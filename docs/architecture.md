@@ -67,6 +67,23 @@ navigation, presentation, capability policy and storage configuration. Shared
 runtime, browser features, native plugins and OS tooling come from the exact
 revision in `upstream.lock.json` and `vendor/eliza`.
 
+### Native sign-in surface migration
+
+The U3 candidate uses the same upstream `NativeCloudSignInController` and
+`NativeCloudSignInView` as canonical Android through public `@elizaos/ui/android-cloud`
+leaf entries. Alpha supplies product copy, its native port and the existing
+connection-operation owner. Native storage and installed callback names do not change.
+The shared controller owns readiness, email, phone, Google, MFA, cancellation and
+retained-return handling; the common view owns its forms and plain-text legal documents.
+
+This does not complete U3. `connection-ui.tsx` still owns resident startup, verified
+local sessions, Cloud identity and plan presentation. It uses the existing shared
+`CloudResidentBindingController` for binding policy. Combining that lifecycle with
+canonical startup remains dependent on U8's canonical native admission and credential
+retirement adapter. A successful native sign-in is not proof of entitlement, resident
+readiness or AI availability. The candidate needs upstream review, pin admission and
+full distribution qualification before it is a shipped migration.
+
 ## Cloud deployment configuration
 
 `config/cloud-deployment.json` owns the public production and staging API, web,
