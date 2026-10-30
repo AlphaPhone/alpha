@@ -48,9 +48,11 @@ test('the plugin start path attaches before it would retire shared work, and att
  const owned=source.slice(source.indexOf('private void requireOwned('),source.indexOf('private void rejectSuperseded('));
  assert.ok(owned.includes('requireCurrent(epoch)')&&owned.includes('if(!pending.contains(call))throw new Superseded();'));
  const request=source.slice(source.indexOf('@PluginMethod public void request('),source.indexOf('@PluginMethod public void cancelStream('));
- const firstGuard=request.indexOf('requireOwned(call,epoch);'),pairing=request.indexOf('String token=enroll(epoch);'),lastGuard=request.lastIndexOf('requireOwned(call,epoch);'),dispatch=request.indexOf('JSONObject result=raw(path,method,body,token,headers,120000);');
- assert.ok(firstGuard>0&&firstGuard<pairing&&pairing<lastGuard&&lastGuard<dispatch,'owned-call guard precedes pairing and dispatch');
- assert.equal(request.slice(lastGuard,dispatch).trim(),'requireOwned(call,epoch);','nothing runs between the guard and dispatch');
+ const firstGuard=request.indexOf('requireOwned(call,epoch);'),dispatch=request.indexOf('NativeOwnerTransport.request(ownerHost(epoch,call),');
+ assert.ok(firstGuard>0&&dispatch>firstGuard,'the shared transport retains this exact pending request owner');
+ const transport=source.slice(source.indexOf('private NativeOwnerTransport.Host ownerHost(long epoch,PluginCall request)'),source.indexOf('private String enroll(long epoch)'));
+ assert.ok(transport.includes('runtime.withCurrent(()->{if(request!=null)requireOwned(request,epoch);requireEnrollmentRoot(epoch,root);'),'every shared enrollment/readback check retains the pending call');
+ assert.ok(transport.includes('if(request!=null)requireOwned(request,epoch);return raw('),'the actual dispatch repeats the pending-call guard');
  // The read-only query never mutates lifecycle state.
  const query=source.slice(source.indexOf('@PluginMethod public void residentAttachment('),source.indexOf('@PluginMethod public void configureProvider('));
  for(const forbidden of ['attachLocked(','invalidateOwnCalls','invalidateCalls','lifecycleEpoch','clearEnrollment','ElizaAgentService.start','ElizaAgentService.stop','enroll(','bindCloudProvider'])
