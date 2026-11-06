@@ -1,5 +1,5 @@
 export const startupPermissionKeys = ['notifications', 'microphone', 'camera', 'location'] as const;
-export const nativeStartupPermissionKeys = [...startupPermissionKeys, 'calendar', 'photos'] as const;
+export const nativeStartupPermissionKeys = [...startupPermissionKeys, 'calendar', 'photos', 'files'] as const;
 export type StartupPermissionKey = typeof startupPermissionKeys[number];
 export type NativeStartupPermissionKey = typeof nativeStartupPermissionKeys[number];
 export type StartupPermissionBridge = {status(): Promise<{granted:boolean;enabled:boolean;requestable?:boolean;denied?:boolean}>;request():Promise<unknown>;openSettings():Promise<unknown>};
@@ -11,6 +11,15 @@ export function startupPhotoAccess(value: unknown) {
   const row = value as {scope?: unknown; locked?: unknown} | null;
   if (!row || typeof row.scope !== 'string' || !['full', 'partial', 'selected', 'denied'].includes(row.scope) || typeof row.locked !== 'boolean' || row.locked) throw Error('Photo access unavailable');
   return {granted: row.scope !== 'denied', enabled: row.scope !== 'denied', description: row.scope === 'full' ? 'All photos and videos allowed' : row.scope === 'selected' ? 'Selected photos and videos only' : row.scope === 'partial' ? 'Limited photo or video access allowed' : 'Not allowed'};
+}
+
+/** Files all-files access (decision F1). The step opens Android's "All files access" page, which
+ * returns to Alpha; access is read back then. Android 10 has no such access, so nothing is asked. */
+export function startupFilesAccess(value: unknown) {
+  const row = value as {access?: unknown} | null;
+  if (!row || typeof row.access !== 'string' || !['granted', 'denied', 'unsupported'].includes(row.access)) throw Error('Files access unavailable');
+  const granted = row.access !== 'denied';
+  return {granted, enabled: granted, requestable: true};
 }
 
 /** Permission metadata only: approximate access is usable without claiming a precise fix. */

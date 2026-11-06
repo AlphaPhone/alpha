@@ -98,7 +98,6 @@ export const LIVE_STATES: State[] = [
   live('Notes note menu', ['Notes', 'New note', 'More']),
   live('Notes source document', ['Notes', 'New note', 'Link source document']),
   live('Notes recorder', ['Notes', 'Record and transcribe'], 'notes-recorder'),
-  live('Files search', ['Files', 'Search files']),
   live('Workflows new automation', ['Workflows', 'New automation'], 'automations-detail'),
 ];
 
@@ -144,9 +143,7 @@ export const MOCK_STATES: State[] = [
   mock('notes', ['New folder']),
   mock('notes', ['Open The case for on-device agents'], 'notes-link'),
   mock('notes:editor', ['Share note']),
-  mock('files', ['Search files']),
-  mock('files:folder', ['View and sort']),
-  mock('files:folder', ['Select files']),
+  mock('files:folder', ['Sort and more']),
   mock('files:preview', ['Rename']),
   mock('files:preview', ['Move file']),
   mock('files:preview', ['Share file']),
