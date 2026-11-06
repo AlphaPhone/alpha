@@ -27,7 +27,7 @@ test.describe('camera in landscape', () => {
       if (mode === 'live') await page.getByRole('button', { name: 'Camera', exact: true }).click();
       await expect(page.locator('html')).toHaveClass(/alpha-landscape/);
       const shutter = page.getByRole('button', { name: 'Take photo', exact: true });
-      for (const control of [shutter, ...['Photo mode', 'Video mode', 'Scan mode', 'Zoom 1x', 'Back to apps'].map(name => page.getByRole('button', { name, exact: true }))])
+      for (const control of [shutter, ...['Photo mode', 'Video mode', ...(mode === 'mock' ? ['Zoom 1x'] : []), 'Back to apps'].map(name => page.getByRole('button', { name, exact: true }))])
         await reachable(page, control);
       // The viewfinder keeps the space the controls do not use, and no control sits on another.
       const finder = (await page.locator('[data-alpha-camera="viewfinder"]').boundingBox())!, capture = (await page.locator('[data-alpha-camera="capture"]').boundingBox())!;
@@ -532,7 +532,7 @@ test.describe('keyboard focus and the floating dock', () => {
 });
 
 test.describe('screen titles with a large system font', () => {
-  for (const title of [{ name: 'Photos', steps: ['Photos'] }, { name: 'Camera', steps: ['Camera'] }, { name: 'Password manager', steps: ['Settings', 'Password manager'] }]) {
+  for (const title of [{ name: 'Photos', steps: ['Photos'] }, { name: 'Password manager', steps: ['Settings', 'Password manager'] }]) {
     test(`"${title.name}" is shown whole at 200% text`, async ({ page }) => {
       await page.addInitScript(offline);
       await page.goto('/');

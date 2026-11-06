@@ -1,6 +1,6 @@
 import {cloudServiceName} from '../runtime/cloud-protocol';
 import {CAMERA_CONTEXT_NOTICE} from '../runtime/device-actions';
-import {captureAgentPhoto} from './camera-adapter';
+import {captureAgentPhoto,cameraScanRequested,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from './mail-folder-picker';
 import {aospImage} from '../runtime/aosp-image';
@@ -1155,6 +1155,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const retiring=this.stopVoiceConversation?.();if(retiring){await retiring;context(this);const now=this.S();if(JSON.stringify(alphaClient.getState().context)!==expectedContext||!this.live||document.hidden||connectionController.getSnapshot().open||sendBinding()!==binding||now.view!==view||String(now.draft||'')!==draft||this.messageReplyTarget!==reply||this.messageEditTarget!==edit)return;}
     let s = this.S(); const text = String(argument ?? s.draft).trim();
     if (!text || s.typing || this.draftSendPending) return;
+    // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
+    if(!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(argument===undefined)this.setState({draft:''});return;}
     const editTarget:ConversationMessageTarget|undefined=this.messageEditTarget,replyTarget:ConversationMessageTarget|undefined=this.messageReplyTarget,editView=s.view;
     if(editTarget){
       if(argument!==undefined||!connectionController.messageTargetCurrent(editTarget))return;

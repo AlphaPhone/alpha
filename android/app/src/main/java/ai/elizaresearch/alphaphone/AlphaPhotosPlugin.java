@@ -41,7 +41,7 @@ public class AlphaPhotosPlugin extends Plugin {
  private PermittedMediaReview mediaReview;
  private OwnedVideoPlayback playback;
  static final OwnedMediaConfig MEDIA_CONFIG=OwnedMediaConfig.builder("alpha")
-   .edits("Pictures/Alpha Phone/Edits/", "Alpha-edit-").captures("Pictures/", "SCAN_").build();
+   .edits("Pictures/Alpha Phone/Edits/", "Alpha-edit-").captures("DCIM/Camera/", "SCAN_").build();
  private OwnedPhotoEdits edits;
  private VideoCopyEdits videoCopies;
  private OwnedCaptures captures;
@@ -160,14 +160,16 @@ public class AlphaPhotosPlugin extends Plugin {
    if(album.equals("favorites")&&Build.VERSION.SDK_INT<30){call.reject("Favorites require Android 11 or later");return;}
    String filter=album.equals("videos")?" AND media_type=3":album.equals("favorites")?" AND is_favorite=1":"";
    String before=call.getString("before","");long cursor=before.isEmpty()?Long.MAX_VALUE:Long.parseLong(before);if(cursor<=0)throw new IllegalArgumentException();
+   // Camera's last-capture tile asks for one row; Photos pages 24 at a time.
+   int page=Math.max(1,Math.min(24,call.getInt("limit",24)));
    Bundle query=new Bundle();query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,owned(trashed)+MEDIA+filter+" AND _id<?");query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{getContext().getPackageName(),Long.toString(cursor)});
-   query.putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS,new String[]{MediaStore.Images.Media._ID});query.putInt(ContentResolver.QUERY_ARG_SORT_DIRECTION,ContentResolver.QUERY_SORT_DIRECTION_DESCENDING);query.putInt(ContentResolver.QUERY_ARG_LIMIT,25);
+   query.putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS,new String[]{MediaStore.Images.Media._ID});query.putInt(ContentResolver.QUERY_ARG_SORT_DIRECTION,ContentResolver.QUERY_SORT_DIRECTION_DESCENDING);query.putInt(ContentResolver.QUERY_ARG_LIMIT,page+1);
    if(Build.VERSION.SDK_INT>=30)query.putInt(MediaStore.QUERY_ARG_MATCH_TRASHED,trashed?MediaStore.MATCH_ONLY:MediaStore.MATCH_EXCLUDE);
    JSArray items=new JSArray();String next="";long last=0;
    try(Cursor rows=getContext().getContentResolver().query(CATALOG,fields(),query,null)){
     if(rows==null)throw new IllegalStateException();
     while(rows.moveToNext()){
-     if(items.length()==24){next=Long.toString(last);break;}
+     if(items.length()==page){next=Long.toString(last);break;}
      JSObject item=metadata(rows);last=rows.getLong(0);
      try{item.put("image",image(last,rows.getInt(5)==3,240));}catch(Exception unavailable){item.put("image","");}
      items.put(item);
