@@ -92,7 +92,7 @@ test('late validated receipt does not replace a newer selected video',async({pag
  await page.getByRole('button',{name:'Back from photo',exact:true}).click();
  await page.evaluate(()=>(window as any).mediaFixture.emit());
  await expect(page.getByRole('button',{name:/^Video, /})).toHaveCount(2);
- await page.getByRole('button',{name:/^Video, /}).last().click();
+ await page.getByRole('button',{name:/^Video, /}).first().click();// newest first: the later copy leads
  await showsCopy(page);
  await page.evaluate(()=>(window as any).mediaFixture.releaseChecks());
  await expect.poll(()=>page.evaluate(()=>localStorage.getItem('alpha.photos.pending-copy.v1'))).toBe(null);
