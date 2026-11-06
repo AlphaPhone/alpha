@@ -93,8 +93,12 @@ public class AlphaPhotosPlugin extends Plugin {
  private String[] fields(){
   String[] result=java.util.Arrays.copyOf(FIELDS,Build.VERSION.SDK_INT<30?8:13);
   if(Build.VERSION.SDK_INT>=30){result[7]=MediaStore.MediaColumns.IS_TRASHED;result[8]=MediaStore.MediaColumns.DATE_EXPIRES;result[9]=MediaStore.MediaColumns.GENERATION_MODIFIED;result[10]=MediaStore.MediaColumns.IS_FAVORITE;result[11]=MediaStore.MediaColumns.GENERATION_ADDED;}
-  result[result.length-1]=MediaStore.MediaColumns.DATE_MODIFIED;return result;
+  result[result.length-1]=MediaStore.MediaColumns.DATE_MODIFIED;
+  // Folder and capture time for Photos' Camera/Screenshots albums, day headers and Info.
+  result=java.util.Arrays.copyOf(result,result.length+2);result[result.length-2]=MediaStore.MediaColumns.RELATIVE_PATH;result[result.length-1]=MediaStore.MediaColumns.DATE_TAKEN;return result;
  }
+ /** Albums Photos lists besides custom ones: the provider folder decides Camera and Screenshots. */
+ static String albumSelection(String album){return "camera".equals(album)?" AND relative_path LIKE 'DCIM/Camera/%'":"screenshots".equals(album)?" AND relative_path LIKE '%Screenshots/%'":"";}
  /**
   * The item's content as of this read: modified time, byte size and (API 30+) MediaStore's
   * modification generation. Unlike revision and mutationRevision (the shared editor's format),
@@ -107,7 +111,7 @@ public class AlphaPhotosPlugin extends Plugin {
  private static final String MEDIA=" AND media_type IN (1,3)";
  private static final String[] FIELDS={MediaStore.Images.Media._ID,MediaStore.Images.Media.WIDTH,MediaStore.Images.Media.HEIGHT,MediaStore.Images.Media.DATE_ADDED,MediaStore.Images.Media.SIZE,MediaStore.Files.FileColumns.MEDIA_TYPE,MediaStore.Video.VideoColumns.DURATION};
  private JSObject metadata(Cursor row){
-  JSObject item=new JSObject();boolean video=row.getInt(5)==MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;item.put("id",(video?"v:":"")+row.getLong(0));item.put("kind",video?"video":"image");item.put("duration",video?row.getLong(6)/1000d:0);item.put("width",row.getInt(1));item.put("height",row.getInt(2));item.put("date",row.getLong(3)*1000);String base=row.getLong(3)+":"+row.getLong(4);String marker=mediaVersions.getString((video?"v:":"")+row.getLong(0),"");item.put("revision",base+(Build.VERSION.SDK_INT>=30&&marker.startsWith(base+"|")?"|"+row.getLong(9):""));item.put("mutationRevision",mutationRevision(row));item.put("contentRevision",contentRevision(row));item.put("trashed",Build.VERSION.SDK_INT>=30&&row.getInt(7)==1);item.put("favorite",Build.VERSION.SDK_INT>=30&&row.getInt(10)==1);item.put("expiresAt",Build.VERSION.SDK_INT>=30?row.getLong(8)*1000:0);return item;
+  JSObject item=new JSObject();boolean video=row.getInt(5)==MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;item.put("id",(video?"v:":"")+row.getLong(0));item.put("kind",video?"video":"image");item.put("duration",video?row.getLong(6)/1000d:0);item.put("width",row.getInt(1));item.put("height",row.getInt(2));item.put("date",row.getLong(3)*1000);String base=row.getLong(3)+":"+row.getLong(4);String marker=mediaVersions.getString((video?"v:":"")+row.getLong(0),"");item.put("revision",base+(Build.VERSION.SDK_INT>=30&&marker.startsWith(base+"|")?"|"+row.getLong(9):""));item.put("mutationRevision",mutationRevision(row));item.put("contentRevision",contentRevision(row));item.put("trashed",Build.VERSION.SDK_INT>=30&&row.getInt(7)==1);item.put("favorite",Build.VERSION.SDK_INT>=30&&row.getInt(10)==1);item.put("expiresAt",Build.VERSION.SDK_INT>=30?row.getLong(8)*1000:0);int folder=row.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH),taken=row.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN);if(folder>=0&&!row.isNull(folder))item.put("folder",row.getString(folder));if(taken>=0&&!row.isNull(taken)&&row.getLong(taken)>0)item.put("taken",row.getLong(taken));return item;
  }
  private Uri uri(long id,boolean video){return ContentUris.withAppendedId(video?MediaStore.Video.Media.EXTERNAL_CONTENT_URI:MediaStore.Images.Media.EXTERNAL_CONTENT_URI,id);}
  private long id(String value){long id=Long.parseLong(value.replaceFirst("^v:",""));if(id<=0)throw new IllegalArgumentException();return id;}
@@ -154,11 +158,11 @@ public class AlphaPhotosPlugin extends Plugin {
  @PluginMethod public void list(PluginCall call){submit(call,()->{
   try{
    boolean trashed=call.getBoolean("trashed",false);if(trashed&&Build.VERSION.SDK_INT<30){call.reject("Android trash requires Android 11 or later");return;}
-   String album=call.getString("album","");if(album.startsWith("custom:")){listCustomAlbum(call,album.substring(7));return;}if(!album.isEmpty()&&!album.equals("favorites")&&!album.equals("videos"))throw new IllegalArgumentException();
-   if(!"denied".equals(permitted.access().getString("scope"))){call.resolve(permitted.list(call.getString("before",""),"",album.equals("videos")?"video":"all",true,trashed?"trash":album.equals("favorites")?"favorites":"all"));return;}
+   String album=call.getString("album","");if(album.startsWith("custom:")){listCustomAlbum(call,album.substring(7));return;}if(!album.isEmpty()&&!album.matches("favorites|videos|camera|screenshots"))throw new IllegalArgumentException();
+   if(!"denied".equals(permitted.access().getString("scope"))){call.resolve(permitted.list(call.getString("before",""),"",album.equals("videos")?"video":"all",true,trashed?"trash":album.matches("favorites|camera|screenshots")?album:"all"));return;}
    if(trashed&&!album.isEmpty())throw new IllegalArgumentException();
    if(album.equals("favorites")&&Build.VERSION.SDK_INT<30){call.reject("Favorites require Android 11 or later");return;}
-   String filter=album.equals("videos")?" AND media_type=3":album.equals("favorites")?" AND is_favorite=1":"";
+   String filter=album.equals("videos")?" AND media_type=3":album.equals("favorites")?" AND is_favorite=1":albumSelection(album);
    String before=call.getString("before","");long cursor=before.isEmpty()?Long.MAX_VALUE:Long.parseLong(before);if(cursor<=0)throw new IllegalArgumentException();
    // Camera's last-capture tile asks for one row; Photos pages 24 at a time.
    int page=Math.max(1,Math.min(24,call.getInt("limit",24)));
@@ -220,7 +224,7 @@ public class AlphaPhotosPlugin extends Plugin {
  });}
  @PluginMethod public void shareMany(PluginCall call){submit(call,()->{
   try{
-   JSArray items=call.getArray("items");if(items==null||items.length()<1||items.length()>20)throw new IllegalArgumentException();
+   JSArray items=call.getArray("items");if(items==null||items.length()<1||items.length()>100)throw new IllegalArgumentException();
    java.util.ArrayList<Uri> uris=new java.util.ArrayList<>();java.util.Set<String> unique=new java.util.HashSet<>();String mime=null;
    for(int i=0;i<items.length();i++){
     org.json.JSONObject item=items.getJSONObject(i);String key=item.getString("id");if(!unique.add(key))throw new IllegalArgumentException();Uri uri;
@@ -277,17 +281,19 @@ public class AlphaPhotosPlugin extends Plugin {
  /** A bounded partial operation, never an atomic all-or-nothing promise. */
  @PluginMethod public void changeMany(PluginCall call){submit(call,()->{
   try{
-   String operation=call.getString("operation","");if(!operation.equals("favorite")&&!operation.equals("trash")&&!operation.equals("restore"))throw new IllegalArgumentException();
+   String operation=call.getString("operation","");if(!operation.matches("favorite|unfavorite|trash|restore"))throw new IllegalArgumentException();
+   // Favorite toggles: unfavorite clears the flag the way restore clears trash.
+   boolean flagFavorite=operation.endsWith("favorite"),desired=operation.equals("favorite")||operation.equals("trash");
    JSArray items=call.getArray("items");if(items==null||items.length()<1||items.length()>20)throw new IllegalArgumentException();
    boolean permittedItems=false;for(int i=0;i<items.length();i++)if(items.getJSONObject(i).getString("id").startsWith("m:"))permittedItems=true;
-   if(permittedItems){java.util.List<String> keys=new java.util.ArrayList<>(),revisions=new java.util.ArrayList<>();for(int i=0;i<items.length();i++){keys.add(items.getJSONObject(i).getString("id"));revisions.add(items.getJSONObject(i).getString("revision"));}mediaReview.request(call,keys,revisions,operation.equals("favorite"),!operation.equals("restore"),true);return;}
+   if(permittedItems){java.util.List<String> keys=new java.util.ArrayList<>(),revisions=new java.util.ArrayList<>();for(int i=0;i<items.length();i++){keys.add(items.getJSONObject(i).getString("id"));revisions.add(items.getJSONObject(i).getString("revision"));}mediaReview.request(call,keys,revisions,flagFavorite,desired,true);return;}
    java.util.Set<String> seen=new java.util.HashSet<>();
    // Validate the complete request before the first write.
    for(int i=0;i<items.length();i++){org.json.JSONObject item=items.getJSONObject(i);String key=item.getString("id"),revision=item.getString("revision");if(!key.matches("(?:v:)?[1-9][0-9]*")||!seen.add(key)||revision.isEmpty()||revision.length()>160)throw new IllegalArgumentException();id(key);}
    JSArray outcomes=new JSArray();int verified=0;
    for(int i=0;i<items.length();i++){
     org.json.JSONObject item=items.getJSONObject(i);JSObject outcome=new JSObject();outcome.put("id",item.getString("id"));
-    try{if(destroyed)throw new IllegalStateException("unverified");JSObject result=changeFlag(item.getString("id"),item.getString("revision"),operation.equals("favorite"),!operation.equals("restore"));outcome.put("status",result.getString("status"));outcome.put("item",result);verified++;}
+    try{if(destroyed)throw new IllegalStateException("unverified");JSObject result=changeFlag(item.getString("id"),item.getString("revision"),flagFavorite,desired);outcome.put("status",result.getString("status"));outcome.put("item",result);verified++;}
     catch(IllegalStateException stale){outcome.put("status","stale".equals(stale.getMessage())?"stale":"unverified");}
     catch(Exception failed){outcome.put("status",Build.VERSION.SDK_INT<30?"unsupported":"unverified");}
     outcomes.put(outcome);
@@ -303,11 +309,11 @@ public class AlphaPhotosPlugin extends Plugin {
    if(!"denied".equals(permitted.access().getString("scope"))){call.resolve(permitted.summary());return;}
    Bundle query=new Bundle();query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,MediaStore.MediaColumns.OWNER_PACKAGE_NAME+"=? AND is_pending=0"+MEDIA);query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{getContext().getPackageName()});
    if(Build.VERSION.SDK_INT>=30)query.putInt(MediaStore.QUERY_ARG_MATCH_TRASHED,MediaStore.MATCH_INCLUDE);
-   int favorite=0,videos=0,trash=0;
+   int favorite=0,videos=0,trash=0,camera=0,screenshots=0;
    try(Cursor rows=getContext().getContentResolver().query(CATALOG,fields(),query,null)){
-    if(rows==null)throw new IllegalStateException();while(rows.moveToNext()){if(Build.VERSION.SDK_INT>=30&&rows.getInt(7)==1){trash++;continue;}if(rows.getInt(5)==3)videos++;if(Build.VERSION.SDK_INT>=30&&rows.getInt(10)==1)favorite++;}
+    if(rows==null)throw new IllegalStateException();int folder=rows.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH);while(rows.moveToNext()){if(Build.VERSION.SDK_INT>=30&&rows.getInt(7)==1){trash++;continue;}if(rows.getInt(5)==3)videos++;if(Build.VERSION.SDK_INT>=30&&rows.getInt(10)==1)favorite++;String path=folder>=0?rows.getString(folder):null;if(path!=null&&path.startsWith("DCIM/Camera/"))camera++;if(path!=null&&path.contains("Screenshots/"))screenshots++;}
    }
-   JSObject result=new JSObject();result.put("favorites",favorite);result.put("videos",videos);result.put("trash",trash);result.put("canFavorite",Build.VERSION.SDK_INT>=30);call.resolve(result);
+   JSObject result=new JSObject();result.put("favorites",favorite);result.put("videos",videos);result.put("camera",camera);result.put("screenshots",screenshots);result.put("trash",trash);result.put("canFavorite",Build.VERSION.SDK_INT>=30);call.resolve(result);
   }catch(Exception failure){call.reject("Album counts could not be loaded");}
  });}
  @PluginMethod public void prepareDeleteTrash(PluginCall call){submit(call,()->{
