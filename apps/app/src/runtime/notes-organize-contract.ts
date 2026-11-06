@@ -1,4 +1,4 @@
-import {notesTarget,type NotesTarget} from './notes-contract';
+import {notesTarget,type NotesTarget} from './notes-contract.ts';
 import {notesFolderName} from './notes-folders-model.ts';
 import {NOTES_KINDS,type NotesKind} from './notes-view.ts';
 

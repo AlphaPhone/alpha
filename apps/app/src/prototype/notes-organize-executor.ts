@@ -1,6 +1,6 @@
 import type {NotesTarget} from '../runtime/notes-contract';
 import type {NotesOrganizeOperation} from '../runtime/notes-organize-contract';
-import {addNotesFolder,findNotesFolderByName,newNotesFolderId,withNoteFolder,type NotesFoldersDocument} from '../runtime/notes-folders-model';
+import {addNotesFolder,findNotesFolderByName,newNotesFolderId,withNoteFolder,type NotesFoldersDocument} from '../runtime/notes-folders-model.ts';
 import type {NotesFilter} from '../runtime/notes-view';
 
 type Note={id:string;folderId?:unknown;[key:string]:unknown};
