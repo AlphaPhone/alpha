@@ -91,7 +91,7 @@ const fakeApi=()=>{const store={photos:{album:'device'}};return {store,api:{get:
  assert.deepEqual(selected,{kind:'photo_library_select',selected:1,missing:1});
  // Select and review need the owner-visible album.
  store.photos={album:null};
- await assert.rejects(library.agent.run({type:'photo_library_select',ids:['lib:i:3:30']},signal),/Open Photos > Device library/);
+ await assert.rejects(library.agent.run({type:'photo_library_select',ids:['lib:i:3:30']},signal),/Open Photos, then ask again/);
  // Denied scope refuses everything.
  state.scope='denied';
  await assert.rejects(library.agent.run({type:'photo_library_search'},signal),/not allowed/);
