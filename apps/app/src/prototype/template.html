@@ -1591,7 +1591,7 @@
 
 <sc-if value="{{is.camera}}">
 <div data-alpha-camera-root style="display: flex; flex-direction: column; height: 100%; position: relative; background: #000000; color: #ffffff; overflow: hidden">
-  <button data-alpha-camera="viewfinder" aria-label="Viewfinder. Tap to focus" onPointerUp="{{camera.vfUp}}" style="position: absolute; left: 0; right: 0; top: 96px; height: 549px; overflow: hidden; display: block; background: {{camera.vfBg}}">
+  <button data-alpha-camera="viewfinder" aria-label="Viewfinder. Tap to focus" onPointerUp="{{camera.vfUp}}" style="position: absolute; left: 0; right: 0; top: 96px; height: 549px; overflow: hidden; display: block; background: {{camera.vfBg}}; transition: background-color .25s ease-out">
     <span data-alpha-camera="frame" style="position: absolute; left: -4%; width: 108%; top: 50%; aspect-ratio: 3 / 4; display: block; transform: translateY(-50%); opacity: {{camera.vfOp}}; transition: opacity .2s ease-out">
       <span style="position: absolute; inset: 0; display: block; background: {{camera.bg}}; transition: transform .35s cubic-bezier(.2,.8,.2,1); {{camera.zoomCss}}"></span>
     </span>

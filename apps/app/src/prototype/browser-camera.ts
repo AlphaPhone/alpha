@@ -3,7 +3,8 @@ import {applyPhotoFilter} from '../browser/photo-filter';
 import {renderVideoEdit,validateVideoEdit,type VideoEdit} from '../browser/video-edit';
 import {BrowserCameraFocus} from '../browser/camera-focus';
 import {browserDevProfile} from '../browser/dev-profile';
-import type {ImportedCameraImage} from './browser-image-import';
+/** A browser image chosen for Photos or kept from scan review, re-encoded as JPEG. */
+export type ImportedCameraImage={original:File;image:string;width:number;height:number};
 import {drawCameraFrame} from '../browser/camera-frame';
 import {BrowserVideoCapture} from '../browser/video-capture';
 import {albumDocument} from '../browser/preference-documents';
