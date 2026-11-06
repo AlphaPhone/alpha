@@ -57,17 +57,20 @@ test('the launcher drawer lists installed apps with icons, launches by package a
     dial: { role: 'dial', available: true, packageName: 'com.android.dialer', label: 'Phone by Example' },
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'All apps', exact: true }).click();
-  const drawer = page.getByRole('dialog', { name: 'All apps', exact: true });
-  await expect(drawer.getByRole('button', { name: 'Open Settings (com.android.settings)', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Apps', exact: true });
+  await expect(drawer.getByRole('button', { name: 'Open Settings', exact: true })).toBeVisible();
   // Icons are requested on Android; an entry with an unsafe icon or a duplicate package is dropped.
   expect(await calls(page, 'DeviceApps', 'list')).toEqual([{ icons: true }]);
   await expect(drawer.getByRole('button', { name: 'Open Bad icon', exact: true })).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: 'Open Settings duplicate', exact: true })).toHaveCount(0);
-  await expect(drawer.getByRole('status').first()).toHaveText('12 apps');
-  await expect(drawer.getByRole('button', { name: 'Open Settings (com.android.settings)', exact: true }).locator('img')).toHaveAttribute('src', PNG);
+  // Installed apps only, alphabetically, with the default dialer as Phone; no count.
+  await expect.poll(() => drawer.locator('[data-launcher-app] > button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))))
+    .toEqual(['Open Broken app', 'Open Phone (Phone by Example)', 'Open Settings']);
+  await expect(drawer.getByText(/\d+ apps?$/)).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: 'Open Settings', exact: true }).locator('img')).toHaveAttribute('src', PNG);
 
-  // The Phone shortcut is the resolved ACTION_DIAL handler, opened in two taps from Home.
+  // Phone is the resolved ACTION_DIAL handler, opened in two taps from Home.
   const phone = drawer.getByRole('button', { name: 'Open Phone (Phone by Example)', exact: true });
   await expect(phone).toBeVisible();
   await phone.click();
@@ -76,7 +79,7 @@ test('the launcher drawer lists installed apps with icons, launches by package a
   // Search, then launch by package name only.
   await drawer.getByRole('searchbox', { name: 'Search apps', exact: true }).fill('sett');
   await expect(phone).toHaveCount(0);
-  await drawer.getByRole('button', { name: 'Open Settings (com.android.settings)', exact: true }).click();
+  await drawer.getByRole('button', { name: 'Open Settings', exact: true }).click();
   await expect.poll(() => calls(page, 'DeviceApps', 'launch')).toEqual([{ packageName: 'com.android.settings' }]);
 
   // A failed launch is reported in place and nothing is retried.
@@ -88,13 +91,14 @@ test('the launcher drawer lists installed apps with icons, launches by package a
   expect(errors).toEqual([]);
 });
 
-test('an empty installed-app list says so and offers no Phone shortcut without a dialer', async ({ page }) => {
+test('an empty installed-app list says No apps and offers no Phone without a dialer', async ({ page }) => {
   await nativeStub(page, { apps: [], dial: { role: 'dial', available: false } });
   await page.goto('/');
-  await page.getByRole('button', { name: 'All apps', exact: true }).click();
-  const drawer = page.getByRole('dialog', { name: 'All apps', exact: true });
-  await expect(drawer.getByText('No other apps are installed.', { exact: true })).toBeVisible();
-  await expect(drawer.getByRole('button', { name: 'Open Calendar', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Apps', exact: true });
+  await expect(drawer.getByText('No apps', { exact: true })).toBeVisible();
+  // Alpha's views are on Home, not in Apps.
+  await expect(drawer.getByRole('button', { name: 'Open Calendar', exact: true })).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: /^Open Phone/ })).toHaveCount(0);
 });
 
@@ -107,13 +111,16 @@ test('typing a search while the installed-app list is still loading still shows 
       ? new Promise(resolve => { w.releaseList = () => resolve(original(plugin, method, options)); }) : original(plugin, method, options);
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'All apps', exact: true }).click();
-  const drawer = page.getByRole('dialog', { name: 'All apps', exact: true });
-  await expect(drawer.getByText('Reading installed apps…', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Apps', exact: true });
+  const grid = drawer.locator('[data-alpha-app-scroll="drawer"]');
+  await expect(grid).toHaveAttribute('aria-busy', 'true');
+  await expect(drawer.getByText('No apps', { exact: true })).toHaveCount(0);
   await drawer.getByRole('searchbox', { name: 'Search apps', exact: true }).fill('chr');
   await page.evaluate(() => (window as any).releaseList());
   await expect(drawer.getByRole('button', { name: 'Open Chrome', exact: true })).toBeVisible();
-  await expect(drawer.getByText('Reading installed apps…', { exact: true })).toHaveCount(0);
+  await expect(grid).toHaveAttribute('aria-busy', 'false');
+  await expect(drawer.getByRole('button', { name: 'Open Settings', exact: true })).toHaveCount(0);
 });
 
 test('required denied notification remains pending after cold start without repeating a prompt',async({page})=>{
@@ -138,7 +145,7 @@ test('an Activity opened with the alpha.assistant extra renders chat and Close o
   await expect(page.locator('html')).toHaveClass(/alpha-assistant-surface/);
   const close = page.getByRole('button', { name: 'Close assistant', exact: true });
   await expect(close).toBeVisible();
-  await expect(page.getByRole('button', { name: 'All apps', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeHidden();
   await page.waitForTimeout(500);
   await expect(page.getByRole('dialog', { name: 'Set up Alpha access', exact: true })).toHaveCount(0);
   await close.click();

@@ -60,7 +60,7 @@ const mock = (start: string, steps: string[] = [], shows?: string): State => ({
 /** Primary views and the subviews, dialogs and failure states reachable without a provider. */
 export const LIVE_STATES: State[] = [
   live('Home'),
-  live('All apps', ['All apps']),
+  live('Apps', ['Apps']),
   live('Conversation', ['Open conversation']),
   live('Inbox (not connected)', ['Inbox']),
   live('Calendar', ['Calendar']),
@@ -348,7 +348,7 @@ const launcher = (name: string, steps: string[] = [], shows?: string): State => 
 });
 export const LAUNCHER_STATES: State[] = [
   launcher('Home'),
-  launcher('All apps', ['All apps']),
+  launcher('Apps', ['Apps']),
   launcher('Calendar', ['Calendar']),
   launcher('Notes', ['Notes']),
   launcher('Files', ['Files']),

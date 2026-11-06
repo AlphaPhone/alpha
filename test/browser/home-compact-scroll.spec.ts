@@ -39,7 +39,7 @@ test('Home at 200% text fills the screen and its last app row scrolls above the 
   if(at==='bottom')expect(order.under,at+': under the composer').toEqual([]);
   expect(order.backwards,at+': reading order goes back up').toEqual([]);
   if(at==='bottom')expect(order.composerBelow,at+': the composer is below every visible Home control').toBe(true);
-  if(at==='bottom')expect(order.names).toContain('All apps');
+  if(at==='bottom')expect(order.names).toContain('Apps');
  }
  // The Home scroller fills the phone instead of clipping labels above the assistant.
  const edges=await page.evaluate(()=>({home:document.querySelector('[data-alpha-layer="home"]')!.getBoundingClientRect().bottom,screen:document.querySelector('[data-screen]')!.getBoundingClientRect().bottom}));

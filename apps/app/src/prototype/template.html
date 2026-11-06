@@ -58,23 +58,32 @@
 
   <div style="flex-grow: 1; min-height: 28px"></div>
 
-  <div class="alpha-fit-grid" data-alpha-home-apps style="--fit-columns: 4; --fit-min: 62px; row-gap: 24px; padding: 0 16px">
+  <sc-if value="{{homeEdit.on}}">
+    <div data-alpha-home-edit style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px 12px">
+      <button class="ib" data-alpha-home-add onClick="{{homeEdit.add}}" disabled="{{homeEdit.noAdd}}" aria-label="Add to Home" aria-haspopup="dialog" style="background: var(--s2)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button>
+      <button data-alpha-home-done onClick="{{homeEdit.done}}" style="min-height: 44px; padding: 0 18px; border-radius: 22px; background: var(--fg); color: var(--bg); font-size: 14px">Done</button>
+    </div>
+  </sc-if>
+  <div class="alpha-fit-grid" data-alpha-home-apps style="--fit-columns: 4; --fit-min: 62px; row-gap: 24px; padding: 0 16px" data-alpha-home-editing="{{homeEdit.on}}">
     <sc-for list="{{apps}}" as="a">
-      <button onClick="{{a.open}}" aria-label="{{a.label}}" style="display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0">
-        <span class="tap" style="position: relative; width: 64px; height: 64px; border-radius: 22px; background: var(--s2); display: flex; align-items: center; justify-content: center">
-          <sc-if value="{{a.hasIcon}}"><img alt="" src="{{a.icon}}" style="width: 44px; height: 44px; border-radius: 14px"></sc-if>
-          <sc-if value="{{a.noIcon}}"><svg class="i" viewBox="0 0 24 24" style="width: 30px; height: 30px"><path d="{{a.d}}"></path></svg></sc-if>
-          <sc-if value="{{a.badge}}"><span class="app-badge" style="position: absolute; top: 12px; right: 12px; width: 8px; height: 8px; border-radius: 4px; background: var(--acc)"></span></sc-if>
-        </span>
-        <span style="font-size: 12px; color: var(--mut); max-width: 100%; text-align: center; overflow-wrap: anywhere">{{a.label}}</span>
-      </button>
+      <div data-home-app="{{a.slot}}" data-alpha-home-dragging="{{a.dragging}}" onPointerDown="{{a.down}}" onPointerMove="{{a.move}}" onPointerUp="{{a.up}}" onPointerCancel="{{a.cancel}}" onLostPointerCapture="{{a.cancel}}" onContextMenu="{{a.context}}" onKeyDown="{{a.keydown}}" style="position: relative; display: flex; justify-content: center; min-width: 0; {{a.dragStyle}}">
+        <button onClick="{{a.open}}" aria-label="{{a.aria}}" style="display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; width: 100%">
+          <span class="tap alpha-home-icon" style="position: relative; width: 64px; height: 64px; border-radius: 22px; background: var(--s2); display: flex; align-items: center; justify-content: center">
+            <sc-if value="{{a.hasIcon}}"><img alt="" src="{{a.icon}}" style="width: 44px; height: 44px; border-radius: 14px"></sc-if>
+            <sc-if value="{{a.noIcon}}"><svg class="i" viewBox="0 0 24 24" style="width: 30px; height: 30px"><path d="{{a.d}}"></path></svg></sc-if>
+            <sc-if value="{{a.badge}}"><span class="app-badge" style="position: absolute; top: 12px; right: 12px; width: 8px; height: 8px; border-radius: 4px; background: var(--acc)"></span></sc-if>
+          </span>
+          <span style="font-size: 12px; color: var(--mut); max-width: 100%; text-align: center; overflow-wrap: anywhere">{{a.label}}</span>
+        </button>
+        <sc-if value="{{a.editing}}"><button data-alpha-home-remove onClick="{{a.remove}}" aria-label="{{a.removeAria}}" style="position: absolute; top: -10px; left: calc(50% + 14px); width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; z-index: 3"><span style="width: 22px; height: 22px; border-radius: 11px; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24" style="width: 14px; height: 14px"><path d="{{ic.minus}}"></path></svg></span></button></sc-if>
+      </div>
     </sc-for>
     <sc-if value="{{launcher}}">
-      <button onClick="{{launcher.open}}" aria-label="All apps" aria-haspopup="dialog" style="display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0">
+      <button onClick="{{launcher.open}}" disabled="{{homeEdit.on}}" aria-label="Apps" aria-haspopup="dialog" style="display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0">
         <span class="tap" style="width: 64px; height: 64px; border-radius: 22px; background: var(--s2); display: flex; align-items: center; justify-content: center">
           <svg class="i" viewBox="0 0 24 24" style="width: 30px; height: 30px"><path d="{{ic.grid}}"></path></svg>
         </span>
-        <span style="font-size: 12px; color: var(--mut); max-width: 100%; text-align: center; overflow-wrap: anywhere">All apps</span>
+        <span style="font-size: 12px; color: var(--mut); max-width: 100%; text-align: center; overflow-wrap: anywhere">Apps</span>
       </button>
     </sc-if>
   </div>
@@ -83,54 +92,50 @@
 </div>
 <div data-alpha-home-clearance aria-hidden="true"></div>
 </div>
+<sc-if value="{{homeEdit.adding}}">
+  <div data-alpha-layer="home-add" style="position: absolute; inset: 0; z-index: 31">
+    <button aria-label="Close" onClick="{{homeEdit.closeAdd}}" style="position: absolute; inset: 0; background: rgba(0,0,0,.25)"></button>
+    <div role="dialog" aria-modal="true" aria-label="Add to Home" style="position: absolute; left: 0; right: 0; bottom: 0; background: var(--bg); color: var(--fg); border-radius: 28px 28px 0 0; padding: 20px 16px calc(24px + var(--alpha-dock-reserve, 0px)); display: flex; flex-direction: column; gap: 4px">
+      <h2 style="margin: 0 4px 8px; font-size: 18px; font-weight: 600">Add to Home</h2>
+      <sc-for list="{{homeEdit.hidden}}" as="h">
+        <button data-alpha-home-restore="{{h.key}}" onClick="{{h.add}}" style="display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 4px 8px; border-radius: 16px; text-align: left; font-size: 16px">
+          <span style="width: 40px; height: 40px; border-radius: 14px; background: var(--s2); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{h.d}}"></path></svg></span>{{h.label}}
+        </button>
+      </sc-for>
+    </div>
+  </div>
+</sc-if>
 <sc-if value="{{drawerOpen}}">
-<div data-alpha-layer="drawer" role="dialog" aria-modal="true" aria-label="All apps" class="alpha-app-drawer fadein" style="position: absolute; inset: 44px 0 0; z-index: 30; background: var(--bg); color: var(--fg); display: flex; flex-direction: column; padding: 12px 0 108px; box-sizing: border-box">
+<div data-alpha-layer="drawer" role="dialog" aria-modal="true" aria-label="Apps" class="alpha-app-drawer fadein" style="position: absolute; inset: 44px 0 0; z-index: 30; background: var(--bg); color: var(--fg); display: flex; flex-direction: column; padding: 12px 0 108px; box-sizing: border-box">
   <div style="display: flex; align-items: center; gap: 8px; padding: 0 12px 0 20px; flex-shrink: 0">
-    <h1 class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">All apps</h1>
-    <span class="mono" role="status" style="color: var(--mut); font-size: 12px">{{launcher.count}}</span>
-    <button class="ib" aria-label="Close all apps" onClick="{{launcher.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
+    <h1 class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">Apps</h1>
+    <button class="ib" aria-label="Close apps" onClick="{{launcher.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
   </div>
   <label style="display: flex; align-items: center; gap: 10px; margin: 12px 16px 8px; padding: 0 16px; min-height: 48px; border-radius: 24px; background: var(--s2); flex-shrink: 0">
     <svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px; color: var(--mut)"><path d="{{ic.search}}"></path></svg>
     <input type="search" aria-label="Search apps" placeholder="Search apps" value="{{launcher.query}}" onChange="{{launcher.onQuery}}" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: 16px">
   </label>
   <sc-if value="{{launcher.hasLaunchError}}"><p role="alert" style="margin: 4px 20px; color: var(--fg); font-size: 14px">{{launcher.launchError}}</p></sc-if>
-  <div class="scr" data-alpha-app-scroll="drawer" style="flex-grow: 1; overflow-y: auto; padding: 4px 8px; touch-action: pan-y">
-    <sc-if value="{{launcher.hasDial}}">
-      <button onClick="{{launcher.dial.open}}" disabled="{{launcher.dial.disabled}}" aria-label="{{launcher.dial.aria}}" style="width: 100%; display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 6px 12px; border-radius: 18px; text-align: left">
-        <sc-if value="{{launcher.dial.hasIcon}}"><img alt="" src="{{launcher.dial.icon}}" style="width: 44px; height: 44px; border-radius: 14px"></sc-if>
-        <sc-if value="{{launcher.dial.noIcon}}"><span style="width: 44px; height: 44px; border-radius: 14px; background: var(--s2); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phone}}"></path></svg></span></sc-if>
-        <span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 16px">{{launcher.dial.label}}</span><span style="font-size: 12px; color: var(--mut)">{{launcher.dial.sub}}</span></span>
-      </button>
-    </sc-if>
-    <sc-if value="{{launcher.hasFavorites}}">
-      <section aria-label="Favorites" data-launcher-favorites>
-        <h2 class="mono" style="margin: 8px 12px 2px; font-size: 12px; font-weight: 400; color: var(--mut)">Favorites</h2>
-        <sc-for list="{{launcher.favorites}}" as="app">
-      <div data-launcher-favorite="{{app.key}}" style="display: flex; align-items: center; gap: 2px">
-        <button onClick="{{app.open}}" disabled="{{app.disabled}}" aria-label="{{app.aria}}" aria-busy="{{app.busy}}" style="flex-grow: 1; min-width: 0; display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 6px 12px; border-radius: 18px; text-align: left">
-          <sc-if value="{{app.hasIcon}}"><img alt="" src="{{app.icon}}" style="width: 44px; height: 44px; border-radius: 14px; flex-shrink: 0"></sc-if>
-          <sc-if value="{{app.noIcon}}"><span style="width: 44px; height: 44px; border-radius: 14px; background: var(--s2); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{app.d}}"></path></svg></span></sc-if>
-          <span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{app.label}}</span><sc-if value="{{app.hasSub}}"><span style="font-size: 12px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{app.sub}}</span></sc-if></span>
-        </button>
-        <button class="ib" onClick="{{app.earlier}}" disabled="{{app.first}}" aria-label="{{app.earlierAria}}" style="flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.up}}"></path></svg></button>
-        <button class="ib" onClick="{{app.later}}" disabled="{{app.last}}" aria-label="{{app.laterAria}}" style="flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.down}}"></path></svg></button>
-        <button class="ib" onClick="{{app.toggleFavorite}}" aria-label="{{app.favoriteAria}}" aria-pressed="{{app.favorite}}" style="flex-shrink: 0"><svg class="i" viewBox="0 0 24 24" style="fill: {{app.favoriteFill}}; color: {{app.favoriteColor}}"><path d="{{ic.star}}"></path></svg></button>
-      </div>
-        </sc-for>
-      </section>
-      <h2 class="mono" style="margin: 14px 12px 2px; font-size: 12px; font-weight: 400; color: var(--mut)">All apps</h2>
-    </sc-if>
-    <sc-for list="{{launcher.rows}}" as="app">
-      <div data-launcher-app="{{app.key}}" style="display: flex; align-items: center; gap: 2px">
-        <button onClick="{{app.open}}" disabled="{{app.disabled}}" aria-label="{{app.aria}}" aria-busy="{{app.busy}}" style="flex-grow: 1; min-width: 0; display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 6px 12px; border-radius: 18px; text-align: left">
-          <sc-if value="{{app.hasIcon}}"><img alt="" src="{{app.icon}}" style="width: 44px; height: 44px; border-radius: 14px; flex-shrink: 0"></sc-if>
-          <sc-if value="{{app.noIcon}}"><span style="width: 44px; height: 44px; border-radius: 14px; background: var(--s2); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{app.d}}"></path></svg></span></sc-if>
-          <span style="display: flex; flex-direction: column; min-width: 0"><span style="font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{app.label}}</span><sc-if value="{{app.hasSub}}"><span style="font-size: 12px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{app.sub}}</span></sc-if></span>
-        </button>
-        <button class="ib" onClick="{{app.toggleFavorite}}" aria-label="{{app.favoriteAria}}" aria-pressed="{{app.favorite}}" style="flex-shrink: 0"><svg class="i" viewBox="0 0 24 24" style="fill: {{app.favoriteFill}}; color: {{app.favoriteColor}}"><path d="{{ic.star}}"></path></svg></button>
-      </div>
-    </sc-for>
+  <sc-if value="{{launcher.menuOpen}}"><button aria-label="Close menu" tabindex="-1" onClick="{{launcher.closeMenu}}" style="position: absolute; inset: 0; z-index: 1; background: transparent"></button></sc-if>
+  <div class="scr" data-alpha-app-scroll="drawer" aria-busy="{{launcher.loading}}" style="flex-grow: 1; overflow-y: auto; padding: 4px 8px; touch-action: pan-y">
+    <div class="alpha-fit-grid" data-launcher-grid style="--fit-columns: 4; --fit-min: 62px; row-gap: 20px; padding: 6px 2px">
+      <sc-for list="{{launcher.tiles}}" as="app">
+        <div data-launcher-app="{{app.key}}" onPointerDown="{{app.down}}" onPointerMove="{{app.move}}" onPointerUp="{{app.up}}" onPointerCancel="{{app.up}}" onContextMenu="{{app.context}}" style="position: relative; display: flex; justify-content: center; min-width: 0">
+          <button onClick="{{app.open}}" disabled="{{app.disabled}}" aria-label="{{app.aria}}" aria-busy="{{app.busy}}" aria-haspopup="{{app.hasMenu}}" aria-expanded="{{app.menuOpen}}" style="display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; width: 100%">
+            <sc-if value="{{app.hasIcon}}"><img alt="" src="{{app.icon}}" style="width: 56px; height: 56px; border-radius: 18px"></sc-if>
+            <sc-if value="{{app.noIcon}}"><span style="width: 56px; height: 56px; border-radius: 18px; background: var(--s2); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{app.d}}"></path></svg></span></sc-if>
+            <span style="font-size: 12px; color: var(--fg); max-width: 100%; text-align: center; overflow-wrap: anywhere">{{app.label}}</span>
+            <sc-if value="{{app.hasSub}}"><span style="font-size: 11px; color: var(--mut); max-width: 100%; text-align: center; overflow-wrap: anywhere">{{app.sub}}</span></sc-if>
+          </button>
+          <sc-if value="{{app.menuOpen}}">
+            <div role="menu" aria-label="{{app.label}}" data-launcher-menu style="position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 2; min-width: 170px; padding: 6px; border-radius: 14px; background: var(--bg); color: var(--fg); box-shadow: 0 10px 30px rgba(0,0,0,.2)">
+              <button role="menuitem" onClick="{{app.addHome}}" disabled="{{app.onHome}}" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 10px; border-radius: 9px; font-size: 14px; text-align: left"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.plus}}"></path></svg>{{app.addLabel}}</button>
+              <sc-if value="{{app.hasInfo}}"><button role="menuitem" onClick="{{app.info}}" style="display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 10px; border-radius: 9px; font-size: 14px; text-align: left"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.info}}"></path></svg>App info</button></sc-if>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
     <sc-if value="{{launcher.hasStatus}}">
       <div style="padding: 28px 16px; text-align: center; color: var(--mut); font-size: 14px"><p role="status" style="margin: 0">{{launcher.status}}</p>
         <sc-if value="{{launcher.failed}}"><button onClick="{{launcher.retry}}" style="margin-top: 12px; min-height: 44px; padding: 0 18px; border-radius: 22px; background: var(--s2); color: var(--fg)">Try again</button></sc-if>

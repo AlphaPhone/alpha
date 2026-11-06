@@ -77,6 +77,28 @@ public class DeviceAppsPlugin extends Plugin {
   try { getActivity().startActivity(intent); call.resolve(); }
   catch (RuntimeException error) { call.reject("App could not be opened", FAILED, error); }
  }
+ /** Opens Android's App info for exactly the listed entry, in its profile. Only Settings opens;
+  * nothing about the app changes here. A stale entry is refused like a launch. */
+ @PluginMethod public void appInfo(PluginCall call) {
+  if (malformed(call.getData(), "activityName") || malformed(call.getData(), "user")) { call.reject("Choose an installed app"); return; }
+  String name = call.getString("packageName"), activityName = call.getString("activityName"), user = call.getString("user");
+  try {
+   if (activityName != null || user != null) {
+    SystemLauncherApps.Target target = SystemLauncherApps.resolve(getContext(), name, activityName, user);
+    if (target.user != null) { getContext().getSystemService(LauncherApps.class).startAppDetailsActivity(target.component, target.user, null, null); call.resolve(); return; }
+    name = target.component.getPackageName();
+   } else {
+    if (name == null || name.isEmpty()) { call.reject("Choose an installed app"); return; }
+    try { getContext().getPackageManager().getApplicationInfo(name, 0); }
+    catch (PackageManager.NameNotFoundException error) { call.reject("This app is no longer installed.", SystemLauncherApps.NOT_INSTALLED); return; }
+   }
+   getActivity().startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", name, null)));
+   call.resolve();
+  }
+  catch (IllegalArgumentException error) { call.reject("Choose an installed app"); }
+  catch (SystemLauncherApps.Refusal refusal) { call.reject(refusal.getMessage(), refusal.code); }
+  catch (RuntimeException error) { call.reject("App info could not be opened", FAILED, error); }
+ }
  /** Code and message for a package-only launch with no openable activity, worded as upstream's
   * component refusals (SystemLauncherApps.explain is package-private). */
  static String[] explain(PackageManager packages, String packageName) {

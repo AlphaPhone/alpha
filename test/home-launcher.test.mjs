@@ -234,7 +234,17 @@ test('localStorage favorites round-trip and unreadable or malformed data reads a
   for (const raw of ['{', '[]', '{"version":3,"keys":["a"]}', '{"version":1,"keys":"a"}']) { data.set(FAVORITES_KEY, raw); assert.deepEqual(store.read(), []); }
   data.set(FAVORITES_KEY, JSON.stringify({version: 1, keys: ['a', 'a', 7, '', 'b']}));
   assert.deepEqual(store.read(), ['a', 'b']);
-  assert.deepEqual(localFavorites(() => { throw Error('SecurityError'); }).read(), []);
+  // Blocked storage is no saved choice, so Home keeps Alpha's views (the drawer lists only Android apps).
+  assert.equal(localFavorites(() => { throw Error('SecurityError'); }).read(), null);
+});
+test('blocked storage keeps Alpha views on Home and reports that changes cannot be saved', async () => {
+  const blocked = localFavorites(() => { throw Error('SecurityError'); });
+  const launcher = createLauncher({list: async () => ({apps: [twins[0]]}), launch: async () => {}}, () => {}, {favorites: blocked});
+  launcher.setBuiltins([{packageName: 'alpha:inbox', label: 'Inbox'}, {packageName: 'alpha:notes', label: 'Notes'}]);
+  assert.deepEqual(launcher.favoriteApps().map(app => app.packageName), ['alpha:inbox', 'alpha:notes']);
+  await launcher.load();
+  assert.deepEqual(launcher.favoriteApps().map(app => app.packageName), ['alpha:inbox', 'alpha:notes']);
+  assert.equal(launcher.snapshot().launchError, 'Favorites could not be saved.');
 });
 test('a refresh after an outside change replaces the list without a loading state and keeps the launch error', async () => {
   let listed = twins, release;
@@ -396,9 +406,9 @@ test('fresh Home defaults to product apps and explicit choices survive restart',
   launcher.setBuiltins([builtin]);
   await launcher.load();
   assert.deepEqual(launcher.favoriteApps().map(appKey), [appKey(builtin)]);
-  assert.deepEqual(launcher.snapshot().apps.map(appKey), [appKey(builtin), ...apps.map(appKey)], 'All apps keeps the full inventory');
+  assert.deepEqual(launcher.snapshot().apps.map(appKey), [appKey(builtin), ...apps.map(appKey)], 'The launcher keeps the full inventory');
   launcher.toggleFavorite(builtin);
-  assert.equal(launcher.snapshot().apps.some(a => appKey(a) === appKey(builtin)), true, 'All apps retains the unfavorited product app');
+  assert.equal(launcher.snapshot().apps.some(a => appKey(a) === appKey(builtin)), true, 'The launcher retains the unfavorited product app');
   assert.equal(launcher.favoriteApps().some(a => appKey(a) === appKey(builtin)), false);
   launcher.toggleFavorite(builtin);
   launcher.moveFavorite(builtin, -1);
@@ -420,51 +430,189 @@ test('explicit empty favorites stay empty across reload and capability-filtered 
   assert.deepEqual(favorites.keys, ['alpha:notes'], 'Capability changes do not erase saved choices');
 });
 
-test('shell Home and All apps use the same favorite order; product taps never call native launch', async () => {
-  let saved = null;
+/** A minimal shell: model state with setState, Home rows for two product views, Back and Home. */
+function shellClass(products = ['notes', 'settings']) {
   const opened = [];
-  const nativeCalls = [];
   class Shell {
-    S() { return {drawer: true}; }
-    setState() {}
-    renderVals() { return {isOn: true, isView: false, ic: {grid: 'grid'}, apps: [{key: 'notes', label: 'Notes', d: 'note', open: () => { opened.push('notes'); }}, {key: 'settings', label: 'Settings', d: 'gear', open: () => { opened.push('settings'); }}]}; }
+    constructor() { this.state = {}; }
+    S() { return this.state; }
+    setState(patch) { this.state = {...this.state, ...patch}; }
+    back() { this.state = {...this.state, drawer: false, drawerQ: ''}; return 'back'; }
+    goHome() { this.state = {...this.state, drawer: false, drawerQ: ''}; }
+    openView(key) { opened.push(`view:${key}`); }
+    renderVals() { return {isOn: true, isView: false, ic: {grid: 'grid', phone: 'phone'}, apps: products.map(key => ({key, label: key[0].toUpperCase() + key.slice(1), d: key, open: () => { opened.push(key); }}))}; }
   }
+  return {Shell, opened};
+}
+
+test('Home and Apps: Apps lists installed Android entries only, alphabetically; product taps never call native launch', async () => {
+  let saved = null;
+  const nativeCalls = [];
+  const {Shell, opened} = shellClass();
   const launcher = installHomeLauncher(Shell, {list: async () => ({apps}), launch: async target => { nativeCalls.push(target); }},
     {favorites: {read: () => saved, write: keys => { saved = [...keys]; }}});
   const shell = new Shell();
   shell.renderVals();
+  shell.openAllApps();
   await launcher.load();
   let rendered = shell.renderVals();
+  assert.equal(rendered.drawerOpen, true);
   assert.deepEqual(rendered.apps.map(a => a.label), ['Notes', 'Settings']);
-  assert.equal(rendered.launcher.rows.length, apps.length);
-  const shown=[...rendered.launcher.favorites,...rendered.launcher.rows].map(a=>a.key);
-  assert.equal(new Set(shown).size,shown.length,'Favorites and inventory never duplicate an entry');
-  let notes = rendered.launcher.favorites.find(a => a.key === 'alpha:notes');
-  await notes.open();
+  // Product views are on Home only; the drawer holds every installed entry once, alphabetically, with no count.
+  assert.deepEqual(rendered.launcher.tiles.map(a => a.label), ['Caméra', 'Chrome', 'Reset tools', 'Settings']);
+  assert.equal(rendered.launcher.tiles.some(a => a.key.startsWith('alpha:')), false);
+  assert.equal('count' in rendered.launcher, false);
+  assert.equal('favorites' in rendered.launcher, false);
+  // Android Settings no longer needs a package suffix: Alpha's Settings is not in the drawer.
+  const installedSettings = rendered.launcher.tiles.find(a => a.key === 'com.android.settings');
+  assert.equal(installedSettings.aria, 'Open Settings');
+  // Home taps of product views open the view in-process.
+  await rendered.apps.find(a => a.label === 'Notes').open();
   assert.deepEqual(opened, ['notes']);
   assert.deepEqual(nativeCalls, []);
-  const settings = rendered.launcher.favorites.find(a => a.key === 'alpha:settings');
-  assert.equal(settings.aria, 'Open Settings (Alpha Phone)');
-  assert.equal(settings.sub, 'Alpha Phone');
-  await settings.open();
-  assert.deepEqual(opened, ['notes', 'settings']);
-  assert.deepEqual(nativeCalls, []);
-  const installedSettings = rendered.launcher.rows.find(a => a.key === 'com.android.settings');
-  assert.equal(installedSettings.aria, 'Open Settings (com.android.settings)');
   await installedSettings.open();
   assert.deepEqual(nativeCalls, [{packageName: 'com.android.settings'}]);
-  rendered.launcher.rows.find(a => a.key === appKey(apps[0])).toggleFavorite();
+  // Search keeps working on the installed list only.
+  shell.setState({drawerQ: 'set'});
   rendered = shell.renderVals();
-  notes = rendered.launcher.favorites.find(a => a.key === 'alpha:notes');
-  notes.later();
+  assert.deepEqual(rendered.launcher.tiles.map(a => a.label), ['Settings', 'Reset tools']);
+  shell.setState({drawerQ: 'notes'});
   rendered = shell.renderVals();
-  assert.equal(rendered.apps[1].label, 'Notes', 'Moving later changes row-major Home order');
-  rendered.launcher.favorites.find(a => a.key === 'alpha:notes').toggleFavorite();
-  rendered = shell.renderVals();
-  assert.equal(rendered.apps.some(a => a.label === 'Notes'), false);
-  assert.equal(rendered.launcher.rows.some(a => a.label === 'Notes'), true);
+  assert.deepEqual(rendered.launcher.tiles, []);
+  assert.equal(rendered.launcher.status, 'No apps');
 });
 
+test('Apps long-press menu adds an installed app to Home once and opens App info only for installed entries', async () => {
+  let saved = null;
+  const info = [];
+  const {Shell} = shellClass();
+  const launcher = installHomeLauncher(Shell, {list: async () => ({apps}), launch: async () => {}, appInfo: async target => { info.push(target); }},
+    {appInfo: true, favorites: {read: () => saved, write: keys => { saved = [...keys]; }}});
+  const shell = new Shell();
+  shell.renderVals(); shell.openAllApps(); await launcher.load();
+  let chrome = shell.renderVals().launcher.tiles.find(a => a.label === 'Chrome');
+  assert.equal(chrome.hasMenu, true);
+  assert.equal(chrome.menuOpen, false);
+  // The platform context-menu gesture (long press) opens the entry's menu; the tap it ends with is swallowed.
+  chrome.context({preventDefault() {}});
+  let rendered = shell.renderVals();
+  chrome = rendered.launcher.tiles.find(a => a.label === 'Chrome');
+  assert.equal(chrome.menuOpen, true);
+  assert.equal(rendered.launcher.menuOpen, true);
+  assert.equal(chrome.addLabel, 'Add to Home');
+  assert.equal(chrome.hasInfo, true);
+  // Back closes the menu first and leaves the drawer open.
+  shell.back();
+  assert.equal(shell.renderVals().launcher.menuOpen, false);
+  assert.equal(shell.renderVals().drawerOpen, true);
+  chrome.context({preventDefault() {}});
+  chrome = shell.renderVals().launcher.tiles.find(a => a.label === 'Chrome');
+  chrome.info();
+  await new Promise(setImmediate);
+  assert.deepEqual(info, [{packageName: 'com.android.chrome'}]);
+  chrome.addHome();
+  rendered = shell.renderVals();
+  assert.deepEqual(saved, ['alpha:notes', 'alpha:settings', 'com.android.chrome']);
+  assert.deepEqual(rendered.apps.map(a => a.label), ['Notes', 'Settings', 'Chrome']);
+  assert.equal(rendered.drawerOpen, false, 'Adding to Home returns to Home');
+  shell.openAllApps(); await launcher.load();
+  chrome = shell.renderVals().launcher.tiles.find(a => a.label === 'Chrome');
+  assert.equal(chrome.onHome, true);
+  assert.equal(chrome.addLabel, 'On Home');
+  chrome.addHome();
+  assert.deepEqual(saved, ['alpha:notes', 'alpha:settings', 'com.android.chrome'], 'An app already on Home is not added twice');
+  // Without the App info bridge the menu offers Add to Home only.
+  const plain = installHomeLauncher(shellClass().Shell, {list: async () => ({apps}), launch: async () => {}}, {favorites: {read: () => null, write() {}}});
+  await plain.load();
+  assert.equal(plain.canShowInfo(apps[0]), false);
+});
+
+test('Home edit mode removes, reorders and restores Home icons, and persists each change', async () => {
+  let saved = null;
+  const {Shell, opened} = shellClass(['notes', 'settings', 'calendar']);
+  const launcher = installHomeLauncher(Shell, {list: async () => ({apps}), launch: async () => {}},
+    {favorites: {read: () => saved, write: keys => { saved = [...keys]; }}});
+  const shell = new Shell();
+  shell.renderVals(); await launcher.load();
+  let rendered = shell.renderVals();
+  assert.equal(rendered.homeEdit.on, false);
+  // Long press on a Home icon enters edit mode; the tap that ends it opens nothing.
+  rendered.apps[0].context({preventDefault() {}});
+  rendered.apps[0].open();
+  assert.deepEqual(opened, []);
+  rendered = shell.renderVals();
+  assert.equal(rendered.homeEdit.on, true);
+  assert.equal(rendered.apps.every(a => a.editing), true);
+  assert.equal(rendered.homeEdit.canAdd, false, 'Nothing is hidden yet');
+  // Taps in edit mode do not open; the drawer does not open either.
+  rendered.apps[1].open();
+  shell.openAllApps();
+  assert.deepEqual(opened, []);
+  assert.equal(shell.renderVals().drawerOpen, false);
+  // Remove Settings: it leaves Home and becomes restorable through "+".
+  assert.equal(rendered.apps[1].removeAria, 'Remove Settings from Home');
+  rendered.apps[1].remove();
+  rendered = shell.renderVals();
+  assert.deepEqual(rendered.apps.map(a => a.label), ['Notes', 'Calendar']);
+  assert.deepEqual(saved, ['alpha:notes', 'alpha:calendar']);
+  assert.deepEqual(rendered.homeEdit.hidden.map(h => h.label), ['Settings']);
+  rendered.homeEdit.add();
+  rendered = shell.renderVals();
+  assert.equal(rendered.homeEdit.adding, true);
+  // Back closes the Add sheet, then edit mode.
+  shell.back();
+  assert.equal(shell.renderVals().homeEdit.adding, false);
+  assert.equal(shell.renderVals().homeEdit.on, true);
+  shell.renderVals().homeEdit.add();
+  shell.renderVals().homeEdit.hidden[0].add();
+  rendered = shell.renderVals();
+  assert.deepEqual(rendered.apps.map(a => a.label), ['Notes', 'Calendar', 'Settings']);
+  assert.equal(rendered.homeEdit.adding, false, 'The sheet closes when nothing is left to restore');
+  // Rearrange: dropping one icon onto another's place, and the keyboard's arrow keys.
+  launcher.placeFavorite('alpha:settings', 'alpha:notes');
+  assert.deepEqual(saved, ['alpha:settings', 'alpha:notes', 'alpha:calendar']);
+  const previous = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = () => 0;
+  try { shell.renderVals().apps[2].keydown({key: 'ArrowLeft', preventDefault() {}}); } finally { globalThis.requestAnimationFrame = previous; }
+  assert.deepEqual(saved, ['alpha:settings', 'alpha:calendar', 'alpha:notes']);
+  // An Android app pinned to Home is removed the same way; it stays installed and in the drawer.
+  launcher.toggleFavorite(apps[2]);
+  rendered = shell.renderVals();
+  rendered.apps.find(a => a.label === 'Chrome').remove();
+  rendered = shell.renderVals();
+  assert.equal(rendered.apps.some(a => a.label === 'Chrome'), false);
+  assert.equal(rendered.homeEdit.hidden.some(h => h.label === 'Chrome'), false, '"+" restores product views; Android apps come back from Apps');
+  assert.equal(rendered.launcher.tiles.some(a => a.label === 'Chrome'), true);
+  rendered.homeEdit.done();
+  assert.equal(shell.renderVals().homeEdit.on, false);
+});
+
+test('the default dialer appears once in Apps, as Phone, and opens Android\'s dial hand-off', async () => {
+  const dialer = {packageName: 'com.android.dialer', activityName: 'com.android.dialer.Main', label: 'Phone'};
+  const calls = [];
+  const {Shell} = shellClass();
+  const launcher = installHomeLauncher(Shell, {
+    list: async () => ({apps: [...apps, dialer]}), launch: async target => { calls.push(['launch', target]); },
+    resolveDefault: async () => ({role: 'dial', available: true, packageName: 'com.android.dialer', label: 'Phone by Example'}),
+    openDefault: async input => { calls.push(['openDefault', input.role]); },
+  }, {favorites: {read: () => null, write() {}}});
+  const shell = new Shell();
+  shell.renderVals(); shell.openAllApps(); await launcher.load();
+  let tiles = shell.renderVals().launcher.tiles;
+  assert.deepEqual(tiles.map(a => a.label), ['Caméra', 'Chrome', 'Phone', 'Reset tools', 'Settings']);
+  const phone = tiles.find(a => a.label === 'Phone');
+  assert.equal(phone.aria, 'Open Phone (Phone by Example)');
+  await phone.open();
+  assert.deepEqual(calls, [['openDefault', 'dial']]);
+  // Its menu acts on the dialer's own entry.
+  assert.equal(phone.hasMenu, true);
+  phone.addHome();
+  assert.equal(launcher.isFavorite(dialer), true);
+  // Search finds Phone by its name and by the dialer's package.
+  shell.setState({drawerQ: 'dialer'});
+  tiles = shell.renderVals().launcher.tiles;
+  assert.deepEqual(tiles.map(a => a.label), ['Phone']);
+});
 
 test('legacy installed favorites migrate to v2 without hiding product Home apps, and browser mirrors deduplicate', async () => {
   const aliases = {'browser.mail': 'alpha:inbox', 'browser.notes': 'alpha:notes', 'browser.browser': 'alpha:browser'};
