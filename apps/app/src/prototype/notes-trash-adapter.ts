@@ -231,6 +231,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
  notes.back=(state:Bag,api:Bag)=>{
   if(state.trashFull){(api.notesTrash as Bag|undefined)?.forget();api.set({trashFull:null});return true;}
   if(state.trashConfirm){api.set({trashConfirm:null});return true;}
+  if(state.trashAsk){api.set({trashAsk:null});return true;}
   if(state.folder==='deleted'){api.set({folder:null});return true;}
   return back(state,api);
  };
@@ -243,7 +244,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
   const rows:NotesTrashEntry[]=state.trash||[],now=Date.now(),disabled=!!state.trashBusy;
   // Recently deleted is the last folder of the list (state.folder 'deleted'), shown while it has notes.
   view.openTrash=()=>{trash.forget();api.set({folder:'deleted',open:null,sheet:null,q:null,trashConfirm:null,trashFull:null});void trash.maintain();};
-  view.closeTrash=()=>api.set({folder:null,trashConfirm:null});
+  view.closeTrash=()=>api.set({folder:null,trashConfirm:null,trashAsk:null});
   view.trashOpen=state.folder==='deleted';
   if(view.trashOpen&&Array.isArray(state.trash)&&!rows.length&&!disabled&&!state.trashFull)queueMicrotask(()=>{const latest=api.get('notes');if(latest.folder==='deleted'&&Array.isArray(latest.trash)&&!latest.trash.length)api.set({folder:null,trashConfirm:null});});
   view.trashCount=rows.length;
@@ -252,8 +253,16 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
    return {id:entry.id,title,kind:kindLabel[entry.note.kind]||'Note',preview:notePreview(entry.note),left:notesTrashDaysShort(entry,now),leftLabel:notesTrashDaysLabel(entry,now),
     restoreLabel:`Recover ${title}`,deleteLabel:`Delete ${title} now`,disabled,
     restore:()=>void trash.restore(entry.id),
-    erase:()=>api.set({trashConfirm:{id:entry.id,title}})};
+    erase:()=>api.set({trashConfirm:{id:entry.id,title}}),
+    ask:()=>api.set({trashAsk:{id:entry.id,title}})};
   });
+  // Tapping a row offers Recover or Delete now; Delete now asks again before erasing.
+  const ask=state.trashAsk as Bag|null,asked=ask&&view.trashOpen?rows.find(entry=>entry.id===ask.id):undefined;
+  view.trashAskOpen=!!asked;
+  view.trashAskTitle=asked?ask!.title:'';
+  view.trashAskClose=()=>api.set({trashAsk:null});
+  view.trashAskRecover=()=>{if(!asked)return;api.set({trashAsk:null});void trash.restore(asked.id);};
+  view.trashAskDelete=()=>{if(!asked)return;api.set({trashAsk:null,trashConfirm:{id:asked.id,title:ask!.title}});};
   view.trashNone=!rows.length;
   view.trashError=state.trashError||'';
   view.trashEmptyDisabled=disabled||!rows.length;
@@ -264,7 +273,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
   const full=(state.trashFull as Bag|null)&&(state.list||[]).some((n:Bag)=>n.id===state.trashFull.id&&n.id===state.open)?state.trashFull as Bag:null;
   if(state.trashFull&&!full)queueMicrotask(()=>{trash.forget();api.set({trashFull:null});});
   view.trashFullOpen=!!full;
-  view.trashConfirmOpen=!!full||(!!confirm&&!!state.trashOpen);
+  view.trashConfirmOpen=!!full||(!!confirm&&view.trashOpen);
   view.trashConfirmTitle=full?'Recently deleted is full':confirm?.id==='all'?'Delete all recently deleted notes?':`Delete “${confirm?.title||'this note'}”?`;
   view.trashConfirmText=full?`“${full.title}” was not deleted.`:'This can’t be undone.';
   view.trashConfirmLabel=full?'Delete permanently':confirm?.id==='all'?'Delete all':'Delete';
