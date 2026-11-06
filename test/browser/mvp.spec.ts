@@ -136,17 +136,18 @@ test('Scheduled digests traps focus, closes on native Back, and restores the tri
   await expect(dialog).toHaveCount(0);await expect(trigger).toBeFocused();
   await expect(page.locator('html')).toHaveAttribute('data-active-view','settings');
 });
-test('Unsigned recorder offers Cloud sign-in before any recording',async({page})=>{
+test('Unsigned recorder opens without a sign-in step and a refused microphone shows one line',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).microphoneRequests=0;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{(window as any).microphoneRequests++;throw Error('Unexpected microphone request');}}});});
   await page.goto('/');await page.getByRole('button',{name:'Notes',exact:true}).click();
   await page.getByRole('button',{name:'Record and transcribe',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Connect Eliza Cloud',exact:true})).toBeEnabled();
-  await expect(page.getByRole('button',{name:'Record without transcription',exact:true})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Start recording',exact:true})).toHaveCount(0);
-  await expect(page.getByText('Sign in to Eliza Cloud to use voice.',{exact:true})).toBeVisible();
-  expect(await page.evaluate(()=>(window as any).microphoneRequests)).toBe(0);
-  await page.getByRole('button',{name:'Discard recording',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Start recording',exact:true})).toHaveCount(0);
+  const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
+  await expect(recorder).toHaveAttribute('data-recorder-state','failed');
+  await expect(recorder.getByRole('alert')).toHaveText('The microphone isn’t available.');
+  await expect(recorder.getByRole('button',{name:'Done',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:/Connect Eliza Cloud|Record without transcription|Start recording/})).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).microphoneRequests)).toBe(1);
+  await recorder.getByRole('button',{name:'Discard recording',exact:true}).click();
+  await expect(recorder).toHaveCount(0);
 });
 test('Display theme survives reload and mock preview does not overwrite it',async({page})=>{
   await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();

@@ -3,7 +3,7 @@
  * rendered controls in the browser build with the development agent profile.
  *
  * Loop covered in one test:
- *  1. Notes "Record and transcribe" -> Cloud transcript -> correct it -> "Save note".
+ *  1. Notes "Record and transcribe" -> Done -> Cloud transcript saved as a voice note.
  *  2. Reload, reopen the saved recording and "Read aloud" / "Stop reading".
  *  3. "Review transcript with Alpha" -> Send -> "Review summary note" -> "Save recording summary".
  *  4. Hand-offs from the note: "Review reminder draft" -> Calendar form -> Save (a reminder), and
@@ -44,7 +44,6 @@ import {localBrowserVoice} from './voice-fixture';
 
 test.setTimeout(420_000);
 
-const heard='Meeting: we agreed to book the venu for Friday and email the caterer.';
 const transcript='Meeting: we agreed to book the venue for Friday and email the caterer.';
 const summary='The team agreed to book the venue.';
 const actionText='Book the venue\nEmail the caterer';
@@ -103,7 +102,7 @@ test('Journey B: recorded note is read aloud, summarized, and becomes an event a
  await returnToApps(page);
 
  // ---- 1. Record, transcribe, correct, save ----
- await installCloudVoiceFixture(page,heard);
+ await installCloudVoiceFixture(page,transcript);
  await page.bringToFront();
  await page.evaluate(()=>{
   const ctx=new AudioContext(),osc=ctx.createOscillator(),gain=ctx.createGain(),sink=ctx.createMediaStreamDestination();gain.gain.value=.1;osc.connect(gain);gain.connect(sink);osc.start();
@@ -114,17 +113,11 @@ test('Journey B: recorded note is read aloud, summarized, and becomes an event a
  });
  await page.getByRole('button',{name:'Notes',exact:true}).click();
  await page.getByRole('button',{name:'Record and transcribe',exact:true}).click();
- await page.getByRole('button',{name:'Start recording',exact:true}).click();
- await expect(page.getByRole('button',{name:'Stop recording',exact:true})).toBeVisible();
+ // The recorder starts at once; Done transcribes and saves one voice note (corrections happen in the note).
+ const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
+ await expect(recorder).toHaveAttribute('data-recorder-state','recording');
  await expect.poll(()=>page.evaluate(()=>(window as any).recordedBytes)).toBeGreaterThan(0);
- await page.getByRole('button',{name:'Stop recording',exact:true}).click();
- await page.getByRole('button',{name:'Transcribe with Eliza Cloud',exact:true}).click();
- const reviewTranscript=page.getByRole('textbox',{name:'Review transcript',exact:true});
- await expect(reviewTranscript).toHaveValue(heard);
- expect(await page.evaluate(()=>(window as any).cloudVoiceFixture.transcriptions.length)).toBe(1);
- expect(await notes(page)).toHaveLength(0);
- await reviewTranscript.fill(transcript);
- await page.getByRole('button',{name:'Save note',exact:true}).click();
+ await recorder.getByRole('button',{name:'Done',exact:true}).click();
  await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Venue meeting');
  await expect.poll(async()=>(await notes(page)).filter(n=>n.kind==='voice'&&n.title==='Venue meeting'&&n.body===transcript&&!!n.audio?.audioId).length).toBe(1);

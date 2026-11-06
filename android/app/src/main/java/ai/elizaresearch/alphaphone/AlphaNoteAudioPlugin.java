@@ -283,18 +283,25 @@ public class AlphaNoteAudioPlugin extends Plugin {
   if(encrypted==null)throw new IOException("Recording metadata unavailable");
   return new JSONObject(encrypted);
  }
- private static void copyBounded(InputStream in,OutputStream out,int limit)throws IOException {byte[] buffer=new byte[8192];int total=0,count;while((count=in.read(buffer))!=-1){if(count>limit-total)throw new IOException("Recording data exceeds limit");out.write(buffer,0,count);total+=count;}}
+ private static void copyBounded(InputStream in,OutputStream out,long limit)throws IOException {byte[] buffer=new byte[8192];long total=0;int count;while((count=in.read(buffer))!=-1){if(count>limit-total)throw new IOException("Recording data exceeds limit");out.write(buffer,0,count);total+=count;}}
  private static void atomic(AtomicFile file,byte[] bytes)throws Exception {FileOutputStream out=null;try{out=file.startWrite();out.write(bytes);file.finishWrite(out);}catch(Exception error){if(out!=null)file.failWrite(out);throw error;}}
  /** Only native recorders can import a stopped clip; the renderer cannot nominate a path. */
- JSObject retain(File source,String recordingId,String noteId,long duration,String transcript)throws Exception {synchronized(METADATA_LOCK){return retainLocked(source,recordingId,noteId,duration,transcript);}}
- private JSObject retainLocked(File source,String recordingId,String noteId,long duration,String transcript)throws Exception {
-  id(recordingId);id(noteId);if(source==null||!source.isFile()||source.length()<1||source.length()>4*1024*1024||duration<1||duration>60000||transcript==null||transcript.length()>64000)throw new IOException();
+ JSObject retain(File source,String recordingId,String noteId,long duration,String transcript)throws Exception {synchronized(METADATA_LOCK){return retainLocked(source,recordingId,noteId,duration,transcript,false);}}
+ /** A Notes recording (AlphaNoteRecorder) has no length limit: the joined file is moved, not copied. */
+ JSObject retainNoteRecording(File source,String recordingId,String noteId,long duration,String transcript)throws Exception {synchronized(METADATA_LOCK){return retainLocked(source,recordingId,noteId,duration,transcript,true);}}
+ private JSObject retainLocked(File source,String recordingId,String noteId,long duration,String transcript,boolean unbounded)throws Exception {
+  id(recordingId);id(noteId);
+  if(source==null||!source.isFile()||source.length()<1||duration<1||transcript==null)throw new IOException();
+  // The metadata slot holds the transcript (512 KiB); a clip keeps the earlier 60 s and 4 MiB bound.
+  if(unbounded?transcript.length()>150_000:(source.length()>4*1024*1024||duration>60000||transcript.length()>64000))throw new IOException();
   File target=audio(recordingId);JSONObject record;
   if(!target.isFile()&&secure().readCredentialSlot(slot(recordingId))!=null&&read(recordingId).has("deletionOperations"))throw new IOException("Recording identity retired");
   if(target.isFile()&&(metadata(recordingId).getBaseFile().isFile()||secure().readCredentialSlot(slot(recordingId))!=null)) {record=read(recordingId);if(!noteId.equals(record.optString("noteId"))||record.optLong("deletedAt",0)>0)throw new IOException();}
   else {
    File temp=new File(directory(),recordingId+".pending");
-   try(InputStream in=new FileInputStream(source);FileOutputStream out=new FileOutputStream(temp)){copyBounded(in,out,4*1024*1024);out.getFD().sync();}catch(Exception error){temp.delete();throw error;}
+   if(!(unbounded&&source.renameTo(temp))){
+    try(InputStream in=new FileInputStream(source);FileOutputStream out=new FileOutputStream(temp)){copyBounded(in,out,unbounded?Long.MAX_VALUE:4*1024*1024);out.getFD().sync();}catch(Exception error){temp.delete();throw error;}
+   }
    if(!temp.renameTo(target)){temp.delete();throw new IOException();}
    record=new JSONObject();record.put("audioId",recordingId);record.put("noteId",noteId);record.put("durationMs",duration);record.put("createdAt",System.currentTimeMillis());record.put("mimeType","audio/mp4");
   }
