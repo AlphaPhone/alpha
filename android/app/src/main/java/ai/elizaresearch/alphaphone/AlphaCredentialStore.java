@@ -18,6 +18,8 @@ final class AlphaCredentialStore {
  static final String NOTES_DRAFT="notes-draft:v1:device";
  /** Reminder-to-note back-references: identity only, at most 200 links (runtime/note-origin.ts). */
  static final String NOTE_ORIGINS="note-origins:v1:device";
+ /** Notes folder list: at most 100 names of 40 characters (runtime/notes-folders.ts). */
+ static final String NOTES_FOLDERS="notes-folders:v1:device";
  interface CloudChangeObserver {void changed()throws Exception;}
  private static CloudChangeObserver cloudChange=()->{};
  static void observeCloudChanges(CloudChangeObserver observer){synchronized(JsonCredentialSlots.LOCK){cloudChange=observer;}}
@@ -43,6 +45,7 @@ final class AlphaCredentialStore {
   if(NOTES_DRAFT.equals(name))return 32*1024*1024;
   // 200 links of bounded ids and a hash stay well under this; a larger value is not a valid index.
   if(NOTE_ORIGINS.equals(name))return 512*1024;
+  if(NOTES_FOLDERS.equals(name))return 64*1024;
   if(name!=null&&(name.startsWith("inbox-drafts:v1:")||name.matches("inbox-operation:v1:[a-f0-9]{64}")))return 8*1024*1024;
   if(name!=null&&name.matches("calendar-linked-sync:v1:[a-f0-9]{64}"))return 4*1024*1024;
   if(name!=null&&name.matches("connected-read-cache:v1:[a-f0-9]{64}"))return 4*1024*1024;
