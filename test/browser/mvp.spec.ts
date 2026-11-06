@@ -46,7 +46,7 @@ test('Notes create, edit, reload and delete to Recently deleted', async ({ page 
   await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toContainText('A real local draft.');
   await page.getByRole('button', { name: 'Open Browser audit note', exact: true }).click();
   await page.getByRole('button', { name: 'More', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
+  await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
   // Deletion is not immediate erasure: the note waits in Recently deleted for 30 days.
   await expect(page.getByText('Moved to Recently deleted', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
@@ -68,8 +68,8 @@ test('Notes folders: create, move via ⋯, filter by chip, persist, and delete w
   await page.getByRole('button', { name: 'All', exact: true }).click();
   await page.getByRole('button', { name: 'Open Browser audit note', exact: true }).click();
   await page.getByRole('button', { name: 'More', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Move to…', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: 'Work', exact: false }).click();
+  await page.getByRole('dialog', { name: 'Note actions' }).getByRole('button', { name: 'Move to…', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Move to' }).getByRole('button', { name: /^Work/ }).click();
   await expect(page.getByText('Moved to Work', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
   await page.getByRole('button', { name: 'Work', exact: true }).click();

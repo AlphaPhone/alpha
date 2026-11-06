@@ -49,7 +49,7 @@ export function installNotesFoldersAdapter(Component:Shell,views:Record<string,B
   for(const detail of [view.ed,view.vo,view.lk])if(detail?.menuShown)for(const key of ['pin','del','moveTo']){
    const action=detail[key];if(typeof action!=='function')continue;
    detail[key]=async(...args:unknown[])=>{
-    const more=document.querySelector<HTMLElement>('button[aria-haspopup="menu"][aria-expanded="true"]');
+    const more=document.querySelector<HTMLElement>('button[aria-haspopup="dialog"][aria-expanded="true"]');
     if(key!=='moveTo'){await api.set({menu:null});more?.focus();}
     return action(...args);
    };

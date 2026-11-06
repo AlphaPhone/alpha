@@ -14,7 +14,7 @@ async function createNote(page:Page,title:string,body:string){
 /** Editor ⋯ menu → Delete (PLAN.md section 3). */
 async function deleteOpenNote(page:Page){
  await page.getByRole('button',{name:'More',exact:true}).click();
- await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
 }
 /** The "Recently deleted" folder chip, shown while it has notes. */
 async function openDeleted(page:Page){await page.getByRole('button',{name:'Recently deleted',exact:true}).click();}

@@ -74,6 +74,7 @@ export const LIVE_STATES: State[] = [
   live('Notes (empty)', ['Notes']),
   live('Notes new note', ['Notes', 'New note']),
   live('Notes new folder', ['Notes', 'New folder']),
+  live('Notes recently deleted', ['Notes', 'New note', 'More', 'Delete', 'Recently deleted'], 'notes-trash'),
   live('Files', ['Files']),
   live('Workflows', ['Workflows']),
   live('Settings', ['Settings']),

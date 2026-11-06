@@ -27,7 +27,7 @@ async function createNote(page:Page,title:string,body:string){
 }
 async function deleteNote(page:Page,title:string){
  await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText(`Moved to Recently deleted`,{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:`Open ${title}`,exact:true})).toHaveCount(0);
 }
@@ -80,7 +80,7 @@ test('Trash written under a larger limit stays readable, restorable and purgeabl
 
  // A new deletion is refused: the note stays saved and open, Trash is unchanged, nothing else is lost.
  await page.getByRole('button',{name:'Open Delta',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  const full=page.getByRole('dialog',{name:'Recently deleted is full'});
  await expect(full).toContainText('“Delta” was not deleted.');
  // The editor under the dialog cannot be operated or read by assistive technology while the choice is open
@@ -100,7 +100,7 @@ test('Trash written under a larger limit stays readable, restorable and purgeabl
  expect((await savedRecords(page)).map((n:any)=>n.title).sort()).toEqual(['Delta','Echo']);
 
  // The separately confirmed escape deletes exactly this note and nothing else.
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await full.getByRole('button',{name:'Delete permanently',exact:true}).click();
  await expect(page.getByText('Delta deleted forever',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0);
@@ -118,7 +118,7 @@ test('Trash written under a larger limit stays readable, restorable and purgeabl
 
  // Exactly at the limit a new addition is still refused; the dialog leads to Trash to make room.
  await page.getByRole('button',{name:'Open Echo',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await full.getByRole('button',{name:'Open Recently deleted',exact:true}).click();
  await expect(full).toHaveCount(0);
  await expect(trash.getByRole('heading',{name:'Recently deleted',exact:true})).toBeVisible();
@@ -145,7 +145,7 @@ test('a note edited after a full Trash refused it is not deleted by the earlier 
  await createNote(page,'Filler','Occupies Trash');await createNote(page,'Changing','First text');
  await deleteNote(page,'Filler');
  await page.getByRole('button',{name:'Open Changing',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  const full=page.getByRole('dialog',{name:'Recently deleted is full'});
  await expect(full).toBeVisible();
  // Another view saves a newer revision of the same note while the dialog is open.
@@ -165,7 +165,7 @@ test('a permanent-delete confirmation in a stale view never drops the Trash copy
  await createNote(page,'Filler','Occupies Trash');await createNote(page,'Moved','First text');
  await deleteNote(page,'Filler');
  await page.getByRole('button',{name:'Open Moved',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  const full=page.getByRole('dialog',{name:'Recently deleted is full'});
  await expect(full).toBeVisible();
  // While the dialog is open another view edits the note and moves that newer revision to Trash
@@ -202,7 +202,7 @@ test('a voice note refused by a full Trash is erased with its own recording only
  const filler=await trashEntries(page);
 
  await page.getByRole('button',{name:'Open Full memo',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  const full=page.getByRole('dialog',{name:'Recently deleted is full'});
  await expect(full).toContainText('was not deleted.');
  // Refused before any effect: note saved, recording untouched, no recovery row, Trash unchanged.
@@ -248,13 +248,13 @@ test('a stale Trash row of a note that is then deleted permanently is dropped, s
  const full=page.getByRole('dialog',{name:'Recently deleted is full'});
 
  await page.getByRole('button',{name:'Open Stale text',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await full.getByRole('button',{name:'Delete permanently',exact:true}).click();
  await expect(page.getByText('Stale text deleted forever',{exact:true})).toBeVisible();
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Filler','Stale memo']);
 
  await page.getByRole('button',{name:'Open Stale memo',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect(full).toContainText('was not deleted.');
  await full.getByRole('button',{name:'Delete permanently',exact:true}).click();
  await expect(page.getByText('Stale memo and its recording deleted forever',{exact:true})).toBeVisible();
@@ -281,7 +281,7 @@ test('an interrupted permanent voice deletion keeps a recovery row and finishes 
  await page.getByRole('button',{name:'Open Cut memo',exact:true}).click();
  // The erase request is lost until the process restarts (reload clears this patch).
  await page.evaluate(async()=>{const {BrowserVoice}=await import('/src/browser/voice.ts');(window as any).purgeCalls=0;BrowserVoice.prototype.purge=async function(){(window as any).purgeCalls++;throw Error('Process stopped before the erase');};});
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await page.getByRole('dialog',{name:'Recently deleted is full'}).getByRole('button',{name:'Delete permanently',exact:true}).click();
  await expect(page.getByText(/Deletion is unconfirmed/).first()).toBeVisible();
  await expect.poll(()=>page.evaluate(()=>(window as any).purgeCalls)).toBeGreaterThan(0);
@@ -376,7 +376,7 @@ test('process death between the write-ahead Trash row and the deletion commit ke
  // 2. A voice entry expires; the recording was erased but the process died before its row was removed.
  await openNotes(page);
  await page.getByRole('button',{name:'Open Dead memo',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Moved to Recently deleted',{exact:true})).toBeVisible();
  const entry=(await trashEntries(page))[0];
  expect(entry.audio).toEqual({audioId:'dead-audio'});
@@ -413,7 +413,7 @@ test('two views: a move to Trash from a stale view keeps the newer Trash row the
   expect(newer.map((e:any)=>e.note.body)).toEqual(['Newer text, only in Trash']);
   // The stale view still shows the older revision and tries to move it to Trash.
   await second.getByRole('button',{name:'Open Kilo',exact:true}).click();
-  await second.getByRole('button',{name:'More',exact:true}).click();await second.getByRole('menuitem',{name:'Delete',exact:true}).click();
+  await second.getByRole('button',{name:'More',exact:true}).click();await second.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
   await expect(second.getByText('This note changed in another view. Nothing was deleted.',{exact:true})).toBeVisible();
   // The newer row is exactly as the first view wrote it; the older revision never replaced it.
   expect(await trashEntries(second)).toEqual(newer);
@@ -439,7 +439,7 @@ test('two views: a second tab never settles a permanent deletion the first open 
    DocumentNotesStore.prototype.execute=async function(...args:any[]){if(args[0]?.type==='notes_delete')throw Error('Notes reply lost');return execute.apply(this,args as any);};
   });
   await first.getByRole('button',{name:'Open Held memo',exact:true}).click();
-  await first.getByRole('button',{name:'More',exact:true}).click();await first.getByRole('menuitem',{name:'Delete',exact:true}).click();
+  await first.getByRole('button',{name:'More',exact:true}).click();await first.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
   await first.getByRole('dialog',{name:'Recently deleted is full'}).getByRole('button',{name:'Delete permanently',exact:true}).click();
   await expect(first.getByText(/Deletion is unconfirmed/).first()).toBeVisible();
   const held=await pendingDeletions(first);
