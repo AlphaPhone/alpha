@@ -336,7 +336,8 @@ test('a clock moved backwards never purges early or extends the label, and the p
  await rowAction(page,'Clock note','Recover');
  await expect(page.getByText('Clock note restored',{exact:true})).toBeVisible();
  expect(await savedRecords(page)).toEqual([original]);
- await trash.getByRole('button',{name:'Back to notes',exact:true}).click();
+ // The last note recovered: Recently deleted closes on its own.
+ await expect(trash).toHaveCount(0);
 
  // Deleted again, then the app is closed across the deadline: startup alone purges, once.
  await page.clock.setSystemTime(entry.deletedAt+DAY);
