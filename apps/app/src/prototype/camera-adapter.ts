@@ -999,7 +999,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     el.addEventListener('scroll',()=>{const album=owner.get('photos')?.album;if(el.scrollTop+el.clientHeight<el.scrollHeight-900)return;
       if(album==='trash'){if(trashNext&&!trashLoading)void loadTrash(owner,true);}else if(album){if(albumNext&&!albumBusy)void loadAlbum(album,owner,true);}else if(next&&!loading)void refresh(true);},{passive:true});
   }
-  const gridCss=()=>`display:grid;grid-template-columns:repeat(${gridColumns},minmax(0,1fr));gap:2px`;
+  const gridCss=()=>`grid-template-columns:repeat(${gridColumns},minmax(0,1fr))`;
   const durationLabel=(row:SavedPhoto)=>row.kind==='video'&&row.duration?`${Math.floor(row.duration/60)}:${String(Math.floor(row.duration%60)).padStart(2,'0')}`:'';
   const tileLabel=(row:SavedPhoto)=>{const when=viewerTitle(shotAt(row));return `${row.kind==='video'?'Video':'Photo'}, ${when.day} ${when.time}`;};
   const imageCss=(row:SavedPhoto)=>row.image?`url("${row.image}") center / cover no-repeat`:'var(--s2)';
@@ -1062,7 +1062,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const onAlbums=st.tab==='alb'&&!st.album;
     // Header: "Photos" / "Albums" with text tabs; Select in the Library and in albums.
     data.tabs=(data.tabs||[]).map((tab:Bag)=>({...tab,pick:()=>{if(mutating||sharing)return;selection=undefined;selectionTab=undefined;drag=undefined;currentApi.set({nativeMultiSelection:Date.now()});tab.pick?.();}}));
-    data.canSelect=!onAlbums&&!selection;
+    data.libTab=!onAlbums&&!selection;
     // Access: one row while access is partial or denied; nothing once it is full.
     data.libraryAccessControl=!browserMode&&!!libraryAccess&&libraryAccess.scope!=='full'&&!st.open&&!st.album&&!selection&&!onAlbums;
     data.libraryAccessBusy=requestingLibraryAccess;
@@ -1132,8 +1132,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     // Drag ranges follow the whole visible grid, across day headers.
     const sections = groupSections(shownCaptures).map(group => ({ label: group.label, place: '', count: String(group.items.length), items: tiles(group.items, currentApi, false, shownCaptures) }));
     data.groups = [...sections, ...(data.groups || [])];
-    data.empty = !data.groups.length && loaded && !loading && !st.nativeLibraryError;
-    data.emptyLabel = photosFilter ? 'No matches' : 'No photos';
+    const nothing = !data.groups.length && loaded && !loading && !st.nativeLibraryError;
+    data.empty = nothing && !photosFilter; data.noMatches = nothing && !!photosFilter;
     // An agent review (photo_library_review or photos_album_create) waits over the grid.
     const review = deviceLibrary.reviewCard();
     data.agentReview = review ? { title: review.title, detail: review.detail, confirmLabel: 'Continue', busy: review.busy, confirm: review.confirm, cancel: review.cancel }
@@ -1162,7 +1162,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       }, fav: () => { void favorite(selected,currentApi); }, edit: () => {void beginEdit(selected,currentApi);}, del: () => { void changeTrash(selected, true, currentApi, (sequence[index + 1] || sequence[index - 1])?.id); }, info: () => { currentApi.set({ sheet: 'photo-info', chrome: true }); }, ask: () => { askCapture(selected,currentApi); } };
       data.v.saveLocally=browserMode?()=>{const token=photoReadEpoch;return saveBrowserMedia({items:[{id:nativeId(selected.id),revision:selected.mutationRevision||''}]},()=>!disposed&&!document.hidden&&photoReadEpoch===token&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected));}:undefined;
       data.v.isDeleted=!!selected.trashed;data.v.notDeleted=!selected.trashed;data.v.canDeleteForever=!!selected.trashed;data.v.recover=()=>void changeTrash(selected,false,currentApi);data.v.deleteForever=()=>void preparePermanent(currentApi,[selected]);if(selected.trashed){data.v.notSecure=false;const left=daysLeft(selected.expiresAt);data.v.sub=left===undefined?when.time:`${left} ${left===1?'day':'days'} left`;}
-      data.v.viewerLabel=selected.kind==='video'?'Video':'Photo';data.v.askLabel=`Ask Alpha about this ${selected.kind==='video'?'video':'photo'}`;
+      data.v.viewerLabel=`${selected.kind==='video'?'Video':'Photo'}. Tap to show or hide controls, swipe to browse`;data.v.askLabel=`Ask Alpha about this ${selected.kind==='video'?'video':'photo'}`;
       data.v.editLabel=selected.kind==='video'?'Edit video':'Edit photo';data.v.shareLabel=selected.kind==='video'?'Share video':'Share photo';data.v.infoLabel=selected.kind==='video'?'Video info':'Photo info';data.v.deleteLabel=selected.kind==='video'?'Delete video':'Delete photo';
       data.v.canEmail=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments')&&typeof views.inbox.fileEmailTarget==='function';
       data.v.email=()=>emailPhoto(selected,currentApi);

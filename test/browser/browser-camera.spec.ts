@@ -38,7 +38,7 @@ test('browser camera persists a real encoded frame, releases capture and restore
  await expect(page.getByText('Moved to Recently deleted',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Albums',exact:true}).click();
  await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
- await page.getByRole('button',{name:/Deleted photo/}).click();
+ await page.getByRole('button',{name:/^Photo, /}).click();
  await expect(page.getByRole('button',{name:'Recover deleted item',exact:true})).toBeVisible();
  expect(await page.evaluate(async()=>{const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');return (await library.list({trashed:true})).items.length;})).toBe(1);
  await page.getByRole('button',{name:'Recover deleted item',exact:true}).click();
