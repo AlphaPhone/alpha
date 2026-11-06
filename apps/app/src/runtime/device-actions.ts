@@ -9,6 +9,7 @@ import {isClockOperation,validateClockOperation,validateClockResult,assertClockT
 import { isMapsOperation, validateMapsOperation, validateMapsResult, type MapsOperation, type MapsResult } from './maps-contract';
 import { validateMapsSelectedObject } from '../maps/agent-context';
 import { isLibraryOperation, validateLibraryOperation, validateLibraryResult, describeLibraryOperation, PHOTO_LIBRARY_CAPABILITY, type LibraryAgentOperation, type LibraryAgentResult } from './photo-library';
+import {isNotesOrganizeOperation,validateNotesOrganizeOperation,describeNotesOrganizeOperation,notesOrganizeContextAllowed,NOTES_ORGANIZE_CAPABILITY,type NotesOrganizeOperation} from './notes-organize-contract';
 import {type ReminderOperation,type ReminderResult,isReminderOperation,reminderFields,validateReminderOperation,validateReminderResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
 import {type NotesOperation,type NotesResult,type NotesTarget,isNotesOperation,notesFields,validateNotesOperation,validateNotesResult} from './notes-contract';
 import {type CalendarOperation,type CalendarResult,type CalendarRecordResult,calendarCapabilityAvailable,calendarFields,isCalendarOperation,validateCalendarOperation,validateCalendarResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
@@ -18,7 +19,7 @@ import { parseWorkflowBinding, parseWorkflowRead, validateWorkflowResult, assert
 import type { ActionProposal, ContextEnvelope, OperationReceipt, VerifiedSession } from './alpha-client';
 
 export type WorkflowPresentationOperation = {type:'post_notification';title:string;body:string}|{type:'speak_text';text:string};
-export type DeviceOperation = CameraCaptureOperation | SmsSendOperation | ReminderCreateOperation | WorkflowPresentationOperation | ClockOperation | MapsOperation | LibraryAgentOperation | ReminderOperation | NotesOperation | NativeNotesQueryOperation | CalendarOperation | WorkflowReadOperation | { type: 'create_note'; title: string; body: string }
+export type DeviceOperation = CameraCaptureOperation | SmsSendOperation | ReminderCreateOperation | WorkflowPresentationOperation | ClockOperation | MapsOperation | LibraryAgentOperation | NotesOrganizeOperation | ReminderOperation | NotesOperation | NativeNotesQueryOperation | CalendarOperation | WorkflowReadOperation | { type: 'create_note'; title: string; body: string }
   | { type: 'create_reminder'; title: string; dueAt: string }
   | { type: 'open_view'; view: string } | { type: 'browser_navigate'; url: string };
 /** Kept in step with the patched contract's FOREGROUND_REVIEW_TYPES (asserted by test-device-actions). */
@@ -89,6 +90,7 @@ export function validateDeviceOperation(value: unknown): DeviceOperation {
   if(isClockOperation(p))return validateClockOperation(p);
   if(isMapsOperation(p))return validateMapsOperation(p);
   if(isLibraryOperation(p))return validateLibraryOperation(p);
+  if(isNotesOrganizeOperation(p))return validateNotesOrganizeOperation(p);
   if(isReminderOperation(p))return validateReminderOperation(p);
   if(isNotesOperation(p))return validateNotesOperation(p);
   if(isCalendarOperation(p))return validateCalendarOperation(p);
@@ -149,6 +151,7 @@ function assertProposalContext(operation:ReviewableDeviceOperation,context:Conte
  if(isClockOperation(operation))assertClockTimeZone(operation,context.timeZone);
  if(isMapsOperation(operation))assertMapsContext(operation,context);
  if(isLibraryOperation(operation))assertLibraryContext(context);
+ if(isNotesOrganizeOperation(operation)&&!notesOrganizeContextAllowed(context))throw new ContextNotice('Open Home or Notes to review this Notes action.');
  if(isReminderOperation(operation))assertReminderContext(operation,context);
  if(isNativeNotesQuery(operation))assertNotesQueryContext(context);
  if(isNotesOperation(operation))assertNotesContext(operation,context);
@@ -218,6 +221,7 @@ export class DeviceActions {
     if(isCalendarOperation(op)&&(op.type==='calendar_create_local'||op.type==='calendar_read_next')&&!calendarCapabilityAvailable(op.type,this.credential.capabilities))throw Error('This agent has not negotiated native Calendar creation or discovery. Reconnect to a compatible agent.');
     if(isNativeNotesQuery(op)&&!this.credential.capabilities?.includes(NOTES_QUERY_CAPABILITY))throw Error('Notes discovery was not negotiated with this agent');
     if(isLibraryOperation(op)&&!this.credential.capabilities?.includes(PHOTO_LIBRARY_CAPABILITY))throw Error('Device library access was not negotiated with this agent');
+    if(isNotesOrganizeOperation(op)&&!this.credential.capabilities?.includes(NOTES_ORGANIZE_CAPABILITY))throw Error('Notes folders were not negotiated with this agent');
     if(isForegroundReview(op)&&(!deviceReviewCapabilityAvailable(op.type,this.credential.capabilities)||!this.executeForeground))throw Error('This action was not negotiated with this agent. Reconnect to a compatible agent.');
     if(isReminderCreate(op)&&!this.reminderCreate)throw Error('This agent does not support reviewed reminder creation. Reconnect to a compatible agent.');
     if(isReminderOperation(op)&&(op.target.timingVersion===2||op.type==='reminder_update'&&op.fields.schedule?.alertMinutes!==undefined)&&!this.reminderV2)throw Error('This agent does not support this reminder timing. Reconnect to a compatible agent.');
@@ -251,6 +255,7 @@ export class DeviceActions {
     if(isSmsSend(op))return {id:proposal.id,title:'Review SMS',description:`To: ${op.recipients.join(', ')}\nSIM subscription: ${op.subscriptionId}\n\n${op.body}\n\nConfirm again in Android. Submission does not prove delivery.`,expiresAt:proposal.expiresAt,contextRevision:context.revision};
     if(isCameraCapture(op))return {id:proposal.id,title:'Take photo',description:'Use the current camera and save one photo in Photos. The photo stays on this device.',expiresAt:proposal.expiresAt,contextRevision:context.revision};
     if (isLibraryOperation(op)) return { id: proposal.id, ...describeLibraryOperation(op), expiresAt: proposal.expiresAt, contextRevision: context.revision };
+    if (isNotesOrganizeOperation(op)) return { id: proposal.id, ...describeNotesOrganizeOperation(op), expiresAt: proposal.expiresAt, contextRevision: context.revision };
     const record = isReminderCreate(op)||isReminderOperation(op)||isNotesOperation(op)||isCalendarOperation(op)||op.type==='create_note'||op.type==='create_reminder'?presentDeviceRecordOperation(op,context.timeZone):undefined;
     const description = isNativeNotesQuery(op)?(op.query.kind==='title'?`Look for the title “${op.query.text}” locally. Choose and review one note before sharing its text.`:`Find the latest ${op.query.by} note locally. Unknown dates or ties require your choice; only the chosen note is shared.`):record?.description ?? (isClockOperation(op) ? describeClockHandoff(op) : isMapsOperation(op) ? 'Send the exact selected place location or route endpoints, mode and distance to the connected agent. This shares location information. It does not start navigation.' : op.type === 'open_view' ? `Open ${op.view} on this phone` : op.type==='browser_navigate'?`Open browser destination ${op.url}`:'Workflow phone read');
     return { id: proposal.id, title: record?.title ?? op.type.replaceAll('_', ' '), description, expiresAt: proposal.expiresAt, contextRevision: context.revision,...(isNativeNotesQuery(op)&&!['home','notes'].includes(context.view)?{reviewDestination:'home' as const}:{}),...(isNativeNotesQuery(op)||op.type==='notes_read_selected'?{privateNotesRead:true as const}:{}),...(proposal.readReplyOrigin?{readReply:{origin:structuredClone(proposal.readReplyOrigin),digest:proposal.digest}}:{}) };
@@ -287,7 +292,7 @@ export class DeviceActions {
    * reads and Calendar/reminder writes retain their recorded separate review policy.
    * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
   async performRequested(messageId:string,context:ContextEnvelope,signal:AbortSignal,allowed:()=>Promise<boolean>,operationType?:ReviewableDeviceOperation['type']):Promise<OperationReceipt[]> {
-    const directTypes:readonly ReviewableDeviceOperation['type'][]=['create_note','open_view','camera_capture_photo','photo_library_select'];
+    const directTypes:readonly ReviewableDeviceOperation['type'][]=['create_note','open_view','camera_capture_photo','photo_library_select','notes_filter'];
     const results:OperationReceipt[]=[];
     for(const [id,entry] of [...this.proposals]) {
       if(results.length>=4||!directTypes.includes(entry.proposal.operation.type)||entry.proposal.workflow||entry.proposal.requestMessageId!==messageId||(operationType!==undefined&&entry.proposal.operation.type!==operationType))continue;
