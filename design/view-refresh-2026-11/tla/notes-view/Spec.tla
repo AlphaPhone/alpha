@@ -145,12 +145,13 @@ Expire(n) ==   \* retention elapsed, or "Delete now" / "Empty" after confirmatio
   /\ UNCHANGED <<folders, noteFolder, live, rev, review>> /\ UNCHANGED RecVars /\ UNCHANGED budget
 
 AgentProposeMove(n, f) ==
-  /\ review = NoReview /\ n \in live /\ f \in folders /\ noteFolder[n] # f
+  \* As implemented (notes_move): the target is an existing folder, or None ("no folder").
+  /\ review = NoReview /\ n \in live /\ f \in folders \cup {None} /\ noteFolder[n] # f
   /\ review' = [n |-> n, f |-> f, r |-> rev[n]]
   /\ UNCHANGED <<folders, noteFolder, live, trash, rev>> /\ UNCHANGED RecVars /\ UNCHANGED budget
 
 ReviewCurrent ==
-  /\ review # NoReview /\ review.n \in live /\ review.f \in folders /\ rev[review.n] = review.r
+  /\ review # NoReview /\ review.n \in live /\ review.f \in folders \cup {None} /\ rev[review.n] = review.r
 
 AgentApply ==
   /\ ReviewCurrent
