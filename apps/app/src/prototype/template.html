@@ -1660,9 +1660,9 @@
       <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">{{photos.title}}</h1>
       <sc-if value="{{photos.libTab}}"><button class="tap" aria-label="Select photos" onClick="{{photos.selStart}}" style="min-height: 44px; padding: 0 12px; font-size: 16px; font-weight: 600; color: var(--acct)">Select</button></sc-if>
     </div>
-    <div role="group" aria-label="Photos sections" style="display: flex; gap: 2px; margin: 0 16px 4px; padding: 3px; border-radius: 22px; background: var(--s2); flex-shrink: 0">
+    <div role="group" aria-label="Photos sections" style="display: flex; gap: 2px; margin: 0 16px 4px; padding: 2px; border-radius: 24px; background: var(--s2); flex-shrink: 0">
       <sc-for list="{{photos.tabs}}" as="t">
-        <button aria-label="{{t.label}}" aria-pressed="{{t.on}}" onClick="{{t.pick}}" style="flex: 1; height: 38px; border-radius: 19px; font-size: 14.5px; font-weight: 600; transition: background .2s; {{t.css}}">{{t.label}}</button>
+        <button aria-label="{{t.label}}" aria-pressed="{{t.on}}" onClick="{{t.pick}}" style="flex: 1; height: 44px; border-radius: 22px; font-size: 14.5px; font-weight: 600; transition: background .2s; {{t.css}}">{{t.label}}</button>
       </sc-for>
     </div>
   </sc-if>
