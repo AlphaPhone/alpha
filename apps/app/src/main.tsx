@@ -155,7 +155,7 @@ installSystemShade(Component,{native:isAndroid});
 installClockAdapter(Component, VIEWS, { simulated: testMocksEnabled && fixture, browser: !isAndroid });
 // Installed apps come from Android (or the browser device's app list); outermost so its drawer
 // state composes with every Home binding above.
-installHomeLauncher(Component, DeviceApps, { icons: isAndroid, follow: deviceAppsListens,
+installHomeLauncher(Component, DeviceApps, { icons: isAndroid, follow: deviceAppsListens, appInfo: isAndroid,
   aliases: isAndroid ? undefined : Object.fromEntries(browserApps.map(app => [app.packageName, `alpha:${app.view}`])),
 });
 /** A browser cannot read or change radios and sensors; show that instead of fixture toggles. */

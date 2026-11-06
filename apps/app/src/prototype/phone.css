@@ -296,8 +296,14 @@ html:not(.alpha-landscape) .alpha-phone [data-screen]:not([data-alpha-chat-half=
 .alpha-landscape .alpha-phone [data-alpha-layer="pill"]{left:auto!important;width:var(--alpha-dock-width)}
 .alpha-landscape .alpha-phone [data-alpha-layer="conversation"]{left:auto!important;width:var(--alpha-dock-width);height:100%!important;border-radius:0!important;box-shadow:-1px 0 0 var(--line),-20px 0 60px var(--shc)!important}
 .alpha-landscape .alpha-phone>[data-screen]{width:var(--phone-width,412px)!important}
-/* App library: a favorite at either end cannot move further. */
-.alpha-app-drawer button.ib:disabled{opacity:.3}
+/* Home edit mode: icons wiggle; the dragged one follows the finger. */
+[data-alpha-home-editing="true"] [data-home-app]{touch-action:none}
+[data-alpha-home-editing="true"] .alpha-home-icon{animation:alpha-wiggle .3s ease-in-out infinite alternate}
+[data-alpha-home-dragging="true"] .alpha-home-icon{animation:none;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+[data-alpha-home-edit] button:disabled{opacity:.35}
+@keyframes alpha-wiggle{from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)}}
+@media (prefers-reduced-motion: reduce){[data-alpha-home-editing="true"] .alpha-home-icon{animation:none}}
+[data-launcher-menu] button:disabled{opacity:.5}
 
 /* Accessibility and resilience (MVP-48). Large text arrives as WebView text zoom, which CSS cannot
  * read, so these are layout rules: text either fits, wraps or is hidden whole; it is never cut. */

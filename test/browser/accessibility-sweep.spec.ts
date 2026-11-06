@@ -92,7 +92,7 @@ for (const state of [...FIXTURE_STATES, ...LAUNCHER_STATES]) {
 // The launcher bridge has no draft-storage plugin. Its normal read retries fail
 // after the drawer opens, adding a real status row above the floating composer.
 // Check that mutation checkpoint, rather than waiting another frame for layout.
-test('launcher All apps keeps scroll clearance when a late draft status arrives', async ({ page }, info) => {
+test('launcher Apps keeps scroll clearance when a late draft status arrives', async ({ page }, info) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
@@ -117,7 +117,7 @@ test('launcher All apps keeps scroll clearance when a late draft status arrives'
     });
     waiting.observe(document, { childList: true, subtree: true });
   });
-  await LAUNCHER_STATES.find(state => state.name === 'launcher All apps')!.open(page, 'light');
+  await LAUNCHER_STATES.find(state => state.name === 'launcher Apps')!.open(page, 'light');
   await expect.poll(() => page.evaluate(() => (window as any).__alphaLateDockLayout)).toBeTruthy();
   const layout = await page.evaluate(() => (window as any).__alphaLateDockLayout as { room: number; need: number });
   await info.attach('late-draft-status-layout', { body: JSON.stringify(layout), contentType: 'application/json' });

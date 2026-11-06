@@ -17,6 +17,8 @@ export const DeviceApps = registerPlugin<{
   list(options?: { icons?: boolean }): Promise<{ apps: InstalledApp[] }>;
   /** Opens exactly the named component (and profile). Without `activityName`, the package's default launcher activity. */
   launch(options: { packageName: string; activityName?: string; user?: string }): Promise<void>;
+  /** Opens Android's App info for exactly that entry (and profile). */
+  appInfo(options: { packageName: string; activityName?: string; user?: string }): Promise<void>;
   /** `appsChanged` fires when a package is added, removed, changed, or a profile is paused/unlocked. */
   addListener(event: 'appsChanged', listener: (change: { packageName?: string; reason?: string }) => void): Promise<{ remove(): Promise<void> }>;
   /** Resolves, without launching, the handler Android would use for the role. */
