@@ -34,6 +34,7 @@ import { toSpeakableText } from '@elizaos/ui/voice/voice-chat-playback';
 import { connectionController } from '../runtime/connection-ui';
 import { NoteRecorderSession, formatRecordingClock, type SavedNoteAudio } from './note-recorder';
 import { createNoteRecorderDriver, noteSegmentTranscriber } from '../runtime/note-recorder-driver';
+import { setNotesRecorderControl } from './notes-recorder-control';
 const voiceServiceName = () => cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
 type Bag = Record<string, any>;
 type Clip = { recordingId: string; durationMs: number };
@@ -49,8 +50,6 @@ const deviceVoice = registerPlugin<typeof voice & {warmSpeechOutput():Promise<vo
 const appSettings = registerPlugin<{ openSettings(input: { page: 'privacy' }): Promise<unknown> }>('AlphaDevice');
 
 type SavedAudio = { audioId: string; noteId: string; durationMs: number; transcript: string };
-const cloudRecorder = registerPlugin<{ saveRecording(input: { recordingId: string; noteId: string; transcript: string }): Promise<SavedAudio> }>('AlphaVoiceCloud');
-const localRecorder = registerPlugin<{ saveRecording(input: { recordingId: string; noteId: string; transcript: string }): Promise<SavedAudio> }>('DevelopmentAgent');
 const noteAudio = registerPlugin<{
   play(input: { audioId: string }): Promise<void>; stop(): Promise<void>;
   state(): Promise<{ playing: boolean; audioId?: string; positionMs: number }>;
@@ -114,7 +113,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   let refusedVoice:Bag|null=null;
   let api: Bag | undefined, stage = 'closed', generation = 0, busy = false;
   let clip: Clip | undefined, recordingId: string | undefined, started = 0;
-  let error = '', draft = '', requestId: string | undefined, saveId = '';
+  let error = '', draft = '', requestId: string | undefined;
   // Distinct failure kinds keep their own guidance.
   let failure: VoiceFailure | '' = '';
   let recognized: { text: string; provenance: TranscriptProvenance } | undefined;
@@ -130,8 +129,6 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       savedTick = setInterval(() => { void noteAudio.state().then(value => { if (epoch !== savedEpoch) return; if (!value.playing || value.audioId !== savedPlaying) { stopSaved(); refresh(); return; } savedPosition = value.positionMs; refresh(); }).catch(() => { if (epoch === savedEpoch) { stopSaved(); refresh(); } }); }, 250);
     } catch { if (epoch === savedEpoch) { stopSaved(); api?.toast('This saved recording could not be played. The transcript is still available.'); refresh(); } }
   }
-  type DictationTarget = { id: string; body: string; revision: string; start: number; end: number };
-  let destination: DictationTarget | undefined;
   let listener: PluginListenerHandle | undefined, tick: ReturnType<typeof setInterval> | undefined;
   let stopping = Promise.resolve();
   type Driver = typeof voice | ReturnType<typeof createCloudVoice> | NativeLiveDictation;
@@ -203,13 +200,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       void stopping.then(()=>{if(retirement!==held)return;retirement=undefined;if(chatShell.live!==false)chatShell.setState((state:any)=>({...(composerBinding()===held.binding&&(state.view||null)===held.view&&state.chat===held.panelChat?{chat:held.returnChat}:{})}));},()=>{if(retirement!==held)return;held.phase='error';if(chatShell.live!==false)chatShell.setState({});});
     }
     clip = undefined; recordingId = undefined;
-    if (close) { stage = 'closed'; draft = ''; destination = undefined; chatDestination = undefined; failure = ''; recognized = undefined; }
+    if (close) { stage = 'closed'; draft = ''; chatDestination = undefined; failure = ''; recognized = undefined; }
     if(publish){if(chatShell)chatShell.setState({});else refresh();}
   }
-  function enter(target?: DictationTarget, preparedLocal?: ReturnType<typeof createOnDeviceVoice>, preference: 'default' | 'device' | 'agent' | 'manual' = 'default', chat?:ChatDestination) {
+  function enter(preparedLocal?: ReturnType<typeof createOnDeviceVoice>, preference: 'default' | 'device' | 'agent' | 'manual' = 'default', chat?:ChatDestination) {
     const selected = chat && chat.mode!=='dictation' && testMocksEnabled ? 'cloud' : selectVoiceRoute(preference), route = selected === 'cloud' ? 'agent' : selected;
     const previousChat=chatDestination;
-    stopLocalSpeechPlayback(); cleanup(true,!chat); chatDestination=chat;reprepare = false; destination = target; saveId = target?.id || crypto.randomUUID(); stage = 'ready'; error = ''; failure = ''; recognized = undefined; draft = ''; selectedRoute = route;
+    stopLocalSpeechPlayback(); cleanup(true,!chat); chatDestination=chat;reprepare = false; stage = 'ready'; error = ''; failure = ''; recognized = undefined; draft = ''; selectedRoute = route;
     if(previousChat&&!chat)previousChat.shell.setState({chat:previousChat.chat});
     cloudMode = selected === 'cloud';
     cloudConnectRequired = cloudMode && !developmentCloudVoiceEnabled && !(chat&&(developmentCartesiaVoiceEnabled||developmentCloudRealtimeVoiceEnabled)) && (!connectionController.getCloudEnvironment() || !connectionController.getCloudClient()?.credentialId);
@@ -259,8 +256,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   /** Retire the current attempt and prepare the same route again, keeping its destination. */
   let reprepare = false;
   function reopen(message: string) {
-    const target = destination, chat = chatDestination, route = selectedRoute;
-    enter(target, undefined, route,chat); error = message; refresh();
+    const chat = chatDestination, route = selectedRoute;
+    enter(undefined, route,chat); error = message; refresh();
   }
   async function act(task: (token: number) => Promise<void>) {
     if (busy) return;
@@ -311,52 +308,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         shell.setState({chat:['input','sheet','full'].includes(chat)?chat:'input',draft:text,voice:'off'});
         return;
       }
-      if(!api)return;
-      if(api.storageReady?.()===false){error='Notes has a pending or unconfirmed save. Wait or reopen Notes to inspect before saving again.';refresh();return;}
-      const current = api.get('notes').list || [];
-      const target = destination && current.find((n: Bag) => n.id === destination!.id);
-      if (destination && (!target || JSON.stringify(target) !== destination.revision)) { error = 'The original note changed. Cancel and reopen recording before applying this transcript.'; refresh(); return; }
-      if (!clip || busy) return;
-      if (destination && target) {
-        const text = destination.body.slice(0, destination.start) + draft + destination.body.slice(destination.end);
-        const id = target.id, caret = destination.start + draft.length;
-        const next = current.map((n: Bag) => n.id === id ? { ...n, body: text, when: 'Now' } : n);
-        const owner = api;
-        await act(async token => {
-          const saved = await owner.saveVoiceNote({ list: next, open: id });
-          if (token !== generation) return;
-          if (saved !== true) { error = 'The note save is unconfirmed. Your transcript is retained; inspect saved Notes before applying again.'; refresh(); return; }
-          markVoiceTiming('send'); finishVoiceTurn(); cleanup();
-          const completed = generation;
-          window.requestAnimationFrame?.(() => {
-            if (completed !== generation || api?.get('notes').open !== id) return;
-            const editor = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Note"]');
-            if (editor?.value === text) { editor.focus(); editor.setSelectionRange(caret, caret); }
-          });
-        });
-        return;
-      }
-      await act(async token => {
-        const id = target?.id || saveId;
-        const text = [target?.body, draft].filter(Boolean).join('\n');
-        const recording = clip!;
-        const audio = await (cloudMode || deviceOnly ? cloudRecorder : localRecorder).saveRecording({ recordingId: recording.recordingId, noteId: id, transcript: text });
-        if (token !== generation) return;
-        if (audio.noteId !== id || audio.audioId !== recording.recordingId || !Number.isFinite(audio.durationMs)) throw new Error('Invalid saved recording');
-        // Provenance describes how this recording's transcript was produced; edits stay the user's.
-        const transcription = recognized ? { ...recognized.provenance, edited: draft.trim() !== recognized.text.trim() } : { route: 'manual' };
-        const note = { ...(target || {}), id, kind: 'voice', title: target?.title || 'Voice note', body: text, audio, transcription, dur: audio.durationMs / 1000, summary: [], actions: [], lines: [{ s: 'me', at: 0, t: text }], pinned: target?.pinned || false, when: 'Now' };
-        // Native retention can outlive unrelated editor commits. Merge into the latest collection.
-        if(api!.storageReady?.()===false)throw new Error('Notes has an unconfirmed save. Reopen before applying this recording.');
-        const latest = api!.get('notes').list || [];
-        const latestTarget = latest.find((n: Bag) => n.id === id);
-        if(target ? JSON.stringify(latestTarget)!==JSON.stringify(target) : !!latestTarget)throw new Error('The note changed while saving audio. Recording retained; reopen before applying.');
-        const next = target ? latest.map((n: Bag) => n.id === id ? note : n) : [note, ...latest];
-        const saved = await api!.saveVoiceNote({ list: next, open: id });
-        if (token !== generation) return;
-        if (saved !== true) { error = 'The note save is unconfirmed. The recording and transcript are retained; inspect saved Notes before saving again.'; refresh(); return; }
-        markVoiceTiming('send'); finishVoiceTurn(); cleanup();
-      });
+      // Notes records with the Notes recorder (note-recorder.ts); this path is chat dictation only.
+      cleanup();
       return;
     }
     await act(async token => {
@@ -638,7 +591,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before transcribing.');return;}
     if(retirement||mediaUnconfirmed||stage!=='closed'){this.toast('Finish or discard the current recording before transcribing.');return;}
     const state=this.S(),chat:ChatDestination={mode:'dictation',shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
-    const readingStopped=stopLocalSpeechPlayback();enter(undefined,undefined,'device',chat);
+    const readingStopped=stopLocalSpeechPlayback();enter(undefined,'device',chat);
     stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
     const token=generation;this.setState({chat:state.chat==='full'?'full':'sheet',voice:'off'},()=>{if(token!==generation||chatDestination!==chat)return;document.querySelector<HTMLElement>('[data-alpha-chat-recorder] button')?.focus({preventScroll:true});maybeStartDictation();});
   };
@@ -650,7 +603,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const state=this.S();
     const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();
-    enter(undefined,undefined,'default',chat);stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';const token=generation;
+    enter(undefined,'default',chat);stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';const token=generation;
     await new Promise<void>(resolve=>this.setState({chat:state.chat==='hidden'?'hidden':state.chat==='full'?'full':'sheet',voice:'off'},()=>{document.querySelector<HTMLElement>(state.chat==='hidden'?'[data-alpha-pill-voice] button':'[data-alpha-chat-recorder] button')?.focus({preventScroll:true});if(chatDestination===chat&&generation===token)void beginConversation().finally(resolve);else resolve();}));
   };
   function conversationRecorderView(icons:Bag){
@@ -961,6 +914,19 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const note = { id: saved.noteId, kind: 'voice', title: 'Voice note', body: transcript, audio: saved, transcription: transcript ? noteProvenance ?? { route: 'manual' } : { route: 'manual' }, dur: saved.durationMs / 1000, summary: [], actions: [], lines: [{ s: 'me', at: 0, t: transcript }], pinned: false, when: 'Now' };
     return await owner.saveVoiceNote({ list: [note, ...latest], open: saved.noteId }) === true;
   };
+  // The agent's notes_record (notes-organize-executor) starts and saves through the same recorder.
+  setNotesRecorderControl({
+    start: async () => {
+      if (noteRecorder.open && noteRecorder.phase !== 'failed') return 'already';
+      if (stage !== 'closed') cleanup(); stopLocalSpeechPlayback(); stopSaved();
+      try { await noteRecorder.begin(); } catch { return 'failed'; }
+      return noteRecorder.phase === 'recording' ? 'started' : 'failed';
+    },
+    stop: async () => {
+      if (!noteRecorder.recordingId || !['recording', 'paused', 'stopped'].includes(noteRecorder.phase)) return 'none';
+      return await noteRecorder.finish(persistNoteRecording) ? 'saved' : 'failed';
+    },
+  });
   const noteRecorderVisibility = () => { if (!document.hidden && noteRecorder.open) void noteRecorder.pump(); };
   document.addEventListener('visibilitychange', noteRecorderVisibility);
   function noteRecorderView(icons: Bag) {
@@ -985,8 +951,15 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       done: () => { void r.finish(persistNoteRecording).then(saved => { if (saved) { markVoiceTiming('send'); finishVoiceTurn(); } }); },
     };
   }
+  const startNoteRecorder = () => { if (stage !== 'closed') cleanup(); stopLocalSpeechPlayback(); stopSaved(); void noteRecorder.begin().catch(() => { /* The recorder shows the error line. */ }); };
+  let recordRequested = false;
   notes.render = (state: Bag, current: Bag) => {
     api = current;
+    // `record` (the notes:rec deep link, or an agent reply) opens the Notes recorder once.
+    if (state.record && !recordRequested) {
+      recordRequested = true;
+      queueMicrotask(() => { recordRequested = false; if (!current.get('notes').record) return; current.set({ record: false }); startNoteRecorder(); });
+    }
     // A recording left open (by a crash, or by leaving Notes) comes back paused.
     if (!noteRecorderAdopted && Capacitor.isPluginAvailable('AlphaVoiceCloud')) { noteRecorderAdopted = true; void noteRecorder.adopt().catch(() => { noteRecorderAdopted = false; }); }
     if(!state.audioDeletionChecked)void refreshDeletionStatus(current);
@@ -1054,16 +1027,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       vo.del = () => { void deleteVoiceNote(current,reviewed,false); };
 
     }
-    result.record = () => { if (stage !== 'closed') cleanup(); stopLocalSpeechPlayback(); stopSaved(); void noteRecorder.begin().catch(() => { /* The recorder shows the error line. */ }); };
-    if (result.ed) result.ed.dictate = () => {
-      const n = (current.get('notes').list || []).find((item: Bag) => item.id === state.open);
-      if (n?.kind === 'list') { current.toast('Convert this checklist to text before dictating.'); return; }
-      if (!n) return;
-      const body = n.body || '', editor = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Note"]');
-      const start = editor && editor.value === body ? editor.selectionStart : body.length;
-      const end = editor && editor.value === body ? editor.selectionEnd : body.length;
-      enter({ id: n.id, body, revision: JSON.stringify(n), start, end });
-    };
+    result.record = startNoteRecorder;
     // Read aloud follows the runtime profile. Closing, leaving or editing the note stops it.
     const readNote = (current.get('notes').list || []).find((item: Bag) => item.id === state.open);
     const readText = noteSpeechText(readNote), activeReading = currentNoteReading();
@@ -1093,14 +1057,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       } : undefined;
     }
     if (noteRecorder.open) { result.noteRecorder = noteRecorderView(current.ic); return result; }
-    if (stage === 'closed'||chatDestination) return result;
-    result.recording=true;result.rec=recorderView(current.ic);return result;
+    return result;
   };
   function recorderView(icons:Bag){
     const token=generation,chat=chatDestination;
     const owned=()=>token===generation&&chatDestination===chat&&(!chat||chatCurrent());
     const seconds = stage === 'recording' ? (Date.now() - started) / 1000 : (clip?.durationMs || 0) / 1000;
-    const labels: Bag = { ready: 'Start recording', starting: 'Starting microphone', recording: 'Stop recording', recorded: onDeviceReady ? 'Transcribe on this phone' : pairedAsrReady ? 'Transcribe with agent Whisper' : deviceOnly ? 'Review recording' : cloudMode ? `Transcribe with ${voiceServiceName()}` : 'Transcribe locally', transcribing: 'Cancel transcription', review: chatDestination ? 'Use in conversation' : destination ? 'Apply transcript' : 'Save note' };
+    const labels: Bag = { ready: 'Start recording', starting: 'Starting microphone', recording: 'Stop recording', recorded: onDeviceReady ? 'Transcribe on this phone' : pairedAsrReady ? 'Transcribe with agent Whisper' : deviceOnly ? 'Review recording' : cloudMode ? `Transcribe with ${voiceServiceName()}` : 'Transcribe locally', transcribing: 'Cancel transcription', review: 'Use in conversation' };
     // No status or privacy narration: the recorder shows one short line, only for an error.
     if (selectedRoute === 'device' && !onDeviceReady && !preparingLocal && stage === 'ready') labels.ready = 'On-device speech unavailable';
     if (preparingPaired && stage === 'ready') labels.ready = 'Checking selected agent voice';
@@ -1119,10 +1082,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       typeChoice: canType,
       typeInstead: () => { if (!owned()||stage !== 'recorded' || !clip || busy) return; draft = ''; recognized = undefined; error = ''; failure = ''; stage = 'review'; refresh(); },
       manualChoice: testMocksEnabled && !cloudMode && stage === 'ready' && !busy && !preparingLocal && selectedRoute !== 'manual',
-      recordOnly: () => { if(!owned())return;const target = destination, chat = chatDestination; enter(target, undefined, 'manual',chat); refresh(); },
+      recordOnly: () => { if(!owned())return;const chat = chatDestination; enter(undefined, 'manual',chat); refresh(); },
       routeChoice: settingsChoice || testMocksEnabled && (!cloudMode && stage === 'ready' && !busy && document.documentElement.dataset.connectionMode !== 'mock' && (!!connectionController.getPairedVoiceBinding() || connectionController.getCloudEnvironment() !== null)),
       routeLabel: settingsChoice ? DENIED_SETTINGS_LABEL : browserDevProfile ? (selectedRoute === 'device' ? 'Use development voice' : 'Use browser voice') : selectedRoute === 'device' ? (connectionController.getCloudEnvironment() !== null ? `Use ${voiceServiceName()} voice` : 'Use selected agent voice') : 'Use on-device voice',
-      changeRoute: () => { if (!owned()||stage !== 'ready' || busy) return; if (settingsChoice) { openSettings(); return; } const target = destination, chat = chatDestination; enter(target, undefined, selectedRoute === 'device' ? 'agent' : 'device',chat); refresh(); },
+      changeRoute: () => { if (!owned()||stage !== 'ready' || busy) return; if (settingsChoice) { openSettings(); return; } const chat = chatDestination; enter(undefined, selectedRoute === 'device' ? 'agent' : 'device',chat); refresh(); },
       clock: `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`, clockCss: '', live: stage === 'recording', paused: stage !== 'recording', dotCss: `background:${stage === 'recording' ? '#E53935' : 'var(--mut)'}`,
       levels: !Capacitor.isNativePlatform()&&stage==='recording'?recordingLevels(recordingId):Array.from({ length: 44 }, () => ({ h: 4 })),
       lines: error ? [{ ini: '', statusIcon:icons.info, t: error, chip: 'background:var(--s2);color:var(--fg)', css: '' }] : [],
@@ -1130,7 +1093,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       primaryLabel: cloudConnectRequired ? `Connect ${voiceServiceName()}` : labels[stage], primaryIcon: cloudConnectRequired ? icons.user : stage === 'review' ? icons.check : stage === 'recording' || stage === 'transcribing' ? icons.stop : icons.mic,
       primaryDisabled: (selectedRoute === 'device' && !onDeviceReady) || preparingLocal || preparingPaired || stage === 'starting' || (busy && stage !== 'transcribing') || (stage === 'review' && !draft.trim()),
       pauseLabel: (onDeviceReady || cloudMode || pairedReady) && stage === 'review' ? playing ? 'Stop audio' : 'Listen to transcript' : ['recorded', 'review'].includes(stage) ? 'Record again' : 'Cancel recording', pauseIcon: (onDeviceReady || cloudMode || pairedReady) && stage === 'review' ? playing ? icons.stop : icons.play : ['recorded', 'review'].includes(stage) ? icons.mic : icons.x,
-      stop: () => { if(owned())void primary(); }, discard: () => {if(owned())chatDestination?cancelChat():cleanup();}, keyboard:()=>{if(owned())cancelChat(true);}, toggle: () => { if(!owned())return;if ((onDeviceReady || cloudMode || pairedReady) && stage === 'review') { void listen(); } else if (['recorded', 'review'].includes(stage)) { const target = destination, chat = chatDestination; enter(target, undefined, selectedRoute,chat); } else if(chatDestination)cancelChat();else cleanup(); },
+      stop: () => { if(owned())void primary(); }, discard: () => {if(owned())chatDestination?cancelChat():cleanup();}, keyboard:()=>{if(owned())cancelChat(true);}, toggle: () => { if(!owned())return;if ((onDeviceReady || cloudMode || pairedReady) && stage === 'review') { void listen(); } else if (['recorded', 'review'].includes(stage)) { const chat = chatDestination; enter(undefined, selectedRoute,chat); } else if(chatDestination)cancelChat();else cleanup(); },
     };
   }
   const originalVals=Component.prototype.renderVals;
@@ -1176,8 +1139,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(watch&&chatDestination?.shell===this&&(this.S().msgs||[]).some((m:Bag)=>m.from==='agent'&&!watch.has(String(m.id))&&String(m.text||'').trim())){conversationReplyWatch=undefined;markVoiceTiming('first-token');}
   };
   const immersive = notes.immersive;
-  notes.immersive = (state: Bag, current: Bag) => noteRecorder.open || stage !== 'closed'&&!chatDestination ? { noPill: true } : immersive?.(state, current);
-  notes.back = (state: Bag, current: Bag) => { if (noteRecorder.open) { if (noteRecorder.confirmingDiscard) noteRecorder.keep(); else void noteRecorder.discard(); return true; } if (stage !== 'closed'&&!chatDestination) { cleanup(); return true; } return back?.(state, current); };
+  notes.immersive = (state: Bag, current: Bag) => noteRecorder.open ? { noPill: true } : immersive?.(state, current);
+  notes.back = (state: Bag, current: Bag) => { if (noteRecorder.open) { if (noteRecorder.confirmingDiscard) noteRecorder.keep(); else void noteRecorder.discard(); return true; } return back?.(state, current); };
   const noteReadingChanged=()=>{if(api)api.setView('notes',{noteReadingRevision:Date.now()});};
   window.addEventListener('alpha:note-reading',noteReadingChanged);
   notes.onLeave = (current: Bag) => { closeTranscriptQuestion?.();stopSpeaking();noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;if(!ownedNavigation?.applying)cleanup(); leave?.(current); };

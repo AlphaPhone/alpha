@@ -151,7 +151,7 @@ function assertProposalContext(operation:ReviewableDeviceOperation,context:Conte
  if(isClockOperation(operation))assertClockTimeZone(operation,context.timeZone);
  if(isMapsOperation(operation))assertMapsContext(operation,context);
  if(isLibraryOperation(operation))assertLibraryContext(context);
- if(isNotesOrganizeOperation(operation)&&!notesOrganizeContextAllowed(context))throw new ContextNotice('Open Home or Notes to review this Notes action.');
+ if(isNotesOrganizeOperation(operation)&&!notesOrganizeContextAllowed(context,operation.type))throw new ContextNotice(operation.type==='notes_record'?'Open Notes to record.':'Open Home or Notes to review this Notes action.');
  if(isReminderOperation(operation))assertReminderContext(operation,context);
  if(isNativeNotesQuery(operation))assertNotesQueryContext(context);
  if(isNotesOperation(operation))assertNotesContext(operation,context);
@@ -292,7 +292,7 @@ export class DeviceActions {
    * reads and Calendar/reminder writes retain their recorded separate review policy.
    * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
   async performRequested(messageId:string,context:ContextEnvelope,signal:AbortSignal,allowed:()=>Promise<boolean>,operationType?:ReviewableDeviceOperation['type']):Promise<OperationReceipt[]> {
-    const directTypes:readonly ReviewableDeviceOperation['type'][]=['create_note','open_view','camera_capture_photo','photo_library_select','notes_filter'];
+    const directTypes:readonly ReviewableDeviceOperation['type'][]=['create_note','open_view','camera_capture_photo','photo_library_select','notes_filter','notes_record'];
     const results:OperationReceipt[]=[];
     for(const [id,entry] of [...this.proposals]) {
       if(results.length>=4||!directTypes.includes(entry.proposal.operation.type)||entry.proposal.workflow||entry.proposal.requestMessageId!==messageId||(operationType!==undefined&&entry.proposal.operation.type!==operationType))continue;
