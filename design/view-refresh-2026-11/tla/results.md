@@ -14,11 +14,16 @@ Run: `design/view-refresh-2026-11/tla/check.sh <tla2tools.jar>` (writes <area>/r
 | photos-library | AsBuilt_Patch | Invariant NoSpuriousClear is violated | 787 |
 | photos-library | AsBuilt_Window | Invariant NewestNeverDropped is violated | initial state |
 | photos-library | Design | No error has been found | 204,208 |
-| notes-view | Ablate_RestoreFolder | Invariant FolderRefsValid is violated | 1259 |
-| notes-view | AsBuilt_Cap | Invariant NoLengthLimit is violated | 104 |
-| notes-view | AsBuilt_Segments | Action property CrashKeepsAudio is violated | 2535 |
-| notes-view | AsBuilt_StreamAsr | Temporal property TranscriptKeepsUp was violated | 59216 |
-| notes-view | Design | No error has been found | 1,392,258 |
+| notes-view | Ablate_RestoreFolder | Invariant FolderRefsValid is violated | 2174 |
+| notes-view | AsBuilt_Cap | Invariant NoLengthLimit is violated | 220 |
+| notes-view | AsBuilt_Segments | Action property CrashKeepsAudio is violated | 6764 |
+| notes-view | AsBuilt_StreamAsr | Temporal property TranscriptKeepsUp was violated | 169238 |
+| notes-view | Design | No error has been found | 4,199,034 |
+| notes-view | Rename | No error has been found | 1,477,710 |
 | files-browser | Ablate_Conflict | Invariant NoOverwriteWithoutConfirm is violated | 255 |
 | files-browser | AsBuilt_Categories | Invariant CategoryIsQuery is violated | initial state |
 | files-browser | Design | No error has been found | 112,117 |
+
+notes-view models folder names (`Names`, `RenameFolder`, `FolderNamesUnique`,
+`RenameKeepsMembership`). Design uses two names, so a rename needs a freed name; `Rename`
+checks renames with three names and smaller recorder bounds (MaxSeg 1, Budget 1).
