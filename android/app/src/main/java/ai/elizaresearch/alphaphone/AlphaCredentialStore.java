@@ -38,7 +38,7 @@ final class AlphaCredentialStore {
   if("notes-audio-deletions:v1:device".equals(name))return 1024*1024;
   if(name!=null&&name.matches("note-audio-metadata:v1:[A-Za-z0-9_-]{1,100}"))return 512*1024;
   if(NOTES_RECORDS.equals(name))return 32*1024*1024;
-  // Restorable copies of deleted notes, purged three days after deletion. The cap is the Trash
+  // Restorable copies of deleted notes, purged thirty days after deletion. The cap is the Trash
   // policy's byte limit (runtime/notes-trash-policy.ts NOTES_TRASH_MAX_BYTES); a document written
   // under the earlier 32 MiB cap stays readable and shrinkable through retainedLimit.
   if(NOTES_TRASH.equals(name))return NOTES_TRASH_BYTES;
