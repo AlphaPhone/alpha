@@ -17,7 +17,7 @@ async function mutate<T>(audioId:string,edit:(row:AudioRow|undefined,store:IDBOb
  });
 }
 export async function retainAudio(audioId:string,noteId:string,transcript:string,clip?:{blob:Blob;durationMs:number}){
- id(noteId);if(typeof transcript!=='string'||transcript.length>64000)throw Error('Transcript is too long.');
+ id(noteId);if(typeof transcript!=='string'||transcript.length>150_000)throw Error('Transcript is too long.');
  const bytes=clip?await clip.blob.arrayBuffer():undefined;
  return mutate(audioId,(prior,store)=>{if(prior&&(prior.noteId!==noteId||prior.deletedAt))throw Error('This recording is not available for this note.');if(!prior&&!clip)throw Error('Record a clip first.');const row=normalize(prior?{...prior,transcript}:{audioId,noteId,...clip,bytes, mimeType:clip?.blob.type,transcript,createdAt:Date.now()});prior?store.put(stored(row)):store.add(stored(row));return audioMetadata(row);});
 }

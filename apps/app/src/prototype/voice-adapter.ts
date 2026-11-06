@@ -32,6 +32,8 @@ import { VoiceAssistantSession, type AssistantState } from '../runtime/voice-ass
 import { shouldRespondToVoiceTurn, buildVoiceTurnSignal } from '@elizaos/voice/turn';
 import { toSpeakableText } from '@elizaos/ui/voice/voice-chat-playback';
 import { connectionController } from '../runtime/connection-ui';
+import { NoteRecorderSession, formatRecordingClock, type SavedNoteAudio } from './note-recorder';
+import { createNoteRecorderDriver, noteSegmentTranscriber } from '../runtime/note-recorder-driver';
 const voiceServiceName = () => cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
 type Bag = Record<string, any>;
 type Clip = { recordingId: string; durationMs: number };
@@ -942,8 +944,51 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     });}catch{current.setView('notes',{audioDeletionRecoveryFailed:true,audioDeletionChecked:true});}finally{deletionRefresh=null;}
     })();
   }
+  // Notes voice recorder (note-recorder.ts): no length limit; finished segments are transcribed
+  // while recording goes on, and Done saves audio and transcript as one voice note.
+  let noteProvenance: TranscriptProvenance | undefined, noteRecorderAdopted = false;
+  const noteRecorder = new NoteRecorderSession(createNoteRecorderDriver(), async () => {
+    const route = await noteSegmentTranscriber(new AbortController().signal);
+    noteProvenance = route?.provenance; return route?.transcribe ?? null;
+  }, () => { api?.setView('notes', { noteRecorderRevision: Date.now() }); }, { visible: () => !document.hidden });
+  const persistNoteRecording = async (saved: SavedNoteAudio, transcript: string) => {
+    const owner = api;
+    if (!owner || owner.storageReady?.() === false) return false;
+    const latest = owner.get('notes').list || [];
+    // A retried Done after a lost save response: the note is already there with this audio.
+    const existing = latest.find((n: Bag) => n.id === saved.noteId);
+    if (existing) return existing.audio?.audioId === saved.audioId;
+    const note = { id: saved.noteId, kind: 'voice', title: 'Voice note', body: transcript, audio: saved, transcription: transcript ? noteProvenance ?? { route: 'manual' } : { route: 'manual' }, dur: saved.durationMs / 1000, summary: [], actions: [], lines: [{ s: 'me', at: 0, t: transcript }], pinned: false, when: 'Now' };
+    return await owner.saveVoiceNote({ list: [note, ...latest], open: saved.noteId }) === true;
+  };
+  const noteRecorderVisibility = () => { if (!document.hidden && noteRecorder.open) void noteRecorder.pump(); };
+  document.addEventListener('visibilitychange', noteRecorderVisibility);
+  function noteRecorderView(icons: Bag) {
+    const r = noteRecorder, finishing = r.phase === 'finishing' || r.phase === 'starting', recording = r.phase === 'recording';
+    const peaks = r.levels.length ? r.levels : [];
+    const levels = Array.from({ length: 44 }, (_, i) => { const peak = peaks[peaks.length - 44 + i]; return { h: peak === undefined ? 4 : Math.max(4, Math.round(Math.sqrt(peak) * 92)), o: recording ? 1 : 0.35 }; });
+    return {
+      phase: r.phase,
+      clock: formatRecordingClock(r.durationMs),
+      levels,
+      transcript: r.transcript(),
+      error: r.error,
+      confirming: r.confirmingDiscard,
+      keep: () => r.keep(),
+      confirmDiscard: () => { void r.discard(true); },
+      discard: () => { void r.discard(); },
+      pauseLabel: recording ? 'Pause' : r.phase === 'failed' ? 'Record' : 'Resume',
+      pauseIcon: recording ? icons.pause : icons.mic,
+      pauseDisabled: finishing,
+      toggle: () => { void r.togglePause(); },
+      doneDisabled: finishing || !r.recordingId,
+      done: () => { void r.finish(persistNoteRecording).then(saved => { if (saved) { markVoiceTiming('send'); finishVoiceTurn(); } }); },
+    };
+  }
   notes.render = (state: Bag, current: Bag) => {
     api = current;
+    // A recording left open (by a crash, or by leaving Notes) comes back paused.
+    if (!noteRecorderAdopted && Capacitor.isPluginAvailable('AlphaVoiceCloud')) { noteRecorderAdopted = true; void noteRecorder.adopt().catch(() => { noteRecorderAdopted = false; }); }
     if(!state.audioDeletionChecked)void refreshDeletionStatus(current);
     const selected = (current.get('notes').list || []).find((n: Bag) => n.id === state.open);
     if (savedPlaying && selected?.audio?.audioId !== savedPlaying) stopSaved();
@@ -1009,7 +1054,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       vo.del = () => { void deleteVoiceNote(current,reviewed,false); };
 
     }
-    result.record = () => enter();
+    result.record = () => { if (stage !== 'closed') cleanup(); stopLocalSpeechPlayback(); stopSaved(); void noteRecorder.begin().catch(() => { /* The recorder shows the error line. */ }); };
     if (result.ed) result.ed.dictate = () => {
       const n = (current.get('notes').list || []).find((item: Bag) => item.id === state.open);
       if (n?.kind === 'list') { current.toast('Convert this checklist to text before dictating.'); return; }
@@ -1047,6 +1092,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         });
       } : undefined;
     }
+    if (noteRecorder.open) { result.noteRecorder = noteRecorderView(current.ic); return result; }
     if (stage === 'closed'||chatDestination) return result;
     result.recording=true;result.rec=recorderView(current.ic);return result;
   };
@@ -1055,43 +1101,14 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const owned=()=>token===generation&&chatDestination===chat&&(!chat||chatCurrent());
     const seconds = stage === 'recording' ? (Date.now() - started) / 1000 : (clip?.durationMs || 0) / 1000;
     const labels: Bag = { ready: 'Start recording', starting: 'Starting microphone', recording: 'Stop recording', recorded: onDeviceReady ? 'Transcribe on this phone' : pairedAsrReady ? 'Transcribe with agent Whisper' : deviceOnly ? 'Review recording' : cloudMode ? `Transcribe with ${voiceServiceName()}` : 'Transcribe locally', transcribing: 'Cancel transcription', review: chatDestination ? 'Use in conversation' : destination ? 'Apply transcript' : 'Save note' };
-    const messages: Bag = { ready: deviceOnly ? 'Record up to 59 seconds in this app. You can add a transcript manually and save without signing in. Nothing is uploaded.' : cloudMode ? `Record up to 59 seconds. Audio stays in this app until you choose Transcribe with ${voiceServiceName()}; uploads use your Cloud plan allowance.` : 'Development voice: record up to 59 seconds. Audio goes to this computer only after you choose Transcribe locally.', starting: 'Waiting for microphone access.', recording: 'Recording. Waveform levels are unavailable. Stop does not upload audio.', recorded: deviceOnly ? 'Microphone is off. Review the recording and enter a transcript manually. Cloud transcription is not connected; nothing is uploaded.' : cloudMode ? `Microphone is off. Choose Transcribe with ${voiceServiceName()} to upload this recording to your selected Cloud account.` : 'Microphone is off. Choose Transcribe locally to process this clip on the connected development computer.', transcribing: cloudMode ? `Transcribing with ${voiceServiceName()}. Nothing has been saved.` : 'Transcribing on the local computer. Nothing has been saved.', review: deviceOnly ? 'Enter a transcript manually, then save it with this recording in this app. Nothing is uploaded or sent to an agent.' : chatDestination ? 'Review the transcript, then use it in the conversation. Press Send there to send it to your agent.' : 'Review and edit the transcript, then save the recording and transcript in this app. Nothing is sent to the agent.' };
-    if (pairedAsrReady) { messages.ready = 'Record up to 59 seconds. English transcription uses your selected agent. Audio stays in this app until you choose Transcribe with agent Whisper.'; messages.recorded = 'Microphone is off. Transcribe with agent Whisper uploads this recording to your selected agent for English speech recognition.'; messages.transcribing = 'Transcribing with your selected agent. Nothing has been saved.'; messages.review = chatDestination ? 'Review the agent transcript, then use it in the conversation. Press Send there to send the message.' : 'Review and edit the agent transcript, then save it with the recording in this app. Nothing is sent as a chat message.'; }
-    if (onDeviceReady) {
-      messages.ready = 'Record up to 29 seconds. English transcription runs on this phone. Nothing is uploaded.';
-      messages.recorded = 'Microphone is off. Transcribe on this phone processes this recording without uploading audio.';
-      messages.transcribing = 'Transcribing on this phone. Nothing has been saved or uploaded.';
-      messages.review = chatDestination ? 'Review the transcript, then use it in the conversation. Press Send there to send it to your agent.' : 'Review and edit the transcript, then save it in this app. Nothing is uploaded.';
-      if (stage === 'review') messages.review += ' Listen also runs on this phone. Unfamiliar English names are spelled; numbers are read digit by digit. Unsupported symbols require editing.';
-    }
-    if (destination) messages.review = 'Review the transcript, then insert it at your saved selection. This keeps your text note; the recording is discarded after applying. ' + (onDeviceReady ? 'Nothing was uploaded.' : cloudMode ? `${voiceServiceName()} processed the audio. No chat message was sent.` : pairedAsrReady ? 'Your selected agent processed the audio. No chat message was sent.' : 'No chat message was sent.');
-    if (pairedReady && stage === 'review' && !destination) messages.review = playing ? 'Playing selected-agent audio. Tap Stop audio to stop. Your recording remains in this app.' : 'Save keeps this recording and transcript in this app. Listen to transcript sends only this text to your selected agent for audio playback.';
-    if (cloudMode && stage === 'review') messages.review += playing ? ' Playing Cloud audio. Tap Stop audio to stop.' : ` Listen to transcript sends this text to ${voiceServiceName()} for audio playback.`;
+    // No status or privacy narration: the recorder shows one short line, only for an error.
     if (selectedRoute === 'device' && !onDeviceReady && !preparingLocal && stage === 'ready') labels.ready = 'On-device speech unavailable';
-    if (preparingPaired && stage === 'ready') { labels.ready = 'Checking selected agent voice'; messages.ready = 'Checking transcription and playback on your selected agent. No audio is uploaded.'; }
-    if (preparingLocal && stage === 'ready') { labels.ready = 'Preparing on-device speech'; messages.ready = 'Loading and checking speech models on this phone. Nothing is uploaded.'; }
-    if(!Capacitor.isNativePlatform() && !cloudMode) {
-      // The browser has no speech engine of its own: on-device speech here means the local
-      // agent on this computer (libelizainference), worded in the block below.
-      if (!onDeviceReady) {
-        labels.recorded='Review transcript';
-        messages.recording='Recording. Stop to review the audio.';
-        messages.ready='Record audio in this app. You can add a transcript manually and save without signing in.';
-        messages.recorded='Microphone is off. Enter the transcript to save with this recording.';
-        messages.transcribing='Review the recording transcript.';
-        if(!destination)messages.review='Edit the transcript, listen, or save the recording in this app.';
-      }
-    }
-    if(browserDevProfile && selectedRoute==='agent' && !cloudMode&&!onDeviceReady){messages.ready='Browser transcription is unavailable. Record audio and enter a transcript, or explicitly select a development agent.';messages.recorded='Microphone is off. Enter a transcript for this recording.';labels.recorded='Review transcript';}
-    if(onDeviceReady&&connectionController.getBrowserSpeechAgent()){
-      labels.recorded='Transcribe on this computer';
-      messages.ready='Record in this app. English transcription runs on the local agent on this computer when you choose Transcribe.';
-      messages.recorded='Microphone is off. Transcribe on this computer sends this recording to your local development agent.';
-      messages.transcribing='Transcribing on this computer. Nothing has been saved.';
-      messages.review='Review the transcript, listen using the local agent on this computer, or save it with the recording. No chat message has been sent.';
-    }
-    if(chatDestination?.mode==='dictation'){labels.review='Use in draft';messages.recording='Recording on this device. Stop to transcribe into editable text. Nothing is sent to your agent.';messages.review='Edit the transcript, then add it to your draft. Only Send submits the message.';}
-    if(liveDictation){messages.ready='Starting transcription on this device. No message is sent.';messages.recording='Your agent on this phone transcribes as you speak. Stop when you finish; speech after Stop is not used. No message is sent.';messages.transcribing='Finishing the transcript on this phone. No message is sent.';messages.review='Edit the transcript, then add it to your draft. Only Send submits the message.';}
+    if (preparingPaired && stage === 'ready') labels.ready = 'Checking selected agent voice';
+    if (preparingLocal && stage === 'ready') labels.ready = 'Preparing on-device speech';
+    if (!Capacitor.isNativePlatform() && !cloudMode && !onDeviceReady) labels.recorded = 'Review transcript';
+    if (browserDevProfile && selectedRoute === 'agent' && !cloudMode && !onDeviceReady) labels.recorded = 'Review transcript';
+    if (onDeviceReady && connectionController.getBrowserSpeechAgent()) labels.recorded = 'Transcribe on this computer';
+    if (chatDestination?.mode === 'dictation') labels.review = 'Use in draft';
     // The Cloud route offers no typing choice (MVP-01 decides whether it should); its failure wording names none.
     const canType = !cloudMode && stage === 'recorded' && !!clip && !busy && (failure === 'no-speech' || failure === 'local-agent' || failure === 'recognition');
     // A refused microphone uses the route slot for its recovery: Android's app settings for Alpha.
@@ -1108,7 +1125,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       changeRoute: () => { if (!owned()||stage !== 'ready' || busy) return; if (settingsChoice) { openSettings(); return; } const target = destination, chat = chatDestination; enter(target, undefined, selectedRoute === 'device' ? 'agent' : 'device',chat); refresh(); },
       clock: `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`, clockCss: '', live: stage === 'recording', paused: stage !== 'recording', dotCss: `background:${stage === 'recording' ? '#E53935' : 'var(--mut)'}`,
       levels: !Capacitor.isNativePlatform()&&stage==='recording'?recordingLevels(recordingId):Array.from({ length: 44 }, () => ({ h: 4 })),
-      lines: [{ ini: '', statusIcon:icons.info, t: error || messages[stage], chip: 'background:var(--s2);color:var(--fg)', css: '' }],
+      lines: error ? [{ ini: '', statusIcon:icons.info, t: error, chip: 'background:var(--s2);color:var(--fg)', css: '' }] : [],
       review: stage === 'review', transcript: draft, transcriptDisabled: busy, onTranscript: (e: Event) => { if (!owned()||busy) return; draft = (e.target as HTMLTextAreaElement).value; refresh(); },
       primaryLabel: cloudConnectRequired ? `Connect ${voiceServiceName()}` : labels[stage], primaryIcon: cloudConnectRequired ? icons.user : stage === 'review' ? icons.check : stage === 'recording' || stage === 'transcribing' ? icons.stop : icons.mic,
       primaryDisabled: (selectedRoute === 'device' && !onDeviceReady) || preparingLocal || preparingPaired || stage === 'starting' || (busy && stage !== 'transcribing') || (stage === 'review' && !draft.trim()),
@@ -1159,11 +1176,11 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(watch&&chatDestination?.shell===this&&(this.S().msgs||[]).some((m:Bag)=>m.from==='agent'&&!watch.has(String(m.id))&&String(m.text||'').trim())){conversationReplyWatch=undefined;markVoiceTiming('first-token');}
   };
   const immersive = notes.immersive;
-  notes.immersive = (state: Bag, current: Bag) => stage !== 'closed'&&!chatDestination ? { noPill: true } : immersive?.(state, current);
-  notes.back = (state: Bag, current: Bag) => { if (stage !== 'closed'&&!chatDestination) { cleanup(); return true; } return back?.(state, current); };
+  notes.immersive = (state: Bag, current: Bag) => noteRecorder.open || stage !== 'closed'&&!chatDestination ? { noPill: true } : immersive?.(state, current);
+  notes.back = (state: Bag, current: Bag) => { if (noteRecorder.open) { if (noteRecorder.confirmingDiscard) noteRecorder.keep(); else void noteRecorder.discard(); return true; } if (stage !== 'closed'&&!chatDestination) { cleanup(); return true; } return back?.(state, current); };
   const noteReadingChanged=()=>{if(api)api.setView('notes',{noteReadingRevision:Date.now()});};
   window.addEventListener('alpha:note-reading',noteReadingChanged);
-  notes.onLeave = (current: Bag) => { closeTranscriptQuestion?.();stopSpeaking();if(!ownedNavigation?.applying)cleanup(); leave?.(current); };
+  notes.onLeave = (current: Bag) => { closeTranscriptQuestion?.();stopSpeaking();noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;if(!ownedNavigation?.applying)cleanup(); leave?.(current); };
   const visibility = () => {
     // Speech preparation is foreground-only; returning prepares the same route again.
     if (!document.hidden) { if (reprepare && stage === 'ready' && !busy) { reprepare = false; reopen(error); } return; }
@@ -1183,5 +1200,5 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', pagehide);
   const unmount = Component.prototype.componentWillUnmount;
-  Component.prototype.componentWillUnmount = function () { window.removeEventListener('alpha:note-reading',noteReadingChanged);stopSpeaking();api = undefined; chatDestination=undefined;cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
+  Component.prototype.componentWillUnmount = function () { window.removeEventListener('alpha:note-reading',noteReadingChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
 }

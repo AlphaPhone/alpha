@@ -83,6 +83,49 @@ public final class AlphaVoiceCloudPlugin extends Plugin {
  @PluginMethod public void getRecordingMetrics(PluginCall call){main.post(()->{try{call.resolve(capture.metrics(call.getString("recordingId")));}catch(RuntimeException error){call.reject("Recording metrics are no longer available");}});}
  @PluginMethod public void stopRecording(PluginCall call){main.post(()->{try{call.resolve(capture.stop());}catch(Exception error){call.reject("Recording could not be saved");}});}
  @PluginMethod public void saveRecording(PluginCall call){getActivity().runOnUiThread(()->{try{String key=call.getString("recordingId");AlphaNoteAudioPlugin store=(AlphaNoteAudioPlugin)getBridge().getPlugin("AlphaNoteAudio").getInstance();call.resolve(capture.retain(store,key,call.getString("noteId"),call.getString("transcript")));}catch(Exception error){call.reject("The recording could not be saved. Keep this draft and retry.");}});}
+ // Notes recording (AlphaNoteRecorder): no length limit, finished segments survive process death,
+ // and AlphaNoteRecordingService keeps it running with the screen off. Segments are transcribed
+ // through the same recordingId lookups as a clip (AlphaCloudVoiceCapture.selected).
+ private final AlphaNoteRecorder.Listener noteRecorderEvents=status->{notifyListeners("noteRecordingChanged",status);if(!"recording".equals(status.getString("state"))&&!"paused".equals(status.getString("state")))AlphaNoteRecordingService.recordingClosed(getContext(),status.getString("recordingId"));};
+ private AlphaNoteRecorder noteRecorder(){AlphaNoteRecorder recorder=AlphaNoteRecorder.get(getContext());recorder.setListener(noteRecorderEvents);return recorder;}
+ private static String noteId(PluginCall call){String value=call.getString("recordingId");if(value==null||!value.matches(AlphaNoteRecorder.ID))throw new IllegalArgumentException();return value;}
+ @PluginMethod public void startNoteRecording(PluginCall call){
+  if(focus!=null&&focus.callActive()){call.reject(CALL_MESSAGE,SpeechAudioFocusPolicy.CALL_ACTIVE);return;}
+  if(getPermissionState("microphone")!=PermissionState.GRANTED){LateLaunch.ask(call,()->requestPermissionForAlias("microphone",call,"noteMicrophonePermission"));return;}
+  startNote(call);
+ }
+ @PermissionCallback private void noteMicrophonePermission(PluginCall call){if(getPermissionState("microphone")!=PermissionState.GRANTED){call.reject("Microphone permission denied","permission-denied");return;}startNote(call);}
+ private void startNote(PluginCall call){main.post(()->{
+  if(destroyed||!speechForeground){call.reject("Recording cancelled");return;}
+  try{JSObject status=noteRecorder().start();AlphaNoteRecordingService.start(getContext(),status.getString("recordingId"));call.resolve(status);}
+  catch(IOException error){call.reject("storage".equals(error.getMessage())?"Storage is full":"Microphone could not start","storage".equals(error.getMessage())?"storage":"capture");}
+  catch(RuntimeException error){call.reject("Microphone could not start","capture");}
+ });}
+ @PluginMethod public void noteRecordingStatus(PluginCall call){main.post(()->call.resolve(noteRecorder().status()));}
+ @PluginMethod public void pauseNoteRecording(PluginCall call){main.post(()->{try{call.resolve(noteRecorder().pause(noteId(call)));}catch(RuntimeException error){call.reject("Recording changed");}});}
+ @PluginMethod public void resumeNoteRecording(PluginCall call){
+  if(focus!=null&&focus.callActive()){call.reject(CALL_MESSAGE,SpeechAudioFocusPolicy.CALL_ACTIVE);return;}
+  main.post(()->{try{String id=noteId(call);JSObject status=noteRecorder().resume(id);AlphaNoteRecordingService.start(getContext(),id);call.resolve(status);}
+  catch(IOException error){call.reject("storage".equals(error.getMessage())?"Storage is full":"Microphone could not start","storage".equals(error.getMessage())?"storage":"capture");}
+  catch(RuntimeException error){call.reject("Recording changed");}});
+ }
+ @PluginMethod public void stopNoteRecording(PluginCall call){main.post(()->{try{call.resolve(noteRecorder().stop(noteId(call)));}catch(RuntimeException error){call.reject("Recording changed");}});}
+ @PluginMethod public void discardNoteRecording(PluginCall call){main.post(()->{AlphaNoteRecorder recorder=noteRecorder();String id=call.getString("recordingId");if(id!=null&&recorder.owns(id))recorder.discard();call.resolve(recorder.status());});}
+ @PluginMethod public void setNoteSegmentText(PluginCall call){main.post(()->{try{noteRecorder().setText(noteId(call),call.getString("segmentId"),call.getString("text"));call.resolve();}catch(Exception error){call.reject("Recording changed");}});}
+ /** Joins the finished segments into one recording and saves it for the note. Repeatable until discarded. */
+ @PluginMethod public void saveNoteRecording(PluginCall call){
+  final String id;try{id=noteId(call);}catch(RuntimeException invalid){call.reject("Invalid recording");return;}
+  AlphaNoteAudioPlugin store=(AlphaNoteAudioPlugin)getBridge().getPlugin("AlphaNoteAudio").getInstance();
+  PluginWorkers.submit(noteSaveWorker,()->{
+   AlphaNoteRecorder recorder=noteRecorder();
+   try{
+    File joined=recorder.joined(id);
+    JSObject saved=store.retainNoteRecording(joined,id,call.getString("noteId"),recorder.totalMs(),call.getString("transcript"));
+    call.resolve(saved); // The renderer discards the segments once the note itself is saved.
+   }catch(Exception error){call.reject("The recording could not be saved.");}
+  },()->call.reject("The recording could not be saved."));
+ }
+ private final ExecutorService noteSaveWorker=new ThreadPoolExecutor(1,1,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(2));
  private boolean isDraining(){synchronized(pending){return draining;}}
  private void finishDrain(boolean complete,String error){
   List<PluginCall> calls;synchronized(pending){if(complete)draining=false;calls=new ArrayList<>(drainWaiters.keySet());for(Runnable timeout:drainWaiters.values())main.removeCallbacks(timeout);drainWaiters.clear();}
@@ -459,7 +502,7 @@ public final class AlphaVoiceCloudPlugin extends Plugin {
  }
  private void stopLiveCapture(){liveAdmission.cancelAll();for(NativeLiveVoicePipe pipe:livePipes.values())pipe.close(true,System.currentTimeMillis());PluginWorkers.submit(liveWorker,()->{if(live!=null){live.stop();live=null;}for(String id:livePipes.keySet())closeNativePipe(id,true,System.currentTimeMillis());},()->{/* Already shut down: its last task stopped the capture. */});}
  @Override protected void handleOnPause(){speechForeground=false;stopLiveCapture();scheduleLocalRelease(30000);if(permissionEpochs.isEmpty())epoch.incrementAndGet();if(capture!=null)capture.stopAutomatically();for(Pending request:pending.values())request.cancel();main.post(this::clearPlayback);super.handleOnPause();}
- @Override protected void handleOnDestroy(){destroyed=true;main.post(()->{closeOutputWarmup();if(focus!=null)focus.close();});stopLiveCapture();liveWorker.shutdown();liveStopWorker.shutdown();nativeVoiceWorker.shutdown();livePermissionEpochs.clear();finishDrain(false,"Voice unavailable");epoch.incrementAndGet();permissionEpochs.clear();for(Pending request:pending.values())request.cancel();if(capture!=null)capture.cancel();main.post(this::clearPlayback);main.removeCallbacks(localIdleRelease);getContext().unregisterComponentCallbacks(localMemoryCallbacks);PluginWorkers.submit(workers,localEngine::close,()->{/* Already stopped: its last task closed nothing new. */});workers.shutdown();super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){destroyed=true;main.post(()->{closeOutputWarmup();if(focus!=null)focus.close();});stopLiveCapture();liveWorker.shutdown();liveStopWorker.shutdown();nativeVoiceWorker.shutdown();livePermissionEpochs.clear();finishDrain(false,"Voice unavailable");epoch.incrementAndGet();permissionEpochs.clear();for(Pending request:pending.values())request.cancel();if(capture!=null)capture.cancel();main.post(this::clearPlayback);main.removeCallbacks(localIdleRelease);getContext().unregisterComponentCallbacks(localMemoryCallbacks);PluginWorkers.submit(workers,localEngine::close,()->{/* Already stopped: its last task closed nothing new. */});workers.shutdown();noteSaveWorker.shutdown();AlphaNoteRecorder.get(getContext()).clearListener(noteRecorderEvents);super.handleOnDestroy();}
 }
 
 /** One foreground-only private audio draft. Capture and upload are separate user actions. */
@@ -519,8 +562,13 @@ final class AlphaCloudVoiceCapture {
   try { events.accept(stop()); }
   catch (RuntimeException error) { JSObject result=new JSObject();result.put("recordingId",ownedId);result.put("status","failed");result.put("message","Recording could not be saved");events.accept(result); }
  }
- synchronized JSObject retain(AlphaNoteAudioPlugin store,String recordingId,String noteId,String transcript)throws Exception {File chosen=selected(recordingId);if(chosen==null)throw new IllegalStateException();return store.retain(chosen,recordingId,noteId,durationMs,transcript);}
+ synchronized JSObject retain(AlphaNoteAudioPlugin store,String recordingId,String noteId,String transcript)throws Exception {File chosen=clip(recordingId);if(chosen==null)throw new IllegalStateException();return store.retain(chosen,recordingId,noteId,durationMs,transcript);}
+ /** The stopped clip, or a finished Notes recording segment (AlphaNoteRecorder), by its id. */
  synchronized File selected(String recordingId) {
+  if (recorder != null || file == null || !id.equals(recordingId)) return recordingId == null ? null : AlphaNoteRecorder.get(context).segment(recordingId);
+  return file;
+ }
+ private synchronized File clip(String recordingId) {
   if (recorder != null || file == null || !id.equals(recordingId)) return null;
   return file;
  }

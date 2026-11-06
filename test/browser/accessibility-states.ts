@@ -96,7 +96,7 @@ export const LIVE_STATES: State[] = [
   live('Photos search', ['Photos', 'Search photos']),
   live('Notes search', ['Notes', 'Search notes']),
   live('Notes source document', ['Notes', 'New note', 'Link source document']),
-  live('Notes recording', ['Notes', 'Record and transcribe'], 'notes-recording'),
+  live('Notes recorder', ['Notes', 'Record and transcribe'], 'notes-recorder'),
   live('Files search', ['Files', 'Search files']),
   live('Workflows new automation', ['Workflows', 'New automation'], 'automations-detail'),
 ];
