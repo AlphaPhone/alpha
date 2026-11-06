@@ -248,6 +248,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
   view.trashOpen=state.folder==='deleted';
   if(view.trashOpen&&Array.isArray(state.trash)&&!rows.length&&!disabled&&!state.trashFull)queueMicrotask(()=>{const latest=api.get('notes');if(latest.folder==='deleted'&&Array.isArray(latest.trash)&&!latest.trash.length)api.set({folder:null,trashConfirm:null});});
   view.trashCount=rows.length;
+  view.hasDeleted=rows.length>0;
   view.trashRows=rows.map(entry=>{
    const title=entry.note.title||kindLabel[entry.note.kind]||'Untitled';
    return {id:entry.id,title,kind:kindLabel[entry.note.kind]||'Note',preview:notePreview(entry.note),left:notesTrashDaysShort(entry,now),leftLabel:notesTrashDaysLabel(entry,now),
