@@ -267,7 +267,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       }
       if (operation.type === 'photos_filter' || operation.type === 'photos_album_create') throw new LibraryAgentRefusal('Open Photos, then ask again.');
       // Selection and review act on what the owner sees in Photos > Device library.
-      if (!visible()) throw new LibraryAgentRefusal('Open Photos > Device library to review this action.');
+      if (!visible()) throw new LibraryAgentRefusal('Open Photos, then ask again.');
       if (operation.type === 'photo_library_select') {
         if (acting || review) throw new LibraryAgentRefusal('Finish the open library review first.');
         selection.clear();
@@ -281,7 +281,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       const items = operation.items.map(entry => ({ id: entry.id, revision: modelRevisions.native(entry.id, entry.revision) ?? '' }));
       if (items.some(entry => !entry.revision)) throw new LibraryAgentRefusal('An item changed since the assistant read it. Nothing changed; ask again.');
       const prepared = prepareReview(operation.action, items);
-      if (!reviewCurrent(prepared, catalog)) throw new LibraryAgentRefusal('An item changed or is not loaded in Photos > Device library. Nothing changed; reload and ask again.');
+      if (!reviewCurrent(prepared, catalog)) throw new LibraryAgentRefusal('An item changed or is not loaded in Photos. Nothing changed; ask again.');
       review = prepared; status = 'The assistant asked for this review. Nothing changes until you confirm here and in Android.';
       refresh();
       return { kind: operation.type, status: 'review_opened', action: operation.action, count: items.length };
