@@ -52,7 +52,7 @@ test('Notes create, edit, reload and delete to Recently deleted', async ({ page 
   await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Browser audit note, 30 days left', exact: true })).toBeVisible();
 });
-test('Notes folders: create, move via ⋯, filter by chip, persist, and delete without losing notes', async ({ page }) => {
+test('Notes folders: create, move via ⋯, filter by chip, persist, rename by long-press, and delete without losing notes', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Notes', exact: true }).click();
   await page.getByRole('button', { name: 'New note', exact: true }).click();
@@ -79,10 +79,25 @@ test('Notes folders: create, move via ⋯, filter by chip, persist, and delete w
   await page.getByRole('button', { name: 'Notes', exact: true }).click();
   await page.getByRole('button', { name: 'Work', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toBeVisible();
-  // Deleting the folder keeps its note, now under no folder.
-  await page.getByRole('button', { name: 'Work, folder options', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Work' }).getByRole('button', { name: 'Delete folder', exact: true }).click();
+  // Long-press a folder chip: Rename keeps the folder's notes and persists in the folder slot.
+  await page.getByRole('button', { name: 'All', exact: true }).click();
+  const chip = page.getByRole('button', { name: 'Work', exact: true });
+  await chip.hover();await page.mouse.down();await page.waitForTimeout(700);await page.mouse.up();
+  await page.getByRole('dialog', { name: 'Work' }).getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Folder name', exact: true })).toHaveValue('Work');
+  await page.getByRole('textbox', { name: 'Folder name', exact: true }).fill('Office');
+  await page.getByRole('dialog', { name: 'Rename folder' }).getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.reload();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Work/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Office', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toBeVisible();
+  // Deleting the folder keeps its note, now under no folder.
+  await page.getByRole('button', { name: 'Office, folder options', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Office' }).getByRole('button', { name: 'Delete folder', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Office/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toBeVisible();
   expect(await page.evaluate(async () => JSON.parse(await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()).records[0].folderId)).toBeUndefined();
 });

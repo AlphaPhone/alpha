@@ -2263,7 +2263,7 @@
   </div>
   <div class="scr notes-folders" role="group" aria-label="Folders" style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 16px 10px; flex-shrink: 0; touch-action: pan-x">
     <button class="tap notes-chip" aria-pressed="{{notes.allPressed}}" onClick="{{notes.selectAll}}">All</button>
-    <sc-for list="{{notes.folderChips}}" as="f"><button class="tap notes-chip" aria-pressed="{{f.pressed}}" aria-label="{{f.label}}" onClick="{{f.select}}">{{f.name}}</button></sc-for>
+    <sc-for list="{{notes.folderChips}}" as="f"><button class="tap notes-chip" data-notes-folder="{{f.id}}" aria-pressed="{{f.pressed}}" aria-label="{{f.label}}" onClick="{{f.select}}" onPointerDown="{{f.down}}" onPointerUp="{{f.up}}" onPointerLeave="{{f.up}}" onPointerCancel="{{f.up}}" onContextMenu="{{f.context}}">{{f.name}}</button></sc-for>
     <button class="tap notes-chip" aria-label="New folder" onClick="{{notes.newFolder}}"><svg class="i" viewBox="0 0 24 24" style="width: 16px; height: 16px"><path d="{{ic.plus}}"></path></svg></button>
     <sc-if value="{{notes.hasDeleted}}"><button class="tap notes-chip" aria-pressed="false" onClick="{{notes.openTrash}}"><svg class="i" viewBox="0 0 24 24" style="width: 16px; height: 16px"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></sc-if>
   </div>
@@ -2508,12 +2508,12 @@
         <input aria-label="Folder name" placeholder="Name" maxlength="40" value="{{notes.folderName}}" onChange="{{notes.onFolderName}}" onKeyDown="{{notes.folderNameKey}}" style="width: 100%; box-sizing: border-box; height: 52px; margin-top: 18px; padding: 0 16px; border: 0; outline: 0; border-radius: 16px; background: var(--s2); color: var(--fg); font-size: 17px">
         <div style="display: flex; gap: 10px; margin-top: 18px">
           <button onClick="{{notes.closeFolderSheet}}" style="flex: 1; height: 52px; border-radius: 26px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--s2)">Cancel</button>
-          <button disabled="{{notes.createDisabled}}" onClick="{{notes.createFolder}}" style="flex: 1; height: 52px; border-radius: 26px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--fg); color: var(--bg)">Create</button>
+          <button disabled="{{notes.createDisabled}}" onClick="{{notes.createFolder}}" style="flex: 1; height: 52px; border-radius: 26px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--fg); color: var(--bg)">{{notes.folderSubmitLabel}}</button>
         </div>
       </sc-if>
       <sc-if value="{{notes.folderOptions}}">
         <div style="display: flex; gap: 10px; margin-top: 24px">
-          <button onClick="{{notes.closeFolderSheet}}" style="flex: 1; height: 52px; border-radius: 26px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--s2)">Cancel</button>
+          <button onClick="{{notes.renameFolder}}" style="flex: 1; height: 52px; border-radius: 26px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--s2); color: var(--fg)">Rename</button>
           <button onClick="{{notes.deleteFolder}}" style="flex: 1; height: 52px; border-radius: 26px; font-size: 15px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--s2); color: var(--fg)">Delete folder</button>
         </div>
       </sc-if>
