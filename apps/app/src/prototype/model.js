@@ -1875,7 +1875,8 @@ registerView("camera", {
   ongoing: function (st) { return st.rec ? { label: camRecLabel(st), icon: "video", color: "#E53935" } : null; },
   jumps: [[null, "Camera"], ["video", "Video"]],
   preset: function (sub) { if (sub === "video" || sub === "photo") return { mode: sub }; },
-  immersive: function () { return { dark: true, noPill: true }; },
+  // The assistant pill stays below the shutter row: asking Alpha (about the frame, or to scan it) replaces header buttons.
+  immersive: function (st) { return st.rec ? { dark: true, noPill: true } : { dark: true }; },
   back: function (st, api) { if (st.rec) { camStopRec(api); return true; } return false; },
   onLeave: function (api) { if (api.secure && api.get("camera").rec) camStopRec(api); },  // recording keeps going in the background (ongoing chip) except from the lock screen
   suggestions: function () { return ["What am I looking at?", "Take a selfie", "Scan this"]; },
