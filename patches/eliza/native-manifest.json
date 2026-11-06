@@ -1,10 +1,29 @@
 {
   "schema": 1,
   "baseCommit": "912f972e58b1b707ecdf2271eeba495f2ed966ef",
-  "patches": [],
+  "patches": [
+    {
+      "module": "plugins/plugin-native-camera/android",
+      "file": "camera-capture-latency.patch",
+      "sha256": "ba408805662fc6ef2d44bd2df1f10327ca1f8e78d2fc4afbb9fa6b8c844e5b39",
+      "targets": [
+        {
+          "path": "plugins/plugin-native-camera/android/src/main/java/ai/eliza/plugins/camera/CameraPlugin.kt",
+          "beforeSha256": "0d6dec5115f050cfac2f6f32b22f68e4a36e6d4ec2b10e815fa74303ec2d4c53",
+          "afterSha256": "a91a945d4028662684d56f82f1c5398c15102850540eaef688e1cab3e99f8900"
+        },
+        {
+          "path": "plugins/plugin-native-camera/android/src/main/java/ai/eliza/plugins/camera/GalleryImageWriter.kt",
+          "beforeSha256": "a41a4fe0bd2dfcd910529b420ffae72f51399066d991cbdd2c562e6cec284d30",
+          "afterSha256": "3da76a1466457bc3acbd0d5ba1fc4b248624c4a4daac714baf77a6f62b053d37"
+        }
+      ]
+    }
+  ],
   "modules": [
     "plugins/plugin-native-action-journal/android",
     "plugins/plugin-native-calendar/android",
+    "plugins/plugin-native-camera/android",
     "plugins/plugin-native-media/android",
     "plugins/plugin-native-notifications/android",
     "plugins/plugin-native-reminders/android",

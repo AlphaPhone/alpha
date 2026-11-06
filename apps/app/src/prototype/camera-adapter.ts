@@ -34,7 +34,7 @@ type PreviewReceipt = { width: number; height: number; deviceId: string; minZoom
 const nativeCamera = registerPlugin<{
   startPreview(options: { direction: 'front' | 'back'; resolution: { width: number; height: number }; mirror: boolean }): Promise<PreviewReceipt>;
   stopPreview(): Promise<void>;
-  capturePhoto(options: { format: 'jpeg'; quality: number; saveToGallery: boolean; thumbnailOnly?: boolean }): Promise<Photo>;
+  capturePhoto(options: { format: 'jpeg'; quality?: number; saveToGallery: boolean; thumbnailOnly?: boolean }): Promise<Photo>;
   startRecording(options: { audio: boolean; saveToGallery: boolean; quality: string; maxDuration: number; maxFileSize: number }): Promise<void>;
   stopRecording(): Promise<VideoReceipt>;
   getRecordingState(): Promise<{ isRecording: boolean; duration: number; fileSize: number }>;
@@ -722,7 +722,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   async function saveCameraPhoto(owner:Bag,showSaved:boolean):Promise<SavedPhoto>{
     // The native layer writes the full JPEG straight to MediaStore (DCIM/Camera) and returns
     // its URI with a small thumbnail; no full-size image crosses the bridge.
-    const photo = await camera.capturePhoto({ format: 'jpeg', quality: 85, saveToGallery: true, ...(browserMode?{}:{thumbnailOnly:true}) });
+    // With thumbnailOnly the native camera chooses the JPEG quality itself.
+    const photo = await camera.capturePhoto(browserMode ? { format: 'jpeg', quality: 85, saveToGallery: true } : { format: 'jpeg', saveToGallery: true, thumbnailOnly: true });
     const preview = photo.thumbnail || photo.base64;
     const legacyFile = !browserMode && typeof photo.path === 'string' && /^file:\/\/\//.test(photo.path);
     const path = photoReceiptPath(photo.path, browserMode);
@@ -820,8 +821,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   scanRequest=()=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    // Close the chat sheet so the viewfinder and scan review are visible.
-    if(['sheet','full'].includes(owner.S.chat))owner.shell({chat:'hidden'});
+    // Close the chat so the viewfinder and scan review are visible.
+    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
     void scanFrame(owner);return true;
   };
   function askCameraFrame(owner:Bag):boolean{

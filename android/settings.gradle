@@ -3,7 +3,6 @@ include ':app', ':capacitor-android', ':eliza-system'
 project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor')
 
 include ':eliza-camera'
-project(':eliza-camera').projectDir = new File('../vendor/eliza/plugins/plugin-native-camera/android')
 
 
 include ':eliza-location'
@@ -36,6 +35,7 @@ gradle.ext.nativePatchReceipt = new File(nativePatchSource.root, '.source.json')
 project(':eliza-system').projectDir = new File(nativePatchSource.root, 'plugins/plugin-native-system/android')
 project(':eliza-calendar').projectDir = new File(nativePatchSource.root, 'plugins/plugin-native-calendar/android')
 project(':eliza-reminders').projectDir = new File(nativePatchSource.root, 'plugins/plugin-native-reminders/android')
+project(':eliza-camera').projectDir = new File(nativePatchSource.root, 'plugins/plugin-native-camera/android')
 include ':elizaos-capacitor-secure-store'
 project(':elizaos-capacitor-secure-store').projectDir = new File(nativePatchSource.root, 'plugins/plugin-native-secure-store/android')
 include ':eliza-passwords'
