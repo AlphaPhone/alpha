@@ -6,7 +6,9 @@ import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,medi
 import {createInlineModal} from '../runtime/inline-modal';
 import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
-import {createDeviceLibrary} from './photo-library-adapter';
+import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal} from './photo-library-adapter';
+import {newestFirst,mergeWindow,groupSections,patchRows,insertRows,patchSelection,favoriteTarget,batches,daysLeft,pinchColumns,dragRange,filterMatches,filterLabel,viewerTitle,formatBytes,shotAt,albumOf,GRID_COLUMNS,type PhotosFilter} from '../runtime/photos-view';
+import {LIBRARY_LIMITS,type LibraryAgentOperation,type LibraryAgentResult} from '../runtime/photo-library';
 import {openVideoEditReview} from './video-edit-review';
 import {openScanReview} from './scan-review';
 import {systemPickerActive} from './scan-pdf';
@@ -63,7 +65,7 @@ export async function restartAfterResume(state: () => { denied?: string; phase: 
 }
 // camera-resume:end
 type LibraryAccess = {scope:'full'|'partial'|'selected'|'denied';images:'full'|'selected'|'denied';videos:'full'|'selected'|'denied'};
-type SavedPhoto = { name?:string;owned?:boolean;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
+type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
 const nativeLibrary = registerPlugin<{
   addListener(event:'libraryChanged',listener:()=>void):Promise<{remove():Promise<void>}>;
   libraryAccess():Promise<LibraryAccess>;
@@ -86,11 +88,11 @@ const nativeLibrary = registerPlugin<{
   share(options: { id: string;revision?:string }): Promise<{ status: string; message?: string }>;
   setFavorite(options: {id:string;revision:string;favorite:boolean}): Promise<SavedPhoto>;
   deletePermittedTrash(options:{items:{id:string;revision:string}[]}):Promise<{status:string;outcomes:{id:string;status:string}[]}>;
-  changeMany(options:{operation:'favorite'|'trash'|'restore';items:{id:string;revision:string}[]}):Promise<{status:string;outcomes:{id:string;status:string;item?:SavedPhoto}[]}>;
+  changeMany(options:{operation:'favorite'|'unfavorite'|'trash'|'restore';items:{id:string;revision:string}[]}):Promise<{status:string;outcomes:{id:string;status:string;item?:SavedPhoto}[]}>;
   shareMany(options:{items:{id:string;revision:string}[]}): Promise<{status:string;count:number;message?:string}>;
   albums(): Promise<{items:OwnedAlbum[]}>;
   changeAlbum(options:Record<string,unknown>): Promise<{status:string;id:string;revision:string}>;
-  summary(): Promise<{favorites:number;videos:number;trash:number;canFavorite:boolean}>;
+  summary(): Promise<{favorites:number;videos:number;camera?:number;screenshots?:number;trash:number;canFavorite:boolean}>;
   prepareDeleteTrash(options?:{items:{id:string;revision:string}[]}): Promise<{confirmation:string;count:number}>;
   cancelDeleteTrash(options:{confirmation:string}): Promise<void>;
   deletePreparedTrash(options:{confirmation:string}): Promise<{status:string;deletedIds:string[];skippedIds:string[];failedIds:string[]}>;
@@ -200,7 +202,16 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let stopping: Promise<void> = Promise.resolve();
   let captures: SavedPhoto[] = [];
   let photosApi: Bag | undefined, loaded = false, loading = false, next = '', libraryEpoch = 0;
-  let libraryAccess:LibraryAccess|undefined,requestingLibraryAccess=false,libraryQuery='';
+  let libraryAccess:LibraryAccess|undefined,requestingLibraryAccess=false;
+  /** The newest rows Photos keeps loaded; a reload re-reads at most RELOAD_LIMIT of them. */
+  const WINDOW=LIBRARY_LIMITS.kept,RELOAD_LIMIT=240,BATCH=20,SHARE_BATCH=100;
+  /** The agent's read-only filter (photos_filter), shown as a clearable chip. */
+  let photosFilter:(PhotosFilter&{label:string})|undefined;
+  let gridColumns:number=GRID_COLUMNS.default;
+  /** Drag-to-extend: the tile the drag started on and the selection it started from. */
+  let drag:{anchor:string;base:SavedPhoto[];order:SavedPhoto[];moved:boolean}|undefined;
+  /** An agent album request waiting for the owner (photos_album_create): exact rows and revisions shown. */
+  let albumReview:{name:string;items:SavedPhoto[];missing:number}|undefined;
   const permittedLibrary=()=>!browserMode&&!!libraryAccess&&libraryAccess.scope!=='denied';
   let preview: SavedPhoto | undefined, reading = '', sharing = false;
   let photoReadEpoch=0;
@@ -301,7 +312,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let counts: {favorites:number;videos:number;trash:number;canFavorite:boolean} | undefined, countsBusy = false, countsError = false, countsEpoch = 0;
   let albumRows: SavedPhoto[] = [], albumKey = '', albumNext = '', albumBusy = false, albumEpoch = 0;
   let customAlbums: OwnedAlbum[] = [], albumsLoaded=false, albumsBusy=false, albumsEpoch=0;
-  let manager: {media?:SavedPhoto;album?:OwnedAlbum;name:string;creating?:boolean;choosing?:boolean;confirmDelete?:boolean}|undefined;
+  /** media: one item (viewer Info); items: the selection (Add to album). */
+  let manager: {media?:SavedPhoto;items?:SavedPhoto[];album?:OwnedAlbum;name:string;creating?:boolean;choosing?:boolean;confirmDelete?:boolean}|undefined;
   let albumTrigger:HTMLElement|null=null;
   const albumModal=createInlineModal(()=>{manager=undefined;photosApi?.set({sheet:null});},()=>albumTrigger);
   let selection: SavedPhoto[]|undefined;let holdTimer:number|undefined;let swallowedTap='';
@@ -326,59 +338,112 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     loading = true; const token = ++libraryEpoch;
     try {
       if(!browserMode)libraryAccess=await nativeLibrary.libraryAccess();
-      const result = permittedLibrary()?await nativeLibrary.listPermitted({...(more?{before:next}:{}),query:libraryQuery}):await library.list(more ? { before: next } : {});
-      if (disposed || token !== libraryEpoch) return;
-      const rows = result.items.map(normalize);
-      captures = more ? [...captures, ...rows.filter(row => !captures.some(old => old.id === row.id))] : rows;
-      if(permittedLibrary())captures=captures.slice(-240);
-      next = result.next; loaded = true; loading = false;
+      // One catalog: AlphaPhotos lists every permitted item, or Alpha's own captures without access.
+      // A reload re-reads as many rows as were showing (bounded), so a change patches the window in place.
+      const want=more?1:Math.min(Math.max(captures.length,1),RELOAD_LIMIT),rows:SavedPhoto[]=[];let cursor=more?next:'';
+      do{const result=await library.list(cursor?{before:cursor}:{});if(disposed||token!==libraryEpoch)return;rows.push(...result.items.map(normalize));cursor=result.next;}while(cursor&&!more&&rows.length<want);
+      captures = more ? mergeWindow(captures, rows, WINDOW) : newestFirst(rows).slice(0, WINDOW);
+      next = cursor; loaded = true; loading = false;
+      patchView();
       photosApi?.set({ nativeLibraryError: '', nativeCaptureRevision: token });
       if (!more && photosApi) { void loadCounts(photosApi); void loadCustomAlbums(photosApi); }
       if (api?.isActive()) api.set({ nativeCaptureRevision: token });
-    } catch { loaded = true; loading = false; if (!disposed) photosApi?.set({ nativeLibraryError: 'Saved photos could not be loaded. Tap to retry.' }); }
+    } catch { loaded = true; loading = false; if (!disposed) photosApi?.set({ nativeLibraryError: 'Photos could not be loaded. Tap to retry.' }); }
     finally { loading = false; if (refreshAgain && !disposed) { refreshAgain = false; queueMicrotask(() => { void refresh(); }); } }
+  }
+  /** The rows a selection may hold: what the open list shows (SelectionSubsetOfVisible). */
+  function selectionPool(owner:Bag|undefined=photosApi):SavedPhoto[]{
+    const album=owner?.get('photos')?.album;
+    if(album==='trash')return trash;
+    if(album)return albumRows;
+    return captures.filter(row=>filterMatches(row,photosFilter,albumMembers));
+  }
+  const albumMembers=(key:string)=>{const album=customAlbums.find(row=>'custom:'+row.id===key);return album?.memberIds.map(id=>'native-camera-'+id);};
+  /** After any load: keep selected rows that still exist (with their current revision); close the
+   * viewer only when its item is gone (FixPatch). Unrelated store events change nothing visible. */
+  function patchView(){
+    if(selection&&!mutating&&!sharing){selection=patchSelection(selection,selectionPool());photosApi?.set({nativeMultiSelection:Date.now()});}
+    const owner=photosApi,open=owner?.get('photos')?.open;
+    if(!owner||!open||edit||closeVideoEdit)return;
+    const live=[...captures,...albumRows,...trash].find(row=>row.id===open);
+    if(live){if(preview?.id===open&&(live.mutationRevision!==preview.mutationRevision||!!live.trashed!==!!preview.trashed||live.favorite!==preview.favorite)){preview={...preview,...live};owner.set({nativePhotoSelection:captureSelection(preview)});}return;}
+    // Not in a loaded list (it may be on a later page): read it; only a missing item closes the viewer.
+    const token=photoReadEpoch;
+    void library.read({id:nativeId(open),includeTrashed:true}).then(row=>{if(disposed||token!==photoReadEpoch||owner.get('photos').open!==open)return;const fresh=normalize(row);if(preview?.id===open)preview={...preview,...fresh};},()=>{
+      if(disposed||token!==photoReadEpoch||owner.get('photos').open!==open)return;
+      retirePhotoRead();preview=undefined;closeVideo();owner.set({open:null,nativePhotoSelection:null,sheet:null,nativeCaptureRevision:Date.now()});
+    });
   }
   function toggleSelection(row:SavedPhoto,owner:Bag){
     if(!selection||mutating||sharing)return;
     if(selection.some(item=>item.id===row.id))selection=selection.filter(item=>item.id!==row.id);
-    else if(selection.length<20)selection=[...selection,row];else owner.toast('Select up to 20 items.');
+    else selection=[...selection,row];
     owner.set({nativePhotoSelection:null,nativeMultiSelection:Date.now()});
   }
-  function thumbnailEvents(row:SavedPhoto,owner:Bag){return {
-    selecting:!!selection,on:!!selection?.some(item=>item.id===row.id),selCss:selection?.some(item=>item.id===row.id)?'background:var(--acc);box-shadow:0 0 0 2px #ffffff':'background:rgba(0,0,0,.7);box-shadow:inset 0 0 0 2px #ffffff',
+  function startSelection(owner:Bag,rows:SavedPhoto[]=[]){
+    if(mutating||sharing)return;
+    const st=owner.get('photos');selection=rows;selectionTab=st?.tab==='alb'?'alb':'lib';swallowedTap='';endHold();
+    owner.set({open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
+  }
+  /** Drag over tiles after a long press, or while selecting, selects the range in grid order. */
+  function dragTo(event:PointerEvent,owner:Bag){
+    if(!drag||!selection)return;
+    const target=document.elementFromPoint(event.clientX,event.clientY)?.closest<HTMLElement>('[data-owned-media-id]'),id=target?.dataset.ownedMediaId;
+    if(!id||(!drag.moved&&id===drag.anchor))return;
+    drag.moved=true;swallowedTap=drag.anchor;
+    const range=dragRange(drag.order,drag.anchor,id),ids=new Set(drag.base.map(row=>row.id));
+    selection=[...drag.base,...range.filter(row=>!ids.has(row.id))];
+    owner.set({nativeMultiSelection:Date.now()});
+  }
+  function thumbnailEvents(row:SavedPhoto,owner:Bag,order:SavedPhoto[]){const on=!!selection?.some(item=>item.id===row.id);return {
+    selecting:!!selection,on,pressed:selection?on:undefined,selCss:on?'background:var(--acc);box-shadow:0 0 0 2px #ffffff':'background:rgba(0,0,0,.35);box-shadow:inset 0 0 0 2px #ffffff',tileCss:on?'transform:scale(.88);border-radius:6px':'',
     tap:()=>{endHold();if(swallowedTap===row.id){swallowedTap='';return;}if(selection)toggleSelection(row,owner);else void openSaved(row.id,owner);},
-    pd:()=>{endHold();if(selection||sharing||mutating)return;holdTimer=window.setTimeout(()=>{holdTimer=undefined;if(!owner.isActive()||disposed)return;selection=[row];selectionTab=owner.get('photos')?.tab==='alb'?'alb':'lib';swallowedTap=row.id;owner.set({open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});},450);},pu:()=>{endHold();window.setTimeout(()=>{swallowedTap='';},0);},
+    pd:(event?:PointerEvent)=>{endHold();if(sharing||mutating)return;
+      // Keep the pointer on this tile so moving across others extends instead of ending the press.
+      try{if(event&&event.currentTarget instanceof Element)event.currentTarget.setPointerCapture(event.pointerId);}catch{/* not capturable */}
+      if(selection){drag={anchor:row.id,base:selection.filter(item=>item.id!==row.id),order,moved:false};if(!on)drag.base=[...selection];return;}
+      holdTimer=window.setTimeout(()=>{holdTimer=undefined;if(!owner.isActive()||disposed)return;startSelection(owner,[row]);swallowedTap=row.id;drag={anchor:row.id,base:[],order,moved:false};},450);},
+    pm:(event:PointerEvent)=>{if(drag)dragTo(event,owner);},
+    pu:()=>{endHold();drag=undefined;window.setTimeout(()=>{swallowedTap='';},0);},
   };}
   async function shareSelection(owner:Bag){
-    if(!selection?.length||sharing||mutating)return;const chosen=selection,token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&owner.isActive()&&selection===chosen&&chosen.every(sameCapture);sharing=true;owner.set({nativeMultiSelection:Date.now()});
+    if(!selection?.length||sharing||mutating)return;if(selection.length>SHARE_BATCH){owner.toast(`Share up to ${SHARE_BATCH} at a time.`);return;}const chosen=selection,token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&owner.isActive()&&selection===chosen&&chosen.every(sameCapture);sharing=true;owner.set({nativeMultiSelection:Date.now()});
     try{const items=chosen.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''})),result:Awaited<ReturnType<typeof nativeLibrary.shareMany>>=browserMode?await browserPhotoLibrary.shareMany({items},current):await nativeLibrary.shareMany({items});if(owner.isActive()&&result.message)owner.toast(result.message);}
     catch(error){if(owner.isActive()&&!(browserMode&&error instanceof DOMException&&error.name==='AbortError'))owner.toast(error instanceof Error?error.message:'Selection could not be shared. Reselect the items.');}
     finally{sharing=false;if(!disposed)owner.set({nativeMultiSelection:Date.now()});}
   }
+  /** Batch change of the selection (or of Undo's items). Large selections run in native-sized batches;
+   * rows are patched in place, so favorite and restore never reorder the grid. */
   async function changeSelection(owner:Bag,operation:'favorite'|'trash'|'restore',undoItems?:SavedPhoto[]){
     if(mutating||sharing||disposed)return;
     const chosen=undoItems||selection;if(!chosen?.length)return;
-    const selectionAtStart=selection;
+    const native:'favorite'|'unfavorite'|'trash'|'restore'=operation==='favorite'?(favoriteTarget(chosen)?'favorite':'unfavorite'):operation;
     mutating=true;closeVideo();preview=undefined;retirePhotoRead();
     owner.set({open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
+    const verified:SavedPhoto[]=[],changed:SavedPhoto[]=[];let failed=0,unverified=false;
     try{
-      const receipt=await library.changeMany({operation,items:chosen.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''}))});
-      if(disposed)return;
-      const verified=receipt.outcomes.filter(row=>row.item),changed=verified.filter(row=>row.status!=='unchanged');
-      const successful=new Set(verified.map(row=>'native-camera-'+row.id));
-      ++libraryEpoch;++trashEpoch;albumKey='';++albumEpoch;
-      captures=captures.filter(row=>!successful.has(row.id));trash=trash.filter(row=>!successful.has(row.id));
-      for(const row of verified){const before=chosen.find(item=>nativeId(item.id)===row.id);const item={...before,...normalize(row.item!)};if(item.trashed)trash.unshift(item);else captures.unshift(item);}
-      if(owner.isActive()&&selection===selectionAtStart){
-        selection=undoItems?undefined:chosen.filter(row=>!successful.has(row.id));if(!selection?.length)selection=undefined;
-        owner.set({nativeMultiSelection:Date.now(),nativeCaptureRevision:Date.now()});
-        const failed=receipt.outcomes.length-verified.length;
-        const message=operation==='favorite'?`${verified.length} favorited`:operation==='trash'?`${verified.length} moved to Recently deleted`:`${verified.length} restored`;
-        const undo=operation==='trash'?changed.map(row=>normalize(row.item!)):[];
-        owner.toast(message+(failed?`; ${failed} not verified. Cancel selection and reselect to refresh.`:''),undo.length?{undo:()=>{void changeSelection(owner,'restore',undo);}}:undefined);
+      for(const batch of batches(chosen,BATCH)){
+        if(disposed)return;
+        let receipt;try{receipt=await library.changeMany({operation:native,items:batch.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''}))});}
+        catch{unverified=true;failed+=batch.length;continue;}
+        for(const outcome of receipt.outcomes){if(!outcome.item){failed++;continue;}const before=batch.find(item=>nativeId(item.id)===outcome.id);const item={...before,...normalize(outcome.item)} as SavedPhoto;verified.push(item);if(outcome.status!=='unchanged')changed.push(item);}
+        failed+=Math.max(0,batch.length-receipt.outcomes.length);
       }
-    }catch{if(owner.isActive())owner.toast('Batch outcome could not be verified. Reopen Photos before retrying.');}
-    finally{mutating=false;if(!disposed){void refresh();void loadTrash(owner);void loadCounts(owner);void loadCustomAlbums(owner);owner.set({nativeMultiSelection:Date.now()});}}
+      if(disposed)return;
+      ++libraryEpoch;++trashEpoch;albumKey='';++albumEpoch;
+      const live=verified.filter(row=>!row.trashed),gone=verified.filter(row=>row.trashed);
+      captures=insertRows(patchRows(captures,verified,row=>!row.trashed),operation==='restore'?live:[]);
+      trash=insertRows(patchRows(trash,verified,row=>!!row.trashed),operation==='trash'?gone:[]);
+      albumRows=patchRows(albumRows,verified,row=>!row.trashed);
+      if(owner.isActive()){
+        selection=undefined;selectionTab=undefined;
+        owner.set({nativeMultiSelection:Date.now(),nativeCaptureRevision:Date.now()});
+        const n=verified.length,message=operation==='favorite'?(native==='favorite'?`Added ${n} to Favorites`:`Removed ${n} from Favorites`):operation==='trash'?`${n} moved to Recently deleted`:`${n} restored`;
+        const undo=operation==='trash'?changed.filter(row=>row.trashed):[];
+        owner.toast(message+(failed?` · ${failed} not changed`:''),undo.length?{undo:()=>{void changeSelection(owner,'restore',undo);}}:undefined);
+      }
+      if(unverified&&!verified.length&&owner.isActive())owner.toast('Nothing changed. Try again.');
+    }finally{mutating=false;if(!disposed){void refresh();void loadTrash(owner);void loadCounts(owner);void loadCustomAlbums(owner);owner.set({nativeMultiSelection:Date.now()});}}
   }
   // Browser-owned album storage reports damaged saved data by failing to read.
   // Albums then offers the exact-byte recovery dialog; saved media is unaffected.
@@ -391,25 +456,42 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   async function loadCustomAlbums(owner: Bag) {
     if(disposed)return;const token=++albumsEpoch;albumsBusy=true;
     try{const result=await library.albums();if(!disposed&&token===albumsEpoch){customAlbums=result.items;albumsLoaded=true;albumsRecovery=false;owner.set({nativeAlbumsError:'',nativeAlbumsRevision:token});}}
-    catch{const recovery=await albumStoreNeedsRecovery().catch(()=>false);if(!disposed&&token===albumsEpoch){albumsLoaded=true;albumsRecovery=recovery;owner.set({nativeAlbumsError:recovery?'Saved albums need recovery. Open Recover albums in Albums.':'Custom albums could not be loaded. Reopen album management to retry.',nativeAlbumsRevision:token});}}
+    catch{const recovery=await albumStoreNeedsRecovery().catch(()=>false);if(!disposed&&token===albumsEpoch){albumsLoaded=true;albumsRecovery=recovery;owner.set({nativeAlbumsError:recovery?'Albums could not be read.':'Albums could not be loaded.',nativeAlbumsRevision:token});}}
     finally{if(token===albumsEpoch)albumsBusy=false;}
   }
   function openAlbumManager(owner:Bag,media?:SavedPhoto,album?:OwnedAlbum,trigger?:HTMLElement){
     albumTrigger=trigger||(document.activeElement instanceof HTMLElement?document.activeElement:null);
     manager={media,album,name:album?.name||''};owner.set({sheet:'owned-album'});void loadCustomAlbums(owner);
   }
+  /** Adds rows one by one at their shown revisions; a row changed since is skipped by the store. */
+  async function addMembers(album:{id:string;revision:string},rows:SavedPhoto[]):Promise<{added:number;skipped:number}>{
+    let revision=album.revision,added=0,skipped=0;
+    for(const row of rows){if(disposed)break;try{const result=await library.changeAlbum({operation:'add',id:album.id,revision,mediaId:nativeId(row.id),mediaRevision:row.mutationRevision});revision=result.revision;added++;}catch{skipped++;try{revision=(await library.albums()).items.find(item=>item.id===album.id)?.revision||revision;}catch{/* keep the last revision */}}}
+    return {added,skipped};
+  }
   async function mutateAlbum(owner:Bag,operation:string,target?:OwnedAlbum){
     const current=manager;if(!current||mutating||disposed)return;
-    const album=target||current.album,media=current.media;
+    const album=target||current.album,media=current.media,items=current.items;
     mutating=true;owner.set({nativePhotoMutation:Date.now()});
     try{
-      await library.changeAlbum({operation,...(album?{id:album.id,revision:album.revision}:{}),...(media?{mediaId:nativeId(media.id),mediaRevision:media.mutationRevision}:{}),name:current.name});
+      let note='';
+      if(items?.length&&(operation==='create'||operation==='add')){
+        // Add to album from a selection: create (with the first item), then add the rest.
+        const [first,...rest]=items;let base:{id:string;revision:string};
+        if(operation==='create'){const created=await library.changeAlbum({operation:'create',name:current.name,mediaId:nativeId(first.id),mediaRevision:first.mutationRevision});base={id:created.id,revision:created.revision};}
+        else base={id:album!.id,revision:album!.revision};
+        const result=await addMembers(base,operation==='create'?rest:items);
+        const name=operation==='create'?current.name.trim():album!.name,count=result.added+(operation==='create'?1:0);
+        note=`Added ${count} to “${name}”`+(result.skipped?` · ${result.skipped} not added`:'');
+      }else await library.changeAlbum({operation,...(album?{id:album.id,revision:album.revision}:{}),...(media?{mediaId:nativeId(media.id),mediaRevision:media.mutationRevision}:{}),name:current.name});
       if(disposed)return;
       albumKey='';++albumEpoch;
       if(manager===current&&owner.isActive()&&owner.get('photos').sheet==='owned-album'){
         manager=undefined;
-        owner.set({sheet:null,...(operation==='delete'?{album:null,open:null,nativePhotoSelection:null}:{}),nativeAlbumsError:''});
-        if(operation==='delete'||operation==='remove')owner.toast(operation==='delete'?'Album deleted. Its media was kept.':'Removed from album. Its media was kept.');
+        if(items){selection=undefined;selectionTab=undefined;}
+        owner.set({sheet:null,...(operation==='delete'?{album:null,open:null,nativePhotoSelection:null}:{}),nativeAlbumsError:'',nativeMultiSelection:Date.now()});
+        if(note)owner.toast(note);
+        else if(operation==='delete'||operation==='remove')owner.toast(operation==='delete'?'Album deleted':'Removed from album');
       }
       await loadCustomAlbums(owner);
     }catch(error){if(!disposed){if(manager===current&&owner.isActive())owner.toast(error instanceof Error?error.message:'Album could not be saved.');void loadCustomAlbums(owner);}}
@@ -421,16 +503,17 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     catch { countsError = true; }
     finally { if (token === countsEpoch) countsBusy = false; }
   }
+  const ALBUM_KEYS:Record<string,string>={fav:'favorites',video:'videos',camera:'camera',shot:'screenshots'};
   async function loadAlbum(key: string, owner: Bag, more = false) {
     if (disposed || (albumBusy && albumKey === key && more)) return;
-    const token = ++albumEpoch; albumKey = key; albumBusy = true;
-    if (!more) { albumRows = []; albumNext = ''; }
+    const token = ++albumEpoch, same = albumKey === key; albumKey = key; albumBusy = true;
+    // Reloading the open album keeps its rows until the new page arrives, so a selection survives.
+    if (!more && !same) { albumRows = []; albumNext = ''; }
     try {
-      const result = await library.list({ album: key.startsWith('custom:') ? key : key === 'fav' ? 'favorites' : 'videos', ...(more ? {before:albumNext} : {}) });
+      const result = await library.list({ album: key.startsWith('custom:') ? key : ALBUM_KEYS[key] ?? 'videos', ...(more ? {before:albumNext} : {}) });
       if (disposed || token !== albumEpoch) return;
-      const rows = result.items.map(normalize); albumRows = more ? [...albumRows,...rows.filter(row => !albumRows.some(old => old.id === row.id))] : rows;
-      if(permittedLibrary())albumRows=albumRows.slice(-240);
-      albumNext = result.next; owner.set({nativeAlbumError:'',nativeAlbumRevision:token});
+      const rows = result.items.map(normalize); albumRows = more ? mergeWindow(albumRows, rows, WINDOW) : newestFirst(rows);
+      albumNext = result.next; patchView(); owner.set({nativeAlbumError:'',nativeAlbumRevision:token});
       if (!more) void loadCounts(owner);
     } catch { if (!disposed && token === albumEpoch) owner.set({nativeAlbumError:'Album could not be loaded. Tap to retry.'}); }
     finally { if (token === albumEpoch) albumBusy = false; }
@@ -441,7 +524,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     try {
       const result = normalize(await library.setFavorite({id:nativeId(row.id),revision:row.mutationRevision,favorite:!row.favorite}));
       if (disposed) return;
-      const updated = {...row,...result}; captures = captures.map(item=>item.id===row.id?updated:item);
+      const updated = {...row,...result}; captures = patchRows(captures,[updated],()=>true); albumRows = patchRows(albumRows,[updated],()=>true);
       const stillSelected = owner.isActive() && owner.get('photos').open === row.id;
       if (stillSelected) preview = updated;
       owner.set({...(stillSelected ? {nativePhotoSelection:captureSelection(updated)} : {}),nativeCaptureRevision:Date.now()});
@@ -458,8 +541,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     mutating=true;owner.set({nativePhotoMutation:Date.now()});
     try {
       const selected=items?.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''}));
-      if(permittedLibrary()&&(!selected?.length||selected.length>20)){owner.toast('Select up to 20 deleted items first.');return;}
-      const result=permittedLibrary()?{confirmation:'',count:selected!.length,items:selected}:await library.prepareDeleteTrash(selected?{items:selected}:undefined);
+      if(permittedLibrary()&&!selected?.length){owner.toast('Select items first.');return;}
+      // Permitted media and large selections are deleted in batches after this one confirmation.
+      const result=permittedLibrary()||selected&&selected.length>BATCH?{confirmation:'',count:selected!.length,items:selected}:await library.prepareDeleteTrash(selected?{items:selected}:undefined);
       if(disposed||!owner.isActive()||owner.get('photos').album!=='trash'){if(result.confirmation)void library.cancelDeleteTrash({confirmation:result.confirmation}).catch(()=>{});return;}
       if(result.count===0){void library.cancelDeleteTrash({confirmation:result.confirmation}).catch(()=>{});owner.toast('Recently deleted is empty.');return;}
       if(prepared?.confirmation)void library.cancelDeleteTrash({confirmation:prepared.confirmation}).catch(()=>{});
@@ -472,15 +556,22 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const snapshot=prepared;mutating=true;closeVideo();owner.set({nativePhotoMutation:Date.now()});
     try {
       let result:{deletedIds:string[];skippedIds:string[];failedIds:string[]};
-      if(snapshot.items){const receipt=await nativeLibrary.deletePermittedTrash({items:snapshot.items});result={deletedIds:[],skippedIds:[],failedIds:[]};for(const item of snapshot.items){const outcome=receipt.outcomes.find(row=>row.id===item.id);if(outcome?.status==='deleted')result.deletedIds.push(item.id);else if(outcome?.status==='stale')result.skippedIds.push(item.id);else result.failedIds.push(item.id);}}
+      if(snapshot.items){
+        result={deletedIds:[],skippedIds:[],failedIds:[]};
+        for(const batch of batches(snapshot.items,BATCH)){
+          if(disposed)return;
+          if(permittedLibrary()){const receipt=await nativeLibrary.deletePermittedTrash({items:batch});for(const item of batch){const outcome=receipt.outcomes.find(row=>row.id===item.id);if(outcome?.status==='deleted')result.deletedIds.push(item.id);else if(outcome?.status==='stale')result.skippedIds.push(item.id);else result.failedIds.push(item.id);}}
+          else{const ticket=await library.prepareDeleteTrash({items:batch}),receipt=await library.deletePreparedTrash({confirmation:ticket.confirmation});result.deletedIds.push(...receipt.deletedIds);result.skippedIds.push(...receipt.skippedIds);result.failedIds.push(...receipt.failedIds);}
+        }
+      }
       else result=await library.deletePreparedTrash({confirmation:snapshot.confirmation});
       if(disposed)return;
       ++libraryEpoch;++trashEpoch;const deleted=new Set(result.deletedIds.map(id=>'native-camera-'+id));trash=trash.filter(row=>!deleted.has(row.id));captures=captures.filter(row=>!deleted.has(row.id));preview=undefined;
       const remaining=result.skippedIds.length+result.failedIds.length;
-      selection=selection?.filter(row=>!deleted.has(row.id));if(!selection?.length)selection=undefined;owner.set({sheet:null,open:null,nativePhotoSelection:null,nativeTrashMutationStatus:remaining?`${result.deletedIds.length} deleted. ${remaining} changed or could not be deleted; review the remaining items.`:''});
-      owner.toast(remaining?'Some items were not deleted.':`${result.deletedIds.length} ${result.deletedIds.length===1?'item':'items'} deleted forever`);
+      selection=selection?.filter(row=>!deleted.has(row.id));if(!selection?.length)selection=undefined;owner.set({sheet:null,open:null,nativePhotoSelection:null,nativeTrashMutationStatus:remaining?`${remaining} not deleted. Try again.`:''});
+      owner.toast(`${result.deletedIds.length} deleted`);
       void refresh();void loadTrash(owner);void loadCounts(owner);void loadCustomAlbums(owner);
-    }catch(error){if(!disposed){owner.set({sheet:null,nativeTrashMutationStatus:'Deletion could not be completed. Review the remaining items.'});owner.toast(error instanceof Error?error.message:'Deletion failed.');void loadTrash(owner);}}
+    }catch(error){if(!disposed){owner.set({sheet:null,nativeTrashMutationStatus:'Not deleted. Try again.'});owner.toast(error instanceof Error?error.message:'Deletion failed.');void loadTrash(owner);}}
     finally{if(prepared===snapshot)prepared=undefined;mutating=false;if(!disposed)owner.set({nativePhotoMutation:Date.now()});}
   }
   async function loadTrash(owner: Bag, more = false) {
@@ -491,25 +582,26 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const result = await library.list({ trashed: true, ...(more ? { before: trashNext } : {}) });
       if (disposed || token !== trashEpoch) return;
       const rows = result.items.map(normalize);
-      trash = more ? [...trash, ...rows.filter(row => !trash.some(old => old.id === row.id))] : rows;
-      if(permittedLibrary())trash=trash.slice(-240);
-      trashNext = result.next; trashLoaded = true;
+      trash = more ? mergeWindow(trash, rows, WINDOW) : newestFirst(rows);
+      trashNext = result.next; trashLoaded = true; patchView();
       owner.set({ nativeTrashError: '', nativeTrashRevision: Date.now() });
     } catch { if (!disposed) owner.set({ nativeTrashError: browserMode?'Browser trash could not be loaded. Tap to retry.':'Android trash could not be loaded. Android 11 or later is required.' }); }
     finally { trashLoading = false; if (trashRefreshAgain && !disposed) { trashRefreshAgain = false; queueMicrotask(() => { void loadTrash(owner); }); } }
   }
-  async function changeTrash(row: SavedPhoto, desired: boolean, owner: Bag) {
+  async function changeTrash(row: SavedPhoto, desired: boolean, owner: Bag, nextId?: string) {
     if (mutating || sharing || disposed) return;
     if (!row.mutationRevision) { owner.toast('Refresh Photos before changing this media.'); return; }
     mutating = true; closeVideo();
     try {
       const result = normalize(await library.setTrashed({ id: nativeId(row.id), revision: row.mutationRevision, trashed: desired }));
       if (disposed) return;
-      ++libraryEpoch; ++trashEpoch; captures = captures.filter(item => item.id !== row.id); trash = trash.filter(item => item.id !== row.id);
-      if (desired) trash.unshift({ ...row, ...result });
-      else captures.unshift({ ...row, ...result });
+      ++libraryEpoch; ++trashEpoch; const updated = { ...row, ...result };
+      captures = insertRows(captures.filter(item => item.id !== row.id), desired ? [] : [updated]); albumRows = albumRows.filter(item => item.id !== row.id);
+      trash = insertRows(trash.filter(item => item.id !== row.id), desired ? [updated] : []);
       preview = undefined; retirePhotoRead();
       owner.set({ open: null, nativePhotoSelection: null, sheet: null, sel: null, nativeCaptureRevision: Date.now() });
+      // Delete in the viewer moves on to the neighbouring item.
+      if (nextId && owner.isActive()) void openSaved(nextId, owner);
       owner.toast(desired ? 'Moved to Recently deleted' : 'Restored', desired ? { undo: () => { void changeTrash({ ...row, ...result }, false, owner); } } : undefined);
       void refresh(); void loadTrash(owner); void loadCounts(owner); void loadCustomAlbums(owner); albumKey=''; ++albumEpoch;
     } catch (error) {
