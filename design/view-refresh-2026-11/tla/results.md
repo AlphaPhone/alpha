@@ -18,7 +18,7 @@ Run: `design/view-refresh-2026-11/tla/check.sh <tla2tools.jar>` (writes <area>/r
 | notes-view | AsBuilt_Cap | Invariant NoLengthLimit is violated | 104 |
 | notes-view | AsBuilt_Segments | Action property CrashKeepsAudio is violated | 2535 |
 | notes-view | AsBuilt_StreamAsr | Temporal property TranscriptKeepsUp was violated | 59216 |
-| notes-view | Design | No error has been found | 1,392,258 |
+| notes-view | Design | No error has been found | 131,110 |
 | files-browser | Ablate_Conflict | Invariant NoOverwriteWithoutConfirm is violated | 255 |
 | files-browser | AsBuilt_Categories | Invariant CategoryIsQuery is violated | initial state |
 | files-browser | Design | No error has been found | 112,117 |

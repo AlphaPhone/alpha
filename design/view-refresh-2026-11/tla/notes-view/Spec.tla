@@ -98,9 +98,12 @@ StorageFull ==
   /\ rec' = "saved" /\ durable' = recorded /\ stopCause' = "storage"
   /\ UNCHANGED <<recorded, asr>> /\ UNCHANGED NoteVars
 
+\* As built (AlphaNoteRecorder.recover): with FixSegments the recording comes back paused
+\* with its finished segments, and the user resumes it, finishes it (Done) or discards it.
 ProcessDeath ==
   /\ rec \in {"recording", "paused"} /\ budget > 0 /\ budget' = budget - 1
-  /\ rec' = "saved" /\ recorded' = durable /\ stopCause' = "death"
+  /\ rec' = IF FixSegments THEN "paused" ELSE "saved"
+  /\ recorded' = durable /\ stopCause' = "death"
   /\ asr' = IF asr > durable THEN durable ELSE asr
   /\ UNCHANGED durable /\ UNCHANGED NoteVars
 
