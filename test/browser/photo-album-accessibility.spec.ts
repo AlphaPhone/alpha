@@ -8,7 +8,7 @@ for(const theme of ['light','dark'])test(`${theme} album manager owns keyboard f
  await page.goto(`/?shell=launcher&theme=${theme}`);
  await page.evaluate(async()=>{const {importBrowserPhoto}=await import('/src/prototype/browser-camera.ts');const canvas=document.createElement('canvas');canvas.width=100;canvas.height=80;canvas.getContext('2d')!.fillRect(0,0,100,80);await importBrowserPhoto({original:new File([],'fixture.jpg'),image:canvas.toDataURL('image/jpeg'),width:100,height:80},new AbortController().signal);});
  await page.getByRole('button',{name:'Photos',exact:true}).click();
- await page.getByRole('button',{name:/Captured photo/}).click();
+ await page.getByRole('button',{name:/^Photo, /}).click();
  const info=page.getByRole('button',{name:'Photo info',exact:true});
  await info.focus();await page.keyboard.press('Enter');
  const dialog=page.locator('[data-alpha-album-manager]');

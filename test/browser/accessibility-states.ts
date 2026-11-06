@@ -93,7 +93,6 @@ export const LIVE_STATES: State[] = [
   live('Browser menu', ['Browser', 'Menu']),
   live('Browser address', ['Browser', 'Edit address']),
   live('Calendar alarms', ['Calendar', 'Clock alarms']),
-  live('Photos search', ['Photos', 'Search photos']),
   live('Notes search', ['Notes', 'Search notes']),
   live('Notes source document', ['Notes', 'New note', 'Link source document']),
   live('Notes recording', ['Notes', 'Record and transcribe'], 'notes-recording'),

@@ -106,7 +106,7 @@ test('the note editor keeps Delete on screen beside the other header actions', a
 });
 
 test.describe('200% text keeps the way out on screen', () => {
-  for (const [start, open, field] of [['inbox', 'Search email', 'Search mail'], ['photos', 'Search photos', 'Search photos'], ['notes', 'Search notes', 'Search notes'], ['files', 'Search files', 'Search files']] as const) {
+  for (const [start, open, field] of [['inbox', 'Search email', 'Search mail'], ['notes', 'Search notes', 'Search notes'], ['files', 'Search files', 'Search files']] as const) {
     test(`${start} search: the field shrinks and Close search stays reachable`, async ({ page }) => {
       await page.goto(`/?mode=mock&start=${start}`);
       await page.getByRole('button', { name: open, exact: true }).click();

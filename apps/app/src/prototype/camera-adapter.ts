@@ -260,8 +260,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     if(edit?.operationId===ticket.token)cancelEdit();
     if(!updateView)return true;owner.set({nativeCopyRecovery:false});
     if(videoEditSource&&videoEditSource===ticket.source&&closeVideoEdit){const close=closeVideoEdit;closeVideoEdit=undefined;close();}
-    if(value.status==='saved'&&value.id){owner.toast('Saved a copy. Original unchanged.');void refresh();await openSaved('native-camera-'+value.id,owner);}
-    else{owner.toast(value.status==='failed'?'Copy was not saved. Original unchanged.':'No copy was created. Original unchanged.');owner.set({nativeEditRevision:Date.now()});}return true;
+    if(value.status==='saved'&&value.id){owner.toast('Copy saved');void refresh();await openSaved('native-camera-'+value.id,owner);}
+    else{owner.toast(value.status==='failed'?'Copy not saved. Try again.':'No changes to save');owner.set({nativeEditRevision:Date.now()});}return true;
   }
   let recoveringEdit=false,automaticEditRecovery='';
   async function recoverEdit(owner:Bag,original?:EditCompletion){
@@ -1147,7 +1147,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       let gesture: { x: number; y: number } | undefined, swiped = false;
       const when = viewerTitle(shotAt(selected)), chrome = st.chrome !== false;
       data.viewing = true; data.viewEmpty = false; data.editing = !!edit&&edit.source===selected.id;
-      data.v = { bg: imageCss(selected).replace('cover', 'contain'), tf: '', flt: '', slide: '', day: when.day, sub: when.time, chromeOp: chrome ? 1 : 0, chromePE: chrome ? 'auto' : 'none', favIcon: selected.favorite ? 'fill:currentColor' : 'fill:none', favLabel: selected.favorite ? 'Remove from favorites' : 'Add to favorites', vid: selected.kind === 'video', playing: !!video && !video.paused, playBtn: selected.kind === 'video' && (!video || video.paused), prog: `width:${video?.duration ? Math.min(100, video.currentTime / video.duration * 100) : 0}%`, play: () => { void playVideo(selected, currentApi); }, pause: () => { video?.pause(); currentApi.set({ nativePlaybackRevision: Date.now() }); }, notSecure: true,
+      data.v = { bg: imageCss(selected).replace('cover', 'contain'), tf: '', flt: '', slide: '', day: when.day, sub: when.time, chromeOp: chrome ? 1 : 0, chromePE: chrome ? 'auto' : 'none', favIcon: selected.favorite ? 'fill:currentColor' : 'fill:none', favLabel: selected.favorite ? 'Remove from favorites' : 'Favorite', vid: selected.kind === 'video', playing: !!video && !video.paused, playBtn: selected.kind === 'video' && (!video || video.paused), prog: `width:${video?.duration ? Math.min(100, video.currentTime / video.duration * 100) : 0}%`, play: () => { void playVideo(selected, currentApi); }, pause: () => { video?.pause(); currentApi.set({ nativePlaybackRevision: Date.now() }); }, notSecure: true,
         // Tap shows or hides the controls; a horizontal swipe moves to the neighbouring item.
         tap: () => { if (swiped) { swiped = false; return; } currentApi.set({ chrome: !chrome }); },
         down: (event: PointerEvent) => { gesture = { x: event.clientX, y: event.clientY }; swiped = false; },
@@ -1169,7 +1169,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // Info: date, file, size, dimensions, folder and albums.
       const albums=customAlbums.filter(album=>album.memberIds.includes(nativeId(selected.id))).map(album=>album.name);
       const facts=[['Date',`${new Date(shotAt(selected)).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})} ${when.time}`],['File',selected.name||''],['Size',formatBytes(selected.size)],['Dimensions',selected.width&&selected.height?`${selected.width} × ${selected.height}`:''],['Length',durationLabel(selected)],['Folder',(selected.folder||'').replace(/\/$/,'')],['Albums',albums.join(', ')]].filter(([,value])=>value).map(([label,value])=>({label,value}));
-      data.v.info2={date:when.day,time:when.time,desc:'',hasPlace:false,hasPeople:false,people:[],facts,hasFacts:true,canAlbum:!selected.trashed,addToAlbum:(event:Event)=>{openAlbumManager(currentApi,selected,undefined,event.currentTarget as HTMLElement);if(manager)manager.choosing=true;currentApi.set({nativeAlbumDraft:Date.now()});}};
+      data.v.info2={date:when.day,time:when.time,desc:'',hasPlace:false,hasPeople:false,people:[],facts,hasFacts:true,canAlbum:!selected.trashed,addToAlbum:()=>{
+        // The info sheet closes as the album sheet opens; focus returns to the viewer's Info control.
+        const infoControl=document.querySelector<HTMLElement>(`[data-alpha-subview="photos-viewer"] button[aria-label="${data.v.infoLabel}"]`)||undefined;
+        openAlbumManager(currentApi,selected,undefined,infoControl);if(manager)manager.choosing=true;currentApi.set({nativeAlbumDraft:Date.now()});}};
       data.infoOpen=st.sheet==='photo-info'||!!data.infoOpen;
       if(edit?.source===selected.id){const current=edit;data.v.ed={bg:`url("${current.image}") center / contain no-repeat`,tf:'',flt:'none',cropOn:current.crop,cropCss:current.crop?'background:#ffffff;color:#000000':'background:rgba(255,255,255,.12);color:#ffffff',status:current.uncertain?'Save outcome unknown. Tap Save copy to check it.':'',saveLabel:'Save copy',saveDisabled:current.busy,rotate:()=>void transformEdit(currentApi,true),crop:()=>void transformEdit(currentApi,false),cancel:()=>{cancelEdit();currentApi.set({nativeEditRevision:Date.now()});},save:()=>void saveEdit(currentApi),filters:[['none','Original'],['vivid','Vivid'],['warm','Warm'],['cool','Cool'],['mono','Mono'],['fade','Fade'],['noir','Noir']].map(([id,label])=>({label,bg:`url("${selected.image}") center / cover no-repeat`,flt:({none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'} as Record<string,string>)[id],on:current.filter===id,ring:current.filter===id?'box-shadow:0 0 0 2px #000,0 0 0 4px #fff':'',lc:current.filter===id?'#fff':'rgba(255,255,255,.6)',pick:()=>void transformEdit(currentApi,false,id)}))};}
     }
