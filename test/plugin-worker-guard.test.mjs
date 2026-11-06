@@ -19,7 +19,7 @@ const plugins={
  AlphaActionJournalPlugin:['worker()'],
  AlphaConnectionPlugin:['workers'],
  AlphaDevicePlugin:['diagnosticsWorker'],
- AlphaFilesPlugin:['worker'],
+ AlphaFilesPlugin:['worker','storageWorker'],
  AlphaHostedResultsPlugin:['io'],
  AlphaLocalAgentPlugin:['workers','voiceWorkers'],
  AlphaMailAttachmentsPlugin:['worker'],

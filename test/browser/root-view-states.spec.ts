@@ -16,7 +16,7 @@ const EMPTY: Record<View, RegExp> = {
   Photos: /^No photos$/,
   Maps: /Add a location/,
   Notes: /No notes yet/,
-  Files: /No recent files/,
+  Files: /Internal storage|Storage is unavailable/,
   Workflows: /Connect your remote agent in Settings\. Reminders on this phone stay available/,
   Settings: /Not signed in/,
   Reminders: /No visible events or reminders/,
