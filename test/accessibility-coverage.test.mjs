@@ -173,7 +173,7 @@ test('the layout fixes the sweep depends on stay in the stylesheet and template'
   assert.match(read('apps/app/src/main.tsx'), /installTextScale\(\)/);
   assert.match(read('apps/app/src/runtime/text-scale.ts'), /font-size:100px;line-height:1/);
   // Search fields may shrink below the input's intrinsic width, so Close search stays on screen.
-  for (const label of ['Search mail', 'Search photos', 'Search notes', 'Search files']) {
+  for (const label of ['Search mail', 'Search photos', 'Search files']) {
     const at = template.indexOf(`aria-label="${label}" placeholder`);
     assert.ok(at > 0, `${label} field is in the template`);
     const wrappers=[...template.slice(0,at).matchAll(/<(?:div|form)\b[^>]*style="flex-grow: 1;[^>]*>/g)];

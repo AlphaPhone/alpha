@@ -2366,6 +2366,7 @@
           </div>
         </div>
       </sc-if>
+      <sc-if value="{{notes.ed.menuShown}}"><div ref="{{notes.noteMenu}}" data-alpha-popup style="display: contents">
       <sc-if value="{{notes.ed.menuShown}}"><button aria-hidden="true" tabindex="-1" onClick="{{notes.ed.closeMenu}}" style="position: absolute; inset: 0; z-index: 11; background: transparent"></button></sc-if>
       <sc-if value="{{notes.ed.menuOpen}}"><div class="notes-menu" role="menu" aria-label="Note actions">
         <button role="menuitem" onClick="{{notes.ed.pin}}"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.notesPin}}"></path></svg>{{notes.ed.pinLabel}}</button>
@@ -2375,6 +2376,7 @@
       </div></sc-if>
       <sc-if value="{{notes.ed.moveOpen}}"><div class="notes-menu" role="menu" aria-label="Move to">
         <sc-for list="{{notes.ed.moveRows}}" as="m"><button role="menuitemradio" aria-checked="{{m.checked}}" onClick="{{m.pick}}"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.notesFolder}}"></path></svg><span style="flex: 1 1 auto">{{m.name}}</span>{{m.mark}}</button></sc-for>
+      </div></sc-if>
       </div></sc-if>
     </div>
   </sc-if>
@@ -2445,6 +2447,7 @@
           </sc-for>
         </div>
       </div>
+      <sc-if value="{{notes.vo.menuShown}}"><div ref="{{notes.noteMenu}}" data-alpha-popup style="display: contents">
       <sc-if value="{{notes.vo.menuShown}}"><button aria-hidden="true" tabindex="-1" onClick="{{notes.vo.closeMenu}}" style="position: absolute; inset: 0; z-index: 11; background: transparent"></button></sc-if>
       <sc-if value="{{notes.vo.menuOpen}}"><div class="notes-menu" role="menu" aria-label="Note actions">
         <button role="menuitem" onClick="{{notes.vo.pin}}"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.notesPin}}"></path></svg>{{notes.vo.pinLabel}}</button>
@@ -2454,6 +2457,7 @@
       </div></sc-if>
       <sc-if value="{{notes.vo.moveOpen}}"><div class="notes-menu" role="menu" aria-label="Move to">
         <sc-for list="{{notes.vo.moveRows}}" as="m"><button role="menuitemradio" aria-checked="{{m.checked}}" onClick="{{m.pick}}"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.notesFolder}}"></path></svg><span style="flex: 1 1 auto">{{m.name}}</span>{{m.mark}}</button></sc-for>
+      </div></sc-if>
       </div></sc-if>
     </div>
   </sc-if>
@@ -2476,6 +2480,7 @@
           </sc-for>
         </div>
       </div>
+      <sc-if value="{{notes.lk.menuShown}}"><div ref="{{notes.noteMenu}}" data-alpha-popup style="display: contents">
       <sc-if value="{{notes.lk.menuShown}}"><button aria-hidden="true" tabindex="-1" onClick="{{notes.lk.closeMenu}}" style="position: absolute; inset: 0; z-index: 11; background: transparent"></button></sc-if>
       <sc-if value="{{notes.lk.menuOpen}}"><div class="notes-menu" role="menu" aria-label="Note actions">
         <button role="menuitem" onClick="{{notes.lk.pin}}"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.notesPin}}"></path></svg>{{notes.lk.pinLabel}}</button>
@@ -2485,6 +2490,7 @@
       </div></sc-if>
       <sc-if value="{{notes.lk.moveOpen}}"><div class="notes-menu" role="menu" aria-label="Move to">
         <sc-for list="{{notes.lk.moveRows}}" as="m"><button role="menuitemradio" aria-checked="{{m.checked}}" onClick="{{m.pick}}"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.notesFolder}}"></path></svg><span style="flex: 1 1 auto">{{m.name}}</span>{{m.mark}}</button></sc-for>
+      </div></sc-if>
       </div></sc-if>
     </div>
   </sc-if>
@@ -2513,7 +2519,7 @@
     </div>
   </sc-if>
   <sc-if value="{{notes.trashAskOpen}}">
-    <div class="photo-delete-modal" style="position:absolute;inset:0;z-index:20">
+    <div ref="{{notes.askModal}}" data-alpha-popup class="photo-delete-modal" style="position:absolute;inset:0;z-index:20">
     <button aria-hidden="true" tabindex="-1" aria-label="Close" onClick="{{notes.trashAskClose}}" style="position: absolute; inset: 0; z-index: 20; background: var(--scrim)"></button>
     <div role="dialog" aria-modal="true" aria-label="{{notes.trashAskTitle}}" class="enter" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 21; max-height:calc(100% - 44px);overflow:auto;box-sizing:border-box; background: var(--s1); color: var(--fg); border-radius: 28px 28px 0 0; padding: 12px 24px 44px">
       <div style="display: flex; justify-content: center; padding-bottom: 14px"><span style="width: 40px; height: 4px; border-radius: 2px; background: var(--mut); opacity: .45"></span></div>
@@ -2526,7 +2532,7 @@
     </div>
   </sc-if>
   <sc-if value="{{notes.folderSheetOpen}}">
-    <div class="photo-delete-modal" style="position:absolute;inset:0;z-index:20">
+    <div ref="{{notes.folderModal}}" data-alpha-popup class="photo-delete-modal" style="position:absolute;inset:0;z-index:20">
     <button aria-hidden="true" tabindex="-1" aria-label="Close" onClick="{{notes.closeFolderSheet}}" style="position: absolute; inset: 0; z-index: 20; background: var(--scrim)"></button>
     <div role="dialog" aria-modal="true" aria-label="{{notes.folderSheetTitle}}" class="enter" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 21; max-height:calc(100% - 44px);overflow:auto;box-sizing:border-box; background: var(--s1); color: var(--fg); border-radius: 28px 28px 0 0; padding: 12px 24px 44px">
       <div style="display: flex; justify-content: center; padding-bottom: 14px"><span style="width: 40px; height: 4px; border-radius: 2px; background: var(--mut); opacity: .45"></span></div>
