@@ -34,20 +34,24 @@ test('batch controls remain reachable above the assistant pill in compact light 
  await page.setViewportSize({width:360,height:640});
  for(const theme of ['light','dark']){
   await page.goto('/?theme='+theme);await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:'Select photos',exact:true}).click();await page.locator('button[data-owned-media-id^="native-camera-"]').first().click();
-  await page.screenshot({path:info.outputPath('batch-'+theme+'.png')});await page.getByRole('button',{name:'Favorite selected',exact:true}).click();await expect(page.getByText('Added 1 to Favorites',{exact:true})).toBeVisible();
+  await page.screenshot({path:info.outputPath('batch-'+theme+'.png')});// Favorite toggles: the second theme run finds the tile already a favourite and removes it.
+  await page.getByRole('button',{name:/^(Favorite|Unfavorite) selected$/}).click();await expect(page.getByText(/^(Added 1 to|Removed 1 from) Favorites$/)).toBeVisible();
  }
 });
 
-test('cancelling selection returns to the Photos tab it started from',async({page})=>{
+test('cancelling selection returns to the Library; Albums has no Select',async({page})=>{
  await page.getByRole('button',{name:'Photos',exact:true}).click();
- for(const tab of ['Albums','Library']){
-  await page.getByRole('button',{name:tab,exact:true}).click();
-  await expect(page.getByRole('button',{name:tab,exact:true})).toHaveAttribute('aria-pressed','true');
-  await page.getByRole('button',{name:'Select photos',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Cancel selection',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Cancel selection',exact:true}).click();
-  await expect(page.getByRole('button',{name:tab,exact:true})).toHaveAttribute('aria-pressed','true');
- }
+ await page.getByRole('button',{name:'Albums',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Albums',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('button',{name:'Select photos',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Library',exact:true}).click();
+ await page.getByRole('button',{name:'Select photos',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Select items',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Select all',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'3 selected',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Deselect all',exact:true}).click();
+ await page.getByRole('button',{name:'Cancel selection',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Library',exact:true})).toHaveAttribute('aria-pressed','true');
  expect(await page.evaluate(async()=>{
   const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');
   return {count:(await browserPhotoLibrary.list()).items.length,trash:(await browserPhotoLibrary.summary()).trash};
