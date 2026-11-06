@@ -772,8 +772,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         if(phase!=='starting')void start(true);
         await untilSettled(signal);
         request.queued=false;
-        signal.throwIfAborted();current();
       }
+      // The request is checked again right before the shutter: the conversation or screen may have changed.
+      signal.throwIfAborted();current();
       if(request.refused)return {status:'failed',summary:'Recording started, so no photo was taken.'};
       if(!active()||phase!=='ready')return {status:'failed',summary:phase==='off'?'Camera closed. No photo was taken.':'Camera unavailable. No photo was taken.'};
       if(capturing||recording||recordingStarting||finalizing||controlBusy)return {status:'failed',summary:'Camera is busy. No photo was taken.'};
