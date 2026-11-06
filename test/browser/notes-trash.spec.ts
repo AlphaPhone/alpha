@@ -202,6 +202,7 @@ test('an expired voice entry never erases a recording that a saved note still re
  const entry=(await trashEntries(page))[0];
  // Another saved note now references the same recording (for example, re-associated by a later edit).
  await page.evaluate(async audio=>{const {openBrowserNotes}=await import('/src/runtime/browser-notes-document.ts');const store=await openBrowserNotes();await store.replace([...store.list,{id:'other-voice',kind:'voice',title:'Other',body:'',audio,dur:1,lines:[],summary:[],actions:[]}]);},entry.note.audio);
+ // Past the Trash deadline. The recording store's own backstop (60 days) is later, so the Trash rule decides.
  await page.clock.setSystemTime(entry.deletedAt+30*DAY+60_000);
  await page.reload();await openNotes(page);
  await openDeleted(page);

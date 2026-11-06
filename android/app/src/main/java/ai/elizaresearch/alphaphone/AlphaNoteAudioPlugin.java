@@ -37,7 +37,7 @@ public class AlphaNoteAudioPlugin extends Plugin {
      if(destroyed)return;
      String key=record.getName().substring(0,record.getName().length()-5);
      JSONObject value=read(key);long deleted=value.optLong("deletedAt",0);
-     if(deleted>0&&System.currentTimeMillis()-deleted>30L*24*60*60*1000){if(!audio(key).exists()||audio(key).delete()){if(!value.has("deletionOperations")){secure().removeCredentialSlot(slot(key));metadata(key).delete();}else{value.put("transcript","");write(key,value);}}}
+     if(deleted>0&&System.currentTimeMillis()-deleted>AUDIO_BACKSTOP_MS){if(!audio(key).exists()||audio(key).delete()){if(!value.has("deletionOperations")){secure().removeCredentialSlot(slot(key));metadata(key).delete();}else{value.put("transcript","");write(key,value);}}}
     }}catch(Exception retained){migrationFailures++;/* Keep both copies; explicit status reports recovery needed. */}
    }
   }catch(Exception retained){migrationFailures++;}
@@ -51,6 +51,8 @@ public class AlphaNoteAudioPlugin extends Plugin {
 
  /** Product Trash retention, matching notes-trash-policy.ts: thirty days after deletion. */
  static final long NOTES_TRASH_RETENTION_MS=30L*24*60*60*1000;
+ /** Orphan-recording backstop: twice Trash retention, so the Trash rules (live references, review) always decide first. */
+ static final long AUDIO_BACKSTOP_MS=2*NOTES_TRASH_RETENTION_MS;
  static final String NOTES_TRASH_SLOT="notes-trash:v1:device",NOTES_SLOT="notes-records:v1:device",PENDING_AUDIO_SLOT="notes-audio-deletions:v1:device";
  private static final String TRASH_PREFIX="{\"version\":1,\"entries\":[",TRASH_SUFFIX="]}";
  private static final String TRASH_WORK="alpha-notes-trash-backstop";
@@ -337,7 +339,7 @@ public class AlphaNoteAudioPlugin extends Plugin {
   if(!receipts.has(operation)&&receipts.length()>=128)throw new IOException("Recording operation history full");
   boolean legacyRestore=!deleted&&record.optLong("deletedAt",0)>0&&!record.has("activeDeletionOperation")&&!record.has("deletionOperations");
   if(record.has("deletedAt")&&!operation.equals(record.optString("activeDeletionOperation"))&&!legacyRestore)throw new IOException("Another deletion owns recording");
-  if(!deleted&&record.optLong("deletedAt",0)>0&&System.currentTimeMillis()-record.getLong("deletedAt")>30L*24*60*60*1000)throw new IOException("Recording expired");
+  if(!deleted&&record.optLong("deletedAt",0)>0&&System.currentTimeMillis()-record.getLong("deletedAt")>AUDIO_BACKSTOP_MS)throw new IOException("Recording expired");
   if(key.equals(playingId))stop();
   if(deleted){record.put("deletedAt",System.currentTimeMillis());record.put("activeDeletionOperation",operation);}
   else {if(!audio(key).isFile())throw new IOException();record.remove("deletedAt");record.remove("activeDeletionOperation");}
