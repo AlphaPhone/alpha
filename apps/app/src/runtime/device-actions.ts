@@ -161,7 +161,7 @@ export function proposalContextNotice(operation:ReviewableDeviceOperation,contex
   if(context.sensitive)return 'Unlock the phone to review this action.';
   if(isClockOperation(operation))return 'This Clock request used a different time zone. Ask again from this phone.';
   if(isMapsOperation(operation))return 'Open the selected place or route in Maps to review this action.';
-  if(isLibraryOperation(operation))return 'Open Photos > Device library to review this action.';
+  if(isLibraryOperation(operation))return 'Open Photos to review this action.';
   if(isReminderOperation(operation))return 'Open the selected reminder in Calendar to review this action.';
   if(isNativeNotesQuery(operation))return 'Open Home or Notes to review this Notes search.';
   if(isNotesOperation(operation))return 'Open the selected note to review this action.';
@@ -287,7 +287,7 @@ export class DeviceActions {
    * reads and Calendar/reminder writes retain their recorded separate review policy.
    * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
   async performRequested(messageId:string,context:ContextEnvelope,signal:AbortSignal,allowed:()=>Promise<boolean>,operationType?:ReviewableDeviceOperation['type']):Promise<OperationReceipt[]> {
-    const directTypes:readonly ReviewableDeviceOperation['type'][]=['create_note','open_view','camera_capture_photo','photo_library_select'];
+    const directTypes:readonly ReviewableDeviceOperation['type'][]=['create_note','open_view','camera_capture_photo','photo_library_select','photos_filter'];
     const results:OperationReceipt[]=[];
     for(const [id,entry] of [...this.proposals]) {
       if(results.length>=4||!directTypes.includes(entry.proposal.operation.type)||entry.proposal.workflow||entry.proposal.requestMessageId!==messageId||(operationType!==undefined&&entry.proposal.operation.type!==operationType))continue;

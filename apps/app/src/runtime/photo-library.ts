@@ -277,10 +277,17 @@ export type LibraryAgentOperation =
   | { type: 'photo_library_search'; kind?: LibraryKind | 'all'; from?: number; to?: number; favorites?: boolean; limit?: number }
   | { type: 'photo_library_inspect'; id: string }
   | { type: 'photo_library_select'; ids: string[] }
-  | { type: 'photo_library_review'; action: LibraryAction; items: { id: string; revision: string }[] };
+  | { type: 'photo_library_review'; action: LibraryAction; items: { id: string; revision: string }[] }
+  /** Read-only: narrows the Photos grid behind a clearable chip. It never changes or shares media. */
+  | { type: 'photos_filter'; from?: number; to?: number; kind?: LibraryKind; favorite?: boolean; album?: string; text?: string }
+  /** Reviewed: the owner confirms the album name and items in Photos before the album is created. */
+  | { type: 'photos_album_create'; name: string; ids: string[] };
 /** Negotiated with the agent before any library proposal is accepted. */
 export const PHOTO_LIBRARY_CAPABILITY = 'photos.library.v1';
-export const LIBRARY_OPERATION_TYPES: readonly string[] = ['photo_library_search', 'photo_library_inspect', 'photo_library_select', 'photo_library_review'];
+export const LIBRARY_OPERATION_TYPES: readonly string[] = ['photo_library_search', 'photo_library_inspect', 'photo_library_select', 'photo_library_review', 'photos_filter', 'photos_album_create'];
+/** Album keys photos_filter accepts besides a custom album id ("custom:<id>"). */
+export const PHOTOS_FILTER_ALBUMS: readonly string[] = ['favorites', 'videos', 'camera', 'screenshots'];
+const ALBUM_NAME = (value: unknown) => typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 80 && !/[\u0000-\u001f\u007f]/.test(value);
 export function isLibraryOperation(value: unknown): value is LibraryAgentOperation {
   return !!value && typeof value === 'object' && LIBRARY_OPERATION_TYPES.includes(String((value as Bag).type));
 }
@@ -303,7 +310,7 @@ export function validateLibraryOperation(value: unknown): LibraryAgentOperation 
   if (op.type === 'photo_library_inspect') { allowed(['type', 'id']); if (!isLibraryId(op.id)) throw Error('Invalid library id'); return { type: op.type, id: op.id }; }
   if (op.type === 'photo_library_select') {
     allowed(['type', 'ids']);
-    if (!Array.isArray(op.ids) || !op.ids.length || op.ids.length > LIBRARY_LIMITS.action || !op.ids.every(isLibraryId) || new Set(op.ids).size !== op.ids.length) throw Error('Invalid library selection');
+    if (!Array.isArray(op.ids) || !op.ids.length || op.ids.length > LIBRARY_LIMITS.validate || !op.ids.every(isLibraryId) || new Set(op.ids).size !== op.ids.length) throw Error('Invalid library selection');
     return { type: op.type, ids: [...op.ids] as string[] };
   }
   if (op.type === 'photo_library_review') {
@@ -320,6 +327,24 @@ export function validateLibraryOperation(value: unknown): LibraryAgentOperation 
     });
     return { type: op.type, action: op.action as LibraryAction, items };
   }
+  if (op.type === 'photos_filter') {
+    allowed(['type', 'from', 'to', 'kind', 'favorite', 'album', 'text']);
+    for (const key of ['from', 'to'] as const) if (op[key] !== undefined && !(Number.isSafeInteger(op[key]) && (op[key] as number) >= 0)) throw Error('Invalid filter date');
+    if (op.from !== undefined && op.to !== undefined && (op.from as number) > (op.to as number)) throw Error('Invalid filter date range');
+    if (op.kind !== undefined && op.kind !== 'image' && op.kind !== 'video') throw Error('Invalid filter kind');
+    if (op.favorite !== undefined && typeof op.favorite !== 'boolean') throw Error('Invalid favorites filter');
+    if (op.album !== undefined && !(typeof op.album === 'string' && (PHOTOS_FILTER_ALBUMS.includes(op.album) || /^custom:[A-Za-z0-9_-]{1,80}$/.test(op.album)))) throw Error('Invalid filter album');
+    if (op.text !== undefined && !(typeof op.text === 'string' && op.text.length <= LIBRARY_LIMITS.query && !/[\u0000-\u001f\u007f]/.test(op.text))) throw Error('Invalid filter text');
+    const result: LibraryAgentOperation = { type: 'photos_filter' };
+    for (const key of ['from', 'to', 'kind', 'favorite', 'album', 'text'] as const) if (op[key] !== undefined) (result as Bag)[key] = op[key];
+    return result;
+  }
+  if (op.type === 'photos_album_create') {
+    allowed(['type', 'name', 'ids']);
+    if (!ALBUM_NAME(op.name)) throw Error('Choose an album name between 1 and 80 characters');
+    if (!Array.isArray(op.ids) || !op.ids.length || op.ids.length > LIBRARY_LIMITS.kept || !op.ids.every(isLibraryId) || new Set(op.ids).size !== op.ids.length) throw Error('Invalid album items');
+    return { type: op.type, name: (op.name as string).trim(), ids: [...op.ids] as string[] };
+  }
   throw Error('Unsupported library operation');
 }
 
@@ -330,9 +355,11 @@ export function describeLibraryOperation(op: LibraryAgentOperation): { title: st
     return { title: 'Search device library', description: `List up to ${op.limit ?? 20} ${op.favorites ? 'favorite ' : ''}${what} Android lets Alpha read${op.from !== undefined || op.to !== undefined ? ' in the requested date range' : ''}. The agent receives ids, kind, dates, dimensions and duration only: no file or album names, no location, no pixels.` };
   }
   if (op.type === 'photo_library_inspect') return { title: 'Inspect one library item', description: 'Share one item\'s id, kind, dates, dimensions and duration with the agent. No file or album name, location or pixels.' };
-  if (op.type === 'photo_library_select') return { title: `Select ${op.ids.length === 1 ? '1 item' : `${op.ids.length} items`} in Photos`, description: 'Mark these items as selected in Photos > Device library on this phone. Nothing is changed or shared.' };
+  if (op.type === 'photo_library_select') return { title: `Select ${op.ids.length === 1 ? '1 item' : `${op.ids.length} items`} in Photos`, description: 'Nothing is changed or shared.' };
+  if (op.type === 'photos_filter') return { title: 'Filter Photos', description: 'Nothing is changed or shared.' };
+  if (op.type === 'photos_album_create') return { title: `Create album “${op.name}”`, description: `${op.ids.length} ${op.ids.length === 1 ? 'item' : 'items'}. You confirm it in Photos.` };
   const text = reviewText(op.action, op.items.length);
-  return { title: text.title, description: `Open this review in Photos > Device library. You confirm it there and then in Android's own dialog or share sheet before anything changes or leaves the phone. ${text.detail}` };
+  return { title: text.title, description: `You confirm it in Photos, then in Android. ${text.detail}` };
 }
 
 /** What a model may receive about library items: identity, an opaque session revision, kind,
@@ -353,7 +380,9 @@ export type LibraryAgentResult =
   | { kind: 'photo_library_search'; scope: LibraryScope; items: LibraryModelItem[]; more: boolean }
   | { kind: 'photo_library_inspect'; item: LibraryModelItem }
   | { kind: 'photo_library_select'; selected: number; missing: number }
-  | { kind: 'photo_library_review'; status: 'review_opened'; action: LibraryAction; count: number };
+  | { kind: 'photo_library_review'; status: 'review_opened'; action: LibraryAction; count: number }
+  | { kind: 'photos_filter'; shown: number; more: boolean }
+  | { kind: 'photos_album_create'; status: 'review_opened'; count: number; missing: number };
 const MODEL_KEYS = ['id', 'revision', 'kind', 'takenAt', 'width', 'height', 'duration', 'favorite'];
 function validateModelItem(value: unknown): LibraryModelItem {
   const row = bag(value);
@@ -378,6 +407,16 @@ export function validateLibraryResult(op: LibraryAgentOperation, value: unknown)
     keys(['kind', 'selected', 'missing']);
     if (!Number.isInteger(row.selected) || !Number.isInteger(row.missing) || (row.selected as number) < 0 || (row.missing as number) < 0 || (row.selected as number) + (row.missing as number) !== op.ids.length) throw Error('Invalid library selection result');
     return { kind: op.type, selected: row.selected as number, missing: row.missing as number };
+  }
+  if (op.type === 'photos_filter') {
+    keys(['kind', 'shown', 'more']);
+    if (!Number.isInteger(row.shown) || (row.shown as number) < 0 || typeof row.more !== 'boolean') throw Error('Invalid photos filter result');
+    return { kind: op.type, shown: row.shown as number, more: row.more };
+  }
+  if (op.type === 'photos_album_create') {
+    keys(['kind', 'status', 'count', 'missing']);
+    if (row.status !== 'review_opened' || !Number.isInteger(row.count) || !Number.isInteger(row.missing) || (row.count as number) < 1 || (row.missing as number) < 0 || (row.count as number) + (row.missing as number) !== op.ids.length) throw Error('Invalid album review result');
+    return { kind: op.type, status: 'review_opened', count: row.count as number, missing: row.missing as number };
   }
   keys(['kind', 'status', 'action', 'count']);
   if (row.status !== 'review_opened' || row.action !== op.action || row.count !== op.items.length) throw Error('Invalid library review result');
