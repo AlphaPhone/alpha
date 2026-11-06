@@ -2291,7 +2291,7 @@
   <div data-alpha-app-header="main" style="display: flex; align-items: center; height: 56px; margin-top: 0; padding: 0 8px 0 20px; gap: 2px; flex-shrink: 0">
   <sc-if value="{{showAppBack}}"><button class="app-header-back" aria-label="Back to apps" onClick="{{backToApps}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
     <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">Notes</h1>
-    <button class="ib" aria-label="Record voice note" onClick="{{notes.record}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.mic}}"></path></svg></button>
+    <button class="ib" aria-label="Record and transcribe" onClick="{{notes.record}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.mic}}"></path></svg></button>
     <button class="ib" aria-label="New note" onClick="{{notes.newNote}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg></button>
   </div>
   <div class="scr notes-folders" role="group" aria-label="Folders" style="display: flex; gap: 8px; overflow-x: auto; padding: 4px 16px 10px; flex-shrink: 0; touch-action: pan-x">
@@ -2327,6 +2327,7 @@
             </span>
           </button>
     </sc-for>
+    <sc-if value="{{notes.canImportText}}"><button class="tap" aria-label="Import text note" disabled="{{notes.documentBusy}}" onClick="{{notes.importText}}" style="display: flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 16px; padding: 0 14px; border-radius: 22px; background: var(--s2); color: var(--fg); font-size: 14px"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.filesDown}}"></path></svg>Import text note</button></sc-if>
   </div>
 
   

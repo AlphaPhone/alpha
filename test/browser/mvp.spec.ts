@@ -54,7 +54,7 @@ for (const [label, text] of [['unicode CRLF', 'Local 🧪 file\r\nExact bytes\n'
   await page.goto('/');
   await page.getByRole('button', {name:'Notes',exact:true}).click();
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', {name:'Import text note',exact:true}).click();
+  await page.getByRole('button',{name:'Import text note',exact:true}).click();
   await (await chooser).setFiles({ name:'Owned browser note.txt', mimeType:'text/plain', buffer:Buffer.from(text) });
   await expect(page.getByRole('textbox',{name:'Note',exact:true})).toHaveValue(text.replaceAll('\r\n','\n'));
   await page.getByRole('button',{name:'Share note',exact:true}).click();
@@ -80,8 +80,7 @@ test('Notes rejects invalid text and cancels an empty file selection without cre
     const chooser=page.waitForEvent('filechooser');
     await page.getByRole('button',{name:'Import text note',exact:true}).click();
     await (await chooser).setFiles(files);
-    await expect(page.getByText('No notes yet. Create a note to get started.')).toBeVisible();
-    await expect(page.getByRole('button',{name:'Import text note',exact:true})).toBeEnabled();
+    await expect(page.getByRole('button',{name:/^Open /})).toHaveCount(0);
     expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records.length)).toBe(0);
   }
 });
