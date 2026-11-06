@@ -1,5 +1,6 @@
 export type AudioRow={audioId:string;noteId:string;durationMs:number;blob:Blob;bytes?:ArrayBuffer;transcript:string;createdAt:number;mimeType:string;deletedAt?:number;expired?:true;deletionOperations?:Record<string,'removed'|'restored'|'purged'>;activeDeletionOperation?:string};
-const retention=30*24*60*60*1000;
+/** Orphan-recording backstop: twice the 30-day Notes Trash retention, so the Trash rules decide first. */
+const retention=60*24*60*60*1000;
 let database:Promise<IDBDatabase>|undefined;
 const id=(value:string)=>{if(typeof value!=='string'||!value||value.length>128)throw Error('Invalid recording identity.');};
 function db(){return database??=new Promise((resolve,reject)=>{const r=indexedDB.open('alpha.browser.audio.v1',1);r.onupgradeneeded=()=>r.result.createObjectStore('audio',{keyPath:'audioId'});r.onsuccess=()=>resolve(r.result);r.onerror=()=>{database=undefined;reject(r.error);};});}

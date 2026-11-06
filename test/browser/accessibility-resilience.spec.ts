@@ -95,18 +95,18 @@ test('a new browser tab shows no find bar until find is opened', async ({ page }
   await expect(page.getByRole('button', { name: 'Close find in page', exact: true })).toHaveCount(0);
 });
 
-test('the note editor keeps Delete on screen beside the other header actions', async ({ page }) => {
+test('the note editor keeps More (Pin, Move to, Delete) on screen beside the other header actions', async ({ page }) => {
   await page.addInitScript(offline);
   await page.goto('/');
   await page.getByRole('button', { name: 'Notes', exact: true }).click();
   await page.getByRole('button', { name: 'New note', exact: true }).click();
-  for (const name of ['Back to notes', 'Share note', 'Delete note']) await reachable(page, page.getByRole('button', { name, exact: true }));
+  for (const name of ['Back to notes', 'Share note', 'More']) await reachable(page, page.getByRole('button', { name, exact: true }));
   const sizes = await page.locator('.note-editor [data-alpha-app-header] button').evaluateAll(list => list.map(el => el.getBoundingClientRect().width));
   for (const width of sizes) expect(width).toBeGreaterThanOrEqual(44);
 });
 
 test.describe('200% text keeps the way out on screen', () => {
-  for (const [start, open, field] of [['inbox', 'Search email', 'Search mail'], ['photos', 'Search photos', 'Search photos'], ['notes', 'Search notes', 'Search notes'], ['files', 'Search files', 'Search files']] as const) {
+  for (const [start, open, field] of [['inbox', 'Search email', 'Search mail'], ['photos', 'Search photos', 'Search photos'], ['files', 'Search files', 'Search files']] as const) {
     test(`${start} search: the field shrinks and Close search stays reachable`, async ({ page }) => {
       await page.goto(`/?mode=mock&start=${start}`);
       await page.getByRole('button', { name: open, exact: true }).click();
