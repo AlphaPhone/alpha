@@ -7,9 +7,7 @@ import {createInlineModal} from '../runtime/inline-modal';
 import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
 import {createDeviceLibrary} from './photo-library-adapter';
-import {openScanDocument,pickNativeScanImage} from './scan-document';
 import {openVideoEditReview} from './video-edit-review';
-import {openCameraImageImport} from './browser-image-import';
 import {openScanReview} from './scan-review';
 import {systemPickerActive} from './scan-pdf';
 import {DailyApps} from '../daily';
@@ -25,18 +23,22 @@ export async function captureAgentPhoto(operationId:string,signal:AbortSignal,cu
 }
 type Bag = Record<string, any>;
 type VideoReceipt = { path: string; duration: number; width: number; height: number; fileSize: number };
-type Photo = { base64: string; format: string; width: number; height: number; path?: string };
+/** `thumbnail` (a JPEG of at most 256 px) replaces `base64` when a gallery capture asks for `thumbnailOnly`. */
+type Photo = { base64?: string; thumbnail?: string; format: string; width: number; height: number; path?: string };
+/** The bound lens: its real zoom range, whether it has a flash unit, and the settings it was restored with. */
+type Lens = { minZoom: number; maxZoom: number; hasFlash: boolean; zoom: number; flash: boolean };
+type PreviewReceipt = { width: number; height: number; deviceId: string; minZoom?: number; maxZoom?: number; hasFlash?: boolean; zoom?: number; flash?: string };
 /** Android wire subset. Upstream's HTMLElement is a web-only argument: the
  * pinned Android implementation ignores it and mounts a full-parent PreviewView.
  * Do not serialize a DOM node or invent rectangle arguments. */
 const nativeCamera = registerPlugin<{
-  startPreview(options: { direction: 'front' | 'back'; resolution: { width: number; height: number }; mirror: boolean }): Promise<{ width: number; height: number; deviceId: string }>;
+  startPreview(options: { direction: 'front' | 'back'; resolution: { width: number; height: number }; mirror: boolean }): Promise<PreviewReceipt>;
   stopPreview(): Promise<void>;
-  capturePhoto(options: { format: 'jpeg'; quality: number; saveToGallery: boolean }): Promise<Photo>;
+  capturePhoto(options: { format: 'jpeg'; quality: number; saveToGallery: boolean; thumbnailOnly?: boolean }): Promise<Photo>;
   startRecording(options: { audio: boolean; saveToGallery: boolean; quality: string; maxDuration: number; maxFileSize: number }): Promise<void>;
   stopRecording(): Promise<VideoReceipt>;
   getRecordingState(): Promise<{ isRecording: boolean; duration: number; fileSize: number }>;
-  switchCamera(options: { direction: 'front' | 'back' }): Promise<unknown>;
+  switchCamera(options: { direction: 'front' | 'back' }): Promise<PreviewReceipt>;
   setZoom(options: { zoom: number }): Promise<void>;
   setSettings(options: { settings: { flash: 'off' | 'on' } }): Promise<void>;
   setFocusPoint(options: { x: number; y: number }): Promise<void>;
@@ -76,7 +78,7 @@ const nativeLibrary = registerPlugin<{
   beginVideoEdit(options:{id:string;revision:string}):Promise<{sessionId:string;operationId:string;duration:number;width:number;height:number}>;
   saveVideoEdit(options:{sessionId:string;start:number;end:number;rotation:number;crop:boolean}):Promise<EditReceipt>;
   cancelVideoEdit(options:{sessionId?:string}):Promise<void>;
-  list(options: { before?: string; trashed?: boolean; album?: string }): Promise<{ items: SavedPhoto[]; next: string }>;
+  list(options: { before?: string; trashed?: boolean; album?: string; limit?: number }): Promise<{ items: SavedPhoto[]; next: string }>;
   read(options: { id: string; includeTrashed?: boolean }): Promise<SavedPhoto>;
   setTrashed(options: { id: string; revision: string; trashed: boolean }): Promise<SavedPhoto & {status:string}>;
   share(options: { id: string;revision?:string }): Promise<{ status: string; message?: string }>;
@@ -131,7 +133,24 @@ const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos
 type EditPreview={sessionId:string;operationId:string;image:string;width:number;height:number;reduced:boolean;maxEdge:number;filter:string};
 type EditReceipt={status:string;operationId:string;id?:string};
 type OwnedAlbum = {id:string;name:string;revision:string;count:number;memberIds:string[]};
-const finder = '[aria-label="Viewfinder. Tap to focus, hold to ask Alpha, swipe to change mode"]';
+const finder = '[data-alpha-camera="viewfinder"]';
+/** Zoom chips offered when the bound lens's range covers them. A lens with only 1× shows none. */
+const ZOOM_STOPS: [number, string][] = [[0.5, '.5'], [1, '1×'], [2, '2'], [5, '5']];
+export function lensFromReceipt(value: unknown): Lens {
+  const row = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const min = Number(row.minZoom), max = Number(row.maxZoom), zoom = Number(row.zoom);
+  const minZoom = Number.isFinite(min) && min > 0 && min <= 1 ? min : 1, maxZoom = Number.isFinite(max) && max >= 1 ? max : 1;
+  return { minZoom, maxZoom, hasFlash: row.hasFlash === true, zoom: Number.isFinite(zoom) && zoom >= minZoom && zoom <= maxZoom ? zoom : 1, flash: row.hasFlash === true && row.flash === 'on' };
+}
+export function zoomStops(lens: Pick<Lens, 'minZoom' | 'maxZoom'>): [number, string][] {
+  const stops = ZOOM_STOPS.filter(([ratio]) => ratio >= lens.minZoom - 1e-3 && ratio <= lens.maxZoom + 1e-3);
+  return stops.length > 1 ? stops : [];
+}
+/** A saved still's receipt: a MediaStore (or browser library) identity, never a file path. */
+export function photoReceiptPath(path: unknown, browser: boolean): string | undefined {
+  if (typeof path !== 'string') return undefined;
+  return (browser ? /^browser-photo:\/\/\/[1-9][0-9]{0,24}$/ : /^content:\/\/media\/(?:external|external_primary)\/images\/media\/[1-9][0-9]{0,18}$/).test(path) ? path : undefined;
+}
 
 /** Install after native/selection adapters. Reload app-owned captures from
  * MediaStore; other personal images remain behind the Android photo picker. */
