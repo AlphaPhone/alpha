@@ -49,6 +49,19 @@ let mountedAgent: LibraryAgent | undefined;
 /** The mounted Photos device library, for approved agent operations; undefined when Photos is not installed. */
 export const deviceLibraryAgent = () => mountedAgent;
 
+/** The main Photos Library (camera-adapter) once it is mounted: select, filter and album reviews act on
+ * the grid the owner sees, and reviews open there instead of in a separate device-library album. */
+export type MainLibraryHost = {
+  visible(): boolean;
+  run(operation: Extract<LibraryAgentOperation, { type: 'photo_library_select' | 'photos_filter' | 'photos_album_create' }>, signal: AbortSignal): Promise<LibraryAgentResult>;
+  /** Re-render after the review card opens, changes or closes. */
+  reviewChanged(): void;
+  /** Items moved to Recently deleted by a confirmed review; the host offers Undo. */
+  trashed(ids: string[]): void;
+};
+let mainHost: MainLibraryHost | undefined;
+export function setMainLibraryHost(host: MainLibraryHost | undefined) { mainHost = host; return () => { if (mainHost === host) mainHost = undefined; }; }
+
 /** One instance per Photos module mount. */
 export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, available = deviceLibraryAvailable) {
   const catalog = new LibraryCatalog(), selection = new LibrarySelection(), revisions = createCaptureRevisions(), modelRevisions = new LibraryRevisions(revisionSession());
@@ -150,11 +163,24 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     refresh();
   }
 
+  /** Every reviewed item still exists, untrashed, at the reviewed revision (NoActionOnStaleRev). */
+  async function validCurrent(items: { id: string; revision: string }[]): Promise<boolean> {
+    for (let at = 0; at < items.length; at += LIBRARY_LIMITS.validate) {
+      const batch = items.slice(at, at + LIBRARY_LIMITS.validate), rows = parseValidation(await port.validate({ items: batch }));
+      if (rows.length !== batch.length || rows.some(row => row.status !== 'current')) return false;
+    }
+    return true;
+  }
+  const changed = () => { if (mainHost) mainHost.reviewChanged(); else refresh(); };
+
   /** Runs only from the owner's in-app confirmation, then Android's own dialog or chooser. */
   async function confirmReview() {
     const pending = review;
     if (!pending || acting) return;
-    if (!reviewCurrent(pending, catalog)) { review = undefined; status = 'The reviewed items changed. Review them again.'; refresh(); return; }
+    let current = false;
+    try { current = mainHost ? await validCurrent(pending.items) : reviewCurrent(pending, catalog); } catch { current = false; }
+    if (review !== pending) return;
+    if (!current) { review = undefined; status = 'The reviewed items changed. Review them again.'; changed(); return; }
     acting = true; review = undefined; refresh();
     try {
       if (pending.action === 'share') {
@@ -166,14 +192,16 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         // A cancelled review rejects with LIBRARY_DECLINED and a revision changed before review with LIBRARY_STALE.
         const result = await port.requestChange({ operation: pending.action, items: pending.items });
         status = describeLibraryChange(result, pending.items.length);
-        selection.clear(); await revalidate();
+        selection.clear();
+        if (mainHost && pending.action === 'trash') mainHost.trashed((result.outcomes || []).filter(row => row.status === 'trashed').map(row => row.id));
+        await revalidate();
       }
     } catch (failure) {
       const code = (failure as { code?: string })?.code;
       if (code === 'LIBRARY_DECLINED') status = 'Android review was cancelled. Nothing changed.';
       else if (code === 'LIBRARY_STALE') { status = 'An item changed before Android review. Nothing changed; review again.'; try { await revalidate(); } catch { /* status already asks for a new review */ } }
       else status = 'The action could not be completed. Reload the library before retrying.';
-    } finally { acting = false; refresh(); }
+    } finally { acting = false; changed(); }
   }
 
   /** The native observer runs only while the device library album is visible and readable. */
@@ -200,6 +228,9 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
    * opaque revisions; select and review act only on the owner-visible device library. */
   const agent: LibraryAgent = {
     async run(operation, signal) {
+      const host = mainHost;
+      // The filter is read-only and works on whatever Photos shows, including Alpha's own captures.
+      if (host && operation.type === 'photos_filter') { if (!host.visible()) throw new LibraryAgentRefusal('Open Photos, then ask again.'); return host.run(operation, signal); }
       if (!available() || disposed) throw new LibraryAgentRefusal('The device library is available only in the Android app.');
       const current = await readScope();
       signal.throwIfAborted();
@@ -218,6 +249,23 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         signal.throwIfAborted();
         return { kind: operation.type, item: modelItem(row, modelRevisions) };
       }
+      if (host) {
+        if (!host.visible()) throw new LibraryAgentRefusal('Open Photos, then ask again.');
+        if (operation.type === 'photo_library_select' || operation.type === 'photos_album_create' || operation.type === 'photos_filter') {
+          if (operation.type !== 'photos_filter' && (acting || review)) throw new LibraryAgentRefusal('Finish the open review first.');
+          return host.run(operation, signal);
+        }
+        if (acting || review) throw new LibraryAgentRefusal('Finish the open review first.');
+        const items = operation.items.map(entry => ({ id: entry.id, revision: modelRevisions.native(entry.id, entry.revision) ?? '' }));
+        if (items.some(entry => !entry.revision)) throw new LibraryAgentRefusal('An item changed since the assistant read it. Nothing changed; ask again.');
+        const prepared = prepareReview(operation.action, items);
+        // The review binds the exact revisions the assistant read; the provider confirms they are still current.
+        if (!await validCurrent(prepared.items)) throw new LibraryAgentRefusal('An item changed or left the library. Nothing changed; ask again.');
+        signal.throwIfAborted();
+        review = prepared; status = ''; host.reviewChanged();
+        return { kind: 'photo_library_review', status: 'review_opened', action: operation.action, count: items.length };
+      }
+      if (operation.type === 'photos_filter' || operation.type === 'photos_album_create') throw new LibraryAgentRefusal('Open Photos, then ask again.');
       // Selection and review act on what the owner sees in Photos > Device library.
       if (!visible()) throw new LibraryAgentRefusal('Open Photos > Device library to review this action.');
       if (operation.type === 'photo_library_select') {
@@ -284,6 +332,13 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         })),
       };
     },
+    /** The agent's open review, shown over the main Library grid. */
+    reviewCard() {
+      if (!review) return undefined;
+      return { title: review.title, detail: review.detail, busy: acting, confirm: () => { void confirmReview(); }, cancel: () => { review = undefined; status = ''; changed(); } };
+    },
+    /** One short line after a confirmed review, for the host's toast. */
+    takeStatus() { const value = status; status = ''; return value; },
     selected: focused,
     agent,
     leave() { selection.clear(); review = undefined; status = ''; error = ''; epoch++; busy = false; scopeRequested = false; loadRequested = false; reloadOnOpen = true; watch(false); },
