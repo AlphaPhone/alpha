@@ -207,3 +207,63 @@ test('a Cloud route without an account records anyway and asks for sign-in once'
   assert.equal(s.error, 'Sign in to transcribe. The audio is kept.');
   assert.equal(await s.finish(async (audio, transcript) => transcript === '' && audio.audioId === driver.id), true, 'saved with its audio only');
 });
+
+/** A live transcription stream like openNativeLiveStream: speech start, interim words, finals. */
+function fakeLive() {
+  const live = {opened: 0, closed: 0, handlers: null, port: async handlers => { live.opened++; live.handlers = handlers; return {close() { live.closed++; live.handlers = null; }}; }};
+  return live;
+}
+const liveSession = (driver, live, transcriber) => new NoteRecorderSession(driver, async () => transcriber ?? (async () => 'committed words'), () => {}, {pollMs: 60_000, live: live.port});
+
+test('live words show while recording and drop out once a transcribed segment covers them; only segment text is saved', async () => {
+  const driver = fakeDriver(), live = fakeLive();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const s = liveSession(driver, live, async () => { await gate; return 'hello there general'; });
+  await s.begin(); await settle();
+  assert.equal(live.opened, 1, 'the live stream opens with the recording');
+  live.handlers.speechStart(); live.handlers.interim('hello');
+  assert.equal(s.displayTranscript(), 'hello', 'a word appears before any segment finishes');
+  live.handlers.interim('hello there');
+  assert.equal(s.displayTranscript(), 'hello there');
+  live.handlers.final('hello there general');
+  assert.equal(s.displayTranscript(), 'hello there general');
+  assert.equal(s.transcript(), '', 'live text is never the committed transcript');
+  // The segment holding that speech finishes; until it is transcribed the live words stay.
+  driver.segment(); await settle();
+  assert.equal(s.displayTranscript(), 'hello there general');
+  // Speech in the next segment, then the first segment's transcript commits.
+  live.handlers.speechStart(); live.handlers.interim('kenobi');
+  release(); await settle();
+  assert.equal(s.transcript(), 'hello there general');
+  assert.equal(s.displayTranscript(), 'hello there general kenobi', 'covered live words are replaced by the segment text, newer ones stay');
+  assert.deepEqual(Object.values(driver.state.texts), ['hello there general'], 'only segment text is journaled');
+  live.handlers.final('kenobi');
+  assert.ok(await s.finish(async () => true));
+  assert.equal(driver.state.saves.at(-1).transcript, 'hello there general', 'the saved transcript is the committed prefix of the audio');
+  assert.equal(live.closed, 1, 'Done closes the live stream');
+});
+
+test('the live stream follows pause and resume, is not reopened after it is lost until the next resume, and is optional', async () => {
+  const driver = fakeDriver(), live = fakeLive(), s = liveSession(driver, live);
+  await s.begin(); await settle();
+  assert.equal(live.opened, 1);
+  await s.pause(); await settle();
+  assert.equal(live.closed, 1, 'paused: the microphone is only the recorder');
+  await s.resume(); await settle();
+  assert.equal(live.opened, 2);
+  live.handlers.lost();
+  driver.segment(); await settle();
+  assert.equal(live.opened, 2, 'a lost stream is not reopened on every status');
+  assert.equal(s.phase, 'recording', 'losing live words never stops the recording');
+  await s.pause(); await s.resume(); await settle();
+  assert.equal(live.opened, 3);
+  s.close(); await settle();
+  assert.equal(live.closed, 2);
+  // No live route (browser, or no on-device ASR): the recorder works as before.
+  const none = new NoteRecorderSession(fakeDriver(), async () => async () => 'x', () => {}, {pollMs: 60_000, live: async () => null});
+  await none.begin(); await settle();
+  assert.equal(none.phase, 'recording');
+  assert.equal(none.displayTranscript(), '');
+  none.close();
+});

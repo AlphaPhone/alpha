@@ -10,6 +10,11 @@
  * routes. The transcript is always a prefix of the audio (TranscriptPrefixOfAudio). Only
  * Done, Discard, low storage or a microphone error end a recording (NoLengthLimit).
  *
+ * While recording, an optional live port (the on-device streaming ASR) adds words as they are
+ * spoken. Live text is display only: it is never journaled or saved, and it is shown only for
+ * audio after the last transcribed segment, so the committed per-segment transcript stays the
+ * source of truth.
+ *
  * This module has no imports so its logic runs under `node --test`.
  */
 export type NoteSegment = { segmentId: string; durationMs: number; text?: string };
@@ -30,6 +35,11 @@ export interface NoteRecorderDriver {
   save(input: { recordingId: string; noteId: string; transcript: string }): Promise<SavedNoteAudio>;
   listen(callback: (status: NoteRecordingStatus) => void): Promise<{ remove(): Promise<void> | void }>;
 }
+/** Callbacks from a live transcription stream; the session tags each utterance with recording time. */
+export interface NoteLiveHandlers { speechStart(): void; interim(text: string): void; final(text: string): void; lost(): void }
+/** Opens a live transcription stream for display, or null when none is available. */
+export type NoteLivePort = (handlers: NoteLiveHandlers) => Promise<{ close(): Promise<void> | void } | null>;
+type NoteRecorderOptions = { pollMs?: number; visible?: () => boolean; live?: NoteLivePort };
 /** Text of one finished segment; '' for silence. Throws when the route fails. */
 export type SegmentTranscriber = (segmentId: string, signal: AbortSignal) => Promise<string>;
 /** `failed`: the microphone did not start; the recorder stays open with one error line. */
@@ -80,13 +90,21 @@ export class NoteRecorderSession {
   private epoch = 0;
   /** The voice note this recording saves into; kept across a retried Done. */
   private noteId?: string;
+  /** Live utterances (display only), tagged with the recording time their speech started. */
+  private liveFinals: { text: string; at: number }[] = [];
+  private liveInterim = '';
+  private liveAt = 0;
+  private liveStream?: { close(): Promise<void> | void };
+  private liveOpening = false;
+  /** A lost live stream is not reopened until the recording pauses and resumes, or Notes is shown again. */
+  private liveLost = false;
 
   private driver: NoteRecorderDriver;
   private transcriber: () => Promise<SegmentTranscriber | null>;
   private changed: () => void;
-  private options: { pollMs?: number; visible?: () => boolean };
+  private options: NoteRecorderOptions;
   // Plain fields, not parameter properties: this module runs under Node's type stripping.
-  constructor(driver: NoteRecorderDriver, transcriber: () => Promise<SegmentTranscriber | null>, changed: () => void, options: { pollMs?: number; visible?: () => boolean } = {}) {
+  constructor(driver: NoteRecorderDriver, transcriber: () => Promise<SegmentTranscriber | null>, changed: () => void, options: NoteRecorderOptions = {}) {
     this.driver = driver; this.transcriber = transcriber; this.changed = changed; this.options = options;
   }
 
@@ -97,6 +115,58 @@ export class NoteRecorderSession {
     for (const segment of this.segments) { const text = this.texts.get(segment.segmentId); if (text === undefined) break; if (text.trim()) parts.push(text.trim()); }
     return parts.join(' ');
   }
+  /** Recording time covered by the transcribed prefix of segments. */
+  private committedMs(): number {
+    let ms = 0;
+    for (const segment of this.segments) { if (!this.texts.has(segment.segmentId)) break; ms += segment.durationMs; }
+    return ms;
+  }
+  /**
+   * What the recorder shows: the committed transcript, then live words for speech that started
+   * after it. A live utterance drops out once a transcribed segment covers its start.
+   */
+  displayTranscript(): string {
+    const committed = this.committedMs();
+    const live = this.liveFinals.filter(u => u.at >= committed).map(u => u.text);
+    if (this.liveInterim && this.liveAt >= committed) live.push(this.liveInterim);
+    return [this.transcript(), ...live].map(t => t.trim()).filter(Boolean).join(' ');
+  }
+  /** Opens the live stream while recording and visible; closes it otherwise. */
+  private syncLive() {
+    const want = this.phase === 'recording' && !!this.options.live && !this.liveLost && this.options.visible?.() !== false;
+    if (!want) { this.closeLive(); return; }
+    if (this.liveStream || this.liveOpening) return;
+    const epoch = this.epoch; this.liveOpening = true;
+    let stream: { close(): Promise<void> | void } | null | undefined;
+    const handlers: NoteLiveHandlers = {
+      speechStart: () => { if (epoch !== this.epoch) return; this.liveAt = this.durationMs; this.liveInterim = ''; },
+      interim: text => { if (epoch !== this.epoch) return; this.liveInterim = String(text || ''); this.changed(); },
+      final: text => {
+        if (epoch !== this.epoch) return;
+        const value = String(text || '').trim();
+        if (value) this.liveFinals.push({ text: value, at: this.liveAt });
+        this.liveInterim = ''; this.liveAt = this.durationMs;
+        // Older utterances already covered by transcribed segments are no longer needed.
+        const committed = this.committedMs(); this.liveFinals = this.liveFinals.filter(u => u.at >= committed);
+        this.changed();
+      },
+      // An older stream (closed by a pause) reporting late is ignored.
+      lost: () => { if (epoch !== this.epoch || (stream && this.liveStream !== stream)) return; this.liveLost = true; this.liveStream = undefined; this.liveInterim = ''; this.changed(); },
+    };
+    void Promise.resolve().then(() => this.options.live!(handlers)).then(opened => {
+      stream = opened;
+      this.liveOpening = false;
+      if (!opened) { if (epoch === this.epoch) this.liveLost = true; return; }
+      if (epoch !== this.epoch || this.phase !== 'recording' || this.liveLost) { void Promise.resolve(opened.close()).catch(() => {}); return; }
+      this.liveStream = opened; this.liveAt = this.durationMs;
+    }, () => { this.liveOpening = false; if (epoch === this.epoch) this.liveLost = true; });
+  }
+  private closeLive() {
+    const stream = this.liveStream; this.liveStream = undefined; this.liveInterim = '';
+    if (stream) void Promise.resolve(stream.close()).catch(() => {});
+  }
+  /** Notes is shown again: a lost live stream may reopen. */
+  visibilityChanged() { this.liveLost = false; this.syncLive(); if (this.open) void this.pump(); }
   /** Adopt a recording that is already open (a recovered one, or one left running), else start one. */
   async begin(): Promise<void> {
     if (this.open && this.phase !== 'failed') return;
@@ -136,6 +206,7 @@ export class NoteRecorderSession {
     this.handle = handle;
   }
   private detach() {
+    this.closeLive();
     if (this.poll) clearTimeout(this.poll); this.poll = undefined;
     this.transcribing?.abort(); this.transcribing = undefined;
     const handle = this.handle; this.handle = undefined; if (handle) void Promise.resolve(handle.remove()).catch(() => {});
@@ -153,7 +224,9 @@ export class NoteRecorderSession {
       this.levels = [...this.levels, Math.max(0, Math.min(1, Number(status.peak) || 0))].slice(-LEVELS);
       if (!this.transcriptionFailed && this.error && previous !== 'recording') this.error = '';
     } else if (status.state === 'stopped' && status.stopReason && status.stopReason !== 'user') this.error = noteRecorderError(status.stopReason);
+    if (status.state !== 'recording' && previous === 'recording') this.liveLost = false;
     this.schedulePoll();
+    this.syncLive();
     void this.pump();
     this.changed();
   }
@@ -231,7 +304,7 @@ export class NoteRecorderSession {
     const id = this.recordingId;
     if (!id || !['recording', 'paused', 'stopped'].includes(this.phase)) return false;
     const epoch = this.epoch;
-    this.phase = 'finishing'; this.confirmingDiscard = false; if (this.poll) clearTimeout(this.poll); this.poll = undefined; this.changed();
+    this.phase = 'finishing'; this.confirmingDiscard = false; if (this.poll) clearTimeout(this.poll); this.poll = undefined; this.closeLive(); this.changed();
     try {
       this.absorb(await this.driver.stop(id));
       if (epoch !== this.epoch) return false;
@@ -267,6 +340,7 @@ export class NoteRecorderSession {
     ++this.epoch; this.detach();
     this.phase = 'closed'; this.recordingId = undefined; this.noteId = undefined; this.durationMs = 0; this.segments = []; this.levels = [];
     this.texts.clear(); this.transcriptionFailed = false; this.confirmingDiscard = false; this.error = '';
+    this.liveFinals = []; this.liveInterim = ''; this.liveLost = false;
     this.changed();
   }
   /**
@@ -277,7 +351,7 @@ export class NoteRecorderSession {
   leave(pause = false) {
     if (!this.open) return;
     const id = this.recordingId, recording = this.phase === 'recording';
-    ++this.epoch; this.detach(); this.phase = 'closed'; this.recordingId = undefined; this.noteId = undefined; this.segments = []; this.texts.clear(); this.levels = []; this.error = ''; this.confirmingDiscard = false; this.transcriptionFailed = false;
+    ++this.epoch; this.detach(); this.phase = 'closed'; this.recordingId = undefined; this.noteId = undefined; this.segments = []; this.texts.clear(); this.levels = []; this.error = ''; this.confirmingDiscard = false; this.transcriptionFailed = false; this.liveFinals = []; this.liveInterim = ''; this.liveLost = false;
     if (pause && recording && id) void this.driver.pause(id).catch(() => { /* Closed already. */ });
   }
 }

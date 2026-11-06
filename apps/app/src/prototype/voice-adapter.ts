@@ -26,13 +26,13 @@ import { speakCloudSpeechChunks } from '../runtime/cloud-speech-chunks';
 import { selectVoiceRoute, voiceSendPolicy } from '../runtime/voice-selection';
 import { beginVoiceTurn, markVoiceTiming, abandonVoiceTurn, finishVoiceTurn, sendVoiceEntry, recordLiveVoiceTiming, recordEndpointVoiceTiming, recordHeardVoiceTiming, activeVoiceTurn } from '../runtime/voice-timing';
 import { residentEndpoint, createHeardReporter } from '../runtime/voice-turn-routes';
-import { createNativeLiveDictation, nativeAssistantListener, nativeLiveVoiceReady, type NativeLiveDictation } from '../runtime/native-live-voice';
+import { createNativeLiveDictation, nativeAssistantListener, nativeLiveVoiceReady, openNativeLiveStream, type NativeLiveDictation } from '../runtime/native-live-voice';
 import { installNativeVoiceTurnMarks } from '../runtime/native-voice-turn';
 import { VoiceAssistantSession, type AssistantState } from '../runtime/voice-assistant';
 import { shouldRespondToVoiceTurn, buildVoiceTurnSignal } from '@elizaos/voice/turn';
 import { toSpeakableText } from '@elizaos/ui/voice/voice-chat-playback';
 import { connectionController } from '../runtime/connection-ui';
-import { NoteRecorderSession, formatRecordingClock, type SavedNoteAudio } from './note-recorder';
+import { NoteRecorderSession, formatRecordingClock, type NoteLivePort, type SavedNoteAudio } from './note-recorder';
 import { createNoteRecorderDriver, noteSegmentTranscriber } from '../runtime/note-recorder-driver';
 import { setNotesRecorderControl } from './notes-recorder-control';
 const voiceServiceName = () => cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
@@ -900,10 +900,25 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   // Notes voice recorder (note-recorder.ts): no length limit; finished segments are transcribed
   // while recording goes on, and Done saves audio and transcript as one voice note.
   let noteProvenance: TranscriptProvenance | undefined, noteRecorderAdopted = false;
+  // Words as they are spoken: the on-device streaming ASR (as live dictation uses) runs beside the
+  // segment recorder while Notes shows the recording. Display only; the transcript that is saved
+  // comes from the finished segments. Android lets one app capture the microphone twice (API 29+).
+  const noteLivePartials: NoteLivePort = async handlers => {
+    const controller = new AbortController();
+    if (!await nativeLiveVoiceReady(controller.signal).catch(() => false)) return null;
+    const stream = await openNativeLiveStream({
+      signal: controller.signal, echoCancel: false,
+      onSpeechStart: () => handlers.speechStart(),
+      onInterim: text => handlers.interim(text),
+      onSegment: text => handlers.final(text ?? ''),
+      onLost: () => handlers.lost(),
+    });
+    return { close: async () => { try { await stream.cancel(); } finally { controller.abort(); } } };
+  };
   const noteRecorder = new NoteRecorderSession(createNoteRecorderDriver(), async () => {
     const route = await noteSegmentTranscriber(new AbortController().signal);
     noteProvenance = route?.provenance; return route?.transcribe ?? null;
-  }, () => { api?.setView('notes', { noteRecorderRevision: Date.now() }); }, { visible: () => !document.hidden });
+  }, () => { api?.setView('notes', { noteRecorderRevision: Date.now() }); }, { visible: () => !document.hidden, live: noteLivePartials });
   const persistNoteRecording = async (saved: SavedNoteAudio, transcript: string) => {
     const owner = api;
     if (!owner || owner.storageReady?.() === false) return false;
@@ -927,7 +942,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       return await noteRecorder.finish(persistNoteRecording) ? 'saved' : 'failed';
     },
   });
-  const noteRecorderVisibility = () => { if (!document.hidden && noteRecorder.open) void noteRecorder.pump(); };
+  const noteRecorderVisibility = () => { if (noteRecorder.open) noteRecorder.visibilityChanged(); };
   document.addEventListener('visibilitychange', noteRecorderVisibility);
   function noteRecorderView(icons: Bag) {
     const r = noteRecorder, finishing = r.phase === 'finishing' || r.phase === 'starting', recording = r.phase === 'recording';
@@ -937,7 +952,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       phase: r.phase,
       clock: formatRecordingClock(r.durationMs),
       levels,
-      transcript: r.transcript(),
+      transcript: r.displayTranscript(),
       error: r.error,
       confirming: r.confirmingDiscard,
       keep: () => r.keep(),
