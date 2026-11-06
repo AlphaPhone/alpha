@@ -43,6 +43,17 @@ export function installNotesFoldersAdapter(Component:Shell,views:Record<string,B
  };
  notes.render=(state:Bag,api:Bag)=>{
   if(!state.foldersLoaded&&!loading&&api.notesFolders)loading=Promise.resolve().then(()=>api.notesFolders.reload()).finally(()=>{loading=null;});
-  return render(state,api);
+  const view=render(state,api);
+  // A ⋯ menu action closes the menu and returns focus to ⋯ first, whichever adapter supplies the
+  // action (the voice adapter replaces Delete), so a dialog it opens hands focus back to ⋯.
+  for(const detail of [view.ed,view.vo,view.lk])if(detail?.menuShown)for(const key of ['pin','del','moveTo']){
+   const action=detail[key];if(typeof action!=='function')continue;
+   detail[key]=async(...args:unknown[])=>{
+    const more=document.querySelector<HTMLElement>('button[aria-haspopup="menu"][aria-expanded="true"]');
+    if(key!=='moveTo'){await api.set({menu:null});more?.focus();}
+    return action(...args);
+   };
+  }
+  return view;
  };
 }
