@@ -14,7 +14,7 @@ async function openPendingVideoCopy(page:Page){
   f.checkReleases=[];f.releaseChecks=()=>{f.holdChecks=false;for(const release of f.checkReleases.splice(0))release();};
   cap.nativePromise=async(plugin:string,method:string,input:any)=>{
    if(plugin==='AlphaPhotos'&&f.holdChecks&&(f.checkRequests||0)<2&&(method==='libraryAccess'||method==='read'&&input.id===f.row.id)){f.checkRequests=(f.checkRequests||0)+1;await new Promise<void>(resolve=>f.checkReleases.push(resolve));}
-   if(plugin==='AlphaPhotos'&&method==='listPermitted'){const result=await original(plugin,method,input);if(f.copy&&f.scope!=='denied')result.items.push(f.copy);return result;}
+   if(plugin==='AlphaPhotos'&&(method==='listPermitted'||method==='list'&&!input?.trashed&&!input?.album)){const result=await original(plugin,method,input);if(f.copy&&f.scope!=='denied')result.items.push(f.copy);return result;}
    if(plugin==='AlphaPhotos'&&['beginVideoEdit','saveVideoEdit','cancelVideoEdit','editResult','read'].includes(method)){
     f.calls.push({plugin,method,input});
     if(method==='read'){if(f.scope==='denied'||f.deleted)throw Error('Source unavailable');return input.id==='v:92'?f.copy:f.row;}
