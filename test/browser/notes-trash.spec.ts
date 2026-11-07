@@ -241,7 +241,8 @@ test('an approved agent deletion of a voice note moves its recording to Trash wi
   return (window as any).__notesTrashTestExecutor({type:'notes_delete',target},operationId,structuredClone(alphaClient.getState().context),new AbortController().signal);
  },operationId);
  expect(result.status).toBe('succeeded');
- // DeviceActions announces every committed Notes operation after journaling it.
+ // The executor alone does not announce the change: the approval-receipt path in agent-adapter does,
+ // through publishCommittedDeviceChanges (test/committed-device-changes.test.mjs). Stand in for it here.
  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('alpha:notes-committed')));
  await expect(page.getByRole('button',{name:'Open Agent memo',exact:true})).toHaveCount(0);
  expect((await savedRecords(page)).some((n:any)=>n.id==='agent-voice')).toBe(false);

@@ -6,6 +6,11 @@ export async function genericCloudSpeechFixture(page:Page,stateName='speechTest'
  await page.evaluate(async name=>{
   const {BrowserVoice}=await import('/src/browser/voice.ts'),{connectionController:c}=await import('/src/runtime/connection-ui.tsx'),state=(window as any)[name];
   c.getCloudEnvironment=()=> 'production';c.getCloudClient=()=>({sessionId:'synthetic-cloud-account',credentialId:'synthetic-cloud-credential',client:{}} as any);
+  // The replacements below read BrowserVoice's private state. A renamed field would read undefined
+  // and silently turn off the busy check, so fail at install, naming the field, if one is gone.
+  const probe=new BrowserVoice() as any;
+  for(const field of ['pendingAudioId','activeSpeechId','activeSpeechRequestId','audio','speechRequests','agentAudio','withAgentSpeech','stopPlayback','notifyListeners'])if(!(field in probe))throw Error(`genericCloudSpeechFixture: BrowserVoice has no ${field}`);
+  if(!(probe.speechRequests instanceof Map))throw Error('genericCloudSpeechFixture: BrowserVoice speechRequests is not a Map');
   const prepared=new Map<string,{text:string;requestId:string}>(),original=BrowserVoice.prototype.play;
   BrowserVoice.prototype.synthesize=async function(input:any){
    if(input.replace===false&&((this as any).activeSpeechId||(this as any).audio||(this as any).pendingAudioId||(this as any).speechRequests.has('stt')||(this as any).speechRequests.has('tts')))throw Object.assign(Error('Synthetic speaker busy'),{code:'playback-busy'});

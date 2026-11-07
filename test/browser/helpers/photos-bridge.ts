@@ -27,7 +27,8 @@ export async function photosBridge(page:Page,scope='full',openPhotos=true,authen
      if(method==='libraryAccess')return access();
      if(method==='requestLibraryAccess'){state.scope='full';return access();}
      if(method==='listPermitted')return {items:state.scope==='denied'||input?.query&&!row.name.toLowerCase().includes(input.query.toLowerCase())?[]:[row],next:'',access:access()};
-     if(method==='list')return {items:state.scope==='denied'||input?.trashed?[]:[row],next:''};
+     // An Alpha-owned row a test sets as mediaFixture.owned stays listed whatever the provider scope.
+     if(method==='list')return {items:input?.trashed?[]:[...(state.scope==='denied'?[]:[row]),...(state.owned?[state.owned]:[])],next:''};
      if(method==='summary')return {favorites:state.scope==='denied'?0:1,videos:0,trash:0,canFavorite:true};
      if(method==='albums')return {items:[]};if(method==='read')return row;
     }

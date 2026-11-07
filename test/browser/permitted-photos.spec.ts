@@ -27,8 +27,12 @@ test('denied Photos keeps an explicit permission request and loads the library a
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='requestLibraryAccess').length)).toBe(1);
 });
 test('revocation clears already rendered Favorites and returns to the owned-only scope',async({page})=>{
- await photosBridge(page);await page.getByRole('button',{name:'Albums',exact:true}).click();await page.getByRole('button',{name:'Favorites',exact:true}).click();
- await expect(page.getByRole('button',{name:/^Captured photo /})).toHaveCount(1);
+ await photosBridge(page);
+ await page.evaluate(()=>{const f=(window as any).mediaFixture;f.owned={...f.row,id:'m:external_primary:i:92',name:'Alpha capture.jpg',owned:true};});
+ await page.getByRole('button',{name:'Albums',exact:true}).click();await page.getByRole('button',{name:'Favorites',exact:true}).click();
+ const provider=page.locator('[data-owned-media-id="native-camera-m:external_primary:i:91"]'),owned=page.locator('[data-owned-media-id="native-camera-m:external_primary:i:92"]');
+ await expect(provider).toHaveCount(1);await expect(owned).toHaveCount(1);
  await page.evaluate(()=>{const f=(window as any).mediaFixture;f.scope='denied';f.emit();});
- await expect(page.getByRole('button',{name:/^Captured photo /})).toHaveCount(0);
+ await expect(provider).toHaveCount(0);
+ await expect(owned).toBeVisible();
 });
