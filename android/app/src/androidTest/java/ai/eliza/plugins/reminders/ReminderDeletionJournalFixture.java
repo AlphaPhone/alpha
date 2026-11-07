@@ -14,6 +14,7 @@ public final class ReminderDeletionJournalFixture {
  private SecureStringStore secure=new SecureStringStore(){public String identity(){return "isolated-deletion-fixture";}public String read(String key){return null;}public void write(String key,String value){throw new AssertionError("No notification tap must be created while suspended");}};
  private JSONObject row()throws Exception{return new JSONObject().put("id","one").put("title","Synthetic reminder").put("body","").put("status","scheduled").put("at",System.currentTimeMillis()-1000).put("createdAt",1).put("occurrenceId","original_occurrence");}
  private void seed(Context c,ReminderConfiguration config,JSONObject row)throws Exception{assertTrue(c.getSharedPreferences(config.envelopeName,0).edit().putString("envelope",new JSONObject().put("version",1).put("source","original_source").put("records",new JSONObject().put("one",row.toString())).put("operations",new JSONObject()).toString()).commit());}
+ private void deleteChannels(Context c,ReminderConfiguration config){android.app.NotificationManager manager=c.getSystemService(android.app.NotificationManager.class);manager.deleteNotificationChannel(config.channelId);manager.deleteNotificationChannel(config.dueChannelId());}
  public void persistedSuspensionBlocksDueDeliveryAndUndoKeepsOriginalOccurrence()throws Exception{
   Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();String id="undo_"+UUID.randomUUID().toString().replace("-","");ReminderConfiguration config=config(id);JSONObject original=row();
   try{
@@ -26,7 +27,7 @@ public final class ReminderDeletionJournalFixture {
    assertEquals(original.toString(),reopened.read(c,"one").toString());assertEquals(selected.toString(),reopened.selected(c,"one").toString());
    assertEquals("undone",reopened.settleDeletion(c,"delete_one","manual-installation",clock("boot",20000),false).getString("phase"));
    reopened.cancel(c,"one");
-  }finally{c.deleteSharedPreferences(config.envelopeName);c.deleteSharedPreferences(config.legacyName);c.deleteSharedPreferences(config.bootMarkerName());}
+  }finally{c.deleteSharedPreferences(config.envelopeName);c.deleteSharedPreferences(config.legacyName);c.deleteSharedPreferences(config.bootMarkerName());deleteChannels(c,config);}
  }
  public void expiryIsSingleWinnerAndChangedBootRequiresReview()throws Exception{
   Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();String id="undo_"+UUID.randomUUID().toString().replace("-","");ReminderConfiguration config=config(id);
@@ -36,6 +37,6 @@ public final class ReminderDeletionJournalFixture {
    try{store.settleDeletion(c,"delete_one","other-owner",clock("boot",10100),false);fail("Other owner dispatched deletion");}catch(IllegalArgumentException expected){}
    ReminderStore reopened=new ReminderStore(config,secure);assertEquals("deleted",reopened.settleDeletion(c,"delete_one","manual-installation",clock("boot",10100),false).getString("phase"));
    assertEquals("deleted",reopened.settleDeletion(c,"delete_one","manual-installation",clock("boot",10101),true).getString("phase"));assertEquals("cancelled",reopened.read(c,"one").getString("status"));
-  }finally{c.deleteSharedPreferences(config.envelopeName);c.deleteSharedPreferences(config.legacyName);c.deleteSharedPreferences(config.bootMarkerName());}
+  }finally{c.deleteSharedPreferences(config.envelopeName);c.deleteSharedPreferences(config.legacyName);c.deleteSharedPreferences(config.bootMarkerName());deleteChannels(c,config);}
  }
 }

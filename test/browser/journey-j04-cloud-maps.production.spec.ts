@@ -17,7 +17,6 @@ import {installCanonicalCalendarFixture} from './helpers/canonical-calendar';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome } from './flag-off-android';
 import { residentStub, stub, type StubMaps } from './resident-stub';
 
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
 
 const TITLE = 'Harbour inspection';
 const LOCATION = 'Port Hercule, Monaco';

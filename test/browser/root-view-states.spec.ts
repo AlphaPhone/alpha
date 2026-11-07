@@ -52,6 +52,7 @@ async function open(page: Page, view: View, theme: 'light' | 'dark'): Promise<Lo
   }
   const target=view === 'Reminders' ? 'Calendar' : view;
   const shortcut=page.getByRole('button',{name:target,exact:true});
+  await expect(shortcut.or(page.getByRole('button',{name:'All apps',exact:true})).first()).toBeVisible();
   if(await shortcut.isVisible())await shortcut.click();
   else{await page.getByRole('button',{name:'All apps',exact:true}).click();await page.getByRole('dialog',{name:'All apps',exact:true}).getByRole('button',{name:`Open ${target}`,exact:true}).click();}
   await expect(page.locator('html')).toHaveAttribute('data-active-view', view === 'Reminders' ? 'calendar' : view.toLowerCase());

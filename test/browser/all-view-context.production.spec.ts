@@ -9,7 +9,6 @@ import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, residentHome } from './flag-off-android';
 import { residentStub, stub } from './resident-stub';
 
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
 
 const VIEWS = [
   { name: 'Home', view: 'home' }, { name: 'Inbox', view: 'inbox' }, { name: 'Calendar', view: 'calendar' }, { name: 'Browser', view: 'browser' },

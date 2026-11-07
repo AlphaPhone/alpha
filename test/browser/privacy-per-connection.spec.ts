@@ -95,8 +95,9 @@ async function nativeStub(page: Page, scenario: Scenario, options: { strayKeyInS
 async function connect(page: Page, scenario: Scenario) {
   await page.goto('/');
   if (scenario === 'resident') {
-    if (!await page.locator('.alpha-connection-scrim').isVisible())
-      await page.getByRole('button', { name: 'Agent connection', exact: true }).click();
+    const scrim = page.locator('.alpha-connection-scrim'), entry = page.getByRole('button', { name: 'Agent connection', exact: true });
+    await expect(scrim.or(entry).first()).toBeVisible();
+    if (!await scrim.isVisible()) await entry.click();
     await page.locator('.alpha-connection').getByRole('button', { name: 'Start local agent', exact: true }).click();
   }
   if (scenario === 'remote') await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 15_000 });

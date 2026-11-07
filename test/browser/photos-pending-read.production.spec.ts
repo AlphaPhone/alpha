@@ -5,7 +5,7 @@ import {photosBridge} from './helpers/photos-bridge';
 for(const slow of [false,true])test(`native Photos grid opens and stays open ${slow?'delayed read':'immediate read'}`,async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await fenceNetwork(page);await photosBridge(page,'full',false,true);
- const skip=page.getByRole('button',{name:'Not now',exact:true});if(await skip.isVisible())await skip.click();
+ const skip=page.getByRole('button',{name:'Not now',exact:true});await expect(skip.or(page.getByRole('button',{name:'Photos',exact:true})).first()).toBeVisible();if(await skip.isVisible())await skip.click();
  await page.getByRole('button',{name:'Photos',exact:true}).click();
  await expect(page.getByRole('button',{name:/^Captured photo /})).toHaveCount(1);
  if(slow)await page.evaluate(()=>{const c=(window as any).Capacitor,original=c.nativePromise;c.nativePromise=async(p:string,m:string,i:any)=>{if(p==='AlphaPhotos'&&m==='read')await new Promise(r=>setTimeout(r,250));return original(p,m,i);};});
@@ -17,7 +17,7 @@ for(const slow of [false,true])test(`native Photos grid opens and stays open ${s
  expect(errors).toEqual([]);
 });
 test('catalog invalidation during a pending read permits another normal grid tap',async({page})=>{
- await fenceNetwork(page);await photosBridge(page,'full',false,true);const skip=page.getByRole('button',{name:'Not now',exact:true});if(await skip.isVisible())await skip.click();await page.getByRole('button',{name:'Photos',exact:true}).click();
+ await fenceNetwork(page);await photosBridge(page,'full',false,true);const skip=page.getByRole('button',{name:'Not now',exact:true});await expect(skip.or(page.getByRole('button',{name:'Photos',exact:true})).first()).toBeVisible();if(await skip.isVisible())await skip.click();await page.getByRole('button',{name:'Photos',exact:true}).click();
  await expect(page.getByRole('button',{name:/^Captured photo /})).toHaveCount(1);
  await page.evaluate(()=>{const w=window as any,c=w.Capacitor,original=c.nativePromise;w.heldReads=0;c.nativePromise=async(p:string,m:string,i:any)=>{if(p==='AlphaPhotos'&&m==='read'&&++w.heldReads===1)await new Promise(r=>{w.releaseHeldRead=r;});return original(p,m,i);};});
  await page.getByRole('button',{name:/^Captured photo /}).click();await expect(page.locator('[data-alpha-subview="photos-viewer"]')).toBeVisible();

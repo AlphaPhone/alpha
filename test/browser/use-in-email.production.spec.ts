@@ -12,7 +12,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, type FlagOffAccount } from './flag-off-android';
 
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
 
 const first = 'Thanks for the plan. Tuesday at 10 works for me.', second = 'I will bring the printed copies.';
 const owner: FlagOffAccount = { connectionId: 'grant-owner', email: 'owner@example.invalid', connected: true, messages: [
@@ -39,8 +38,9 @@ async function openEmail(page: Page, accounts: FlagOffAccount[] = [owner]) {
 async function ask(page: Page, question: string, reply: string) {
   await harness(page, f => f.replies.length);
   await page.evaluate(text => { (window as any).flagOff.replies.push(text); }, reply);
-  if (!await page.getByRole('textbox', { name: 'Message Alpha', exact: true }).isVisible().catch(() => false)) await button(page, 'Open conversation').click();
   const box = page.getByRole('textbox', { name: 'Message Alpha', exact: true });
+  await expect(box.or(button(page, 'Open conversation')).first()).toBeVisible();
+  if (!await box.isVisible()) await button(page, 'Open conversation').click();
   await box.fill(question); await box.press('Enter');
   await expect(bubble(page, reply)).toHaveCount(1, { timeout: 20_000 });
 }
