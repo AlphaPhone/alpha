@@ -1,40 +1,14 @@
-import { readFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
-import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 
-const root = resolve(import.meta.dirname, "../..");
-const compile = (path: string) =>
-	stripTypeScriptTypes(readFileSync(resolve(root, path), "utf8"), {
-		mode: "transform",
-	}).replace(/^import[\s\S]*?;\n/gm, "");
-const source = [
-	".eliza/client-features/packages/core/src/events.ts",
-	".eliza/client-features/packages/core/src/views/view-interact-protocol.ts",
-	".eliza/client-features/packages/core/src/views/view-action-handoff.ts",
-	".eliza/client-features/packages/core/src/views/completed-action-navigation.ts",
-	"apps/app/src/runtime/alpha-client.ts",
-	"apps/app/src/runtime/aosp-image.ts",
-	"apps/app/src/prototype/mvp-features.ts",
-	"apps/app/src/runtime/view-navigation.ts",
-]
-	.map(compile)
-	.join("\n");
+// runtime/view-navigation.ts loaded as the real module, with its real imports (the shared handoff
+// contracts and Alpha's product view registry), on a same-origin page that does not boot the app.
 async function setup(page: import("@playwright/test").Page) {
 	// Native WebView and localhost are secure contexts; about:blank is not.
 	await page.route('**/__navigation-fixture',route=>route.fulfill({contentType:'text/html',body:'<main id="screen">Home</main>'}));
 	await page.goto('/__navigation-fixture');
-	// Targets resolve through Alpha's real product view registry, served by the dev server.
 	await page.evaluate(async () => {
-		const views = await import("/src/product/alpha-product.ts");
-		Object.assign(window, { alphaCanonicalViewId: views.alphaCanonicalViewId, alphaViewKey: views.alphaViewKey, alphaViewPaths: views.alphaViewPaths });
-	});
-	await page.addScriptTag({
-		type: "module",
-		content:
-			"const browserDevProfile=false; const Capacitor={getPlatform:()=>\"web\",PluginHeaders:[]}; const TELEPHONY_PROFILE_METHOD=\"imageCapability\"; const detectTelephonyProfile=()=>false;\n" +
-			source +
-			"\nwindow.ViewNavigationClient=ViewNavigationClient;",
+		const navigation = await import("/src/runtime/view-navigation.ts" as string);
+		(window as any).ViewNavigationClient = navigation.ViewNavigationClient;
 	});
 	await page.evaluate(() => {
 		const win = window as any;
