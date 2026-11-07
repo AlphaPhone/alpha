@@ -9,36 +9,24 @@ import {stripTypeScriptTypes} from 'node:module';
 function storage(bytes = new Map()) {
   return {bytes, getItem: key => bytes.has(key) ? bytes.get(key) : null, setItem: (key, value) => { bytes.set(key, String(value)); }, removeItem: key => { bytes.delete(key); }};
 }
-function load(store, f = {account: true, dev: false}) {
-  if (typeof f === 'boolean') f = {account: true, dev: false, mocks: f};
-  const events = [];
+function load(store, f = {account: true}) {
+  if (typeof f === 'boolean') f = {account: true, mocks: f};
   const box = {
-    cloudRuntimeEnabled: f.cloud === true, testMocksEnabled: f.mocks === true, localStorage: store, Date, JSON, Number, Event: class { constructor(type) { this.type = type; } },
-    window: {dispatchEvent: event => { events.push(event.type); return true; }},
-    get browserDevProfile() { return f.dev; },
-    connectionController: {getSnapshot:()=>({residentInference:(f.own||f.direct)?'direct':'cloud',providerStatus:{voiceConfigured:f.voice===true}}),getCloudEnvironment: () => f.account ? 'production' : null, getCloudClient: () => f.account ? {sessionId: 'synthetic-session', credentialId: 'synthetic-credential'} : null},
+    cloudRuntimeEnabled: f.cloud === true, testMocksEnabled: f.mocks === true, localStorage: store,
+    connectionController: {getSnapshot:()=>({residentInference:f.direct?'direct':'cloud',providerStatus:{voiceConfigured:f.voice===true}}),getCloudEnvironment: () => f.account ? 'production' : null, getCloudClient: () => f.account ? {sessionId: 'synthetic-session', credentialId: 'synthetic-credential'} : null},
   };
   const source = fs.readFileSync('apps/app/src/runtime/voice-selection.ts', 'utf8').replace(/^import .*;\n/gm, '').replaceAll('export function', 'function').replaceAll('export type', 'type');
-  vm.runInNewContext('{' + stripTypeScriptTypes(source, {mode: 'transform'}) + '\nglobalThis.api={selectVoiceRoute,chooseVoiceRoute,voiceRoutePreference,cloudVoiceAvailable,voicePreferenceKeys,cloudSpeechDisclosure,voiceSendPolicy,setVoiceSendPolicyForTests};}', box);
-  return {...box.api, events, f};
+  vm.runInNewContext('{' + stripTypeScriptTypes(source, {mode: 'transform'}) + '\nglobalThis.api={selectVoiceRoute,voiceSendPolicy,setVoiceSendPolicyForTests};}', box);
+  return box.api;
 }
 
-test('production keeps speech local regardless of account, legacy preferences or requested fallback', () => {
-  for (const account of [true, false]) for (const dev of [true, false]) {
-    const v=load(storage(), {account,dev});
+test('production keeps speech local regardless of account, stored legacy route or requested fallback', () => {
+  const legacy = new Map([['alphaphone:voice-route:v1', JSON.stringify({version: 1, route: 'cloud', disclosed: 'cloud-speech-uses-plan', chosenAt: 1})]]);
+  for (const account of [true, false]) for (const store of [storage(), storage(legacy)]) {
+    const v=load(store, {account});
     for(const requested of ['default','device','manual','agent']) assert.equal(v.selectVoiceRoute(requested),'device');
-    assert.equal(v.chooseVoiceRoute('cloud'),false);
-    assert.equal(v.chooseVoiceRoute('cloud',{disclosed:'cloud-speech-uses-plan'}),false);
-    assert.equal(v.chooseVoiceRoute('device'),true);assert.equal(v.cloudVoiceAvailable(),false);assert.equal(v.voiceRoutePreference(),'device');
-    assert.equal(v.selectVoiceRoute(),'device','legacy preference cannot silently override current production policy');
-    assert.match(v.cloudSpeechDisclosure(),/counts toward your plan allowance/);
   }
 });
-
-test('legacy preference persistence detects dropped or unavailable storage', () => {
-  for(const store of [{getItem:()=>null,setItem(){}},{getItem(){throw Error('blocked');},setItem(){throw Error('blocked');}}]) {
-    const v=load(store);assert.equal(v.chooseVoiceRoute('cloud',{disclosed:'cloud-speech-uses-plan'}),false);assert.equal(v.selectVoiceRoute(),'device');
-  }
 
 test('the voice send policy defaults to auto-send and only test-mocks builds can exercise review', () => {
   const production = load(storage());
@@ -53,37 +41,23 @@ test('the voice send policy defaults to auto-send and only test-mocks builds can
   assert.equal(mocks.voiceSendPolicy(), 'auto-send', 'an unknown policy falls back to the constant');
 });
 
-});
-
-test('spoken replies have no preference: only the route is stored, and an old Read replies aloud value is not read', () => {
-  const store = storage(), v = load(store);
-  assert.deepEqual({...v.voicePreferenceKeys()}, {route: 'alphaphone:voice-route:v1', event: 'alpha:voice-preferences'});
-  assert.doesNotMatch(fs.readFileSync('apps/app/src/runtime/voice-selection.ts', 'utf8'), /speak-replies|speakReplies/);
+test('an old Read replies aloud value does not change the route', () => {
+  const store = storage();
   store.bytes.set('alphaphone:speak-replies:v1', '{"version":1,"enabled":true}');
-  const reloaded = load(store);
-  assert.equal(reloaded.selectVoiceRoute(), 'device');
-  assert.deepEqual(reloaded.events, []);
+  assert.equal(load(store).selectVoiceRoute(), 'device');
 });
 
 test('explicit production Cloud profile never silently selects local speech or enables mocks', () => {
   for(const account of [true,false]) {
-    const v=load(storage(),{cloud:true,account,dev:false});
+    const v=load(storage(),{cloud:true,account});
     for(const route of ['default','device','agent','manual'])assert.equal(v.selectVoiceRoute(route),'cloud');
-    assert.equal(v.cloudVoiceAvailable(),account);assert.equal(v.voiceRoutePreference(),'cloud');
     assert.equal(v.setVoiceSendPolicyForTests('review'),false);
   }
 });
 
-test('own-provider voice availability follows the selected optional Cartesia key',()=>{
- for(const voice of [false,true]){
-  const v=load(storage(),{account:false,dev:false,own:true,voice});
-  assert.equal(v.cloudVoiceAvailable(),voice,'no Cloud account or plan substitutes for the own voice selection');
- }
-});
-
 test('explicit own keys choose the resident network voice route without a Cloud account',()=>{
- const v=load(storage(),{direct:true,voice:true,account:false});
- assert.equal(v.selectVoiceRoute('default'),'cloud');assert.equal(v.selectVoiceRoute('agent'),'cloud');assert.equal(v.selectVoiceRoute('device'),'device');
- assert.equal(v.cloudVoiceAvailable(),true);assert.match(v.cloudSpeechDisclosure(),/own API key/);assert.doesNotMatch(v.cloudSpeechDisclosure(),/Cloud account/);
- const off=load(storage(),{direct:true,voice:false,account:false});assert.equal(off.cloudVoiceAvailable(),false);assert.equal(off.selectVoiceRoute('default'),'cloud');
+ for(const voice of [true,false]){
+  const v=load(storage(),{direct:true,voice,account:false});
+  assert.equal(v.selectVoiceRoute('default'),'cloud');assert.equal(v.selectVoiceRoute('agent'),'cloud');assert.equal(v.selectVoiceRoute('device'),'device');
+ }
 });

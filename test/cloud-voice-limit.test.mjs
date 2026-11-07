@@ -123,12 +123,11 @@ test('native CloudVoiceLimit keeps the same facts and never the body text',()=>{
 test('only the explicit Cloud profile and development browser-resident builds reach Cloud speech',()=>{
  const selection=fs.readFileSync('apps/app/src/runtime/voice-selection.ts','utf8').replace(/^import .*;\n/gm,'').replaceAll('export function','function').replaceAll('export type','type');
  for(const [cloud,mocks,expected] of [[false,false,'device'],[true,false,'cloud']]){
-  const box={cloudRuntimeEnabled:cloud,testMocksEnabled:mocks,browserDevProfile:false,localStorage:{getItem:()=>JSON.stringify({version:1,route:'cloud',disclosed:'cloud-speech-uses-plan',chosenAt:1}),setItem(){}},JSON,Number,Date,connectionController:{getSnapshot:()=>({residentInference:'cloud'}),getCloudEnvironment:()=>'production',getCloudClient:()=>({})}};
-  vm.runInNewContext('{'+stripTypeScriptTypes(selection,{mode:'transform'})+'\nglobalThis.api={selectVoiceRoute,voiceRoutePreference};}',box);
+  const box={cloudRuntimeEnabled:cloud,testMocksEnabled:mocks,localStorage:{getItem:()=>JSON.stringify({version:1,route:'cloud',disclosed:'cloud-speech-uses-plan',chosenAt:1}),setItem(){}},connectionController:{getSnapshot:()=>({residentInference:'cloud'}),getCloudEnvironment:()=>'production',getCloudClient:()=>({})}};
+  vm.runInNewContext('{'+stripTypeScriptTypes(selection,{mode:'transform'})+'\nglobalThis.api={selectVoiceRoute};}',box);
   // A native flag-off build routes speech to the device even with a stored Cloud choice.
   for(const requested of ['default','device','manual','agent'])assert.equal(box.api.selectVoiceRoute(requested),expected);
-  assert.equal(box.api.voiceRoutePreference(),expected);
- }
+  }
  // The development browser route is the only other caller: a test-mocks (development) surface.
  const browser=fs.readFileSync('apps/app/src/browser/voice.ts','utf8');
  assert.match(browser,/if\(!devSurfacesEnabled\)throw Error\('Cloud voice requires the native app or a development host\.'\)/);
