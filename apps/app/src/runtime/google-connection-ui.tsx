@@ -157,7 +157,7 @@ export function GoogleConnectionsPanel(){
    // Only an unknown pause stays retained for review.
    // An earlier attempt's unknown pause stays reviewable unless this one confirmed the pause.
    if(calendar&&pause!=='unknown')for(const [pauseKey,context] of calendar.retained)if(context.connectionId===account.connectionId&&(pause==='confirmed'||!before.has(pauseKey)))calendar.retained.delete(pauseKey);
-   setNotice(googleDisconnectMessage(result.outcome,account.label,serviceName)+(pause==='confirmed'?' Calendar sync is paused; saved events are kept.':pause==='unknown'?' Calendar sync pause was not confirmed. Review Calendar sync; saved events are unchanged.':''));setAccounts(result.accounts||[]);
+   setNotice(googleDisconnectMessage(result.outcome,account.label)+(pause==='confirmed'?' Calendar sync is paused; saved events are kept.':pause==='unknown'?' Calendar sync pause was not confirmed. Review Calendar sync; saved events are unchanged.':''));setAccounts(result.accounts||[]);
   }catch(error){if(!abort.signal.aborted){connectionController.rejectCloudSession(cloud.sessionId,error);setNotice('Disconnect was not confirmed. Check Google connections before trying again.'+(calendar&&[...calendar.retained.values()].some(context=>context.connectionId===account.connectionId)?' Review Calendar sync too; saved events are unchanged.':''));}}
   finally{if(active.current===abort)setBusy(false);}
  }
