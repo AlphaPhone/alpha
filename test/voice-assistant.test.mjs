@@ -45,7 +45,13 @@ function harness(options = {}) {
       if (options.holdOpen) await options.holdOpen.promise;
       const capture = {handlers, active: true}; captures.push(capture); log.activeCaptures++;
       const retire = () => { if (capture.active) { capture.active = false; log.activeCaptures--; } };
-      return {fullDuplex: options.fullDuplex ?? true, close: async () => { log.closed++; retire(); }, cancel: () => { log.cancelled++; retire(); }};
+      // options.close and options.cancel return a promise the test settles (a close that rejects
+      // leaves the capture unconfirmed, still active); without them both settle at once.
+      return {
+        fullDuplex: options.fullDuplex ?? true,
+        close: async () => { log.closed++; if (options.close) await options.close(capture); retire(); },
+        cancel: () => { log.cancelled++; const done = options.cancel?.(capture); if (!done) return retire(); return done.then(retire); },
+      };
     },
     shouldRespond: options.shouldRespond,
     endpoint: options.endpoint,
@@ -509,6 +515,104 @@ test('a Notes review keeps input closed through exact approval and approved play
   assert.equal(h.log.activeCaptures, 1);
   assert.equal(h.phase(), 'listening');
   await h.session.stop();
+});
+
+const review = {complete: false, awaitingUserInput: {proposalId: 'p-1', digest: 'd-1'}};
+const approved = (pause, text) => ({pause, reply: {requestId: pause.requestId, conversationId: 'room-1', userMessageId: pause.userMessageId, assistantMessageId: 'a-2', text, complete: true}});
+
+test('a microphone still opening at submission is closed before the turn is sent and cannot end the Notes review', async () => {
+  const options = {};
+  const h = harness(options);
+  await h.session.start();
+  const first = h.mic;
+  first.onSpeechStart(h.clock.now()); await flush();
+  await h.session.setMuted(true);
+  first.onSpeechEnd(h.clock.now()); first.onSegment('read my packing note'); await flush();
+  // Unmute starts an open that is still in flight when the muted utterance is submitted.
+  options.holdOpen = deferred();
+  const unmuting = h.session.setMuted(false); await flush();
+  assert.equal(h.log.captures, 2);
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.longGapMs);
+  assert.equal(h.phase(), 'thinking');
+  assert.equal(h.log.sends.length, 0, 'nothing is sent while a microphone may still come on');
+  options.holdOpen.resolve(); await unmuting; await flush();
+  assert.equal(h.log.closed, 2, 'the late capture is closed on arrival');
+  assert.equal(h.log.sends.length, 1);
+  h.answer(0, 'Share the note?', review); await flush();
+  assert.equal(h.phase(), 'awaiting-user-input');
+  assert.equal(h.log.activeCaptures, 0, 'the owner reviews without open input');
+  // Room speech on the late capture outlasts the barge-in hold: the review stands.
+  h.mic.onSpeechStart(h.clock.now()); await flush();
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.bargeInConfirmMs * 2);
+  h.mic.onSpeechEnd(h.clock.now()); h.mic.onSegment('what was that'); await flush();
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.longGapMs);
+  assert.equal(h.phase(), 'awaiting-user-input');
+  assert.equal(h.replies[0].input.signal.aborted, false);
+  assert.equal(h.log.sends.length, 1, 'speech during review is never a turn');
+  const pause = h.session.getSnapshot().awaitingUserInput;
+  assert.equal(h.session.resume(approved(pause, 'Passport and boots.')), true); await flush();
+  h.speeches[0].input.onStarted(); h.speeches[0].done.resolve(); await flush();
+  assert.equal(h.log.captures, 3, 'one capture opens after the approved reply');
+  assert.equal(h.log.activeCaptures, 1);
+  assert.equal(h.phase(), 'listening');
+  await h.session.stop();
+});
+
+test('speech that starts as a turn is submitted never confirms a barge-in during the review that follows', async () => {
+  const h = harness();
+  await h.session.start();
+  await h.say('read my packing note');
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.longGapMs - 1);
+  const mic = h.mic;
+  // The owner starts speaking as the turn is submitted; the hold timer would fire during the pause.
+  await h.clock.advance(1);
+  mic.onSpeechStart(h.clock.now()); await flush();
+  h.answer(0, 'Share the note?', review); await flush();
+  assert.equal(h.phase(), 'awaiting-user-input');
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.bargeInConfirmMs);
+  mic.onSpeechEnd(h.clock.now()); mic.onSegment('actually'); await flush();
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.longGapMs);
+  assert.equal(h.phase(), 'awaiting-user-input', 'the review is not cancelled');
+  assert.equal(h.replies[0].input.signal.aborted, false);
+  assert.equal(h.log.sends.length, 1);
+  assert.equal(h.log.activeCaptures, 0);
+  const pause = h.session.getSnapshot().awaitingUserInput;
+  assert.equal(h.session.resume(approved(pause, 'Passport and boots.')), true); await flush();
+  assert.equal(h.speeches.length, 1, 'the approved result is spoken');
+  h.speeches[0].input.onStarted(); h.speeches[0].done.resolve(); await flush();
+  assert.equal(h.phase(), 'listening');
+  assert.equal(h.log.activeCaptures, 1, 'listening means a capture is open');
+  await h.session.stop();
+});
+
+test('Mute whose close rejects ends voice with nothing sent; Unmute cannot reopen and the capture is cancelled', async () => {
+  const closing = deferred(), cancelling = deferred();
+  const h = harness({close: () => closing.promise, cancel: () => cancelling.promise});
+  await h.session.start();
+  await h.say('turn off the');
+  const muting = h.session.setMuted(true); await flush();
+  assert.equal(h.log.closed, 1);
+  closing.reject(Error('native close not confirmed')); await muting; await flush();
+  assert.equal(h.phase(), 'error', 'an unconfirmed microphone is not shown as muted');
+  assert.equal(h.log.cancelled, 1, 'the unconfirmed capture is cancelled');
+  assert.equal(h.log.activeCaptures, 1, 'the capture counts as live until its cancel settles');
+  cancelling.resolve(); await flush();
+  assert.equal(h.log.activeCaptures, 0);
+  await h.session.setMuted(false); await flush();
+  await h.clock.advance(ASSISTANT_TIMING_DEFAULTS.longGapMs * 2);
+  assert.equal(h.log.captures, 1, 'Unmute never reopens after a failed close');
+  assert.equal(h.log.sends.length, 0, 'the utterance waiting on the close is never sent');
+
+  // The same close failure while a submitted turn waits on it: nothing is sent either.
+  const submitClose = deferred();
+  const g = harness({close: () => submitClose.promise});
+  await g.session.start();
+  await g.say('what is on my calendar');
+  await g.clock.advance(ASSISTANT_TIMING_DEFAULTS.longGapMs);
+  submitClose.reject(Error('native close not confirmed')); await flush();
+  assert.equal(g.phase(), 'error');
+  assert.equal(g.log.sends.length, 0);
+  assert.equal(g.log.captures, 1);
 });
 
 test('sentence splitting keeps the reply text and avoids tiny fragments', () => {
