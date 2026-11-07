@@ -19,16 +19,24 @@ function stub(answers = {}) {
   return { plugin, calls };
 }
 
+// Every client method, contacts, calls and messages alike, with a valid argument list.
+const sms = { recipients: ["+15555550100"], body: "Hi", subscriptionId: 1 };
+const mms = { ...sms, attachments: [{ contentType: "image/png", name: "a.png", bytes: new Uint8Array([1]) }] };
+const CLIENT_CALLS = {
+  imageCapability: [], status: [], requestAccess: ["contacts"], requestRole: ["sms"], searchContacts: ["Ada"], recentCalls: [],
+  dial: ["+15555550100"], composeSms: [{ ...sms, subscriptionId: null }], listThreads: [], listMessages: ["thread:1"],
+  threadPage: [], messagePage: ["thread:1"], observeMessages: [() => {}], markThreadRead: ["thread:1", 1],
+  sendSms: [sms, "op-1"], sendMms: [mms, "op-1"], mmsSendResult: [mms, "op-1"], cancelSmsReview: ["op-1"],
+  smsSendHistory: [], smsSendResult: [sms, "op-1"],
+};
+
 test("off the verified image nothing reaches native code", async () => {
   const { plugin, calls } = stub({ status: status() });
   for (const client of [createAospTelephony(null, false), createAospTelephony(plugin, false), createAospTelephony(null, true)]) {
     assert.equal(client.available, false);
-    await assert.rejects(client.status(), TelephonyUnavailable);
-    await assert.rejects(client.searchContacts("Ada"), TelephonyUnavailable);
-    await assert.rejects(client.dial("+15555550100"), TelephonyUnavailable);
-    await assert.rejects(client.composeSms({ recipients: ["+15555550100"], body: "Hi", subscriptionId: null }), TelephonyUnavailable);
-    await assert.rejects(client.requestRole("sms"), TelephonyUnavailable);
-    await assert.rejects(client.requestAccess("contacts"), TelephonyUnavailable);
+    const methods = Object.keys(client).filter(name => typeof client[name] === "function");
+    assert.deepEqual(methods.sort(), Object.keys(CLIENT_CALLS).sort(), "the table covers every client method");
+    for (const [method, args] of Object.entries(CLIENT_CALLS)) await assert.rejects(client[method](...args), TelephonyUnavailable, method);
   }
   assert.deepEqual(calls, [], "a standalone install or agent request never reaches the native boundary");
 });

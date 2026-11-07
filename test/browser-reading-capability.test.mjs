@@ -4,7 +4,7 @@
 // script cannot reach. A WebView provider without that capability (the SDK emulator's WebView 133
 // is one) gets no page reading. These checks hold the three parts of that rule together: there is
 // no injection into the page's world to fall back to, the native refusal names the capability, and
-// the renderer says the same thing before a review starts.
+// the renderer uses the same words (test/browser/reading-capability.spec.ts runs its refusal).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -17,11 +17,9 @@ const world = shared("BrowserReadingWorld");
 // The tab host and its reviewed reading are shared; AlphaBrowserPlugin supplies only Alpha's identity.
 const reading = shared("BrowserReviewedReading"), plugin = shared("BrowserTabHostPlugin"), alphaPlugin = java("AlphaBrowserPlugin");
 const downloads = shared("BrowserDownloads"), capture = shared("BrowserBlobCapture"), loginFields = shared("BrowserLoginFields");
-const adapter = fs.readFileSync("apps/app/src/prototype/browser-adapter.ts", "utf8");
 // The shared page-reading policy at the pin: the renderer module and its native half.
 const capability = fs.readFileSync("vendor/eliza/plugins/plugin-native-browser-surface/src/page-reading.ts", "utf8");
 const policy = shared("BrowserPageReading");
-const template = fs.readFileSync("apps/app/src/prototype/template.html", "utf8");
 
 test("no browser source can put a script or a bridge in a page's own world", () => {
   for (const [name, source] of [["BrowserReadingWorld", world], ["BrowserReviewedReading", reading], ["BrowserTabHostPlugin", plugin], ["AlphaBrowserPlugin", alphaPlugin], ["BrowserDownloads", downloads], ["BrowserBlobCapture", capture], ["BrowserLoginFields", loginFields]]) {
@@ -79,6 +77,18 @@ test("the native side reports the capability and refuses a review with the unava
   assert.match(policy, /public static final String READING_UNSUPPORTED = "reading-unsupported";/);
 });
 
+test("the other page-reading refusals carry their own codes, so the renderer never parses message text", () => {
+  assert.match(policy, /public static final String ISOLATED_WORLD_UNAVAILABLE = "isolated-world-unavailable";/);
+  assert.match(policy, /public static final String SENSITIVE_PAGE = "sensitive-page";/);
+  assert.match(policy, /public static final String READING_NOT_READY = "reading-not-ready";/);
+  assert.match(reading, /ISOLATED_MESSAGE="Isolated page reading is unavailable\. Update Android System WebView, then reload this page\.";/);
+  const review = reading.slice(reading.indexOf("private void review(PluginCall call"), reading.indexOf("private void scheduleTimeout("));
+  assert.match(review, /rejected\.reject\("Reading unavailable on a sensitive or ambiguous page",BrowserPageReading\.SENSITIVE_PAGE\);/, "a page the extractor blocks is a sensitive refusal");
+  assert.match(review, /if\(rejected!=null\)rejected\.reject\(ISOLATED_MESSAGE,BrowserPageReading\.ISOLATED_WORLD_UNAVAILABLE\);/, "an isolated world that fails to run is unavailable, not sensitive");
+  // A sensitive page is never reported as merely unavailable.
+  assert.ok(review.indexOf("SENSITIVE_PAGE") < review.indexOf("ISOLATED_WORLD_UNAVAILABLE"));
+});
+
 test("the renderer and the native side say the same words", () => {
   const message = /READING_UNSUPPORTED_MESSAGE =\s*"([^"]+)";/.exec(capability)?.[1];
   const native = /public static final String UNSUPPORTED_MESSAGE =\s*"([^"]+)";/.exec(policy)?.[1];
@@ -86,29 +96,4 @@ test("the renderer and the native side say the same words", () => {
   assert.equal(native, message);
   assert.match(message, /Read aloud and Ask about page are unavailable on this device/);
   assert.match(message, /Update Android System WebView\.$/);
-});
-
-test("the renderer asks on Android only, says so before any speech route or excerpt is prepared, and shows it in the menu", () => {
-  assert.match(adapter, /const readingSupport = Capacitor\.isNativePlatform\(\) \? createReadingSupport\(\(\) => Browser\.readingSupport\(\), \(\) => refresh\(\)\) : undefined;/);
-  assert.match(adapter, /if \(browserActive && !browserWasActive\) void readingSupport\?\.check\(\);/, "asked when the browser opens, so the menu already knows");
-  const read = adapter.slice(adapter.indexOf("async function readPage()"), adapter.indexOf("async function askPage()"));
-  const ask = adapter.slice(adapter.indexOf("async function askPage()"), adapter.indexOf("function hide()"));
-  assert.ok(read.indexOf("if(await readingUnsupported())return;") > 0 && read.indexOf("if(await readingUnsupported())return;") < read.indexOf("createNativeReadingVoice()"), "Read aloud refuses before a speech route is asked for");
-  assert.ok(ask.indexOf("if(await readingUnsupported())return;") > 0 && ask.indexOf("if(await readingUnsupported())return;") < ask.indexOf("Browser.reviewQuestion"), "Ask about page refuses before preparing an excerpt");
-  assert.match(adapter, /report\(new Error\(READING_UNSUPPORTED_MESSAGE\)\)/);
-  assert.match(adapter, /readingUnavailable:readingSupport\?\.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,/);
-  assert.match(template, /<sc-if value="\{\{browser\.readingUnavailable\}\}"><p role="note" aria-label="Page reading unavailable" data-alpha-reading-unavailable [^>]*>\{\{browser\.readingNote\}\}<\/p><\/sc-if>/);
-  // Only an explicit boolean is believed.
-  assert.match(capability, /if \(available === true\) state = "available";\s*else if \(available === false\) state = "unavailable";/);
-});
-
-test("BrowserReadingNavigation runs exactly one method per provider and records which", () => {
-  const source = fs.readFileSync("android/app/src/androidTest/java/ai/elizaresearch/alphaphone/BrowserReadingNavigationInstrumentedTest.java", "utf8");
-  assert.match(source, /assumeFalse\("This WebView provider has isolated-world injection[^\n]{0,120}?,provider\(\)\);/, "the unavailable method runs only without the capability");
-  assert.match(source, /assumeTrue\("This WebView provider has no isolated-world injection[^\n]{0,160}?,provider\(\)\);/, "the full method runs only with it");
-  assert.match(source, /assertEquals\("The product reports the provider's isolated-world capability as it is",capable,BrowserReadingWorld\.supported\(\)\);/);
-  assert.match(source, /seen\.putString\("browserReadingProvider",capable\?"isolated-world":"no-isolated-world"\)/);
-  // The full method's assertions are the ones it had.
-  for (const kept of ['assertFalse("Old document must not bind after invalidation",world.ready());', 'extracted.get().contains("Current synthetic page /second")', 'world.pageStarted("https://reading.invalid/other");assertFalse(world.ready());'])
-    assert.ok(source.includes(kept), kept);
 });

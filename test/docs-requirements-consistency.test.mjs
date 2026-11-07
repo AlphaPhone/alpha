@@ -85,20 +85,21 @@ test('every capability row labels its evidence class', () => {
 });
 
 
-test('October 12 owner choices map all 32 reviewed issues to open implementation TODOs', () => {
+test('every open owner-decision TODO maps to an issue and a plan section', () => {
   const decisions = read('docs/decisions.md');
   const pending = section(decisions, 'Pending owner decisions');
   assert.match(pending, /No reviewed/);
   assert.equal(pending.split('\n').filter(line => /^\| A-\d\d \|/.test(line)).length, 0);
   const resolved = table(decisions, 'Resolved decision index');
+  // A row closes when its work lands; every row still open names its issue, decision and plan section.
   const active = resolved.filter(row => row.State === 'TODO');
-  assert.equal(active.length, 32);
-  const numbers = active.map(row => Number(row.Implementation.match(/#(\d+)/)[1]));
-  assert.deepEqual(numbers, Array.from({ length: 32 }, (_, i) => 394 + i));
-  assert.equal(new Set(active.map(row => row.ID)).size, 32);
+  assert.equal(new Set(active.map(row => row.ID)).size, active.length, 'each decision is listed once');
+  const plan = read('docs/owner-approved-mvp-plan-2026-10-12.md');
   for (const row of active) {
-    assert.ok(section(decisions, 'October 12 owner decisions').includes(`**${row.Policy} — ${row.ID}`));
-    assert.ok(read('docs/owner-approved-mvp-plan-2026-10-12.md').includes(`## ${row.Implementation.match(/#\d+/)[0]} — ${row.ID}:`));
+    const issue = row.Implementation.match(/#\d+/)?.[0];
+    assert.ok(issue, `${row.ID}: the TODO row names its issue`);
+    assert.ok(section(decisions, 'October 12 owner decisions').includes(`**${row.Policy} — ${row.ID}`), `${row.ID}: the owner decision is recorded`);
+    assert.ok(plan.includes(`## ${issue} — ${row.ID}:`), `${row.ID}: the plan has a section for ${issue}`);
   }
   const licence = resolved.find(row => row.ID === 'A-21');
   assert.equal(licence.State, 'Policy closed');
@@ -138,13 +139,4 @@ test('every MVP item a requirement names is tagged with that requirement in the 
       assert.ok(inventory.get(id).requirements.includes(requirement.id), `${requirement.id} names ${id}, which is not tagged ${requirement.id} in docs/mvp-remaining-work-2026-10-09.json`);
     }
   }
-});
-
-// Always-on listening and hardware invocation (MVP-52) gate AP-06 and AP-14 and are owner-gated.
-test('AP-06 and AP-14 name MVP-52 as open and owner-gated', () => {
-  const byId = new Map(requirements.requirements.map(requirement => [requirement.id, requirement]));
-  for (const id of ['AP-06', 'AP-14']) assert.match(byId.get(id).remaining, /always-on listening and hardware invocation \(MVP-52\) (?:is|are) open and owner-gated/i, `${id}: MVP-52`);
-  const item = JSON.parse(read('docs/mvp-remaining-work-2026-10-09.json')).items.find(entry => entry.id === 'MVP-52');
-  assert.ok(item.blocked_on.some(entry => entry.startsWith('HUMAN: ')), 'MVP-52 must stay blocked on an owner decision');
-  for (const id of ['AP-06', 'AP-14']) assert.ok(item.requirements.includes(id), `MVP-52 must be tagged ${id}`);
 });

@@ -165,7 +165,12 @@ test("permissions: standalone has none, the launcher declares read access only, 
   for (const permission of ["SEND_SMS", "READ_SMS"]) {
     assert.ok(!declared(main).includes(`android.permission.${permission}`) && !declared(standalone).includes(`android.permission.${permission}`), `${permission} is launcher-only`);
     assert.ok(declared(launcher).includes(`android.permission.${permission}`), `launcher declares ${permission}`);
+    assert.ok(removed(standalone).includes(`android.permission.${permission}`), `standalone removes ${permission}`);
   }
+  // The send result receiver takes explicit intents only (no filter, not exported), in the launcher alone.
+  assert.match(launcher, /<receiver android:name="\.AlphaSmsSendReceiver" android:exported="false" \/>/);
+  assert.doesNotMatch(main + standalone, /AlphaSmsSendReceiver/);
+  assert.match(launcher, /<uses-feature android:name="android\.hardware\.telephony" android:required="false" \/>/, "telephony hardware stays optional");
   assert.match(launcher, /android\.intent\.action\.SENDTO"\/><data android:scheme="smsto"/);
   assert.doesNotMatch(main, /<intent><action android:name="android\.intent\.action\.SENDTO"\/><data android:scheme="smsto"\/><\/intent>/, "only the image-capable flavor can see SMS handlers");
 });

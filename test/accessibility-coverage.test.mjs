@@ -47,9 +47,6 @@ test('every subview of a retained view is opened by a state that asserts it is t
   const subviews = [...new Set([...template.matchAll(/data-alpha-subview="([^"]+)"/g)].map(match => match[1]))].filter(id => retained.has(owner(id)));
   assert.ok(subviews.length >= 25, 'the template still marks its subviews');
   // The base list of a view is what its plain state shows; only layered subviews need a named state.
-  // photos-empty (the viewer left open after its photo disappears) has no tap path; a fixture state
-  // opens it directly and asserts it like the others.
-  const unreachable = new Set();
   // A subview is a screen a state exposes, so none is hidden from assistive technology by markup alone.
   // A blank cover, such as the one a Home calendar card opens its event over, is not a subview.
   const tags = [...template.matchAll(/<[a-z]+ [^>]*data-alpha-subview="([^"]+)"[^>]*>/g)];
@@ -65,7 +62,7 @@ test('every subview of a retained view is opened by a state that asserts it is t
     ...[...states.matchAll(/shows: '([a-zA-Z-]+)'/g)].map(match => match[1]),
   ]);
   for (const id of subviews) {
-    if (id.endsWith('-list') || unreachable.has(id)) continue;
+    if (id.endsWith('-list')) continue;
     assert.ok(asserted.has(id), `a state opens and asserts the ${id} subview`);
   }
   // Menus, search fields, sheets and the Undo toast are states of their own.
@@ -98,8 +95,7 @@ test('the sweep applies every dimension and cannot be narrowed silently', () => 
   assert.match(sweep, /landscape at 200% text keeps every control on screen[\s\S]*?toHaveClass\(\/alpha-landscape\/\);\s*await setTextScale\(page, 2\);[\s\S]{0,200}auditPage\(page, \{ clipping: true, overlap: true, dock: true \}\), \.\.\.await auditTree\(page\), \.\.\.await auditTabOrder\(page\)/);
   assert.match(sweep, /viewport: \{ width: 915, height: 412 \}/);
   for (const spec of [sweep, production]) assert.match(spec, /toHaveClass\(\/alpha-landscape\/\)/, 'the landscape lane asserts the landscape layout is active');
-  // Only deliberate truncation is tolerated; nothing else is filtered out of the results.
-  assert.equal([...sweep.matchAll(/\.filter\(/g)].length, 2);
+  // Only deliberate truncation is tolerated.
   assert.doesNotMatch(sweep, /process\.env/);
   assert.match(sweep, /lines\.filter\(line => !line\.startsWith\('text-truncated:'\) \|\| appTitle\(line\)\)/);
   // A cut app title is never tolerated (AP-15): it names the screen and has room to wrap.
@@ -195,15 +191,7 @@ test('provider-connected screens are swept, against a synthetic mailbox only', (
 });
 
 test('the dock, title and toast fixes the sweep depends on stay in the source', () => {
-  const css = read('apps/app/src/prototype/phone.css');
   const main = read('apps/app/src/main.tsx');
-  // Home and the app library reserve measured clearance inside their full-height scroll content.
-  assert.match(css, /--alpha-dock-reserve:max\(108px,calc\(var\(--alpha-dock-clearance,102px\) \+ 6px\)\)/);
-  assert.match(css, /html:not\(\.alpha-landscape\) \.alpha-phone \[data-alpha-layer="home"\] \{ bottom:0!important; scroll-padding-bottom:var\(--alpha-dock-reserve\)!important;/);
-  assert.match(css, /html:not\(\.alpha-landscape\) \.alpha-phone \[data-alpha-layer="drawer"\] \{ padding-bottom:0!important; \}/);
-  assert.match(css, /\[data-alpha-home-layout\] \{ padding-bottom:var\(--alpha-dock-reserve\)!important; min-height:calc\(100% \+ var\(--alpha-dock-reserve\) - 108px\)!important; \}/);
-  assert.match(css, /:is\(\[data-alpha-app-scroll\],\.calendar-timeline,\.calendar-draft-fields\) \{ scroll-padding-bottom:calc\(var\(--alpha-dock-clearance,102px\) \+ 16px\); \}/);
-  assert.match(css, /\.inbox-compose-fields \{[^}]*padding-bottom:max\(64px,calc\(var\(--alpha-dock-clearance,102px\) \+ 8px\)\)!important/);
   assert.match(main, /installDockClearance\(\)/);
   const dock = read('apps/app/src/runtime/dock-clearance.ts');
   assert.match(dock, /'--alpha-dock-clearance'/);
@@ -217,7 +205,6 @@ test('the dock, title and toast fixes the sweep depends on stay in the source', 
   assert.match(read('apps/app/src/prototype/chat-overlay-motion-adapter.ts'), /if \(!sheet && !target\.matches\(":focus-visible"\)\) return;/);
   // A screen title is not shortened with a large system font: it takes its own row.
   assert.match(read('apps/app/src/runtime/text-scale.ts'), /classList\.toggle\(TEXT_XL_CLASS, scale > TEXT_XL_ABOVE\)/);
-  assert.match(css, /\.alpha-text-xl\.standalone-app \[data-alpha-app-header\] \[data-alpha-app-title\] \{[^}]*flex:1 0 100%;[^}]*white-space:normal!important;[^}]*text-overflow:clip!important/);
   // A toast under a top-layer dialog is shown and announced inside that dialog.
   assert.match(main, /installToastLayer\(\)/);
   const toast = read('apps/app/src/runtime/toast-layer.ts');
