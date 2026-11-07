@@ -1,5 +1,8 @@
 # One paired agent: combined runtime acceptance plan
 
+> Retired by P-22. Alpha has no paired agent; it uses the resident agent (P-43). Kept
+> as a historical record.
+
 ## Present evidence and gap
 
 The user needs one selected agent for all supported flows. Separate passing hosts do not establish that journey:

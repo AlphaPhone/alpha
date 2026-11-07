@@ -88,8 +88,10 @@ export function scheduledOccurrence(loop:OccurrenceLoop,now:number):Occurrence|n
  * Settlement memory a new version of a schedule keeps from the one it replaces. Settled civil times
  * are compared as text, so they carry over only within one time zone: after a zone change the same
  * text names a different instant, and keeping it would silently suppress the first occurrence in the
- * new zone ("12:30" already settled in Auckland, then due in Los Angeles). Nothing can run twice
- * without it: a new version never settles an occurrence from before its own creation.
+ * new zone ("12:30" already settled in Auckland, then due in Los Angeles). Dropping it cannot run
+ * anything twice while the wall clock stays at or after the new version's creation, since that
+ * version never settles an occurrence from before then. A clock moved back past that point, with a
+ * zone change away and back, can repeat an occurrence the old version already settled.
  */
 export function carriedSettlement(old:OccurrenceLoop|undefined,timeZone:string):Pick<OccurrenceLoop,'lastOccurrence'|'settledOccurrences'|'settledFloor'>{
  if(!old||old.spec.timeZone!==timeZone)return {};

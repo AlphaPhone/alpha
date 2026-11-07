@@ -1,5 +1,8 @@
 # Explicit standalone paired ASR
 
+> Retired by P-42. Alpha ships no whisper.cpp provider; on-device ASR runs through
+> `libelizainference`. Kept as a historical record.
+
 The isolated local agent47846 now serves an explicitly enabled whisper.cpp
 provider through its normal authenticated HTTP host. This is separate from
 `/api/asr/local-inference`, whose fused Gemma bundle remains unavailable and
