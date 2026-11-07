@@ -60,9 +60,8 @@ test("Inbox keeps one combined consent and discards unsent reviews when change a
   assert.doesNotMatch(panel,/connect\('(send|drafts|mailbox)'\)/,'no separate per-capability buttons');
   assert.doesNotMatch(inbox, /connect\('(send|drafts|mailbox)'\)/, "no separate per-capability consent prompts");
   assert.match(inbox, /if\(previous&&grantChange\.withdrawn\.length\)provider\.withdrawn\(\);/);
-  assert.match(inbox, /const dropped=previous!==selected\|\|\(!!previous&&grantChange\.dropReadCache\);/, "a changed read-cache identity drops what was read");
-  assert.match(inbox, /const cached=key&&inboxPreview\?\.key===key&&inboxPreview\.sessionId===binding\?\.sessionId&&inboxPreview\.accountId===selected/, "Home shows the preview only under the identity it was read with");
-  // Behaviour: scripts/test-inbox-cloud-flow.mjs (read grant withdrawn) and scripts/test-inbox-grant-withdrawal.mjs.
+  // Dropping what was read under a withdrawn grant runs in scripts/test-inbox-cloud-flow.mjs and the
+  // discard itself in scripts/test-inbox-grant-withdrawal.mjs (both run by test/adapter-contracts.test.mjs).
   // The reviewed effect controller is shared (@elizaos/plugin-inbox/mailbox); Alpha binds it to its encrypted slots.
   const binding = fs.readFileSync("apps/app/src/prototype/inbox-provider-controls.ts", "utf8");
   assert.match(binding, /createMailReviewController\(\{publish,toast,store:inboxLocalStore,/);
