@@ -84,24 +84,26 @@ test('every capability row labels its evidence class', () => {
   for (const code of ['(S)', '(B)', '(E)', '(I)', '(R)', '(D)']) assert.ok(status.includes(code), `class ${code} is not defined`);
 });
 
-test('every open owner choice maps to an implementation issue and its plan section', () => {
+// The State column is tracker state the owner maintains (decisions.md); only the structure is checked.
+test('every owner decision maps to a policy, an implementation issue and its plan section', () => {
   const decisions = read('docs/decisions.md');
   const pending = section(decisions, 'Pending owner decisions');
   assert.match(pending, /No reviewed/);
   assert.equal(pending.split('\n').filter(line => /^\| A-\d\d \|/.test(line)).length, 0);
   const resolved = table(decisions, 'Resolved decision index');
-  const active = resolved.filter(row => row.State === 'TODO');
-  assert.equal(new Set(active.map(row => row.ID)).size, active.length, 'each decision has one row');
+  assert.equal(new Set(resolved.map(row => row.ID)).size, resolved.length, 'each decision has one row');
+  for (const row of resolved) assert.match(row.Policy, /^P-\d\d$/, `${row.ID} maps to a P- policy`);
+  const planned = resolved.filter(row => row.ID !== 'A-21');
+  const issues = planned.map(row => Number(row.Implementation.match(/#(\d+)/)?.[1]));
+  assert.deepEqual([...issues].sort((a, b) => a - b), Array.from({length: 32}, (_, index) => 394 + index), 'issues #394..#425, one per decision');
   const plan = read('docs/owner-approved-mvp-plan-2026-10-12.md');
   const owner = section(decisions, 'October 12 owner decisions');
-  for (const row of active) {
+  for (const row of planned) {
     const issue = row.Implementation.match(/#\d+/)?.[0];
-    assert.ok(issue, `${row.ID} names its implementation issue`);
     assert.ok(owner.includes(`**${row.Policy} — ${row.ID}`), `${row.ID} is an October 12 owner decision`);
     assert.ok(plan.includes(`## ${issue} — ${row.ID}:`), `${row.ID} has a plan section for ${issue}`);
   }
   const licence = resolved.find(row => row.ID === 'A-21');
-  assert.equal(licence.State, 'Policy closed');
   assert.match(licence.Implementation, /no licence document, name, number, scope or terms has been seen or recorded/);
   assert.match(section(decisions, 'October 10 owner product decision'), /\*\*P-09\*\*[\s\S]*closes A-21 as licensed/);
 });
