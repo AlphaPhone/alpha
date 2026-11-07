@@ -276,7 +276,12 @@ public class DailyAppsInstrumentedTest {
   } finally { ReminderTestAccess.cancel(context,id); }
  }
 
- @Test public void rootBackFinishesStandaloneAndKeepsLauncherHome() throws Exception {
+ /**
+  * Root Back: the standalone app finishes. The launcher stays on Home while Alpha holds HOME (a real
+  * HOME-type start, or Alpha's own task while it has the role); on a phone where another app is
+  * HOME, an icon start moves its task back and the single live instance survives.
+  */
+ @Test public void rootBackFinishesStandaloneKeepsHomeAndMovesLauncherTaskBackWhenNotHome() throws Exception {
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
    ready(scenario);
    // A fresh install opens the sign-in panel and the access panel over Home; both count as
@@ -289,11 +294,17 @@ public class DailyAppsInstrumentedTest {
     SystemClock.sleep(100);
    }
    assertEquals("Home has no in-app back history", "\"false\"", evaluate(scenario,"document.documentElement.dataset.alphaCanGoBack"));
+   boolean[] home = {false};
+   WebViewTestDriver.withActivity(MainActivity.class, a -> home[0] = a.isCurrentHome());
    WebViewTestDriver.pressBack();
-   if (BuildConfig.IS_LAUNCHER) {
+   if (BuildConfig.IS_LAUNCHER && home[0]) {
     SystemClock.sleep(300);
     assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, scenario.getState());
     assertEquals("true",evaluate(scenario,"Boolean(document.querySelector('[data-screen]'))"));
+   } else if (BuildConfig.IS_LAUNCHER) {
+    for (int i = 0; i < 50 && scenario.getState() != androidx.lifecycle.Lifecycle.State.CREATED; i++) SystemClock.sleep(100);
+    // Stopped, not destroyed: the task moved back and the live instance kept its state.
+    assertEquals("Root Back moves the task back when Alpha is not HOME", androidx.lifecycle.Lifecycle.State.CREATED, scenario.getState());
    } else {
     for (int i = 0; i < 50 && scenario.getState() != androidx.lifecycle.Lifecycle.State.DESTROYED; i++) SystemClock.sleep(100);
     assertEquals(androidx.lifecycle.Lifecycle.State.DESTROYED, scenario.getState());

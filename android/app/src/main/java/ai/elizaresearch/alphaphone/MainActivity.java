@@ -28,8 +28,29 @@ public class MainActivity extends BridgeActivity {
  // Renderer recovery is process-wide so a crash loop backs off instead of spinning (RendererRecoveryBudget).
  private static final RendererRecoveryBudget recoveryBudget = new RendererRecoveryBudget();
  private boolean recoveringRenderer = false;
+ /** A renderer lost in the background: the activity is rebuilt at its next onStart. */
+ private boolean pendingRebuild = false;
  /** Alpha is the home activity here: a renderer crash loop must not leave a blank, inescapable HOME. */
- private boolean showsHome() { return BuildConfig.IS_LAUNCHER && !isAssistantSurface() && startedAsHome; }
+ private boolean showsHome() { return BuildConfig.IS_LAUNCHER && !isAssistantSurface() && isCurrentHome(); }
+ /**
+  * Whether Alpha holds HOME now. An icon start on a phone where another app is HOME is not HOME,
+  * and a standard task of Alpha while it holds the role still is. startedAsHome stays the task's
+  * kind, which is what the hand-off needs; this is the live role.
+  */
+ boolean isCurrentHome() {
+  try {
+   if (android.os.Build.VERSION.SDK_INT >= 29) {
+    android.app.role.RoleManager roles = getSystemService(android.app.role.RoleManager.class);
+    if (roles != null) return roles.isRoleHeld(android.app.role.RoleManager.ROLE_HOME);
+   } else {
+    android.content.pm.ResolveInfo home = getPackageManager().resolveActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+    if (home != null && home.activityInfo != null) return getPackageName().equals(home.activityInfo.packageName);
+   }
+  } catch (RuntimeException unavailable) {
+   android.util.Log.w("AlphaInstance", "Home role could not be read: " + unavailable.getClass().getSimpleName());
+  }
+  return startedAsHome;
+ }
  /**
   * The native escape view after the recovery budget is used up while Alpha is HOME. Built in code:
   * it needs no page, no bridge and no layout resource. Each Settings button opens a stock Settings
@@ -43,7 +64,7 @@ public class MainActivity extends BridgeActivity {
   panel.setPadding(pad, pad, pad, pad);
   panel.setBackgroundColor(android.graphics.Color.BLACK);
   android.widget.TextView message = new android.widget.TextView(this);
-  message.setText("Alpha Phone's screen stopped several times in a minute. Reload it, or open Android Settings to choose another Home app.");
+  message.setText("Alpha Phone's screen keeps stopping.");
   message.setTextColor(android.graphics.Color.WHITE);
   message.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18);
   message.setGravity(android.view.Gravity.CENTER);
@@ -76,14 +97,17 @@ public class MainActivity extends BridgeActivity {
   @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
    if (getBridge() == null || view != getBridge().getWebView()) return false;
    // A dead renderer leaves the HOME surface blank and, unhandled, kills the app process.
-   // Detach and destroy the dead WebView, then rebuild the Activity and its bridge.
-   android.util.Log.w("AlphaRenderer", "WebView renderer gone; crashed=" + detail.didCrash() + "; recreating activity");
+   // Detach and destroy the dead WebView, then rebuild the Activity and its bridge. A renderer the
+   // system reclaimed while Alpha was in the background is rebuilt at the next onStart, uncounted.
+   boolean visible = getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
+   android.util.Log.w("AlphaRenderer", "WebView renderer gone; crashed=" + detail.didCrash() + "; visible=" + visible);
    if (recoveringRenderer) return true;
    recoveringRenderer = true;
    if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
    view.destroy();
-   RendererRecoveryBudget.Action action = recoveryBudget.onLoss(SystemClock.elapsedRealtime(), showsHome());
+   RendererRecoveryBudget.Action action = recoveryBudget.onLoss(SystemClock.elapsedRealtime(), showsHome(), detail.didCrash(), visible);
    if (action == RendererRecoveryBudget.Action.SHOW_ESCAPE) { showRendererEscape(); return true; }
+   if (action == RendererRecoveryBudget.Action.REBUILD_ON_START) { pendingRebuild = true; return true; }
    getWindow().getDecorView().postDelayed(() -> { if (!isFinishing() && !isDestroyed()) recreate(); }, RendererRecoveryBudget.delay(action));
    return true;
   }
@@ -152,6 +176,8 @@ public class MainActivity extends BridgeActivity {
  boolean wasHandedOff() { return handedOff; }
  /** Marks a bring-to-front start. It carries nothing else: the real intent is delivered before it. */
  private static final String EXTRA_FRONT_START = "alpha.frontStart";
+ /** The marker's value: random per process, so another app cannot make its start look like ours. */
+ private static final String FRONT_START_TOKEN = java.util.UUID.randomUUID().toString();
  /**
   * Set once the bring-to-front start is seen not to work in this process: it made a new instance,
   * it could not be started, or the live instance did not receive three in a row.
@@ -160,7 +186,7 @@ public class MainActivity extends BridgeActivity {
  private static boolean hasFrontMarker(Intent intent) {
   if (intent == null) return false;
   // MainActivity is exported: another app's extras may not unparcel here. Such an intent is not ours.
-  try { return intent.getBooleanExtra(EXTRA_FRONT_START, false); }
+  try { return FRONT_START_TOKEN.equals(intent.getStringExtra(EXTRA_FRONT_START)); }
   catch (RuntimeException foreign) { return false; }
  }
  @Override protected void load() { if (!handedOff) super.load(); }
@@ -185,7 +211,7 @@ public class MainActivity extends BridgeActivity {
      Intent front = live.startedAsHome
        ? new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(getPackageName())
        : new Intent(this, MainActivity.class);
-     front.putExtra(EXTRA_FRONT_START, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+     front.putExtra(EXTRA_FRONT_START, FRONT_START_TOKEN).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
      try { startActivity(front); started = true; }
      catch (RuntimeException failure) { android.util.Log.w("AlphaInstance", "Live instance could not be brought to the front: " + failure.getClass().getSimpleName()); }
     }
@@ -328,13 +354,16 @@ public class MainActivity extends BridgeActivity {
   getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
    @Override public void handleOnBackPressed() {
     if (BuildConfig.DEBUG) android.util.Log.d("AlphaNavigation", "Back dispatched");
-    // Test and consume renderer navigation in one evaluation. Root Back uses
-    // normal Android task behavior in standalone mode; launcher retains HOME.
+    // Test and consume renderer navigation in one evaluation. Root Back stays on Home while Alpha
+    // holds HOME. Otherwise it is the normal Android task behavior, except that the launcher's single
+    // live instance moves its task back instead of finishing, so its state survives.
+    boolean launcher = BuildConfig.IS_LAUNCHER && !isAssistantSurface();
     String script = "(() => { if (document.documentElement.dataset.alphaCanGoBack === 'true') { window.dispatchEvent(new Event('alpha-back')); return true; } "
-     + (BuildConfig.IS_LAUNCHER && !isAssistantSurface() ? "window.dispatchEvent(new Event('launcher-home')); return true;" : "return false;") + " })()";
+     + (launcher && isCurrentHome() ? "window.dispatchEvent(new Event('launcher-home')); return true;" : "return false;") + " })()";
     getBridge().getWebView().evaluateJavascript(script, handled -> {
      if (BuildConfig.DEBUG) android.util.Log.d("AlphaNavigation", "Back handled by renderer=" + handled);
-     if ((!BuildConfig.IS_LAUNCHER || isAssistantSurface()) && !"true".equals(handled) && !isFinishing() && !isDestroyed()) finish();
+     if ("true".equals(handled) || isFinishing() || isDestroyed()) return;
+     if (launcher) moveTaskToBack(true); else finish();
     });
    }
   });
@@ -351,6 +380,10 @@ public class MainActivity extends BridgeActivity {
   }
   if (getBridge() != null && !isAssistantSurface() && isHomeIntent(intent))
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('launcher-home'))", null);
+ }
+ @Override public void onStart() {
+  super.onStart();
+  if (pendingRebuild && !isFinishing() && !isDestroyed()) { pendingRebuild = false; recreate(); }
  }
  @Override public void onDestroy() {
   if (liveInstance.get() == this) liveInstance = new java.lang.ref.WeakReference<>(null);

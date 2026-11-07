@@ -33,6 +33,27 @@ public final class RendererRecoveryBudgetTest {
   // Three losses spread beyond the window never reach the escape view.
   RendererRecoveryBudget spread=new RendererRecoveryBudget();
   for(int loss=0;loss<8;loss++)check(spread.onLoss(loss*61_000L,true)==NOW,"spread losses recover at once");
+  // Crash vs system reclaim, visible vs background. A reclaim in the background is never counted:
+  // any number of them leaves the full budget, and each waits for the next onStart.
+  RendererRecoveryBudget.Action START=RendererRecoveryBudget.Action.REBUILD_ON_START;
+  RendererRecoveryBudget reclaim=new RendererRecoveryBudget();
+  for(int loss=1;loss<=10;loss++)check(reclaim.onLoss(loss*100L,true,false,false)==START,"background reclaim "+loss+" waits for onStart");
+  check(RendererRecoveryBudget.delay(START)==0L,"no timed recreate for a background loss");
+  for(int loss=1;loss<=3;loss++)check(reclaim.onLoss(1_000L+loss,true,true,true)==NOW,"background reclaims left the budget whole");
+  check(reclaim.onLoss(1_004L,true,true,true)==ESCAPE,"visible crashes past the budget while HOME show the escape view");
+  // A reclaim while visible counts like a crash.
+  RendererRecoveryBudget visibleReclaim=new RendererRecoveryBudget();
+  for(int loss=1;loss<=3;loss++)check(visibleReclaim.onLoss(loss,false,false,true)==NOW,"visible reclaim "+loss+" recreates at once");
+  check(visibleReclaim.onLoss(4L,false,false,true)==LATER,"a visible reclaim past the budget backs off when not HOME");
+  // A crash in the background counts but rebuilds at onStart, unless it is past the budget while HOME.
+  RendererRecoveryBudget hidden=new RendererRecoveryBudget();
+  for(int loss=1;loss<=3;loss++)check(hidden.onLoss(loss,true,true,false)==START,"background crash "+loss+" rebuilds at onStart");
+  check(hidden.onLoss(4L,false,true,false)==START,"past the budget, not HOME: still rebuilt at onStart");
+  check(hidden.onLoss(5L,true,true,false)==ESCAPE,"past the budget while HOME: the escape view, counted");
+  // Not HOME (another app holds the role): never the escape view, only the backoff.
+  RendererRecoveryBudget notHome=new RendererRecoveryBudget();
+  for(int loss=1;loss<=3;loss++)notHome.onLoss(loss,false,true,true);
+  check(notHome.onLoss(4L,false,true,true)==LATER&&notHome.onLoss(5L,false,true,true)==LATER,"not HOME backs off instead of the escape view");
   // Buttons resolve to stock Settings activities, with the documented fallbacks.
   Set<String> all=Set.of("android.settings.SETTINGS","android.settings.HOME_SETTINGS","android.settings.MANAGE_DEFAULT_APPS_SETTINGS");
   check("android.settings.SETTINGS".equals(RendererRecoveryBudget.settingsAction(all::contains)),"Open Android Settings uses ACTION_SETTINGS");
