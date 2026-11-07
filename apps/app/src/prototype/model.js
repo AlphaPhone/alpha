@@ -17,6 +17,7 @@ import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
+import { transcriptWindow, growTranscriptAtTop } from "./chat-transcript-window.js";
 import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWeek, visibleCalendarDays } from "./calendar-days";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
 
@@ -5105,12 +5106,15 @@ class Component extends DCLogic {
     this.G = {}; this.I = {};
     var self = this;
     this.clock = setInterval(function () { self.setState({ now: Date.now() }); }, 15000);
+    this.transcriptScroll = function (event) { growTranscriptAtTop(self, event); };
+    document.addEventListener("scroll", this.transcriptScroll, true);
     this.preset(this.props.initial || "boot");
   }
   getSnapshotBeforeUpdate(_props, previous) {
-    var list = document.querySelector("[data-alpha-transcript]");
-    if (!list) { this.chatScrollSnapshot = null; return null; }
-    var state = this.S(), rows = Array.from(list.querySelectorAll("[data-alpha-message-id]"));
+    var list = document.querySelector("[data-alpha-transcript]"), state = this.S();
+    // A chat that stays closed has no reading position to keep.
+    if (!list || (!["sheet", "full"].includes(previous.chat) && !["sheet", "full"].includes(state.chat))) { this.chatScrollSnapshot = null; return null; }
+    var rows = Array.from(list.querySelectorAll("[data-alpha-message-id]"));
     var bounds = list.getBoundingClientRect(), scale = bounds.height / list.clientHeight || 1;
     var anchor = rows.find(function (row) { return row.getBoundingClientRect().bottom >= bounds.top; });
     var oldUser = (previous.msgs || []).filter(function (m) { return m.from === "user"; }).at(-1);
@@ -5155,6 +5159,7 @@ class Component extends DCLogic {
   }
   componentWillUnmount() {
     this.chatScrollObserver?.disconnect();
+    document.removeEventListener("scroll", this.transcriptScroll, true);
     clearInterval(this.clock); clearInterval(this.vI);
     var G = this.G || {}; Object.keys(G).forEach(function (k) { G[k].forEach(clearTimeout); });
     var I = this.I || {}; Object.keys(I).forEach(function (k) { I[k].forEach(clearInterval); });
@@ -5582,7 +5587,9 @@ class Component extends DCLogic {
       } };
     });
 
-    var msgs = S.msgs.map(function (m) {
+    // Only the newest rows are mounted. A drag (chatMotion, from the motion adapter) shows the
+    // sheet before its mode changes, so any drag keeps the open window.
+    var msgs = transcriptWindow(this, S.msgs, panelOpen || !!this.chatMotion).map(function (m) {
       var c = m.card || {}; var t = c.type;
       return {
         id: m.id, text: m.text, displayText: m.text, hasCalendarText: true, calendarReviews: [], isUser: m.from === "user", isAgent: m.from === "agent", c: c,

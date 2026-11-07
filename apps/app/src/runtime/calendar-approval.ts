@@ -1,11 +1,13 @@
 export const CALENDAR_APPROVAL_READ_PATH='/api/approvals?state=all&limit=500';
 /** Calendar markup identifies a candidate review; only the authenticated queue can authorize it. */
 const uuid='[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
-export const calendarApprovalId=(value:unknown):value is string=>typeof value==='string'&&new RegExp('^'+uuid+'$','i').test(value);
+const idPattern=new RegExp('^'+uuid+'$','i');
+// String.replace restarts a global pattern from 0, so one module-level instance is safe to share.
+const choicePattern=new RegExp('\\[CHOICE:approval-('+uuid+') id=\\1\\]\\s*\\r?\\n([\\s\\S]*?)\\r?\\n\\[/CHOICE\\]','gi');
+export const calendarApprovalId=(value:unknown):value is string=>typeof value==='string'&&idPattern.test(value);
 export function calendarReviewText(text:string){
  const ids:string[]=[];
- const pattern=new RegExp('\\[CHOICE:approval-('+uuid+') id=\\1\\]\\s*\\r?\\n([\\s\\S]*?)\\r?\\n\\[/CHOICE\\]','gi');
- const rendered=text.replace(pattern,(whole,id,body)=>{
+ const rendered=text.replace(choicePattern,(whole,id,body)=>{
   const values=body.split(/\r?\n/).map((line:string)=>line.trim()).filter(Boolean).map((line:string)=>{const at=line.indexOf('=');return at>0&&line.slice(at+1).trim()?line.slice(0,at).trim():'';});
   if(values.length!==2||!values.includes('approve '+id)||!values.includes('reject '+id))return whole;
   if(!ids.includes(id))ids.push(id);return '';

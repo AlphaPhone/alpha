@@ -5,7 +5,7 @@ import { test, expect, type Page } from '@playwright/test';
 // model is called. This is browser source evidence, not emulator or device acceptance.
 const REMOTE = 'https://agent.example.test';
 const ROOM = '99999999-8888-4777-8666-555555555555';
-type Options = { holdIdentity?: boolean; createFails?: boolean; createHangs?: boolean; createLimited?: boolean; abortRoute?: boolean; abortResult?: boolean; long?: boolean; assistantEntry?: boolean };
+type Options = { holdIdentity?: boolean; createFails?: boolean; createHangs?: boolean; createLimited?: boolean; abortRoute?: boolean; abortResult?: boolean; long?: boolean | number; assistantEntry?: boolean };
 
 async function remoteAgent(page: Page, options: Options = {}) {
   await page.addInitScript(({ remote, room, options }) => {
@@ -24,7 +24,7 @@ async function remoteAgent(page: Page, options: Options = {}) {
       if (!sessionStorage.getItem('continuity-seeded')) {
         sessionStorage.setItem('continuity-seeded', '1');
         localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'remote', origin: remote }));
-        if (options.long) agent.history = Array.from({ length: 230 }, (_, index) => ({ id: `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`, role: index % 2 ? 'assistant' : 'user', text: `Synthetic message ${index}`, timestamp: 1_000 + index }));
+        if (options.long) agent.history = Array.from({ length: typeof options.long === 'number' ? options.long : 230 }, (_, index) => ({ id: `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`, role: index % 2 ? 'assistant' : 'user', text: `Synthetic message ${index}`, timestamp: 1_000 + index }));
       } else agent = JSON.parse(sessionStorage.getItem('continuity-agent') || 'null') ?? agent;
     } catch { /* storage failures are covered elsewhere */ }
     const persist = () => { try { sessionStorage.setItem('continuity-agent', JSON.stringify(agent)); } catch { /* fixture only */ } };
@@ -443,6 +443,34 @@ test('reconnecting restores the saved remote conversation with older pages; the 
   // Nothing was sent by restoring, navigating, resizing or reloading.
   expect(await fixture(page, f => f.posts)).toBe(0);
   await expect.poll(restored, { timeout: 30_000 }).toMatchObject({ count: 232, conversation: 'fixture-chat' });
+});
+
+// The open chat mounts one page of rows and another each time the owner reaches the top, so a long
+// restored conversation is still readable back to its first message.
+test('a restored 300-message conversation scrolls back to its first message', async ({ page }) => {
+  test.setTimeout(120_000);
+  await connected(page, { long: 300 });
+  await expect.poll(() => page.evaluate(async () => {
+    const { connectionController } = await import('/src/runtime/connection-ui.tsx');
+    return connectionController.getSnapshot().history?.messages.length;
+  }), { timeout: 30_000 }).toBe(300);
+  const transcript = page.locator('[data-alpha-transcript]'), rows = transcript.locator('[data-alpha-message-id]');
+  await expect(rows).toHaveCount(20);
+  await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
+  await expect(rows).toHaveCount(100);
+  await expect(rows.last()).toContainText('Synthetic message 299');
+  const first = transcript.getByText('Synthetic message 0', { exact: true });
+  for (let step = 0; step < 3 && !(await first.count()); step++) {
+    const before = await rows.count();
+    await transcript.evaluate(element => { element.scrollTop = 0; });
+    await expect(rows).not.toHaveCount(before);
+    // The rows the owner was reading stay in place; the older page is mounted above them.
+    expect(await transcript.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  }
+  await expect(rows).toHaveCount(300);
+  await first.scrollIntoViewIfNeeded();
+  await expect(first).toBeInViewport();
+  expect(await fixture(page, f => f.posts)).toBe(0);
 });
 
 const NOT_CHECKED = /The stopped reply was not checked because another message was sent\./;
