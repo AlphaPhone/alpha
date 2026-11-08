@@ -1031,6 +1031,37 @@
         "Two capture identities/reservations and source instances, with three host epochs. Native open and release are controlled ports.",
         "Provider-piped capture remains a separate source schedule obligation."
       ]
+    },
+    {
+      "path": "specs/quint/native/NativeAsrPipe.qnt",
+      "module": "NativeAsrPipe",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "sources": [
+        "vendor/eliza/plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/LiveSegmentPipe.java",
+        "patches/eliza/speech-pipe-settlement.patch"
+      ],
+      "tests": [
+        "warmThenConfirmedCloseTest",
+        "cancelledWarmCanStillReportReadyTest",
+        "staleOwnerCannotSendCleanupTest",
+        "ninthBatchFailsClosedTest",
+        "cutoffDropsLaterFramesTest",
+        "asrFailureDoesNotRetireWholePipeTest",
+        "rejectedCancellationSettlesTest"
+      ],
+      "invariants": [
+        "QueueBound",
+        "CancelledQueueEmpty",
+        "FinishedSettlesFutures",
+        "OneWarmAndClose",
+        "CutoffBoundsDispatch"
+      ],
+      "abstractions": [
+        "One worker start, eight queued batches, three dispatched batches/results, independent early/late frame and VAD masks.",
+        "Controlled owner-bound provider responses and worker scheduling. Physical IPC and controller composition have separate source scopes."
+      ]
     }
   ]
 }

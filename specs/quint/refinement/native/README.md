@@ -127,3 +127,20 @@ zeroing. Cleanup now retains the capture error while continuing detector cleanup
 zeroing and terminal notification. The observer still reports failed physical
 release independently. Piped ASR and real Android resource guarantees remain
 outside the non-piped campaign.
+
+## ASR pipe state
+
+`asr-pipe.mjs` executes the current staged `LiveSegmentPipe` against a serial
+worker and an owner-bound provider port. `AsrPipeTraces` reads its actual queue,
+flags, cutoff and futures. Provider-post history supplies the dispatched frame
+and VAD membership mask, with the cutoff observed at that posting boundary.
+Source operations are suspended at provider requests and checked after their
+stable return or future completion. No source queue or response algorithm is
+reimplemented by the driver.
+
+The finite scenarios cover maximum queue admission, frame-count and exact JSON
+character limits, copied payload isolation, FIFO delivery, independent timestamp
+filtering, NaN, malformed input/response, recoverable ASR failure, owner retirement,
+discard and close acknowledgment. The executor-refusal regression retains the
+cancellation or listener exception while guaranteeing completion of the public futures. The
+actual controller-to-pipe join and full native transport have separate scopes.
