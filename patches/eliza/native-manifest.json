@@ -192,13 +192,13 @@
     },
     {
       "file": "speech-recording-admission.patch",
-      "sha256": "c9dafa9c5a859ae63454ea4008bde96efbde82407eeb707eb9ce6c3af65c0b93",
+      "sha256": "65501b0763dd1651b6a2ac23c25fc66a02f1bc2a9b65512d13a72865e7572cb3",
       "module": "plugins/plugin-local-inference/native/android",
       "targets": [
         {
           "path": "plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice/LocalSpeechBridgePlugin.java",
-          "beforeSha256": "e453f1e3289e85791b5ec729db56f9708afab15be54088d57d7bd3e1602e78c7",
-          "afterSha256": "8da521d8a33ac00c98c99d7f875b1f9a7c9b3a84cf48494d7d67261da8e82648"
+          "beforeSha256": "63d10371fcedbe7b9ce5aa8c5b9b6f5ddcee0492a46865582a66cb86e0529e68",
+          "afterSha256": "ab664a5103720621ca0c28d47bcce875ed6ebd1385da7eae7922b434fb391912"
         },
         {
           "path": "plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/LiveCaptureController.java",

@@ -10,7 +10,7 @@ import {currentNativeSource,nativePatchInputs} from './current-sources.mjs';
 const voice='vendor/eliza/plugins/plugin-local-inference/native/android/';
 export function sharedRecordingSources(platform,source=currentNativeSource('LocalSpeechBridgePlugin.java')){
  return [source,
-  ...['SpeechRequestGate','SpeechAudioFocusPolicy','LiveCaptureAdmission','LocalSpeechEngine','StreamingSpeechPlayback','SpeechPcmQueue','VoiceLatencyTrials'].map(name=>voice+'src/main/java/ai/eliza/voice/'+name+'.java'),
+  ...['SpeechRequestGate','SpeechAudioFocusPolicy','LiveCaptureAdmission','LocalSpeechEngine','StreamingSpeechPlayback','SpeechPcmQueue','VoiceLatencyTrials','SpeechOutputWarmup','FirstWriteSpeechOutput','SpeechLeadTrim'].map(name=>voice+'src/main/java/ai/eliza/voice/'+name+'.java'),
   currentNativeSource('LocalVoiceRecording.java'),directory+'/NoteBridgePorts.java',directory+'/NoteRecordingPorts.java',directory+'/SharedRecordingPorts.java',
   'node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/JSObject.java',...platform.paths];
 }

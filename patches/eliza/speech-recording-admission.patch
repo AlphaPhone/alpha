@@ -1,6 +1,6 @@
 --- a/plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice/LocalSpeechBridgePlugin.java
 +++ b/plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice/LocalSpeechBridgePlugin.java
-@@ -227,7 +227,7 @@
+@@ -229,7 +229,7 @@
   /** Capacitor's own permission request launches through the activity; see {@link #launch}. */
   @Override @PluginMethod public void requestPermissions(PluginCall call){launch(call,()->super.requestPermissions(call));}
   @PermissionCallback private void microphonePermission(PluginCall call){Long admitted=permissionEpochs.remove(call.getCallbackId());if(admitted==null||admitted!=epoch.get()){call.reject("Recording cancelled");return;}if(getPermissionState("microphone")!=PermissionState.GRANTED){call.reject("Microphone permission denied","permission-denied");return;}startRecording(call,admitted);}
@@ -9,7 +9,7 @@
   @PluginMethod public void getRecordingMetrics(PluginCall call){main.post(()->{try{call.resolve(js(capture.metrics(call.getString("recordingId"))));}catch(RuntimeException error){call.reject("Recording metrics are no longer available");}});}
   @PluginMethod public void stopRecording(PluginCall call){main.post(()->{try{call.resolve(js(capture.stop()));}catch(Exception error){call.reject("Recording could not be saved");}});}
   private void finishDrain(boolean complete,String error){
-@@ -449,6 +449,7 @@
+@@ -470,6 +470,7 @@
   // started the capture (residentRoute), never through the renderer.
   private final LiveCaptureController live=new LiveCaptureController(new LiveCaptureController.Host(){
    public boolean open(long admitted){return !destroyed&&speechForeground&&admitted==epoch.get();}
