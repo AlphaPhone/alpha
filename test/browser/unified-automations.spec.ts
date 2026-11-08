@@ -62,3 +62,36 @@ test('missing server capability is an explicit source state, not a healthy empty
  const calls=await setup(page);await page.route('**/__unified_api/api/lifeops/reminders',route=>route.fulfill({status:404,contentType:'application/json',body:'{}'}));await page.getByRole('button',{name:'Refresh',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Agent reminders are not available on this agent.');await expect(page.locator('[data-alpha-layer=app]').getByText('Document review',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'New automation',exact:true}).click();await expect(page.getByRole('button',{name:'Agent reminder',exact:false})).toBeDisabled();await expect(page.getByRole('button',{name:'Agent reminder',exact:false})).toContainText('not available on this agent');await expect(page.getByRole('button',{name:'Prompt automation',exact:false})).toBeEnabled();await expect(page.getByRole('button',{name:'Reminder on this phone',exact:false})).toBeEnabled();expect(calls.filter(call=>call.method!=='GET')).toHaveLength(0);
 });
+
+test('a refreshed automation list preserves the focused row and its exact detail action',async({page},info)=>{
+ const {captureInputs}=await import('../../specs/quint/refinement/check-traces.mjs');
+ const {writeFileSync}=await import('node:fs');
+ const sources=['apps/app/src/prototype/automations-adapter.ts','apps/app/src/prototype/workflow-adapter.ts',
+  'apps/app/src/runtime/automations-protocol.ts','apps/app/src/prototype/template.html','apps/app/src/prototype/dc-lite.js','test/browser/unified-automations.spec.ts'];
+ const hashes=captureInputs(sources),checkpoints:any[]=[];
+ await setup(page);
+ const list=page.locator('[data-alpha-subview="workflows-list"]');
+ const target=list.getByRole('button').filter({hasText:'Document review'});await target.focus();
+ await target.evaluate(element=>(window as any).originalAutomationRow=element);
+ const intended=await target.getAttribute('data-alpha-workflow-id');
+ const observe=()=>page.evaluate(intended=>({
+  rows:Array.from(document.querySelectorAll('[data-alpha-workflow-id]')).map(row=>row.getAttribute('data-alpha-workflow-id')),
+  intended,focused:document.activeElement?.getAttribute('data-alpha-workflow-id')||null,
+  owner:document.activeElement?.closest('[data-alpha-subview]')?.getAttribute('data-alpha-subview')||null,
+  title:document.querySelector('[data-alpha-subview="automations-detail"] h2')?.textContent||null,
+  activeView:document.documentElement.dataset.activeView,
+ }),intended);
+ checkpoints.push({label:'focus canonical prompt row',...await observe()});
+ await page.route('**/__unified_api/api/automations',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({automations:[
+  {id:'trigger:inserted',type:'coordinator_text',title:'A new automation',description:'New explicit record',status:'paused',enabled:false,triggerId:'inserted',schedules:[{id:'inserted',displayName:'A new automation',instructions:'New explicit record',enabled:false,triggerType:'event',eventName:'manual-fixture'}]},
+  {id:'trigger:prompt',type:'coordinator_text',title:'Document review',description:'Review the supplied text only.',status:'paused',enabled:false,triggerId:'prompt',schedules:[{id:'prompt',displayName:'Document review',instructions:'Review the supplied text only.',enabled:false,triggerType:'cron',cronExpression:'0 9 * * 1',timezone:'UTC'}]},
+ ]})}));
+ await list.getByRole('button',{name:'Refresh',exact:true}).evaluate((element:HTMLElement)=>element.click());
+ await expect(list.getByText('A new automation',{exact:true})).toBeVisible();await expect(target).toBeFocused();
+ expect(await target.evaluate(element=>element===(window as any).originalAutomationRow)).toBe(true);
+ checkpoints.push({label:'canonical refresh inserts an earlier automation',...await observe()});
+ await page.keyboard.press('Enter');await expect(page.locator('[data-alpha-subview="automations-detail"] h2')).toHaveText('Document review');
+ checkpoints.push({label:'activate retained prompt detail',...await observe()});
+ expect(captureInputs(sources)).toEqual(hashes);
+ const path=info.outputPath('automation-refresh-focus.json');writeFileSync(path,JSON.stringify({sources:hashes,checkpoints},null,2));await info.attach('automation-refresh-focus',{path,contentType:'application/json'});
+});

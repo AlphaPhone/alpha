@@ -21,7 +21,7 @@ The following table tracks source-backed mutable families and their remaining ob
 | Browser | `browser.tabCards`, saved-library and suggestion rows | Tab cards now retain source `tab.id`, and saved-library rows retain their canonical URL identity. Search and suggestion rows remain in the broader review. |
 | Photos | Groups, assets, albums and related choices are keyed | The cross-parent helper covers a retained asset moving between groups. Broader provider-revocation and replacement schedules remain open. |
 | Maps | Saved rows/chips, provider results and fixture pins are keyed | Provider insertion and saved-row removal traces pass. Broader provider replacement, revocation and native schedules remain open. |
-| Workflows | cards, management cards, approvals and builder steps | Workflow, run, approval and step identities must survive asynchronous refresh, insertion and deletion. |
+| Workflows | Canonical rows, management controls, approvals and typed builder collections are keyed | Protocol refresh and typed-step modal-return traces cover retained identity. Legacy development steps still need durable IDs. |
 | AOSP communication | native message threads, Contacts groups and rows, Phone recents | Provider record identity must survive refresh. These need separate AOSP admission and device evidence. |
 | Launcher | Home, favorites and application rows are keyed | Source-backed reordering and Favorites transfer now retain app/control identity. Native package installation, removal and profile-state schedules remain open. |
 | Conversation | messages and nested review/action rows | Message, proposal and review identity must survive streaming, history replacement and owner changes. |
@@ -87,3 +87,13 @@ Launcher validation passed both new focus cases, both existing launcher browser 
 Five Maps loops now retain source identities. Saved places use their durable saved ID, provider results use the provider/place-ID tuple, and the two namespaces remain distinct when origin results combine them. Fixture pins, saved chips, results and category choices retain their source IDs as well.
 
 A real Maps-controller browser trace reproduces focus retargeting when a synthetic provider inserts a preceding result. The fix keeps the original DOM node and opens the originally focused place. A second trace deletes another saved place through the actual controller/store and verifies the retained focused saved row and selection. Both traces retain source hashes and DOM observations. Both browser cases, thirteen Maps/source unit tests and TypeScript checking passed. Provider network behavior and native acceptance remain outside these two controlled browser schedules.
+
+## Workflows follow-up
+
+Eighteen Workflows loops now retain available source identities. These include canonical automation rows, workflow management rows, execution history, phone proposals, approval request digests, typed builder steps and generated steps, source-step/Notes/calendar selections, fields and operation choices. Workflow and management identities use separate namespaces. Typed step keys retain the immutable step ID and separate the fixed trigger row from actual steps.
+
+The canonical automation browser regression inserts an earlier row through the real protocol readback and checks that the previously focused prompt opens its own detail. A second regression opens the step editor while another typed step has focus, moves the new step earlier, closes the modal, and checks that focus returns to the original step. Disabling only the typed-step key reproduces the wrong return target. These traces execute the real renderer, protocol/controller or authoring source and retain source hashes and concrete observations.
+
+Legacy development builder steps have no durable per-step ID. Their positional fallback is retained. Generic remote workflow detail steps expose only labels/descriptions and are read-only. A future migration needs stable IDs before those collections can receive the same identity guarantee. Checklist items, voice-action rows and legacy workflow definitions require separate durable-ID migrations.
+
+Workflows validation passed the three-case unified automation suite, the ordinary typed authoring save flow, both final source-observation focus cases, forty-four focused Node tests and TypeScript checking. An initial typed authoring smoke run timed out during page loading. Its independent retry passed before the focused step-reordering check ran. The successful browser traces contain three checkpoints each with unchanged source hashes.

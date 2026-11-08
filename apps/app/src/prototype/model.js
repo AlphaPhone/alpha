@@ -4433,7 +4433,7 @@ registerView("workflows", {
     var cards = list.map(function (f) {
       var last = f.runs && f.runs[0];
       var failed = f.on && last && last.status === "fail";
-      return { name: f.name, short: failed ? "Failed · " + last.sum : f.short, failed: failed, on: f.on, track: api.track(f.on), kx: api.kx(f.on), dim: "",
+      return { id: f.id, name: f.name, short: failed ? "Failed · " + last.sum : f.short, failed: failed, on: f.on, track: api.track(f.on), kx: api.kx(f.on), dim: "",
         open: function () { set({ open: f.id, run: null }); }, toggle: toggle(f) };
     });
 
@@ -4463,7 +4463,7 @@ registerView("workflows", {
     if (f) {
       var running = st.running && st.running.id === f.id ? st.running.i : null;
       var runs = (f.runs || []).map(function (r) {
-        return { when: r.when, sum: r.sum, d: r.status === "ok" ? IC.check : (r.status === "fail" ? IC.x : IC.wfSkip),
+        return { id: r.id, when: r.when, sum: r.sum, d: r.status === "ok" ? IC.check : (r.status === "fail" ? IC.x : IC.wfSkip),
           css: r.status === "ok" ? "background:var(--acct);color:var(--bg)" : (r.status === "fail" ? "background:var(--fg);color:var(--bg)" : "background:var(--s3);color:var(--fg)"),
           label: r.when + ", " + (r.status === "ok" ? "succeeded" : r.status === "fail" ? "failed" : "skipped"),
           open: function () { set({ run: r.id }); } };

@@ -22192,7 +22192,7 @@
     },
     {
       "path": "apps/app/src/prototype/automations-adapter.ts",
-      "sha256": "ea16d752a6a09c1fe4b27a08e924e7076956a29fc0c8f652d4cb4b14638ae94b",
+      "sha256": "6585072230ac52b842c2842103ea3c49bb48b62f60b4d2d98883e932a982ff95",
       "models": [
         "WorkflowExecution"
       ],
@@ -24665,7 +24665,7 @@
     },
     {
       "path": "apps/app/src/prototype/model.js",
-      "sha256": "a37ce542dd4fc3f5a8d765b46cff63e5336b698e35871f801954f89a10107160",
+      "sha256": "0a3de3d79dc1057c76c5d7a850428ee72dd8f4ec5203e2d3d146d653041cbe97",
       "models": [
         "Application",
         "CalendarPresentation",
@@ -31221,7 +31221,7 @@
     },
     {
       "path": "apps/app/src/prototype/template.html",
-      "sha256": "22df73ab26bc74b3515ec43308e13a30db51b3e4876cb98839237e95f7f5480c",
+      "sha256": "fc29479f0a9c4795bb4d2920d7a8351d4ea897ed0da722b30f00fce6bfc30c47",
       "models": [
         "ShellNavigation",
         "PreferencesAndPresentation",
@@ -31794,7 +31794,7 @@
     },
     {
       "path": "apps/app/src/prototype/workflow-adapter.ts",
-      "sha256": "8f0068b7cb833563a725ff2e98b9d35bb6bac5a74df15960663d616b16594c86",
+      "sha256": "6e03d1276ea2aef7636c1a460ad0d1e8441e152075ec966d21496ed4a3b0c7fb",
       "models": [
         "WorkflowExecution"
       ],
@@ -31929,7 +31929,7 @@
     },
     {
       "path": "apps/app/src/prototype/workflow-authoring.ts",
-      "sha256": "2979b6514f9dba7960f45053e1a363112a3a2579fac50a4bd54a8479cbec16cc",
+      "sha256": "a273ae2ff055a7efdfeec862be8443cdfca9a68f33e0b0de827b500e885c20c5",
       "models": [
         "WorkflowExecution"
       ],

@@ -49,3 +49,43 @@ test('a draft read finishing after an owner switch cannot reveal the old value',
  });
  expect(result.value).toBeNull();expect(result.error).toContain('owner changed');
 });
+
+test('reordering typed steps keeps the modal return target on the original step identity',async({page},info)=>{
+ const {captureInputs}=await import('../../specs/quint/refinement/check-traces.mjs');
+ const {writeFileSync}=await import('node:fs');
+ const sources=['apps/app/src/prototype/workflow-authoring.ts','apps/app/src/prototype/subview-accessibility.ts',
+  'apps/app/src/runtime/inline-modal.ts','apps/app/src/prototype/template.html','apps/app/src/prototype/dc-lite.js',
+  'test/browser/dev-workflow-authoring.spec.ts','test/browser/workflow-navigation.ts'];
+ const hashes=captureInputs(sources),checkpoints:any[]=[];
+ await setup(page);
+ for(const text of ['First source','Second source']){
+  await page.getByRole('button',{name:'Add Read step',exact:true}).click();
+  await page.getByRole('textbox',{name:'Text supplied to workflow',exact:true}).fill(text);
+  await page.getByRole('button',{name:'Done',exact:true}).click();
+ }
+ await expect.poll(async()=>JSON.parse((await savedDraft(page))!).spec.steps.length).toBe(2);
+ const intended=await page.evaluate(async()=>{
+  const buttons=Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-workflow-step]'));
+  const row=buttons.find(button=>button.textContent?.includes('supplied text')&&button!==buttons.find(other=>other.textContent?.includes('supplied text')));
+  return row?.getAttribute('data-alpha-workflow-step')||null;
+ });
+ expect(intended).not.toBeNull();
+ const target=page.locator('[data-alpha-workflow-step="'+intended+'"]');await target.focus();
+ await target.evaluate(element=>(window as any).typedStepReturnTarget=element);
+ const observe=async()=>({intended,focused:await page.evaluate(()=>document.activeElement?.getAttribute('data-alpha-workflow-step')||null),
+  steps:JSON.parse((await savedDraft(page))!).spec.steps.map((step:any)=>({id:step.id,text:step.text})),
+  rows:await page.locator('[data-alpha-workflow-step]').evaluateAll(elements=>elements.map(element=>element.getAttribute('data-alpha-workflow-step')))});
+ checkpoints.push({label:'focus second typed Read step',...await observe()});
+ await page.getByRole('button',{name:'Add Read step',exact:true}).evaluate((element:HTMLElement)=>element.click());
+ await page.getByRole('textbox',{name:'Text supplied to workflow',exact:true}).fill('Third source');
+ await page.getByRole('button',{name:'Move step up',exact:true}).click();
+ await page.getByRole('button',{name:'Done',exact:true}).click();
+ await expect(target).toBeFocused();
+ expect(await target.evaluate(element=>element===(window as any).typedStepReturnTarget)).toBe(true);
+ checkpoints.push({label:'move a new step ahead and return from modal',...await observe()});
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('textbox',{name:'Text supplied to workflow',exact:true})).toHaveValue('Second source');
+ checkpoints.push({label:'reopen original typed step',...await observe()});
+ expect(captureInputs(sources)).toEqual(hashes);
+ const path=info.outputPath('typed-step-focus.json');writeFileSync(path,JSON.stringify({sources:hashes,checkpoints},null,2));await info.attach('typed-step-focus',{path,contentType:'application/json'});
+});
