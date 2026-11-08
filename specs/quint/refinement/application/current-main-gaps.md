@@ -56,7 +56,7 @@ retained-device Notes contract.
   revisions require review, while clean drafts follow current snapshots. Empty
   new drafts, delete-after-save and restore use separate guarded paths.
 - `CanonicalNotesMutation` exercises actual remove/restore continuations, prerequisite dirty saves, changed tokens, queued newer edits, rejected concurrent commands, owner loss and codec guards. Backend create/update/delete/restore, collection revision allocation, Trash guarantees and persistence remain source-refinement obligations.
-- `CanonicalNotesUi` now has source-bound `CanonicalNotesFeedback` coverage for failure/review classification, including delete/restore callbacks. Collection presentation and the remaining command joins are still open. It owns pending idle
+- `CanonicalNotesUi` now has source-bound `CanonicalNotesFeedback` coverage for failure/review classification, including delete/restore callbacks. Collection presentation and idle waiters now have `CanonicalNotesView` callback coverage. Remaining command joins are open. It owns pending idle
   waiters, projected base rows and editable rows, open/draft identity, Trash
   rows, source-derived status and action decoration. It also mediates selection
   after saves, creation in a folder, voice transcript creation, note-to-Calendar

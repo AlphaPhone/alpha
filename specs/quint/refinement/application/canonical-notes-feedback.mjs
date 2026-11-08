@@ -8,10 +8,10 @@ import {checkTraces} from '../check-traces.mjs';
 const driver = fileURLToPath(import.meta.url);
 const source = 'apps/app/src/prototype/canonical-notes-ui.ts';
 
-async function compile(extraSources = []) {
-  const compiled = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `export {CanonicalNotesUi} from './${source}';`},
+export async function compileCanonicalNotesUi(extraSources = [], observationPlugins = []) {
+  const compiled = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `export {CanonicalNotesUi} from './${source}'; export {projectNoteForModel} from './.eliza/client-features/plugins/plugin-notes/src/types.ts';`},
     bundle: true, format: 'cjs', platform: 'node', write: false, metafile: true,
-    plugins: [{name: 'canonical-view-ports', setup(builder) {
+    plugins: [...observationPlugins, {name: 'canonical-view-ports', setup(builder) {
       builder.onResolve({filter: /^\.\.\/runtime\/connection-ui$/}, () => ({path: 'copy', namespace: 'ports'}));
       builder.onResolve({filter: /^\.\.\/daily$/}, () => ({path: 'daily', namespace: 'ports'}));
       builder.onLoad({filter: /.*/, namespace: 'ports'}, args => ({loader: 'js', contents: args.path === 'copy'
@@ -24,14 +24,14 @@ async function compile(extraSources = []) {
   return {code: compiled.outputFiles[0].text, sources};
 }
 
-async function fixture(compiled) {
+export async function createCanonicalNotesUiFixture(compiled, onViewObservation = () => {}) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const events = new EventTarget(); Object.defineProperty(globalThis, 'window', {configurable: true, writable: true, value: events});
   const requests = [], toasts = [], commands = [];
   let current = true, reviews = 0;
   const daily = {perform() {throw Error('Native actions are outside the feedback fixture');}};
   const module = {exports: {}};
-  new Function('require', 'module', 'exports', '__ports', compiled.code)(createRequire(import.meta.url), module, module.exports, {daily});
+  new Function('require', 'module', 'exports', '__ports', compiled.code)(createRequire(import.meta.url), module, module.exports, {daily, observe: onViewObservation});
   const identity = {ownerId: 'owner-one', agentId: 'agent', sessionId: 'session-one', origin: 'https://fixture.invalid'};
   const port = {sessionId: identity.sessionId, identity, current: () => current,
     request(path, method, body, signal) {const task = deferred(); requests.push({path, method, body, signal, task, settled: false}); return task.promise;}};
@@ -95,7 +95,7 @@ async function fixture(compiled) {
   ui.editor.hooks.committed = (target, token) => {originalCommitted(target, token); record(actionCall('committed'));};
   const originalDiscard = ui.discardDraftAndReload.bind(ui);
   ui.discardDraftAndReload = () => {prefix.push(actionCall('discard')); return originalDiscard();};
-  return {ui, observe, feedback, initial, feedbackSteps, run, resolveRequest, api, requests,
+  return {ui, projectNoteForModel: module.exports.projectNoteForModel, observe, feedback, initial, feedbackSteps, run, resolveRequest, api, requests,
     restore() {const output = ui.decorate({none: false}, api, viewState); output.trashRows[0].restore();},
     loseOwner() {current = false;}, async close() {
       ui.retire(); for (const request of requests) if (!request.settled) {request.settled = true; request.task.reject(Error('Fixture teardown'));}
@@ -104,13 +104,13 @@ async function fixture(compiled) {
 }
 
 export async function checkCanonicalNotesFeedback(extraSources = []) {
-  const compiled = await compile(extraSources), traces = [];
+  const compiled = await compileCanonicalNotesUi(extraSources), traces = [];
   const note = {id: 'note-one', title: 'Note', body: '\nBody', color: 'yellow', createdAt: '2026-11-08T00:00:00Z', updatedAt: '2026-11-08T00:00:00Z'};
   const state = (revision = 1, notes = [note], trash = []) => ({revision, notes, trash});
   for (const scenario of ['initial-read', 'initial-read-failure', 'read-recovery', 'dirty-read-recovery', 'dirty-new-revision',
     'uncertain-delete', 'uncertain-restore', 'uncertain-update', 'discard-success', 'discard-failure',
     'commit-after-uncertain', 'card-after-uncertain', 'local-invalid-update', 'owner-read', 'retire-read', 'retire-uncertain']) {
-    const f = await fixture(compiled);
+    const f = await createCanonicalNotesUiFixture(compiled);
     try {
       f.run('refresh');
       if (scenario === 'retire-read' || scenario === 'owner-read') {
