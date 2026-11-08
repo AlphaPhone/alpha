@@ -1,0 +1,48 @@
+--- a/packages/core/src/services/task.ts
++++ b/packages/core/src/services/task.ts
+@@ -217,6 +217,7 @@
+ 	 * WHY serverless first: no long-lived process; WHY daemon second: one shared getTasks(agentIds) per tick for all agents.
+ 	 */
+ 	startTimer() {
++		if (this.stopped) return;
+ 		if (this.runtime.serverless === true) {
+ 			return;
+ 		}
+@@ -792,7 +793,17 @@
+ 	 *
+ 	 * @param {Task} task - The task to be executed.
+ 	 */
++	private assertAcceptingExecution(): void {
++		if (this.stopped) {
++			throw new ElizaError("Task service has stopped accepting execution", {
++				code: "TASK_SERVICE_STOPPED",
++				severity: "ephemeral",
++			});
++		}
++	}
++
+ 	private async executeTask(task: Task) {
++		this.assertAcceptingExecution();
+ 		const execution = this.executeTaskInternal(task);
+ 		this.executingTaskPromises.add(execution);
+ 		try {
+@@ -1069,9 +1080,11 @@
+ 	 * WHY separate from timer: serverless has no long-lived process; host drives execution explicitly.
+ 	 */
+ 	async runDueTasks(): Promise<void> {
++		if (this.stopped) return;
+ 		while (this.activeTick) {
+ 			await this.activeTick;
+ 		}
++		if (this.stopped) return;
+ 		const run = (async () => {
+ 			const allTasks = await this.runtime.getTasks({
+ 				tags: ["queue"],
+@@ -1100,6 +1113,7 @@
+ 	 * @param taskId - UUID of the task.
+ 	 */
+ 	async executeTaskById(taskId: UUID): Promise<void> {
++		this.assertAcceptingExecution();
+ 		const task = await this.runtime.getTask(taskId);
+ 		if (!task) {
+ 			throw new Error(`Task ${taskId} not found`);
