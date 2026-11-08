@@ -1,9 +1,6 @@
-# Historical TLA+ results (view refresh)
+# View refresh TLA+ results (TLC 2026-11-06)
 
-These TLC results predate the Quint migration and are kept as historical evidence.
-The models now live in `specs/quint/legacy/` (CameraSession, PhotosLibrary, NotesView,
-FilesBrowser; configurations and provenance in `specs/quint/legacy/view-refresh.manifest.json`).
-The original `.tla`/`.cfg` files are in git history at the commits named in each module header.
+Run: `design/view-refresh-2026-11/tla/check.sh <tla2tools.jar>` (writes <area>/results/, untracked).
 
 | Spec | Config | Result | Distinct states |
 |---|---|---|---|

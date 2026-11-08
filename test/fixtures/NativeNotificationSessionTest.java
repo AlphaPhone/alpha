@@ -10,9 +10,10 @@ public final class NativeNotificationSessionTest {
  static void check(boolean value){if(!value)throw new AssertionError("Check "+checks);checks++;}
  interface Work{void run()throws Exception;}
  static void reject(Work work)throws Exception{try{work.run();}catch(SecurityException|NativeNotificationSession.Superseded expected){checks++;return;}throw new AssertionError("Untrusted restore accepted");}
+ static void notReady(Work work)throws Exception{try{work.run();}catch(SecurityException|NativeNotificationSession.Superseded wrong){throw new AssertionError("Starting resident treated as revoked",wrong);}catch(java.io.IOException retry){checks++;return;}throw new AssertionError("Starting resident accepted");}
  static final class Fixture implements NativeNotificationSession.Ports{
   String saved,provider="existing-provider-generation",installation=INSTALL,root="new-service-root";
-  String responseOwner=OWNER,responseAgent=AGENT,sessionKind="machine";long responseExpiry=EXPIRY;boolean revoked,changedAfterOwner,retired;List<String> requests=new ArrayList<>();
+  String responseOwner=OWNER,responseAgent=AGENT,sessionKind="machine",agentStatus="running";long responseExpiry=EXPIRY;boolean revoked,changedAfterOwner,retired;List<String> requests=new ArrayList<>();
   Fixture()throws Exception{
    JSONObject session=ResidentResultSession.snapshot(OWNER,"synthetic-existing-machine",EXPIRY,"previous-service-root");
    saved=NativeNotificationSession.record(session,new JSONObject().put("subjectUserId",OWNER).put("agentId",AGENT),INSTALL,provider).toString();
@@ -28,11 +29,20 @@ public final class NativeNotificationSessionTest {
      .put("session",new JSONObject().put("id",token).put("kind",sessionKind).put("expiresAt",responseExpiry));
     if(changedAfterOwner)root="rotated-again";return out;
    }
-   if("/api/agents".equals(path))return new JSONObject().put("agents",new JSONArray().put(new JSONObject().put("id",responseAgent).put("status","running")));
+   if("/api/agents".equals(path))return new JSONObject().put("agents",new JSONArray().put(new JSONObject().put("id",responseAgent).put("status",agentStatus)));
    throw new AssertionError("Unexpected route: "+path);
   }
  }
  public static void main(String[] args)throws Exception{
+  check(NativeNotificationSession.pagePath(new JSONObject().put("afterSequence",0)).equals("/api/notifications?nativeTransport=true&afterSequence=0&limit=128"));
+  JSONObject cursor=new JSONObject().put("afterSequence",7).put("nativeEpoch",INSTALL).put("throughSequence",9007199254740991L);
+  check(NativeNotificationSession.pagePath(cursor).equals("/api/notifications?nativeTransport=true&afterSequence=7&nativeEpoch="+INSTALL+"&throughSequence=9007199254740991&limit=128"));
+  for(Object bad:new Object[]{-1,0.5,"1",true,9007199254740992L})reject(()->NativeNotificationSession.pagePath(new JSONObject().put("afterSequence",bad)));
+  reject(()->NativeNotificationSession.pagePath(new JSONObject().put("afterSequence",1)));
+  reject(()->NativeNotificationSession.pagePath(new JSONObject().put("afterSequence",0).put("throughSequence",0)));
+  reject(()->NativeNotificationSession.pagePath(new JSONObject(cursor.toString()).put("throughSequence",6)));
+  reject(()->NativeNotificationSession.pagePath(new JSONObject(cursor.toString()).put("nativeEpoch",INSTALL+"&limit=1000")));
+  reject(()->NativeNotificationSession.pagePath(new JSONObject(cursor.toString()).put("token","synthetic")));
   Fixture valid=new Fixture();JSONObject restored=NativeNotificationSession.restore(valid,NOW);
   check(restored.getJSONObject("session").getString("runtimeDigest").equals(HostedResultNotices.hash("new-service-root")));
   check(restored.getJSONObject("session").getString("token").equals("synthetic-existing-machine"));
@@ -43,6 +53,9 @@ public final class NativeNotificationSessionTest {
   Fixture expired=new Fixture();reject(()->NativeNotificationSession.restore(expired,EXPIRY));check(expired.requests.isEmpty());
   Fixture owner=new Fixture();owner.responseOwner="40000000-0000-4000-8000-000000000004";reject(()->NativeNotificationSession.restore(owner,NOW));check(owner.requests.size()==1);
   Fixture agent=new Fixture();agent.responseAgent="40000000-0000-4000-8000-000000000004";reject(()->NativeNotificationSession.restore(agent,NOW));
+  Fixture starting=new Fixture();starting.agentStatus="starting";notReady(()->NativeNotificationSession.restore(starting,NOW));
+  Fixture restarting=new Fixture();restarting.agentStatus="restarting";restarting.responseAgent="40000000-0000-4000-8000-000000000004";notReady(()->NativeNotificationSession.restore(restarting,NOW));
+  Fixture placeholder=new Fixture();placeholder.responseAgent="00000000-0000-0000-0000-000000000000";notReady(()->NativeNotificationSession.restore(placeholder,NOW));
   Fixture kind=new Fixture();kind.sessionKind="browser";reject(()->NativeNotificationSession.restore(kind,NOW));
   Fixture expiry=new Fixture();expiry.responseExpiry++;reject(()->NativeNotificationSession.restore(expiry,NOW));
   Fixture revoked=new Fixture();revoked.revoked=true;reject(()->NativeNotificationSession.restore(revoked,NOW));

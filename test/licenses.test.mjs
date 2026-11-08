@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {
-  ROOT, JSON_OUTPUT, TEXT_OUTPUT, ALLOWLIST, NO_FONT_LICENCE, UNKNOWN, UNVERIFIED, generate, collectNotices, detectLicenceFromText, loadTemplates, packageNotice,
+  ROOT, JSON_OUTPUT, TEXT_OUTPUT, ALLOWLIST, NO_FONT_LICENCE, UNKNOWN, UNVERIFIED, generate, verifyCommittedNotices, collectNotices, detectLicenceFromText, loadTemplates, packageNotice,
 } from '../scripts/generate-licenses.mjs';
 import {FLAGS, classifyLicence, licenceFlagLines, licenceFlagRecords, obligationNote} from '../scripts/licence-policy.mjs';
 import {releaseBlockers} from '../scripts/release-blockers.mjs';
@@ -47,8 +47,8 @@ test('the committed notices flag what the product ships today, in the JSON and a
   assert.match(header, new RegExp(`Entries: ${fresh.entries.length}\\. Flagged entries: ${Object.keys(flagged).length}\\.`));
   assert.match(header, /not legal review/);
   for (const entry of fresh.entries) for (const flag of entry.flags) {
-    const section = header.slice(header.indexOf(`\n${flag} (`));
-    assert.ok(section.split(/\n(?=\S)/)[0].includes(`  - ${entry.name}@${entry.version.split('\n')[0]} (${entry.license})`) || section.includes(`  - ${entry.name}@`), `${flag}: ${entry.name}`);
+    const section = header.slice(header.indexOf(`\n${flag} (`) + 1);
+    assert.ok(section.split(/\n(?=\S)/)[0].includes(`  - ${entry.name}@${entry.version.split('\n')[0]} (${entry.license})`), `${flag}: ${entry.name}`);
   }
   assert.match(fresh.text, /\nmediabunny\nVersion: [^\n]+\nLicense: MPL-2\.0\nSource: [^\n]+\nFlags: copyleft-weak\nObligation \(copyleft-weak\): MPL-2\.0: file-level copyleft\./);
   assert.match(fresh.text, /License text: canonical SPDX text \(the package ships no licence file\)\nFlags: licence-text-missing-from-package\n/);
@@ -140,7 +140,7 @@ test('a package without a licence file gets the canonical text and a flag; an un
 });
 
 test('checked-in notices are byte-identical to a fresh generation', () => {
-  const shipped = generate(ROOT);
+  const shipped = verifyCommittedNotices(ROOT);
   assert.deepEqual(shipped.errors, []);
   assert.equal(fs.readFileSync(path.join(ROOT, JSON_OUTPUT), 'utf8'), shipped.json, `${JSON_OUTPUT} is stale; run node scripts/generate-licenses.mjs`);
   assert.equal(fs.readFileSync(path.join(ROOT, TEXT_OUTPUT), 'utf8'), shipped.text, `${TEXT_OUTPUT} is stale; run node scripts/generate-licenses.mjs`);
@@ -234,16 +234,16 @@ test('broken input still fails: a corrupted or missing package manifest is an er
 });
 
 test('the notices carry no entries for the removed speech runtimes or models', () => {
-  // Spelled in pieces so the repository-wide search (test/llama-cpp-only.test.mjs) stays clean.
+  // Spelled in pieces so the names are never written out here (test/llama-cpp-only.test.mjs checks
+  // tracked paths everywhere, but file contents only in web-owned sources).
   const banned = new RegExp(['on' + 'nx', 'sher' + 'pa', 'k2' + 'fsa', 'pi' + 'per-voices'].join('|'), 'i');
   assert.deepEqual(fresh.entries.filter(entry => banned.test(`${entry.name}\n${entry.version}\n${entry.source}`)).map(entry => entry.name), []);
 });
-test('Paradee notices preserve the eSpeak license and exclude the retired speech runtime', () => {
+test('Paradee notices preserve the eSpeak license', () => {
   const {entries} = fresh;
   const espeak = entries.find(row => row.name.startsWith('eSpeak NG'));
   assert.equal(espeak.license, 'GPL-3.0-or-later');
   assert.match(espeak.text, /GNU GENERAL PUBLIC LICENSE/);
-  assert.equal(entries.some(row => /^Sherpa-O/.test(row.name)), false);
 });
 
 function scratchRoot(t, {ownNodeModules = false} = {}) {

@@ -9,8 +9,6 @@ import { flagOffAndroid, fenceNetwork, expectNoDevelopmentSurface } from './flag
 import { residentStub, type StubAccount } from './resident-stub';
 import { ASSISTANT_GROUP, auditPage, auditReadingOrder, auditTabOrder, auditTree, format } from './accessibility-audit';
 
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
-
 const account: StubAccount = { token: 'accessibility-sign-in-key', userId: '9f1dc45a-4011-4e44-947a-30d999d24fa5', email: 'owner@example.invalid', balance: 5 };
 const blocking = (lines: string[]) => lines.filter(line => !line.startsWith('text-truncated:'));
 
@@ -53,6 +51,18 @@ async function signedOut(page: Page) {
   return { foreign, welcome };
 }
 
+test('the signed-out Cloud chooser stays usable after the resident fails to start', async ({page}) => {
+  const foreign = await fenceNetwork(page);
+  await flagOffAndroid(page, {freshAccess: true});
+  await residentStub(page, {nativeSignIn: true, emptyKeystore: true, rejectStart: true, accounts: [account]});
+  await page.goto('/');
+  await expect(page.getByRole('main', {name:'Welcome to Alpha.', exact:true})).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).residentStub.order.includes('Agent.start'))).toBe(true);
+  await expect(page.getByRole('button', {name:'Email me a code', exact:true})).toBeEnabled();
+  await expect(page.getByText('Local agent failed to start.', {exact:true})).toHaveCount(0);
+  expect(foreign).toEqual([]);
+});
+
 /** Everything the page offers can be brought on screen by scrolling and nothing is painted over it. */
 async function unreachable(page: Page) {
   return page.evaluate(() => {
@@ -91,7 +101,7 @@ for (const scale of [1, 2]) {
     }
     const found = blocking(format([
       ...await auditTree(page),
-      ...await auditPage(page, scale === 1 ? { contrast: true, targetSize: 24, clipping: true, overlap: true } : { clipping: true, overlap: true }),
+      ...await auditPage(page, scale === 1 ? { contrast: true, targetSize: 24, clipping: true, overlap: true, placeholder: true, selection: true } : { clipping: true, overlap: true }),
       ...await auditReadingOrder(page),
       ...await auditTabOrder(page),
     ]));
@@ -113,4 +123,26 @@ test.describe('landscape', () => {
     expect(await unreachable(page)).toEqual([]);
     expect(foreign).toEqual([]);
   });
+});
+
+// The launcher variant draws under transparent system bars and reports them only as
+// --native-top-inset/--native-bottom-inset (env(safe-area-inset-*) stays 0 in its WebView).
+test('the sign-in page and sheet clear the native system bars', async ({ page }) => {
+  await signedOut(page);
+  const padding = await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.setProperty('--native-top-inset', '40px');
+    root.setProperty('--native-bottom-inset', '34px');
+    const scrim = document.body.appendChild(document.createElement('div'));
+    scrim.className = 'alpha-connection-scrim';
+    const content = getComputedStyle(document.querySelector('.alpha-auth-page .alpha-auth-content')!);
+    const sheet = getComputedStyle(scrim);
+    const out = { contentTop: parseFloat(content.paddingTop), contentBottom: parseFloat(content.paddingBottom), scrimTop: parseFloat(sheet.paddingTop), scrimBottom: parseFloat(sheet.paddingBottom) };
+    scrim.remove();
+    return out;
+  });
+  expect(padding.contentTop).toBeGreaterThanOrEqual(72);
+  expect(padding.contentBottom).toBeGreaterThanOrEqual(66);
+  expect(padding.scrimTop).toBeGreaterThanOrEqual(40);
+  expect(padding.scrimBottom).toBeGreaterThanOrEqual(34);
 });

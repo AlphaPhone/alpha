@@ -12,7 +12,7 @@ const prepared = fs.existsSync(".eliza/client-features/plugins/plugin-inbox/src/
 
 /** Run a module snippet with type transforms (CloudProtocol uses parameter properties). */
 function runTs(source) {
-  const child = spawnSync(process.execPath, ["--experimental-transform-types", "--no-warnings", "--input-type=module", "-e", source], { encoding: "utf8" });
+  const child = spawnSync(process.execPath, ["--import=tsx", "--no-warnings", "--input-type=module", "-e", source], { encoding: "utf8" });
   assert.equal(child.status, 0, child.stderr);
   return JSON.parse(child.stdout.trim().split("\n").at(-1));
 }
@@ -60,12 +60,12 @@ test("consent paths are exactly what CloudProtocol posts to connect/initiate", {
 test("the Settings screen starts only the consent paths marked ui", () => {
   const ui = fs.readFileSync("apps/app/src/runtime/google-connection-ui.tsx", "utf8");
   const connects = [...ui.matchAll(/(?:onClick=\{\(\)=>void|await) connect\((.*?)\)(?:\}>|;)/g)].map(m => m[1].trim());
-  assert.deepEqual(connects.sort(), ["", "accounts.some(account=>gmailGrantTier(account)==='modify')?'modify':'send','write'", "gmail,'write'"].sort(),
+  assert.deepEqual(connects.sort(), ["heldGmailTier(accounts,'send')", "heldGmailTier(accounts,'send'),'write'", "heldGmailTier(connected,'read'),'write'"].sort(),
     "a new Settings consent button needs a row in ALPHA_CONSENT_PATHS and the runbook matrix");
   assert.doesNotMatch(ui, /initiateGmail/);
   const uiPaths = ALPHA_CONSENT_PATHS.filter(p => p.surface === "ui").map(p => p.call.slice(1).join("/")).sort();
   assert.deepEqual(uiPaths, ["write/modify", "write/read", "write/send"]);
-  assert.match(ui, /const gmail=connected\.some\(account=>gmailGrantTier\(account\)==='modify'\)\?'modify':connected\.some\(account=>account\.grantedCapabilities\.includes\('google\.gmail\.send'\)\)\?'send':'read';/, "the Calendar intent asks Gmail read only, and never narrows Gmail access already granted");
+  assert.match(ui, /const heldGmailTier=\(accounts:GmailAccount\[\],floor:'read'\|'send'\)=>accounts\.some\(account=>account\.connected&&gmailGrantTier\(account\)==='modify'\)\?'modify':accounts\.some\(account=>account\.connected&&account\.grantedCapabilities\.includes\('google\.gmail\.send'\)\)\?'send':floor;/, "every consent keeps the Gmail tier already granted; only the Calendar intent may ask Gmail read");
   assert.match(ui, /async function connect\(permission:'read'\|'modify'\|'send'='send',calendarPermission:'read'\|'write'='write'\)/, "Connect asks for every scope Cloud grants up front");
 });
 
@@ -86,7 +86,7 @@ test("read state is unavailable unless inbox-v1/capabilities advertises readStat
   const sites = [...adapter.matchAll(/setRead\(/g)].length;
   const gated = [...adapter.matchAll(/capabilities\(\)\?\.readState/g)].length;
   assert.ok(sites >= 3 && gated >= 4, `expected the readState gate at each setRead entry point (setRead ${sites}, gates ${gated})`);
-  assert.match(adapter, /!provider\.capabilities\(\)\?\.readState\) \{ if \(explicit\) api\?\.toast\('This account cannot change read state here\. Nothing was changed\.'\); return; \}/);
+  assert.match(adapter, /!provider\.capabilities\(\)\?\.readState\) \{ if \(explicit\) api\?\.toast\("Can't change read state for this account\."\); return; \}/);
   assert.match(adapter, /canToggleRead: !!provider\.capabilities\(\)\?\.readState&&/);
 });
 

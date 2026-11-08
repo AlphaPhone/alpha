@@ -77,7 +77,8 @@ export interface ConversationMessageTarget {
   text: string;
   from: 'user' | 'agent';
 }
-export type VoiceTurnSignal = import('@elizaos/voice/turn').VoiceTurnSignal;
+/** A committed voice turn omits the text end-of-turn score (voice-adapter.ts `turnSignal`). */
+export type VoiceTurnSignal = Omit<import('@elizaos/voice/turn').VoiceTurnSignal,'endOfTurnProbability'>&{endOfTurnProbability?:number};
 export type ChatChannel = 'DM' | 'VOICE_DM';
 export interface VoiceConversationBinding { conversationId:string;session:VerifiedSession;connectionEpoch:number }
 export interface ReadReplyBinding extends VoiceConversationBinding {cloudAccount:string}
@@ -87,6 +88,8 @@ export interface VoiceNavigationContinuation {
  finish(delivered:boolean):ContextEnvelope|undefined;
 }
 export interface AgentReply {
+  /** A voice turn the agent chose not to answer: `text` is empty and no reply was written. */
+  ignored?: true;
   messageId?: string;
   userMessageId?: string;
   messageBinding?: { conversationId: string; session: VerifiedSession };
@@ -124,7 +127,7 @@ export interface VerifiedSessionTransport {
     voiceTurnSignal?: VoiceTurnSignal;
     context: ContextEnvelope;
     signal: AbortSignal;
-    onText?:(text:string)=>void;
+    onText?:import('./local-agent-stream').StreamTextListener;
     onReplyReady?:(results:readonly unknown[]|undefined)=>void;
     replyTo?: ConversationMessageTarget;
   }): Promise<AgentReply>;
@@ -305,7 +308,7 @@ export class AlphaClient {
           reject(
             new AlphaClientError(
               "cancelled",
-              "Request cancelled. A dispatched action may still need status reconciliation.",
+              "Request cancelled. Check whether the action already happened.",
             ),
           );
         controller.signal.addEventListener("abort", abortListener, {
@@ -367,7 +370,7 @@ export class AlphaClient {
       return reply.text;
     },signal,automatic);
   }
-  async send(text: string, onText?:(text:string)=>void, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal}): Promise<AgentReply> {
+  async send(text: string, onText?:import('./local-agent-stream').StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal}): Promise<AgentReply> {
     if (!text.trim()) throw new Error("Enter a message.");
     if(options?.channelType==='VOICE_DM'&&replyTo)throw Error("A voice turn cannot resend or edit a selected message.");
     return this.run(async (transport, context, signal) => {
@@ -380,7 +383,7 @@ export class AlphaClient {
         context,
         signal,
         onReplyReady:results=>{if(!accepting||signal.aborted||this.transport!==transport||this.context.revision!==context.revision)return;onReplyReady?.(results);},
-        onText:value=>{if(!accepting||signal.aborted)return;if(typeof value!=='string'||value.length>200000)throw new AlphaClientError('invalid-response','Invalid streamed reply.');onText?.(value);},
+        onText:(value,frame)=>{if(!accepting||signal.aborted)return;if(typeof value!=='string'||value.length>200000)throw new AlphaClientError('invalid-response','Invalid streamed reply.');onText?.(value,frame);},
       }); } finally {accepting=false;}
       if (signal.aborted)
         throw new AlphaClientError("cancelled", "Request cancelled.");
@@ -427,6 +430,7 @@ export class AlphaClient {
       this.proposals = next;
       return {
         text: result.text,
+        ...(result.ignored===true?{ignored:true as const}:{}),
         ...(completedReads.length?{completedReads}:{}),
         ...(completedActions.length?{completedActions}:{}),
         ...(result.messageId?{messageId:result.messageId}:{}),

@@ -22,6 +22,17 @@ test('native inference export keeps fixed durations and a valid trace, never arb
  assert.equal(sanitizeNativeInferenceTiming({get version(){throw Error('diagnostics must not throw');}}),undefined);
 });
 
+test('diagnostics join native inference only to the matching exported voice record',()=>{
+ const id='1b0c7a52-6d5e-4e0f-9a43-5c1d2e3f4a51',record={version:1,id,recordedAt:now,route:'local-agent',cold:false,entry:'conversation',marks:{send:0}};
+ const join={traceId:nativeInference.traceId,voiceTurnId:id,secret:secrets[0]};
+ const input={platform:'android',nativeInferenceTiming:nativeInference,nativeInferenceVoiceJoin:join,voiceTiming:{format:'alpha-voice-timing-v1',records:[record]}};
+ const report=buildDiagnostics(input,now);
+ assert.equal(report.nativeInferenceVoiceTurnId,id);
+ assert.ok(!diagnosticsText(report).includes(secrets[0]));
+ for(const invalid of [{nativeInferenceVoiceJoin:{...join,traceId:'bc'.repeat(16)}},{voiceTiming:{format:'alpha-voice-timing-v1',records:[]}},{platform:'web'}])
+  assert.equal(buildDiagnostics({...input,...invalid},now).nativeInferenceVoiceTurnId,undefined);
+});
+
 test('diagnostics keep versions, pin, runtime hashes, permission and role state and crash classes',()=>{
  const report=buildDiagnostics({generatedAt:now,platform:'android',
   app:{version:'0.1.0',versionCode:7,variant:'launcher',buildType:'release',testMocks:false},
@@ -97,6 +108,20 @@ test('renderer voice startup exports only the bounded phase, outcome and elapsed
  assert.doesNotMatch(diagnosticsText(report),/acct_|Buy milk/);
  assert.equal(buildDiagnostics({voiceStartup:{...diagnostic,stage:secrets[0]}},now).voiceStartup,undefined);
  assert.equal(buildDiagnostics({voiceStartup:{...diagnostic,elapsedMs:Infinity}},now).voiceStartup,undefined);
+ const listening={route:'cloud-cartesia',stage:'speech-session',outcome:'listening',elapsedMs:850,
+  phaseMs:{'conversation-selection':300,'renderer-channel':200,'speech-session':350}};
+ assert.deepEqual(buildDiagnostics({voiceStartup:listening},now).voiceStartup,listening);
+ const {route:_,...withoutRoute}=listening;
+ assert.deepEqual(buildDiagnostics({voiceStartup:{...listening,route:secrets[3]}},now).voiceStartup,withoutRoute);
+});
+test('renderer startup phase times retain only known stages and sum to the measured attempt',()=>{
+ const attempt={stage:'draft-binding',outcome:'timeout',elapsedMs:12000};
+ const phaseMs={'conversation-selection':120,'draft-binding':11880};
+ const report=buildDiagnostics({voiceStartup:{...attempt,phaseMs:{...phaseMs,[secrets[3]]:1}}},now);
+ assert.deepEqual(report.voiceStartup,{...attempt,phaseMs});
+ assert.ok(!diagnosticsText(report).includes(secrets[3]));
+ for(const invalid of [{...phaseMs,'draft-binding':11900},{...phaseMs,'draft-binding':-1},{'conversation-selection':12000}])
+  assert.deepEqual(buildDiagnostics({voiceStartup:{...attempt,phaseMs:invalid}},now).voiceStartup,attempt);
 });
 test('Cloud startup diagnostics keep bounded stages and status without carrying content or raw ids',()=>{
  const secret=secrets[2],rawSession=7194538;
@@ -119,7 +144,7 @@ test('Cloud startup diagnostics keep bounded stages and status without carrying 
 
 test('Cloud startup diagnostics tolerate absent, outdated, and stalled native bridges',async()=>{
  const {readFileSync}=await import('node:fs');
- const {stripTypeScriptTypes}=await import('node:module');
+ const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');
  const vm=await import('node:vm');
  const source=readFileSync(new URL('../apps/app/src/runtime/cloud-voice.ts',import.meta.url),'utf8');
  const start=source.indexOf('export async function readNativeCloudStreamTiming');
@@ -259,16 +284,20 @@ test('Cloud inference failures share one finite problem-log and Android export p
 });
 
 test('status inference read rejects retired resident sessions before recording',async()=>{
- const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('node:module');const vm=await import('node:vm');const {sanitizeCloudInferenceFailure}=await import('../apps/app/src/runtime/crash-log.ts');
+ const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');const vm=await import('node:vm');const {sanitizeCloudInferenceFailure}=await import('../apps/app/src/runtime/crash-log.ts');
  const source=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');const method=source.slice(source.indexOf('  async readResidentDiagnostics('),source.indexOf('  voiceTurnFailureMessage(')).trim().replace(/,$/,'');const code=stripTypeScriptTypes('async function '+method.slice('async '.length),{mode:'strip'});
- let release,calls=0;const pending=new Promise(resolve=>{release=resolve;});const context={active:{kind:'resident',remote:{request:async(path,body,signal)=>{calls++;assert.equal(path,'/api/status');assert.equal(body,undefined);assert.ok(signal instanceof AbortSignal);return pending;}}},state:{session:{}},epoch:1,sanitizeCloudInferenceFailure,sanitizeNativeInferenceTiming,DOMException};
+ let release,calls=0;const pending=new Promise(resolve=>{release=resolve;});const context={active:{kind:'resident',remote:{request:async(path,body,signal)=>{calls++;assert.equal(path,'/api/status');assert.equal(body,undefined);assert.ok(signal instanceof AbortSignal);return pending;}}},state:{session:{sessionId:'resident'}},epoch:1,lastNativeVoiceInference:undefined,sanitizeCloudInferenceFailure,sanitizeNativeInferenceTiming,DOMException};
  const read=vm.runInNewContext('('+code+')',context),signal=new AbortController().signal;const result=read(signal);context.epoch=2;release({cloudInferenceFailure:{version:1,at:Date.now(),stage:'text',reason:'unknown',strictTools:[],schemaKeywords:[],schemaScanTruncated:false,prompt:secrets[0]}});await assert.rejects(result,{name:'AbortError'});assert.equal(calls,1);
  const failure={version:1,at:Date.now(),stage:'text',reason:'unknown',strictTools:[],schemaKeywords:[],schemaScanTruncated:false,prompt:secrets[0]};context.active={kind:'resident',remote:{request:async()=>({cloudInferenceFailure:failure,nativeInferenceTiming:nativeInference})}};assert.deepEqual(JSON.parse(JSON.stringify(await read(signal))),{cloudInferenceFailure:sanitizeCloudInferenceFailure(failure),nativeInferenceTiming:nativeInference});
+ const match={traceId:nativeInference.traceId,voiceTurnId:'1b0c7a52-6d5e-4e0f-9a43-5c1d2e3f4a51'};
+ context.lastNativeVoiceInference={...match,epoch:2,sessionId:'resident'};
+ assert.deepEqual(JSON.parse(JSON.stringify((await read(signal)).nativeInferenceVoiceJoin)),match);
+ context.epoch=3;assert.equal((await read(signal)).nativeInferenceVoiceJoin,undefined);
  context.active=null;assert.equal(await read(signal),null);const abort=new AbortController();abort.abort();await assert.rejects(read(abort.signal),{name:'AbortError'});assert.equal(calls,1);
 });
 
 test('explicit inference refresh is isolated and abortable without unrelated capability reads',async()=>{
- const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('node:module');const vm=await import('node:vm');
+ const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');const vm=await import('node:vm');
  const source=readFileSync(new URL('../apps/app/src/prototype/settings-adapter.ts',import.meta.url),'utf8');const body=source.slice(source.indexOf('  async function refreshResidentDiagnostics(){'),source.indexOf('  async function refreshCapabilities(')).trim();const code=stripTypeScriptTypes(body,{mode:'strip'});
  let reads=0,records=0;const context={inferenceAbort:null,owner:{},AbortController,setTimeout:callback=>{queueMicrotask(callback);return 1;},clearTimeout:()=>{},connectionController:{readResidentDiagnostics:signal=>{reads++;return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}},recordCloudInferenceFailure:()=>{records++;return true;},readCrashLog:()=>{throw Error('Unexpected log read after cancellation');},changed:()=>{throw Error('Unexpected update after cancellation');}};
  await vm.runInNewContext('('+code+')',context)();assert.equal(reads,1);assert.equal(records,0);assert.equal(context.inferenceAbort,null);
@@ -276,18 +305,20 @@ test('explicit inference refresh is isolated and abortable without unrelated cap
 });
 
 test('diagnostics export uses one status observation and drops timing after a resident session changes',async()=>{
- const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('node:module');const vm=await import('node:vm');
+ const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');const vm=await import('node:vm');
  const source=readFileSync(new URL('../apps/app/src/prototype/settings-adapter.ts',import.meta.url),'utf8');const body=source.slice(source.indexOf('  async function exportDiagnostics(api: Bag) {'),source.indexOf('  async function clearProblems(')).trim();
+ const id='1b0c7a52-6d5e-4e0f-9a43-5c1d2e3f4a51';
+ const voiceTiming={format:'alpha-voice-timing-v1',records:[{version:1,id,recordedAt:now,route:'local-agent',cold:false,entry:'conversation',marks:{send:0}}]};
  for(const retire of [false,true]){
   let session={},reads=0,shared;
-  const context={diagnosticsBusy:false,owner:{},Capacitor:{isNativePlatform:()=>true},changed:()=>{},connectionController:{getSnapshot:()=>({kind:'resident',session})},refreshResidentDiagnostics:async()=>{reads++;return {nativeInferenceTiming:nativeInference};},device:{diagnosticsFacts:async()=>{if(retire)session={};return {};},shareDiagnostics:async({text})=>{shared=JSON.parse(text);return {status:'opened'};}},readCrashLog:async()=>({entries:[]}),system:{getStatus:async()=>({})},readRoles:()=>({}),readNativeVoiceTiming:async()=>null,readNativeCloudStreamTiming:async()=>null,buildDiagnostics,diagnosticsText,facts:{},delivery:{},exportRealtimeVoiceTiming:()=>undefined,voiceStartupTiming:()=>undefined,exportVoiceTiming:()=>'{"records":[]}'};
+  const context={diagnosticsBusy:false,owner:{},Capacitor:{isNativePlatform:()=>true},changed:()=>{},connectionController:{getSnapshot:()=>({kind:'resident',session})},refreshResidentDiagnostics:async()=>{reads++;return {nativeInferenceTiming:nativeInference,nativeInferenceVoiceJoin:{traceId:nativeInference.traceId,voiceTurnId:id}};},device:{diagnosticsFacts:async()=>{if(retire)session={};return {};},shareDiagnostics:async({text})=>{shared=JSON.parse(text);return {status:'opened'};}},readCrashLog:async()=>({entries:[]}),system:{getStatus:async()=>({})},readRoles:()=>({}),readNativeVoiceTiming:async()=>null,readNativeCloudStreamTiming:async()=>null,buildDiagnostics,diagnosticsText,facts:{},delivery:{},exportRealtimeVoiceTiming:()=>undefined,voiceStartupTiming:()=>undefined,exportVoiceTiming:()=>JSON.stringify(voiceTiming)};
   await vm.runInNewContext('('+stripTypeScriptTypes(body,{mode:'strip'})+')',context)({toast:()=>{}});
-  assert.equal(reads,1);assert.ok(shared);assert.deepEqual(shared.nativeInferenceTiming,retire?undefined:nativeInference);assert.equal(context.diagnosticsBusy,false);
+  assert.equal(reads,1);assert.ok(shared);assert.deepEqual(shared.nativeInferenceTiming,retire?undefined:nativeInference);assert.equal(shared.nativeInferenceVoiceTurnId,retire?undefined:id);assert.equal(context.diagnosticsBusy,false);
  }
 });
 
 test('confirmed clear cancels an outstanding inference refresh before it can append',async()=>{
- const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('node:module');const vm=await import('node:vm');
+ const {readFileSync}=await import('node:fs');const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');const vm=await import('node:vm');
  const source=readFileSync(new URL('../apps/app/src/prototype/settings-adapter.ts',import.meta.url),'utf8');
  const refresh=source.slice(source.indexOf('  async function refreshResidentDiagnostics(){'),source.indexOf('  async function refreshCapabilities(')).trim();
  const clear=source.slice(source.indexOf('  async function clearProblems(api: Bag) {'),source.indexOf('  async function refresh()')).trim();
@@ -307,4 +338,14 @@ test('voice conversation rows name their path: live assistant or recorded-clip b
   {...row(ids[4],{live:{mode:'batch',partials:0}}),entry:'notes',path:'live'},
  ]}},now).voiceTiming.records;
  assert.deepEqual(records.map(r=>r.path),['live','live','batch',undefined,undefined]);
+});
+
+
+test('error classification tolerates hostile names and revoked proxies',()=>{
+ const named=new Error('private text');Object.defineProperty(named,'name',{get(){throw Error('private getter');}});
+ assert.equal(errorClassOf(named),'Error');
+ const coercion=new Error();coercion.name={toString(){throw Error('private coercion');}};
+ assert.equal(errorClassOf(coercion),'Error');
+ const {proxy,revoke}=Proxy.revocable({},{});revoke();
+ assert.equal(errorClassOf(proxy),'Error');
 });

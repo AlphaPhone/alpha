@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
 import {deploymentOutputs,validateCloudDeployment} from '../scripts/cloud-deployment.mjs';
 import {preparePatchedNative} from '../scripts/prepare-patched-native.mjs';
+import {runJvm} from './fixtures/jvm-tools.mjs';
 const defaults=JSON.parse(fs.readFileSync(new URL('../config/cloud-deployment.json',import.meta.url)));
 test('committed renderer and native authorities match the deployment configuration',()=>{
  for(const [file,contents] of Object.entries(deploymentOutputs(defaults)))assert.equal(fs.readFileSync(file,'utf8'),contents);
@@ -56,8 +56,7 @@ public class DeploymentTest {public static void main(String[] args){
  if(!CloudDeployment.storageSlot("notes-records:v1:device").equals("notes-records:v1:device"))throw new AssertionError("local notes changed");
  System.out.println("PASS");}}
 `);
-  execFileSync('javac',['--release','11','-d',temp,...['CloudDeployment.java',...files,'AlphaRegistration.java','DeploymentTest.java'].map(f=>path.join(temp,f)),...sharedFiles]);
-  assert.equal(execFileSync('java',['-cp',temp,'ai.elizaresearch.alphaphone.DeploymentTest'],{encoding:'utf8'}).trim(),'PASS');
+  assert.equal(runJvm([...['CloudDeployment.java',...files,'AlphaRegistration.java','DeploymentTest.java'].map(f=>path.join(temp,f)),...sharedFiles],'ai.elizaresearch.alphaphone.DeploymentTest').trim(),'PASS');
  }finally{fs.rmSync(temp,{recursive:true,force:true});}
 });
 test('configuration refuses credentials, insecure URLs, paths, aliases and accidental environment overlap',()=>{
@@ -101,6 +100,20 @@ test('build admission rejects drift in either renderer or native generated autho
  }finally{fs.rmSync(temp,{recursive:true,force:true});}
 });
 
+test('build admission rejects a staging-only change that would move production credentials without a migration',async()=>{
+ const {checkCloudDeployment,storageFingerprint,STORAGE_NAMESPACES}=await import('../scripts/cloud-deployment.mjs');
+ assert.equal(storageFingerprint(defaults),STORAGE_NAMESPACES.at(-1));
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-cloud-namespace-'));
+ try{
+  const changed=structuredClone(defaults);changed.staging.services='https://different.example.org';
+  fs.mkdirSync(path.join(temp,'config'));fs.writeFileSync(path.join(temp,'config/cloud-deployment.json'),JSON.stringify(changed));
+  // Regenerated outputs are not enough: the reviewed namespace list must move with them.
+  for(const [file,contents] of Object.entries(deploymentOutputs(changed))){fs.mkdirSync(path.dirname(path.join(temp,file)),{recursive:true});fs.writeFileSync(path.join(temp,file),contents);}
+  assert.throws(()=>checkCloudDeployment(temp),/Cloud storage namespace would change: every installed phone loses its production credential/);
+  checkCloudDeployment(temp,undefined,[...STORAGE_NAMESPACES,storageFingerprint(changed)]);
+ }finally{fs.rmSync(temp,{recursive:true,force:true});}
+});
+
 test('build admission rejects a resident Cloud SDK base that disagrees with the deployment configuration',async()=>{
  const {checkCloudDeployment}=await import('../scripts/cloud-deployment.mjs');
  const {CLOUD_SDK_BASES,cloudSdkBases}=await import('../scripts/cloud-sdk-authority.mjs');
@@ -117,7 +130,7 @@ test('build admission rejects a resident Cloud SDK base that disagrees with the 
 test('every authority change gives renderer and native credentials a new namespace',async()=>{
  const file='apps/app/src/runtime/cloud-deployment.generated.ts';
  const load=async config=>{
-  const {stripTypeScriptTypes}=await import('node:module');
+  const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');
   return import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(deploymentOutputs(config)[file])).toString('base64'));
  };
  const original=await load(defaults);
@@ -166,7 +179,7 @@ test('custom deployment reaches native inference configuration and Google transp
 });
 
 test('configured service names reach the renderer without changing credential authority',async()=>{
- const {stripTypeScriptTypes}=await import('node:module');
+ const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');
  const load=async config=>import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(deploymentOutputs(config)['apps/app/src/runtime/cloud-deployment.generated.ts'])).toString('base64'));
  const original=await load(defaults),config=structuredClone(defaults);
  config.production.name='Independent Service';config.staging.name='Independent Preview';

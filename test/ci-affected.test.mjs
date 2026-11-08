@@ -3,14 +3,15 @@ import {mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, readdirSync
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {git as fixtureGit} from './fixtures/git-fixture.mjs';
 import {test} from 'node:test';
 
 // Exercise the actual Actions entry point, complete Git history and output files.
 test('CI selection follows changed files, renames, missing history and manual dispatch', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'alpha-ci-selection-'));
   t.after(() => rmSync(cwd, {recursive:true, force:true}));
-  const git = (...args) => execFileSync('git', args, {cwd, encoding:'utf8'}).trim();
-  git('init', '-q'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'CI fixture');
+  const git = (...args) => fixtureGit(cwd, ...args);
+  git('init', '-q');
   const put = (name, text='fixture\n') => {
     mkdirSync(join(cwd, name, '..'), {recursive:true}); writeFileSync(join(cwd, name), text);
   };
@@ -40,6 +41,9 @@ test('CI selection follows changed files, renames, missing history and manual di
   assert.equal(result.browser_production,false);assert.equal(result.browser_speech,false);
   base=git('rev-parse','HEAD');put('test/browser/production-surface.spec.ts','changed\n');commit('test');
   result=select(pr());assert.equal(result.browser_development,false);assert.equal(result.browser_production,true);
+  // The local-agent profile step owns host reminder recovery (it skips without VITE_LOCAL_AGENT) as well as the speech specs.
+  base=git('rev-parse','HEAD');put('test/browser/host-reminder-recovery.spec.ts','changed\n');commit('test');
+  result=select(pr());assert.deepEqual(result.browser_specs,['test/browser/host-reminder-recovery.spec.ts']);assert.equal(result.browser_speech,true);
   base=git('rev-parse','HEAD');git('mv','apps/app/source.ts','docs/reference.ts');commit('.');
   result=select(pr());assert.deepEqual(lanes(result),[true,true,true,false]);assert.deepEqual(result.browser_specs,[]);
   base=git('rev-parse','HEAD');git('rm','test/browser/notes.spec.ts');commit('.');
@@ -60,6 +64,7 @@ test('docs read by node tests select verify; design and research notes select no
   }
   assert.deepEqual(lanes(['design/prototype.html','design/assets/icon.svg']), [false,false,false,false]);
   assert.deepEqual(lanes(['.github/workflows/dependency-audit.yml']), [true,false,false,false], 'the scheduled audit workflow selects verify only');
+  assert.deepEqual(lanes(['specs/quint/application/Application.qnt','specs/quint/coverage.json','scripts/check-quint.mjs']), [true,false,false,false], 'formal specifications run repository verification');
   assert.deepEqual(lanes(['docs/market-research/proposal.md','AGENTS.md','LICENSE']), [false,false,false,false]);
   // Every docs file a node test names must select verify.
   const named = new Set();

@@ -5,6 +5,7 @@ import android.content.*;
 import android.database.Cursor;
 import android.graphics.*;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -42,13 +43,22 @@ public final class KeptCaptureLegacyPathInstrumentedTest {
   if(publish){ContentValues published=new ContentValues();published.put("is_pending",0);assertEquals(1,r.update(uri,published,null,null));}
   return uri;
  }
- private int rows(ContentResolver r,String operation){
-  Bundle query=new Bundle();query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,"_display_name=?");query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{AlphaMediaConfig.MEDIA.captureName(operation)});query.putInt(MediaStore.QUERY_ARG_MATCH_PENDING,MediaStore.MATCH_INCLUDE);
-  try(Cursor row=r.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,new String[]{"_id"},query,null)){assertNotNull(row);return row.getCount();}
+ private List<Uri> rows(ContentResolver resolver,String operation){
+  Uri images=MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+  Bundle query=new Bundle();
+  query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,"owner_package_name=? AND _display_name=?");
+  query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{context().getPackageName(),AlphaMediaConfig.MEDIA.captureName(operation)});
+  if(Build.VERSION.SDK_INT>=30)query.putInt(MediaStore.QUERY_ARG_MATCH_PENDING,MediaStore.MATCH_INCLUDE);
+  else images=MediaStore.setIncludePending(images);
+  List<Uri> result=new ArrayList<>();
+  try(Cursor row=resolver.query(images,new String[]{"_id"},query,null)){
+   assertNotNull(row);
+   while(row.moveToNext())result.add(ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,row.getLong(0)));
+  }
+  return result;
  }
- private void cleanup(Context c,ContentResolver r,String operation){
-  Bundle query=new Bundle();query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,"_display_name=?");query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{AlphaMediaConfig.MEDIA.captureName(operation)});query.putInt(MediaStore.QUERY_ARG_MATCH_PENDING,MediaStore.MATCH_INCLUDE);
-  r.delete(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,query);
+ private void cleanup(Context c,ContentResolver resolver,String operation){
+  for(Uri row:rows(resolver,operation))resolver.delete(row,null,null);
   c.getSharedPreferences(AlphaMediaConfig.MEDIA.preferences("kept-captures"),0).edit().remove(operation).commit();
  }
 
@@ -64,7 +74,17 @@ public final class KeptCaptureLegacyPathInstrumentedTest {
    OwnedCaptures.Result result=new OwnedCaptures(c,AlphaMediaConfig.MEDIA).keep(operation,Base64.getEncoder().encodeToString(bytes));
    assertFalse(result.saved);
    assertEquals("The unfinished capture was removed. Capture it again to retry.",result.message);
-   assertEquals("the pending row in Pictures/ is gone and nothing was published in DCIM/Camera/",0,rows(r,operation));
+   assertEquals("the pending row in Pictures/ is gone and nothing was published in DCIM/Camera/",0,rows(r,operation).size());
+  }finally{cleanup(c,r,operation);}
+ }
+
+ @Test public void aPendingRowWithoutAReservationIsNotDeletedOrReplaced()throws Exception{
+  Context c=context();ContentResolver r=c.getContentResolver();String operation=UUID.randomUUID().toString();byte[] bytes=jpeg();
+  try{
+   legacyRow(r,operation,bytes,false);
+   OwnedCaptures.Result result=new OwnedCaptures(c,AlphaMediaConfig.MEDIA).keep(operation,Base64.getEncoder().encodeToString(bytes));
+   assertFalse(result.saved);
+   assertEquals("the unreserved pending image stays and no second copy is published",1,rows(r,operation).size());
   }finally{cleanup(c,r,operation);}
  }
 
@@ -75,7 +95,7 @@ public final class KeptCaptureLegacyPathInstrumentedTest {
    OwnedCaptures.Result result=new OwnedCaptures(c,AlphaMediaConfig.MEDIA).keep(operation,Base64.getEncoder().encodeToString(bytes));
    assertTrue(result.message,result.saved);
    assertEquals(Long.toString(ContentUris.parseId(legacy)),result.id);
-   assertEquals("no second copy",1,rows(r,operation));
+   assertEquals("no second copy",1,rows(r,operation).size());
   }finally{cleanup(c,r,operation);}
  }
 }

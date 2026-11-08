@@ -8,7 +8,7 @@ test.beforeEach(async({page})=>{
   HTMLCanvasElement.prototype.captureStream=function(rate){const stream=original.call(this,rate);streams.push(stream);return stream;};
   const devices=navigator.mediaDevices;devices.getUserMedia=async()=>canvas.captureStream(20);Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:devices});
  });
- await page.goto('/');await page.getByRole('button',{name:'Camera',exact:true}).click();await expect.poll(()=>page.locator('[aria-label^="Viewfinder."] video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
+ await page.goto('/');await page.getByRole('button',{name:'Camera',exact:true}).click();await expect.poll(()=>page.locator('[data-alpha-camera="viewfinder"] video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
 });
 test('digital zoom changes saved pixels and preserves front-camera mirroring',async({page})=>{
  const result=await page.evaluate(async()=>{
@@ -16,7 +16,7 @@ test('digital zoom changes saved pixels and preserves front-camera mirroring',as
   const samples=async()=>{const p=await c.capturePhoto(),image=new Image();image.src='data:image/jpeg;base64,'+p.base64;await image.decode();const canvas=document.createElement('canvas');canvas.width=p.width;canvas.height=p.height;const ctx=canvas.getContext('2d')!;ctx.drawImage(image,0,0);return [20,300].map(x=>Array.from(ctx.getImageData(x,120,1,1).data).slice(0,3));};
   const normal=await samples();await c.setZoom({zoom:2});const zoomed=await samples();await c.switchCamera({direction:'front'});await c.setZoom({zoom:2});const mirrored=await samples();
   let invalid=false;try{await c.setZoom({zoom:.5});}catch{invalid=true;}
-  return {normal,zoomed,mirrored,invalid,transform:(document.querySelector('[aria-label^="Viewfinder."] video') as HTMLVideoElement).style.transform};
+  return {normal,zoomed,mirrored,invalid,transform:(document.querySelector('[data-alpha-camera="viewfinder"] video') as HTMLVideoElement).style.transform};
  });
  expect(result.normal[0][0]).toBeGreaterThan(230);expect(result.normal[1][0]).toBeGreaterThan(230);
  expect(result.zoomed[0][1]).toBeGreaterThan(230);expect(result.zoomed[1][2]).toBeGreaterThan(230);
@@ -35,7 +35,7 @@ test('encoded video and thumbnail use the zoomed crop and release the processing
 });
 test('flash requires a confirmed torch capability and never applies a brightness filter',async({page})=>{
  const result=await page.evaluate(async()=>{
-  const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');const video=document.querySelector('[aria-label^="Viewfinder."] video') as HTMLVideoElement,track=(video.srcObject as MediaStream).getVideoTracks()[0];let unavailable=false;
+  const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');const video=document.querySelector('[data-alpha-camera="viewfinder"] video') as HTMLVideoElement,track=(video.srcObject as MediaStream).getVideoTracks()[0];let unavailable=false;
   try{await c.setSettings({settings:{flash:'on'}});}catch{unavailable=true;}
   const changes:boolean[]=[];let torch=false;track.getCapabilities=()=>({torch:true} as MediaTrackCapabilities);track.applyConstraints=async(input:any)=>{torch=input.advanced[0].torch;changes.push(torch);};track.getSettings=()=>({torch} as MediaTrackSettings);
   await c.setSettings({settings:{flash:'on'}});await c.setSettings({settings:{flash:'off'}});
@@ -54,7 +54,27 @@ test('rendered zoom selection captures cropped pixels and switching resets the c
 test('a zoomed recording stops when its camera source ends',async({page})=>{
  await page.evaluate(async()=>{const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');await c.setZoom({zoom:2});await c.startRecording({audio:false,maxDuration:10,maxFileSize:1000000});});
  await expect.poll(()=>page.evaluate(async()=>{const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');return (await c.getRecordingState()).fileSize;})).toBeGreaterThan(0);
- await page.evaluate(()=>{const video=document.querySelector('[aria-label^="Viewfinder."] video') as HTMLVideoElement;(video.srcObject as MediaStream).getVideoTracks()[0].dispatchEvent(new Event('ended'));});
+ await page.evaluate(()=>{const video=document.querySelector('[data-alpha-camera="viewfinder"] video') as HTMLVideoElement;(video.srcObject as MediaStream).getVideoTracks()[0].dispatchEvent(new Event('ended'));});
  await expect.poll(()=>page.evaluate(async()=>{const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');return (await c.getRecordingState()).isRecording;})).toBe(false);
  const saved=await page.evaluate(async()=>{const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');const result=await c.stopRecording();await c.stopPreview();return {bytes:result.fileSize,released:(window as any).controlStreams.every((s:MediaStream)=>s.getTracks().every(t=>t.readyState==='ended'))};});expect(saved.bytes).toBeGreaterThan(0);expect(saved.released).toBe(true);
+});
+
+test('switching with flash on and zoom 2x keeps both reset when the switch fails',async({page})=>{
+ await page.evaluate(async()=>{
+  const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');const calls=(window as any).flipCalls=[] as string[],setZoom=c.setZoom,switchCamera=c.switchCamera;
+  // Only the control boundary is observed; the browser camera still zooms and switches.
+  c.flashAvailable=()=>true;c.lightingLabel=(on:boolean)=>`Flash ${on?'on':'off'}`;c.setSettings=async(input:{settings:{flash:string}})=>{calls.push('flash '+input.settings.flash);};
+  c.setZoom=async(input:{zoom:number})=>{calls.push('zoom '+input.zoom);await setZoom(input);};
+  c.switchCamera=async(options:{direction:'front'|'back'})=>{calls.push('switch '+options.direction);if((window as any).failSwitch)throw Object.assign(Error('Target camera has no flash unit'),{code:'FLASH_UNSUPPORTED'});return switchCamera(options);};
+ });
+ await page.getByRole('button',{name:'Zoom 2x',exact:true}).click();await expect(page.getByRole('button',{name:'Zoom 2x',exact:true})).toHaveCSS('width','40px');
+ await page.getByRole('button',{name:'Flash off',exact:true}).click();await expect(page.getByRole('button',{name:'Flash on',exact:true})).toBeVisible();
+ const calls=()=>page.evaluate(()=>(window as any).flipCalls.splice(0));expect(await calls()).toEqual(['zoom 2','flash on']);
+ await page.evaluate(()=>(window as any).failSwitch=true);await page.getByRole('button',{name:'Switch camera',exact:true}).click();
+ await expect(page.locator('[data-alpha-camera="said"]')).toContainText('Not supported on this camera.');
+ expect(await calls()).toEqual(['flash off','zoom 1','switch front']);
+ await expect(page.getByRole('button',{name:'Flash off',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Zoom 1x',exact:true})).toHaveCSS('width','40px');
+ await page.evaluate(()=>(window as any).failSwitch=false);await page.getByRole('button',{name:'Switch camera',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Flash off',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Zoom 2x',exact:true})).toHaveCount(0);
+ expect(await calls()).toEqual(['switch front']);
 });

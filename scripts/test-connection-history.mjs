@@ -1,5 +1,6 @@
 import {validateUuid} from '../vendor/eliza/packages/core/src/utils/uuid.ts';
 import {isCalendarReadFailureCode} from '../.eliza/client-features/packages/contracts/src/calendar.ts';
+import {FILES_CAPABILITY} from '../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import * as residentRecovery from '../apps/app/src/runtime/resident-recovery.ts';
 import {resolveCloudEnvironment} from '../apps/app/src/runtime/cloud-environment-selection.ts';
 // Non-product development controller + shared Cloud protocol over synthetic loopback HTTP. No live account.
@@ -7,12 +8,12 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { stripTypeScriptTypes } from 'node:module';
+import { stripTypeScriptTypes } from '../test/support/strip-types.mjs';
 import { spawnSync } from 'node:child_process';
 import { installWorkflowDeviceBindings } from '../test/fixtures/workflow-device-bindings.mjs';
 const cloudSignInModule = await import('../apps/app/src/runtime/cloud-sign-in.ts');
-if (!process.execArgv.includes('--experimental-transform-types')) {
-  process.exit(spawnSync(process.execPath, ['--import','tsx','--experimental-transform-types', process.argv[1]], { stdio: 'inherit' }).status ?? 1);
+if (!process.execArgv.some(arg => arg === '--import=tsx' || arg === 'tsx')) {
+  process.exit(spawnSync(process.execPath, ['--import=tsx', process.argv[1]], { stdio: 'inherit' }).status ?? 1);
 }
 const {clockHandoffCapabilities}=await import('../apps/app/src/runtime/clock-contract.ts');
 const {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities}=await import('../apps/app/src/runtime/phone-dial-contract.ts');
@@ -119,7 +120,7 @@ let clockRetirements=0,heldClockRetirement=null,clockRetirementStarted=null;
 const retireClockReviews=async()=>{clockRetirements++;clockRetirementStarted?.();if(heldClockRetirement)await heldClockRetirement;};
 // This controller fixture models a host whose transport reaches Eliza Cloud. The flag-off web page
 // has none and starts no Cloud route; test/browser/connection-boundaries.production.spec.ts covers it.
-const sandbox = { validateUuid, isCalendarReadFailureCode, appRecordInvalidations,AUTOMATIONS_COMMITTED_EVENT,automationsCommitted, browserCloudResidentEnabled:false,browserCloudResidentEnvironment:'production',...residentRecovery,CAMERA_CAPTURE_CAPABILITY:'camera.capture-photo.v1',clockHandoffCapabilities,PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities,readDevicePreferences:async()=>({askBeforeAgentActions:true}),  resolveCloudEnvironment,fixtureViteEnv:{DEV:true},...subscriptionEntitlement, ...cloudSignInModule, cloudSignIn:undefined, cloudSignInGoogle:false, AlphaClientError, browserLocalAgentEnabled:true, retireClockReviews, workflowPresentationProtocol:async()=>2, browserDevProfile:false,privateLocalPreviewEnabled:false, devProfileQuery:false, testMocksEnabled:true, devSurfacesEnabled:true, secureConnectionStore:{read:async slot=>deviceSlots.get(slot)??null,write:async(slot,value)=>{deviceSlots.set(slot,value);},remove:async slot=>{deviceSlots.delete(slot);}},
+const sandbox = { validateUuid, isCalendarReadFailureCode, FILES_CAPABILITY, appRecordInvalidations,AUTOMATIONS_COMMITTED_EVENT,automationsCommitted, browserCloudResidentEnabled:false,browserCloudResidentEnvironment:'production',...residentRecovery,CAMERA_CAPTURE_CAPABILITY:'camera.capture-photo.v1',clockHandoffCapabilities,PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities,readDevicePreferences:async()=>({askBeforeAgentActions:true}),  resolveCloudEnvironment,fixtureViteEnv:{DEV:true},...subscriptionEntitlement, ...cloudSignInModule, cloudSignIn:undefined, cloudSignInGoogle:false, AlphaClientError, browserLocalAgentEnabled:true, retireClockReviews, workflowPresentationProtocol:async()=>2, browserDevProfile:false,privateLocalPreviewEnabled:false, devProfileQuery:false, testMocksEnabled:true, devSurfacesEnabled:true, secureConnectionStore:{read:async slot=>deviceSlots.get(slot)??null,write:async(slot,value)=>{deviceSlots.set(slot,value);},remove:async slot=>{deviceSlots.delete(slot);}},
   PersonalProtocolError, ClientObservationSupportSession, personalIntent:async()=>null, savePersonalIntent:async(_owner,intent)=>intent, clearPersonalIntent:async()=>{},
   withResidentMapsNavigation, RemoteProtocol, remoteCredentialStore, nativeRemoteRequest, DeviceActions, presentDeviceRecordOperation, actionScope:async value=>Buffer.from(value).toString('base64url').slice(0,32), negotiateEnabledViews:async()=>'',
   Capacitor:{getPlatform:()=>'web',isNativePlatform:()=>false},aospImage:false,SMS_SEND_CAPABILITY:'sms.send.v1', setTimeout:(callback,ms)=>setTimeout(callback,ms===15000?20:ms), clearTimeout, Intl, Date, Buffer, pauseHostedBackground:async()=>{}, configureHostedBackground:async()=>{}, registerPlugin: () => ({}), cloudServiceName, CloudProtocol, CloudProtocolError, DevelopmentCloudAgentProtocol, CloudProvisionAcceptedError, phoneContextMessage, findStoppedUserTurn, nativeCloudRequest,
@@ -130,7 +131,7 @@ const sandbox = { validateUuid, isCalendarReadFailureCode, appRecordInvalidation
 };
 // Exercise the real installed string-map adapter alongside the controller fixture.
 const selectionSandbox = { ...sandbox, Capacitor: { getPlatform: () => 'android' } };
-const selectionSource = stripTypeScriptTypes(await readFile(new URL('../apps/app/src/runtime/conversation-selection.ts', import.meta.url), 'utf8'), { mode: 'transform' })
+const selectionSource = stripTypeScriptTypes(await readFile(new URL('../apps/app/src/runtime/conversation-selection.ts', import.meta.url), 'utf8'), { mode: 'strip' })
   .replace(/^import .*;\n/gm, '').replace(/export /g, '');
 vm.runInNewContext(selectionSource + '\nglobalThis.selectionApi = { captureConversationChoice, selectConversation };', selectionSandbox);
 Object.assign(sandbox, selectionSandbox.selectionApi);
@@ -143,7 +144,7 @@ source += '\nglobalThis.controller = connectionController;';
 source += '\nglobalThis.observationFixture={activate:(client,format)=>activate({kind:"resident",remote:client,origin:client.origin,userTextFormatVersion:format},client.session,"Observation fixture"),retire:()=>retire()};';
 vm.createContext(sandbox);
 installWorkflowDeviceBindings(sandbox);
-vm.runInContext(stripTypeScriptTypes(source, { mode: 'transform' }), sandbox);
+vm.runInContext(stripTypeScriptTypes(source, { mode: 'strip' }), sandbox);
 const controller = sandbox.controller;
 try {
   await controller.cloudList('production');
@@ -243,7 +244,7 @@ try {
   await controller.disconnect();
   assert.equal(remote.deviceRevokes,1,'disconnect revokes the device enrollment');
   assert.equal(remote.logouts,1,'disconnect revokes the owner session');
-  assert.match(controller.getSnapshot().message,/revoked on the agent/);
+  assert.equal(controller.getSnapshot().message,'Agent disconnected.');
   assert.equal(remoteSaved.size,0,'local remote credential removed after revocation');
   assert.equal([...deviceSlots.keys()].filter(key=>key.startsWith('device:')).length,0,'device installation key deleted');
   const replay=await nativeRemoteRequest({url:'https://agent.example/api/auth/me',method:'GET',headers:{Authorization:`Bearer ${firstToken}`}});
@@ -305,10 +306,10 @@ try {
   assert.equal(remote.failedPosts,1,'the refused post is not repeated');assert.equal(remote.sends,sendsBefore);
   // Cloud refusals in the pinned upstream reply shape reach the owner as specific, non-retrying copy.
   for(const [failure,expected] of [
-    [{kind:'insufficient_credits',message:'Synthetic upstream text',transient:false},/^Eliza Cloud declined this AI request for your account's billing\. Check your account in Settings\. Alpha Phone did not retry your message, and nothing is purchased automatically\./],
+    [{kind:'insufficient_credits',message:'Synthetic upstream text',transient:false},/^Eliza Cloud declined this AI request for your account's billing\. Alpha Phone did not retry your message\. Local apps keep working\.$/],
     [{kind:'rate_limited',message:'Synthetic upstream text',transient:true},/^The AI request rate limit was reached\. Wait a moment before sending again\. Alpha Phone did not retry your message\.$/],
     [{kind:'rate_limited',message:'Synthetic upstream text',transient:true,rateLimit:{kind:'rate_limited',retryAfterMs:2400,planId:'synthetic',scope:'burst'}},/^The AI request rate limit was reached\. Try again in about 3 seconds\. Alpha Phone did not retry your message\.$/],
-    [{kind:'provider_issue',message:'Synthetic upstream text',transient:true},/^Alpha’s AI service could not complete this reply\. Nothing was resent\.$/],
+    [{kind:'provider_issue',message:'Synthetic upstream text',transient:true},/^Alpha’s AI service couldn’t finish this reply\.$/],
   ]){
     const before=remote.failureReplies||0;remote.failureReply=failure;
     const refused=await controller.send('Refused turn',{view:'home',revision:13,sensitive:false},'refused-'+failure.kind+(failure.rateLimit?'-live-wait':''),new AbortController().signal).then(()=>null,error=>error);
@@ -339,7 +340,8 @@ try {
     const refused=await controller.send('Refused Calendar',{view:'home',revision:15,sensitive:false},'refused-calendar-'+code+transient+text,new AbortController().signal).then(()=>null,error=>error);
     assert.ok(refused instanceof AlphaClientError,'unknown/transient/empty Calendar failures still reject, never return a successful answer');
     assert.equal(refused.code,'transport-failed');
-    assert.equal(refused.message,'The agent request failed. Check connection and action history before sending another request.');
+    // Every known failure kind has its own owner copy and kind (replyFailure is total).
+    assert.equal(refused.message,'Your agent couldn’t write a reply this time. Nothing was resent.');assert.equal(refused.failureKind,'reply_generation_error');
     assert.doesNotMatch(refused.message,/UNKNOWN_CODE|CALENDAR_READ_RECEIPT_MISMATCH|Synthetic upstream text/,'failure copy does not expose upstream diagnostics');
     assert.equal(refused.userMessageId,remote.failureUserMessageId,'the recorded user row identity survives a failed reply');
     assert.equal(refused.messageBinding.conversationId,remoteConversation);

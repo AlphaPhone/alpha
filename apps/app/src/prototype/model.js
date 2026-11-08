@@ -1768,7 +1768,7 @@ registerView("browser", {
     /* tabs */
     var tabCards = st.tabs.map(function (x) {
       var p = brPage(x.hist[x.pos]); var on = x.id === st.cur;
-      return { title: p.title, host: p.host || "New tab", css: on ? "box-shadow:inset 0 0 0 2px var(--acc)" : "", prev: "background:" + imgBg({ news: "news", enclave: "enclave", book: "nopa" }[p.kind] || "-", p.tile), aria: "Switch to " + p.title, closeAria: "Close " + p.title,
+      return { id: x.id, title: p.title, host: p.host || "New tab", css: on ? "box-shadow:inset 0 0 0 2px var(--acc)" : "", prev: "background:" + imgBg({ news: "news", enclave: "enclave", book: "nopa" }[p.kind] || "-", p.tile), aria: "Switch to " + p.title, closeAria: "Close " + p.title,
         pick: function () { set({ cur: x.id, tabsOpen: false }); },
         close: function () {
           var s = api.get("browser"); var rest = s.tabs.filter(function (y) { return y.id !== x.id; });
@@ -1778,9 +1778,9 @@ registerView("browser", {
     });
 
     /* library */
-    var libRows = (st.lib === "history" ? st.visits : st.marks).map(function (u) {
+    var libRows = Array.from(new Set(st.lib === "history" ? st.visits : st.marks)).map(function (u) {
       var p = brPage(u);
-      return { title: p.title, host: p.host + p.path, ini: (p.host || "?").charAt(0).toUpperCase(), css: "background:" + (p.tile && p.tile.indexOf("var") < 0 ? p.tile + ";color:var(--alpha-white)" : "var(--s3)"), go: link(u),
+      return { id: u, title: p.title, host: p.host + p.path, ini: (p.host || "?").charAt(0).toUpperCase(), css: "background:" + (p.tile && p.tile.indexOf("var") < 0 ? p.tile + ";color:var(--alpha-white)" : "var(--s3)"), go: link(u),
         canRemove: st.lib !== "history", removeAria: "Remove bookmark " + p.title, remove: function () { var s = api.get("browser"); set({ marks: s.marks.filter(function (x) { return x !== u; }) }); } };
     });
 
@@ -2229,7 +2229,7 @@ registerView("photos", {
       var on = selecting && sel.indexOf(it.id) >= 0;
       var v = phLook(it, "thumb", null, on);
       return {
-        bg: v.bg, tf: v.tf, flt: v.flt, vid: it.kind === "video" && !selecting, dur: it.dur, fav: !!it.fav && !trashMode && !selecting, selecting: selecting && !trashMode, on: on,
+        id: "fixture:" + it.id, bg: v.bg, tf: v.tf, flt: v.flt, vid: it.kind === "video" && !selecting, dur: it.dur, fav: !!it.fav && !trashMode && !selecting, selecting: selecting && !trashMode, on: on,
         dim: trashMode ? "opacity:.6" : "",
         selCss: on ? "background:var(--acc);box-shadow:0 0 0 2px var(--alpha-white)" : "background:rgba(0,0,0,.7);box-shadow:inset 0 0 0 2px var(--alpha-white)",
         alt: (trashMode ? "Restore " : "") + (it.kind === "video" ? "Video" : "Photo") + ", " + phDayLabel(it.ts, now) + (it.place ? ", " + it.place : ""),
@@ -2265,7 +2265,7 @@ registerView("photos", {
     var groups = []; var gi = {};
     shown.forEach(function (it) {
       var k = phDayKey(it.ts);
-      if (gi[k] == null) { gi[k] = groups.length; groups.push({ label: phDayLabel(it.ts, now), pc: {}, items: [] }); }
+      if (gi[k] == null) { gi[k] = groups.length; groups.push({ id: k, label: phDayLabel(it.ts, now), pc: {}, items: [] }); }
       var g = groups[gi[k]]; g.items.push(thumb(it, seqIds)); if (it.place) g.pc[it.place] = (g.pc[it.place] || 0) + 1;
     });
     groups.forEach(function (g) { g.place = Object.keys(g.pc).sort(function (a, b) { return g.pc[b] - g.pc[a]; }).slice(0, 2).join(", "); });
@@ -2293,7 +2293,7 @@ registerView("photos", {
     function tile(key) {
       var items = albumItems(key); if (!items.length) return null;
       var cov = items.filter(function (it) { return it.kind === "photo" && it.scene !== "portrait" && it.scene !== "selfie"; })[0] || items[0]; var c = phLook(cov, "thumb");
-      return { name: albumName(key), count: items.length, bg: c.bg, tf: c.tf, flt: c.flt, open: function () { api.set({ album: key }); } };
+      return { id: "album:" + key, name: albumName(key), count: items.length, bg: c.bg, tf: c.tf, flt: c.flt, open: function () { api.set({ album: key }); } };
     }
     var keys = (st.albums || []).map(function (a) { return "user:" + a.id; }).concat(["fav", "video"]);
     var pc = {}; list.forEach(function (it) { if (it.place) pc[it.place] = (pc[it.place] || 0) + 1; });
@@ -2304,7 +2304,7 @@ registerView("photos", {
       var mine = list.filter(function (it) { return (it.people || []).indexOf(p.id) >= 0; }); if (!mine.length) return null;
       var cover = mine.filter(function (it) { return it.scene === "portrait" || (it.people.length === 1 && it.figs); })[0] || mine[0];
       var c = phLook(cover, "thumb");
-      return { first: p.name.split(" ")[0], name: p.name, bg: c.bg, tf: c.tf, open: function () { api.set({ album: "person:" + p.id }); } };
+      return { id: p.id, first: p.name.split(" ")[0], name: p.name, bg: c.bg, tf: c.tf, open: function () { api.set({ album: "person:" + p.id }); } };
     }).filter(Boolean);
 
     var alb = null;
@@ -2338,7 +2338,7 @@ registerView("photos", {
         else return false;
       });
       var ed = st.edit || null;
-      var people = (cur.people || []).map(function (id) { var p = api.person(id); return p ? { ini: p.ini, first: p.name.split(" ")[0], label: "Open " + p.name, open: function () { api.open("contacts", { open: id }); } } : null; }).filter(Boolean);
+      var people = (cur.people || []).map(function (id) { var p = api.person(id); return p ? { id: id, ini: p.ini, first: p.name.split(" ")[0], label: "Open " + p.name, open: function () { api.open("contacts", { open: id }); } } : null; }).filter(Boolean);
       vw = {
         bg: look.bg, tf: look.tf, flt: look.flt,
         slide: "transform: translateX(" + (st.vx || 0) + "px); opacity: " + (st.vx ? 0.35 : 1) + "; transition: " + (st.vt ? "transform .32s cubic-bezier(.19,1,.22,1), opacity .25s" : "none"),
@@ -2347,6 +2347,8 @@ registerView("photos", {
         notDeleted: true,
         favIcon: cur.fav ? "fill: currentColor" : "", favLabel: cur.fav ? "Remove from favorites" : "Add to favorites",
         viewerLabel: (cur.kind === "video" ? "Video" : "Photo") + ", " + phDayLabel(cur.ts, now) + " " + phTime(cur.ts),
+        hasPrevItem: idx > 0, hasNextItem: idx >= 0 && idx < seq.length - 1,
+        prevItem: function () { go(-1); }, nextItem: function () { go(1); },
         askLabel: "Ask Alpha about this " + (cur.kind === "video" ? "video" : "photo"),
         editLabel: cur.kind === "video" ? "Edit video" : "Edit photo", shareLabel: cur.kind === "video" ? "Share video" : "Share photo", infoLabel: cur.kind === "video" ? "Video info" : "Photo info", deleteLabel: cur.kind === "video" ? "Delete video" : "Delete photo",
         vid: cur.kind === "video", playBtn: cur.kind === "video" && !st.playing, playing: !!st.playing,
@@ -2382,7 +2384,7 @@ registerView("photos", {
           filters: PH_FILTER_LIST.map(function (f) {
             var fl = phLook(cur, "thumb", { filter: f[0] });
             var on = (ed.filter || "none") === f[0];
-            return { label: f[1], bg: fl.bg, flt: fl.flt, on: on, ring: on ? "box-shadow: 0 0 0 2px var(--alpha-black), 0 0 0 4px var(--alpha-white)" : "", lc: on ? "var(--alpha-white)" : "rgba(255,255,255,.6)", pick: function () { var e2 = api.get("photos").edit; api.set({ edit: Object.assign({}, e2, { filter: f[0] }) }); } };
+            return { id: f[0], label: f[1], bg: fl.bg, flt: fl.flt, on: on, ring: on ? "box-shadow: 0 0 0 2px var(--alpha-black), 0 0 0 4px var(--alpha-white)" : "", lc: on ? "var(--alpha-white)" : "rgba(255,255,255,.6)", pick: function () { var e2 = api.get("photos").edit; api.set({ edit: Object.assign({}, e2, { filter: f[0] }) }); } };
           }),
           cancel: function () { api.set({ edit: null }); },
           save: function () { var s = api.get("photos"); var e2 = s.edit; var clean = (!e2.rot && !e2.crop && (e2.filter || "none") === "none") ? null : e2; api.set({ edit: null, list: s.list.map(function (it) { return it.id === cur.id ? Object.assign({}, it, { edit: clean }) : it; }) }); api.toast("Saved"); }
@@ -2396,21 +2398,21 @@ registerView("photos", {
     var share = {
       people: PH_SHARE.map(function (id) {
         var p = api.person(id); if (!p) return null;
-        return { ini: p.ini, first: p.name.split(" ")[0], label: "Send to " + p.name, send: function () { api.set({ sheet: null, sel: null }); api.toast(nShare > 1 ? "Sent " + nShare + " to " + p.name.split(" ")[0] : "Sent to " + p.name.split(" ")[0]); } };
+        return { id: id, ini: p.ini, first: p.name.split(" ")[0], label: "Send to " + p.name, send: function () { api.set({ sheet: null, sel: null }); api.toast(nShare > 1 ? "Sent " + nShare + " to " + p.name.split(" ")[0] : "Sent to " + p.name.split(" ")[0]); } };
       }).filter(Boolean),
       apps: [
         ["bubble", "Messages", function () { api.set({ sheet: null, sel: null }); api.open("messages", { compose: true }); }],
         ["mail", "Mail", function () { api.set({ sheet: null, sel: null }); api.open("inbox", { compose: { subject: nShare > 1 ? nShare + " photos" : "Photo", body: "", attach: shareIds } }); }],
         ["link", "Copy link", function () { api.set({ sheet: null, sel: null }); api.toast("Link copied"); }],
         ["folder", "Files", function () { api.set({ sheet: null, sel: null }); api.toast("Saved to Files"); }]
-      ].map(function (a) { return { d: IC[a[0]], label: a[1], go: a[2] }; })
+      ].map(function (a) { return { id: a[0], d: IC[a[0]], label: a[1], go: a[2] }; })
     };
 
     var nSel = sel ? sel.length : 0;
     return {
       hdr: !selecting && !st.searching, isLib: st.tab !== "alb" || !!st.searching, isAlb: st.tab === "alb" && !st.searching, libTab: st.tab !== "alb",
       title: st.tab === "alb" ? "Albums" : "Photos",
-      tabs: [["lib", "Library", IC.photo], ["alb", "Albums", IC.phAlbums]].map(function (t) { var on = (st.tab || "lib") === t[0]; return { label: t[1], d: t[2], on: on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)", pick: function () { api.set({ tab: t[0], sel: null }); } }; }),
+      tabs: [["lib", "Library", IC.photo], ["alb", "Albums", IC.phAlbums]].map(function (t) { var on = (st.tab || "lib") === t[0]; return { id: t[0], label: t[1], d: t[2], on: on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)", pick: function () { api.set({ tab: t[0], sel: null }); } }; }),
       searching: !!st.searching, q: st.q || "", hasQ: !!(st.q || "").trim(), askLabel: "Ask " + api.name + ": “" + (st.q || "").trim() + "”",
       search: function () { api.set({ searching: true, q: "", sel: null, album: null }); },
       onQ: function (e) { api.set({ q: e.target.value }); },
@@ -2709,7 +2711,7 @@ registerView("maps", {
     else pinList = [dst.id];
     var pins = pinList.map(function (id) {
       var p = mapsPlace(id); var o = scr(p.x, p.y); var big = mode !== "base" && mode !== "results";
-      return { l: o.l, t: o.t, d: IC[p.icon], name: p.name, sz: big ? 44 : 34, off: big ? -22 : -17, isz: big ? 20 : 16,
+      return { id: id, l: o.l, t: o.t, d: IC[p.icon], name: p.name, sz: big ? 44 : 34, off: big ? -22 : -17, isz: big ? 20 : 16,
         css: big ? "background: var(--acc); color: var(--alpha-white); box-shadow: 0 0 0 3px var(--alpha-white), 0 6px 18px rgba(0,0,0,.25)" : "background: var(--bg); color: var(--fg); box-shadow: 0 0 0 1.5px var(--line), 0 4px 12px var(--shc)",
         tap: function () { if (tapGuard() || mode === "nav" || mode === "dir") return; api.set({ place: id, pan: null }); } };
     });
@@ -2732,15 +2734,15 @@ registerView("maps", {
     /* saved chips */
     var chips = mapsSavedIds(st).map(function (id) {
       var p = mapsPlace(id);
-      return { label: id === MAPS_FIX.work ? MAPS_FIX.workLabel || p.name : p.name, d: IC[p.icon], go: function () { api.set({ place: id, pan: null }); } };
+      return { id: id, label: id === MAPS_FIX.work ? MAPS_FIX.workLabel || p.name : p.name, d: IC[p.icon], go: function () { api.set({ place: id, pan: null }); } };
     });
     var cats = [["Coffee", "mapsCup", "coffee"], ["Food", "mapsFood", "food"], ["Gym", "mapsGym", "gym"]].map(function (c) {
-      return { label: c[0], d: IC[c[1]], go: function () { api.set({ query: c[2], sheet: "half", place: null, pan: null }); } };
+      return { id: c[2], label: c[0], d: IC[c[1]], go: function () { api.set({ query: c[2], sheet: "half", place: null, pan: null }); } };
     });
 
     var row = function (p) {
       var h = mapsHours(p, api.now);
-      return { name: p.name, d: IC[p.icon], sub: p.cat + " · " + mapsMi(p.mi) + " mi" + (h ? " · " + (h.open ? "Open" : "Closed") : ""), go: function () { api.set({ place: p.id, pan: null }); } };
+      return { id: p.id, name: p.name, d: IC[p.icon], sub: p.cat + " · " + mapsMi(p.mi) + " mi" + (h ? " · " + (h.open ? "Open" : "Closed") : ""), go: function () { api.set({ place: p.id, pan: null }); } };
     };
     var savedRows = mapsSavedIds(st).map(function (id) { var r = row(mapsPlace(id)); if (id === MAPS_FIX.work && MAPS_FIX.workName) r.name = MAPS_FIX.workName; return r; });
     var q = st.query || "";
@@ -3154,6 +3156,7 @@ registerView("notes", {
     if (isEdit) {
       ed = Object.assign({}, common, {
         isText: n.kind === "text", isList: n.kind === "list",
+        done: common.close, doneDisabled: false, saveStatus: "",
         body: n.body || "",
         onBody: function (e) { notesUpd(api, n.id, { body: e.target.value }); },
         listCss: n.kind === "list" ? "color: var(--acct)" : "", listLabel: n.kind === "list" ? "Turn into text" : "Turn into checklist",
@@ -3606,7 +3609,7 @@ registerView("files", {
     /* top level */
     var locs = FILES_FOLDERS.filter(function (d) { return !d.parent; }).map(function (d) {
       var n = filesCount(files, d.id);
-      return { name: d.id, d: IC[d.icon], sub: n === 1 ? "1 item" : n + " items", go: function () { api.set({ folder: d.id, q: null }); } };
+      return { id: "category:" + d.id, name: d.id, d: IC[d.icon], sub: n === 1 ? "1 item" : n + " items", go: function () { api.set({ folder: d.id, q: null }); } };
     });
     var q = st.q == null ? null : String(st.q).toLowerCase().trim();
     var results = q ? files.filter(function (f) { return filesNorm(f.name + " " + f.folder + " " + (FILES_TYPES[f.type] || {}).label).indexOf(filesNorm(q)) >= 0; }).map(row) : [];
@@ -3623,7 +3626,7 @@ registerView("files", {
         toggleView: function () { api.set({ grid: !st.grid }); },
         hasMenu: true, hasCrumbs: false, openMenu: function () { api.set({ menu: true }); },
         menuRows: [["list", IC.filesRows, "List", !st.grid, { grid: false }], ["grid", IC.grid, "Grid", !!st.grid, { grid: true }], ["recent", IC.clock, "Newest first", st.sort !== "name", { sort: "recent" }], ["name", IC.filesSort, "Name", st.sort === "name", { sort: "name" }]].map(function (m) {
-          return { label: m[2], d: m[1], on: m[3], go: function () { api.set(Object.assign({ menu: false }, m[4])); } };
+          return { id: m[0], label: m[2], d: m[1], on: m[3], go: function () { api.set(Object.assign({ menu: false }, m[4])); } };
         }),
         sortLabel: st.sort === "name" ? "Sort by date" : "Sort by name", sortCss: st.sort === "name" ? "color: var(--acct)" : "",
         toggleSort: function () { var nx = st.sort === "name" ? "recent" : "name"; api.set({ sort: nx }); },
@@ -3705,7 +3708,7 @@ registerView("files", {
     var curFolder = f ? f.folder : st.folder;
     var moveTo = FILES_FOLDERS.map(function (d) {
       var here = d.id === curFolder;
-      return { name: d.id, d: IC[d.icon] || IC.folder, here: here, notHere: !here, sub: d.parent ? d.parent : "",
+      return { id: d.id, name: d.id, d: IC[d.icon] || IC.folder, here: here, notHere: !here, sub: d.parent ? d.parent : "",
         go: function () {
           if (here) { api.set({ sheet: null }); return; }
           var ids = targetIds.slice();
@@ -4525,7 +4528,9 @@ function stPageAccess(root) {
   var previous = stPageFocus.get(root);
   var saved = previous ? previous.saved : new Map();
   var active = document.activeElement;
-  if (previous && previous.key !== key && previous.page.contains(active)) saved.set(previous.depth, active);
+  if (previous && previous.key !== key && previous.page.contains(active)) {
+    saved.set(previous.depth, { element: active, id: active.id, tag: active.tagName, label: active.getAttribute("aria-label") });
+  }
   // Release the destination before restoring focus. Hide the former page only
   // after focus moves so browsers do not reject aria-hidden on its active child.
   // An open sheet owns focus and has retired this page; it releases the page when it closes.
@@ -4534,7 +4539,16 @@ function stPageAccess(root) {
     current.removeAttribute("aria-hidden");
   }
   if (previous && previous.key !== key) {
-    var target = depth < previous.depth ? saved.get(depth) : null;
+    var record = depth < previous.depth ? saved.get(depth) : null;
+    var target = record ? record.element : null;
+    // Settings can refresh the covered page while a child is open. Restore its
+    // uniquely named control even when that refresh replaced the original node.
+    if (record && (!target || !target.isConnected || !current.contains(target))) {
+      var matches = Array.from(current.querySelectorAll("button, input, select, textarea, [tabindex='0']")).filter(function (element) {
+        return record.id ? element.id === record.id : record.label && element.tagName === record.tag && element.getAttribute("aria-label") === record.label;
+      });
+      target = matches.length === 1 ? matches[0] : null;
+    }
     if (!target || !target.isConnected || !current.contains(target)) target = current.querySelector("button, input, select, textarea, [tabindex='0']");
     if (target) target.focus({ preventScroll: true });
     Array.from(saved.keys()).forEach(function (i) { if (i > depth) saved.delete(i); });
@@ -5016,6 +5030,9 @@ var BASE = {
   charName: ALPHA_PRODUCT.identity.characterName, vs: {}, secure: false, stack: [], toastUndo: false, drawer: false, drawerQ: "",
   msgs: []
 };
+// A long conversation renders only its newest rows: enough for the closed bar, a page once chat
+// opens, and another page each time the owner scrolls to the top of what is shown.
+var CHAT_CLOSED_ROWS = 20, CHAT_PAGE_ROWS = 100;
 
 class Component extends DCLogic {
   constructor(props) {
@@ -5028,17 +5045,42 @@ class Component extends DCLogic {
     this.G = {}; this.I = {};
     var self = this;
     this.clock = setInterval(function () { self.setState({ now: Date.now() }); }, 15000);
+    this.chatWindowScroll = function (event) { self.growChatWindow(event.target); };
+    document.addEventListener("scroll", this.chatWindowScroll, true);
+    this.chatWindowCommitted = this.chatWindowRows;
     this.preset(this.props.initial || "boot");
+  }
+  transcriptWindow(msgs, open) {
+    var key = msgs.length ? msgs[0].id : null;
+    if (key !== this.chatWindowKey) { this.chatWindowKey = key; this.chatWindowSize = CHAT_PAGE_ROWS; }
+    var size = open ? this.chatWindowSize || CHAT_PAGE_ROWS : CHAT_CLOSED_ROWS;
+    this.chatWindowRows = Math.min(size, msgs.length);
+    return msgs.length > size ? msgs.slice(-size) : msgs;
+  }
+  growChatWindow(list) {
+    if (!list || !list.matches || !list.matches("[data-alpha-transcript]") || list.scrollTop > 40) return;
+    var S = this.S(), rows = this.chatWindowRows || 0;
+    // Grow once per page: until the larger window renders, rows stays below the size.
+    if (!["sheet", "full"].includes(S.chat) || rows < (this.chatWindowSize || CHAT_PAGE_ROWS) || S.msgs.length <= rows) return;
+    this.chatWindowSize = rows + CHAT_PAGE_ROWS;
+    this.setState({});
   }
   getSnapshotBeforeUpdate(_props, previous) {
     var list = document.querySelector("[data-alpha-transcript]");
     if (!list) { this.chatScrollSnapshot = null; return null; }
-    var state = this.S(), rows = Array.from(list.querySelectorAll("[data-alpha-message-id]"));
+    var state = this.S();
+    var wasOpen = ["sheet", "full"].includes(previous.chat), isOpen = ["sheet", "full"].includes(state.chat);
+    // A closed chat is not being read: skip measuring rows. When a drag opens the window, keep
+    // the newest row where it was.
+    if (!wasOpen && !isOpen) {
+      this.chatScrollSnapshot = this.chatWindowRows !== this.chatWindowCommitted ? { list: list, fromBottom: list.scrollHeight - list.scrollTop } : null;
+      return null;
+    }
+    var rows = Array.from(list.querySelectorAll("[data-alpha-message-id]"));
     var bounds = list.getBoundingClientRect(), scale = bounds.height / list.clientHeight || 1;
     var anchor = rows.find(function (row) { return row.getBoundingClientRect().bottom >= bounds.top; });
     var oldUser = (previous.msgs || []).filter(function (m) { return m.from === "user"; }).at(-1);
     var newUser = state.msgs.filter(function (m) { return m.from === "user"; }).at(-1);
-    var wasOpen = ["sheet", "full"].includes(previous.chat), isOpen = ["sheet", "full"].includes(state.chat);
     var newTurn = state.typing && newUser && newUser.id !== oldUser?.id;
     var atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80 && window.getSelection()?.isCollapsed !== false;
     var reading = { anchor: anchor?.getAttribute("data-alpha-message-id"), offset: anchor ? (anchor.getBoundingClientRect().top - bounds.top) / scale : 0 };
@@ -5055,6 +5097,8 @@ class Component extends DCLogic {
     if (prev && prev.initial !== this.props.initial) this.preset(this.props.initial || "boot");
     this.syncShadeFocus();
     var list = document.querySelector("[data-alpha-transcript]"), saved = this.chatScrollSnapshot;
+    this.chatWindowCommitted = this.chatWindowRows;
+    if (list && saved && saved.list === list && saved.fromBottom !== undefined) list.scrollTop = list.scrollHeight - saved.fromBottom;
     if (!list || !["sheet", "full"].includes(this.S().chat)) return;
     if (this.chatScrollElement !== list && typeof ResizeObserver !== "undefined") {
       this.chatScrollObserver?.disconnect(); this.chatScrollElement = list;
@@ -5078,6 +5122,7 @@ class Component extends DCLogic {
   }
   componentWillUnmount() {
     this.chatScrollObserver?.disconnect();
+    document.removeEventListener("scroll", this.chatWindowScroll, true);
     clearInterval(this.clock); clearInterval(this.vI);
     var G = this.G || {}; Object.keys(G).forEach(function (k) { G[k].forEach(clearTimeout); });
     var I = this.I || {}; Object.keys(I).forEach(function (k) { I[k].forEach(clearInterval); });
@@ -5250,6 +5295,8 @@ class Component extends DCLogic {
     if (S.voice !== "off") return this.stopVoice();
     // An open conversation lowers one detent (full, sheet, rest) before Back leaves the view.
     if (S.chat === "full" || S.chat === "sheet") return this.setState(this.shellNavigate({ type: "back" }));
+    // A bar raised from the pill lowers before Back leaves the view.
+    if (S.chat === "input" && this.rest() === "hidden") return this.setState({ chat: "hidden" });
     if (S.view) {
       var m = this.mod(S.view);
       if (m.back && m.back(this.vget(S.view), this.api(S.view))) return;
@@ -5315,7 +5362,6 @@ class Component extends DCLogic {
     if (action === "open-system-shade") return this.openSystemShade();
     if (action === "home") return this.goHome();
     if (action === "lower-assistant") return this.setState({ chat: this.rest() });
-    if (action === "raise-assistant") return this.setState({ chat: "sheet" });
   }
   pullContext() {
     var S = this.S();
@@ -5505,10 +5551,15 @@ class Component extends DCLogic {
       } };
     });
 
-    var msgs = S.msgs.map(function (m) {
+    var msgs = this.transcriptWindow(S.msgs, panelOpen || (isOn && !!this.chatMotion)).map(function (m) {
       var c = m.card || {}; var t = c.type;
+      var shown = m.from === "agent" && typeof m.displayText === "string" ? m.displayText : m.text;
+      if (typeof shown === "string" && shown.length > 200000) {
+        var end = 200000 - (/[\uD800-\uDBFF]/.test(shown[199999]) ? 1 : 0);
+        shown = shown.slice(0, end) + " [Message shortened for display]";
+      }
       return {
-        id: m.id, text: m.text, displayText: m.from === "agent" && typeof m.displayText === "string" ? m.displayText : m.text, hasCalendarText: true, calendarReviews: [], isUser: m.from === "user", isAgent: m.from === "agent", c: c,
+        id: m.id, text: m.text, displayText: shown, hasCalendarText: true, calendarReviews: [], workflowRuns: [], mapsCards: [], hasMapsChoice: false, mapsChoices: [], isUser: m.from === "user", isAgent: m.from === "agent", c: c,
         cAgenda: t === "agenda", cEvent: t === "event", cDigest: t === "digest", cNote: t === "note", cFlow: t === "flow", cSummary: t === "summary", cDraft: t === "draft", cCall: t === "call", cGeneric: t === "generic",
         gIcon: IC[c.icon] || IC.spark, evIcon: c.act && !c.done ? IC.plus : IC.check, callIni: c.ini || ((c.who || "").split(" ").map(function (w) { return w.charAt(0); }).join("").slice(0, 2)),
         sumSave: t === "summary" && !c.done && !!c.act, sumOpen: t === "summary" && !c.act && !!c.go,
@@ -5522,7 +5573,8 @@ class Component extends DCLogic {
     });
     var baseSug = ["Plan my afternoon", "What needs me?", "Take a note: call the landlord Friday", "Every weekday at 6, wrap up my day"];
     var sugList = (mod && mod.suggestions) ? mod.suggestions(st, this.api(v)) : baseSug;
-    var sugg = sugList.filter(function (s) { return !deferredMvpPrompt(s); }).map(function (s) { return { label: s, go: function () { self.send(s); } }; });
+    // A suggestion is a prompt to send, or a { label, go } control that acts instead of sending.
+    var sugg = sugList.filter(function (s) { return typeof s !== "string" || !deferredMvpPrompt(s); }).map(function (s) { return typeof s === "string" ? { label: s, go: function () { self.send(s); } } : s; });
 
     var bars = []; for (var b = 0; b < 28; b++) bars.push({ h: 10 + ((b * 37) % 30), dl: ((b * 0.137) % 1).toFixed(2) });
     var vShow = S.voice === "speaking" ? S.vcap : (S.vtext || "…");
@@ -5543,7 +5595,7 @@ class Component extends DCLogic {
       [IC.up, "Swipe up from the bottom bar, or tap it · Home, from anywhere"],
       [IC.back, "Swipe in from either edge · back one step inside the app"],
       [IC.down, "Swipe down on launcher Home, or tap Notifications · Android notifications and quick settings"],
-      [IC.half, "Swipe up on Home · chat. Drag its grabber to resize"],
+      [IC.half, "Tap the chat dock to open chat. Drag its grabber to resize"],
       [IC.lock, "Side key: tap · lock or wake"]
     ].map(function (l) { return { d: l[0], t: l[1] }; });
 
@@ -5593,7 +5645,7 @@ class Component extends DCLogic {
       panelComposer: panelOpen && !voiceOn,
       panelH: !isOn ? 0 : (S.chat === "full" ? 915 : (S.chat === "sheet" ? 560 : 0)), panelR: S.chat === "full" ? "0px" : "30px 30px 0 0",
       panelOp: panelOpen ? 1 : 0, panelPE: panelOpen ? "auto" : "none", panelTop: S.chat === "full" && this.props.systemShell !== false ? "var(--alpha-chat-full-top,60px)" : "4px",
-      scrimOp: 0, scrimPE: "none",
+      scrimOp: 0, scrimPE: "none", scrimZ: 45,
       showGrabber: S.chat !== "full", sizeIcon: S.chat === "full" ? IC.shrink : IC.expand, sizeLabel: S.chat === "full" ? "Shrink chat" : "Expand chat",
       showComposer: showComposer, showPill: showPill, cmpBottom: 28,
       cmpPlaceholder: (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,

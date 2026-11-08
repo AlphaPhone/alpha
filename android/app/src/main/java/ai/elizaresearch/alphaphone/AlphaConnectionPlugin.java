@@ -58,7 +58,7 @@ public final class AlphaConnectionPlugin extends Plugin {
  }
 
  /** Workspace return uses only its own native protected pending slot, on the build's verified App Link host
-  * (BuildConfig.ELIZAOS_APP_LINK_HOST, the sign-in return host). A build without one reports the return unsupported. */
+  * (BuildConfig.ELIZAOS_APP_LINK_HOST, the sign-in return host). */
  private GoogleWorkspaceReturnFlow workspaceFlow(){
   return new GoogleWorkspaceReturnFlow(BuildConfig.ELIZAOS_APP_LINK_HOST,new GoogleWorkspaceReturnFlow.Store(){
    public String credential()throws Exception{return storage().readCredentialSlot("cloud:production");}
@@ -155,7 +155,8 @@ public final class AlphaConnectionPlugin extends Plugin {
   });
  }
  private long credentialIntent(String name){
-  return RendererCredentialSlots.credentialSlot(name)?AlphaLocalAgentPlugin.reserveCredentialIntent():0;
+  if(RendererCredentialSlots.credentialSlot(name))return AlphaLocalAgentPlugin.reserveCredentialIntent(foregroundLock,()->{if(destroyed)throw new IllegalStateException("Connection closed");});
+  synchronized(foregroundLock){if(destroyed)throw new IllegalStateException("Connection closed");return 0;}
  }
  private AlphaCredentialStore storage(long intent){
   return new AlphaCredentialStore(getContext(),()->{if(destroyed)throw new IllegalStateException("Connection closed");if(intent!=0)AlphaLocalAgentPlugin.requireCredentialIntent(intent);});
@@ -378,9 +379,8 @@ public final class AlphaConnectionPlugin extends Plugin {
   requests.resumeAll();
  }
  @Override protected void handleOnDestroy() {
-  destroyed=true;
+  synchronized(foregroundLock){destroyed=true;foregroundLock.notifyAll();}
   requests.cancelAll();
-  synchronized(foregroundLock){foregroundLock.notifyAll();}
   storageTasks.close();workers.shutdownNow(); super.handleOnDestroy();
  }
 }

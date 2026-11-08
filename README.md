@@ -55,17 +55,20 @@ the required evidence rather than treating a successful APK build as acceptance.
 
 - [Current flow research](docs/research-report.md)
 - [Detailed flow PRD](docs/flow-audit-and-prd.md)
-- [Current implementation plan](docs/flow-implementation-plan.md)
+- [Current implementation plan](docs/implementation-plan.md)
 - [current product status](docs/mvp-current-status.md)
-- [Production readiness record, 2026-10-04](https://github.com/AlphaCompute/alphaphone/blob/51c8157533353a805afd2811f4e3f41b66b7b9fa/docs/production-readiness-2026-10-04.md)
+- [Production readiness record, 2026-10-04](https://github.com/eliza-research/alphaphone/blob/51c8157533353a805afd2811f4e3f41b66b7b9fa/docs/production-readiness-2026-10-04.md)
 - [Cloud deployment and authentication findings](docs/cloud-production-validation.md)
 - [Browser autofill and Proton integration](docs/browser-autofill-integration.md)
 - [Calendar and reminder contracts](docs/calendar-reminder-contract.md)
-- [Gesture zones and the notifications panel](docs/gesture-zones.md)
+- [Gesture zones, the chat dock and the notifications panel](docs/gesture-zones.md)
+- [Home cards and layout](docs/daily-overview.md)
+- [Settings structure](docs/settings.md)
 
 - [Working PRD](docs/prd.md)
-- [Detailed implementation plan](docs/implementation-plan.md)
+- [Flow implementation plan (historical)](docs/flow-implementation-plan.md)
 - [Architecture and upstream ownership](docs/architecture.md)
+- [Quint application-state models](specs/quint/README.md) and [migration report](docs/quint-migration-report.md)
 - [Requirements and open decisions](docs/decisions.md)
 - [Verification gates and evidence](docs/verification.md)
 - [Source/design provenance](docs/sources.md)
@@ -82,7 +85,8 @@ the retained chat-dictation API is not a second user-facing chat control.
 Always-on listening is required in the Pixel 10a / Android 17 AOSP MVP. Phone,
 Contacts and SMS are AOSP-only; Wallet is removed. Full permitted Photos access and
 reset-only data management are planned. These are requirements, not claims that the
-current Cloud voice/credit UI or other source already implements them.
+current source already implements them. Speech is on-device by default; Cloud speech is
+used only in the `cloud` runtime profile or with an owner Cartesia key.
 See [speech research](docs/local-speech-research-2026-10-12.md) for native candidates.
 
 ## Cloud release qualification — November 6
@@ -111,6 +115,21 @@ bundle. This qualification does not publish a release or replace owner acceptanc
 
 ## Explicit Cloud QA profile — October 18
 
+For a private Settings updater baseline, declare `ALPHA_UPDATE_CHANNEL=private-qa`,
+`ALPHA_PRIVATE_UPDATE_MANIFEST_FILE` and `ALPHA_PRIVATE_UPDATE_MANIFEST_SHA256`.
+The file must be an absolute path outside the checkout, owned by the build user
+with mode 0600, containing only the exact URL bytes without a newline. The digest
+is SHA-256 of those bytes. Only the reviewed Google Storage `update-qa` manifest
+path and a five-minute to one-day signed URL are accepted. Never commit or log
+that URL. The normal build uses the unchanged public URL in `app.config.json`.
+
+Private QA requires the complete Cloud profile. Android metadata, build and
+producer evidence, and the reviewed signing plan bind the channel and URL digest;
+the plan also names `purpose: private-update-qa-baseline`. These artifacts are
+never public-distribution candidates. TLS, package, signer, APK hash and version
+checks remain unchanged. Input admission is not an update, retention or device
+acceptance result.
+
 The owner-approved `cloud` runtime profile supersedes the local-speech-only wording
 above for this explicit QA configuration. It keeps the genuine Bun/PGlite resident
 agent, history and approvals on the phone, uses authenticated Eliza Cloud for
@@ -122,6 +141,8 @@ Select it explicitly with `--runtime-profile=cloud` for runtime staging and Andr
 builds (`agent:stage-android` and `android:build`). Renderer, native and packaged
 runtime admission must agree on the profile; test mocks and unpackaged runtimes
 are rejected. The default remains `native` with its existing qualification gates.
+Use the default `native` profile for on-device speech with Cloud text inference
+([measurements](docs/on-device-speech-2026-11-05.md)).
 The Talk button is the explicit voice start; it opens the voice surface and starts
 the microphone without a second Start Cloud voice button. The active surface keeps
 the Cloud upload and plan-usage disclosure visible. Account and conversation binding,
@@ -141,11 +162,22 @@ The default manual profile and automatic resident qualification remain `native`.
 ## Setup
 
 ```sh
-git clone --recurse-submodules https://github.com/AlphaCompute/alphaphone.git
+git clone --recurse-submodules https://github.com/eliza-research/alphaphone.git
 cd alphaphone
 npm ci
 npm run verify
 npm run dev
+```
+
+`npm run verify` needs a JDK (`JAVA_HOME` or `javac` on `PATH`) for the host contract tests.
+The tests that load the real SDK need Bun 1.4.2 and the prepared SDK; without them they
+skip. To run them, as CI's Repository verification does:
+
+```sh
+export ALPHA_BUN="$(command -v bun)"   # must report 1.4.2
+node scripts/prepare-local-agent.mjs
+export ALPHA_CLOUD_COLLECTOR_SOURCE="$(node --input-type=module -e "import {sourceDirectory} from './scripts/local-agent-source.mjs'; process.stdout.write(sourceDirectory(process.cwd()))")"
+ALPHA_REQUIRE_PREPARED_SDK=1 npm run verify   # fails instead of skipping when preparation is missing
 ```
 
 ## Build-time test-mock switch
@@ -263,11 +295,17 @@ file flows, dialog accessibility, disclosed adapter fixtures and reference desig
 states. Reports/screenshots are in `test-results/browser-report` and
 `test-results/browser`. Browser CI runs independently of Android qualification.
 
-Use Node 24.15.0, the prepared source's pinned Bun version (currently 1.4.2), and JDK 21.
-`agent:prepare` checks Bun against the upstream `packageManager` before installing dependencies.
+Use Node 26.13.0 (`.nvmrc`), the prepared source's pinned Bun version (currently 1.4.2), and JDK 21.
+Node and Bun have separate jobs. Node and npm drive this repository's own tooling: Vite, Playwright,
+the `node --test` suite, Capacitor and the build scripts. Bun is the runtime of the Eliza agent that
+ships on the phone (`libeliza_bun.so`) and the tool upstream Eliza uses to build that agent bundle,
+so it is needed only to prepare or run the agent (`agent:prepare`, the local agent scripts).
+`agent:prepare` checks Bun against the upstream `packageManager` before installing dependencies,
+and `agent:stage-android` refuses to bundle with any other Bun (Bun 1.3.14 dropped modules from
+the mobile bundle, so every chat turn failed).
 Put that Bun version first on `PATH` for the build scripts; `ALPHA_BUN` may also select
-its absolute executable for preparation and nested tools. An older Bun can emit incompatible
-plugin imports during the runtime build. Native builds require Android SDK platform 36 and
+its absolute executable for preparation and nested tools.
+Native builds require Android SDK platform 36 and
 build-tools 36.0.0. Set `JAVA_HOME` and `ANDROID_HOME` on Linux; the scripts also
 recognize the usual macOS Homebrew JDK/Android SDK locations. The Gradle 8.13
 wrapper is hash-pinned. No Eliza root dependency installation or package
@@ -357,32 +395,32 @@ Three inputs of a distributable build cannot come from a script, and
 `npm run android:build:inputs` names each with who supplies it:
 
 - **The reviewed ARM64 embedding host** (`android/embedding-host/qualified-host.json`). Its
-  three native libraries are ignored by Git. `npm run agent:build-embedding-host` passes
-  when they are staged and otherwise stops (exit 3) before any long step. The reviewed
-  bytes were built without a build-path remap, so they contain the absolute directory of
-  that build, which only the qualification receipt records; a rebuild elsewhere has the
-  same source and toolchain and different bytes
-  (`android/embedding-host/build-toolchain.json` records the measurement). A person
-  therefore has to either stage the reviewed libraries
-  (`node scripts/stage-embedding-host.mjs --receipt <QUALIFICATION.json>`) or qualify a
-  rebuilt candidate: `node scripts/build-embedding-host.mjs --candidate` fetches the pinned
-  engine, builds with NDK `29.0.13113456` and CMake `4.0.3` using
-  `prepare-embedding-host.mjs --remap-build-path`, and never stages the result. The staging
+  three native libraries are ignored by Git. `android/embedding-host/build-toolchain.json`
+  records NDK `28.2.13676358`, CMake `4.0.3` and `remapBuildPath: true`, so
+  `npm run agent:build-embedding-host` passes when the reviewed libraries are staged and
+  otherwise rebuilds them (about ten minutes, 6 GiB free) and stages them only when they are
+  byte-identical to the reviewed ones; it stops (exit 3) when they are not. The current
+  record carries `requalification.required: true` at pin `0594fc72da`: the engine gitlink
+  moved from `cc8c9791` to `b3eb2bf6` and no rebuild has compared the bytes, so the step
+  stops (exit 3) before any build and a distribution build needs a new reviewed receipt.
+  `npm run android:build:inputs` names who supplies it: whoever holds the reviewed libraries
+  and their receipt stages them (`node scripts/stage-embedding-host.mjs --receipt
+  <QUALIFICATION.json>`), or a reviewer qualifies a rebuilt candidate
+  (`node scripts/build-embedding-host.mjs --candidate`, which never stages it). The staging
   command checks the staged embedding model, so run `agent:prepare`,
   `agent:build-workflow-worker` and `agent:stage-android` before it; and it refuses to
   replace a differing `qualified-host.json`, so a new qualification removes the old one in
-  the same reviewed change. Three remapped builds in three directories on one macOS arm64
-  host were byte-identical; no other host has been tried. Once a candidate is qualified and
-  `remapBuildPath` is set to `true` in the same commit, the step rebuilds the libraries and
-  stages them only when they are byte-identical to the reviewed ones, and stops (exit 3)
-  when they are not. Gradle's `:app:verifyEmbeddingHost` requires them for every
-  distribution and test-mocks build. The unpackaged developer build
+  the same reviewed change. Gradle's `:app:verifyEmbeddingHost` requires the libraries for
+  every distribution and test-mocks build. The unpackaged developer build
   (`--allow-unpackaged-runtime`, which `--test-mocks` may be combined with) passes only
   while no resident payload is staged at all: once `agent:stage-android` has run, remove
   `android/app/src/main/assets/agent` and `android/app/src/main/jniLibs` or stage the host.
-- **A qualified speech runtime** (decision A-24). A local rebuild installs only with
-  `--allow-unqualified-runtime`. The chain still completes with it; `verify-apks` records
-  the releases `distributable:false` and names the speech reasons.
+  Staged voice outputs in `.eliza/paradee-voice/native` keep `:app:verifyParadeeAppLinkage`
+  checking the app libraries, so remove that directory too or stage the host.
+- **The on-device voice outputs** ([fused speech](docs/fused-speech.md)). A person stages
+  them with `node scripts/android-stage-voice-models.mjs --from <directory>`;
+  `npm run android:build:inputs` lists them. The voice host record is not qualified, so
+  `verify-apks` records the releases `distributable:false` and names the reason.
 - **The release signer** (decision P-16; [human actions](docs/human-actions.md) H-08 to H-10).
   `node scripts/enroll-release-keys.mjs` records the key ceremony's certificate digest in
   `android/release-signer.json`; releases are then signed by Gradle with the `ELIZAOS_KEYSTORE_*`
@@ -545,7 +583,7 @@ results. Inbox uses a closed synthetic provider transport in the test APK and ex
 These checks do not establish physical-device or real-provider acceptance.
 
 Installed Calendar and reminder upgrade acceptance uses
-`node scripts/test-calendar-upgrade.mjs` or `node scripts/test-reminder-upgrade.mjs`.
+`node scripts/test-installed-upgrade.mjs calendar` or `node scripts/test-installed-upgrade.mjs reminder`.
 Set `ANDROID_HOME` and the matching `ALPHA_CALENDAR_` or `ALPHA_REMINDER_` variables:
 `BASELINE_DIR` (absolute), `TEST_SERIAL`, `TEST_AVD`, and `TEST_ABI`. Baselines contain
 `standalone-debug.apk` and `launcher-debug.apk`; reminder baselines also require
@@ -584,9 +622,10 @@ for signing, default-home policy and the full image verification boundary.
 
 The opt-in always-on listener ships only in the image. Build it with `./gradlew :sense:assembleRelease`
 (in `android/` after `npm run android:host`, same signing variables as the APKs, after the speech model bundle is prepared) and pass
-it with `--listener-apk FILE`. Production staging requires it together with `--listener-descriptor FILE`, an
-independently reviewed JSON record of `packageName`, `apkSha256` and `certificateSha256`, and refuses a
-listener APK without the qualified speech bundle. `node scripts/verify-aosp-listener.mjs --serial SERIAL --user 0` is a read-only
+it with `--listener-apk FILE` (optionally with `--listener-descriptor FILE`, an independently reviewed
+JSON record of `packageName`, `apkSha256` and `certificateSha256`). While P-78 defers wake listening,
+only `--development` staging takes it; production staging refuses `--listener-apk` and the image
+ships without AlphaSense. `node scripts/verify-aosp-listener.mjs --serial SERIAL --user 0` is a read-only
 check of a booted image. See [ADR 0001](docs/adr/0001-privileged-listener.md) for the privilege
 boundary and the remaining device gates.
 

@@ -1,3 +1,5 @@
+import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../../../../.eliza/client-features/packages/ui/src/components/chat/message-maps-parser.ts';
+import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
 type Message = Record<string, any>;
@@ -105,9 +107,9 @@ const UPSTREAM_COMBINED_NOTICE = `${UPSTREAM_MODEL_UNAVAILABLE_NOTICE}\n---\n${U
 export const MODEL_UNAVAILABLE_NOTICE = 'Your agent cannot reply yet. Choose an AI provider in Settings, then send your message again.';
 
 /** A runtime-error notice that arrived while the owner's latest message was unanswered. */
-export const RUNTIME_ERROR_NOTICE = 'Part of your agent stopped working, so this reply may not arrive. Nothing was resent. Send your message again in a moment.';
+export const RUNTIME_ERROR_NOTICE = 'Part of your agent stopped working. Send your message again in a moment.';
 /** A runtime-error notice that arrived with nothing waiting (a service failing at start, for example). */
-export const RUNTIME_ERROR_BACKGROUND_NOTICE = 'Part of your agent stopped working. Chat can still answer, but some features may not work until it recovers.';
+export const RUNTIME_ERROR_BACKGROUND_NOTICE = 'Part of your agent stopped working. Some features may not work until it recovers.';
 
 /** The upstream notice a stored assistant text is, if any. */
 export function systemNoticeKind(text: unknown): SystemNoticeKind | undefined {
@@ -120,11 +122,11 @@ export function systemNoticeKind(text: unknown): SystemNoticeKind | undefined {
 }
 
 /** The owner-facing text of a stored notice row, always in Alpha's words;
- * the combined form keeps both halves. `waiting`: it arrived while the owner's message was unanswered. */
+ * the combined form keeps both halves with one send-again step. `waiting`: it arrived while the
+ * owner's message was unanswered. */
 export function systemNoticeDisplayText(kind: SystemNoticeKind, waiting = false): string {
-  const runtime = waiting ? RUNTIME_ERROR_NOTICE : RUNTIME_ERROR_BACKGROUND_NOTICE;
-  return kind === 'runtime-error' ? runtime
-    : kind === 'model-and-runtime-error' ? `${MODEL_UNAVAILABLE_NOTICE}\n${runtime}`
+  return kind === 'runtime-error' ? (waiting ? RUNTIME_ERROR_NOTICE : RUNTIME_ERROR_BACKGROUND_NOTICE)
+    : kind === 'model-and-runtime-error' ? `${MODEL_UNAVAILABLE_NOTICE}\n${RUNTIME_ERROR_BACKGROUND_NOTICE}`
     : MODEL_UNAVAILABLE_NOTICE;
 }
 
@@ -163,4 +165,82 @@ export function collapseSystemNotices<T extends ChatRow>(messages: T[]): T[] {
     changed = true; result.push({ ...message, text });
   });
   return changed ? result : messages;
+}
+
+
+/** Display-only projection of an agent Maps card. Links are shown as text, never opened. */
+export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];attribution:string};
+/** The plugin-maps share gate: exactly two bounded answers that are sent back verbatim. */
+export type MapsShareChoice={id:string;options:{label:string;value:string}[]};
+
+const MODES:Record<string,string>={drive:'Driving',walk:'Walking',bicycle:'Cycling',transit:'Transit'};
+const placeLine=(place:MapsCardPlace)=>place.formattedAddress?`${place.name}, ${place.formattedAddress}`:place.name;
+// Alpha's agent context carries no device position, so the locate card cannot be answered here.
+const LOCATE_LINE='Alpha does not send your location to the agent. Name a starting place or address instead.';
+
+function present(card:MapsCardSpec):MapsChatCard{
+ switch(card.kind){
+  case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||''};
+  case 'places':return {kind:card.kind,title:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||''};
+  case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||''};
+  case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:''};
+  case 'locate':return {kind:card.kind,title:'Location needed',lines:[LOCATE_LINE],attribution:''};
+ }
+}
+
+const SHARE_CHOICE=/\[CHOICE:maps-share id=(maps-share-[^\]\s]{1,200})\]\r?\n([\s\S]*?)\r?\n\[\/CHOICE\]/g;
+function shareChoice(id:string,body:string):MapsShareChoice|null{
+ const options=body.split(/\r?\n/).map(line=>{const at=line.lastIndexOf('=');return at>0?{value:line.slice(0,at).trim(),label:line.slice(at+1).trim()}:{value:'',label:''};});
+ if(options.length!==2||options.some(o=>!o.value||!o.label||o.value.length>500||o.label.length>80))return null;
+ return {id,options};
+}
+
+// Alpha has no form surface. The question the form asks is already in the prose before it
+// (plugin-maps missingInput), so a complete form block is dropped and nothing is lost.
+const FORM=/\[FORM\]\r?\n(\{[^\r\n]*\})\r?\n\[\/FORM\]/g;
+function formBlock(json:string){
+ try{const body=JSON.parse(json);return !!body&&typeof body==='object'&&typeof body.id==='string'&&Array.isArray(body.fields);}catch{return false;}
+}
+
+/** Replace valid Maps markup with presentation metadata. Malformed markup stays literal text. */
+export function mapsChatText(text:string){
+ const cards:MapsChatCard[]=[];let choice:MapsShareChoice|null=null,rendered=text;
+ const regions=findMapsCardRegions(text);
+ for(const region of [...regions].reverse()){cards.unshift(present(region.card));rendered=rendered.slice(0,region.start)+rendered.slice(region.end);}
+ rendered=rendered.replace(SHARE_CHOICE,(whole,id,body)=>{
+  // The question itself stays in the surrounding prose; only its answers become buttons.
+  const parsed=choice?null:shareChoice(id,body);if(!parsed)return whole;choice=parsed;return '';
+ });
+ let forms=false;
+ rendered=rendered.replace(FORM,(whole,json)=>formBlock(json)?(forms=true,''):whole);
+ // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
+ const displayText=cards.length||choice||forms?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered;
+ return {displayText,cards,choice:choice as MapsShareChoice|null};
+}
+
+/** A chat-started workflow run replies with a [WORKFLOW] block (plugin-workflow's WORKFLOW run
+ * action) that upstream's UI renders and Alpha does not import. Only a block whose tags sit on
+ * their own lines counts, so prose that mentions the tag stays as written. A block with valid
+ * JSON naming string runId and workflowId becomes a run card; a malformed or unterminated block
+ * is removed and never shown or spoken raw. */
+export type WorkflowRunCard={workflowId:string;runId:string;title:string};
+// String.replace resets a global pattern's lastIndex, so one shared pattern is safe. The body is
+// tried empty first, so an empty block ends at its own closing tag, not at the end of the reply.
+const blockPattern=/(^|\n)[ \t]*\[WORKFLOW\][ \t]*(?:\r?\n([\s\S]*?))??(?:\r?\n[ \t]*(\[\/WORKFLOW\])[ \t]*(?=\r?\n|$)|$)/g;
+const runCard=(body:string):WorkflowRunCard|null=>{
+ let value:unknown;try{value=JSON.parse(body);}catch{return null;}
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const {runId,workflowId,title}=value as Record<string,unknown>;
+ if(typeof runId!=='string'||!runId.trim()||typeof workflowId!=='string'||!workflowId.trim())return null;
+ return {workflowId,runId,title:typeof title==='string'&&title.trim()?title.trim():'Workflow run'};
+};
+export function workflowReplyText(text:string){
+ const runs:WorkflowRunCard[]=[];let removed=false;
+ const rendered=text.replace(blockPattern,(_whole,lead:string,body:string|undefined,closed:string|undefined)=>{
+  removed=true;const card=closed&&body!==undefined?runCard(body):null;
+  if(card&&!runs.some(run=>run.runId===card.runId&&run.workflowId===card.workflowId))runs.push(card);
+  return lead;
+ });
+ // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
+ return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():text,runs};
 }

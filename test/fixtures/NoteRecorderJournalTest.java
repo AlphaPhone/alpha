@@ -42,18 +42,30 @@ public final class NoteRecorderJournalTest {
    // Resume continues in a new segment after the recovered ones.
    recovered.resume(id);SystemClock.now+=5_000;recovered.stop(id);
    check(recovered.status().getJSONArray("segments").length()==3,"resume continues with a third segment");
-   recovered.discard();check(root.listFiles().length==0,"discard removes every file");
-   // A session whose journal is unreadable, or that lacks a journaled segment, is removed; so is a stray folder.
+   check(recovered.claimCanonicalSave(id),"the stopped recording reserves its canonical save");
+   AlphaNoteRecorder pending=restart(context);
+   check(pending.status().getBoolean("canonicalSavePending"),"an uncertain save stays reserved after restart");
+   try{pending.resume(id);throw new AssertionError("an uncertain save resumed");}catch(java.io.IOException expected){}
+   pending.discard();check(root.listFiles().length==0,"discard removes this recording's files");
+   // Unreadable recordings and unrelated directories retain their bytes for explicit recovery.
    AlphaNoteRecorder fresh=restart(context);String broken=fresh.start(OWNER,"").getString("recordingId");
    SystemClock.now+=20_000;MediaRecorder.last.rollToNext();
    Files.write(new File(root,broken+"/segments.json").toPath(),"{\"segments\":[".getBytes());
    new File(root,"not-a-recording").mkdirs();
    check(restart(context).status().optString("recordingId","").isEmpty(),"nothing is recovered from a torn journal");
-   check(root.listFiles().length==0,"the torn session and the stray folder are deleted");
-   AlphaNoteRecorder third=restart(context);String gap=third.start(OWNER,"").getString("recordingId");
+   check(new File(root,broken+"/segments.json").isFile(),"the unreadable journal is retained");
+   check(new File(root,broken+"/00000.m4a").isFile(),"finished audio is retained");
+   check(new File(root,"not-a-recording").isDirectory(),"an unrelated directory is retained");
+   try{restart(context).start(OWNER,"");throw new AssertionError("uncertain audio allowed a new recording");}catch(java.io.IOException expected){check("recovery".equals(expected.getMessage()),"recovery refusal");}
+   File gapHome=new File(home,"gap-home");check(gapHome.mkdir(),"gap test directory");
+   Context gapContext=new Context(gapHome);File gapRoot=new File(gapHome,"note-recording");
+   AlphaNoteRecorder third=restart(gapContext);String gap=third.start(OWNER,"").getString("recordingId");
    SystemClock.now+=20_000;MediaRecorder.last.rollToNext();
-   new File(root,gap+"/00000.m4a").delete();
-   check(restart(context).status().optString("recordingId","").isEmpty()&&root.listFiles().length==0,"a journaled segment missing on disk drops the session");
+   check(new File(gapRoot,gap+"/00000.m4a").delete(),"remove one journaled segment");
+   AlphaNoteRecorder missing=restart(gapContext);
+   check(missing.status().optString("recordingId","").isEmpty(),"a missing segment is not presented as a complete recording");
+   check(new File(gapRoot,gap+"/segments.json").isFile()&&new File(gapRoot,gap+"/00001.m4a").isFile(),"remaining journal and audio survive an uncertain recovery");
+   try{missing.start(OWNER,"");throw new AssertionError("missing audio allowed a new recording");}catch(java.io.IOException expected){check("recovery".equals(expected.getMessage()),"missing-segment refusal");}
    System.out.println("PASS note recorder journal");
   }finally{deleteTree(home);}
  }

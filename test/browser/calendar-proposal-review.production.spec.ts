@@ -17,7 +17,6 @@ import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 // (calendar display name, time, location, description) is not rendered here and is not evidence
 // of anything; CalendarAgentCrudInstrumentedTest is the emulator gate for it.
 const AGENT = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
 // Fixed instants in a zone that is not the browser's, so the card has to show the event's zone.
 const fields = { title: 'Venue booking call', description: 'From the venue meeting note', location: 'Main hall', start: '2027-03-01T05:00:00.000Z', end: '2027-03-01T06:00:00.000Z', timeZone: 'Asia/Tokyo' };
 const operation = { type: 'calendar_create_local', fields };
@@ -183,7 +182,7 @@ test('Android: the proposal card states time zone, calendar and attendees, and A
   expect(state.journal.filter(m => ['reserve', 'markApplying', 'finish'].includes(m))).toEqual([]);
 
   await approve.dblclick();
-  const completed = page.getByText(`Created event “Venue booking call” — ${card[2]}.`, { exact: true });
+  const completed = page.getByRole('button', { name: `Message actions: Created event “Venue booking call” — ${card[2]}.`, exact: true });
   await expect(completed).toBeVisible({ timeout: 20_000 });
   await expect(completed).toHaveCount(1);
   await expect(page.locator('.alpha-action-review')).toHaveCount(0);

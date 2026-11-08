@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {git as fixtureGit} from './fixtures/git-fixture.mjs';
 import {createHash} from 'node:crypto';
-import {androidDependencyFingerprint} from '../scripts/generate-licenses.mjs';
+import {androidDependencyFingerprint,parseGradleTree} from '../scripts/generate-licenses.mjs';
 import {preparePatchedNative} from '../scripts/prepare-patched-native.mjs';
 
 const descriptor = 'packages/auth/android/build.gradle';
@@ -20,8 +20,8 @@ function fixture(t) {
  write(root,'vendor/eliza/packages/app/scripts/mobile/android/consumer-host/toolchain.json',JSON.stringify({androidGradlePlugin:'8.7.2',kotlin:'2.1.0',versions:{}}));
  write(root,'vendor/eliza/packages/app/scripts/mobile/android/consumer-host/app.gradle',"dependencies { implementation project(':eliza-cloud-auth') }\n");
  write(root,`vendor/eliza/${descriptor}`,original);
- const git=args=>execFileSync('git',['-C',path.join(root,'vendor/eliza'),...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
- git(['init','-q']);git(['add','.']);git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','core.hooksPath=/dev/null','commit','-qm','fixture']);
+ const git=args=>fixtureGit(path.join(root,'vendor/eliza'),...args);
+ git(['init','-q']);git(['add','.']);git(['commit','-qm','fixture']);
  const pin=git(['rev-parse','HEAD']);
  write(root,'upstream.lock.json',JSON.stringify({commit:pin}));
  return {root,pin};
@@ -62,4 +62,27 @@ test('Android dependency fingerprint rejects unauthenticated auth descriptor cha
  patchAuth(source,original+"dependencies {\n implementation 'androidx.browser:browser:1.9.0'\n}\n");
  fs.appendFileSync(path.join(source.root,'patches/eliza/auth.patch'),'unreviewed\n');
  assert.throws(()=>androidDependencyFingerprint(source.root),/Native patch digest mismatch/);
+});
+
+test('Android dependency fingerprint includes transitive credential custody but excludes fixture modules',t=>{
+ const {root}=fixture(t);
+ const host=JSON.parse(fs.readFileSync(path.join(root,'android/consumer-host.json'),'utf8'));
+ const nativeOnly='plugins/plugin-native-secure-store/android-nativeonly';
+ host.profile.modules.push(
+  {name:'elizaos-capacitor-secure-store-nativeonly',source:{root:'patchedNative',path:nativeOnly},appDependency:false},
+  {name:'test-fixture',source:{root:'consumer',path:'android/test-fixture'},appDependency:false},
+ );
+ write(root,'android/consumer-host.json',JSON.stringify(host));
+ write(root,`vendor/eliza/${nativeOnly}/build.gradle`,"implementation 'androidx.core:core:1.16.0'\n");
+ const before=androidDependencyFingerprint(root);
+ write(root,'android/test-fixture/build.gradle',"implementation 'example:fixture:1.0.0'\n");
+ assert.equal(androidDependencyFingerprint(root),before);
+ write(root,`vendor/eliza/${nativeOnly}/build.gradle`,"implementation 'androidx.core:core:1.17.0'\n");
+ assert.notEqual(androidDependencyFingerprint(root),before);
+});
+
+test('Android classpath capture rejects an unresolved Gradle row alongside resolved dependencies',()=>{
+ const resolved='+--- androidx.core:core:1.16.0 -> 1.17.0\n';
+ assert.deepEqual(parseGradleTree(resolved),['androidx.core:core:1.17.0']);
+ assert.throws(()=>parseGradleTree(resolved+'\\--- example:missing:1.0 FAILED\n'),/Unresolved Android runtime dependency/);
 });

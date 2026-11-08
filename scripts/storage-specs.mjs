@@ -1,7 +1,6 @@
 /** Product storage contracts qualified across Chromium, Firefox and WebKit. */
 export const STORAGE_SPECS = Object.freeze([
   "test/browser/assistant-draft-storage.spec.ts",
-  "test/browser/assistant-draft-recovery.spec.ts",
   "test/browser/device-storage-migration.spec.ts",
   "test/browser/password-provider-storage.spec.ts",
   "test/browser/album-storage-migration.spec.ts",
@@ -38,12 +37,7 @@ export const STORAGE_SPECS = Object.freeze([
   "test/browser/reminder-creation-storage.spec.ts",
   "test/browser/reminder-create-review.spec.ts",
   "test/browser/domain-initialization.spec.ts",
-  "test/browser/dev-cloud-setup.spec.ts",
-  "test/browser/dev-cloud-scenarios.spec.ts",
-  "test/browser/cloud-personal-intent-storage.spec.ts",
-  "test/browser/cloud-personal-onboarding.spec.ts",
   "test/browser/cloud-account-migration.spec.ts",
-  "test/browser/cloud-setup-migration.spec.ts",
 ]);
 export const storageSpecPattern = new RegExp(`(?:^|[\\\\/])(${STORAGE_SPECS.map(file =>
   file.slice("test/browser/".length, -".spec.ts".length)).join("|")})\\.spec\\.ts$`);

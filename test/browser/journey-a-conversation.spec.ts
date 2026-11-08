@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openLegacyNotes} from './helpers/legacy-notes';
 /*
  * Journey A (docs/mvp-completion-plan.md "A. Boot, authenticate and keep a conversation"), browser build.
@@ -29,8 +30,11 @@ const AGENT_KEY='alpha.browser.agent.local.v1';
 const AGENT_LOCK=JSON.stringify(['browser-document','alpha.browser.documents.v1',AGENT_KEY]);
 const REPLY='Journey A scripted reply';
 // Wording owned by apps/app/src/runtime/connection-ui.tsx (STOPPED_REPLY_NOTICE and the check's outcome).
-const MAY_FINISH='The agent may still finish this reply. Alpha Phone will check once and show it here if it does.';
+const MAY_FINISH='This reply may still finish. It will appear here if it does.';
 const NOT_RECORDED='The agent did not record the stopped message.';
+// apps/app/src/runtime/connection-ui.tsx STOPPED_REPLY_CHECK_MS. This spec drives it with page.clock;
+// journey-core-loops.production.spec.ts keeps the check on real time.
+const STOPPED_REPLY_CHECK_MS=15_000;
 /** Pass-through counter of reads of the development agent document; it changes no result. */
 const countAgentReads=(page:Page)=>page.addInitScript(key=>{const w=window as any;w.agentReads=0;const get=IDBObjectStore.prototype.get;IDBObjectStore.prototype.get=function(query:any){if(query===key)w.agentReads++;return get.call(this,query);};},AGENT_KEY);
 const agentReads=(page:Page)=>page.evaluate(()=>(window as any).agentReads as number);
@@ -44,7 +48,7 @@ const agentDocument=(page:Page)=>page.evaluate(async key=>{
 },AGENT_KEY);
 async function openConnection(page:Page){
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  await expect(page.getByRole('dialog',{name:'Development connections'})).toBeVisible();
 }
 
@@ -54,6 +58,9 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
 
  // 1. Boot: fresh storage lands on Home with a typed and a talk entry point, and no agent.
  await countAgentReads(page);
+ // The clock is installed before the stop check is scheduled. It still runs in real time, so the development
+ // agent's fetches and lock waits are not held; runFor only skips ahead over the check's delay.
+ await page.clock.install();
  await page.goto('/?mode=dev');
  await expect(page.getByRole('region',{name:'Home'})).toBeVisible();
  const ask=page.getByRole('textbox',{name:'Ask Alpha',exact:true}),message=page.getByRole('textbox',{name:'Message Alpha',exact:true});
@@ -73,8 +80,9 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
 
  // 2. Connection choice: Settings -> Agent connection, save a scripted reply and connect the development profile.
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await expect(page.getByRole('button',{name:'Agent connection',exact:true})).toContainText('Offline');
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Agent connection',exact:true})).toHaveCount(0);
+ await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().session)).toBeNull();
+ await openConnectionDiagnostics(page);
  const dialog=page.getByRole('dialog',{name:'Development connections'});
  await expect(dialog).toBeVisible();
  await dialog.getByRole('textbox',{name:'Scripted reply'}).fill(REPLY);
@@ -82,7 +90,7 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
  await expect(page.getByRole('status').filter({hasText:'Development reply saved.'})).toBeVisible();
  await dialog.getByRole('button',{name:'Connect development profile'}).click();
  await expect(dialog).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Agent connection',exact:true})).toContainText('On-device agent · development');
+ await expect.poll(()=>page.evaluate(async()=>{const state=(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot();return {kind:state.kind,connected:!!state.session,selection:JSON.parse(localStorage.getItem('alpha.connection.selection.v1')||'null')?.kind};})).toEqual({kind:'resident',connected:true,selection:'development'});
  await returnToApps(page);
 
  // 3. Typed conversation from Home.
@@ -119,7 +127,7 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
    // Honest in-chat state, shown exactly once: no claim that the agent stopped or that nothing happened,
    // and no second "may have reached the agent" bubble beside it.
    await expect(conversation.getByText(MAY_FINISH,{exact:true})).toHaveCount(1);
-   await expect(conversation.getByText('Request cancelled. A dispatched action may still need status reconciliation.',{exact:true})).toHaveCount(0);
+   await expect(conversation.getByText('Request cancelled. Check whether the action already happened.',{exact:true})).toHaveCount(0);
    await expect(bubble(page,'Your message may have reached the agent. Check before sending it again.')).toHaveCount(0);
    await expect(conversation.getByText('The agent stopped this reply.',{exact:true})).toHaveCount(0);
    // While the single check is pending there is nothing to press: the check is automatic.
@@ -138,7 +146,8 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
    expect(afterStop![0].texts.some((t:string)=>t.includes('Journey A cancelled request'))).toBe(false);
    // The one automatic check (about 15 s after Stop) reads the agent's own history and reports what it holds:
    // the agent has no record of the stopped message. The pending notice is replaced, not added to.
-   await expect(conversation.getByText(NOT_RECORDED,{exact:true})).toHaveCount(1,{timeout:60_000});
+   await page.clock.runFor(STOPPED_REPLY_CHECK_MS);
+   await expect(conversation.getByText(NOT_RECORDED,{exact:true})).toHaveCount(1);
    await expect(conversation.getByText(MAY_FINISH,{exact:true})).toHaveCount(0);
    await expect(page.getByRole('button',{name:/^Check saved conversation/})).toHaveCount(0);
    await expect(bubble(page,'Journey A cancelled request')).toHaveCount(1);
@@ -146,9 +155,9 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
    await expect(message).toHaveValue('');
    const readsAfterCheck=await agentReads(page);
    expect(readsAfterCheck).toBeGreaterThan(readsAtStop);
-   // Exactly once: for longer than another check interval nothing reads the agent again, the outcome stands,
+   // Exactly once: for two more check intervals nothing reads the agent again, the outcome stands,
    // and the check wrote and sent nothing.
-   await page.waitForTimeout(20_000);
+   await page.clock.runFor(2*STOPPED_REPLY_CHECK_MS);
    expect(await agentReads(page)).toBe(readsAfterCheck);
    await expect(conversation.getByText(NOT_RECORDED,{exact:true})).toHaveCount(1);
    await expect(conversation.getByText(MAY_FINISH,{exact:true})).toHaveCount(0);
@@ -214,7 +223,7 @@ test('journey A: a proposed phone action is declined from the conversation and n
  await dialog.getByRole('button',{name:'Save development reply'}).click();
  await dialog.getByRole('button',{name:'Connect development profile'}).click();
  await expect(dialog).toHaveCount(0);
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  await dialog.getByText('Development device actions',{exact:true}).click();
  await dialog.getByRole('textbox',{name:'Action JSON'}).fill(JSON.stringify({type:'create_note',title:'Journey A declined note',body:'Must never be saved'}));
  await dialog.getByRole('button',{name:'Queue action for review'}).click();

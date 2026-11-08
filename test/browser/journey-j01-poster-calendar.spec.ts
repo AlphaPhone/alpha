@@ -51,7 +51,7 @@ async function scanPoster(page:Page){
 }
 async function openScanMode(page:Page){
  await page.getByRole('button',{name:'Camera',exact:true}).click();
- const video=page.locator('[aria-label^="Viewfinder."] video');
+ const video=page.locator('[data-alpha-camera="viewfinder"] video');
  await expect.poll(()=>video.evaluate((v:HTMLVideoElement)=>v.readyState),{timeout:60_000}).toBeGreaterThanOrEqual(2);
 }
 
@@ -95,7 +95,7 @@ test('J01 poster scan becomes exactly one reviewed Calendar event; suggestions a
  expect(await events(page)).toHaveLength(0);
  await page.reload();await ready(page);
  expect(await events(page)).toHaveLength(0);
- await expect(page.getByRole('button',{name:'Open Agent Calendar',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Calendar',exact:true})).toBeVisible();
 
  // 3. The scan draft carries a creationId, so Calendar retained the reviewed form across the
  //    reload: New event restores it through form recovery, still unsaved, and Save writes one event.

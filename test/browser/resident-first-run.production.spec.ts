@@ -5,8 +5,6 @@ import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurfa
 import { residentStub, stub, setStub, enterNativeEmailCode, type StubAccount } from './resident-stub';
 import { recordStartupFrames, expectNoHomeBeforePrompt, startupLoading } from './helpers/startup-frames';
 
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
-
 const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5';
 const account: StubAccount = { token: 'first-run-key', userId: id, email: 'new-owner@example.invalid', balance: 5 };
 const WAITING = 'Checking code…';
@@ -78,10 +76,10 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
   expect(await stub(page, s => s.order.some((entry: string) => entry.startsWith('configureCloudProvider')))).toBe(false);
   await expect(welcome.getByRole('note')).toHaveCount(0);
   await expect(welcome.getByRole('button', { name: 'Use local apps without AI', exact: true })).toHaveCount(0);
-  await expect(welcome.getByRole('button',{name:'Reconnect agent',exact:true})).toHaveCount(0);
+  await expect(welcome.getByRole('button',{name:'Restart agent',exact:true})).toHaveCount(0);
   await expect(welcome.getByText('Your agent runs with AI off until you sign in to Eliza Cloud.',{exact:true})).toHaveCount(0);
   await expect(welcome.getByText('Phone action history',{exact:true})).toHaveCount(0);
-  await expect(welcome.getByText('Conversation history',{exact:true})).toHaveCount(0);
+  await expect(welcome.getByText('Earlier conversations',{exact:true})).toHaveCount(0);
   return { foreign, welcome };
 }
 /** No key was kept or bound, and the resident is running without AI (P-43). `untouched`: the sign-in
@@ -136,7 +134,7 @@ test('first run: native email sign-in, credits, provider binding, then the resid
     await expect(access.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);
     await access.getByRole('button',{name:'Allow',exact:true}).click();
   }
-  await expect(access.getByRole('heading',{name:'You’re all set',exact:true})).toBeVisible();
+  await expect(access.getByRole('heading',{name:/^(You’re all set|Setup finished)$/})).toBeVisible();
   expect(await page.evaluate(()=>(window as any).firstRunAccess.requests)).toEqual(['notifications','microphone','camera','location','calendar','photos','files']);
   await access.getByRole('button',{name:'Go to Alpha',exact:true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 30_000 });
@@ -169,8 +167,8 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   await expect(page.getByRole('button', { name: 'Message actions: Resident reply 1', exact: true })).toHaveCount(1);
   expect(await harness(page, f => f.streams)).toBe(1);
   const settings=await openYourAgent(page);
-  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toBeVisible();
-  await expect(settings.getByText('Conversation history',{exact:true})).toBeVisible();
+  await expect(settings.getByRole('button',{name:'Restart agent',exact:true})).toBeVisible();
+  await expect(settings.getByText('Earlier conversations',{exact:true})).toBeVisible();
   expect(await page.locator('body').innerText()).not.toContain(account.token);
   await expectNoDevelopmentSurface(page);
   const lifecycle=await page.evaluate(()=>(window as any).firstRunLifecycle) as Array<{path:string;method:string;ownerId:string;credentialId:string|null}>;
@@ -190,9 +188,8 @@ test('first run: Cancel while verifying the email code keeps no key and the resi
   await expect(page.getByText(WAITING, { exact: true })).toBeVisible();
   await expect.poll(() => stub(page, s => s.order.includes('native sign-in verifyEmail'))).toBe(true);
   await page.getByRole('button', { name: 'Back', exact: true }).click();
-  const polls = await stub(page, s => s.polls);
-  await page.waitForTimeout(2000);
-  expect(await stub(page, s => s.polls)).toBe(polls);
+  // Back cancels the native attempt, which ends the held verify; nothing is stored afterwards.
+  await expect.poll(() => stub(page, s => s.order.includes('native sign-in cancel'))).toBe(true);
   await nothingLeft(page, welcome, true);
   expect(foreign).toEqual([]);
 });
@@ -215,8 +212,8 @@ test('first run: Cloud refusing the new key (401 on the account read) removes it
   expect(await stub(page, s => s.order.filter((entry: string) => entry.startsWith('store') || entry === 'remove cloud key'))).toEqual(['store first-run-key', 'remove cloud key']);
   await nothingLeft(page, welcome);
   await expect(welcome.getByRole('alert')).toHaveText('Eliza Cloud refused this sign-in. Your agent keeps running; sign in again to turn AI on.');
-  await expect(welcome.getByRole('button',{name:'Reconnect agent',exact:true})).toHaveCount(0);
-  await expect(welcome.getByText('Conversation history',{exact:true})).toHaveCount(0);
+  await expect(welcome.getByRole('button',{name:'Restart agent',exact:true})).toHaveCount(0);
+  await expect(welcome.getByText('Earlier conversations',{exact:true})).toHaveCount(0);
 });
 
 // An account Cloud reports unable to use AI no longer blocks the resident agent: billing state never

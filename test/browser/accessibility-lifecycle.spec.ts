@@ -13,9 +13,9 @@ const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON
 const VIEWS = ['Inbox', 'Calendar', 'Browser', 'Camera', 'Photos', 'Maps', 'Notes', 'Files', 'Workflows', 'Settings'] as const;
 const DRAFT = 'Lifecycle draft kept across every screen';
 
-async function start(page: Page) {
+async function start(page: Page, url = '/') {
   await page.addInitScript(offline);
-  await page.goto('/');
+  await page.goto(url);
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
@@ -29,8 +29,16 @@ const focusState = (page: Page) => page.evaluate(() => {
     onHome: !!el?.closest('[data-alpha-layer="home"]'),
     name: el ? (el.getAttribute('aria-label') || (el.textContent || '').trim().slice(0, 40)) : '',
     title: !!el?.matches('[data-alpha-app-title]'),
+    region: document.querySelector('[data-alpha-layer="app"][role="region"]')?.getAttribute('aria-label') || '',
   };
 });
+/** Focus is on the screen's name, as view-focus.ts's screenFocusTarget picks it: the app's title, else its labelled region. */
+async function expectScreenName(page: Page, where: string) {
+  await expect.poll(async () => {
+    const focus = await focusState(page);
+    return !focus.dropped && (focus.title || (!!focus.region && focus.name === focus.region));
+  }, { message: `${where}: focus is not on the screen's name` }).toBe(true);
+}
 /** Activates a Home app tile from the keyboard, as Switch Access or a TalkBack double tap does. */
 async function openFromHome(page: Page, view: string) {
   const tile = page.locator('[data-alpha-layer="home"]').getByRole('button', { name: view, exact: true }).and(page.locator('[data-mobile-shell-tile]'));
@@ -64,6 +72,7 @@ test.describe('repeated HOME across views', () => {
       // Opening an app from the keyboard announces it: focus is on its name, not dropped behind Home.
       await expect.poll(async () => (await focusState(page)).dropped, { message: `${view}: focus was dropped when it opened` }).toBe(false);
       expect((await focusState(page)).onHome).toBe(false);
+      await expectScreenName(page, `${view} opened from Home`);
       await pressHome(page, 3);
       await expect.poll(async () => (await focusState(page)).dropped, { message: `${view}: focus was dropped by HOME` }).toBe(false);
       expect((await focusState(page)).onHome).toBe(true);
@@ -100,7 +109,7 @@ test.describe('repeated HOME across views', () => {
 test.describe('HOME while a popup, subview or field is open', () => {
   // Menus and sheets over a scrim own focus (subview-accessibility.ts); HOME must retire them, not
   // leave the page inert or focus behind them. Live screens: HOME is the product's own handler.
-  for (const steps of [['Browser', 'Menu'], ['Browser', 'Edit address'], ['Calendar', 'Clock alarms'], ['Workflows', 'New automation'], ['Settings', 'Display']] as const) {
+  for (const steps of [['Browser', 'Menu'], ['Browser', 'Edit address'], ['Calendar', 'Clock alarms'], ['Workflows', 'New automation'], ['Settings', 'About']] as const) {
     test(`${steps.join(' > ')}: HOME retires it and Home is announced`, async ({ page }) => {
       // Two app openings, a popup and two audits: explicit, as the 200% sweeps run beside it.
       test.setTimeout(60_000);
@@ -114,7 +123,7 @@ test.describe('HOME while a popup, subview or field is open', () => {
       // The app opens again without the popup in front of it.
       await openFromHome(page, steps[0]);
       await expect(page.locator('[role="dialog"][aria-modal="true"]:visible, dialog[open]')).toHaveCount(0);
-      await expect.poll(async () => (await focusState(page)).dropped).toBe(false);
+      await expectScreenName(page, `${steps[0]} reopened after HOME`);
     });
   }
 });
@@ -152,13 +161,13 @@ test.describe('a reload (the renderer restarted)', () => {
   test('the chosen text size survives, and Home comes back announced and in reading order', async ({ page }) => {
     // A reload plus three audited views: 5 s alone, past the 30 s default when run beside the 200% sweeps.
     test.setTimeout(90_000);
-    await start(page);
+    await start(page, '/?mode=dev');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'General', exact: true }).click();
     await page.getByRole('button', { name: 'Display', exact: true }).click();
-    const slider = page.getByRole('slider', { name: 'Text size', exact: true });
-    await expect(slider).toBeVisible();
-    // The largest in-app size (150%), set as a person drags the slider: the input event the page listens for.
-    await slider.evaluate(input => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '100'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    const largest = page.getByRole('button', { name: 'Text size: Largest', exact: true });
+    await largest.click();
+    await expect(page.getByRole('button', { name: 'Text size: Largest, selected', exact: true })).toBeVisible();
     await expect.poll(() => page.evaluate(() => Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale')))).toBeGreaterThanOrEqual(1.4);
     const scale = await page.evaluate(() => Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale')));
     await page.reload();
@@ -170,7 +179,7 @@ test.describe('a reload (the renderer restarted)', () => {
     // Every app still opens announced at that size.
     for (const view of ['Settings', 'Files', 'Calendar'] as const) {
       await openFromHome(page, view);
-      await expect.poll(async () => (await focusState(page)).dropped).toBe(false);
+      await expectScreenName(page, `${view} after reload`);
       const found = format([...await auditTree(page), ...await auditReadingOrder(page)]);
       expect(found, `${view} after reload:\n${found.join('\n')}`).toEqual([]);
       await pressHome(page);
@@ -185,6 +194,7 @@ test.describe('a reload (the renderer restarted)', () => {
     await setTextScale(page, 2);
     for (const view of VIEWS) {
       await openFromHome(page, view);
+      await expectScreenName(page, `${view} at 200% after reload`);
       await settled(page);
       const found = format(await auditReadingOrder(page));
       expect(found, `${view} at 200% after reload:\n${found.join('\n')}`).toEqual([]);
@@ -210,7 +220,7 @@ test.describe('permission loss and offline', () => {
     });
     await start(page);
     await openFromHome(page, 'Camera');
-    await expect(page.locator('[aria-label^="Viewfinder."] video')).toBeVisible();
+    await expect(page.locator('[data-alpha-camera="viewfinder"] video')).toBeVisible();
     await pressHome(page);
     await page.evaluate(() => { (window as any).cameraAllowed = false; });
     await openFromHome(page, 'Camera');

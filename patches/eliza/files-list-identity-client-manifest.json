@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "baseCommit": "99b49439ce9d0cb5607e9831b9f7f58d89525029",
+  "path": "plugins/plugin-files/src/browser/files-browser-adapter.ts",
+  "beforeSha256": "52fbc3536220e6d1673971022e98c6c49a0b049033cc44ccdc78f5c4541d977d",
+  "afterSha256": "91702f687da1fd92bbbabf792f0b959d5f3140c1097f5487f07fcdb50034c2d6",
+  "patchSha256": "6400bc6622743270ae35d248e5116084e55b8a4cc34cb0cedecfe3035975abeb"
+}

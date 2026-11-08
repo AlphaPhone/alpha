@@ -2,6 +2,36 @@ import {test,expect} from '@playwright/test';
 import {canonicalNotesFixture,openCanonicalNotes} from './helpers/canonical-notes';
 const snapshot=(page:import('@playwright/test').Page)=>page.evaluate(()=>(window as any).canonicalNotesFixture.state);
 
+test('a lost canonical recording save reply is reconciled without another create',async({page})=>{
+ await canonicalNotesFixture(page);
+ const result=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {CanonicalNotesUi}=await import('/src/prototype/canonical-notes-ui.ts');
+  const fixture=(window as any).canonicalNotesFixture;
+  let pending=false,claims=0;
+  const attempt=async()=>{
+   const ui=new CanonicalNotesUi(connectionController.getAppRecordClient()!,{paint(){},review(){}});
+   try{
+    return await ui.saveVoice('11111111-2222-4333-8444-555555555555','A recovered recording.',3000,'f-original',()=>true,{
+     pending,
+     claim:async()=>{claims++;if(pending)return false;pending=true;return true;},
+    });
+   }finally{ui.retire();}
+  };
+  fixture.failAfterApplied=true;
+  const first=await attempt();
+  fixture.failReads=true;
+  const unavailable=await attempt();
+  fixture.failReads=false;
+  const reconciled=await attempt();
+  return {first,unavailable,reconciled,claims,notes:fixture.state.notes,posts:fixture.requests.filter((r:any)=>r.method==='POST')};
+ });
+ expect(result).toMatchObject({first:false,unavailable:false,reconciled:true,claims:1});
+ expect(result.posts).toHaveLength(1);
+ expect(result.notes).toHaveLength(1);
+ expect(result.notes[0].format.data).toMatchObject({recordingId:'11111111-2222-4333-8444-555555555555',folderId:'f-original',dur:3});
+});
+
 // Live agent Notes render through Alpha's own Notes template (the one mock mode shows), saved through
 // the canonical Notes client: the same committed identity, expectedRevision and Trash restore.
 test('canonical Notes UI creates, edits, trashes and restores the same committed identity',async({page})=>{
@@ -43,42 +73,61 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
-// Agent Notes have the redesign's header: Record and New note (PLAN.md section 3). Record opens the
-// Notes recorder; Done saves an agent voice note with the transcript and length, and no audio.
-test('Record in agent Notes retains missing transcription, then saves a voice note without audio',async({page})=>{
+test('Stop saves canonical audio locally and Generate transcript later uses its retained recording only on request',async({page})=>{
  const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
+ let uploads=0;
+ await page.route('**/__alpha-browser-cloud',async route=>{
+  const request=route.request(),type=request.headers()['content-type']||'';
+  if(type.includes('multipart/form-data')){
+   const body=request.postDataBuffer()!;expect(body.includes(Buffer.from('audio/wav'))).toBe(true);expect(body.indexOf(Buffer.from('RIFF'))).toBeGreaterThan(0);expect(body.includes(Buffer.from('WAVE'))).toBe(true);
+   uploads++;await route.fulfill({json:{text:'A closed Notes fixture.',local:false}});return;
+  }
+  const input=request.method()==='POST'?request.postDataJSON():null;
+  if(input?.operation==='secureRead'&&input.slot==='cloud:production'){await route.fulfill({json:{value:JSON.stringify({credentialId:'notes-fixture',credentialReference:'closed-fixture-reference'})}});return;}
+  await route.fallback();
+ });
+ await page.bringToFront();
  const header=page.locator('[data-alpha-subview="notes-list"] [data-alpha-app-header="main"]');
- expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record and transcribe','New note']);
+ expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record voice note','New note']);
  await page.evaluate(async()=>{
-  const {BrowserVoice}=await import('/src/browser/voice.ts');
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   connectionController.getCloudEnvironment=()=> 'production';
-  connectionController.getCloudClient=()=>({sessionId:'notes-speech-fixture',credentialId:'notes-speech-fixture'}) as any;
-  BrowserVoice.prototype.transcribeRecording=async()=>{
-   if(!(window as any).noteTranscriptReady)throw Error('Synthetic transcription unavailable');
-   return {text:'Synthetic recorded note',local:false};
-  };
+  connectionController.getCloudClient=()=>({sessionId:'notes-fixture',credentialId:'notes-fixture'} as any);
   const ctx=new AudioContext(),osc=ctx.createOscillator(),sink=ctx.createMediaStreamDestination();
-  osc.connect(sink);osc.start();
+  osc.connect(sink);osc.start();document.addEventListener('click',()=>{void ctx.resume();},{once:true,capture:true});
   Object.defineProperty(navigator.mediaDevices,'getUserMedia',{configurable:true,value:async()=>sink.stream});
   (window as any).micContext=ctx;
  });
- await page.getByRole('button',{name:'Record and transcribe',exact:true}).click();
+ await page.getByRole('button',{name:'Record voice note',exact:true}).click();
  const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
  await expect(recorder).toHaveAttribute('data-recorder-state','recording');
  await page.waitForTimeout(1200);
- await recorder.getByRole('button',{name:'Done',exact:true}).click();
- await expect(recorder).toHaveAttribute('data-recorder-state','stopped');
- expect((await snapshot(page)).notes).toEqual([]);
- await page.evaluate(()=>(window as any).noteTranscriptReady=true);
- await recorder.getByRole('button',{name:'Done',exact:true}).click();
+ expect(uploads).toBe(0);
+ await recorder.getByRole('button',{name:'Stop recording',exact:true}).click();
  await expect(recorder).toHaveCount(0);
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.map((n:any)=>[n.title,n.format?.kind]))).toEqual([['Voice note','voice']]);
  const saved=(await snapshot(page)).notes[0];
- expect(saved.body).toContain('Synthetic recorded note');
- expect(saved.format.data.dur).toBeGreaterThan(0);expect(JSON.stringify(saved)).not.toMatch(/audio/i);
+ expect(saved.format.data.dur).toBeGreaterThan(0);
+ expect(saved.format.data.audio.audioId).toBe(saved.format.data.recordingId);
+ expect(saved.format.data.audio.durationMs).toBeGreaterThan(0);
+ expect(saved.body).toBe('');expect(uploads).toBe(0);
+ await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();
+ const retained=await page.evaluate(async(audioId)=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');
+  return registerPlugin<any>('AlphaNoteAudio').describe({audioId});
+ },saved.format.data.audio.audioId);
+ expect(retained.audioId).toBe(saved.format.data.audio.audioId);expect(retained.noteId).toBe(saved.id);
+ await expect(page.getByRole('button',{name:'Generate transcript',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Generate transcript',exact:true}).click();
+ await expect.poll(()=>snapshot(page).then((state:any)=>state.notes[0].body)).toBe('\nA closed Notes fixture.');
+ expect(uploads).toBe(1);
+ await expect(page.getByRole('button',{name:'Generate transcript',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();
+ const after=(await snapshot(page)).notes[0];expect(after.id).toBe(saved.id);expect(after.format.data.audio).toEqual(saved.format.data.audio);
+
  const requests=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.path==='/api/views/notes/interact'));
- expect(JSON.stringify(requests)).not.toMatch(/audioId/);
+ expect(requests.filter((r:any)=>r.body.capability==='create-note')).toHaveLength(1);expect(requests.filter((r:any)=>r.body.capability==='update-note')).toHaveLength(1);
+ expect(JSON.stringify(requests)).not.toMatch(/blob:|file:\/\/|content:\/\//);
  await page.evaluate(()=>(window as any).micContext.close());
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
@@ -95,7 +144,7 @@ test('canonical failed save retains the owner draft until explicit discard and r
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Keep this unsaved owner text');
  expect((await snapshot(page)).notes[0].body).toBe('\nCommitted original');
- await expect(page.getByText('Your draft is kept here. Reload the current notes to discard it.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Your draft is shown here until you reload or the connection changes. Reload the current notes to discard it.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Discard draft and reload',exact:true})).toBeVisible();
  const attempts=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length);
  await page.evaluate(()=>(window as any).canonicalNotesFixture.fail=false);
@@ -199,7 +248,7 @@ test('an agent append refreshes the open note and its row, and a stale owner edi
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
-test('older device notes stay a separate explicit recovery source and are not opened by canonical Notes',async({page})=>{
+test('the single Notes list hides Previous notes without importing or changing retained device data',async({page})=>{
  const {errors}=await canonicalNotesFixture(page);
  const before=await page.evaluate(async()=>{
   const m=await import('/src/runtime/browser-notes-document.ts');
@@ -208,16 +257,16 @@ test('older device notes stay a separate explicit recovery source and are not op
  });
  await openCanonicalNotes(page);
  await expect(page.getByRole('button',{name:'Open Previous local note',exact:true})).toHaveCount(0);
- // Record is in both sources (agent notes keep its transcript only).
- await expect(page.getByRole('button',{name:'Record and transcribe',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Previous notes',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Older notes',exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'Open Previous local note',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Record voice note',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('group',{name:'Folders',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'New note',exact:true}).click();
+ await page.getByRole('textbox',{name:'Title',exact:true}).fill('Canonical only');
+ await page.getByRole('textbox',{name:'Note',exact:true}).fill('New text stays in the canonical store.');
+ await page.getByRole('button',{name:'Done editing note',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Open Canonical only',exact:true})).toBeVisible();
  expect(await page.evaluate(async()=>(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())).toBe(before);
- expect((await snapshot(page)).notes).toEqual([]);
- await page.getByRole('button',{name:'Return to Notes',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Notes',exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toBeVisible();
+ expect((await snapshot(page)).notes.map((note:any)=>note.title)).toEqual(['Canonical only']);
  expect(errors).toEqual([]);
 });
 
@@ -302,7 +351,7 @@ test('a later read failure and recovery cannot clear accepted-write uncertainty 
  const writes=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length);
  await page.evaluate(()=>{const f=(window as any).canonicalNotesFixture;f.failAfterApplied=false;f.failReads=true;});
  await refreshCanonicalRead(page);
- await expect(page.getByText('Your draft is kept here. Reload the current notes to discard it.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Your draft is shown here until you reload or the connection changes. Reload the current notes to discard it.',{exact:true})).toBeVisible();
  const acceptedReadsBeforeRecovery=await page.evaluate(()=>(window as any).canonicalNotesFixture.acceptedReads.length);
  await page.evaluate(()=>(window as any).canonicalNotesFixture.failReads=false);
  await refreshCanonicalRead(page);
@@ -351,4 +400,41 @@ test('read recovery cannot replace a no-draft uncertain interaction with a read-
  expect(await snapshot(page)).toEqual(accepted);
  expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length)).toBe(writes);
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
+});
+
+test('audio-only recorder saves a separate canonical voice note without replacing a dirty text draft',async({page})=>{
+ await canonicalNotesFixture(page);
+ const result=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {CanonicalNotesUi}=await import('/src/prototype/canonical-notes-ui.ts');
+  const fixture=(window as any).canonicalNotesFixture,retained:string[]=[];
+  const ui=new CanonicalNotesUi(connectionController.getAppRecordClient()!,{paint(){},review(){}});
+  try{
+   await ui.refresh();ui.editor.begin('text');ui.editor.edit({title:'Unfinished text',body:'Keep exactly this draft.'});
+   const before=structuredClone(ui.editor.draft);
+   const saved=await ui.saveVoice('recording-audio-only-1','',2500,null,()=>true,{pending:false,claim:async()=>true,retainAudio:async noteId=>{retained.push(noteId);return {audioId:'recording-audio-only-1',noteId,durationMs:2500,transcript:''};}});
+   return {saved,before,after:ui.editor.draft,retained,notes:fixture.state.notes,rows:ui.list,posts:fixture.requests.filter((r:any)=>r.method==='POST')};
+  }finally{ui.retire();}
+ });
+ expect(result.saved).toBe(true);expect(result.notes).toHaveLength(1);expect(result.posts).toHaveLength(1);
+ expect(result.retained).toEqual([result.notes[0].id]);expect(result.after?.token).toBe(result.before?.token);expect(result.after?.body).toBe('Keep exactly this draft.');
+ const voice=result.rows.find((row:any)=>row.id===result.notes[0].id);
+ expect(voice).toMatchObject({kind:'voice',audio:{audioId:'recording-audio-only-1',noteId:result.notes[0].id,durationMs:2500}});
+});
+
+test('lost canonical audio-note create is read back before attaching audio without replay',async({page})=>{
+ await canonicalNotesFixture(page);
+ const result=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {CanonicalNotesUi}=await import('/src/prototype/canonical-notes-ui.ts');
+  const fixture=(window as any).canonicalNotesFixture;let pending=false,claims=0;const retained:string[]=[];
+  const attempt=async()=>{
+   const ui=new CanonicalNotesUi(connectionController.getAppRecordClient()!,{paint(){},review(){}});
+   try{return await ui.saveVoice('recording-audio-only-2','',3000,null,()=>true,{pending,claim:async()=>{if(pending)return false;pending=true;claims++;return true;},retainAudio:async noteId=>{retained.push(noteId);return {audioId:'recording-audio-only-2',noteId,durationMs:3000,transcript:''};}});}
+   finally{ui.retire();}
+  };
+  fixture.failAfterApplied=true;const first=await attempt();const afterLost=retained.length;const second=await attempt();
+  return {first,second,afterLost,claims,retained,notes:fixture.state.notes,posts:fixture.requests.filter((r:any)=>r.method==='POST')};
+ });
+ expect(result).toMatchObject({first:false,second:true,afterLost:0,claims:1});expect(result.notes).toHaveLength(1);expect(result.posts).toHaveLength(1);expect(result.retained).toEqual([result.notes[0].id]);
 });

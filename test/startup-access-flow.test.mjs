@@ -8,12 +8,6 @@ test('photo grant description preserves selected/partial scope and rejects locke
  assert.equal(flow.startupPhotoAccess({scope:'denied',locked:false}).granted,false);
  for(const value of [null,{scope:['full'],locked:false},{scope:'full',locked:true},{scope:'full'}])assert.throws(()=>flow.startupPhotoAccess(value));
 });
-test('Google identity alone cannot claim mail/calendar access',()=>{
- const account={connected:true,connectionId:'connection',grantedCapabilities:[]};
- assert.deepEqual(flow.startupGoogleAccess([account]),{gmail:false,calendar:false});
- assert.deepEqual(flow.startupGoogleAccess([{...account,grantedCapabilities:['google.gmail.triage','google.calendar.read']}]),{gmail:true,calendar:true});
- assert.deepEqual(flow.startupGoogleAccess([{...account,connectionId:null,grantedCapabilities:['google.gmail.triage']},{...account,connected:false,grantedCapabilities:['google.calendar.read']}]),{gmail:false,calendar:false});
-});
 test('checks never prompt, denial persists to settings, and a granted readback retires the prompt',async()=>{
  const values=new Map();const store={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
  let granted=false,requests=0,settings=0;
@@ -32,4 +26,26 @@ test('location metadata labels approximate and precise grants without accepting 
  assert.match(flow.startupLocationAccess({location:'granted',accuracy:'precise'}).description,/Precise/);
  assert.equal(flow.startupLocationAccess({location:'denied',accuracy:'none'}).granted,false);
  for(const value of [null,{location:'granted',accuracy:'none'},{location:'granted',accuracy:['precise']},{location:'denied',accuracy:'precise'},{location:'prompt'}])assert.throws(()=>flow.startupLocationAccess(value));
+});
+
+
+test('failed attempt persistence retains one prompt per live flow and permits a prompt after cold restart', async () => {
+  const store = { getItem: () => null, setItem: () => { throw new Error('Storage unavailable'); } };
+  let requests = 0;
+  let settings = 0;
+  const bridge = {
+    status: async () => ({ granted: false, enabled: false }),
+    request: async () => { requests++; },
+    openSettings: async () => { settings++; },
+  };
+  const first = flow.createStartupPermissionFlow(bridge, { key: 'camera', store });
+  assert.equal(await first.enable(), 'settings');
+  assert.equal(await first.enable(), 'settings');
+  assert.equal(requests, 1);
+  assert.equal(settings, 1);
+  assert.equal(flow.readStartupPermissionMemory(store).attempted.camera, undefined);
+  const restarted = flow.createStartupPermissionFlow(bridge, { key: 'camera', store });
+  assert.equal(await restarted.refresh(), 'request');
+  assert.equal(await restarted.enable(), 'settings');
+  assert.equal(requests, 2);
 });

@@ -10,11 +10,10 @@ coordinator rejects an operation type it does not know, so `runtime/connection-u
 yet offer `notes.organize.v1`; add it to the negotiated list (and to `config/alpha-product.json`
 `features.capabilities`) in the pin bump that brings this patch.
 
-Base: elizaOS/eliza `475a8d59dc1811c2cde093613519906a5a3f6457` (the pin in
+Base: elizaOS/eliza `99b49439ce9d0cb5607e9831b9f7f58d89525029` (the pin in
 `upstream.lock.json`). Apply from the eliza repo root with `git apply`. The patch was first
-written at `912f972e58` and regenerated at `0594fc72da`; every file it touches is
-byte-identical at all three commits, so the hunks are unchanged. It was regenerated and
-re-tested at `475a8d59dc` on 2026-11-07 (see below).
+written at `912f972e58`, regenerated at `0594fc72da` and `475a8d59dc`, and regenerated and
+re-tested at `99b49439ce` on 2026-11-08 (see below).
 
 ## What it adds
 
@@ -58,6 +57,18 @@ and review cards for the same operations.
   `notes.organize.v1`. Without this change the route rejects a capability header that
   contains it.
 - `test/device-actions.e2e.test.ts`: adds the capability to the expected enrollment list.
+
+## Regenerated and re-tested at `99b49439ce` (2026-11-08)
+
+The pin added the Files agent operations beside the ones this patch adds, so
+`client-coordinator.ts` gained five sibling additions (operation union, validation, context
+check, review description, direct types); each keeps upstream's Files line followed by this
+patch's Notes line. The other files merged without conflict (three-way from `475a8d59dc`).
+`git apply --check` passes on the pin. In a scratch `git archive` export of the pin (same
+layout and third-party packages as below), Bun 1.3.14: `notes-organize-contract.test.ts` and
+`client-coordinator.test.ts` 50 pass, 0 fail; the whole `device-actions/` folder 102 pass,
+2 fail (the same two missing-module failures as below; the unpatched export gives 86 pass,
+2 fail).
 
 ## Re-tested at `475a8d59dc` (2026-11-07)
 

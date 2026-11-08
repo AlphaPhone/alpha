@@ -47,26 +47,33 @@ public class VideoInstrumentedTest {
    if(c!=null)while(c.moveToNext())result.add(ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,c.getLong(0)));
   }return result;
  }
+ /** Polls for the owned, no longer pending MediaStore rows this test created. */
+ private Set<Uri> created(Set<Uri> before){
+  long end=SystemClock.elapsedRealtime()+30000;Set<Uri> created;
+  do{created=owned();created.removeAll(before);if(!created.isEmpty())break;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
+  return created;
+ }
  private void permission(){
   for(String permission:new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO}) InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context().getPackageName(),permission);
   if(android.os.Build.VERSION.SDK_INT>=33)InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context().getPackageName(),Manifest.permission.POST_NOTIFICATIONS);
  }
  private void admitAccount()throws Exception{
   if(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS){AppNavigation.liveMode();return;}
-  until("[...document.querySelectorAll('.alpha-connection button')].some(b=>b.textContent.trim()==='Sign in with Eliza Cloud'&&!b.disabled)");
+  // Install at launch, before startup settles: the required sign-in page opens by itself (P-43) and
+  // its readiness probe must reach the fixture, never Cloud. A late install fails the check below.
+  until("window.Capacitor?.nativePromise&&!window.__alphaVideoAccount");
   try(java.io.InputStream input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("video-account-fixture.js")){
    eval(new String(input.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));
   }
-  // Use the production control and identity/balance/provider binding path.
+  // Use the production sign-in page and identity/balance/provider binding path.
   // Only its account/runtime boundary is synthetic; Camera/Photos remain native.
-  eval("[...document.querySelectorAll('.alpha-connection button')].find(b=>b.textContent.trim()==='Sign in with Eliza Cloud').click()");
-  // In-app sign-in: the email code is entered on Alpha's own screen (the host is the fixture above).
-  until("document.querySelector('.alpha-cloud-sign-in input[name=email]')");
+  until(AppNavigation.SIGN_IN_PAGE_READY);
+  assertEquals("The readiness probe reached the fixture: "+eval("JSON.stringify(window.__alphaVideoAccount.calls)"),"true",eval("window.__alphaVideoAccount.calls.includes('signIn:status')"));
   eval("(()=>{const toggle=document.getElementById('alpha-sign-in-other-methods')?.previousElementSibling;if(toggle?.getAttribute('aria-expanded')==='false')toggle.click();const field=document.querySelector('.alpha-cloud-sign-in input[name=email]');field.value='video-fixture@example.invalid';[...document.querySelectorAll('.alpha-cloud-sign-in button')].find(b=>b.textContent.trim()==='Email me a code').click();})()");
   until("document.querySelector('.alpha-cloud-sign-in input[name=one-time-code]')");
   eval("(()=>{const field=document.querySelector('.alpha-cloud-sign-in input[name=one-time-code]');field.value='123456';[...document.querySelectorAll('.alpha-cloud-sign-in button')].find(b=>b.textContent.trim()==='Verify').click();})()");
-  until("!document.querySelector('.alpha-connection-scrim')");
-  assertEquals("Production account admission reached native startup","true",eval("window.__alphaVideoAccount.calls.includes('/api/v1/user')&&window.__alphaVideoAccount.calls.includes('/api/v1/billing/limits')&&window.__alphaVideoAccount.calls.includes('configureCloudProvider')&&window.__alphaVideoAccount.calls.includes('start')"));
+  // Admission stops the real resident, then binds and starts the synthetic one.
+  until("['/api/v1/user','/api/v1/billing/limits','native:stop','configureCloudProvider','start'].every(c=>window.__alphaVideoAccount.calls.includes(c))&&!document.querySelector('.alpha-auth-page')");
  }
  private void begin()throws Exception{
   navigate("Camera");until("document.querySelector('[data-alpha-camera-screen]')");
@@ -83,8 +90,8 @@ public class VideoInstrumentedTest {
  @Test public void recordsDurableVideoAndPrototypeControlsDriveRealPlayback()throws Exception{
   permission();Set<Uri> before=owned();
   try(BoundedActivityScenario<MainActivity>s=BoundedActivityScenario.launch(MainActivity.class)){
-   admitAccount();begin();click("Stop recording");until("document.body.innerText.includes('Video saved to Android Photos.')");
-   Set<Uri> created=owned();created.removeAll(before);assertEquals("One finalized video",1,created.size());assertMedia(created.iterator().next());
+   admitAccount();begin();click("Stop recording");
+   Set<Uri> created=created(before);assertEquals("One finalized video",1,created.size());assertMedia(created.iterator().next());
    click("Open last photo");until(AppNavigation.selected("Photos"));until("document.body.innerText.includes('Captured video')");
    click("Play video");until("(()=>{const v=document.querySelector('video[data-alpha-captured-video]');return v&&!v.paused&&v.currentTime>0.2&&v.videoWidth>0})()");
    click("Pause video");until("document.querySelector('video[data-alpha-captured-video]')?.paused && document.querySelector('button[aria-label=\"Play video\"]')");
@@ -108,8 +115,7 @@ public class VideoInstrumentedTest {
   permission();Set<Uri> before=owned();
   try(BoundedActivityScenario<MainActivity>s=BoundedActivityScenario.launch(MainActivity.class)){
    admitAccount();begin();navigate("Home");until("!document.querySelector('[data-alpha-camera-screen]')");
-   long end=SystemClock.elapsedRealtime()+30000;Set<Uri> created;
-   do{created=owned();created.removeAll(before);if(!created.isEmpty())break;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
+   Set<Uri> created=created(before);
    assertEquals("Leaving finalizes one video",1,created.size());assertMedia(created.iterator().next());
    eval("window.__videoState=null;Capacitor.Plugins.ElizaCamera.getRecordingState().then(v=>window.__videoState=v)");
    until("window.__videoState && window.__videoState.isRecording===false");

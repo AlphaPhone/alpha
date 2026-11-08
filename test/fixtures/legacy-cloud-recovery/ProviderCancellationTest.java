@@ -34,7 +34,7 @@ public final class ProviderCancellationTest {
   String accepted=requests.reserve();long committed=requests.begin(accepted);
   AlphaCredentialStore positive=new AlphaCredentialStore(context,()->requests.require(accepted,committed));
   check(NativeProviderSlot.saveVerifiedProvider(AlphaLocalAgentPlugin.providerSlot(positive),"synthetic-positive-key",LocalAgentProviderAdmission.CEREBRAS_PROVIDER_MODEL,null,(key,model)->null,"Alpha")==null,"positive commit succeeds");requests.finish(accepted,committed);
-  check(retirements[0]>0,"positive change uses existing retirement lifecycle");check(initial.readCredentialSlot("local-agent-provider:v1").contains("synthetic-positive-key"),"positive key saved");
+  check(retirements[0]>0,"positive change selects the shutdown branch");check(initial.readCredentialSlot("local-agent-provider:v1").contains("synthetic-positive-key"),"positive key saved");
   String stale=requests.reserve();long older=requests.begin(stale);String newest=requests.reserve();long latest=requests.begin(newest);requests.cancel(stale);requests.require(newest,latest);requests.finish(stale,older);requests.finish(newest,latest);
   String direct=initial.readCredentialSlot("local-agent-provider:v1");retirements[0]=0;
   String clearing=requests.reserve();long clearIntent=requests.begin(clearing);
@@ -44,7 +44,8 @@ public final class ProviderCancellationTest {
   check(!queued.isAlive()&&failure.get() instanceof IllegalStateException,"queued clear cancelled");check(retirements[0]==0&&direct.equals(initial.readCredentialSlot("local-agent-provider:v1")),"cancelled Cloud switch must not clear or retire direct provider");
   String clearAccepted=requests.reserve();long clearAcceptedIntent=requests.begin(clearAccepted);
   AlphaLocalAgentPlugin.clearProviderSlot(new AlphaCredentialStore(context,()->requests.require(clearAccepted,clearAcceptedIntent)),false);requests.finish(clearAccepted,clearAcceptedIntent);
-  check(initial.readCredentialSlot("local-agent-provider:v1")==null&&retirements[0]>0,"positive explicit Cloud switch clears provider normally");
+  String retained=initial.readCredentialSlot("local-agent-provider:v1");
+  check(new org.json.JSONObject(retained).optBoolean("unbound")&&retained.contains("synthetic-positive-key")&&retirements[0]>0,"legacy clear retires routing but preserves saved Own key");
   AlphaLocalAgentPlugin.beforeCommit=()->{};
   System.out.println("PASS native provider cancellation: paused validation, cancel-before-dispatch, no save/switch/retirement, positive commit");
  }

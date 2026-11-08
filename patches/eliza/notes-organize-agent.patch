@@ -1,28 +1,28 @@
 diff --git a/packages/agent/src/api/device-action-routes.ts b/packages/agent/src/api/device-action-routes.ts
-index 4b66eca..e9eeebd 100644
+index d3689f3..78bacca 100644
 --- a/packages/agent/src/api/device-action-routes.ts
 +++ b/packages/agent/src/api/device-action-routes.ts
-@@ -95,6 +95,7 @@ export function deviceRequestCredential(
+@@ -96,6 +96,7 @@ export function deviceRequestCredential(
      "calendar.agenda-read.v1",
      "notes.local-record.v1",
      "notes.query.v1",
 +    "notes.organize.v1",
      CALENDAR_NAMED_READ_CAPABILITY,
      CALENDAR_AVAILABILITY_CAPABILITY,
-     NAMED_TARGET_CAPABILITY,
-@@ -182,6 +183,7 @@ export async function handleDeviceActionRoutes(
+     FILES_CAPABILITY,
+@@ -184,6 +185,7 @@ export async function handleDeviceActionRoutes(
              "calendar.agenda-read.v1",
              "notes.local-record.v1",
              "notes.query.v1",
 +            "notes.organize.v1",
              CALENDAR_AVAILABILITY_CAPABILITY,
+             FILES_CAPABILITY,
              NAMED_TARGET_CAPABILITY,
-             NOTES_SEARCH_CAPABILITY,
 diff --git a/plugins/plugin-assistant/src/services/device-actions/action.ts b/plugins/plugin-assistant/src/services/device-actions/action.ts
-index 522bfb9..3db4ad1 100644
+index f2470cd..d63b3e4 100644
 --- a/plugins/plugin-assistant/src/services/device-actions/action.ts
 +++ b/plugins/plugin-assistant/src/services/device-actions/action.ts
-@@ -47,6 +47,10 @@ import {
+@@ -53,6 +53,10 @@ import {
  } from "./foreground-review-contract.ts";
  import { isMapsOperation, validateMapsResult } from "./maps-contract.ts";
  import { isNotesOperation, validateNotesResult } from "./notes-contract.ts";
@@ -33,7 +33,7 @@ index 522bfb9..3db4ad1 100644
  import { validateNotesQueryResult } from "./notes-query-result.ts";
  import {
    isPhoneDial,
-@@ -253,6 +257,60 @@ const notesSchemas: ActionParameterSchema[] = [
+@@ -259,6 +263,60 @@ const notesSchemas: ActionParameterSchema[] = [
        : {}),
    },
  }));
@@ -94,7 +94,7 @@ index 522bfb9..3db4ad1 100644
  const calendarString = { type: "string" };
  const calendarSource = {
    type: "object",
-@@ -591,6 +649,7 @@ export const proposeDeviceAction: Action = {
+@@ -597,6 +655,7 @@ export const proposeDeviceAction: Action = {
      "Reviewed SIM SMS requires sms.send.v1, exact canonical recipients, body and the active subscriptionId shown by the phone. Never invent a SIM ID or substitute an external compose intent. The owner reviews the exact content on the unlocked phone. submitted proves submission only; sent proves all sent callbacks; delivered requires all matching delivery reports. Unknown or partial failure must never be automatically retried. " +
      "A reviewed dial uses phone_dial with target {kind: number, number: digits with optional leading +} (requires phone.dial.v1) or {kind: contact, query: the contact name} (also requires contacts.lookup.v1; the phone looks the contact up locally and the owner picks the number, which is never returned). After the owner's approval the phone opens its dial screen with the number; the owner places the call there. handed-off proves only that the dial screen opened, never a placed, connected or completed call. Never retry automatically. " +
      "Native Notes discovery from Home uses notes_query with query {kind: title, text: requested title} or {kind: latest, by: created|updated}, only with notes.query.v1. Candidates remain on the phone; the owner confirms exactly one note to share. Unknown chronology or ties require local owner choice; a returned owner-choice-uncertain basis does not prove latest. Never substitute backend Notes. " +
@@ -102,7 +102,7 @@ index 522bfb9..3db4ad1 100644
      "For a one-shot relative reminder use reminder_create_after with fields title, body and schedule {after: elapsed duration with units such as 2m, alertMinutes: 0 for one alert or null for no alert}. The server resolves exact instants from the authenticated turn start; do not calculate epoch timestamps. Requires reminders.create.v1. Use returned reminderTiming dueAtDisplay and alertAtDisplay verbatim when available; they already use the phone timezone. Otherwise keep the returned UTC instants explicit, without inventing a local timezone. Create reviewed no-alert, lead or recurring reminders only with reminder_create and reminders.create.v1. The legacy create_reminder supports only title and dueAt and always requests an alert; never discard requested timing. reminder_create.fields requires title, body and schedule; schedule requires at, dueAt, alertMinutes (null means no alert), recurrence (null or exact repeat). at=dueAt-(alertMinutes??0)*60000; recurrence leadMinutes matches. No-alert creates pending, not delivered. Propose an approved selected Maps snapshot, note, reminder, view change, or HTTPS browser navigation on the phone enrolled for this authenticated turn. Browser navigation is only for a web address the user typed in this message and asks to open now; never for a deferred, hypothetical, question-about, past or reported mention. Notes read-selected/update/delete requires notes.local-record.v1 and exact selected sourceId/sourceRevision/noteId/revision. Existing create_note creates a text note. Selected reminder read/update/complete/snooze/cancel requires reminders.local-record.v1 and exact sourceId/sourceRevision/reminderId/occurrenceId/revision. Preserve target.timingVersion=2 when supplied by the phone. TimingVersion 2 targets and schedules with dueAt plus alertMinutes require reminders.local-record.v2. Supply both timing fields together; alertMinutes null means no notification, at equals dueAt, and any recurrence leadMinutes is zero. Numeric alerts require at=dueAt-alertMinutes*60000 and matching recurrence leadMinutes. No-alert tasks cannot be snoozed; only an explicitly reviewed schedule edit enables an alert. Cancel stops all future repeats; snooze is ten minutes. For creation from Home use calendar_create_local and calendar.create.v1; the host derives original readable event details through Calendar and code converts the timezone; the phone resolves its default On this phone calendar and requires native confirmation. For next-event discovery use calendar_read_next with no guessed timestamps and calendar.next-read.v1; the native clock fixes a window from now through the next 30 owner-local days; the foreground native review discovers readable Calendar sources and shares only the approved next event, or an explicit no-events-in-window result. Never infer a source from arbitrary UI selection; no background access is granted. Calendar create/read-selected/update/delete additionally requires calendar.local-event.v1 and the exact current native source/target revisions; never invent IDs or revisions. Maps read-selected requires maps.selected-read.v1 and exact current clientDevice.context kind/id/revision; never infer coordinates from the opaque identifier. The phone owner must explicitly review and approve, except that a typed address the user asks to open now may open without a review." +
      " " +
      FOREGROUND_REVIEW_GUIDANCE +
-@@ -668,6 +727,7 @@ export const proposeDeviceAction: Action = {
+@@ -677,6 +736,7 @@ export const proposeDeviceAction: Action = {
            ...calendarSchemas,
            calendarAvailabilitySchema,
            ...notesSchemas,
@@ -110,7 +110,7 @@ index 522bfb9..3db4ad1 100644
            notesQuerySchema,
            notesSearchSchema,
            ...namedTargetSchemas,
-@@ -1278,6 +1338,7 @@ export function deviceActionForCapabilities(
+@@ -1290,6 +1350,7 @@ export function deviceActionForCapabilities(
                  type !== "phone_dial" &&
                  type !== "clock_alarm" &&
                  type !== "notes_query" &&
@@ -245,7 +245,7 @@ index 7f4e14f..a55e4f0 100644
 +  });
 +});
 diff --git a/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts b/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts
-index 6a6f778..09bc778 100644
+index 79d7ddb..6bd6171 100644
 --- a/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts
 +++ b/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts
 @@ -113,6 +113,15 @@ import {
@@ -264,26 +264,26 @@ index 6a6f778..09bc778 100644
  import {
    type NotesQueryResult,
    validateNotesQueryResult,
-@@ -223,6 +232,7 @@ export type DeviceOperation =
-   | ClockHandoffOperation
+@@ -235,6 +244,7 @@ export type DeviceOperation =
    | MapsOperation
    | LibraryAgentOperation
+   | FilesAgentOperation
 +  | NotesOrganizeOperation
    | ReminderOperation
    | NotesOperation
    | NativeNotesQueryOperation
-@@ -494,6 +504,7 @@ export function validateDeviceOperation(
-   if (isClockHandoffOperation(p)) return validateClockHandoffDispatch(p);
+@@ -507,6 +517,7 @@ export function validateDeviceOperation(
    if (isMapsOperation(p)) return validateMapsOperation(p);
    if (isLibraryOperation(p)) return validateLibraryOperation(p);
+   if (isFilesOperation(p)) return validateFilesOperation(p);
 +  if (isNotesOrganizeOperation(p)) return validateNotesOrganizeOperation(p);
    if (isReminderOperation(p)) return validateReminderOperation(p);
    if (isNotesOperation(p)) return validateNotesOperation(p);
    if (isCalendarOperation(p)) return validateCalendarOperation(p);
-@@ -774,6 +785,15 @@ export function assertProposalContext<C extends DeviceContextEnvelope>(
-     assertClockHandoffTimeZone(operation, context.timeZone);
-   if (isMapsOperation(operation)) assertMapsContext(operation, context, ports);
-   if (isLibraryOperation(operation)) assertLibraryContext(context);
+@@ -793,6 +804,15 @@ export function assertProposalContext<C extends DeviceContextEnvelope>(
+         ? "Unlock the phone to review this action."
+         : "Open Files to review this action.",
+     );
 +  if (
 +    isNotesOrganizeOperation(operation) &&
 +    !notesOrganizeContextAllowed(context, operation)
@@ -296,10 +296,10 @@ index 6a6f778..09bc778 100644
    if (isReminderOperation(operation)) assertReminderContext(operation, context);
    if (isNativeNotesQuery(operation)) assertNotesQueryContext(context);
    if (isNotesOperation(operation)) assertNotesContext(operation, context);
-@@ -1232,6 +1252,11 @@ export class DeviceActionCoordinator<
-       throw Error("Notes discovery was not negotiated with this agent");
-     if (isLibraryOperation(op) && !this.capability(PHOTO_LIBRARY_CAPABILITY))
+@@ -1266,6 +1286,11 @@ export class DeviceActionCoordinator<
        throw Error("Device library access was not negotiated with this agent");
+     if (isFilesOperation(op) && !this.capability(FILES_CAPABILITY))
+       throw Error("Files access was not negotiated with this agent");
 +    if (
 +      isNotesOrganizeOperation(op) &&
 +      !this.capability(NOTES_ORGANIZE_CAPABILITY)
@@ -308,24 +308,24 @@ index 6a6f778..09bc778 100644
      if (
        isForegroundReviewOperation(op) &&
        (!foregroundReviewOperationAvailable(op, this.credential.capabilities) ||
-@@ -1407,6 +1432,8 @@ export class DeviceActionCoordinator<
-       };
+@@ -1442,6 +1467,8 @@ export class DeviceActionCoordinator<
      if (isLibraryOperation(op))
        return { ...base, ...describeLibraryOperation(op, this.profile.appName) };
+     if (isFilesOperation(op)) return { ...base, ...describeFilesOperation(op) };
 +    if (isNotesOrganizeOperation(op))
 +      return { ...base, ...describeNotesOrganizeOperation(op) };
      const notesDestination =
        (op.type === "notes_delete" || op.type === "notes_update") &&
        !context.sensitive &&
-@@ -1576,6 +1603,7 @@ export class DeviceActionCoordinator<
-       "browser_navigate",
+@@ -1664,6 +1691,7 @@ export class DeviceActionCoordinator<
        "camera_capture_photo",
        "photo_library_select",
+       ...FILES_DIRECT_TYPES,
 +      ...NOTES_ORGANIZE_DIRECT_TYPES,
      ];
      const results: DeviceOperationReceipt[] = [];
      for (const [proposalId, entry] of [...this.proposals]) {
-@@ -2060,7 +2088,12 @@ export class DeviceActionCoordinator<
+@@ -2154,7 +2182,12 @@ export class DeviceActionCoordinator<
            op.type !== "calendar_read_next"
          )
            committedChanges.push("calendar");
@@ -340,7 +340,7 @@ index 6a6f778..09bc778 100644
            isReminderOperation(op) ||
            isReminderCreate(op) ||
 diff --git a/plugins/plugin-assistant/src/services/device-actions/contract.ts b/plugins/plugin-assistant/src/services/device-actions/contract.ts
-index 7f26cf0..1eff4dc 100644
+index 64d4ce6..1035e36 100644
 --- a/plugins/plugin-assistant/src/services/device-actions/contract.ts
 +++ b/plugins/plugin-assistant/src/services/device-actions/contract.ts
 @@ -35,6 +35,12 @@ import {
@@ -356,15 +356,15 @@ index 7f26cf0..1eff4dc 100644
  import {
    PHONE_DIAL_CAPABILITY,
    type PhoneDialOperation,
-@@ -95,6 +101,7 @@ export type DeviceOperation =
-   | MapsOperation
+@@ -102,6 +108,7 @@ export type DeviceOperation =
+   | FilesAgentOperation
    | ReminderOperation
    | NotesOperation
 +  | NotesOrganizeOperation
    | NativeNotesQueryOperation
    | CalendarOperation
    | ForegroundReviewOperation
-@@ -128,6 +135,11 @@ export function deviceOperationSupportedByCapabilities(
+@@ -137,6 +144,11 @@ export function deviceOperationSupportedByCapabilities(
        capabilities?.includes(NOTES_QUERY_CAPABILITY) === true &&
        capabilities.includes("notes.local-record.v1")
      );
@@ -376,7 +376,7 @@ index 7f26cf0..1eff4dc 100644
    if (type === "clock_alarm")
      return capabilities?.includes(CLOCK_ALARMS_CAPABILITY) === true;
    if (type === "clock_handoff")
-@@ -242,6 +254,18 @@ export function validateDeviceOperation(value: unknown): DeviceOperation {
+@@ -251,6 +263,18 @@ export function validateDeviceOperation(value: unknown): DeviceOperation {
        } catch {
          throw new DeviceActionError("Invalid Notes operation");
        }
@@ -891,10 +891,10 @@ index 0000000..d9c5159
 +    : context.view === "home" || context.view === "notes";
 +}
 diff --git a/plugins/plugin-assistant/src/services/device-actions/service.ts b/plugins/plugin-assistant/src/services/device-actions/service.ts
-index 599af5d..7b79344 100644
+index 7f3a8df..18215ec 100644
 --- a/plugins/plugin-assistant/src/services/device-actions/service.ts
 +++ b/plugins/plugin-assistant/src/services/device-actions/service.ts
-@@ -120,6 +120,11 @@ import {
+@@ -124,6 +124,11 @@ import {
    validateNotesOperation,
    validateNotesResult,
  } from "./notes-contract.ts";
@@ -906,7 +906,7 @@ index 599af5d..7b79344 100644
  import { notesDeleteAfterReadPlan } from "./notes-delete-continuation.ts";
  import { originalRequestsNotesDeletion } from "./notes-delete-intent.ts";
  import { validateNotesQueryResult } from "./notes-query-result.ts";
-@@ -606,6 +611,7 @@ export function deviceAppRecordOperationAvailable(
+@@ -610,6 +615,7 @@ export function deviceAppRecordOperationAvailable(
    if (typeof type !== "string") return false;
    const domain =
      isNotesOperation(operation) ||
@@ -914,15 +914,15 @@ index 599af5d..7b79344 100644
      isNativeNotesQuery({ type }) ||
      [
        "create_note",
-@@ -1758,6 +1764,7 @@ export class DeviceActionService {
+@@ -1762,6 +1768,7 @@ export class DeviceActionService {
            CALENDAR_AGENDA_CAPABILITY,
            "notes.local-record.v1",
            NOTES_QUERY_CAPABILITY,
 +          NOTES_ORGANIZE_CAPABILITY,
            NOTES_SEARCH_CAPABILITY,
            CALENDAR_AVAILABILITY_CAPABILITY,
-           NAMED_TARGET_CAPABILITY,
-@@ -2057,6 +2064,7 @@ export class DeviceActionService {
+           FILES_CAPABILITY,
+@@ -2063,6 +2070,7 @@ export class DeviceActionService {
          "notes_query",
          "notes_update",
          "notes_delete",
@@ -930,7 +930,7 @@ index 599af5d..7b79344 100644
          "create_reminder",
          "reminder_create",
          "reminder_read_selected",
-@@ -2503,6 +2511,7 @@ export class DeviceActionService {
+@@ -2509,6 +2517,7 @@ export class DeviceActionService {
          if (
            (isCameraCapture(operation) ||
              isNativeNotesQuery(operation) ||

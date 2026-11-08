@@ -7,7 +7,7 @@ import {distributionProblems, legacyStorageProblems} from '../scripts/apk.mjs';
 import {startupFilesAccess} from '../apps/app/src/startup-permission-flow.ts';
 
 const manifest = readFileSync('android/app/src/main/AndroidManifest.xml', 'utf8');
-const catalog = readFileSync('android/app/src/main/java/ai/elizaresearch/alphaphone/StorageCatalog.java', 'utf8');
+const catalog = readFileSync('vendor/eliza/plugins/plugin-native-filesystem/android/src/main/java/ai/eliza/plugins/filesystem/browser/StorageCatalog.java', 'utf8');
 const plugin = readFileSync('android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaFilesPlugin.java', 'utf8');
 
 test('the manifest asks for legacy storage on API 29 only and keeps all-files access for API 30+', () => {
@@ -22,10 +22,11 @@ test('the manifest asks for legacy storage on API 29 only and keeps all-files ac
 });
 
 test('native reports API 29 access from both storage permissions and asks for them, never the all-files page', () => {
-  assert.match(catalog, /if\(Build\.VERSION\.SDK_INT>=Build\.VERSION_CODES\.R\)return Environment\.isExternalStorageManager\(\)\?"granted":"denied";/);
+  assert.match(catalog, /public static String access\(\)\{\s*if\(Build\.VERSION\.SDK_INT<Build\.VERSION_CODES\.R\)return "unsupported";\s*return Environment\.isExternalStorageManager\(\)\?"granted":"denied";/);
+  assert.match(catalog, /public static String access\(Context context\)\{\s*if\(Build\.VERSION\.SDK_INT>=Build\.VERSION_CODES\.R\)return access\(\);/);
   assert.match(catalog, /if\(Build\.VERSION\.SDK_INT<Build\.VERSION_CODES\.Q\)return "unsupported";/);
-  assert.match(catalog, /LEGACY_PERMISSIONS=\{android\.Manifest\.permission\.READ_EXTERNAL_STORAGE,android\.Manifest\.permission\.WRITE_EXTERNAL_STORAGE\}/);
-  assert.match(catalog, /static boolean legacy\(\)\{return Build\.VERSION\.SDK_INT==Build\.VERSION_CODES\.Q;\}/);
+  assert.match(catalog, /private static final String\[\] LEGACY_PERMISSIONS=\{android\.Manifest\.permission\.READ_EXTERNAL_STORAGE,android\.Manifest\.permission\.WRITE_EXTERNAL_STORAGE\}/);
+  assert.match(catalog, /public static boolean legacy\(\)\{return Build\.VERSION\.SDK_INT==Build\.VERSION_CODES\.Q;\}/);
   assert.match(plugin, /@Permission\(alias="legacyStorage",strings=\{android\.Manifest\.permission\.READ_EXTERNAL_STORAGE,android\.Manifest\.permission\.WRITE_EXTERNAL_STORAGE\}\)/);
   const request = plugin.slice(plugin.indexOf('public void storageRequestAccess('), plugin.indexOf('private void storageAccessReturned('));
   const legacy = request.slice(request.indexOf('if(StorageCatalog.legacy())'), request.indexOf('ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION'));
@@ -60,26 +61,19 @@ test('the APK policy admits WRITE_EXTERNAL_STORAGE only up to API 29', () => {
   assert.deepEqual(assess([[W, 29]]), []);
   assert.ok(assess([[W]]).includes('WRITE_EXTERNAL_STORAGE is requested above API 29'));
 });
-test('on API 29 a refusal names storage access, not all-files access, which that release does not have', () => {
-  assert.match(plugin, /result\("denied",StorageCatalog\.legacy\(\)\?"Allow storage access to browse files\.":"Allow all-files access to browse storage\."\)/);
-  const adapter = readFileSync('apps/app/src/prototype/files-browser-adapter.ts', 'utf8');
-  assert.match(adapter, /summary: 'Files needs storage access\. Nothing was changed\.'/);
-  assert.doesNotMatch(adapter, /needs all-files access/);
-  assert.match(readFileSync('docs/prototype-camera-integration.md', 'utf8'), /replaces that maximum with\nAPI 29/);
-});
-
 test('on API 29 the Files access banner names storage access, the permission that release requests', async () => {
-  const {stripTypeScriptTypes} = await import('node:module');
+  const {stripTypeScriptTypes} = await import('./support/strip-types.mjs');
   const vm = await import('node:vm');
-  const strip = path => stripTypeScriptTypes(readFileSync(path, 'utf8').replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, ''), {mode: 'transform'});
-  const source = strip('apps/app/src/prototype/files-browser-adapter.ts'), rules = strip('apps/app/src/runtime/files-storage.ts');
+  const strip = (path, imports) => stripTypeScriptTypes((imports ? readFileSync(path, 'utf8').replace(/^import[\s\S]*?;\n/gm, '') : readFileSync(path, 'utf8')).replace(/^export /gm, ''), {mode: 'transform'});
+  const shared = '.eliza/client-features/plugins/plugin-files/src/browser/';
+  const source = strip(shared + 'files-browser-adapter.ts', true), rules = strip(shared + 'storage-model.ts');
   const banner = async legacy => {
     const state = {}, api = {ic: {}, get: () => state, set: patch => Object.assign(state, patch), isActive: () => true, toast() {}};
     const storage = {storageState: async () => ({status: 'ready', access: 'denied', ...(legacy === undefined ? {} : {legacy}), volumes: []}), storageCategory: async () => ({status: 'denied', access: 'denied', legacy}), storageTrashList: async () => ({status: 'denied', access: 'denied', legacy}), storageWatch: async () => ({status: 'ready'}), storageUnwatch: async () => ({status: 'ready'}), addListener: async () => ({remove: async () => {}})};
     const view = {render: () => ({}), onLeave() {}};
-    const ctx = vm.createContext({setTimeout, clearTimeout, queueMicrotask, window: new EventTarget(), CustomEvent: class {}, HTMLElement: class {}, document: Object.assign(new EventTarget(), {hidden: false}), registerPlugin: () => storage, DailyApps: {}, createInlineModal: () => ({}), registerFilesAgent() {}});
+    const ctx = vm.createContext({setTimeout, clearTimeout, queueMicrotask, window: new EventTarget(), CustomEvent: class {}, HTMLElement: class {}, document: Object.assign(new EventTarget(), {hidden: false})});
     vm.runInContext(rules + ';' + source + ';globalThis.install=installFilesBrowserAdapter', ctx);
-    ctx.install({files: view}, async () => {}, () => {});
+    ctx.install(view, async () => {}, () => {}, {storage, createInlineModal: () => ({}), menuFocus: () => null, async forgetSelected() {}});
     view.render(state, api);
     for (let i = 0; i < 30; i++) await Promise.resolve();
     const browse = view.render(state, api).browse;

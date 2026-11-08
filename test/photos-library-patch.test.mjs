@@ -77,11 +77,18 @@ test('Photos grid thumbnails can be read again by id, so off-screen rows drop th
  const thumbnails=method(plugin,'public void thumbnails(PluginCall call)');
  assert.match(plugin,/@PluginMethod\n  public void thumbnails\(PluginCall call\)/);
  assert.match(thumbnails,/ids\.length\(\) > OwnedMediaLibrary\.PAGE/);
- assert.match(thumbnails,/PhotoLibraryAccess\.permitted\(id\) \? permitted\.thumbnailOf\(id, 240\)\s*: owned\.preview\(id, 240\)/);
- const of=method(catalog,'public String thumbnailOf(String id, int size)');
- assert.match(of,/readable\(key\.video\)/);assert.match(of,/volumes\(\)\.contains\(key\.volume\)/);
+ assert.match(thumbnails,/PhotoLibraryAccess\.permitted\(id\)\s*\? permitted\.read\(id, null, true, false, 240\)\.getString\("image"\)\s*: owned\.preview\(id, 240\)/);
+ const read=method(catalog,'public JSObject read(String id, String expectedRevision, boolean pixels, boolean trashed,\n      int edge)');
+ assert.match(read,/volumes\.contains\(key\.volume\)/);
+ assert.match(read,/result\.put\("image", thumbnail\(key, edge\)\)/);
+ assert.match(read,/revision\.equals\(inspect\(key, trashed\)\.getString\("revision"\)\)/);
+ assert.match(read,/current\(snapshot, volumes\)/);
+ const inspect=method(catalog,'private JSObject inspect(MediaLibraryKey key, boolean includeTrash)');
+ assert.match(inspect,/unlocked\(\)/);assert.match(inspect,/query\(key\.volume, key\.video, args\)/);
+ assert.match(catalog,/if \(!readable\(video\)\)/);
  const js=fs.readFileSync(path.join(root,'apps/app/src/prototype/camera-adapter.ts'),'utf8');
- assert.match(js,/thumbnailPlan\(rows\.map\(row=>live\.get\(row\.id\)\?\?row\),from,to,LIBRARY_LIMITS\.thumbnailsKept\)/);
+ assert.match(js,/const visible=rows\.filter\(row=>live\.has\(row\.id\)\)\.map\(row=>live\.get\(row\.id\)!\)/);
+ assert.match(js,/thumbnailPlan\(visible,from,to,LIBRARY_LIMITS\.thumbnailsKept\)/);
 });
 
 test('An interrupted Save copy is found while pending and cleaned up, not reported failed and stranded',{skip:!ready&&'vendor/eliza not checked out'},async()=>{
@@ -114,6 +121,8 @@ public final class Uri {
  private Uri(String value) { this.value=value; }
  public static Uri parse(String value) { return new Uri(value); }
  public String toString() { return value; }
+ public boolean equals(Object other) { return other instanceof Uri && value.equals(((Uri)other).value); }
+ public int hashCode() { return value.hashCode(); }
 }`),
   stub('android/content/SharedPreferences.java',`package android.content;
 public interface SharedPreferences {
@@ -134,14 +143,7 @@ public final class ContentResolver {
   writes++;
   return new FileOutputStream(target);
  }
- /** Rows MediaStore reports for the original: one, or none once it was deleted. */
- public int rows=1;
- public Cursor query(Uri uri,String[] columns,String where,String[] args,String order) {
-  if(columns==null||columns.length!=1||!"_id".equals(columns[0])) throw new AssertionError("Unexpected query");
-  return (Cursor)java.lang.reflect.Proxy.newProxyInstance(Cursor.class.getClassLoader(),new Class<?>[]{Cursor.class},(proxy,method,values)->{
-   switch(method.getName()){case "moveToFirst":return rows>0;case "getCount":return rows;case "close":return null;default:throw new AssertionError("Unexpected cursor call "+method.getName());}
-  });
- }
+ public Cursor query(Uri uri,String[] columns,String where,String[] args,String order) { throw new AssertionError("Unexpected query"); }
  public Uri insert(Uri uri,ContentValues values) { throw new AssertionError("Unexpected insert"); }
  public int update(Uri uri,ContentValues values,String where,String[] args) { throw new AssertionError("Unexpected update"); }
  public int delete(Uri uri,String where,String[] args) { throw new AssertionError("Unexpected delete"); }
@@ -215,16 +217,15 @@ public final class PhotoRecoveryCheck {
    edited=new File(backups,TOKEN+".edited");
    if(retainEdit) Files.write(edited.toPath(),EDITED);
    record=new JSONObject().put("replace",true).put("status","writing").put("id","1")
-    .put("backup",original.getName()).put("original",hash(ORIGINAL)).put("edited",hash(EDITED));
+    .put("backup",original.getName()).put("target","content://fixture/1").put("original",hash(ORIGINAL)).put("edited",hash(EDITED));
    if(retainEdit) record.put("editBackup",edited.getName());
    context=new Context(directory,target);
-   if(current==null) context.getContentResolver().rows=0;
    saveRecord();
    for(String[] orphan:ORPHANS){
     File file=new File(backups,orphan[0]); Files.write(file.toPath(),ORIGINAL);
-    if(orphan[1]!=null){
+    if(!orphan[1].isEmpty()){
      // writing-expired / writing-recent: another writer's bytes were found 8 days / 1 hour ago.
-     JSONObject journaled=new JSONObject().put("replace",true).put("status",orphan[1].startsWith("writing")?"writing":orphan[1]).put("backup",orphan[0]);
+     JSONObject journaled=new JSONObject().put("replace",true).put("status",orphan[1].startsWith("writing")?"writing":orphan[1]).put("original",orphan[2].equals("verified")?hash(ORIGINAL):hash(EDITED)).put("edited",hash(ORIGINAL));
      if(orphan[1].equals("writing-expired")) journaled.put("externalAt",System.currentTimeMillis()-8L*DAY);
      if(orphan[1].equals("writing-recent")) journaled.put("externalAt",System.currentTimeMillis()-3600_000L);
      context.preferences.values.put(orphan[0].substring(0,orphan[0].lastIndexOf('.')),journaled.toString());
@@ -238,14 +239,13 @@ public final class PhotoRecoveryCheck {
    });
   }
   void saveRecord() { context.preferences.values.put(TOKEN,record.toString()); }
-  /** Other operations' files: {name, journal status or null for no record here}. */
-  static final String[][] ORPHANS={{"aaaaaaaa-0000-4000-8000-000000000001.original","incomplete"},{"aaaaaaaa-0000-4000-8000-000000000002.original","saved"},{"aaaaaaaa-0000-4000-8000-000000000003.edited","failed"},{"aaaaaaaa-0000-4000-8000-000000000004.original","writing"},{"aaaaaaaa-0000-4000-8000-000000000005.original",null},{"aaaaaaaa-0000-4000-8000-000000000006.original","writing-expired"},{"aaaaaaaa-0000-4000-8000-000000000007.original","writing-recent"}};
+  static final String[][] ORPHANS={{"aaaaaaaa-0000-4000-8000-000000000001.original","incomplete","verified"},{"aaaaaaaa-0000-4000-8000-000000000002.original","saved","verified"},{"aaaaaaaa-0000-4000-8000-000000000003.edited","failed","verified"},{"aaaaaaaa-0000-4000-8000-000000000004.original","writing","verified"},{"aaaaaaaa-0000-4000-8000-000000000005.original","","verified"},{"aaaaaaaa-0000-4000-8000-000000000006.original","saved","tampered"},{"aaaaaaaa-0000-4000-8000-000000000007.original","writing-expired","verified"},{"aaaaaaaa-0000-4000-8000-000000000008.original","writing-recent","verified"}};
   void expectSwept() {
    File backups=new File(directory,"photo-replace-backups");
-   for(String[] orphan:ORPHANS) check(new File(backups,orphan[0]).exists()==(orphan[1]==null||orphan[1].equals("writing")||orphan[1].equals("writing-recent")),directory.getName()+" sweep "+orphan[0]);
+   for(String[] orphan:ORPHANS){boolean terminal=orphan[1].equals("saved")||orphan[1].equals("failed")||orphan[1].equals("writing-expired");check(new File(backups,orphan[0]).exists()!= (terminal&&orphan[2].equals("verified")),directory.getName()+" sweep "+orphan[0]);}
    // An externally rewritten Replace past its keep time is settled abandoned before its files go.
-   check(journalStatus("aaaaaaaa-0000-4000-8000-000000000006").equals("abandoned"),directory.getName()+" expired record settled");
-   check(journalStatus("aaaaaaaa-0000-4000-8000-000000000007").equals("writing"),directory.getName()+" recent record kept");
+   check(journalStatus("aaaaaaaa-0000-4000-8000-000000000007").equals("abandoned"),directory.getName()+" expired record settled");
+   check(journalStatus("aaaaaaaa-0000-4000-8000-000000000008").equals("writing"),directory.getName()+" recent record kept");
   }
   String journalStatus(String token) { try { return new JSONObject(context.preferences.getString(token,"{}")).getString("status"); } catch(Exception e) { throw new AssertionError(e); } }
   void expect(String status,byte[] expected,int writes,boolean keepBackups) throws Exception {
@@ -264,30 +264,37 @@ public final class PhotoRecoveryCheck {
  public static void main(String[] args) throws Exception {
   File root=new File(args[0]); check(root.mkdir(),"create data directory");
   byte[] external=bytes("a later external photo edit");
-  Case external0=new Case(root,"external",external,true);external0.expectSwept();external0.expect("unknown",external,0,true);
+  Case externalCase=new Case(root,"external",external,true);externalCase.expectSwept();externalCase.expect("unknown",external,0,true);
+  new Case(root,"unreadable-or-absent",null,true).expect("unknown",null,0,true);
   // Another writer's bytes are recorded once; the backups stay for inspection, then go after the keep time.
-  JSONObject seen=new JSONObject(external0.context.preferences.getString(TOKEN,"{}"));
+  JSONObject seen=new JSONObject(externalCase.context.preferences.getString(TOKEN,"{}"));
   long firstSeen=seen.getLong("externalAt");
   check(firstSeen>0&&firstSeen<=System.currentTimeMillis(),"external rewrite recorded");
-  external0.expect("unknown",external,0,true);
-  check(new JSONObject(external0.context.preferences.getString(TOKEN,"{}")).getLong("externalAt")==firstSeen,"first sighting kept");
-  external0.context.preferences.values.put(TOKEN,seen.put("externalAt",System.currentTimeMillis()-8L*DAY).toString());
-  check(external0.recovery.result(TOKEN).getString("status").equals("unknown"),"expired external rewrite is still not a known outcome");
-  check(Arrays.equals(external,Files.readAllBytes(external0.target.toPath()))&&external0.context.getContentResolver().writes==0,"the other writer's bytes are untouched");
-  check(!external0.original.exists()&&!external0.edited.exists(),"expired backups are released");
-  check(external0.journalStatus(TOKEN).equals("abandoned"),"settled abandoned");
-  check(external0.recovery.result(TOKEN).getString("status").equals("unknown"),"repeat result");
+  externalCase.expect("unknown",external,0,true);
+  check(new JSONObject(externalCase.context.preferences.getString(TOKEN,"{}")).getLong("externalAt")==firstSeen,"first sighting kept");
+  externalCase.context.preferences.values.put(TOKEN,seen.put("externalAt",System.currentTimeMillis()-8L*DAY).toString());
+  check(externalCase.recovery.result(TOKEN).getString("status").equals("unknown"),"expired external rewrite is still not a known outcome");
+  check(Arrays.equals(external,Files.readAllBytes(externalCase.target.toPath()))&&externalCase.context.getContentResolver().writes==0,"the other writer's bytes are untouched");
+  check(!externalCase.original.exists()&&!externalCase.edited.exists(),"expired backups are released");
+  check(externalCase.journalStatus(TOKEN).equals("abandoned"),"settled abandoned");
+  check(externalCase.recovery.result(TOKEN).getString("status").equals("unknown"),"repeat result");
   // A partial write found after the keep time is still restored: only another writer's bytes expire.
   Case latePrefix=new Case(root,"late-prefix",Arrays.copyOf(EDITED,9),true);
   latePrefix.record.put("externalAt",System.currentTimeMillis()-8L*DAY);latePrefix.saveRecord();
   latePrefix.expect("failed",ORIGINAL,1,false);
-  // A deleted original settles as failed and its backups go; an unreadable one that still exists stays unknown.
-  Case deleted=new Case(root,"deleted",null,true);deleted.expect("failed",null,0,false);
-  Case unreadable=new Case(root,"unreadable",null,true);unreadable.context.getContentResolver().rows=1;unreadable.expect("unknown",null,0,true);
   new Case(root,"complete",EDITED,true).expect("saved",EDITED,0,false);
   new Case(root,"unchanged",ORIGINAL,true).expect("failed",ORIGINAL,0,false);
   new Case(root,"prefix",Arrays.copyOf(EDITED,9),true).expect("failed",ORIGINAL,1,false);
-  new Case(root,"restore-retry",Arrays.copyOf(ORIGINAL,8),true).expect("failed",ORIGINAL,1,false);
+  Case restoreRetry=new Case(root,"restore-retry",Arrays.copyOf(ORIGINAL,8),true);
+  restoreRetry.record.put("restoring",true); restoreRetry.saveRecord();
+  restoreRetry.expect("failed",ORIGINAL,1,false);
+  new Case(root,"original-prefix-without-phase",Arrays.copyOf(ORIGINAL,8),true).expect("unknown",Arrays.copyOf(ORIGINAL,8),0,true);
+  Case missingTarget=new Case(root,"missing-target",Arrays.copyOf(EDITED,9),true);
+  missingTarget.record.remove("target"); missingTarget.saveRecord();
+  missingTarget.expect("unknown",Arrays.copyOf(EDITED,9),0,true);
+  Case differentTarget=new Case(root,"different-target",Arrays.copyOf(EDITED,9),true);
+  differentTarget.record.put("target","content://fixture/2"); differentTarget.saveRecord();
+  differentTarget.expect("unknown",Arrays.copyOf(EDITED,9),0,true);
   new Case(root,"empty",new byte[0],true).expect("failed",ORIGINAL,1,false);
   new Case(root,"legacy",Arrays.copyOf(EDITED,9),false).expect("unknown",Arrays.copyOf(EDITED,9),0,true);
   Case badEdit=new Case(root,"corrupt-edit",Arrays.copyOf(EDITED,9),true);
@@ -309,6 +316,7 @@ public final class PhotoRecoveryCheck {
  execFileSync(javaBinary('javac'),['-proc:none','-nowarn','-implicit:none','-d',path.join(work,'out'),'-cp',classpath,...sources],{timeout:120000,stdio:'pipe'});
  assert.equal(execFileSync(javaBinary('java'),['-cp',path.join(work,'out')+path.delimiter+classpath,'ai.eliza.plugins.media.PhotoRecoveryCheck',path.join(work,'data')],{encoding:'utf8',timeout:60000}).trim(),'ok');
 });
+
 test('Photos 8: list skips thumbnail decoding when asked (thumbnails:false), owned and permitted alike',{skip:!ready&&'vendor/eliza not checked out'},async()=>{
  const plugin=await source('PhotosPlugin'),owned=await source('OwnedMediaLibrary');
  const list=method(plugin,'public void list(');
@@ -316,4 +324,92 @@ test('Photos 8: list skips thumbnail decoding when asked (thumbnails:false), own
  assert.match(list,/permitted\.list\(call\.getString\("before", ""\), "", listing\[0\], thumbnails, listing\[1\],/);
  assert.match(list,/owned\.list\(call\.getString\("before", ""\), trashed, album, limit, thumbnails\)/);
  assert.match(method(owned,'public JSObject list(String before, boolean trashed, String album, int limit, boolean thumbnails)'),/if \(thumbnails\) putPreview\(item, key\(rows\), 240\);/);
+});
+
+test('retired folder grants keep their recovery identity until release is confirmed', {skip:!ready&&'vendor/eliza not checked out'}, async t => {
+ const tree=await source('DocumentFolderTree');
+ const forget=method(tree,'public JSObject forget()')+'\n  }';
+ const adopt=method(tree,'public JSObject adopt(')+'\n  }';
+ const work=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-folder-retirement-'));
+ t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
+ // Execute the actual two methods with controlled preference and Android grant boundaries.
+ const java=`import java.util.*;
+import java.util.concurrent.*;
+public final class FolderRetirementCheck {
+ static final String KEY="root";
+ static final int GRANTS=3;
+ final SharedPreferences preferences=new SharedPreferences();
+ final Resolver grants=new Resolver();
+ final Session session=new Session();
+ Uri tree;
+ static final class Uri {
+  final String value; Uri(String value){this.value=value;}
+  static Uri parse(String value){return new Uri(value);}
+  String getScheme(){return "content";}
+  public String toString(){return value;}
+  public boolean equals(Object other){return other instanceof Uri&&value.equals(((Uri)other).value);}
+  public int hashCode(){return value.hashCode();}
+ }
+ static final class UriPermission {
+  final Uri uri; UriPermission(String value){uri=Uri.parse(value);}
+  Uri getUri(){return uri;} boolean isReadPermission(){return true;} boolean isWritePermission(){return true;}
+ }
+ static final class Intent {static final int FLAG_GRANT_READ_URI_PERMISSION=1,FLAG_GRANT_WRITE_URI_PERMISSION=2;}
+ static final class DocumentsContract {static boolean isTreeUri(Uri value){return true;}}
+ static final class Session {void clear(){}}
+ static final class JSObject extends HashMap<String,String> {}
+ static JSObject result(String status,String message){JSObject value=new JSObject();value.put("status",status);return value;}
+ static final class SharedPreferences {
+  volatile String value="old"; boolean failCommit;
+  String getString(String key,String fallback){return value==null?fallback:value;}
+  Editor edit(){return new Editor();}
+  final class Editor {
+   String pending; Editor putString(String key,String value){pending=value;return this;}
+   Editor remove(String key){pending=null;return this;}
+   boolean commit(){if(failCommit)return false;value=pending;return true;}
+  }
+ }
+ final class Resolver {
+  final List<UriPermission> values=new ArrayList<>(List.of(new UriPermission("old"),new UriPermission("document")));
+  boolean failRelease,ignoreRelease; Runnable duringRelease;
+  List<UriPermission> getPersistedUriPermissions(){return new ArrayList<>(values);}
+  void releasePersistableUriPermission(Uri uri,int flags){
+   if(failRelease)throw new SecurityException("unconfirmed");
+   if(!ignoreRelease)values.removeIf(value->value.uri.equals(uri));
+   if(duringRelease!=null)duringRelease.run();
+  }
+  void takePersistableUriPermission(Uri uri,int flags){values.add(new UriPermission(uri.value));}
+ }
+ SharedPreferences store(){return preferences;} Resolver resolver(){return grants;}
+ Object root(){return null;} JSObject list(Object value){return result("ready","");}
+ void release(String value){grants.values.removeIf(item->item.uri.value.equals(value));}
+ ${adopt}
+ ${forget}
+ static void check(boolean value,String why){if(!value)throw new AssertionError(why);}
+ static boolean has(FolderRetirementCheck value,String uri){return value.grants.values.stream().anyMatch(item->item.uri.value.equals(uri));}
+ public static void main(String[] args)throws Exception {
+  FolderRetirementCheck failed=new FolderRetirementCheck();failed.grants.failRelease=true;
+  try{failed.forget();throw new AssertionError("release succeeded");}catch(SecurityException expected){}
+  check("old".equals(failed.preferences.value)&&has(failed,"old"),"failed release retains recovery identity");
+  failed.grants.failRelease=false;failed.grants.ignoreRelease=true;
+  check("failed".equals(failed.forget().get("status"))&&"old".equals(failed.preferences.value),"readback refuses unconfirmed release");
+  failed.grants.ignoreRelease=false;failed.preferences.failCommit=true;
+  check("failed".equals(failed.forget().get("status"))&&!has(failed,"old")&&"old".equals(failed.preferences.value),"failed preference commit stays retryable");
+  failed.preferences.failCommit=false;
+  check("forgotten".equals(failed.forget().get("status"))&&failed.preferences.value==null&&has(failed,"document"),"retry clears an absent old grant and keeps selected documents");
+  FolderRetirementCheck stale=new FolderRetirementCheck();stale.tree=Uri.parse("old");stale.preferences.value="new";
+  check("failed".equals(stale.forget().get("status"))&&"new".equals(stale.preferences.value)&&has(stale,"old"),"stale instance preserves a newer selection");
+  FolderRetirementCheck changed=new FolderRetirementCheck();changed.grants.duringRelease=()->changed.preferences.value="new";
+  check("failed".equals(changed.forget().get("status"))&&"new".equals(changed.preferences.value),"owner recheck preserves an external update");
+  FolderRetirementCheck concurrent=new FolderRetirementCheck();CountDownLatch started=new CountDownLatch(1);List<Throwable> errors=new ArrayList<>();
+  Thread next=new Thread(()->{started.countDown();try{concurrent.adopt(Uri.parse("new"),3);}catch(Throwable error){errors.add(error);}});
+  concurrent.grants.duringRelease=()->{next.start();try{check(started.await(5,TimeUnit.SECONDS),"adopt thread starts");}catch(InterruptedException e){throw new AssertionError(e);}};
+  check("forgotten".equals(concurrent.forget().get("status")),"old selection retired");next.join(5000);
+  check(!next.isAlive()&&errors.isEmpty()&&"new".equals(concurrent.preferences.value)&&has(concurrent,"new"),"new adoption is serialized after retirement");
+  System.out.println("ok");
+ }
+}`;
+ const file=path.join(work,'FolderRetirementCheck.java');fs.writeFileSync(file,java);
+ execFileSync(javaBinary('javac'),['-d',work,file],{timeout:120000,stdio:'pipe'});
+ assert.equal(execFileSync(javaBinary('java'),['-cp',work,'FolderRetirementCheck'],{encoding:'utf8',timeout:60000}).trim(),'ok');
 });

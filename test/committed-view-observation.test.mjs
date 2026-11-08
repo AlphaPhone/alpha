@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {randomUUID,webcrypto} from 'node:crypto';
 import vm from 'node:vm';
 
 const sdk='vendor/eliza/';
-const transform=path=>stripTypeScriptTypes(readFileSync(path,'utf8'),{mode:'transform'}).replace(/^import[\s\S]*?;\n/gm,'').replace(/^export /gm,'');
+const transform=path=>stripTypeScriptTypes(readFileSync(path,'utf8'),{mode:'strip'}).replace(/^import[\s\S]*?;\n/gm,'').replace(/^export /gm,'');
 const sources=[
  sdk+'packages/core/src/events.ts',
  sdk+'packages/core/src/views/view-interact-protocol.ts',
@@ -64,6 +64,9 @@ function fixture(mode,observedContext={view:"calendar",sensitive:false}){
    if(mode==='cleanup-retired')session=false;
    if(mode==='installation-retired')c.api.revokeViewInstallation(runtime,installation);
    if(mode==='after')context={view:'settings',sensitive:false};
+   // The page hides while the claim is in flight; an aborted fetch the host already
+   // processed rejects here even though the claim is recorded.
+   if(mode==='superseded-claim'&&context.view==='calendar'){c.document.hidden=true;client.observeCommittedView();context={view:'settings',sensitive:false};if(signal.aborted)throw Error('claim aborted');}
    if(mode==='claim-lost')throw Error('claim response lost');
    if(mode==='retired-after-claim')session=false;
    return {claimId:mode==='bad-nonce'?'wrong-claim':claimId};
@@ -74,7 +77,7 @@ function fixture(mode,observedContext={view:"calendar",sensitive:false}){
   if(mode==='positive-lost')throw Error('positive reply lost');
   return {accepted};
  },()=>session,()=>context);
- return {client,calls,timers,host,get settled(){return settled;},get history(){return history;},
+ return {client,calls,timers,host,context:c,get settled(){return settled;},get history(){return history;},
   expire(){for(const [id,timer] of [...timers])if(timer.ms===120000){timers.delete(id);timer.fn();}},
   close(){host.close();client.dispose();}};
 }
@@ -107,6 +110,15 @@ for(const mode of ['retired','retired-after-claim','lost-prepare','invalid-bindi
 for(const mode of ['installation-retired','bad-nonce'])test(`${mode} rejects negative settlement and retains genuine timeout`,async()=>{
  const f=fixture(mode);try{assert.equal(await f.client.observeCommittedView(),false);const replies=f.calls.filter(c=>c.path.endsWith('interact-result'));assert.equal(replies.length,1);assert.equal(replies[0].body.success,false);const rejected=assert.rejects(f.settled,error=>error.code==='PENDING_REQUEST_TIMEOUT');f.expire();await rejected;assert.equal(f.history,0);assert.equal(f.calls.filter(c=>c.path.endsWith('interact-claim')).length,1);}finally{f.close();}
 });
+test('superseding an observation while its claim is pending settles the claim; the next navigation is not refused',async()=>{
+ const f=fixture('superseded-claim');try{
+  assert.equal(await f.client.observeCommittedView(),false);
+  const first=await f.settled;assert.equal(first.success,false);assert.equal(f.history,0);
+  f.context.document.hidden=false;
+  assert.equal(await f.client.observeCommittedView(),true);assert.equal(f.calls.at(-3).path,'/api/views/settings/navigate');
+  await f.settled;assert.equal(f.history,1);
+ }finally{f.close();}
+});
 test('lost positive acknowledgment never sends a contradictory negative or retry',async()=>{
  const f=fixture('positive-lost');try{assert.equal(await f.client.observeCommittedView(),false);assert.equal((await f.settled).success,true);assert.equal(f.calls.length,3);assert.equal(f.history,1);}finally{f.close();}
 });
@@ -118,11 +130,11 @@ test('lost negative acknowledgment is settled once and never replayed',async()=>
 for(const view of ['calendar','settings'])for(const chat of ['sheet','full'])test(`actual adapter ${chat} overlay retains underlying ${view}`,async()=>{
  const adapter=readFileSync('apps/app/src/prototype/agent-adapter.ts','utf8');
  const start=adapter.indexOf('  function context(shell: Shell) {');
- const helper=stripTypeScriptTypes(adapter.slice(start,adapter.indexOf('  p.componentDidMount',start)),{mode:'transform'});
+ const helper=stripTypeScriptTypes(adapter.slice(start,adapter.indexOf('  p.componentDidMount',start)),{mode:'strip'});
  let observed;
  const alphaClient={setViewContext(value){observed=value;},getState(){return {context:observed};}};
- new Function('document','alphaClient','connectionController','currentClockTimeZone','passwordSurfaceOpen','updateBackAvailability','recoverPendingActions','shell',helper+';context(shell);')(
-  {hidden:false,documentElement:{dataset:{}}},alphaClient,{getSnapshot:()=>({open:false})},()=> 'UTC',()=>false,()=>{},()=>{},
+ new Function('document','alphaClient','connectionController','currentClockTimeZone','passwordSurfaceOpen','updateBackAvailability','recoverPendingActions','syncPreviousNotesAvailability','shell',helper+';context(shell);')(
+  {hidden:false,documentElement:{dataset:{}}},alphaClient,{getSnapshot:()=>({open:false})},()=> 'UTC',()=>false,()=>{},()=>{},shell=>assert.notEqual(shell.S().view,'notes'),
   {S:()=>({view,chat}),vget:()=>({}),calendarSelection:()=>undefined,clockSelection:()=>undefined});
  assert.equal(observed.view,view);assert.equal(observed.sensitive,false);
  const f=fixture('unchanged',observed);try{assert.equal(await f.client.observeCommittedView(),true);await f.settled;assert.equal(f.calls[0].path,`/api/views/${view}/navigate`);assert.equal(f.history,1);}finally{f.close();}

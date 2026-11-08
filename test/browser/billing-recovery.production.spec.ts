@@ -11,14 +11,12 @@ import { join } from 'node:path';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, seedCompletedAccessSetup } from './flag-off-android';
 import { residentStub, stub, setStub, type StubAccount } from './resident-stub';
 
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
-
 const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5';
 // Synthetic, never a real grant code: 16 Crockford characters once normalized.
 const CODE = 'synt-hetc-0de0-0001', NORMALIZED = 'SYNTHETC0DE00001';
 const NEEDED = 'Choose a monthly plan or enter a membership code to ask Alpha.';
-const REFUSED = 'Eliza Cloud declined this AI request for your account’s billing. Check your subscription or enter a membership code, then send again. Nothing was retried or purchased.';
-const SHEET_REFUSED = 'Eliza Cloud declined your last AI request for billing. Check your subscription or enter a membership code, then send again.';
+const REFUSED = 'Eliza Cloud declined this request for billing. Check your subscription or enter a membership code, then send again.';
+const SHEET_REFUSED = 'Your last request was declined for billing.';
 const composer = (page: Page) => page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
 const conversation = (page: Page) => page.locator('[data-alpha-layer="conversation"]');
 const bubble = (page: Page, text: string) => page.getByRole('button', { name: 'Message actions: ' + text, exact: true });
@@ -168,7 +166,8 @@ test('Cloud declining a turn mid-use gives one answer and the popup; after plan 
   await expect(bubble(page, 'What is on my calendar this week?')).toHaveCount(1);
   const offer = page.getByRole('button', { name: /^Check subscription or enter a membership code/ });
   await expect(offer).toHaveCount(1);
-  await page.waitForTimeout(2000); // unrelated transient toasts settle before the screenshot
+  // Unrelated transient toasts settle before the screenshot; a long one stays up to 10 s.
+  await expect(page.locator('[data-alpha-toast] .drop')).toHaveCount(0, { timeout: 11_000 });
   await shot(page, info, '08-midturn-refusal-chat.png');
   await offer.click();
   await expect(sheet(page)).toBeVisible();

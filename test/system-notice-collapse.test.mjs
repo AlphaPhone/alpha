@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {build} from 'esbuild';
 // Upstream's escalation service posts "Eliza needs attention" into client chat for any repeated
 // error (a Notes state the resident could not read at start produced one per boot), and history
 // replays every stored copy. Alpha shows at most the latest notice, only while it can be true.
-const ts=source=>stripTypeScriptTypes(source,{mode:'transform'});
+const ts=source=>stripTypeScriptTypes(source,{mode:'strip'});
 const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
 const notices=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const {systemNoticeText}=await import('data:text/javascript;base64,'+Buffer.from(ts(fs.readFileSync('vendor/eliza/packages/core/src/types/system-notice.ts','utf8'))).toString('base64'));
@@ -25,11 +25,12 @@ test('the recognized texts are byte-equal to the pinned upstream systemNoticeTex
 
 test('the runtime-error copy names an owner step, not the host operator diagnostics',()=>{
  for(const copy of [RUNTIME_ERROR_NOTICE,RUNTIME_ERROR_BACKGROUND_NOTICE])assert.doesNotMatch(copy,/host|diagnostics|—/);
- assert.match(RUNTIME_ERROR_NOTICE,/Nothing was resent/);
+ assert.match(RUNTIME_ERROR_NOTICE,/Send your message again/);
  assert.doesNotMatch(RUNTIME_ERROR_BACKGROUND_NOTICE,/may not arrive|resent/,'nothing was waiting, so nothing is said about a reply');
  assert.equal(systemNoticeDisplayText('runtime-error'),RUNTIME_ERROR_BACKGROUND_NOTICE);
  assert.equal(systemNoticeDisplayText('runtime-error',true),RUNTIME_ERROR_NOTICE);
  assert.equal(systemNoticeDisplayText('model-and-runtime-error'),`${MODEL_UNAVAILABLE_NOTICE}\n${RUNTIME_ERROR_BACKGROUND_NOTICE}`,'a combined notice keeps both halves');
+ for(const waiting of [false,true])assert.equal(systemNoticeDisplayText('model-and-runtime-error',waiting).match(/send your message again/gi).length,1,'a combined notice gives one send-again step');
 });
 
 test('model-unavailable display is product-neutral while raw protocol recognition and stored bytes remain intact',()=>{
@@ -79,7 +80,7 @@ test('failed, unfinished, streaming, card and phone receipt rows do not prove ch
 
 test('restored history marks saved interrupted replies as unfinished',()=>{
  const restored=ui.slice(ui.indexOf('function restoredMessages('),ui.indexOf('\n}\n',ui.indexOf('function restoredMessages(')));
- const run=new Function('systemNoticeKind','systemNoticeDisplayText','restoredText',ts(restored.replace(/:RestoredMessage\[\]/,'').replace(/items:Record<string,unknown>\[\]/,'items')+'\n}')+';return restoredMessages;')(systemNoticeKind,systemNoticeDisplayText,text=>text);
+ const run=new Function('systemNoticeKind','systemNoticeDisplayText','restoredText','displayText',ts(restored.replace(/:RestoredMessage\[\]/,'').replace(/items:Record<string,unknown>\[\]/,'items')+'\n}')+';return restoredMessages;')(systemNoticeKind,systemNoticeDisplayText,text=>text,text=>text);
  const rows=run([{id:'u1',role:'user',text:'hi'},{id:'a1',role:'assistant',text:'',interrupted:true},{id:'a2',role:'assistant',text:'Half',interrupted:true},{id:'n1',role:'assistant',text:systemNoticeText('runtime-error')}]);
  assert.deepEqual(rows.map(m=>[m.id,m.unfinished===true,m.systemNotice]),[['u1',false,undefined],['a1',true,undefined],['a2',true,undefined],['n1',false,'runtime-error']]);
  assert.deepEqual(collapseSystemNotices(rows).map(m=>m.id),['u1','a1','a2','n1'],'after a reload, a failed turn keeps its notice');

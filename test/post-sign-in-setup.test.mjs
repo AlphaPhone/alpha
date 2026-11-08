@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import vm from 'node:vm';
 
 // Owner report 2026-10-30: after a verified email code the app held "Checking your code…" and an
@@ -10,9 +10,9 @@ import vm from 'node:vm';
 // it shown as starting, and the earlier failure rules (P-43, a refused key) still hold.
 const ui=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
 const between=(text,start,end)=>{const from=text.indexOf(start),to=text.indexOf(end,from);assert.ok(from>=0&&to>from,start);return text.slice(from,to);};
-const residentSignedIn=stripTypeScriptTypes(between(ui,'async function residentSignedIn(','/** The key is stored;'),{mode:'transform'});
-const signedIn=stripTypeScriptTypes(between(ui,'async function signedIn(','/** The development hosted-agent client.'),{mode:'transform'});
-const showPostSignInSetup=stripTypeScriptTypes(between(ui,'function showPostSignInSetup(','/**\n * A verified sign-in on the resident flow'),{mode:'transform'});
+const residentSignedIn=stripTypeScriptTypes(between(ui,'async function residentSignedIn(','/** The key is stored;'),{mode:'strip'});
+const signedIn=stripTypeScriptTypes(between(ui,'async function signedIn(','/** The development hosted-agent client.'),{mode:'strip'});
+const showPostSignInSetup=stripTypeScriptTypes(between(ui,'function showPostSignInSetup(','/**\n * A verified sign-in on the resident flow'),{mode:'strip'});
 const ISSUED='11111111-1111-4111-8111-111111111111';
 const COMMITTED={credentialId:ISSUED,credentialReference:'browser-cloud-reference:33333333-3333-4333-8333-333333333333',userId:'owner',organizationId:'organization'};
 
@@ -20,11 +20,12 @@ function harness({admission={binding:'cloud'},admitted=true,refusedAccount=false
   // The agent before the sign-in ran without Cloud AI ('unavailable').
   const events=[],state={signIn:{step:'code'},open:true,busy:true,message:'Checking your code…',kind:'starting',purpose:'agent',setupRevision:0,cloudAccount:null,residentPlanNotice:null,residentStarting:false,residentInference:'unavailable'};
   let stored={credentialId:ISSUED};
-  const box={ownProviderSelected:()=>false,state,events,active:null,residentAlwaysPresent:true,cloud:{environment:'production'},residentCloudFlow:()=>true,prepareSignInReplacement:()=>events.push('replace'),
+  const box={DOMException,ownProviderSelected:()=>false,state,events,active:null,residentAlwaysPresent:true,cloud:{environment:'production'},residentCloudFlow:()=>true,prepareSignInReplacement:()=>events.push('replace'),
     update:patch=>{Object.assign(state,patch);events.push({update:patch,snapshot:{...state}});},
     retire:()=>{events.push('retire');state.kind='starting';},
     residentEnvironment:()=>'production',cloudServiceName:()=>'Eliza Cloud',
     cloudCredentialStore:{read:async()=>stored,clear:async()=>{events.push('clear key');stored=null;}},
+    readCloudCredential:async(_environment,signal)=>{signal.throwIfAborted();return stored;},
     CloudProtocolError:class extends Error {constructor(code){super(code);this.code=code;}},
     replaceStored:value=>{stored=value;},
     admitCloudResident:async signal=>{events.push({admit:{...state}});admit?.();signal.throwIfAborted();if(admitted===true)state.cloudAccount=refusedAccount?null:{userId:'owner'};if(admitted instanceof Error)throw admitted;return admission;},
@@ -78,7 +79,7 @@ test('a failed restart after setup recovers once, keeps setup and rethrows for t
 });
 
 test('a key Cloud refused right after issuing it is removed and never opens setup',async()=>{
-  const admission={binding:'unbound',notice:{open:true,error:'refused'}};
+  const admission={binding:'unbound',notice:{open:true,error:'refused',errorKind:'sign-in-rejected'},authRefused:true};
   const box=harness({admission,refusedAccount:true});
   await box.run(new AbortController().signal,false);
   const connect=box.events.find(event=>event.connect);
@@ -86,7 +87,15 @@ test('a key Cloud refused right after issuing it is removed and never opens setu
   assert.equal(connect.connect,admission);assert.equal(connect.during.signIn,null);assert.notEqual(connect.during.residentStarting,true);assert.equal(connect.during.message,'');
   assert.equal(box.events.indexOf('clear key')>box.events.indexOf(connect),true);
   assert.equal(box.state.setupRevision,0);
-  assert.deepEqual({open:box.state.open,error:box.state.error},{open:true,error:'Eliza Cloud refused this sign-in. Your agent keeps running; sign in again to turn AI on.'});
+  assert.deepEqual({open:box.state.open,error:box.state.error,errorKind:box.state.errorKind},{open:true,error:'Eliza Cloud refused this sign-in. Your agent keeps running; sign in again to turn AI on.',errorKind:'sign-in-rejected'});
+});
+
+test('a key Cloud did not refuse (an outage, an unreadable answer, a newer sign-in) is kept for a retry',async()=>{
+  const admission={binding:'unbound',notice:{open:true,error:'Eliza Cloud could not complete this. Try again.',errorKind:null}};
+  const box=harness({admission,refusedAccount:true});
+  await box.run(new AbortController().signal,false);
+  assert.equal(box.events.includes('clear key'),false,'the freshly issued key is not deleted');
+  assert.notEqual(box.state.error,'Eliza Cloud refused this sign-in. Your agent keeps running; sign in again to turn AI on.');
 });
 
 test('an expected key replaced while the account is admitted still stops the sign-in before the restart',async()=>{
@@ -128,13 +137,13 @@ test('a cancelled admission leaves the sign-in step and the agent to the caller 
 });
 
 test('a resident start ends with its operation in one update, so setup behind it never blinks',async()=>{
-  const work=stripTypeScriptTypes(between(ui,'async function work(','/** Start (or restart) the resident.'),{mode:'transform'});
+  const work=stripTypeScriptTypes(between(ui,'async function work(','/** Only an explicitly failed native start'),{mode:'transform'});
   for(const fail of [false,true]){
     const seen=[],state={busy:false,open:false,residentStarting:false,error:'',message:''};
-    const box={state,AbortController,active:null,cloud:{},testMocksEnabled:false,
+    const box={state,AbortController,active:null,cloud:{},testMocksEnabled:false,scheduleResidentAutoRetry:()=>{},
       update:patch=>{Object.assign(state,patch);seen.push({busy:state.busy,starting:state.residentStarting});},
-      residentRecoveryReason:()=>null,errorMessage:error=>error.message,expired:()=>false,residentCloudFlow:()=>true,runQueuedResidentRebind:()=>{},runQueuedSignInReturn:()=>{}};
-    vm.createContext(box);vm.runInContext('var operation=null,residentStartInBackground=false,signInReadinessOwner=null;\n'+work+';globalThis.run=work;',box);
+      residentRecoveryReason:()=>null,errorMessage:error=>error.message,errorKindOf:()=>null,expired:()=>false,residentCloudFlow:()=>true,runQueuedResidentRebind:()=>{},runQueuedSignInReturn:()=>{}};
+    vm.createContext(box);vm.runInContext('var operation=null,planRecheck=null,residentStartInBackground=false,signInReadinessOwner=null;\n'+work+';globalThis.run=work;',box);
     await box.run('Starting your agent…',async()=>{box.update({residentStarting:true});await new Promise(resolve=>setTimeout(resolve,5));if(fail)throw Error('Local agent failed to start.');},true);
     const started=seen.findIndex(row=>row.starting);
     assert.ok(started>=0);
@@ -143,15 +152,19 @@ test('a resident start ends with its operation in one update, so setup behind it
   }
 });
 
-test('access setup is not held behind a background resident start, only behind a foreground step',()=>{
+test('access setup is not held behind background work, only behind a foreground step',async()=>{
+  const {startupPermissionsActive}=await import('../apps/app/src/startup-permission-flow.ts');
   const main=readFileSync(new URL('../apps/app/src/main.tsx',import.meta.url),'utf8');
   const expression=/<StartupPermissions active=\{([^}]*)\} \/>/.exec(main)?.[1];
   assert.ok(expression,'StartupPermissions gate');
-  const active=new Function('connection','return '+expression);
+  const evaluate=new Function('connection','startupPermissionsActive','return '+expression);
+  const active=connection=>evaluate(connection,startupPermissionsActive);
   const signedIn={cloudAccount:{userId:'owner'},signIn:null};
   assert.equal(active({...signedIn,busy:true,residentStarting:true}),true,'the agent starting behind setup');
   assert.equal(active({...signedIn,busy:false}),true);
+  assert.equal(active({...signedIn,busy:true,backgroundWork:true}),true,'a background rebind keeps setup visible');
   assert.equal(active({...signedIn,busy:true,residentStarting:false}),false,'a foreground step such as checking a code');
+  assert.equal(active({...signedIn,busy:true,backgroundWork:true}),true,'a background rebind of the resident');
   assert.equal(active({...signedIn,signIn:{step:'code'},busy:false}),false);
   assert.equal(active({cloudAccount:null,signIn:null,busy:false}),false);
   // Own Cerebras keys open setup only after the sign-in page saved them (setupRevision), not on a passive status read.
@@ -162,17 +175,19 @@ test('access setup is not held behind a background resident start, only behind a
   assert.equal(active({...ownKeys,setupRevision:1,providerStatus:{selected:false,provider:'elizacloud'}}),false);
 });
 
-test('Settings says the agent and its AI are starting instead of "Not available"',()=>{
+test('Settings reports agent lifecycle separately from the available AI route',()=>{
   const settings=readFileSync(new URL('../apps/app/src/prototype/settings-adapter.ts',import.meta.url),'utf8');
-  const line=/const agentRows=\[(info\('Agent'.*?\)),(info\('AI'.*?\))\];/.exec(settings);
-  assert.ok(line,'agent connection rows');
-  const rows=connection=>new Function('connection','serviceName','info','return ['+line[1]+','+line[2]+']')(connection,'Eliza Cloud',(label,value)=>value);
-  assert.deepEqual(rows({session:null,kind:'starting',cloudAccount:{userId:'owner'},residentInference:null}),['Starting…','Starting…']);
-  assert.deepEqual(rows({session:{},kind:'resident',cloudAccount:{userId:'owner'},residentInference:'cloud'}),['Running on this device','Eliza Cloud']);
-  assert.deepEqual(rows({session:{},kind:'resident',cloudAccount:{userId:'owner'},residentInference:'unavailable'}),['Running on this device','Not available']);
-  assert.deepEqual(rows({session:null,kind:'recovering',cloudAccount:{userId:'owner'},residentInference:null}),['Not running','Not available']);
-  assert.deepEqual(rows({session:null,kind:'starting',cloudAccount:{userId:'owner'},residentInference:null,residentRecoveryReason:'startup-refused'}),['Needs attention','Not available']);
-  assert.deepEqual(rows({session:null,kind:'starting',cloudAccount:null,residentInference:null}),['Starting…','Sign in required']);
+  const rows=/const agentRows=(\[info\('Agent'[^\n]+);/.exec(settings)?.[1];
+  assert.ok(rows,'the current Connection help status rows are present');
+  const render=connection=>new Function('connection','serviceName','info',`return ${rows};`)(connection,'Eliza Cloud',(label,value)=>[label,value]);
+  const values=connection=>render(connection).map(row=>row[1]);
+  assert.deepEqual(values({session:null,kind:'starting',cloudAccount:{userId:'owner'},residentInference:null}),['Starting…','Starting…']);
+  assert.deepEqual(values({session:{},kind:'resident',cloudAccount:{userId:'owner'},residentInference:'cloud'}),['Running on this device','Eliza Cloud']);
+  assert.deepEqual(values({session:{},kind:'resident',cloudAccount:{userId:'owner'},residentInference:'direct'}),['Running on this device','Cerebras · own API key']);
+  for(const residentInference of ['unknown','unavailable'])assert.deepEqual(values({session:{},kind:'resident',cloudAccount:{userId:'owner'},residentInference}),['Running on this device','Not available']);
+  assert.deepEqual(values({session:null,kind:'recovering',cloudAccount:{userId:'owner'},residentInference:null}),['Not running','Not available']);
+  assert.deepEqual(values({session:null,kind:'starting',cloudAccount:{userId:'owner'},residentInference:null,residentRecoveryReason:'startup-refused'}),['Needs attention','Not available']);
+  assert.deepEqual(values({session:null,kind:'starting',cloudAccount:null,residentInference:null}),['Starting…','Sign in required']);
 });
 
 test('the agent panel shows a calm starting state while a signed-in agent starts',()=>{
@@ -183,4 +198,24 @@ test('the agent panel shows a calm starting state while a signed-in agent starts
   assert.match(panel,/\{residentAiStarting\?null:snapshot\.cloudAccount&&!residentSignInRejected \? <>/);
   // A start that failed (the binding was cleared at sign-in) never says the agent still runs.
   assert.match(panel,/:!snapshot\.session&&snapshot\.kind==='recovering'\?'AI is unavailable while your agent is not running\.':'AI connection is not confirmed\. Your agent still runs on this device\.'/);
+});
+
+test('a returning sign-in on completed setup opens Ready when an unconfirmed revocation arrives after setup opened',async()=>{
+  // spec-startup-permissions-F04: a completed install with no new account shows no Ready card, and
+  // the restart's notice used to have nowhere to render.
+  const {showWalkthroughCompletion}=await import('../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts');
+  const {lateReadyNotice}=await import('../apps/app/src/startup-permission-flow.ts');
+  const shown=showWalkthroughCompletion({accountCreated:false,resumed:false});
+  assert.equal(shown,false,'setup opened silently');
+  const silent=!shown;
+  // At setup the restart is still running: nothing to show yet.
+  assert.equal(lateReadyNotice({silent,error:'',message:''}),false);
+  // The real restart's notice (same harness as above) arrives after setup opened.
+  const box=harness();await box.run(new AbortController().signal,true);
+  assert.equal(box.state.setupRevision,1);
+  assert.equal(lateReadyNotice({silent,error:box.state.error??'',message:box.state.message}),true);
+  assert.equal(lateReadyNotice({silent,error:'Eliza Cloud is unavailable right now. Try again.',message:''}),true);
+  // A sign-in that showed Ready (or resumed setup) never reopens it, and plain receipts do not count.
+  assert.equal(lateReadyNotice({silent:false,error:'',message:box.state.message}),false);
+  assert.equal(lateReadyNotice({silent,error:'',message:'Signed in to Eliza Cloud.'}),false);
 });

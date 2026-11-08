@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openLegacyNotes} from './helpers/legacy-notes';
 /*
  * Journey J03: Inbox attachment -> Files -> reviewed document question -> reviewed summary note
@@ -64,7 +65,7 @@ async function openLinkedSource(page:Page){
 test('J03: an Inbox attachment is saved to Files, analysed, and kept as a reviewed note whose source link opens the source and fails closed when it changes or is deleted',async({page})=>{
  await page.goto('/?mode=dev&tools=1');await ready(page);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  await page.getByRole('textbox',{name:'Scripted reply'}).fill(reply);
  await page.getByRole('button',{name:'Save development reply'}).click();
  await page.getByRole('button',{name:'Connect development profile'}).click();
@@ -92,7 +93,7 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  expect(await files(page)).toEqual([]);
  const saveToFiles=attachment.getByRole('button',{name:'Save to Files',exact:true});
  await saveToFiles.click();
- await expect(attachment.getByRole('status')).toHaveText('Saved in Files. Exact bytes verified.');
+ await expect(attachment.getByRole('status')).toHaveText('Saved in Files.');
  await expect(saveToFiles).toBeDisabled();
  await attachment.getByRole('button',{name:'Done',exact:true}).click();
  await expect(attachment).toHaveCount(0);

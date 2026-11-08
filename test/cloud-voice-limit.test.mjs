@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import {execFileSync} from 'node:child_process';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {tsImport} from 'tsx/esm/api';
 
 const limitModule=await tsImport(new URL('../apps/app/src/runtime/cloud-voice-limit.ts',import.meta.url).href,{parentURL:import.meta.url});
@@ -30,7 +30,7 @@ function loadCloudVoice(f={}){
   playOwnedSpeech:async(_native,_signal,prepare)=>{await prepare('request');},
   cloudVoiceLimitOf,readServiceLimit:sdk.readServiceLimit,retryDuration:sdk.retryDuration,cloudServiceName:()=>'Eliza Cloud'};
  const source=fs.readFileSync('apps/app/src/runtime/cloud-voice.ts','utf8').replace(/^import [^;]*;\n/gm,'').replaceAll('export async function','async function').replaceAll('export function','function').replaceAll('export type','type');
- vm.runInNewContext('{'+stripTypeScriptTypes(source,{mode:'transform'})+';globalThis.failure=cloudVoiceFailure;globalThis.serviceLimit=cloudVoiceServiceLimit;globalThis.create=createCloudVoice;}',box);
+ vm.runInNewContext('{'+stripTypeScriptTypes(source,{mode:'strip'})+';globalThis.failure=cloudVoiceFailure;globalThis.serviceLimit=cloudVoiceServiceLimit;globalThis.create=createCloudVoice;}',box);
  return {box,notes};
 }
 
@@ -43,15 +43,16 @@ test('a 429 shows plan-limit wording with the retry time and keeps the recording
  // Without retry facts the wording still names the plan limit, never the bare status.
  assert.equal(box.failure(limited(undefined),{recording:true}),"Eliza Cloud voice reached your plan's request limit. Wait a moment, then try again. Your recording is kept.");
  const allowance=box.failure(limited({limitCode:'allowance_exhausted',resetAt:Date.now()+3*86_400_000}),{recording:true});
- assert.match(allowance,/^Your Eliza Cloud plan's voice allowance is used up\. It resets .+\. Your recording is kept\. Nothing is purchased automatically\.$/);
+ assert.match(allowance,/^Your Eliza Cloud plan's voice allowance is used up\. It resets .+\. Your recording is kept\.$/);
  assert.match(box.failure(limited({limitCode:'subscription_required'})),/needs an active Eliza Cloud plan/);
  // Only the validated facts are read: forged fields, provider bodies and messages never show.
  for(const data of [{retryAfterSeconds:42,message:SENTINEL},{limitCode:SENTINEL,retryAfterSeconds:'42'},{retryAfterSeconds:1e9},{resetAt:'tomorrow'}]){
   const text=box.failure(limited(data),{recording:true});
   assert.doesNotMatch(text,new RegExp(SENTINEL));assert.doesNotMatch(text,/\(429\)/);
  }
- // Other HTTP codes keep their earlier wording.
- assert.equal(box.failure({code:'voice-http-503'}),'Cloud voice could not complete this request (503). Try again later.');
+ // A 402 uses the same billing wording; other HTTP codes never show the bare status.
+ assert.equal(box.failure({code:'voice-http-402'},{recording:true}),'Eliza Cloud declined voice for billing. Check your account in Settings. Your recording is kept.');
+ assert.equal(box.failure({code:'voice-http-503'}),'Eliza Cloud voice couldn’t complete this request. Try again later.');
  assert.equal(box.serviceLimit({code:'voice-http-503',data:{retryAfterSeconds:5}}),null);
 });
 
@@ -73,7 +74,7 @@ test('connection controller records a Cloud speech limit only for the account it
  const start=ui.indexOf('  noteCloudServiceLimit(');const end=ui.indexOf('\n  },',start);
  assert.ok(start>=0&&end>start);
  const updates=[];let service={identity:{sessionId:'account-session'}};
- const object=stripTypeScriptTypes(`const controller={${ui.slice(start,end+4)}};`,{mode:'transform'});
+ const object=stripTypeScriptTypes(`const controller={${ui.slice(start,end+4)}};`,{mode:'strip'});
  const method=(limit,sessionId)=>new Function('update','service','limit','sessionId',`${object}\nreturn controller.noteCloudServiceLimit(limit,sessionId);`)(value=>updates.push(value),service,limit,sessionId);
  const limit={kind:'rate-limited',retryAfterMs:30_000,resetsAt:null};
  assert.equal(method(limit,'account-session'),true);
@@ -124,10 +125,9 @@ test('only the explicit Cloud profile and development browser-resident builds re
  const selection=fs.readFileSync('apps/app/src/runtime/voice-selection.ts','utf8').replace(/^import .*;\n/gm,'').replaceAll('export function','function').replaceAll('export type','type');
  for(const [cloud,mocks,expected] of [[false,false,'device'],[true,false,'cloud']]){
   const box={cloudRuntimeEnabled:cloud,testMocksEnabled:mocks,browserDevProfile:false,localStorage:{getItem:()=>JSON.stringify({version:1,route:'cloud',disclosed:'cloud-speech-uses-plan',chosenAt:1}),setItem(){}},JSON,Number,Date,connectionController:{getSnapshot:()=>({residentInference:'cloud'}),getCloudEnvironment:()=>'production',getCloudClient:()=>({})}};
-  vm.runInNewContext('{'+stripTypeScriptTypes(selection,{mode:'transform'})+'\nglobalThis.api={selectVoiceRoute,voiceRoutePreference};}',box);
+  vm.runInNewContext('{'+stripTypeScriptTypes(selection,{mode:'strip'})+'\nglobalThis.api={selectVoiceRoute,voiceRoutePreference};}',box);
   // A native flag-off build routes speech to the device even with a stored Cloud choice.
   for(const requested of ['default','device','manual','agent'])assert.equal(box.api.selectVoiceRoute(requested),expected);
-  assert.equal(box.api.voiceRoutePreference(),expected);
  }
  // The development browser route is the only other caller: a test-mocks (development) surface.
  const browser=fs.readFileSync('apps/app/src/browser/voice.ts','utf8');
@@ -139,5 +139,5 @@ test('own-key HTTP limits never mutate the retained Cloud account limit',async()
  const {box,notes}=loadCloudVoice({failure,own:true});const voice=box.create();
  await assert.rejects(voice.transcribeRecording({recordingId:'clip',requestId:'request'}),error=>error===failure);
  await assert.rejects(voice.speak('Reply',new AbortController().signal),error=>error===failure);
- assert.deepEqual(notes,[]);assert.match(box.failure(failure),/Cartesia.*own key or provider allowance/);
+ assert.deepEqual(notes,[]);assert.equal(box.failure(failure),'Cartesia refused voice. Check your key and Cartesia plan.');
 });

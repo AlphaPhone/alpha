@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import vm from 'node:vm';
 // #406: a saved hosted or paired agent selection from an earlier build becomes the resident agent.
 // Runs the real selection and migration functions of connection-ui.tsx against an in-memory
@@ -14,7 +14,7 @@ const code=stripTypeScriptTypes([
  slice('function save(selection: Selection)','\nfunction retire('),
  slice('function selection(): Selection | null {','\nfunction errorMessage('),
  slice('/** Saved selection kinds of the retired hosted and paired agents','/**\n * Every Alpha Phone signs in to Eliza Cloud'),
-].join('\n').replace(/export /g,''),{mode:'transform'});
+].join('\n').replace(/export /g,''),{mode:'strip'});
 const SELECTION='alpha.connection.selection.v1',LEGACY='alpha.connection.legacy-hosted-selection.v1';
 const CONVERSATIONS='alpha.connection.conversations.v1',CLOUD_SERVICE='alpha.connection.cloud-service.v1';
 function fixture(testMocksEnabled,seed){
@@ -79,9 +79,20 @@ test('a non-array or unreadable earlier record is kept ahead of the new one',()=
 
 test('product labels never describe an unexpected non-resident connection as on this device',()=>{
  const settings=readFileSync(new URL('../apps/app/src/prototype/settings-adapter.ts',import.meta.url),'utf8');
- assert.match(settings,/testMocksEnabled\?'Remote agent':'Unsupported connection'/);
+ const location=/const runtimeLocation=([^\n]+);/.exec(settings)?.[1];
+ const start=settings.indexOf('          const agentStatus = '),end=settings.indexOf('          if(connection.message)',start);
+ assert.ok(location&&start>=0&&end>start,'the current Settings Agent status row is present');
+ const rows=settings.slice(start,end);
+ const label=(kind,testMocksEnabled=false)=>{
+  const row=new Function('connection','serviceName','testMocksEnabled','Capacitor','info',`const runtimeLocation=${location};${rows};return agentRows[0];`)(
+   {session:{},kind,residentInference:'cloud'},'Eliza Cloud',testMocksEnabled,{isNativePlatform:()=>true},(label,val)=>({label,val}));
+  assert.equal(row.label,'Agent');
+  return row.val;
+ };
+ assert.equal(label('resident'),'Running on this device');
+ for(const kind of ['cloud','local','remote'])assert.equal(label(kind),'Unsupported connection',kind);
+ for(const kind of ['cloud','local','remote'])assert.equal(label(kind,true),'Remote agent',kind);
  assert.match(source,/testMocksEnabled \? \(snapshot\.kind === 'cloud' \? serviceName : snapshot\.kind === 'local' \? 'Local development' : 'Remote agent'\) : 'Unsupported connection'\}/);
- assert.doesNotMatch(settings,/testMocksEnabled\?'Remote agent':'On this device'/);
 });
 
 test('other saved choices are not migrated',()=>{

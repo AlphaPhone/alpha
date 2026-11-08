@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {runInNewContext} from 'node:vm';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
 // The product's standard node --test entry must load its real TypeScript client.
-if(!process.execArgv.some((arg,i)=>arg==='--import'&&process.execArgv[i+1]==='tsx')||!process.execArgv.includes('--experimental-transform-types')){
- const child=spawnSync(process.execPath,['--import','tsx','--experimental-transform-types',process.argv[1]],{stdio:'inherit',timeout:30000});
+if(!process.execArgv.some((arg,i)=>arg==='--import'&&process.execArgv[i+1]==='tsx')){
+ const child=spawnSync(process.execPath,['--import','tsx',process.argv[1]],{stdio:'inherit',timeout:30000});
  if(child.error)throw child.error;
  if(child.signal)throw Error(`Capability test stopped with ${child.signal}`);
  process.exit(child.status??1);
 }
 const {DeviceActions}=await import('../apps/app/src/runtime/device-actions.ts');
+const {FILES_CAPABILITY}=await import('../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts');
 const {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities}=await import('../apps/app/src/runtime/phone-dial-contract.ts');
 
 const connection=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
@@ -25,9 +26,9 @@ const offered=['reminders.create.v1','reminders.local-record.v2','calendar.creat
 // Execute the production function, with platform/foreign-domain ports supplied.
 // This is capability and client-boundary proof, not Android or model acceptance.
 async function capabilities(platform,offers=offered){
- const negotiate=runInNewContext(stripTypeScriptTypes(negotiateSource,{mode:'transform'})+';deviceCapabilities',{
+ const negotiate=runInNewContext(stripTypeScriptTypes(negotiateSource,{mode:'strip'})+';deviceCapabilities',{
   Capacitor:{getPlatform:()=>platform,isNativePlatform:()=>platform!=='web',isPluginAvailable:()=>false},
-  CAMERA_CAPTURE_CAPABILITY:'camera.capture-photo.v1',SMS_SEND_CAPABILITY:'sms.send.v1',
+  CAMERA_CAPTURE_CAPABILITY:'camera.capture-photo.v1',SMS_SEND_CAPABILITY:'sms.send.v1',FILES_CAPABILITY,
   CALENDAR_AVAILABILITY_CAPABILITY:'calendar.availability-read.v1',
   availabilityNegotiated:()=>false,foregroundExecutor:undefined,aospImage:false,
   clockHandoffCapabilities:()=>[],clockRepeatDaysSupported:async()=>false,

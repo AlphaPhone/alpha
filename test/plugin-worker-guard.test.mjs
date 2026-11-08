@@ -20,13 +20,14 @@ const plugins={
  AlphaActionJournalPlugin:['worker()'],
  AlphaConnectionPlugin:['workers'],
  AlphaDevicePlugin:['diagnosticsWorker','updateWorker'],
- AlphaFilesPlugin:['storageWorker'],
+ AlphaFilesPlugin:['worker','storageWorker'],
  AlphaHostedResultsPlugin:['io'],
  AlphaLocalAgentPlugin:['workers','voiceWorkers','rendererWorkers'],
  AlphaMailAttachmentsPlugin:['worker'],
  AlphaMapsTransportPlugin:['workers','closers','deadlines'],
  AlphaNoteAudioPlugin:['migrationWorker'],
  AlphaNoteDocumentsPlugin:['worker'],
+ DailyAppsPlugin:['worker'],
 };
 const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 
@@ -52,6 +53,15 @@ test('the Maps deadline scheduler is the one dispatch that cannot use Executor a
  assert.match(request.slice(schedule),/\}catch\(RejectedExecutionException busy\)\{[^\n]*pending\.remove\(id,job\);job\.cancel\(/,'and a stopped scheduler cancels the job instead of throwing');
 });
 
+test('DailyApps runs every selected-document call on its worker, never on the plugin thread',()=>{
+ const source=readFileSync(nativeSource('DailyAppsPlugin.java'),'utf8');
+ const methods=[...source.matchAll(/@PluginMethod public void (\w+Selected)\(PluginCall call\)\{([^\n]*)\}\n/g)];
+ assert.deepEqual(methods.map(match=>match[1]).sort(),['describeSelected','forgetSelected','openSelected','pdfSelected','readSelected','renameSelected','restoreSelected','shareSelected']);
+ for(const [,name,body] of methods)assert.match(body,/^(?:Activity activity=getActivity\(\);)?documents\(call,\(\)->SelectedDocumentCalls\.\w+\(/,`${name} goes through the worker`);
+ assert.match(source,/private void documents\(PluginCall call,Runnable task\)\{PluginWorkers\.submit\(worker,task,/);
+ assert.match(source,/protected void handleOnDestroy\(\)\{worker\.shutdownNow\(\);super\.handleOnDestroy\(\);\}/,'and stops it without dropping the reminder teardown');
+});
+
 test('every worker a plugin declares is listed and checked above',()=>{
  for(const name of Object.keys(plugins)){
   const source=readFileSync(nativeSource(`${name}.java`),'utf8');
@@ -65,11 +75,13 @@ test('the shared Photos bridge Alpha registers answers a call for a stopped work
  // DeviceLibraryPlugin and own no worker; the shared plugins catch the refusal themselves.
  for(const name of ['AlphaPhotosPlugin','AlphaPhotoLibraryPlugin'])assert.doesNotMatch(readFileSync(nativeSource(`${name}.java`),'utf8'),/ExecutorService|\.execute\(/);
  const shared=name=>readFileSync(new URL(`../vendor/eliza/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/${name}.java`,import.meta.url),'utf8');
- const photos=shared('PhotosPlugin'),library=shared('DeviceLibraryPlugin');
- const submit=photos.slice(photos.indexOf('  private void submit(PluginCall call, Runnable action) {'),photos.indexOf('  static void requireLibraryAliases('));
+ const photos=shared('PhotosPlugin'),base=shared('PermittedPhotosPlugin'),library=shared('DeviceLibraryPlugin');
+ assert.match(photos,/extends PermittedPhotosPlugin/);
+ const submit=base.slice(base.indexOf('  protected final void submit(PluginCall call, Runnable action) {'),base.indexOf('  static void requireLibraryAliases('));
  assert.match(submit,/try \{\n {6}worker\.execute\([\s\S]*\} catch \(RejectedExecutionException stopped\) \{\n {6}call\.reject\("Photo library closed"\);/);
- assert.equal([...photos.matchAll(/worker\.execute\(/g)].length,2,'submit and the destroy-time close only');
- assert.match(photos,/try \{\n {6}worker\.execute\(\(\) -> \{\n {8}if \(edits != null\) edits\.close\(\);\n {6}\}\);\n {4}\} catch \(RejectedExecutionException stopped\)/);
+ assert.equal([...base.matchAll(/worker\.execute\(/g)].length,1,'all base calls share the guard');
+ assert.equal([...photos.matchAll(/worker\(\)\.execute\(/g)].length,1,'the subclass only uses the worker directly to close');
+ assert.match(photos,/try \{\n {6}worker\(\)\.execute\(\(\) -> \{\n {8}if \(edits != null\) edits\.close\(\);\n {6}\}\);\n {4}\} catch \(RejectedExecutionException stopped\)/);
  const facade=library.slice(library.indexOf('  private void submit(PluginCall call, ReadAction action) {'),library.indexOf('  private boolean locked()'));
  assert.match(facade,/worker\.execute\([\s\S]*\} catch \(RuntimeException stopped\) \{[\s\S]*call\.reject\("Device library closed"\);/);
  assert.equal([...library.matchAll(/worker\.execute\(/g)].length,1);

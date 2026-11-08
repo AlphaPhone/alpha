@@ -201,7 +201,7 @@ export const BR_PAGES = {};
 BR_PAGES[BR_NEWS] = { kind: "news", title: "The case for on-device agents", host: "news.example", path: "/on-device-agents", tile: "#000000",
   snip: "An assistant that lives on your phone sees everything you do. The question is who else gets to see it.", kw: "agents on-device ai assistant privacy phone news",
   points: ["Keeping model and memory on the phone means nobody else sees your data", "Hardware-held keys make every agent action signed and checkable", "The interface should get quieter: one conversation, the right card at the right time"] };
-BR_PAGES[BR_ENC] = { kind: "enclave", title: "Keys that never leave the chip", host: "enclave.example", path: "/keys-in-hardware", tile: "#0000FF",
+BR_PAGES[BR_ENC] = { kind: "enclave", title: "Keys in the chip", host: "enclave.example", path: "/keys-in-hardware", tile: "#0000FF",
   snip: "A secure enclave is a small, sealed part of the processor. Keys are created inside it and never read out.", kw: "enclave keys hardware security chip secure",
   points: ["Enclave keys are created inside the chip and can't be read out", "Signed actions prove they came from your device", "The phone becomes the root of trust, not a server"] };
 BR_PAGES[BR_BOOK] = { kind: "book", title: "Nopa · Book a table", host: "tables.example", path: "/nopa", tile: "#17352A",
@@ -337,7 +337,7 @@ export const NOTES_SEED = [
   { id: "enclave", kind: "text", title: "Enclave launch", body: "Confirm attestation flow\nShip the keys-on-device doc\nDry run Friday", pinned: true, when: "Today" },
   { id: "groceries", kind: "list", title: "Groceries", items: [{ t: "Oat milk", done: true }, { t: "Espresso beans", done: false }, { t: "Lemons", done: false }, { t: "Sourdough from Tartine", done: false }], pinned: false, when: "Today" },
   { id: "agents", kind: "link", title: "The case for on-device agents", url: "news.example/on-device-agents", domain: "news.example", when: "Mon",
-    clips: ["Keys that never leave the device change what an assistant can be trusted with.", "Latency drops below the threshold where talking feels like thinking.", "The phone becomes the agent's body, not just its screen."] },
+    clips: ["Keys held on the device change what an assistant can be trusted with.", "Latency drops below the threshold where talking feels like thinking.", "The phone becomes the agent's body, not just its screen."] },
   { id: "gifts", kind: "text", title: "Gift ideas · Priya", body: "Film camera, ceramics class.\nShe mentioned the print show at SFMOMA.", pinned: false, when: "Sun" },
   { id: "landlord", kind: "text", title: "Radiator", body: "Call the landlord Friday. Bedroom radiator clanks all night.", pinned: false, when: "Sep 22" }
 ];
@@ -568,7 +568,11 @@ export const ATTENTION_ROWS = [
 /* Home card values of the reference layout. */
 export const HOME_DEFAULTS = {
   homeCalendarLabel: "Next: Design review at 3:00 PM", homeCalendarTime: "3:00 PM", homeCalendarTitle: "Design review",
-  homeWorkflowLabel: "Morning brief delivered at 7:02 AM", homeWorkflowTitle: "Morning brief", homeWorkflowTime: "7:02 AM"
+  homeWorkflowLabel: "Morning brief delivered at 7:02 AM", homeWorkflowTime: "7:02 AM",
+  // Home draws a card only when it has something to show (docs/ui-refresh-2026-11), so the fixture
+  // Home says it has the next event, an enabled workflow and unread mail.
+  homeCalendarHasEvent: true, homeWorkflowHasRows: true, homeWorkflowRows: [{ name: "Morning brief", status: "" }], homeWorkflowTitle: "",
+  homeInboxCount: "2 unread", homeInboxRows: [{ subject: "Design review notes", from: "Maya Chen" }, { subject: "Offsite agenda", from: "Priya Nair" }], homeInboxHasRows: true, homeInboxState: "ready"
 };
 
 /* Per-view scripted copy: suggestions, voice phrases, presets for the dev jump

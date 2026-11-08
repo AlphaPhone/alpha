@@ -1,5 +1,8 @@
 # Explicit standalone paired ASR
 
+> **Retired by P-42 (docs/decisions.md).** Alpha has no whisper.cpp provider; on-device
+> speech recognition runs through `libelizainference` (docs/fused-speech.md). Kept as history.
+
 The isolated local agent47846 now serves an explicitly enabled whisper.cpp
 provider through its normal authenticated HTTP host. This is separate from
 `/api/asr/local-inference`, whose fused Gemma bundle remains unavailable and
@@ -98,7 +101,8 @@ reviewed composer draft and cancelled old-account result. Native execution is
 pending: `PairedAsrInstrumentedTest` covers real AAC conversion plus synthetic
 native HTTP; `PairedAsrLiveInstrumentedTest` is gated `pairedAsrLive=1` and its
 runner `android-paired-asr-live.mjs` verifies archived matching APKs and real
-47846 transcription/review/edit/TTS playback. The live fixture injects only a
+47846 transcription/review/edit/TTS playback. It reads the host's owner token from
+`ALPHA_ASR_PROFILE/owner-token` to get a pairing code. The live fixture injects only a
 test-owned synthesized AAC recording at capture ingress; it never opens a
 microphone. There is still no physical microphone/user speech acceptance.
 

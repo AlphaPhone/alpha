@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {join,resolve} from 'node:path';import {execFileSync} from 'node:child_process';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {join,resolve} from 'node:path';import {execFileSync} from 'node:child_process';import {located} from './fixtures/source-text.mjs';
 // Device photo/video library rules (issue 408). Source-level: this proves the renderer contract and
 // the native source shape, not Android behaviour (see PhotoLibraryInstrumentedTest for that).
 const m=await import('../apps/app/src/runtime/photo-library.ts');
@@ -10,6 +10,7 @@ const registration=readFileSync('android/app/src/main/java/ai/elizaresearch/alph
 const java=compact(readFileSync(media+'DeviceLibraryPlugin.java','utf8'));
 const access=compact(readFileSync(media+'PhotoLibraryAccess.java','utf8'));
 const sharedPhotos=compact(readFileSync(media+'PhotosPlugin.java','utf8'));
+const permittedPhotos=compact(readFileSync(media+'PermittedPhotosPlugin.java','utf8'));
 const manifest=readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
 const adapter=readFileSync('apps/app/src/prototype/photo-library-adapter.ts','utf8');
 
@@ -34,7 +35,8 @@ test('native facade bounds the renderer contract: per-SDK permission request, pa
  // The scope, identity and MediaStore rules live in the shared PermittedMediaCatalog/MediaLibraryKey
  // (plugins/plugin-native-media, tested upstream). Alpha keeps only the facade bounds checked here.
  assert.match(registration,/public class AlphaPhotoLibraryPlugin extends DeviceLibraryPlugin \{/);
- assert.match(sharedPhotos,/public static String\[\]libraryPermissionAliases\(\)\{return PhotoLibraryAccess\.permissionAliases\(Build\.VERSION\.SDK_INT\);\}/);
+ assert.match(sharedPhotos,/class PhotosPlugin extends PermittedPhotosPlugin/);
+ assert.match(permittedPhotos,/public static String\[\]libraryPermissionAliases\(\)\{return PhotoLibraryAccess\.permissionAliases\(Build\.VERSION\.SDK_INT\);\}/);
  assert.match(access,/public static final int SELECTED_SDK=34;/);assert.match(access,/public static final int MEDIA_PERMISSIONS_SDK=33;/);
  assert.match(access,/if\(sdk>=SELECTED_SDK\)return new String\[\]\{"libraryImages","libraryVideos","librarySelected"\};if\(sdk>=MEDIA_PERMISSIONS_SDK\)return new String\[\]\{"libraryImages","libraryVideos"\};return new String\[\]\{"libraryLegacy"\};/);
  assert.match(access,/public static final int PAGE=24;/);assert.match(access,/return Math\.min\(PAGE,Math\.max\(1,requested\)\);/);
@@ -116,8 +118,16 @@ test('external edits and deletes reconcile; a row id reused after delete is a di
  const changes=catalog.applyChanges([{...item(3),trashed:true},{...item(2,{revision:'1:1:99'})},{...item(9)}],99);
  assert.deepEqual(changes,{removed:['lib:i:3:30'],changed:['lib:i:2:20'],added:1});assert.equal(catalog.generation,99);
  assert.equal('trashed' in catalog.items[0],false);
- // MediaStore _id 2 reused with a new add generation is not the old item.
- assert.notEqual('lib:i:2:20','lib:i:2:21');assert.ok(m.isLibraryId('lib:i:2:21'));
+ // MediaStore _id 2 reused with a new add generation is not the old item: it never updates the old row,
+ // and once the old row is missing a selection bound to it is dropped, not moved to the new one.
+ const reused=new m.LibraryCatalog(),selection=new m.LibrarySelection();
+ reused.apply(m.parsePage(page([item(2)])),true);selection.toggle(reused.items[0]);
+ assert.deepEqual(reused.applyChanges([item(2,{id:'lib:i:2:21',revision:'1700000500:3000:5'})],100),{removed:[],changed:[],added:1});
+ assert.deepEqual(reused.items.map(row=>[row.id,row.revision]),[['lib:i:2:20',item(2).revision]]);
+ assert.deepEqual(reused.reconcile(m.parseValidation({items:[{id:'lib:i:2:20',status:'missing'}]})),{removed:['lib:i:2:20'],changed:[]});
+ assert.equal(reused.items.length,0);
+ assert.deepEqual(selection.reconcile(reused),{dropped:1,changed:0});
+ assert.equal(selection.has('lib:i:2:21'),false);assert.equal(selection.size,0);
 });
 
 test('permission downgrade or a MediaStore version change clears the catalog and selection',()=>{
@@ -172,7 +182,9 @@ test('agent operations: search/inspect/select read locally; every change or shar
  assert.throws(()=>m.validateLibraryOperation({type:'photo_library_review',action:'trash',items:[{id:'lib:i:1:1',revision:'1:2:3'}]}),/Invalid reviewed item/);
  assert.throws(()=>m.validateLibraryOperation({type:'photo_library_review',action:'restore',items:[{id:'lib:i:1:1',revision:'rev-ab12-3'}]}),/Unsupported/);
  assert.equal(m.REVIEWED_LIBRARY_ACTIONS.includes('restore'),false,'restore is not offered: trashed rows are never paged');
- assert.match(m.describeLibraryOperation({type:'photo_library_review',action:'delete',items:[{id:'lib:i:1:1',revision:'rev-ab12-3'}]}).description,/You confirm it there and then in Android/);
+ const review={type:'photo_library_review',action:'delete',items:[{id:'lib:i:1:1',revision:'rev-ab12-3'}]};
+ assert.deepEqual(m.describeLibraryOperation(review),{title:m.reviewText('delete',1).title,description:m.reviewText('delete',1).detail});
+ assert.equal(m.describeLibraryOperation({type:'photo_library_select',ids:['lib:i:1:1']}).description,'');
  // Results: exact shape, opaque revisions only.
  const search={type:'photo_library_search',limit:2};
  assert.throws(()=>m.validateLibraryResult(search,{kind:'photo_library_search',scope:'full',more:false,items:[{id:'lib:i:1:1',revision:'1:2:3',kind:'image',takenAt:1,width:1,height:1}]}),/Invalid library result item/);
@@ -212,8 +224,8 @@ test('agent album observes only while open and falls back to a bounded fresh cat
  assert.match(java,/catalog=photos\.permittedCatalog\(\);review=photos\.permittedReview\(\);/);
  assert.doesNotMatch(java,/new PermittedMediaCatalog\(|new PermittedMediaReview\(/,'the device library constructs no second catalog or review');
  assert.match(java,/catalog\.watch\("library",watching\)/);
- const photos=sharedPhotos;
- assert.match(photos,/permitted=new PermittedMediaCatalog\(getContext\(\),false,\(\)->\{if\(!destroyed\)\{diagnostic\(Diagnostic\.LIBRARY_CHANGED_CATALOG\);notifyListeners\("libraryChanged",new JSObject\(\)\);\}\}\);/,'Photos observes only while its grid is open; catalog diagnostics and notification share the destroyed guard');
+ const photos=permittedPhotos;
+ assert.match(photos,/permitted=new PermittedMediaCatalog\(getContext\(\),false,\(\)->\{if\(!destroyed\)\{diagnostic\(Diagnostic\.LIBRARY_CHANGED_CATALOG\);notifyListeners\("libraryChanged",new JSObject\(\)\);\}\},profile\);/,'Photos observes only while its grid is open; catalog diagnostics and notification share the destroyed guard');
  assert.match(photos,/permitted\.watch\("photos",active\)/);
  const camera=readFileSync('apps/app/src/prototype/camera-adapter.ts','utf8');
  assert.match(camera,/watchLibrary\(!disposed&&!document\.hidden&&!!photosApi\?\.isActive\(\)&&permittedLibrary\(\)\)/);

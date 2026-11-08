@@ -1,5 +1,6 @@
 import {createInlineModal} from '../runtime/inline-modal';
 import {currentSurfaceLayout} from '../runtime/canvas-geometry';
+import {createKeyedListFocus} from './keyed-list-focus';
 /** On a split canvas the open message, note or file sits beside its list, which stays usable. */
 const split=()=>currentSurfaceLayout().split;
 type Bag=Record<string,any>;
@@ -51,11 +52,17 @@ export function installSubviewAccessibility(views:Bag){
  ] as Array<[string,string[],(out:Bag)=>Bag]>){
   const render=views[name].render,focus=focusHistory(),refs=Object.fromEntries(keys.map(key=>[key+'Focus',subviewFocus(focus.read)]));
   let output:Bag={};
+  const listFocus=name==='notes'?createKeyedListFocus('data-alpha-note-id'):name==='photos'?createKeyedListFocus('data-alpha-media-key'):null;
+  const albumListFocus=name==='photos'?createKeyedListFocus('data-alpha-media-key'):null;
   const deleteModal=name==='photos'?reviewFocus(()=>output.closeSheet?.()):name==='notes'?reviewFocus(()=>output.trashCancel?.()):null;
   const popups=popupFocus(name,()=>output);
   views[name].render=(state:Bag,api:Bag)=>{
+   const listSnapshot=listFocus?.capture()??null,albumSnapshot=albumListFocus?.capture()??null;
    const out=output=render(state,api);deleteModal?.render(!!(out.emptyOpen||out.trashConfirmOpen));
-   return {...out,...refs,...popups(out),emptyModal:deleteModal?.ref,captureSubviewFocus:focus.capture,...coverage(out)};
+   const restoreList=listFocus?.ref(listSnapshot),restoreAlbum=albumListFocus?.ref(albumSnapshot);
+   return {...out,...refs,...popups(out),listFocus:restoreList,albumListFocus:restoreAlbum,
+    gridRef:name==='photos'?(element:HTMLElement|null)=>{out.gridRef?.(element);(out.album?restoreAlbum:restoreList)?.(element);}:out.gridRef,
+    emptyModal:deleteModal?.ref,captureSubviewFocus:focus.capture,...coverage(out)};
   };
  }
  {
@@ -133,4 +140,73 @@ function focusHistory(){
   capture:()=>{const target=current();if(target.scope)remembered=target;},
   read:()=>{const target=current();return target.scope?target:remembered.scope?.isConnected?remembered:target;},
  };
+}
+
+/**
+ * Assistant replies for screen readers.
+ *
+ * The transcript is a plain scrolling list and focus deliberately stays on the composer after Send,
+ * so a TalkBack user heard nothing when Alpha began replying, replied or failed. One visually
+ * hidden polite status region, outside the conversation layer (which is inert while the chat is
+ * closed), says "Alpha is replying" when a turn starts and then the settled reply once, never each
+ * streamed token. The region is mounted empty before any text, because a live region that
+ * arrives together with its text is not announced reliably. A voice conversation speaks its own
+ * replies, so nothing is written while one is active. Focus never moves.
+ */
+type ReplyShell = Record<string, any>;
+const REPLYING = 'Alpha is replying';
+const LIMIT = 600;
+
+let region: HTMLElement | null = null, frame = 0, regionOwner: ReplyShell | undefined;
+function say(text: string, owner: ReplyShell) {
+  regionOwner=owner;
+  const session=owner.connectionSession,conversation=owner.restoredHistory?.conversationId;
+  if (!region || !region.isConnected) {
+    region = document.createElement('div');
+    region.setAttribute('role', 'status');
+    region.setAttribute('aria-live', 'polite');
+    region.setAttribute('aria-atomic', 'true');
+    region.setAttribute('data-alpha-reply-announcer', '');
+    region.style.cssText = 'position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap';
+    document.body.append(region);
+  }
+  // Cleared now and written on the next frame, so the same words said twice are announced twice.
+  region.textContent = '';
+  cancelAnimationFrame(frame);
+  frame = requestAnimationFrame(() => { frame = 0; if (region && regionOwner===owner && owner.replyAnnouncerLive && session===owner.connectionSession && conversation===owner.restoredHistory?.conversationId && !document.hidden && !owner.voiceConversationActive?.()) region.textContent = text; });
+}
+const bounded = (text: string) => text.length > LIMIT ? text.slice(0, LIMIT - 1).trimEnd() + '…' : text;
+const agentTail = (msgs: ReplyShell[]) => { const last = msgs.at(-1); return last?.from === 'agent' ? last : undefined; };
+
+export function installReplyAnnouncer(Component: any) {
+  const originalMount = Component.prototype.componentDidMount;
+  Component.prototype.componentDidMount = function (...args: any[]) {
+    originalMount?.apply(this, args);
+    this.replyAnnouncerLive=true;
+    if (!region) say('',this);
+  };
+  const originalUnmount=Component.prototype.componentWillUnmount;
+  Component.prototype.componentWillUnmount=function(...args:any[]){this.replyAnnouncerLive=false;if(regionOwner===this){cancelAnimationFrame(frame);frame=0;region?.remove();region=null;regionOwner=undefined;}originalUnmount?.apply(this,args);};
+  const originalUpdate = Component.prototype.componentDidUpdate;
+  Component.prototype.componentDidUpdate = function (...args: any[]) {
+    originalUpdate?.apply(this, args);
+    const previous: ReplyShell = args[1] || {}, state: ReplyShell = this.S();
+    const identity=JSON.stringify([this.connectionSession??'',this.restoredHistory?.conversationId??'']);
+    const changed=this.replyAnnouncerIdentity!==undefined&&this.replyAnnouncerIdentity!==identity;this.replyAnnouncerIdentity=identity;
+    if(changed||document.hidden||state.screen&&state.screen!=='home'||this.voiceConversationActive?.()){this.replyAnnounced=false;if(regionOwner===this)say('',this);return;}
+    const before: ReplyShell[] = previous.msgs || [], after: ReplyShell[] = state.msgs || [];
+    const was = agentTail(before), last = agentTail(after);
+    const started = (!!state.turnStatus && !previous.turnStatus) || (!!state.typing && !previous.typing) || (!!last?.streaming && !was?.streaming);
+    if (started && !this.replyAnnounced) { this.replyAnnounced = true; say(REPLYING,this); }
+    if (!last || last.streaming || last.id === this.replyAnnouncedId) { if (!state.typing && !state.turnStatus && !last?.streaming) this.replyAnnounced = false; return; }
+    // A streamed reply settling (its id may change on settlement), or one new agent row: a reply
+    // delivered whole or a failed-turn notice. A history load replaces many rows and is not read.
+    const known = new Set(before.map(message => message.id)), added = after.filter(message => !known.has(message.id));
+    const settled = !!was?.streaming && !after.some(message => message.streaming);
+    const arrived = before.length > 0 && added.length === 1 && added[0] === last;
+    if (!settled && !arrived) { if (!state.typing && !state.turnStatus) this.replyAnnounced = false; return; }
+    const text = String(last.text || last.card?.title || '').trim();
+    this.replyAnnouncedId = last.id; this.replyAnnounced = false;
+    if (text) say(bounded(text),this);
+  };
 }

@@ -1,5 +1,7 @@
 package ai.elizaresearch.alphaphone;
 
+import ai.eliza.plugins.filesystem.browser.StorageBrowser;
+import ai.eliza.plugins.filesystem.browser.StorageCatalog;
 import ai.eliza.plugins.media.DocumentFolderTree;
 import android.app.Activity;
 import android.content.*;
@@ -11,32 +13,26 @@ import com.getcapacitor.annotation.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Files browser over shared storage with all-files access, or the legacy storage permissions on
- * API 29 (storage* methods,
- * design/view-refresh-2026-11/PLAN.md section 4, decision F1). Storage paths are volume-relative
- * and checked by StorageBrowser.resolve; the renderer never names an absolute path or a provider
- * URI. The earlier user-selected SAF tree is gone: a tree an earlier version recorded under
- * {@link #PREF} has its persisted grant released once, on load. */
+/** Files browser over shared storage with all-files access, or legacy storage permission on API 29.
+ * Paths stay volume-relative and are checked by the shared StorageBrowser. A retired SAF folder
+ * grant is released on load; selected document capabilities keep their separate grants. */
 @CapacitorPlugin(name="AlphaFiles", permissions={@Permission(alias="legacyStorage",strings={android.Manifest.permission.READ_EXTERNAL_STORAGE,android.Manifest.permission.WRITE_EXTERNAL_STORAGE})})
 public class AlphaFilesPlugin extends Plugin {
- /** Installed name of the preference where earlier versions recorded the chosen SAF tree. */
+ /** Preference used by earlier installs to record their selected SAF folder. */
  static final String PREF="alpha-files-tree";
- /** Plugin.requestPermissions launches for a plugin that declares permissions (legacyStorage);
-  * a late call is answered like every other Alpha plugin (LateLaunch). */
+ private static final String STORAGE_TRASH_FOLDER=".Trash-alpha";
  @Override @PluginMethod public void requestPermissions(PluginCall call){LateLaunch.ask(call,()->super.requestPermissions(call));}
  @Override public void load(){PluginWorkers.submit(storageWorker,this::releaseRetiredTree,()->{});}
- /** Releases the grant of a tree an earlier version recorded; selected documents keep theirs. */
  private void releaseRetiredTree(){
   if(getContext().getSharedPreferences(PREF,Context.MODE_PRIVATE).getAll().isEmpty())return;
-  try{new DocumentFolderTree(getContext(),PREF,uri->null).forget();}catch(Exception ignored){/* Retried on the next load. */}
+  try{new DocumentFolderTree(getContext(),PREF,uri->null).forget();}catch(Exception ignored){/* Retry on the next load. */}
  }
  private static JSObject result(String status,String message){return DocumentFolderTree.result(status,message);}
  private ContentResolver resolver(){return getContext().getContentResolver();}
- // ---- Storage browser (all-files access; API 29: legacy storage) ----
+ // ---- Storage browser (all-files access) ----
  private final ExecutorService storageWorker=Executors.newSingleThreadExecutor();
  private final StorageBrowser.WatchSlot watch=new StorageBrowser.WatchSlot();
  private final android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());
- private final Runnable changed=()->notifyListeners("storageChanged",new JSObject());
  private interface StorageWork {JSObject run(StorageBrowser browser)throws Exception;}
  private JSObject denied(){JSObject out=result("denied",StorageCatalog.legacy()?"Allow storage access to browse files.":"Allow all-files access to browse storage.");out.put("access",StorageCatalog.access(getContext()));out.put("legacy",StorageCatalog.legacy());return out;}
  private void storage(PluginCall call,StorageWork task){storage(call,task,null);}
@@ -46,7 +42,7 @@ public class AlphaFilesPlugin extends Plugin {
    if(!"granted".equals(StorageCatalog.access(getContext()))){refuse(call,failed,denied());return;}
    StorageCatalog.Volume volume=StorageCatalog.volume(getContext(),call.getString("volume","primary"));
    if(volume==null){refuse(call,failed,result("unavailable","This storage is not mounted."));return;}
-   JSObject out=task.run(new StorageBrowser(volume.directory));if(!out.has("status"))out.put("status","ready");call.resolve(out);
+   JSObject out=task.run(new StorageBrowser(volume.directory,STORAGE_TRASH_FOLDER));if(!out.has("status"))out.put("status","ready");call.resolve(out);
   }catch(IllegalArgumentException e){refuse(call,failed,result("invalid","Invalid name or path."));}
   catch(IllegalStateException e){refuse(call,failed,result("exists","That name is already used here."));}
   catch(java.io.FileNotFoundException e){refuse(call,failed,result("missing","This item is no longer there."));}
@@ -59,6 +55,17 @@ public class AlphaFilesPlugin extends Plugin {
   List<String> out=new ArrayList<>();Set<String> seen=new HashSet<>();
   for(int i=0;i<array.length();i++){String value=array.optString(i,null);if(value==null||!seen.add(value))throw new IllegalArgumentException();out.add(value);}
   return out;
+ }
+ private static List<String> reviewedTokens(PluginCall call){
+  if(!call.getData().has("reviewed"))return null;
+  JSArray values=call.getArray("reviewed");
+  if(values==null||values.length()<1||values.length()>StorageBrowser.BATCH_MAX)throw new IllegalArgumentException();
+  List<String> tokens=new ArrayList<>(values.length());
+  for(int i=0;i<values.length();i++){
+   Object value=values.opt(i);if(!(value instanceof String))throw new IllegalArgumentException();
+   tokens.add((String)value);
+  }
+  return tokens;
  }
  private static JSObject row(StorageBrowser.Row r){JSObject o=new JSObject();o.put("path",r.path);o.put("name",r.name);o.put("directory",r.directory);o.put("mimeType",r.mime);o.put("size",r.size);o.put("modified",r.modified);if(r.directory)o.put("children",r.children);return o;}
  private static JSArray outcomes(List<StorageBrowser.Outcome> list){JSArray out=new JSArray();for(StorageBrowser.Outcome o:list){JSObject v=new JSObject();v.put("path",o.path);v.put("status",o.status);if(o.to!=null)v.put("to",o.to);out.put(v);}return out;}
@@ -105,7 +112,7 @@ public class AlphaFilesPlugin extends Plugin {
   ?StorageCatalog.count(resolver(),primaryBrowser(),call.getString("category",""))
   :StorageCatalog.category(resolver(),primaryBrowser(),call.getString("category","")));}
  /** Categories are on the primary volume whichever volume the call named. */
- private StorageBrowser primaryBrowser(){StorageCatalog.Volume v=StorageCatalog.volume(getContext(),"primary");return new StorageBrowser(v==null?android.os.Environment.getExternalStorageDirectory():v.directory);}
+ private StorageBrowser primaryBrowser(){StorageCatalog.Volume v=StorageCatalog.volume(getContext(),"primary");return new StorageBrowser(v==null?android.os.Environment.getExternalStorageDirectory():v.directory,STORAGE_TRASH_FOLDER);}
  /** Candidates for the agent's read-only filter; the renderer applies the exact rules. */
  @PluginMethod public void storageQuery(PluginCall call){storage(call,b->{
   Double from=call.getDouble("from"),to=call.getDouble("to");long since=from==null?0:from.longValue(),until=to==null?0:to.longValue();
@@ -114,21 +121,22 @@ public class AlphaFilesPlugin extends Plugin {
   if(Boolean.TRUE.equals(call.getBoolean("folders",false))){JSArray rows=new JSArray();for(StorageBrowser.Row r:primaryBrowser().folders(call.getString("folder",""),call.getString("text"),since,until,StorageCatalog.QUERY_MAX,StorageBrowser.WALK_MAX))rows.put(row(r));out.put("entries",rows);return out;}
   out.put("entries",StorageCatalog.query(resolver(),call.getString("text"),call.getString("mimePrefix"),Boolean.TRUE.equals(call.getBoolean("documents",false)),call.getString("folder"),since,until));return out;
  });}
- /** The identities an agent review bound ({@code expect}: [{size, modified}] per path), or null. */
- private static List<StorageBrowser.Identity> expected(PluginCall call,int count)throws org.json.JSONException{
-  JSArray array=call.getArray("expect");if(array==null)return null;if(array.length()!=count)throw new IllegalArgumentException();
-  List<StorageBrowser.Identity> out=new ArrayList<>();
-  for(int i=0;i<array.length();i++){org.json.JSONObject o=array.optJSONObject(i);if(o==null||!o.has("size")||!o.has("modified"))throw new IllegalArgumentException();long size=o.getLong("size"),modified=o.getLong("modified");if(size<0||modified<0)throw new IllegalArgumentException();out.add(new StorageBrowser.Identity(size,modified));}
-  return out;
- }
- /** Each path's identity (size, modified) for an agent review card; {@code missing} where it is not there. */
- @PluginMethod public void storageIdentity(PluginCall call){storage(call,b->{
-  JSArray rows=new JSArray();for(StorageBrowser.Identity identity:b.identities(strings(call,"paths",StorageBrowser.BATCH_MAX))){JSObject o=new JSObject();if(identity==null){o.put("missing",true);o.put("size",0);o.put("modified",0);}else{o.put("size",identity.size);o.put("modified",identity.modified);}rows.put(o);}
-  JSObject out=new JSObject();out.put("identities",rows);return out;
+ private boolean filesReviewVisible(){Activity activity=getActivity();return activity!=null&&activity.hasWindowFocus();}
+ @PluginMethod public void storageReviewedIdentities(PluginCall call){storage(call,b->{
+  if(!filesReviewVisible())return result("changed","Open Files to review these items.");
+  List<String> paths=strings(call,"paths",StorageBrowser.BATCH_MAX);
+  JSArray tokens=new JSArray();
+  for(String identity:b.reviewedIdentities(paths)){
+   if(identity==null)return result("changed","A file couldn’t be verified. Nothing changed.");
+   tokens.put(identity);
+  }
+  JSObject out=new JSObject();out.put("reviewed",tokens);return out;
  });}
  @PluginMethod public void storageTransfer(PluginCall call){storage(call,b->{
   List<String> paths=strings(call,"paths",StorageBrowser.BATCH_MAX);boolean copy=Boolean.TRUE.equals(call.getBoolean("copy",false));
-  List<StorageBrowser.Outcome> done=b.transfer(paths,call.getString("dest",""),copy,expected(call,paths.size()));
+  List<String> reviewed=reviewedTokens(call);
+  if(reviewed!=null&&!filesReviewVisible())return result("changed","Open Files to review these items.");
+  List<StorageBrowser.Outcome> done=b.transfer(paths,call.getString("dest",""),copy,reviewed);
   List<String> touched=new ArrayList<>();for(StorageBrowser.Outcome o:done){if(o.to!=null)touched.add(o.to);if(!copy&&"moved".equals(o.status))touched.add(o.path);}scan(b,touched);
   JSObject out=new JSObject();out.put("outcomes",outcomes(done));return out;
  });}
@@ -137,7 +145,9 @@ public class AlphaFilesPlugin extends Plugin {
  });}
  @PluginMethod public void storageCreateFolder(PluginCall call){storage(call,b->{JSObject out=new JSObject();out.put("path",b.createFolder(call.getString("parent",""),call.getString("name","")));return out;});}
  @PluginMethod public void storageTrash(PluginCall call){storage(call,b->{
-  List<String> paths=strings(call,"paths",StorageBrowser.BATCH_MAX);List<StorageBrowser.Outcome> done=b.trash(paths,System.currentTimeMillis(),expected(call,paths.size()));
+  List<String> paths=strings(call,"paths",StorageBrowser.BATCH_MAX),reviewed=reviewedTokens(call);
+  if(reviewed!=null&&!filesReviewVisible())return result("changed","Open Files to review these items.");
+  List<StorageBrowser.Outcome> done=b.trash(paths,System.currentTimeMillis(),reviewed);
   List<String> gone=new ArrayList<>();for(StorageBrowser.Outcome o:done)if("trashed".equals(o.status))gone.add(o.path);scan(b,gone);
   JSObject out=new JSObject();out.put("outcomes",outcomes(done));return out;
  });}
@@ -194,17 +204,25 @@ public class AlphaFilesPlugin extends Plugin {
   String path=call.getString("path");String category=call.getString("category");
   java.io.File folder=path!=null?b.resolve(path,true):"downloads".equals(category)?new java.io.File(primaryBrowser().root,StorageCatalog.DOWNLOAD_FOLDER):null;
   watch.install(ticket,()->{
-   FileObserver files=folder!=null&&folder.isDirectory()?new FileObserver(folder,FileObserver.CREATE|FileObserver.DELETE|FileObserver.MOVED_FROM|FileObserver.MOVED_TO|FileObserver.CLOSE_WRITE|FileObserver.DELETE_SELF|FileObserver.MOVE_SELF){@Override public void onEvent(int event,String name){burst();}}:null;
-   if(files!=null)files.startWatching();
-   android.database.ContentObserver media=new android.database.ContentObserver(main){@Override public void onChange(boolean self){burst();}};resolver().registerContentObserver(android.provider.MediaStore.Files.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL),true,media);
-   return ()->{if(files!=null)files.stopWatching();resolver().unregisterContentObserver(media);main.removeCallbacks(changed);};
+   Runnable changed=()->{if(watch.isCurrent(ticket))notifyListeners("storageChanged",new JSObject());};
+   FileObserver files=folder!=null&&folder.isDirectory()?new FileObserver(folder,FileObserver.CREATE|FileObserver.DELETE|FileObserver.MOVED_FROM|FileObserver.MOVED_TO|FileObserver.CLOSE_WRITE|FileObserver.DELETE_SELF|FileObserver.MOVE_SELF){@Override public void onEvent(int event,String name){burst(changed);}}:null;
+   android.database.ContentObserver media=new android.database.ContentObserver(main){@Override public void onChange(boolean self){burst(changed);}};
+   StorageBrowser.WatchSlot.Watch resources=()->{
+    try{if(files!=null)files.stopWatching();}
+    finally{try{resolver().unregisterContentObserver(media);}finally{main.removeCallbacks(changed);}}
+   };
+   try{
+    if(files!=null)files.startWatching();
+    resolver().registerContentObserver(android.provider.MediaStore.Files.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL),true,media);
+   }catch(RuntimeException failed){try{resources.stop();}catch(RuntimeException cleanup){failed.addSuppressed(cleanup);}throw failed;}
+   return resources;
   });
   return new JSObject();
  // A watch refused before it installs (invalid path, access denied) stops the previous folder's
  // observers, so they emit nothing for a folder no longer shown.
  },()->watch.fail(ticket));}
  @PluginMethod public void storageUnwatch(PluginCall call){stopWatching();call.resolve(new JSObject());}
- private void burst(){main.removeCallbacks(changed);main.postDelayed(changed,400);}
+ private void burst(Runnable changed){main.removeCallbacks(changed);main.postDelayed(changed,400);}
  private void stopWatching(){watch.clear();}
  @Override protected void handleOnDestroy(){stopWatching();storageWorker.shutdownNow();}
 }

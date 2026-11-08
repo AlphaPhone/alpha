@@ -41,6 +41,7 @@ public final class PhotosCatalogOrderInstrumentedTest {
  private static long taken(ContentResolver r,Uri uri){try(Cursor row=r.query(uri,new String[]{"datetaken"},null,null,null)){assertNotNull(row);assertTrue(row.moveToFirst());return row.isNull(0)?0:row.getLong(0);}}
 
  @Test public void anOldPhotoInsertedLastPagesAfterANewerOne()throws Exception{
+  assertTrue("Disposable secondary user required",android.os.Process.myUid()/100000>0);
   assumeTrue(Build.VERSION.SDK_INT>=30);
   Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();ContentResolver r=c.getContentResolver();
   String permission=Build.VERSION.SDK_INT>=33?Manifest.permission.READ_MEDIA_IMAGES:Manifest.permission.READ_EXTERNAL_STORAGE;

@@ -7,6 +7,7 @@ import {
 	DEFAULT_PULL_DISTANCE,
 	TAP_SLOP,
 } from "../../../../.eliza/client-features/packages/ui/src/gestures/constants";
+import { isEditing, keyboardFreeHeight } from "../runtime/canvas-geometry";
 import { visibleDocks } from "../runtime/dock-clearance";
 
 const SHEET_EASE = `cubic-bezier(${OVERLAY_EASE.join(",")})`;
@@ -16,6 +17,8 @@ const RESIZE_TRANSITION = `height .42s ${SHEET_EASE}, border-radius .42s, opacit
 /** How long a tap close keeps the sheet's composer, then fades it to show the bar in its place. */
 const CLOSE_MS = 400;
 const CLOSE_FADE_MS = 120;
+/** Android may deliver the click in a later gesture task after pointerup. */
+const SCRIM_CLICK_WAIT_MS = 350;
 type Shell = any;
 // chat-release:begin (dependency-free; exercised by test/chat-release.test.mjs)
 type Mode = "hidden" | "input" | "sheet" | "full";
@@ -323,11 +326,59 @@ export function installChatOverlayMotion(Component: Shell) {
 		window.addEventListener("blur", this.cancelChatMotion);
 		window.addEventListener("pagehide", this.cancelChatMotion);
 		document.addEventListener("visibilitychange", this.chatMotionVisibility);
+		// Android can close the keyboard by itself (its hide key, Back) and leave the composer
+		// focused. Keyboard up and composer focus are one state here, so the composer lets go.
+		// MainActivity uses adjustResize, so the WebView itself shrinks with the keyboard: compare
+		// against the keyboard-free height for this width (the shared helper main.tsx also uses),
+		// seeded now, before any keyboard can have shrunk the window.
+		const free = keyboardFreeHeight();
+		const visible = () => {
+			const width = document.documentElement.clientWidth || window.innerWidth,
+				layout = document.documentElement.clientHeight || window.innerHeight;
+			return {
+				width,
+				layout,
+				height: Math.min(layout, window.visualViewport?.height || layout),
+			};
+		};
+		const seed = visible();
+		free(seed.width, seed.layout, false);
+		let keyboardOpen = false;
+		this.dockKeyboardWatch = () => {
+			const now = visible(),
+				covered =
+					free(now.width, now.layout, isEditing(document.activeElement)) -
+						now.height >
+					150;
+			if (keyboardOpen && !covered && this.chatInputFocused) {
+				const active = document.activeElement;
+				if (active instanceof HTMLElement && active.matches("[data-alpha-composer]"))
+					active.blur();
+			}
+			keyboardOpen = covered;
+		};
+		window.visualViewport?.addEventListener("resize", this.dockKeyboardWatch);
+		window.addEventListener("resize", this.dockKeyboardWatch);
+		// Leaving the app ends typing: the keyboard is gone when it returns.
+		this.dockHiddenWatch = () => {
+			if (!document.hidden) return;
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.matches("[data-alpha-composer]")) active.blur();
+			this.chatInputFocused = false;
+			this.chatScrimPress = undefined;
+		};
+		document.addEventListener("visibilitychange", this.dockHiddenWatch);
 	};
 	p.componentDidUpdate = function (...args: Shell[]) {
 		update?.apply(this, args);
 		const drag: Drag | undefined = this.chatMotion,
 			s = this.S();
+		// The bar's composer unmounts without a blur event: its focus ends with it.
+		const previousView = args[1]?.view;
+		if ((s.chat !== "input" || (args[1] && previousView !== s.view)) && (this.chatInputFocused || this.chatScrimPress)) {
+			this.chatInputFocused = false;
+			this.chatScrimPress = undefined;
+		}
 		if (
 			drag &&
 			(s.view !== drag.view ||
@@ -343,11 +394,15 @@ export function installChatOverlayMotion(Component: Shell) {
 		}
 	};
 	p.componentWillUnmount = function () {
+		this.chatScrimPress = undefined;
 		retire(this, false);
 		window.removeEventListener("resize", this.cancelChatMotion);
 		window.removeEventListener("blur", this.cancelChatMotion);
 		window.removeEventListener("pagehide", this.cancelChatMotion);
 		document.removeEventListener("visibilitychange", this.chatMotionVisibility);
+		window.visualViewport?.removeEventListener("resize", this.dockKeyboardWatch);
+		window.removeEventListener("resize", this.dockKeyboardWatch);
+		document.removeEventListener("visibilitychange", this.dockHiddenWatch);
 		unmount?.call(this);
 	};
 
@@ -689,18 +744,40 @@ export function installChatOverlayMotion(Component: Shell) {
 					: shell.rest(),
 			});
 		};
-		out.scrimTap = out.closeChat;
-		// Any touch outside the open sheet collapses it and reaches nothing underneath. A tap
-		// collapses on its click, so no compatibility click can land on what the sheet uncovers;
-		// a drag has no click, so it collapses on release. Assistive technology activates
-		// controls directly and keeps reaching the app.
+		if (!out.showComposer) shell.chatInputFocused = false;
+		const setInputFocus = (focused: boolean) => {
+			if (!focused && shell.chatScrimPress || !!shell.chatInputFocused === focused) return;
+			shell.chatInputFocused = focused;
+			shell.setState({});
+		};
+		out.inputComposerFocus = () => setInputFocus(true);
+		out.inputComposerBlur = () => setInputFocus(false);
+		const dockScrim =
+			s.chat === "input" && !!out.showComposer && !s.shade &&
+			s.voice === "off" && !shell.props.assistantSurface &&
+			(shell.chatInputFocused || shell.rest() === "hidden");
+		out.dockScrim = dockScrim;
+		out.scrimZ = dockScrim ? 39 : 45;
+		out.scrimTap = () => {
+			shell.chatScrimPress = undefined;
+			const active = document.activeElement;
+			if (dockScrim && active instanceof HTMLElement && active.matches("[data-alpha-composer]"))
+				active.blur();
+			out.closeChat();
+		};
+		// An outside tap lowers the sheet or dock without activating what it uncovers.
+		// A drag has no click, so it collapses on release. Assistive technology can
+		// still activate app controls directly.
 		out.scrimPE =
-			s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface
+			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface
 				? "auto"
 				: "none";
 		out.scrimSw = {
 			down(event: PointerEvent) {
 				event.stopPropagation();
+				// Keep focus until the scrim receives the click. An early blur would
+				// otherwise uncover the app between pointer down and pointer up.
+				if (dockScrim) event.preventDefault();
 				if (event.isPrimary === false) return;
 				shell.chatScrimPress = {
 					id: event.pointerId,
@@ -726,11 +803,14 @@ export function installChatOverlayMotion(Component: Shell) {
 			up(event: PointerEvent) {
 				event.stopPropagation();
 				const press = shell.chatScrimPress;
-				shell.chatScrimPress = undefined;
-				if (press?.id === event.pointerId && press.moved) out.scrimTap();
+				if (press?.id !== event.pointerId) return;
+				if (press.moved) out.scrimTap();
+				else setTimeout(() => {
+					if (shell.chatScrimPress === press) out.scrimTap();
+				}, SCRIM_CLICK_WAIT_MS);
 			},
-			cancel() {
-				shell.chatScrimPress = undefined;
+			cancel(event: PointerEvent) {
+				if (shell.chatScrimPress?.id === event.pointerId) out.scrimTap();
 			},
 		};
 		return out;

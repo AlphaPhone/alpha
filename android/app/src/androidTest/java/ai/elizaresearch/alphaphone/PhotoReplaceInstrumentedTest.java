@@ -1,143 +1,319 @@
 package ai.elizaresearch.alphaphone;
 
-import ai.eliza.plugins.media.OwnedPhotoEdits;
-import android.content.*;
-import android.database.Cursor;
-import android.graphics.*;
-import android.net.Uri;
-import android.provider.MediaStore;
-import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.*;
-import java.util.*;
-import org.json.JSONObject;
-import org.junit.Test;
-import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 import static org.junit.Assume.assumeTrue;
 
-/**
- * Replace never leaves the original damaged: a write that fails part way is undone from the
- * private backup, a write that cannot be undone yet keeps the backup and reports unknown until a
- * later result (a new process) restores it, and a write that completed before its error is the
- * saved edit. Each case uses its own uniquely named owned PNG, deleted afterwards.
- */
+import ai.eliza.plugins.media.OwnedPhotoEdits;
+import android.content.ContentResolver;
+import android.content.ContentUris;
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Random;
+import java.util.UUID;
+import org.json.JSONObject;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 @RunWith(AndroidJUnit4.class)
 public final class PhotoReplaceInstrumentedTest {
- /** Writes {@code limit} bytes, then fails the write (as a full disk does); or, with limit < 0, fails on close. */
- private static final class Faulty implements OwnedPhotoEdits.ReplaceOutput {
-  final int limit,failures;int opened;
-  /** Faults the first {@code failures} opens; later opens (the restore) write normally. */
-  Faulty(int limit,int failures){this.limit=limit;this.failures=failures;}
-  @Override public OutputStream open(ContentResolver r,Uri target)throws IOException{
-   OutputStream out=r.openOutputStream(target,"wt");if(opened++>=failures)return out;
-   return new FilterOutputStream(out){int written;
-    @Override public void write(int b)throws IOException{if(limit>=0&&written>=limit)throw new IOException("No space left on device");written++;out.write(b);}
-    @Override public void write(byte[] b,int off,int len)throws IOException{for(int i=0;i<len;i++)write(b[off+i]);}
-    @Override public void close()throws IOException{super.close();if(limit<0)throw new IOException("close failed");}
-   };
+  private Context context;
+  private ContentResolver resolver;
+  private Uri photo;
+  private String token;
+
+  @Before public void createPhoto() throws Exception {
+    assumeTrue(Build.VERSION.SDK_INT >= 30);
+    context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+    resolver = context.getContentResolver();
+    ContentValues values = new ContentValues();
+    values.put("_display_name", "alpha-replace-" + UUID.randomUUID() + ".png");
+    values.put("mime_type", "image/png");
+    values.put("relative_path", "Pictures/AlphaPhone-tests/");
+    values.put("is_pending", 1);
+    photo = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+    assertNotNull(photo);
+    writePhoto(7);
+    ContentValues published = new ContentValues();
+    published.put("is_pending", 0);
+    assertEquals(1, resolver.update(photo, published, null, null));
   }
- }
- private Context context(){return InstrumentationRegistry.getInstrumentation().getTargetContext();}
- private static byte[] read(ContentResolver r,Uri uri)throws Exception{try(InputStream in=r.openInputStream(uri);ByteArrayOutputStream out=new ByteArrayOutputStream()){assertNotNull(in);byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1)out.write(b,0,n);return out.toByteArray();}}
- private static String revision(ContentResolver r,Uri uri){try(Cursor row=r.query(uri,new String[]{"date_added","_size","generation_modified","is_trashed"},null,null,null)){assertNotNull(row);assertTrue(row.moveToFirst());return row.getLong(0)+":"+row.getLong(1)+":"+row.getLong(2)+":"+row.getInt(3);}}
- private static String[] backups(Context c){String[] names=new File(c.getFilesDir(),"photo-replace-backups").list();return names==null?new String[0]:names;}
- /** A published owned 256x192 PNG of seeded noise (far larger than any fault limit below); a 90° rotation changes its bytes. */
- private Uri owned(ContentResolver r)throws Exception{
-  ContentValues values=new ContentValues();values.put("_display_name","alpha-replace-"+UUID.randomUUID()+".png");values.put("mime_type","image/png");values.put("relative_path","Pictures/AlphaPhone-tests/");values.put("is_pending",1);
-  Uri uri=r.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);assertNotNull(uri);
-  Bitmap bitmap=Bitmap.createBitmap(256,192,Bitmap.Config.ARGB_8888);Random random=new Random(7);int[] pixels=new int[256*192];for(int i=0;i<pixels.length;i++)pixels[i]=0xff000000|random.nextInt(0x1000000);bitmap.setPixels(pixels,0,256,0,0,256,192);
-  try(OutputStream out=r.openOutputStream(uri)){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,out));}finally{bitmap.recycle();}
-  ContentValues published=new ContentValues();published.put("is_pending",0);assertEquals(1,r.update(uri,published,null,null));return uri;
- }
- private String begin(OwnedPhotoEdits edits,ContentResolver r,Uri uri)throws Exception{
-  // begin answers the edit's identity as sessionId (also operationId), the token the plugin passes to replace and result.
-  JSONObject session=edits.begin(Long.toString(ContentUris.parseId(uri)),revision(r,uri));assertTrue(session.getBoolean("canReplace"));
-  String token=session.optString("sessionId",null);assertNotNull("begin names the edit session",token);assertEquals(token,session.optString("operationId",null));return token;
- }
 
- @Test public void aWriteThatFailsPartWayIsUndoneFromTheBackup()throws Exception{
-  assumeTrue(android.os.Build.VERSION.SDK_INT>=30);Context c=context();ContentResolver r=c.getContentResolver();Uri uri=owned(r);
-  try{
-   byte[] original=read(r,uri);Faulty faulty=new Faulty(1000,1);OwnedPhotoEdits edits=new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG,null,faulty);
-   String token=begin(edits,r,uri);
-   try{edits.replace(token,90,false,"none");fail("the injected write failure is reported");}catch(IOException expected){assertEquals("No space left on device",expected.getMessage());}
-   assertEquals("the write and the restore both opened the original",2,faulty.opened);
-   assertArrayEquals("the original holds its own bytes again",original,read(r,uri));
-   assertEquals("failed",new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG).result(token).getString("status"));
-   assertEquals("no backup is left once the original is restored",0,backups(c).length);
-  }finally{r.delete(uri,null,null);}
- }
+  @After public void deletePhoto() {
+    if (photo != null)
+      resolver.delete(photo, null, null);
+    if (token != null) {
+      backup().delete();
+      editBackup().delete();
+      context.getSharedPreferences("alpha-photo-edit-results", 0).edit().remove(token).commit();
+    }
+  }
 
- @Test public void anUnrestoredWriteKeepsTheBackupUntilALaterResultRestoresIt()throws Exception{
-  assumeTrue(android.os.Build.VERSION.SDK_INT>=30);Context c=context();ContentResolver r=c.getContentResolver();Uri uri=owned(r);
-  try{
-   byte[] original=read(r,uri);OwnedPhotoEdits edits=new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG,null,new Faulty(1000,Integer.MAX_VALUE));
-   String token=begin(edits,r,uri);
-   try{edits.replace(token,90,false,"none");fail("the injected write failure is reported");}catch(IOException expected){}
-   assertFalse("the original is damaged while the restore keeps failing",Arrays.equals(original,read(r,uri)));
-   assertEquals(2,backups(c).length);
-   assertEquals("unknown",new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG,null,new Faulty(1000,Integer.MAX_VALUE)).result(token).getString("status"));
-   assertEquals("the original and encoded edit are still kept",2,backups(c).length);
-   // As a new process would: the default writer restores the original from the backup.
-   assertEquals("failed",new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG).result(token).getString("status"));
-   assertArrayEquals(original,read(r,uri));
-   assertEquals(0,backups(c).length);
-   assertEquals("settled once","failed",new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG).result(token).getString("status"));
-  }finally{r.delete(uri,null,null);}
- }
+  @Test public void failedWriteRestoresOriginal() throws Exception {
+    byte[] original = readPhoto();
+    Faulty writer = new Faulty(1000, 1);
+    failWrite(writer);
+    assertEquals(2, writer.opens);
+    assertArrayEquals(original, readPhoto());
+    assertEquals("failed", result());
+    assertFalse(backup().exists());
+  }
 
- @Test public void aWriteThatCompletedBeforeItsErrorIsTheSavedEdit()throws Exception{
-  assumeTrue(android.os.Build.VERSION.SDK_INT>=30);Context c=context();ContentResolver r=c.getContentResolver();Uri uri=owned(r);
-  try{
-   byte[] original=read(r,uri);OwnedPhotoEdits edits=new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG,null,new Faulty(-1,1));
-   String token=begin(edits,r,uri);
-   JSONObject receipt=edits.replace(token,90,false,"none");
-   assertEquals("saved",receipt.getString("status"));assertTrue(receipt.getBoolean("replaced"));
-   byte[] now=read(r,uri);assertFalse(Arrays.equals(original,now));
-   Bitmap rotated=BitmapFactory.decodeByteArray(now,0,now.length);assertNotNull(rotated);assertEquals(192,rotated.getWidth());assertEquals(256,rotated.getHeight());rotated.recycle();
-   assertEquals(0,backups(c).length);
-  }finally{r.delete(uri,null,null);}
- }
+  @Test public void laterResultRestoresTheSameRecordedDamage() throws Exception {
+    byte[] original = readPhoto();
+    failWrite(new Faulty(1000, Integer.MAX_VALUE));
+    assertEquals(1000, readPhoto().length);
+    assertTrue(backup().exists());
+    assertEquals("unknown", edits(new Faulty(500, 1)).result(token).getString("status"));
+    assertEquals(500, readPhoto().length);
+    assertEquals("failed", result());
+    assertArrayEquals(original, readPhoto());
+    assertFalse(backup().exists());
+    assertEquals("failed", result());
+  }
 
- @Test public void recoveryLeavesALaterExternalEditUntouched()throws Exception{
-  assumeTrue(android.os.Build.VERSION.SDK_INT>=30);Context c=context();ContentResolver r=c.getContentResolver();Uri uri=owned(r);String token=null;
-  try{
-   OwnedPhotoEdits edits=new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG,null,new Faulty(1000,Integer.MAX_VALUE));
-   token=begin(edits,r,uri);
-   try{edits.replace(token,90,false,"none");fail("the injected write failure is reported");}catch(IOException expected){}
-   byte[] newer="a later external edit must survive recovery".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-   try(OutputStream output=r.openOutputStream(uri,"wt")){assertNotNull(output);output.write(newer);}
-   OwnedPhotoEdits recovery=new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG);
-   assertEquals("unknown",recovery.result(token).getString("status"));
-   assertArrayEquals(newer,read(r,uri));
-   assertEquals("inspection keeps both recovery files",2,backups(c).length);
-   assertEquals("unknown",recovery.result(token).getString("status"));
-   assertArrayEquals(newer,read(r,uri));
-  }finally{discardRecovery(c,token);r.delete(uri,null,null);}
- }
+  @Test public void laterResultLeavesNewerPhotoAndOriginalBackupIntact() throws Exception {
+    byte[] original = readPhoto();
+    failWrite(new Faulty(1000, Integer.MAX_VALUE));
+    writePhoto(21);
+    byte[] newer = readPhoto();
+    Faulty observer = new Faulty(1000, 0);
+    assertEquals("unknown", edits(observer).result(token).getString("status"));
+    assertEquals(0, observer.opens);
+    assertArrayEquals(newer, readPhoto());
+    assertTrue(backup().exists());
+    assertArrayEquals(original, java.nio.file.Files.readAllBytes(backup().toPath()));
+  }
 
- @Test public void legacyRecoveryWithoutEncodedBytesLeavesCurrentContentUntouched()throws Exception{
-  assumeTrue(android.os.Build.VERSION.SDK_INT>=30);Context c=context();ContentResolver r=c.getContentResolver();Uri uri=owned(r);String token=null;
-  try{
-   OwnedPhotoEdits edits=new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG,null,new Faulty(1000,Integer.MAX_VALUE));
-   token=begin(edits,r,uri);
-   try{edits.replace(token,90,false,"none");fail("the injected write failure is reported");}catch(IOException expected){}
-   android.content.SharedPreferences journal=c.getSharedPreferences(AlphaPhotosPlugin.MEDIA_CONFIG.preferences("photo-edit-results"),0);
-   JSONObject record=new JSONObject(journal.getString(token,null));record.remove("editBackup");
-   assertTrue(journal.edit().putString(token,record.toString()).commit());
-   assertTrue(new File(c.getFilesDir(),"photo-replace-backups/"+token+".edited").delete());
-   byte[] current=read(r,uri);
-   assertEquals("unknown",new OwnedPhotoEdits(c,AlphaPhotosPlugin.MEDIA_CONFIG).result(token).getString("status"));
-   assertArrayEquals(current,read(r,uri));
-   assertEquals(1,backups(c).length);
-  }finally{discardRecovery(c,token);r.delete(uri,null,null);}
- }
+  @Test public void interruptedWriteWithoutDamageProofRetainsBackup() throws Exception {
+    failWrite(new Faulty(1000, Integer.MAX_VALUE));
+    android.content.SharedPreferences journal =
+        context.getSharedPreferences("alpha-photo-edit-results", 0);
+    JSONObject interrupted = new JSONObject(journal.getString(token, ""));
+    interrupted.remove("damage");
+    interrupted.remove("editBackup");
+    assertTrue(journal.edit().putString(token, interrupted.toString()).commit());
+    byte[] interruptedBytes = readPhoto();
+    Faulty observer = new Faulty(1000, 0);
+    assertEquals("unknown", edits(observer).result(token).getString("status"));
+    assertEquals(0, observer.opens);
+    assertArrayEquals(interruptedBytes, readPhoto());
+    assertTrue(backup().exists());
+  }
 
- private static void discardRecovery(Context c,String token){
-  if(token==null)return;
-  new File(c.getFilesDir(),"photo-replace-backups/"+token+".original").delete();
-  new File(c.getFilesDir(),"photo-replace-backups/"+token+".edited").delete();
-  c.getSharedPreferences(AlphaPhotosPlugin.MEDIA_CONFIG.preferences("photo-edit-results"),0).edit().remove(token).commit();
- }
+  @Test public void processDeathDuringEditRecoversDurablePrefix() throws Exception {
+    byte[] original = readPhoto();
+    crashWrite(1000);
+    assertTrue(editBackup().isFile());
+    assertEquals(1000, readPhoto().length);
+    assertEquals("failed", result());
+    assertArrayEquals(original, readPhoto());
+    assertFalse(backup().exists());
+    assertFalse(editBackup().exists());
+  }
+
+  @Test public void processDeathImmediatelyAfterTruncationRecoversOriginal() throws Exception {
+    byte[] original = readPhoto();
+    crashWrite(0);
+    assertEquals(0, readPhoto().length);
+    assertEquals("failed", result());
+    assertArrayEquals(original, readPhoto());
+  }
+
+  @Test public void processDeathDuringRestoreRecoversOriginalPrefix() throws Exception {
+    byte[] original = readPhoto();
+    crashWrite(1000);
+    try {
+      edits(new Faulty(500, 1, true)).result(token);
+      fail("Expected interrupted restore");
+    } catch (ProcessDeath expected) { }
+    assertEquals(500, readPhoto().length);
+    assertEquals("failed", result());
+    assertArrayEquals(original, readPhoto());
+    assertFalse(editBackup().exists());
+  }
+
+  @Test public void unrelatedOriginalPrefixWithoutRestorePhaseStaysUnresolved() throws Exception {
+    byte[] original = readPhoto();
+    crashWrite(1000);
+    try (OutputStream out = resolver.openOutputStream(photo, "wt")) {
+      out.write(original, 0, 500);
+    }
+    byte[] before = readPhoto();
+    assertEquals("unknown", result());
+    assertArrayEquals(before, readPhoto());
+    assertArrayEquals(original, java.nio.file.Files.readAllBytes(backup().toPath()));
+    assertTrue(editBackup().exists());
+  }
+
+  @Test public void changedDurableEditRetainsBothBackups() throws Exception {
+    byte[] original = readPhoto();
+    crashWrite(1000);
+    byte[] before = readPhoto();
+    java.nio.file.Files.write(editBackup().toPath(), new byte[] {3, 2, 1});
+    assertEquals("unknown", result());
+    assertArrayEquals(before, readPhoto());
+    assertArrayEquals(original, java.nio.file.Files.readAllBytes(backup().toPath()));
+    assertArrayEquals(new byte[] {3, 2, 1}, java.nio.file.Files.readAllBytes(editBackup().toPath()));
+  }
+
+  private void crashWrite(int limit) throws Exception {
+    OwnedPhotoEdits edit = edits(new Faulty(limit, 1, true));
+    begin(edit);
+    try {
+      edit.replace(token, 90, false, "none");
+      fail("Expected interrupted write");
+    } catch (ProcessDeath expected) { }
+    JSONObject journal = new JSONObject(context.getSharedPreferences("alpha-photo-edit-results", 0)
+        .getString(token, ""));
+    assertFalse(journal.has("damage"));
+  }
+
+  @Test public void completedWriteWithCloseErrorIsSaved() throws Exception {
+    OwnedPhotoEdits edit = edits(new Faulty(-1, 1));
+    begin(edit);
+    JSONObject receipt = edit.replace(token, 90, false, "none");
+    assertEquals("saved", receipt.getString("status"));
+    assertTrue(receipt.getBoolean("replaced"));
+    byte[] bytes = readPhoto();
+    Bitmap rotated = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+    assertNotNull(rotated);
+    try {
+      assertEquals(192, rotated.getWidth());
+      assertEquals(256, rotated.getHeight());
+    } finally {
+      rotated.recycle();
+    }
+    assertFalse(backup().exists());
+  }
+
+  private void failWrite(Faulty writer) throws Exception {
+    OwnedPhotoEdits edit = edits(writer);
+    begin(edit);
+    try {
+      edit.replace(token, 90, false, "none");
+      fail("Expected the injected write failure");
+    } catch (IOException expected) {
+      assertEquals("No space left on device", expected.getMessage());
+    }
+  }
+
+  private void begin(OwnedPhotoEdits edit) throws Exception {
+    String revision;
+    try (Cursor row = resolver.query(photo,
+        new String[] {"date_added", "_size", "generation_modified", "is_trashed"},
+        null, null, null)) {
+      assertNotNull(row);
+      assertTrue(row.moveToFirst());
+      revision = row.getLong(0) + ":" + row.getLong(1) + ":" + row.getLong(2) + ":" + row.getInt(3);
+    }
+    JSONObject session = edit.begin(Long.toString(ContentUris.parseId(photo)), revision);
+    assertTrue(session.getBoolean("canReplace"));
+    token = session.getString("sessionId");
+  }
+
+  private OwnedPhotoEdits edits(OwnedPhotoEdits.ReplaceOutput output) {
+    return new OwnedPhotoEdits(context, AlphaMediaConfig.MEDIA, null, output);
+  }
+
+  private String result() throws Exception {
+    return edits(null).result(token).getString("status");
+  }
+
+  private File backup() {
+    return new File(new File(context.getFilesDir(), "photo-replace-backups"), token + ".original");
+  }
+
+  private File editBackup() {
+    return new File(new File(context.getFilesDir(), "photo-replace-backups"), token + ".edited");
+  }
+
+  private byte[] readPhoto() throws Exception {
+    try (InputStream in = resolver.openInputStream(photo);
+         ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      assertNotNull(in);
+      byte[] buffer = new byte[16384];
+      int count;
+      while ((count = in.read(buffer)) != -1)
+        out.write(buffer, 0, count);
+      return out.toByteArray();
+    }
+  }
+
+  private void writePhoto(int seed) throws Exception {
+    Bitmap bitmap = Bitmap.createBitmap(256, 192, Bitmap.Config.ARGB_8888);
+    Random random = new Random(seed);
+    int[] pixels = new int[256 * 192];
+    for (int i = 0; i < pixels.length; i++)
+      pixels[i] = 0xff000000 | random.nextInt(0x1000000);
+    bitmap.setPixels(pixels, 0, 256, 0, 0, 256, 192);
+    try (OutputStream out = resolver.openOutputStream(photo, "wt")) {
+      assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out));
+    } finally {
+      bitmap.recycle();
+    }
+  }
+
+  private static final class ProcessDeath extends Error { }
+
+  private static final class Faulty implements OwnedPhotoEdits.ReplaceOutput {
+    private final int limit;
+    private final int failures;
+    private final boolean crash;
+    private int opens;
+
+    Faulty(int limit, int failures) {
+      this(limit, failures, false);
+    }
+
+    Faulty(int limit, int failures, boolean crash) {
+      this.limit = limit;
+      this.failures = failures;
+      this.crash = crash;
+    }
+
+    @Override public OutputStream open(ContentResolver resolver, Uri target) throws IOException {
+      OutputStream output = resolver.openOutputStream(target, "wt");
+      if (opens++ >= failures)
+        return output;
+      return new FilterOutputStream(output) {
+        private int written;
+
+        @Override public void write(int value) throws IOException {
+          if (limit >= 0 && written >= limit) {
+            if (crash) throw new ProcessDeath();
+            throw new IOException("No space left on device");
+          }
+          out.write(value);
+          written++;
+        }
+
+        @Override public void write(byte[] values, int offset, int length) throws IOException {
+          for (int i = 0; i < length; i++)
+            write(values[offset + i]);
+        }
+
+        @Override public void close() throws IOException {
+          super.close();
+          if (limit < 0)
+            throw new IOException("close failed");
+        }
+      };
+    }
+  }
 }

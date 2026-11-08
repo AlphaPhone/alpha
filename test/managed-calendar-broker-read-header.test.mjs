@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {Readable} from 'node:stream';
 import {EventEmitter} from 'node:events';
 // Actual broker + exact shared codec, with only external error-class identities
 // replaced. No real host/SDK graph, provider, native bridge, or socket is loaded.
-const strip=source=>stripTypeScriptTypes(source.replace(/^import .*;\n/gm,'').replace(/^export /gm,''),{mode:'transform'});
+const strip=source=>stripTypeScriptTypes(source.replace(/^import .*;\n/gm,'').replace(/^export /gm,''),{mode:'strip'});
 const brokerSource=readFileSync('backend/managed-google-agent-broker.ts','utf8');
 const contractImport=brokerSource.match(/^import \{calendarReadBrokerDiagnosticHeader\} from '([^']+)';$/m);
 assert.equal(contractImport?.[1],'../vendor/eliza/packages/contracts/src/calendar.ts','broker must consume the actual pinned shared source');
@@ -20,7 +20,8 @@ const helper=new Function(strip(readFileSync('backend/managed-google-failure-sta
 class CloudProtocolError extends Error{constructor(code,status,data){super('private synthetic error');this.code=code;this.status=status;this.data=data;}}
 class CalendarAgentWriteRefused extends Error{constructor(){super('private refusal');this.refusal={code:'SYNTHETIC_UNCHANGED_REFUSAL'};}}
 const brokerCode=strip(brokerSource);
-const makeBroker=new Function('calendarReadBrokerDiagnosticHeader','managedGoogleFailureStage','managedGoogleTransportCodes','CloudProtocolError','CalendarAgentWriteRefused',brokerCode+';return createManagedGoogleAgentBroker;')(codec,helper.managedGoogleFailureStage,helper.managedGoogleTransportCodes,CloudProtocolError,CalendarAgentWriteRefused);
+class GoogleAgentRefusal extends Error{}
+const makeBroker=new Function('calendarReadBrokerDiagnosticHeader','managedGoogleFailureStage','managedGoogleTransportCodes','CloudProtocolError','CalendarAgentWriteRefused','GoogleAgentRefusal','GOOGLE_AGENT_RESULT_MAX','GMAIL_QUERY_MAX',brokerCode+';return createManagedGoogleAgentBroker;')(codec,helper.managedGoogleFailureStage,helper.managedGoogleTransportCodes,CloudProtocolError,CalendarAgentWriteRefused,GoogleAgentRefusal,256*1024,2048);
 const secret='NEVER_EXPOSE_TOKEN_ACCOUNT_BODY_QUERY';
 const generic='Google request could not be verified. Check the current account, permissions, and any saved operation receipt before retrying.';
 async function call({input={calendar:{operation:'sources'}},error=new Error(secret),stage,authorized=true,method='POST',origin,success=false,logThrows=false}={}){

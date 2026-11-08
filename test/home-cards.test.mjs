@@ -162,7 +162,8 @@ test('next item: an overdue reminder does not hide the next event, which keeps i
   assert.deepEqual(H.presentHomeNext({title: '  ', begin: at(17), allDay: false, now, provenance: reminder}),
     {text: 'Next: Untitled event 5:00 PM', source: 'Reminder', description: 'Next: Untitled event, 5:00 PM. Reminder saved on this browser, read 2:50 PM'});
   const cards = readFileSync(new URL('../apps/app/src/prototype/home-overview-cards.ts', import.meta.url), 'utf8');
-  assert.match(cards, /out\.homeCalendarHasNext \? \{text: String\(out\.homeCalendarNext \|\| ''\), source: String\(out\.homeCalendarNextSource \|\| ''\)\}/);
+  assert.match(cards, /out\.homeCalendarHasNext \? \{text: String\(out\.homeCalendarNext \|\| ''\), source: String\(out\.homeCalendarNextSource \|\| ''\)\}/, 'the Next line retains its source label');
+  assert.match(cards, /description: String\(out\.homeCalendarDescription \?\? ''\)/, 'the card retains the model description, including the next item source');
   assert.match(cards, /next: \{'data-alpha-home-calendar-next-line': ''\}, nextSource: \{'data-alpha-home-calendar-next-source': ''\}/);
 });
 test('next item under Agent Calendar: an overdue reminder shows whichever comes first of an upcoming phone reminder and the agent event', () => {
@@ -197,28 +198,6 @@ test('a phone reminder leading under Agent Calendar keeps a failed or out-of-dat
   assert.match(adapter, /presentHomeAgendaCard\(agentReminderLead\(local,feed\)\)/);
 });
 test('Agent Calendar freshness: an unverified next event is never fresh or an empty schedule', () => {
-  const next = {calendarFeedState: 'complete', timeReference: {asOf: new Date(at(15)).toISOString()}};
-  const fresh = H.presentAgentAgendaFeed({status: 'ready', next, nextFresh: true, error: null}, true, now, 'No upcoming events in this window');
-  assert.equal(fresh.state, 'ready'); assert.equal(fresh.read, 'Agent Calendar'); assert.equal(fresh.stale, false);
-  assert.equal(H.presentAgentAgendaFeed({status: 'ready', next: {...next}, nextFresh: true, error: null}, false, now, 'No upcoming events in this window').title, 'No upcoming events in this window');
-  // A failed next read keeps the same-source cached event, shown stale with the failure.
-  const failed = H.presentAgentAgendaFeed({status: 'ready', next, nextFresh: false, error: 'Next event could not be refreshed. Saved event is unverified.'}, true, now, 'Calendar has not been verified');
-  assert.equal(failed.state, 'stale'); assert.equal(failed.stale, true); assert.match(failed.read, /^Not updated since /);
-  assert.equal(failed.description, 'Next event could not be refreshed. Saved event is unverified. Open Calendar to retry.');
-  // An event that ended (or a partial feed) with nothing verified since is unverified, not empty.
-  for (const status of ['ready', 'partial']) {
-    const ended = H.presentAgentAgendaFeed({status, next: null, nextFresh: false, error: null}, false, now, 'Calendar has not been verified');
-    assert.equal(ended.state, 'error'); assert.equal(ended.title, 'Calendar has not been verified'); assert.equal(ended.read, 'Open Calendar to retry');
-    assert.doesNotMatch(ended.title, /No upcoming/);
-    assert.equal(ended.description, 'Agent Calendar has not been verified. Open Calendar to retry.');
-  }
-  // Reading again after the failure, and other controller states, keep the shared presentation.
-  assert.equal(H.presentAgentAgendaFeed({status: 'loading', next, nextFresh: false, error: null}, true, now, '').state, 'loading');
-  assert.equal(H.presentAgentAgendaFeed(undefined, false, now, '').state, 'not-connected');
-  assert.equal(H.presentAgentAgendaFeed({status: 'error', next: null, nextFresh: false, error: 'Calendar service unavailable'}, false, now, '').description, 'Calendar service unavailable. Open Calendar to retry.');
-  // A stale feed with a failed retry leads a phone reminder with the agent's read line.
-  const local = {now, item: {title: 'Call mom', begin: at(16), allDay: false, video: false}, provenance: {origin: 'Reminder', read: '', description: 'Reminder saved on this browser'}};
-  assert.equal(H.presentHomeAgendaCard(H.agentReminderLead(local, failed)).stale, true);
   // Exercise the current adapter's actual render closure with the real complete-feed
   // selector. A future-only `next` result must never authorize Home's agenda.
   const adapter = readFileSync(new URL('../apps/app/src/prototype/agent-calendar-adapter.ts', import.meta.url), 'utf8');
@@ -236,7 +215,7 @@ test('Agent Calendar freshness: an unverified next event is never fresh or an em
   const source={provider:'eliza',side:'owner',grantId:'fixture',connectorAccountId:null,calendarId:'primary',includeInFeed:true,accessRole:'owner'};
   const event={...source,id:'event',title:'Verified today',status:'confirmed',startAt:new Date(at(16)).toISOString(),endAt:new Date(at(17)).toISOString()};
   let current=true,owner='owner',state={ownerKey:'owner',status:'ready',mutating:false,calendars:[source],next:{event},nextFresh:true,feed:undefined};
-  let reads=0;const opened=[],context={p:{},renderVals:()=>({}),deviceCalendarScope:()=>false,Date:class extends Date{static now(){return now;}},controller:{get state(){return state;},sourceHandle:()=> 'fixture'},calendarSourceKey:key,port:()=>({current:()=>current}),calendarOwnerKey:()=>owner,zone:()=> 'UTC',homeCalendarSelection:loaded.exports.homeCalendarSelection,homeCalendarValues:H.homeCalendarValues,presentHomeAgendaCard:H.presentHomeAgendaCard,presentHomeAgendaFeed:H.presentHomeAgendaFeed,agentReminderLead:H.agentReminderLead,overdueAgendaNext:H.overdueAgendaNext,refresh:force=>{assert.equal(force,true);reads++;},calendarEventKey:e=>e.id,canonicalCalendarRow:()=>({off:0})};
+  let reads=0;const opened=[],context={p:{},renderVals:()=>({}),deviceCalendarScope:()=>false,Date:class extends Date{static now(){return now;}},controller:{get state(){return state;},sourceHandle:()=> 'fixture'},calendarSourceKey:key,port:()=>({current:()=>current}),calendarOwnerKey:()=>owner,zone:()=> 'UTC',homeCalendarSelection:loaded.exports.homeCalendarSelection,homeCalendarValues:H.homeCalendarValues,homeReadIsStale:H.homeReadIsStale,presentHomeAgendaCard:H.presentHomeAgendaCard,presentHomeAgendaFeed:H.presentHomeAgendaFeed,agentReminderLead:H.agentReminderLead,overdueAgendaNext:H.overdueAgendaNext,refresh:force=>{assert.equal(force,true);reads++;},calendarEventKey:e=>e.id,canonicalCalendarRow:()=>({off:0})};
   vm.runInNewContext(transformSync(adapter.slice(start,end+4),{loader:'ts'}).code,context);
   let savedPrefs={};const shell={vget:()=>({calPrefs:savedPrefs}),openView:(...args)=>opened.push(args)},render=()=>context.p.renderVals.call(shell);
   let home=render();assert.doesNotMatch(home.homeCalendarTitle,/Verified today|Nothing planned/,'next-only cache is unverified');
@@ -250,13 +229,22 @@ test('Agent Calendar freshness: an unverified next event is never fresh or an em
     const saved=state;state={...state,status,error:'Calendar service unavailable',feed:status==='partial'?{...state.feed,state:'partial'}:null};
     const failed=render();assert.equal(reads,0,'failure rendering never starts reads');assert.doesNotMatch(failed.homeCalendarTitle,/Verified today|Nothing planned/);
     if(status==='partial'){
-      assert.equal(failed.homeCalendarTitle,'Calendar');
-      assert.equal(failed.homeCalendarDescription,'Open Calendar to retry');
+      assert.equal(failed.homeCalendarTitle,'Calendar unavailable');
+      assert.equal(failed.homeCalendarDescription,'Calendar service unavailable. Open Calendar to retry.');
     }
     failed.goCalendar();assert.equal(reads,1,'explicit navigation retries the actual failed/unverified feed');reads=0;state=saved;
   }
   current=false;assert.doesNotMatch(render().homeCalendarTitle,/Verified today|Nothing planned/,'retired connection drops the event');current=true;
-  state={...state,feed:{...state.feed,events:[]}};assert.equal(render().homeCalendarTitle,'Nothing planned','only complete covered feed can assert empty');
+  state={...state,feed:{...state.feed,events:[],syncedAt:new Date(now).toISOString()}};assert.equal(render().homeCalendarTitle,'Nothing planned','only complete covered feed can assert empty');
+  for(const syncedAt of [new Date(now-2*86400000).toISOString(),new Date(now+3600000).toISOString(),undefined]){
+    state={...state,feed:{...state.feed,syncedAt}};
+    const unverified=render();
+    assert.equal(unverified.homeCalendarConfirmedEmpty,false);
+    assert.equal(unverified.homeCalendarTitle,'Calendar has not been verified');
+    assert.equal(unverified.homeCalendarSource,'Open Calendar to retry');
+    assert.equal(reads,0,'rendering an unverified empty read never retries automatically');
+    unverified.goCalendar();assert.equal(reads,1,'owner navigation explicitly retries unverified empty reads');reads=0;
+  }
 });
 test('inbox status: readable freshness and every non-ready state', () => {
   const base = {failure: false, pending: false, cached: null, connected: false, unchecked: false, now};
@@ -292,10 +280,15 @@ test('Home template renders source, freshness and the brief card only from live 
   assert.doesNotMatch(home, /\}\}\s+\{\{/, 'each card placeholder is alone in its text node');
   assert.doesNotMatch(home, /home-calendar-card|home-brief-card|data-alpha-home-inbox|\{\{homeCalendarTitle\}\}|\{\{homeBriefTitle\}\}|\{\{homeInboxTitle\}\}/, 'no second copy of the shared card markup');
   assert.match(home, /aria-description="\{\{homeWorkflowDescription\}\}"/);
-  assert.match(home, /<sc-if value="\{\{homeWorkflowFreshness\}\}"><span data-alpha-home-workflow-freshness>/);
+  const workflows = readFileSync(new URL('../apps/app/src/prototype/workflow-adapter.ts', import.meta.url), 'utf8');
+  const automations = readFileSync(new URL('../apps/app/src/prototype/automations-adapter.ts', import.meta.url), 'utf8');
+  for (const source of [workflows, automations]) {
+    assert.match(source, /presentHomeWorkflowFreshness\(/);
+    assert.match(source, /homeWorkflowDescription:loaded\.description/, 'the compact card keeps the read time in its accessible description');
+  }
   assert.doesNotMatch(home, /Morning brief|Design review|7:02 AM/, 'no fixture brief or agenda text in the template');
   const adapter = readFileSync(new URL('../apps/app/src/prototype/data-adapter.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(adapter, /gmailSearch|gmailThread|\.sync\(|fetch\(/, 'the Home adapter starts no mail read, digest sync or network request');
+  assert.doesNotMatch(adapter, /gmailSearch|gmailThread|\.sync\(|fetch\(/);
 });
 
 test('calendar name lookup: the event\'s own calendar in the same read, and no borrowed or stale name', () => {

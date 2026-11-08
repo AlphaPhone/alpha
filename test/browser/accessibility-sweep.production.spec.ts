@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { auditPage, auditReadingOrder, auditTabOrder, auditTree, format } from './accessibility-audit';
+import { auditPage, auditReadingOrder, auditTabOrder, auditTree, exposedTabStopBudget, format } from './accessibility-audit';
 import { LIVE_STATES, type State } from './accessibility-states';
 
 import {flagOffAndroid, residentHome, fenceNetwork} from './flag-off-android';
@@ -33,6 +33,8 @@ const PRODUCTION_APPS_STATE: State = {
       };
     });
     await residentHome(page);
+    const notice=page.getByRole('region',{name:'Eliza Cloud sign-in notice',exact:true});
+    await notice.getByRole('button',{name:'Dismiss sign-in notice',exact:true}).click();await expect(notice).toBeHidden();
     await page.getByRole('button', {name: 'Apps', exact: true}).click();
     const drawer = page.getByRole('dialog', {name: 'Apps', exact: true});
     await expect(drawer.getByRole('button', {name: 'Open Synthetic clock', exact: true})).toBeVisible();
@@ -47,10 +49,13 @@ const blocking = (lines: string[]) => lines.filter(line => !line.startsWith('tex
 for (const state of STATES) {
   test(`production names, roles, focus, contrast and clipping: ${state.name}`, async ({ page }) => {
     await state.open(page);
+    // Walk every exposed component row in the license inventory, with room for the browser edge.
+    const tabLimit=state.name==='live Settings licenses'?await exposedTabStopBudget(page):undefined;
+    if(tabLimit)test.setTimeout(90_000);
     const found = blocking(format([
       ...await auditTree(page),
       ...await auditPage(page, { contrast: true, targetSize: 24, clipping: true, overlap: true, dock: true }),
-      ...await auditTabOrder(page),
+      ...await auditTabOrder(page,tabLimit),
       ...await auditReadingOrder(page),
     ]));
     expect(found, found.join('\n')).toEqual([]);
@@ -63,7 +68,9 @@ test.describe('landscape', () => {
     test(`production landscape keeps every control on screen: ${state.name}`, async ({ page }) => {
       await state.open(page);
       await expect(page.locator('html')).toHaveClass(/alpha-landscape/);
-      const found = blocking(format([...await auditPage(page, { clipping: true, overlap: true, dock: true }), ...await auditTree(page), ...await auditTabOrder(page), ...await auditReadingOrder(page)]));
+      const tabLimit=state.name==='live Settings licenses'?await exposedTabStopBudget(page):undefined;
+      if(tabLimit)test.setTimeout(90_000);
+      const found = blocking(format([...await auditPage(page, { clipping: true, overlap: true, dock: true }), ...await auditTree(page), ...await auditTabOrder(page,tabLimit), ...await auditReadingOrder(page)]));
       expect(found, found.join('\n')).toEqual([]);
     });
   }

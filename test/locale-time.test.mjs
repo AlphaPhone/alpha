@@ -54,6 +54,15 @@ test('time ranges share a trailing day period only when both ends have the same 
   assert.equal(L.formatHoursRange(15, 16.5), '15:00 – 16:30');
   L.setLocalePreferences({});
 });
+test('formatDateTime keeps the date and follows the device hour cycle without seconds', () => {
+  L.setLocalePreferences({locale: 'en-US', hourCycle: 'h23'});
+  assert.equal(L.formatDateTime(afternoon), 'Oct 7, 2026, 15:04');
+  L.setLocalePreferences({locale: 'en-US', hourCycle: 'h12'});
+  assert.equal(L.formatDateTime(afternoon), 'Oct 7, 2026, 3:04 PM');
+  L.setLocalePreferences({locale: 'en-GB', hourCycle: 'h12'});
+  assert.match(L.formatDateTime(afternoon), /^7 Oct 2026,? 3:04 pm$/i);
+  L.setLocalePreferences({});
+});
 test('model.js has no hard-coded weekday, month or 12-hour clock code paths', () => {
   const model = readFileSync(new URL('../apps/app/src/prototype/model.js', import.meta.url), 'utf8');
   assert.doesNotMatch(model, /\["Sunday", "Monday"/);
@@ -62,4 +71,14 @@ test('model.js has no hard-coded weekday, month or 12-hour clock code paths', ()
   assert.doesNotMatch(model, /\? " AM" : " PM"|"PM" : "AM"|"AM" : "PM"/);
   assert.doesNotMatch(model, /(?:DAYS|MONS)\[[^\]]+\]\.slice\(0, 3\)/);
   assert.doesNotMatch(model, /\.slice\(-2\) === [a-z]+\.slice\(-2\)/, 'no AM/PM suffix slicing');
+});
+
+test('full message dates retain seconds and follow the device hour cycle', () => {
+  assert.equal(L.formatFullDateTime(new Date('')), 'Date unavailable');
+  L.setLocalePreferences({locale: 'en-US', hourCycle: 'h23'});
+  assert.match(L.formatFullDateTime(afternoon), /Wednesday, October 7, 2026/);
+  assert.match(L.formatFullDateTime(afternoon), /15:04:00/);
+  L.setLocalePreferences({locale: 'en-US', hourCycle: 'h12'});
+  assert.match(L.formatFullDateTime(afternoon), /3:04:00 PM/);
+  L.setLocalePreferences({});
 });

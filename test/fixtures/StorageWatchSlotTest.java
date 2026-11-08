@@ -1,4 +1,4 @@
-package ai.elizaresearch.alphaphone;
+package ai.eliza.plugins.filesystem.browser;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -17,9 +17,14 @@ public final class StorageWatchSlotTest {
   check(slot.install(newer,()->{registered.incrementAndGet();return watch;}),"the latest request registers");
   check(!slot.install(older,()->{registered.incrementAndGet();return watch;}),"a superseded request registers nothing");
   check(registered.get()==1&&slot.active(),"one watch");
+  check(!slot.isCurrent(older)&&slot.isCurrent(newer),"only the installed current owner may publish");
   // The next watch stops the current one first; unwatch stops it.
   check(slot.install(slot.request(),()->{registered.incrementAndGet();return watch;})&&stopped.get()==1,"a new watch stops the previous one");
   slot.clear();check(stopped.get()==2&&!slot.active(),"unwatch stops the current watch");
+  check(!slot.isCurrent(newer),"late callbacks cannot publish after unwatch");
+  long failed=slot.request();
+  try{slot.install(failed,()->{throw new IllegalStateException("registration failed");});throw new AssertionError("registration succeeded");}catch(IllegalStateException expected){}
+  check(!slot.active()&&!slot.isCurrent(failed),"a failed registration has no publication authority");
   // A watch refused before it installs (invalid path, access denied) stops the previous folder's watch.
   check(slot.install(slot.request(),()->{registered.incrementAndGet();return watch;})&&slot.active(),"a folder is watched");
   long refused=slot.request();slot.fail(refused);

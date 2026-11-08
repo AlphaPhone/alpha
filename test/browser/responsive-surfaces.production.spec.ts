@@ -7,7 +7,6 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 // window resizing and the software keyboard; they do not qualify Android rotation, process
 // recreation, TalkBack or a device keyboard.
 test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
-test.beforeEach(({}, info) => test.skip(info.project.name !== 'production', 'Production bundle only'));
 
 const PORTRAIT = { width: 412, height: 915 }, SMALL_LANDSCAPE = { width: 640, height: 360 }, LANDSCAPE = { width: 915, height: 412 };
 const TABLET_PORTRAIT = { width: 800, height: 1280 }, TABLET_LANDSCAPE = { width: 1280, height: 800 };
@@ -56,7 +55,7 @@ test('the canvas keeps its own density and takes its arrangement from measured s
   // A small phone turned sideways is not shrunk: 44px controls stay 44px.
   await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: true, wide: false });
   await expectTarget(page, page.getByRole('button', { name: 'Back to apps', exact: true }));
-  await expectTarget(page, page.getByRole('button', { name: 'Display', exact: true }));
+  await expectTarget(page, page.getByRole('button', { name: 'About', exact: true }));
   // A tablet is never drawn as a magnified phone, in either orientation.
   await resize(page, TABLET_LANDSCAPE);
   await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: true, wide: true });
@@ -82,7 +81,7 @@ test('the canvas keeps its own density and takes its arrangement from measured s
 
 test('Settings keeps a readable column, 44px rows and the focused row through every size', async ({ page }) => {
   await open(page, 'Settings');
-  const row = page.getByRole('button', { name: 'Display', exact: true });
+  const row = page.getByRole('button', { name: 'About', exact: true });
   await row.focus();
   const original = await row.elementHandle();
   for (const viewport of MATRIX) {
@@ -94,7 +93,7 @@ test('Settings keeps a readable column, 44px rows and the focused row through ev
     await page.screenshot({ animations: 'disabled', path: test.info().outputPath(`settings-${viewport.width}x${viewport.height}.png`) });
   }
   await row.press('Enter');
-  await expect(page.getByRole('heading', { name: 'Display', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible();
 });
 
 test('a Calendar event draft keeps its text, caret and field through resizing, in a bounded form', async ({ page }) => {
@@ -175,7 +174,6 @@ test('the Browser menu ends above the dock on short screens and its rows stay re
     expect(await last.evaluate(el => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return hit === el || el.contains(hit); })).toBe(true);
     await page.screenshot({ animations: 'disabled', path: test.info().outputPath(`browser-menu-${viewport.width}x${viewport.height}.png`) });
     await page.keyboard.press('Escape');
-    if (await menu.isVisible()) await page.getByRole('button', { name: 'Menu', exact: true }).click();
     await expect(menu).toBeHidden();
   }
 });
@@ -204,7 +202,7 @@ const fakeCamera = () => {
 test('Camera keeps one capture session and an undistorted preview through rotation; Photos fits the capture', async ({ page }) => {
   await page.addInitScript(fakeCamera);
   await open(page, 'Camera');
-  const video = page.locator('[aria-label^="Viewfinder."] video');
+  const video = page.locator('[data-alpha-camera="viewfinder"] video');
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
   const original = await video.elementHandle();
   const shutter = page.getByRole('button', { name: 'Take photo', exact: true });
@@ -227,12 +225,14 @@ test('Camera keeps one capture session and an undistorted preview through rotati
   await expect(tile).toHaveCount(1);
   for (const tab of ['Library', 'Albums']) await expectTarget(page, page.getByRole('button', { name: tab, exact: true }));
   // Photos retains its selected density through rotation. The default is four
-  // edge-to-edge columns with 2px gaps (view refresh PLAN section 2).
+  // columns with 2px gaps and the existing 12px inset.
   const grid = page.locator('.photo-grid').filter({visible: true}).first();
   for (const viewport of [PORTRAIT, LANDSCAPE]) {
     await resize(page, viewport);
     await expect.poll(() => grid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4);
     await expect(grid).toHaveCSS('column-gap', '2px');
+    await expect(grid).toHaveCSS('margin-left', '12px');
+    await expect(grid).toHaveCSS('margin-right', '12px');
     const gridBounds = await box(grid), tileBounds = await box(tile);
     expect(tileBounds.width).toBeCloseTo((gridBounds.width - 6) / 4, 1);
     expect(Math.abs(tileBounds.width - tileBounds.height)).toBeLessThan(1);
@@ -259,7 +259,6 @@ const inert = (locator: Locator) => locator.evaluate(element => !!element.closes
 
 test('the Settings Theme choice is a 44px target at every size', async ({ page }) => {
   await open(page, 'Settings');
-  await page.getByRole('button', { name: 'Display', exact: true }).click();
   for (const viewport of [PORTRAIT, SMALL_LANDSCAPE, TABLET_LANDSCAPE]) {
     await resize(page, viewport);
     for (const name of ['Theme: Light', 'Theme: Dark']) await expectTarget(page, page.getByRole('button', { name, exact: true }));

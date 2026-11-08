@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {randomUUID} from 'node:crypto';
 import {createDeviceActionExecution} from '../vendor/eliza/packages/contracts/src/device-action-execution.ts';
 import {parseBrowserAddressInput} from '../.eliza/client-features/plugins/plugin-native-browser-surface/src/address-input.ts';
@@ -12,7 +12,7 @@ import {BrowserTabSession} from '../.eliza/client-features/plugins/plugin-native
 const root=process.env.ALPHA_RECEIPT_SOURCE_ROOT||'.';
 const read=p=>fs.readFileSync(root+'/'+p,'utf8');
 const agent=read('apps/app/src/prototype/agent-adapter.ts'),browser=read('apps/app/src/prototype/browser-adapter.ts'),device=read('apps/app/src/runtime/device-actions.ts');
-const ts=s=>stripTypeScriptTypes(s,{mode:'transform'});
+const ts=s=>stripTypeScriptTypes(s,{mode:'strip'});
 const presentation=await build({entryPoints:[root+'/apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
 const {browserNavigationSummary,projectActionMessages,succeededBrowserDestination}=await import('data:text/javascript;base64,'+Buffer.from(presentation.outputFiles[0].text).toString('base64'));
 const navigateCode=ts(browser.slice(browser.indexOf('  async function navigate('),browser.indexOf('  async function command(')));
@@ -31,7 +31,7 @@ function harness({native=false,origin='notes',receiptFailure=false,dispatchFailu
  // The chat request that carried a direct-request action settles: alphaClient clears pending and emits.
  const settle=()=>{pending=false;for(const listener of [...listeners])listener();};
  const cancel=()=>vm.runInNewContext(cancelCode,{shell,document,connection,currentContext});
- const browserContext={URL,Error,parseBrowserAddressInput,document,Capacitor:{isNativePlatform:()=>native},session:'native-session',state:()=>state,tabs,shell,get disposed(){return disposed;},profileUnsupportedTab:undefined,newTabId:()=> 'new-tab',isPrivate:()=>false,restored:new Map(),restoreAttempts:new Map(),
+ const browserContext={URL,Error,MAX_TABS:8,parseBrowserAddressInput,document,Capacitor:{isNativePlatform:()=>native},session:'native-session',state:()=>state,tabs,shell,get disposed(){return disposed;},profileUnsupportedTab:undefined,newTabId:()=> 'new-tab',isPrivate:()=>false,restored:new Map(),restoreAttempts:new Map(),
  ensure(id){return tabs.creation(id)??tabs.ensure(id,false,()=>Promise.resolve());},
  Browser:{async navigate(){controller.signal.throwIfAborted();events.push('dispatch');if(dispatchFailure)throw Error('dispatch failed');afterDispatch?.({controller,changeTab:()=>{void tabs.ensure('foreign',false,()=>Promise.resolve());state.cur='foreign';},dispose:()=>disposed=true});},async close(){}},refresh(){},report(){}};
  const browserNavigateApproved=vm.runInNewContext('(function(){'+navigateCode+'\n'+browserCode+';return this.browserNavigateApproved;}).call({})',browserContext);

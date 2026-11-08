@@ -86,6 +86,27 @@ test('a rebuild is staged only when every library is byte-identical to the revie
   assert.deepEqual(stagedLibraries(f.root).map(row => row.state), ['staged', 'staged', 'staged']);
 });
 
+test('pending requalification stops every builder entry before historical bytes or producers are used', t => {
+  const f = fixture(t, {remapBuildPath: true});
+  const record = {...f.manifest, requalification: {required: true, atPin: 'c'.repeat(40), reason: 'The pinned engine and producer inputs changed.'}};
+  const stored = JSON.stringify(record);
+  f.write(QUALIFIED_HOST, stored);
+  // The qualification decision must precede even reading the historical toolchain.
+  fs.unlinkSync(path.join(f.root, BUILD_TOOLCHAIN));
+  for (const staged of [false, true]) {
+    if (staged) for (const name of f.names) f.stage(name);
+    for (const options of [{}, {status: true}, {candidate: true}]) {
+      assert.throws(() => run(f.root, {...options, build: () => assert.fail('historical producer must not run')}),
+        error => error instanceof Stop && error.code === 3
+          && error.message.includes(`requalification required at ${'c'.repeat(40)}`)
+          && error.message.includes('prepare-embedding-host.mjs --fork')
+          && error.message.includes('stage-embedding-host.mjs --receipt'));
+    }
+  }
+  assert.equal(fs.readFileSync(path.join(f.root, QUALIFIED_HOST), 'utf8'), stored);
+  assert.equal(fs.existsSync(path.join(f.root, '.eliza')), false);
+});
+
 test('once the reviewed bytes are reproducible the step rebuilds with the remap and stages only an exact reproduction', t => {
   // The compile step is replaced: these cases are about what the step does with its result.
   const f = fixture(t, {remapBuildPath: true});
@@ -213,6 +234,21 @@ test('the input report separates what a script produces from what needs a person
   assert.deepEqual([host.suppliedBy, host.action], ['script', 'npm run agent:build-embedding-host']);
 });
 
+test('a record awaiting requalification stops the step before any build and names a person in the report', t => {
+  const f = fixture(t, {remapBuildPath: true});
+  f.write(QUALIFIED_HOST, JSON.stringify({...f.manifest, requalification: {required: true, atPin: 'c'.repeat(40), reason: 'the engine gitlink moved'}}));
+  for (const name of f.names) f.stage(name);
+  // Even reviewed bytes already staged are not admitted, and nothing is compiled or fetched.
+  assert.throws(() => run(f.root, {build: () => assert.fail('must not build')}), error => error instanceof Stop && error.code === 3
+    && /must be requalified at cccccccccccc: the engine gitlink moved/.test(error.message) && error.message.includes(HUMAN_ACTION));
+  assert.equal(fs.existsSync(path.join(f.root, '.eliza')), false, 'nothing was fetched or built');
+  f.write('upstream.lock.json', JSON.stringify({commit: 'd'.repeat(40)}));
+  f.write('android/release-signer.json', JSON.stringify({signerSha256: 'unset'}));
+  const host = strictBuildInputs(f.root, null, {env: {}, voiceHost: () => ({status: 'not-packaged'})}).find(item => item.input === 'embedding host libraries');
+  assert.deepEqual([host.state, host.suppliedBy, host.action], ['missing', 'person', HUMAN_ACTION]);
+  assert.match(host.detail, /must be requalified.*A person must requalify it/);
+});
+
 test('the real checkout reports its inputs without failing and without building', () => {
   // Signing values, if this machine has any, are not this test's input.
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^ELIZAOS_(KEYSTORE_PATH|KEYSTORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD)$/.test(name)));
@@ -229,6 +265,7 @@ test('the real checkout reports its inputs without failing and without building'
   assert.equal(row('release signer').state, 'missing', 'no signing values in this environment');
   assert.equal(row('on-device voice outputs').suppliedBy, 'person');
   assert.equal(row('on-device voice qualified').state, 'missing', 'the committed record is not qualified');
-  assert.equal(row('embedding host libraries').suppliedBy, readJson(BUILD_TOOLCHAIN).remapBuildPath === true ? 'script' : 'person');
+  const reproducible = readJson(BUILD_TOOLCHAIN).remapBuildPath === true && readJson(QUALIFIED_HOST).requalification?.required !== true;
+  assert.equal(row('embedding host libraries').suppliedBy, reproducible ? 'script' : 'person');
   for (const item of rows) assert.equal(item.action === null, item.state === 'ready', item.input);
 });

@@ -1,5 +1,13 @@
 # photos-view-agent.patch
 
+Current integration uses the shared Photos contracts in SDK
+`99b49439ce9d0cb5607e9831b9f7f58d89525029`. Library cards receive their concise
+presentation through the reviewed `photos-library-presentation-client.patch`,
+whose base and output hashes are checked by `prepare-client-features.mjs`.
+The proposal below records the earlier SDK and is retained as historical input.
+
+## Historical proposal
+
 Status: proposed upstream. No build uses this patch. It is not listed in
 `native-manifest.json` (which admits Android sources only), and `prepare-client-features`
 admits no TypeScript patch to these files. It takes effect only after it is merged upstream
@@ -71,9 +79,9 @@ only when both `photos.library.v1` and `photos.view.v1` were negotiated.
   an opened review, not a saved change.
 - Wording: the redesign removes the "Device library" album, so the shared copy no longer says
   "Photos > Device library". `proposalContextNotice` for a library operation now says "Open
-  Photos to review this action."; `describeLibraryOperation` for `photo_library_select` has no
-  description (the title is the effect), and for `photo_library_review` it is the action detail
-  alone.
+  Photos to review this action."; `describeLibraryOperation` for `photo_library_select` says
+  "Nothing is changed or shared." and for `photo_library_review` says "You confirm it in Photos,
+  then in Android." followed by the action detail.
 - `packages/agent/src/api/device-action-routes.ts`: accepts and advertises
   `photos.library.v1` and `photos.view.v1`. At the pin the route accepts neither, so without
   this change a phone could not negotiate them at all.

@@ -1,4 +1,4 @@
-import type {CreateLifeOpsCalendarEventRequest,LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,LifeOpsCalendarFeed,LifeOpsCalendarSummary,LifeOpsNextCalendarEventContext,GetLifeOpsCalendarFeedRequest,LifeOpsLinkedCalendarControl,UpdateLifeOpsLinkedCalendarControlRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
+import type {CreateLifeOpsCalendarEventRequest,LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,LifeOpsCalendarFeed,LifeOpsCalendarSummary,LifeOpsNextCalendarEventContext,GetLifeOpsCalendarFeedRequest,LifeOpsLinkedCalendarControl,LifeOpsLinkedCalendarEventView,UpdateLifeOpsLinkedCalendarControlRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
 import {eventEditorMutability,cancellationModeForEditorEvent} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy';
 import {agentCalendarClient,type AgentCalendarClient,type AppRecordPort} from './agent-calendar-client';
 export type AgentCalendarSyncReview={binding:string;control:LifeOpsLinkedCalendarControl;sources:LifeOpsCalendarSummary[];visibleLocalEventIds:string[]};
@@ -14,16 +14,20 @@ export const calendarOwnerKey=(p:AppRecordPort)=>JSON.stringify([new URL(p.ident
 export const calendarSourceKey=(s:Pick<LifeOpsCalendarSummary,'provider'|'side'|'grantId'|'calendarId'|'connectorAccountId'>)=>JSON.stringify([s.provider,s.side,s.grantId,s.connectorAccountId,s.calendarId]);
 export const calendarEventKey=(e:LifeOpsCalendarEvent)=>JSON.stringify([e.provider,e.side,e.grantId??'',e.connectorAccountId??'',e.calendarId,e.externalId,e.id]);
 const empty=():AgentCalendarState=>({ownerKey:null,status:'disconnected',feed:null,calendars:[],next:null,nextFresh:false,legacy:null,error:null,mutating:false});
+/** A response that cannot belong to this owner, agent or window; never kept across a refresh. */
+class CalendarIntegrityError extends Error{}
 type ClientFactory=(p:AppRecordPort,s:AbortSignal)=>Pick<AgentCalendarClient,'getLifeOpsCalendarFeed'|'getLifeOpsCalendars'|'getLifeOpsNextCalendarEventContext'|'createLifeOpsCalendarEvent'|'updateLifeOpsCalendarEvent'|'deleteLifeOpsCalendarEvent'|'getLinkedCalendarControl'|'updateLinkedCalendarControl'>;
 /** UI snapshot only. CalendarService remains the sole app-record authority. */
 export class AgentCalendar {
  private value=empty();private epoch=0;private abort:AbortController|undefined;private reading:AbortController|undefined;private listeners=new Set<()=>void>();private binding='';private nextQuery='';private deferredRefresh:GetLifeOpsCalendarFeedRequest|undefined;private sourceRevisions=new Map<string,string>();
  constructor(private port:()=>AppRecordPort|null,private preservation:CalendarPreservation,private client:ClientFactory=agentCalendarClient){}
  get state():Readonly<AgentCalendarState>{return this.value;}
+ /** A retained ready feed can still have an outstanding read. */
+ get refreshing(){return this.reading!==undefined;}
  subscribe(fn:()=>void){this.listeners.add(fn);return()=>{this.listeners.delete(fn);};}
  private publish(patch:Partial<AgentCalendarState>){this.value={...this.value,...patch};for(const fn of this.listeners)fn();}
  retire(){++this.epoch;this.abort?.abort();this.abort=this.reading=undefined;this.binding='';this.nextQuery='';this.deferredRefresh=undefined;this.sourceRevisions.clear();this.publish(empty());}
- private current(port:AppRecordPort,epoch:number,signal:AbortSignal){signal.throwIfAborted();if(!port.current())throw Error('Calendar owner or agent changed');const now=this.port();if(!now||epoch!==this.epoch||this.binding!==JSON.stringify([calendarOwnerKey(now),now.sessionId,now.scope]))throw Error('Calendar owner or agent changed');}
+ private current(port:AppRecordPort,epoch:number,signal:AbortSignal){signal.throwIfAborted();if(!port.current())throw new CalendarIntegrityError('Calendar owner or agent changed');const now=this.port();if(!now||epoch!==this.epoch||this.binding!==JSON.stringify([calendarOwnerKey(now),now.sessionId,now.scope]))throw new CalendarIntegrityError('Calendar owner or agent changed');}
  /** Invalidate presentation freshness without changing the authoritative event/feed. */
  invalidateNext(){
   const event=this.value.next?.event,ended=!!event&&!(Date.parse(event.endAt)>Date.now());
@@ -38,15 +42,18 @@ export class AgentCalendar {
   // serving an aborted read, so abort-and-restart only stacks Cloud work. A changed query aborts all three.
   if(this.reading&&port?.current()&&this.binding===JSON.stringify([calendarOwnerKey(port),port.sessionId,port.scope])&&this.nextQuery===JSON.stringify(window)){this.deferredRefresh={...window};this.invalidateNext();return;}
   this.abort?.abort();this.deferredRefresh=undefined;const controller=this.abort=this.reading=new AbortController(),signal=controller.signal,epoch=++this.epoch;
-  if(!port){this.binding='';this.publish(empty());return;}
-  if(!port.current()){this.binding='';this.publish(empty());return;}const ownerKey=calendarOwnerKey(port),binding=JSON.stringify([ownerKey,port.sessionId,port.scope]),query=JSON.stringify(window);
+  if(!port){this.reading=undefined;this.binding='';this.publish(empty());return;}
+  if(!port.current()){this.reading=undefined;this.binding='';this.publish(empty());return;}const ownerKey=calendarOwnerKey(port),binding=JSON.stringify([ownerKey,port.sessionId,port.scope]),query=JSON.stringify(window);
+  // A re-read of the same owner and window keeps the shown feed until it is replaced, so the
+  // visible day and selection (and with them a live turn and its proposals) stay stable.
+  const revalidating=this.binding===binding&&this.nextQuery===query&&(this.value.status==='ready'||this.value.status==='partial');
   if(this.binding!==binding||this.nextQuery!==query)this.value=empty();this.binding=binding;this.nextQuery=query;
   this.invalidateNext();
-  this.publish({ownerKey,status:'loading',error:null,feed:null,calendars:[],nextFresh:false,mutating:false});
+  if(revalidating)this.publish({error:null});else this.publish({ownerKey,status:'loading',error:null,feed:null,calendars:[],nextFresh:false,mutating:false});
   try{
    const legacy=await this.preservation.capture(signal);this.current(port,epoch,signal);this.publish({legacy});
-   if(!legacy.readable||legacy.pending){this.publish({status:'legacy-recovery'});return;}
-   if(legacy.present&&!await this.preservation.retainedReadOnly(ownerKey,legacy.fingerprint,signal)){this.current(port,epoch,signal);this.publish({status:'transition-required'});return;}
+   if(!legacy.readable||legacy.pending){this.publish({status:'legacy-recovery',feed:null,calendars:[]});return;}
+   if(legacy.present&&!await this.preservation.retainedReadOnly(ownerKey,legacy.fingerprint,signal)){this.current(port,epoch,signal);this.publish({status:'transition-required',feed:null,calendars:[]});return;}
    this.current(port,epoch,signal);const api=this.client(port,signal);
    const [feedRead,sourcesRead,nextRead]=await Promise.allSettled([api.getLifeOpsCalendarFeed(window,{signal}),api.getLifeOpsCalendars({side:window.side,mode:window.mode},{signal}),api.getLifeOpsNextCalendarEventContext({side:window.side,mode:window.mode,timeZone:window.timeZone})]);
    this.current(port,epoch,signal);
@@ -54,21 +61,31 @@ export class AgentCalendar {
    const sources=sourcesRead.value;
    // Home next-context is aggregated with hidden calendars excluded, even when
    // the separate visible feed query explicitly includes a hidden source.
-   const ownsNext=(next:LifeOpsNextCalendarEventContext|null)=>{const event=next?.event;return !event||event.agentId===port.identity.agentId&&Date.parse(event.endAt)>Date.now()&&sources.calendars.some(source=>source.includeInFeed===true&&['owner','writer','reader'].includes(source.accessRole)&&source.provider===event.provider&&source.side===event.side&&source.grantId===event.grantId&&source.calendarId===event.calendarId&&(!event.connectorAccountId||source.connectorAccountId===event.connectorAccountId));};
-   let next=ownsNext(this.value.next)?this.value.next:null;
+   const ownsNext=(next:LifeOpsNextCalendarEventContext|null)=>{const event=next?.event;return !event||event.agentId===port.identity.agentId&&sources.calendars.some(source=>source.includeInFeed===true&&['owner','writer','reader'].includes(source.accessRole)&&source.provider===event.provider&&source.side===event.side&&source.grantId===event.grantId&&source.calendarId===event.calendarId&&(!event.connectorAccountId||source.connectorAccountId===event.connectorAccountId));};
+   // The agent keeps an event until endAt >= its clock; one that ended on the phone clock is dropped, not an error.
+   const live=(next:LifeOpsNextCalendarEventContext|null)=>!next?.event||Date.parse(next.event.endAt)>Date.now();
+   let next=ownsNext(this.value.next)&&live(this.value.next)?this.value.next:null,ended=false;
    if(nextRead.status==='fulfilled'){
-    if(nextRead.value?.event&&nextRead.value.event.agentId!==port.identity.agentId)throw Error('Calendar response belongs to another agent');
-    if(!ownsNext(nextRead.value))throw Error('Next Calendar event owner, source or end time could not be verified');
-    next=nextRead.value;
+    if(nextRead.value?.event&&nextRead.value.event.agentId!==port.identity.agentId)throw new CalendarIntegrityError('Calendar response belongs to another agent');
+    if(!ownsNext(nextRead.value))throw new CalendarIntegrityError('Next Calendar event owner or source could not be verified');
+    ended=!live(nextRead.value);next=ended?null:nextRead.value;
    }
    const feed=feedRead.status==='fulfilled'?feedRead.value:null;
-   if(feed&&(window.timeMin&&Date.parse(window.timeMin)!==Date.parse(feed.timeMin)||window.timeMax&&Date.parse(window.timeMax)!==Date.parse(feed.timeMax)))throw Error('Calendar response window changed');
-   if(feed?.events.some((e:LifeOpsCalendarEvent)=>e.agentId!==port.identity.agentId))throw Error('Calendar response belongs to another agent');
+   // A failed feed read during a re-read is a transport failure: keep the shown feed (catch below).
+   if(revalidating&&feedRead.status==='rejected')throw feedRead.reason;
+   if(feed&&(window.timeMin&&Date.parse(window.timeMin)!==Date.parse(feed.timeMin)||window.timeMax&&Date.parse(window.timeMax)!==Date.parse(feed.timeMax)))throw new CalendarIntegrityError('Calendar response window changed');
+   if(feed?.events.some((e:LifeOpsCalendarEvent)=>e.agentId!==port.identity.agentId))throw new CalendarIntegrityError('Calendar response belongs to another agent');
    const revisions=await Promise.all(sources.calendars.map(async(source:LifeOpsCalendarSummary)=>[calendarSourceKey(source),Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(calendarSourceKey(source))))).map(n=>n.toString(16).padStart(2,'0')).join('')] as const));this.current(port,epoch,signal);this.sourceRevisions=new Map(revisions);
-   const nextFresh=nextRead.status==='fulfilled'&&feed?.state==='complete'&&next?.calendarFeedState==='complete';
+   const nextFresh=nextRead.status==='fulfilled'&&!ended&&feed?.state==='complete'&&next?.calendarFeedState==='complete';
    this.publish({feed,calendars:sources.calendars,next,nextFresh:!!nextFresh,status:!feed?'error':feed.state==='complete'?'ready':feed.state==='partial'?'partial':'unavailable',error:feedRead.status==='rejected'?'Calendar could not be refreshed. Saved next event is unverified.':nextRead.status==='rejected'?'Next event could not be refreshed. Saved event is unverified.':null});
-  }catch(error){if(epoch===this.epoch&&!signal.aborted)this.publish({status:'error',error:error instanceof Error?error.message:'Calendar could not be verified',feed:null,calendars:[],next:null,nextFresh:false});}
-  finally{if(this.reading===controller){this.reading=undefined;const pending=this.deferredRefresh;this.deferredRefresh=undefined;if(pending&&epoch===this.epoch)void this.refresh(pending);}}
+  }catch(error){
+   if(epoch===this.epoch&&!signal.aborted){
+    // A failed re-read keeps the shown feed; a response that fails an ownership or window check never does.
+    if(revalidating&&!(error instanceof CalendarIntegrityError))this.publish({error:'Calendar could not load. Try again.',next:null,nextFresh:false});
+    else this.publish({status:'error',error:'Calendar could not load. Try again.',feed:null,calendars:[],next:null,nextFresh:false});
+   }
+  }
+  finally{if(this.reading===controller){this.reading=undefined;const pending=this.deferredRefresh;this.deferredRefresh=undefined;if(pending&&epoch===this.epoch)void this.refresh(pending);else this.publish({});}}
  }
  async confirmLegacyRetention(){
   const port=this.port(),previous=this.value.legacy;if(!port||!previous||!this.preservation.confirmReadOnly)throw Error('Calendar transition review is required');
@@ -105,7 +122,7 @@ export class AgentCalendar {
  sourceHandle(key:string){const revision=this.sourceRevisions.get(key);return revision?'agent:'+revision:undefined;}
  sourceKeyForHandle(handle:string){return this.value.calendars.map(calendarSourceKey).find(key=>this.sourceHandle(key)===handle);}
  private async mutate<T>(operation:(api:ReturnType<ClientFactory>,port:AppRecordPort)=>Promise<T>,creation=false):Promise<T>{
-  if(this.value.mutating||!(creation?['ready','partial','unavailable']:['ready','partial']).includes(this.value.status))throw Error('Wait for the current Calendar source');
+  if(this.reading||this.value.mutating||!(creation?['ready','partial','unavailable']:['ready','partial']).includes(this.value.status))throw Error('Wait for the current Calendar source');
   const port=this.port();if(!port||calendarOwnerKey(port)!==this.value.ownerKey)throw Error('Calendar owner changed');if(!port.current())throw Error('Calendar owner or agent changed');
   const epoch=this.epoch,signal=this.abort?.signal;if(!signal)throw Error('Calendar is not ready');
   this.publish({mutating:true});
@@ -137,6 +154,13 @@ export class AgentCalendar {
    const [control,result]=await Promise.all([api.getLinkedCalendarControl(),api.getLifeOpsCalendars({side:'owner'})]);
    return {binding,control,sources:result.calendars.filter(source=>source.provider==='google'&&source.side==='owner'&&['owner','writer'].includes(source.accessRole)),visibleLocalEventIds:this.value.feed?.events.filter(event=>event.provider==='eliza'&&event.side==='owner').map(event=>event.id)??[]};
   },true);
+ }
+ /** The linked event rows with their local titles, for the sync review: one read on the same owner-bound port, no write. */
+ async listLinkedEvents(signal:AbortSignal):Promise<LifeOpsLinkedCalendarEventView[]>{
+  const port=this.port(),check=()=>{signal.throwIfAborted();const now=this.port();if(!port?.current()||!now||this.binding!==JSON.stringify([calendarOwnerKey(port),port.sessionId,port.scope])||this.binding!==JSON.stringify([calendarOwnerKey(now),now.sessionId,now.scope]))throw Error('Calendar owner or agent changed');};
+  check();const result=await port!.request('/api/lifeops/calendar/links?view=events','GET',undefined,signal) as {links?:unknown};check();
+  if(!Array.isArray(result?.links))throw Error('Calendar sync links could not be read');
+  return result.links as LifeOpsLinkedCalendarEventView[];
  }
  /** sending runs once its fence, owner and destination checks pass, immediately before the control write. */
  async changeSync(review:AgentCalendarSyncReview,operation:UpdateLifeOpsLinkedCalendarControlRequest['operation'],key:string,current:()=>boolean,sourceKey?:string,sending?:()=>void){
