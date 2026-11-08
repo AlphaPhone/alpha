@@ -654,5 +654,31 @@
       "Current source-bound traces cover open and late reply after leaving. Full Files browser load/filter/watch, provider mutation and underlying grant lifecycles remain separate obligations.",
       "The released field records the source cleanup request for a stale selected capability. The controlled port acknowledges it in these traces. A native cleanup failure or durable grant revocation is outside this component model."
     ]
+  },
+  {
+    "path": "specs/quint/application/CanonicalNotesController.qnt",
+    "module": "CanonicalNotesController",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "coalescedReadTest",
+      "writeRetiresReadTest",
+      "staleReadTest",
+      "retiredReadTest",
+      "ownerLostWriteTest",
+      "wrongSessionIgnoredTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/canonical-notes-controller.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-snapshot-state.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts"
+    ],
+    "abstractions": [
+      "Two opaque note identities, revisions0..2 and six request identities. All current controller state, retained transport calls and authenticated listener ownership have an explicit projection.",
+      "The source adapter controls valid read/POST envelopes and their completion order. Editor drafts, record mutation semantics, full UI and server behavior remain separate obligations.",
+      "Response publication plus finally cleanup and coalesced reload form a macrostep. Settled checkpoints compare all model fields; intermediate hook/microtask states and arbitrary reentrant hooks remain explicit refinement obligations."
+    ]
   }
 ]
