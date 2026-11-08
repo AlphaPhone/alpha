@@ -4,8 +4,8 @@ import {createHash} from 'node:crypto';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {inspectJavaFiles} from '../scripts/quint-java-state-audit.mjs';
 import {inspectStateCandidates, writeStateAudit, checkStateAudit} from '../scripts/quint-state-audit.mjs';
-
 test('state audit retains mutable readonly containers and asynchronous closure writes', () => {
   const report = inspectStateCandidates('fixture.ts', `
     let generation = 0;
@@ -30,8 +30,10 @@ test('state audit retains mutable readonly containers and asynchronous closure w
   assert.ok(report.candidates.some(item => item.name === 'state' && item.reason === 'state-hook'));
   assert.ok(!report.candidates.some(item => item.name === 'fixed' || item.name === 'constant'));
   assert.ok(report.asynchronous.some(item => item.operation === 'setTimeout'));
+  const unknown = inspectStateCandidates('unknown.ts', 'getOwner().active = true;');
+  assert.equal(unknown.writeSites, 1);
+  assert.equal(unknown.unassignedWrites.length, 1);
 });
-
 
 test('state audit binds its detailed report and refuses changed source bytes', t => {
   const root = mkdtempSync(join(tmpdir(), 'alpha-state-audit-'));
@@ -48,8 +50,8 @@ test('state audit binds its detailed report and refuses changed source bytes', t
   ]}));
   const counts = writeStateAudit(root);
   assert.equal(counts.files, 2);
-  assert.equal(counts.parsedFiles, 1);
-  assert.equal(counts.languageReview, 1);
+  assert.equal(counts.parsedFiles, 2);
+  assert.equal(counts.languageReview, 0);
   const summary = JSON.parse(readFileSync(join(root, 'specs/quint/state-audit.json')));
   const detail = readFileSync(join(root, summary.detail.path));
   assert.equal(sha256(detail), summary.detail.sha256);
@@ -60,7 +62,31 @@ test('state audit binds its detailed report and refuses changed source bytes', t
   assert.ok(checkStateAudit(root).some(problem => problem.includes('owner.ts')));
   assert.throws(() => writeStateAudit(root), /current source bytes/);
 });
-
 test('committed state candidate audit matches its source inputs', () => {
   assert.deepEqual(checkStateAudit(process.cwd()), []);
+});
+
+test('Java audit observes final containers and monitor-protected field writes', t => {
+  const root = mkdtempSync(join(tmpdir(), 'alpha-java-audit-test-'));
+  t.after(() => rmSync(root, {recursive: true, force: true}));
+  writeFileSync(join(root, 'Owner.java'), `
+    import java.util.*;
+    class Owner {
+      final Map<String, String> pending = new HashMap<>();
+      int generation;
+      void start() { synchronized (pending) { pending.put("key", "value"); generation++; } }
+      void change(int value) { value++; }
+      void change(long value) { value--; }
+    }
+  `);
+  const parsed = inspectJavaFiles(root, ['Owner.java'])['Owner.java'];
+  assert.deepEqual(parsed.parseErrors, []);
+  assert.ok(parsed.candidates.some(item => item.name === 'pending' && item.readonly && item.writes.some(write => write.operation === '.put()')));
+  const generation = parsed.candidates.find(item => item.name === 'generation');
+  assert.ok(generation.writes.some(write => write.guards.some(guard => guard.includes('synchronized'))));
+  const overloaded = parsed.candidates.filter(item => item.name === 'value');
+  assert.equal(overloaded.length, 2);
+  assert.notEqual(overloaded[0].owner, overloaded[1].owner);
+  assert.deepEqual(overloaded.map(item => item.writes.length), [1, 1]);
+  assert.match(parsed.consumedSha256, /^[a-f0-9]{64}$/);
 });

@@ -73731,6 +73731,13 @@
       "sha256": "7a53ab6062db8ff795d82c14fa79ec957d7e2e6907d4e80fc0ff86497f13c116"
     },
     {
+      "path": "scripts/QuintJavaStateAudit.java",
+      "models": [
+        "Application"
+      ],
+      "sha256": "2fc3a4b95281d0d7fc69d351b276051089814aef42ba2833eade6d4796e822bf"
+    },
+    {
       "path": "scripts/build-mobile-agent.mjs",
       "models": [
         "AlwaysOnListener",
@@ -74499,6 +74506,13 @@
       "sha256": "98e6506eea25a2c1c3c46fd2f4a4d849d7fd1ae2693eb888bd37cc08ee4a7354"
     },
     {
+      "path": "scripts/quint-java-state-audit.mjs",
+      "models": [
+        "Application"
+      ],
+      "sha256": "fd7baaa3fbcff6e3b42b79022ee488aeb6ff0aabd6a168a22b4cb1c8cb3abf0f"
+    },
+    {
       "path": "scripts/quint-lib.mjs",
       "models": [
         "Application"
@@ -74508,84 +74522,9 @@
     {
       "path": "scripts/quint-state-audit.mjs",
       "models": [
-        "AlwaysOnListener",
-        "Application",
-        "ApplicationComposition",
-        "AssistantConversation",
-        "BrowserDownloads",
-        "BrowserReadingState",
-        "BrowserSession",
-        "BrowserSiteState",
-        "CalendarLinkedSync",
-        "CalendarPresentation",
-        "CallbackLanding",
-        "CanonicalNotesController",
-        "CanonicalNotesDraft",
-        "CanonicalNotesFeedback",
-        "CanonicalNotesMutation",
-        "CanonicalNotesView",
-        "CoreRuntimeRetirement",
-        "CoreRuntimeShutdown",
-        "CoreServiceLifecycle",
-        "CredentialVault",
-        "DeletionJournal",
-        "DevelopmentDevice",
-        "DevelopmentHost",
-        "DevelopmentSurfaces",
-        "DeviceActions",
-        "DraftDispatch",
-        "DurableStore",
-        "FilesAndSharing",
-        "FilesPreview",
-        "GoogleAccounts",
-        "IdentitySession",
-        "InboxCoordinator",
-        "InboxDelivery",
-        "InboxProviderDrafts",
-        "ListenerLeaseProducer",
-        "ListenerLeaseRecovery",
-        "MapsNavigation",
-        "MediaLifecycle",
-        "NativeAsrPipe",
-        "NativeCaptureFrames",
-        "NativeCredentialMutation",
-        "NativeLiveCapture",
-        "NativeNotePermission",
-        "NativeNoteRecording",
-        "NativeNoteRecordingService",
-        "NativePipedCapture",
-        "NativeViewSubscription",
-        "NativeVoiceDraft",
-        "NavigationProgress",
-        "NotesLifecycle",
-        "NoticesAndCaches",
-        "NotificationCollection",
-        "PdfWorker",
-        "PermanentVoiceDeletion",
-        "PermissionWalkthrough",
-        "PreferencesAndPresentation",
-        "RendererFailureUI",
-        "RendererRecovery",
-        "ResetRecovery",
-        "ResidentRuntime",
-        "ResidentScheduling",
-        "ScanDocument",
-        "ServiceAuthorization",
-        "SharedRecordingAdmission",
-        "ShellNavigation",
-        "SpeechResources",
-        "StartupPermissions",
-        "StreamingPlayback",
-        "TaskServiceLifecycle",
-        "VadSegmentation",
-        "VoiceIpcAssembly",
-        "VoiceSession",
-        "WorkflowEngineAdmission",
-        "WorkflowExecution",
-        "WorkflowScheduleTasks",
-        "WorkflowWakeups"
+        "Application"
       ],
-      "sha256": "d339b75404966b1ec76650c90b0c4c5e466e145459ff4787e464b98973d8f284"
+      "sha256": "403a33cab0dff7ace6219b29e7ffef373319677a7d8be6641466dd16a6750b5b"
     },
     {
       "path": "scripts/source-snapshot.mjs",
