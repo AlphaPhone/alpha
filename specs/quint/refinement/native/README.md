@@ -161,3 +161,20 @@ failures, explicit discard, late warmup and both kinds of owner retirement.
 Installed Android delivery and the product's actual resident credential/IPC
 transport remain external integration obligations. The provider response and
 physical audio ports perform no real network or microphone effects.
+
+## Capture frame buffering
+
+`capture-frames.mjs` drives the real patched `LiveVoiceCapture`, `LiveVadGate`
+and `LiveCaptureResource`. Its source and detector ports provide one distinct
+PCM marker per window and record actual positive read calls and detector inputs.
+Every source checkpoint waits until the next blocking read or the terminal sink,
+so the observed packet list belongs to a completed window. Packet frames are
+decoded from the actual base64 payload; the model computes its own expected
+pre-roll and emission history. No copy of the VAD algorithm runs in the adapter.
+
+The source, detector and Android base64 ports retain the actual reusable short,
+float and byte array references for terminal zeroing checks. A before/after
+source probe shows that failed release previously left buffers uncleared and
+omitted the terminal callback. The patched source clears them and reports the
+capture failure. Clock timestamps, arbitrary PCM and detector accuracy are not
+in this finite equality projection.
