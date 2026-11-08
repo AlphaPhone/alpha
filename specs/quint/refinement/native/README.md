@@ -211,3 +211,19 @@ The settings coordinator is bounded to serialized source calls. Android's real
 SharedPreferences implementation, stopService acceptance, unrestricted concurrent
 writers and the service's reaction remain explicit obligations. This campaign
 adds no runtime source patch.
+
+### Shared listener service lifecycle
+
+`listener-service.mjs` runs the complete shared listener/service implementation
+with the actual settings, lease and policy helpers. `listener-service-platform`
+provides Android primitives and an externally held ASR allocation. It records
+actual callback registration, foreground calls, AudioRecord state and engine
+close effects. The observer reads every lifecycle model field from source objects and
+platform-port observations.
+
+The release regression compares the original and patched source. Both release-only
+and combined stop/release failures now allow destruction to retire callbacks and
+the recognizer. A failed release remains an owned resource with its durable
+marker, and another start cannot overwrite that reference. The campaign checks a
+later successful release and capture restart. Installed Binder/audio behavior,
+physical release acceptance and arbitrary callbacks remain external obligations.

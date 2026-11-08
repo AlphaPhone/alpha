@@ -235,6 +235,18 @@
           "afterSha256": "46d5b4779ce49a784bba12b8b37830783f1cd994a6e0c2c49ff2e52b0e680855"
         }
       ]
+    },
+    {
+      "file": "listener-service-cleanup.patch",
+      "sha256": "96659f3040b784b828d017183eb4956bf9668cdeb4189f318254f2ddae76e0cf",
+      "module": "packages/app/platforms/android/sense",
+      "targets": [
+        {
+          "path": "packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/ListeningService.java",
+          "beforeSha256": "53254aa2bc75047a7893347d7bbac5c2e46d2d095474385ff4c22d814b6820db",
+          "afterSha256": "902bf007189720645823065d6d016dda648c8f3f01b8fbf347ff85132262e3f7"
+        }
+      ]
     }
   ],
   "modules": [
