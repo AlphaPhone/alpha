@@ -1514,5 +1514,39 @@
       "Exact verified account read and Calendar intent for a pending Allow Calendar changes prompt and its guarded persistence and continuation.",
       "Two Cloud bindings, four intents, six reads and six access captures. Controlled native access receipts, Calendar helper and browser consent. Post-consent return, physical persistence and provider effects remain separate."
     ]
+  },
+  {
+    "path": "specs/quint/application/CalendarPreservationConfirmation.qnt",
+    "module": "CalendarPreservationConfirmation",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "sameOwnerReplacementBeforeDispatchTest",
+      "reentryAndOldFinallyTest",
+      "committedMarkerSurvivesRetirementTest",
+      "currentExactMarkerPublishesTest",
+      "changedInventoryRequiresFreshReviewTest",
+      "pageHideRetiresHeldApprovalTest"
+    ],
+    "invariants": [
+      "ActiveReviewOwnsVisit",
+      "MarkerHasDispatch",
+      "PublishedHasCurrentReadback"
+    ],
+    "sources": [
+      "apps/app/src/prototype/agent-calendar-adapter.ts",
+      "apps/app/src/prototype/settings-adapter.ts",
+      "apps/app/src/prototype/model.js",
+      "apps/app/src/prototype/template.html",
+      "apps/app/src/runtime/agent-calendar.ts",
+      "apps/app/src/runtime/legacy-calendar-preservation.ts",
+      "apps/app/src/browser/calendar-store.ts",
+      "apps/app/src/browser/documents.ts"
+    ],
+    "abstractions": [
+      "Exact mounted Settings review, live port and pending confirmation, with separate marker capture, expected receipt, CAS commit and UI settlement.",
+      "Two owners, four port lifetimes and attempts, two real inventory equality classes. Chromium IndexedDB and closed record transport. Installed provider and arbitrary device loss are separate."
+    ]
   }
 ]
