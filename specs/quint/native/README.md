@@ -414,3 +414,19 @@ The present source campaign covers non-piped capture. Provider warmup, pipe
 queues, transcript callbacks and close acknowledgment require separate source
 schedules. Physical Android microphone enforcement and operating-system resource
 release remain explicit acceptance boundaries.
+
+`NativeAsrPipe` covers the shared `LiveSegmentPipe` worker, readiness and close
+futures, eight-batch queue, serialized JSON copies, per-frame and per-VAD cutoff,
+provider ownership checks and transcript/error replies. Frame and VAD timestamps
+use independent membership bits. NaN cutoff remains NaN and therefore forwards
+no timed items. A canceled warm request can still complete readiness successfully;
+the capture controller must apply its own current-ticket guard.
+
+The source campaign suspends at actual provider posts and compares completed
+source operations, including future settlement. Transient instruction-level
+ordering between the private `finished` flag and `closed.complete` is inside one
+completion observation. Rejected-worker settlement now runs even when cancellation or the
+failure listener throws. ASR_FAILED remains a recoverable per-response outcome;
+transport failures close the pipe. These bounded checks use one worker start and
+at most three posted batches/transcript results. Controller composition and
+physical/native transport remain separate obligations.
