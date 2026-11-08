@@ -31,7 +31,7 @@ export async function loadPinnedRuntime() {
 		JSON.stringify(
 			{
 				commit: head,
-				coreState: coreStateBuildRecord(resolve(import.meta.dirname, ".."), core.transforms),
+				coreState: coreStateBuildRecord(resolve(import.meta.dirname, ".."), core.transforms, true),
 				modules: Object.fromEntries([...resolvedSources].sort()),
 			},
 			null,
