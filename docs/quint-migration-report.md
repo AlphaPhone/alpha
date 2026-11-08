@@ -372,3 +372,34 @@ The current-main Android build preflight rejects the voice qualification pin
 pin. APK verification then reports missing distribution artifacts. No Android
 build, emulator role test, AOSP boot or device/provider acceptance is claimed for
 this reconciliation.
+
+## Mutable state candidate inventory
+
+The syntax audit covers all 5,653 ledger inputs. It parses 4,921 JavaScript and
+TypeScript files without syntax errors and records 33,898 candidate bindings,
+49,762 write sites and 7,381 asynchronous registration calls. These include
+temporary local bindings and bundled paths whose runtime activation still needs
+review. Candidate counts describe the review backlog.
+
+The committed [state-owner summary](../specs/quint/state-audit.json) records every
+file, owner, binding count and source hash. Running
+`node scripts/quint-state-audit.mjs` regenerates that summary and the detailed
+`test-results/quint-state-audit/details.json` report. The detailed report includes
+individual fields, line numbers, mutations, surrounding guards and asynchronous
+boundaries. `node scripts/quint-state-audit.mjs --check` checks the recorded input
+identities. The syntax-only tool uses the TypeScript 6.0.3 parser alias.
+
+There are 4,794 write sites without a syntactically matched declaration. Aliases,
+computed access, injected references and closure lifetimes require review before
+assigning those writes to a state owner. Native and data inputs remain explicit
+work across 678 Java files, 39 Kotlin files, 12 JSON files and three HTML files.
+Effective client, native and core patch outputs retain their separate source
+provenance requirements.
+
+The largest candidate groups include the product's prototype model, connection
+controller, camera and voice adapters, the shared assistant planner, chat
+overlay, backup service, SQL adapter, Calendar service and core runtime. Each
+owner must be classified for lifetime and enabled entry point, mapped to the
+corresponding Quint state and transitions, and driven through current source.
+The existing file-to-model allocation supplies an initial assignment for this
+review.
