@@ -812,7 +812,7 @@ function payloadEntries(packaged) {
       source: 'scripts/stage-local-agent-runtime.mjs',
       text: packaged
         ? 'The staged on-device agent payload is present. Bun and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (musl loader, libstdc++ and libgcc_s runtime libraries, PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
-        : 'This build does not include the on-device agent runtime (Bun and the bundled elizaOS agent), so no agent notices are listed.'},
+        : 'These notices list the renderer and recorded native components. A packaged distribution generates additional entries for the staged on-device agent runtime, including Bun and the bundled elizaOS agent dependencies.'},
   ];
 }
 
