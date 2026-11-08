@@ -6,7 +6,7 @@ The incoming shared pin `4787d51a142c63c98371c832997184c53f7218d3` adds 16 TLA+ 
 
 - Translate every declared variable, helper, action, initial condition, invariant, specification and temporal property. Retain original operator names where Quint permits them. Use the `Core` module prefix to distinguish these designs from existing runtime models.
 - Preserve every configuration’s constants, selected specification, invariant list, temporal-property list and deadlock setting. Each profile needs a named executable entry point and its own validation result.
-- Store implementations and comparison metadata under `specs/quint/legacy/core`. Register every default model in the legacy manifest with upstream source revision and hashes. The core configuration runner must enumerate all 31 profiles independently of the default manifest entry.
+- Store Quint model files directly under `specs/quint/legacy` and configuration metadata under `specs/quint/legacy/core`. Register every default model in the legacy manifest with upstream source revision and hashes. The core configuration runner must enumerate all 31 profiles independently of the default manifest entry.
 - Preserve weak and strong fairness and temporal quantification. Check safety separately from liveness. A fairness-conditioned temporal property must use the source action-enablement semantics and the complete source state tuple for stuttering.
 - Add executable scenarios for success, rejection/failure, competing calls, cancellation/retirement and retries where the source defines them. Run type checking, scenarios and bounded simulation for each configuration, followed by bounded symbolic and feasible TLC temporal checks with recorded limits.
 - Preserve the reducer graph as historical upstream evidence. A generated graph does not replace a checked Quint model or source-executing refinement.
@@ -377,3 +377,19 @@ Translate `packages/core/tla/TaskService.tla` to `CoreTaskService.qnt`. Source S
 The first validation pass can use the existing pinned Quint CLI without changing the product or vendor sources. Existing long TLC checkpoint recovery remains separate work. New heavyweight exhaustive runs wait for host capacity. A passing bounded run will be recorded with its exact depth or simulation counts and never described as a universal proof.
 
 No conversion has been claimed complete by this inventory report. The report and exact source/configuration hashes precede parallel implementation dispatch.
+
+## Configuration execution
+
+The finite TLC phase compiles Quint’s exact `rawStep` action, which retains
+the source `Next` relation. Each generated configuration explicitly selects the
+original deadlock setting. The bounded checks use `step`, which includes
+stuttering as permitted by the source temporal specification. For fair profiles,
+the temporal check uses a fairness implication over the same transition
+relation. `SingleFlightMemo.safety` records its original symmetry operator
+while the generated runner explores the unreduced graph.
+
+The profile checker validates all constant assignments, invariant and property
+lists, deadlock and symmetry metadata, and original Git blob hashes before
+running. Results distinguish type checking, scenarios, simulation, bounded
+symbolic checking and a complete finite TLC exploration. Generated TLA is
+backend output and lives only in test results.
