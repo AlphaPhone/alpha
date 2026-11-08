@@ -51,13 +51,15 @@ export function coreStatePatch(root, source = path.join(root, 'vendor/eliza')) {
   root = path.resolve(root); source = path.resolve(source);
   const receipt = coreStateReceipt(root);
   const expected = receipt.files[CORE_STATE_TARGET];
+  const patchBytes = readRegular(root, 'patches/eliza/task-service-stop.patch');
+  if (sha(patchBytes) !== receipt.patches[0].sha256) throw Error('Core patch changed before application');
   const original = readRegular(source, CORE_STATE_TARGET);
   if (sha(original) !== expected.beforeSha256) throw Error('Core patch preimage mismatch');
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-core-patch-'));
   try {
     const file = path.join(temporary, CORE_STATE_TARGET);
     fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, original, {mode: 0o644});
-    execFileSync('patch', ['--batch', '--fuzz=0', '--forward', '-p1', '--input', path.join(root, 'patches/eliza/task-service-stop.patch')], {cwd: temporary, stdio: 'pipe', timeout: 30000});
+    execFileSync('patch', ['--batch', '--fuzz=0', '--forward', '-p1'], {cwd: temporary, input: patchBytes, stdio: 'pipe', timeout: 30000});
     const output = readRegular(temporary, CORE_STATE_TARGET);
     const inventory = fs.readdirSync(temporary, {recursive: true, withFileTypes: true})
       .filter(entry => !entry.isDirectory()).map(entry => path.relative(temporary, path.join(entry.parentPath, entry.name)));
