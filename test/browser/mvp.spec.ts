@@ -100,7 +100,8 @@ test('Notes folders: create, move via ⋯, filter by chip, persist, rename by lo
   await page.getByRole('dialog', { name: 'Office' }).getByRole('button', { name: 'Delete folder', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Office/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toBeVisible();
-  expect(await page.evaluate(async () => JSON.parse(await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()).records[0].folderId)).toBeUndefined();
+  // The folder slot is written before the note is released, so wait for the note's own write.
+  await expect.poll(() => page.evaluate(async () => JSON.parse(await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()).records[0].folderId ?? null)).toBeNull();
 });
 for (const [label, text] of [['unicode CRLF', 'Local 🧪 file\r\nExact bytes\n'], ['UTF-8 BOM', '\ufeffLocal 🧪 file\r\nExact bytes\n'], ['empty', '']]) test(`Local text import and complete selected-note download: ${label}`, async ({ page }) => {
   await page.goto('/');

@@ -57,7 +57,7 @@ async function entitlements(overrides:Record<string,unknown>={}){
  return {keys:[jwk],tokens};
 }
 
-type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits?:'active'|'none'|'canceled'|'absent'|'503';identity?:'ok'|'offline'|'401';
+type Fixture={plan?:string;route?:'signed'|'signed-until-bound'|'absent'|'503'|'401'|'offline';limits?:'active'|'none'|'canceled'|'absent'|'503';identity?:'ok'|'offline'|'401';
  redeem?:'ok'|'invalid'|'rate'|'already'|'transport-once';redeemPlan?:string;saved?:boolean;expiresAt?:number;holdProvider?:boolean;providerFailure?:string;cashBalance?:number;
  /** Exact USD organization credit balance in the billing snapshot (data.v2.balance); absent when unset. */
  credits?:string;storage?:Record<string,string>;fullApp?:boolean};
@@ -107,6 +107,8 @@ async function boot(page:Page,initial:Fixture&{tokens?:Record<string,string>;key
    if(path==='/api/v1/subscription/entitlement-keys')return {status:200,data:{keys:f.keys??[]}};
    if(path==='/api/v1/subscription/entitlement'){
     if(f.route==='signed')return {status:200,data:{entitlement:f.tokens[f.plan]}};
+    // Answers admission; once Cloud inference is bound, every later refresh meets an outage.
+    if(f.route==='signed-until-bound')return f.calls.some((c:any)=>c.method==='configureCloudProvider')?{status:503,data:{success:false,code:'service_unavailable'}}:{status:200,data:{entitlement:f.tokens[f.plan]}};
     if(f.route==='401')return {status:401,data:{}};
     if(f.route==='503')return {status:503,data:{success:false,code:'service_unavailable'}};
     if(f.route==='offline')throw Error('Connection request failed');
@@ -137,7 +139,8 @@ async function boot(page:Page,initial:Fixture&{tokens?:Record<string,string>;key
   const w=window as any;w.planController=(await import('/src/runtime/connection-ui.tsx')).connectionController;
   w.planFlags={native:(await import('/src/native.ts')).isAndroid?'android':'web',mocks:(await import('/src/build-flags.ts')).testMocksEnabled};
  });
- await expect.poll(()=>page.evaluate(()=>(window as any).planFlags)).toEqual({native:'android',mocks:false});
+ // The full app's module graph loads cold on the first boot; give it longer than the default poll.
+ await expect.poll(()=>page.evaluate(()=>(window as any).planFlags),{timeout:15000}).toEqual({native:'android',mocks:false});
 }
 type Call={plugin:string;method:string;path?:string;url?:string;httpMethod?:string};
 const calls=(page:Page)=>page.evaluate(()=>(window as any).planFixture.calls as Call[]);
@@ -488,11 +491,12 @@ test.describe('outages and offline use',()=>{
   expect(await configured(page)).toBe(0);
  });
  test('a failed background refresh does not renew the verified plan timestamp',async({page})=>{
-  await boot(page,{...await entitlements({rfa:Math.floor(Date.now()/1000)+4}),holdProvider:false});
+  // The outage starts right after admission, so a slow boot cannot let the refresh succeed first.
+  await boot(page,{...await entitlements({rfa:Math.floor(Date.now()/1000)+8}),route:'signed-until-bound',holdProvider:false});
   await expect.poll(()=>configured(page)).toBe(1);await idle(page);
   const before=await page.evaluate(()=>localStorage.getItem('alpha.connection.plan-admission.v1'));
-  await fixture(page,{route:'503'});
-  await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().residentSubscription?.refreshFailed),{timeout:10000}).toBe(true);
+  expect(before).not.toBeNull();
+  await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().residentSubscription?.refreshFailed),{timeout:20000}).toBe(true);
   expect(await page.evaluate(()=>localStorage.getItem('alpha.connection.plan-admission.v1'))).toBe(before);
  });
  test('a billing outage without a recent plan is "needs plan" with a retry',async({page})=>{
