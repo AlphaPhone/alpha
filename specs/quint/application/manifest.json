@@ -753,5 +753,30 @@
       "Two record identities, five editor tokens and four edit versions/revisions. One remove/restore continuation, rejected concurrent probes and independent save queue use settled promise macrosteps.",
       "Server response membership is controlled input. Provider mutation, revision allocation, durability, arbitrary reentrant hooks and multiple simultaneous remove continuations remain separate obligations."
     ]
+  },
+  {
+    "path": "specs/quint/application/CanonicalNotesView.qnt",
+    "module": "CanonicalNotesView",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "newDraftOverlaysFirstTest",
+      "canonicalDraftReplacesInPlaceTest",
+      "localHandlesNeverReachRowsTest",
+      "ownerLossMasksRetainedRowsTest",
+      "phaseDrainsNavigationWaitersTest",
+      "retirementClearsProjectionTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/canonical-notes-ui.ts",
+      "apps/app/src/prototype/canonical-notes-controller.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts"
+    ],
+    "abstractions": [
+      "Source-bound projection of base and draft rows, current-owner public visibility, synthetic draft identities, Trash collection and navigation waiter admission/drain.",
+      "Canonical snapshot and editor callback inputs have separate controller/draft models. Row payload uses bounded text, kind, pin, folder and local-handle classes. Recorder, dictation, Calendar handoff and full competing navigation policies remain obligations."
+    ]
   }
 ]

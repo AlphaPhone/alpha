@@ -16,6 +16,7 @@ import {checkCanonicalNotesController} from './canonical-notes-controller.mjs';
 import {checkCanonicalNotesDraft} from './canonical-notes-draft.mjs';
 import {checkCanonicalNotesFeedback} from './canonical-notes-feedback.mjs';
 import {checkCanonicalNotesMutation} from './canonical-notes-mutation.mjs';
+import {checkCanonicalNotesView} from './canonical-notes-view.mjs';
 import {checkRecoveryUI} from './recovery-ui.mjs';
 import {fileURLToPath} from 'node:url';
 
@@ -42,6 +43,7 @@ export async function runApplicationRefinement() {
   receipts.push(await checkCanonicalNotesDraft([fileURLToPath(import.meta.url), 'test/quint-application-refinement.test.mjs', 'specs/quint/refinement/model-state.mjs']));
   receipts.push(await checkCanonicalNotesFeedback([fileURLToPath(import.meta.url), 'test/quint-application-refinement.test.mjs', 'specs/quint/refinement/model-state.mjs']));
   receipts.push(await checkCanonicalNotesMutation([fileURLToPath(import.meta.url), 'test/quint-application-refinement.test.mjs', 'specs/quint/refinement/model-state.mjs']));
+  receipts.push(await checkCanonicalNotesView([fileURLToPath(import.meta.url), 'test/quint-application-refinement.test.mjs', 'specs/quint/refinement/model-state.mjs']));
   receipts.push(await checkRecoveryUI([fileURLToPath(import.meta.url), 'test/quint-application-refinement.test.mjs']));
   for (const entry of (Array.isArray(manifest) ? manifest : manifest.models)) {
     const model = entry.module;
