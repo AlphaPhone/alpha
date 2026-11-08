@@ -1062,6 +1062,35 @@
         "One worker start, eight queued batches, three dispatched batches/results, independent early/late frame and VAD masks.",
         "Controlled owner-bound provider responses and worker scheduling. Physical IPC and controller composition have separate source scopes."
       ]
+    },
+    {
+      "path": "specs/quint/native/NativePipedCapture.qnt",
+      "module": "NativePipedCapture",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "sources": [
+        "vendor/eliza/plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice/LocalSpeechBridgePlugin.java",
+        "vendor/eliza/plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/LiveCaptureController.java",
+        "vendor/eliza/plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/LiveSegmentPipe.java",
+        "vendor/eliza/plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/LiveVoiceCapture.java"
+      ],
+      "tests": [
+        "warmBeforeNativeOpenTest",
+        "callDuringOpenRefusesPublicationTest",
+        "retiredWarmCannotOpenTest",
+        "discardClosesWithoutRendererAudioTest",
+        "failedPipeRetainsControllerUntilStopTest"
+      ],
+      "invariants": [
+        "WarmBeforeCapture",
+        "NoPcmToRenderer",
+        "CompletedStartHasNoPendingOpen",
+        "Bounded"
+      ],
+      "abstractions": [
+        "One piped reservation, two forwarded frame events and transcript callbacks. Controlled original-owner provider and physical audio ports."
+      ]
     }
   ]
 }

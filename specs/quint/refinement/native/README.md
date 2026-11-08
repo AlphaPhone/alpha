@@ -144,3 +144,20 @@ filtering, NaN, malformed input/response, recoverable ASR failure, owner retirem
 discard and close acknowledgment. The executor-refusal regression retains the
 cancellation or listener exception while guaranteeing completion of the public futures. The
 actual controller-to-pipe join and full native transport have separate scopes.
+
+## Piped capture coordinator
+
+`piped-capture.mjs` executes the complete shared bridge and real capture, resource
+and ASR-pipe implementations together. Provider replies are suspended at real
+transport calls. The actual AudioRecord constructor is held until the model
+observes successful ASR readiness. Source frame callbacks pass through the
+controller, which forwards PCM to the pipe and only metadata to the renderer.
+The observer reads actual reservation flags, controller references, public pipe
+futures and bridge results. Its close reason names the outstanding source call
+or lifecycle cleanup that is awaiting the provider.
+
+The fourteen bounded schedules include recoverable and terminal provider
+failures, explicit discard, late warmup and both kinds of owner retirement.
+Installed Android delivery and the product's actual resident credential/IPC
+transport remain external integration obligations. The provider response and
+physical audio ports perform no real network or microphone effects.

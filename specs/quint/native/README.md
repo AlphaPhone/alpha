@@ -433,3 +433,16 @@ failure listener throws. ASR_FAILED remains a recoverable per-response outcome;
 transport failures close the pipe. These bounded checks use one worker start and
 at most three posted batches/transcript results. Controller composition and
 physical/native transport remain separate obligations.
+
+`NativePipedCapture` checks the real join between shared bridge admission,
+`LiveCaptureController`, `LiveVoiceCapture` and `LiveSegmentPipe`. Fourteen source
+schedules cover provider warmup before microphone opening, late warmup after
+pause/destruction, call entry while opening, provider retirement, recoverable
+ASR failures, metadata-only renderer frame events and acknowledged/unconfirmed
+pipe closure. A failed pipe can remain referenced by its controller until an
+explicit Stop cleans it up, even after its physical source stopped.
+
+The model uses one initially valid owner-bound pipe, two frame events and two
+transcript results. The provider and physical AudioRecord are controlled ports.
+The detailed pipe queue/response state has its own `NativeAsrPipe` projection;
+these coordinator observations add the ordering between that pipe and capture.
