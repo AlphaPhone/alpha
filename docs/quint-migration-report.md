@@ -338,8 +338,9 @@ state-machine coverage or an implementation relation. The worker bundle,
 runtime-computed imports, enabled feature paths and external providers remain
 separate discovery and contract obligations.
 The four newly discovered view-refresh TLA+ designs and their 22 configurations
-now have Quint translations. There are no tracked `.tla` or `.cfg` files in the
-product tree or its pinned upstream checkout. Historical design comparisons
+now have Quint translations. The earlier `475a8d5` snapshot had no tracked `.tla` or `.cfg` files in the
+product tree or its pinned upstream checkout. The next shared pin adds the
+16 core specifications listed below, which are being converted. Historical design comparisons
 retain their original source references as historical metadata. Their references
 to deleted implementations are excluded from current runtime conformance.
 
@@ -360,7 +361,8 @@ a file-level backlog for the remaining unclassified modules. The aggregate
 report uses parsed Quint declarations to list unobserved fields and unexecuted
 transitions, including nested records and imported instances.
 
-PR 825 is mergeable against main after the reconciliation merge at `2f14ad0302`.
+PR 825 was mergeable after the reconciliation merge at `2f14ad0302`. Main then
+advanced again, so a second source reconciliation is in progress.
 The frozen 76-model formal phases passed. Its full application test run finished
 with fixture and environment failures. Follow-up fixes passed the 83-model
 focused checkpoint and are included in the frozen 90-model verification run. Fourteen Cloud profile tests pass
@@ -436,3 +438,41 @@ The complete `c890a570` verification run finished with 3,868 passing Node tests,
 missing prepared-SDK inputs, stale source fixtures and a shell-load timeout.
 The run stopped before production build and bundle audit. The next complete
 run includes the corrections and uses the authenticated SDK environment.
+
+## November 8 shared-source update
+
+Main commit `0bb9d5f904` advances the shared runtime from `475a8d5` to
+`4787d51a142c63c98371c832997184c53f7218d3`. The source delta changes 1,029
+upstream files. The first source-reference pass identifies 14 existing models
+with directly changed source inputs. Transitive inputs and new owners also
+require review through a fresh producer graph and state audit.
+
+The update adds 16 authored TLA+ modules in `packages/core/tla`. Conversion must
+preserve every supplied configuration, invariant, temporal property and source
+mapping for `ActionSettlement`, `ApprovalService`, `EmbeddingDimension`,
+`FactWriteDedupe`, `InteractionSession`, `InteractiveTask`, `PluginLifecycle`,
+`ProviderExecution`, `RoomHandlerQueue`, `RuntimeLifecycle`, `Semaphore`,
+`Serialise`, `ServiceLifecycle`, `SingleFlightMemo`, `TaskScheduler` and
+`TaskService`. Existing Cloud Quint models under `packages/cloud/formal` also
+need inventory and integration review. The original shared checkout remains
+immutable so comparisons can use its authored source.
+
+The migration now requires the following parallel work.
+
+- Replay and validate authenticated native patches, including changed speech
+  bridge and media preimages. Add coverage for output warmup, streaming
+  recognition, cancellation generations and availability caching.
+- Reconcile the TaskService and turn-controller patches with the new lifecycle,
+  queue, scheduler and SQL source. Preserve the new upstream shutdown admission
+  behavior while checking per-runtime asynchronous-context isolation.
+- Complete the new TLA+ conversions and comparison configurations, then rerun
+  the affected runtime models against current source.
+- Regenerate the mobile and workflow producer inventories, source-owner audit
+  and remaining state obligations at the exact new pin.
+- Run complete repository verification and both Android distribution checks at
+  the integrated source revision. Previous source receipts remain historical.
+
+The 90-model `5199e76` snapshot passed every formal typecheck, registered
+scenario and sampled safety phase. Its Node test run stopped without a terminal
+summary or exit receipt. No full repository success is recorded for that run.
+The next full run must use the reconciled snapshot and retain a terminal result.
