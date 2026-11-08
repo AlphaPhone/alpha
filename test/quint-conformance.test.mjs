@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { stripTypeScriptTypes } from './support/strip-types.mjs';
+import { build } from 'esbuild';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { repositoryRoot } from '../scripts/quint-lib.mjs';
 
 async function sourceModule(path) {
-  const source = readFileSync(join(repositoryRoot, path), 'utf8');
-  return import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source, { mode: 'strip' })).toString('base64')}`);
+  const compiled = await build({absWorkingDir: repositoryRoot, entryPoints: [path], bundle: true,
+    platform: 'node', format: 'esm', write: false});
+  return import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].contents).toString('base64')}`);
 }
 
 function modelTrace(module, scenario, stateName = 's', main = module) {
@@ -80,11 +81,11 @@ test('Quint denied-permission restart trace agrees with the real permission flow
 
 test('Quint private-session trace agrees with the real browser snapshot and restore', async () => {
   const expected = modelTrace('BrowserSession', 'privateRestartTest').at(-1);
-  const { browsingSnapshot, restoreBrowsing } = await sourceModule('apps/app/src/browser/browsing-session.ts');
+  const { browsingSnapshot, restoreBrowsing } = await sourceModule('.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts');
   const state = { tabs: [{ id: '1' }, { id: '3', priv: true }], visits: [], cur: '3' };
   const saved = browsingSnapshot(state, id => ({ url: `https://example.test/${id}`, title: id }));
   const restored = restoreBrowsing(saved, { tabs: [{ id: 'new' }], visits: [] }, true);
-  assert.deepEqual(restored.tabs.map(tab => Number(tab.id)), expected.normal['#set']);
+  assert.deepEqual(restored.restored.map(tab => Number(tab.id)), expected.normal['#set']);
   assert.deepEqual(expected.privateTabs['#set'], []);
   assert.ok(!saved.tabs.some(tab => tab.id === '3'));
 });
@@ -129,15 +130,19 @@ test('held draft release matches the real controller with newer typing', async (
   let record = { version: 1, binding: 'one', revision: '0', text: 'A' };
   const store = {
     async read() { return record; },
-    async save(previous, value) {
+    async save(previous, value, _recovery, options) {
       assert.deepEqual(previous, record);
-      record = { ...record, revision: String(Number(record.revision) + 1), text: value };
+      const {sending: _previousSending, ...fields} = record;
+      record = { ...fields, revision: String(Number(record.revision) + 1), text: value,
+        ...(options?.sending ? {sending: true} : {}) };
       return record;
     },
   };
   const controller = new AssistantDraftController(async () => store, () => text, value => { text = value; }, () => {});
   await controller.open('one');
-  assert.equal(await controller.hold('A'), true);
+  await controller.hold('A');
+  assert.equal(controller.holding, true);
+  assert.equal(record.sending, true);
   text = '';
   controller.edit(text);
   text = 'B';
@@ -146,4 +151,6 @@ test('held draft release matches the real controller with newer typing', async (
   for (let tick = 0; tick < 10 && record.text !== actualText(expected.savedOne); tick++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(text, actualText(expected.draft));
   assert.equal(record.text, actualText(expected.savedOne));
+  assert.equal(record.sending, undefined);
+  assert.equal(controller.holding, false);
 });

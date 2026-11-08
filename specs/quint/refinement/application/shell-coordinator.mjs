@@ -28,7 +28,7 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
   const {flagOffAndroid, fenceNetwork, residentStub, setStub} = fixtureModule.exports;
   const transformed = new Set();
   const prior = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;
-  let server, browser;
+  let server, browser, heldStartupAsset;
   try {
     process.env.ELIZA_DEV_ALLOW_TEST_MOCKS = '';
     server = await createServer({configFile: resolve(root, 'vite.config.ts'), logLevel: 'error',
@@ -76,9 +76,27 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
       });
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      await page.goto(origin + '/');
-      await page.waitForFunction(() => window.quintShell?.live && window.quintActors?.connectionController.getSnapshot().session);
-      await page.waitForFunction(() => window.quintShell.notesSourceMode === 'canonical');
+      if (name === 'navigation') {
+        // A nonessential asset deliberately keeps window.load pending. Readiness
+        // comes from the actual mounted source and bound session below.
+        await page.route(origin + '/__quint_startup_pending.svg', route => {heldStartupAsset = route;});
+        await page.route(origin + '/', async route => {
+          const response = await route.fetch();
+          await route.fulfill({response, body: (await response.text()).replace('</body>',
+            '<img hidden alt="" src="/__quint_startup_pending.svg"></body>')});
+        });
+      }
+      await page.goto(origin + '/', {waitUntil: 'commit', timeout: 120000});
+      await page.waitForFunction(() => window.quintShell?.live &&
+        window.quintActors?.connectionController.getSnapshot().session &&
+        window.quintShell.notesSourceMode === 'canonical', null, {timeout: 120000});
+      if (name === 'navigation') {
+        assert.ok(heldStartupAsset, 'The unrelated startup asset is still held');
+        assert.notEqual(await page.evaluate(() => document.readyState), 'complete',
+          'Source readiness does not depend on the window load event');
+        await heldStartupAsset.fulfill({contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg"/>'});
+        heldStartupAsset = null;
+      }
       const observations = [];
       const observe = async label => {
         const source = await page.evaluate(() => {
@@ -152,6 +170,7 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
     }
     return {scenarios, sources: [...new Set([...sources, ...transformed])], driverHashes};
   } finally {
+    await heldStartupAsset?.abort().catch(() => {});
     await browser?.close();
     await server?.close();
   }
