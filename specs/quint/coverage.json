@@ -24511,7 +24511,7 @@
     },
     {
       "path": "apps/app/src/prototype/maps-adapter.ts",
-      "sha256": "6014ae9e553842881da1b208895a76f41f9f93081a3f08a69a5d102d0689057c",
+      "sha256": "d3166df398fe31ca0b44fb4870822c3849dd0280e3d09793b083e6dd2f2ab169",
       "models": [
         "Maps",
         "MapsNavigation",
@@ -24665,7 +24665,7 @@
     },
     {
       "path": "apps/app/src/prototype/model.js",
-      "sha256": "89a0a237a80f0393758742347e51f5c0d84669dc7ef3029ca06b6c62317631c5",
+      "sha256": "a37ce542dd4fc3f5a8d765b46cff63e5336b698e35871f801954f89a10107160",
       "models": [
         "Application",
         "CalendarPresentation",
@@ -31221,7 +31221,7 @@
     },
     {
       "path": "apps/app/src/prototype/template.html",
-      "sha256": "13e1e074cca84618aa4592d2e474887a31d765178d75b7f624e225d6ab910bd0",
+      "sha256": "22df73ab26bc74b3515ec43308e13a30db51b3e4876cb98839237e95f7f5480c",
       "models": [
         "ShellNavigation",
         "PreferencesAndPresentation",
