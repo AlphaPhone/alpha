@@ -14,7 +14,7 @@
       "scripts/mobile-uuid-adapter.mjs": "f5f674ae8661ec7c45aedee268b6aa5780bf2df93cb2c80aeb43e3c84a5ba55d",
       "scripts/mobile-bundle-smoke.mjs": "2e4f7ef05ae6f09285c2a6141876c14b5f30539c926a46864bf8862ae8d3b7bd",
       "scripts/local-agent-source.mjs": "321abaf05f9e8cbf6e4ba642ec7ebf45a6c693331a637210610a1f7723662daa",
-      "scripts/core-state-patch.mjs": "25c66e40aaaa340e1813f7268db913d46134f132116a45278d267ff3d8deb759",
+      "scripts/core-state-patch.mjs": "8009421748b5ab2347f50ffa51799c297cd7525789f999387cb6a24b826993bc",
       "scripts/core-state-preload.mjs": "c5368c9075aa8c7660bee01338185fbe673c9b8dd6889dd1ab01d195efa17c10",
       "scripts/combined-agent-source.mjs": "1e7409ec7c91439a2e73b77aaa32042ed989a725cd18b24bc3247685ed7e886d",
       "patches/eliza/core-state-manifest.json": "ef8f3e590d9661f019dacdd68d5a481cf5fd98b4d5f570801604d3fc858e16a2",
@@ -25,7 +25,7 @@
       "baseCommit": "475a8d59dc1811c2cde093613519906a5a3f6457",
       "manifestSha256": "ef8f3e590d9661f019dacdd68d5a481cf5fd98b4d5f570801604d3fc858e16a2",
       "inputHashes": {
-        "scripts/core-state-patch.mjs": "25c66e40aaaa340e1813f7268db913d46134f132116a45278d267ff3d8deb759",
+        "scripts/core-state-patch.mjs": "8009421748b5ab2347f50ffa51799c297cd7525789f999387cb6a24b826993bc",
         "scripts/core-state-preload.mjs": "c5368c9075aa8c7660bee01338185fbe673c9b8dd6889dd1ab01d195efa17c10",
         "scripts/combined-agent-source.mjs": "1e7409ec7c91439a2e73b77aaa32042ed989a725cd18b24bc3247685ed7e886d",
         "patches/eliza/core-state-manifest.json": "ef8f3e590d9661f019dacdd68d5a481cf5fd98b4d5f570801604d3fc858e16a2",
@@ -58,8 +58,8 @@
     "bundleSha256": "34e95f1397b7db289381fda6d481a8ad7ac89d9a852483100725bf6519877756",
     "sourceTreeVerifiedBeforeAndAfter": true,
     "inputHashesUnchanged": true,
-    "rawMetafileSha256": "fcc3c518dcf4c902d176c483394cd1492a06f77b7003d04a142026657adb3ff7",
-    "producerObservationSha256": "3b07d5cf115e8f91a164f91cba821d8c47ae5d11154b487bed694a273f187cd3"
+    "rawMetafileSha256": "04a75be3d5b9dc5c115ae6b82eb9bd3cf9757aaa3e9762ba77c2fbf94a911caf",
+    "producerObservationSha256": "bdd91c056a9c12397fc3a97512b7ba8139347fe7867c614193b4ca1eaa4ad1b0"
   },
   "counts": {
     "parsed": 9988,
