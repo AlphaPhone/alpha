@@ -443,3 +443,18 @@ The model uses one initially valid owner-bound pipe, two frame events and two
 transcript results. The provider and physical AudioRecord are controlled ports.
 The detailed pipe queue/response state has its own `NativeAsrPipe` projection;
 these coordinator observations add the ordering between that pipe and capture.
+
+`NativeCaptureFrames` covers the actual `LiveVoiceCapture` loop's input/output
+state. Its observed history contains the detector inputs that were consumed;
+a pure model fold derives VAD counters, the ten-window pre-roll, three-window
+emission cadence and unflushed frames. Actual emitted packets carry distinct PCM
+window markers, so packet membership and ordering are checked independently of
+the model calculation. Stop flushes pending speech frames; a read failure drops
+that unreported tail. The private running flag remains set after a read error
+until Stop, even though the source and detector have closed.
+
+Normal, interrupted and failed cleanup paths observe the actual short, float
+and byte buffers and detached source ownership. The campaign includes partial
+reads, exact threshold windows, non-finite and absent detector output, both
+cleanup failures and the previous cleanup regression. Physical inference and
+microphone timing remain external inputs.
