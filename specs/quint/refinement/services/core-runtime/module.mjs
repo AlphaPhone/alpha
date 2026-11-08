@@ -73,3 +73,11 @@ export function loadAgentRuntime(extraSources = []) {
 export function loadTurnControllers(extraSources = []) {
   return loadCoreSource("export {TurnControllerRegistry} from './vendor/eliza/packages/core/src/runtime/turn-controller.ts';", extraSources);
 }
+
+export function loadRuntimeEmbeddings(extraSources = []) {
+  return loadCoreSource(`
+    export {RuntimeEmbeddings, EMBEDDING_STORE_IDENTITY_CACHE_KEY, EMBEDDING_STORE_ACCEPT_MODEL_SETTING}
+      from './vendor/eliza/packages/core/src/runtime/embeddings.ts';
+    export {ModelType} from './vendor/eliza/packages/core/src/types/model.ts';
+  `, extraSources);
+}
