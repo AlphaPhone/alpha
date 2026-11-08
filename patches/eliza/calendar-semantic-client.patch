@@ -44,3 +44,6 @@
 +    const localChanged = !await matchesCheckpoint(record.lastCommonSemanticHash, local.event, localHash);
 +    const providerChanged = provider !== null && providerHash !== null &&
 +      !await matchesCheckpoint(record.lastCommonSemanticHash, provider.event, providerHash);
+@@ -278 +285 @@
+-    if (provider && providerChanged && !localChanged) {
++    if (provider && providerChanged && !localChanged && localHash !== providerHash) {
