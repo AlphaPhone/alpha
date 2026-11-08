@@ -1,17 +1,13 @@
 --- a/packages/core/src/services/task.ts
 +++ b/packages/core/src/services/task.ts
-@@ -217,6 +217,7 @@
- 	 * WHY serverless first: no long-lived process; WHY daemon second: one shared getTasks(agentIds) per tick for all agents.
- 	 */
- 	startTimer() {
+@@ -78,2 +78,2 @@
+-	/** Tracks task IDs currently being executed to prevent overlapping runs. WHY: blocking tasks must not run again until current run finishes. */
+-	private executingTasks: Set<string> = new Set();
++	/** Counts overlapping manual executions so blocking scheduler runs wait for every owner to finish. */
++	private executingTasks: Map<string, number> = new Map();
+@@ -219,0 +220 @@
 +		if (this.stopped) return;
- 		if (this.runtime.serverless === true) {
- 			return;
- 		}
-@@ -792,7 +793,17 @@
- 	 *
- 	 * @param {Task} task - The task to be executed.
- 	 */
+@@ -794,0 +796,9 @@
 +	private assertAcceptingExecution(): void {
 +		if (this.stopped) {
 +			throw new ElizaError("Task service has stopped accepting execution", {
@@ -21,28 +17,19 @@
 +		}
 +	}
 +
- 	private async executeTask(task: Task) {
+@@ -795,0 +806 @@
 +		this.assertAcceptingExecution();
- 		const execution = this.executeTaskInternal(task);
- 		this.executingTaskPromises.add(execution);
- 		try {
-@@ -1069,9 +1080,11 @@
- 	 * WHY separate from timer: serverless has no long-lived process; host drives execution explicitly.
- 	 */
- 	async runDueTasks(): Promise<void> {
+@@ -830 +841 @@
+-		this.executingTasks.add(task.id);
++		this.executingTasks.set(task.id, (this.executingTasks.get(task.id) ?? 0) + 1);
+@@ -1042 +1053,3 @@
+-			this.executingTasks.delete(task.id);
++			const remaining = this.executingTasks.get(task.id)! - 1;
++			if (remaining > 0) this.executingTasks.set(task.id, remaining);
++			else this.executingTasks.delete(task.id);
+@@ -1071,0 +1085 @@
 +		if (this.stopped) return;
- 		while (this.activeTick) {
- 			await this.activeTick;
- 		}
+@@ -1074,0 +1089 @@
 +		if (this.stopped) return;
- 		const run = (async () => {
- 			const allTasks = await this.runtime.getTasks({
- 				tags: ["queue"],
-@@ -1100,6 +1113,7 @@
- 	 * @param taskId - UUID of the task.
- 	 */
- 	async executeTaskById(taskId: UUID): Promise<void> {
+@@ -1102,0 +1118 @@
 +		this.assertAcceptingExecution();
- 		const task = await this.runtime.getTask(taskId);
- 		if (!task) {
- 			throw new Error(`Task ${taskId} not found`);
