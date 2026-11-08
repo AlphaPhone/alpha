@@ -323,7 +323,7 @@ starts at `f2a0eb035da9c8ede24efe735d981a27dd403283`, with shared upstream
 verification remains evidence for that earlier source. Its product source is
 being ported selectively so current-main ownership and behavior are preserved.
 
-The current inventory discovers 5,653 product and shared-source inputs. This
+The current inventory discovers 5,660 product and shared-source inputs. This
 includes 4,813 upstream inputs selected by the client/native projections, direct
 model dependencies and an authenticated Android bundle graph. The successful
 producer parsed 4,338 first-party inputs, including 248 generated inputs with
@@ -331,7 +331,7 @@ origin mappings. The graph and its generator are bound as configuration inputs.
 All tracked inputs and generated-source origins are checked against current
 source bytes before coverage admission.
 
-There are 83 registered models. The source ledger retains 5,288
+There are 90 registered models. The source ledger retains 5,295
 `state-audit-required` rows and 1,533 rows with only the general application
 domain allocation. These rows identify unfinished review. They do not establish
 state-machine coverage or an implementation relation. The worker bundle,
@@ -375,9 +375,9 @@ this reconciliation.
 
 ## Mutable state candidate inventory
 
-The syntax audit covers all 5,653 ledger inputs. It parses 4,921 JavaScript and
-TypeScript files without syntax errors and records 33,898 candidate bindings,
-49,762 write sites and 7,381 asynchronous registration calls. These include
+The syntax audit covers all 5,660 ledger inputs. It parses 4,928 JavaScript and
+TypeScript files without syntax errors and records 33,916 candidate bindings,
+49,803 write sites and 7,390 asynchronous registration calls. These include
 temporary local bindings and bundled paths whose runtime activation still needs
 review. Candidate counts describe the review backlog.
 
@@ -389,7 +389,7 @@ individual fields, line numbers, mutations, surrounding guards and asynchronous
 boundaries. `node scripts/quint-state-audit.mjs --check` checks the recorded input
 identities. The syntax-only tool uses the TypeScript 6.0.3 parser alias.
 
-There are 4,794 write sites without a syntactically matched declaration. Aliases,
+There are 4,821 write sites without a syntactically matched declaration. Aliases,
 computed access, injected references and closure lifetimes require review before
 assigning those writes to a state owner. Native and data inputs remain explicit
 work across 678 Java files, 39 Kotlin files, 12 JSON files and three HTML files.
@@ -403,3 +403,33 @@ owner must be classified for lifetime and enabled entry point, mapped to the
 corresponding Quint state and transitions, and driven through current source.
 The existing file-to-model allocation supplies an initial assignment for this
 review.
+
+
+### Core and voice implementation refinements
+
+TaskService now refuses new execution and timer restart after stop. Its
+execution count retains ownership until every overlapping manual invocation
+settles, so scheduled blocking work cannot enter through an early removal.
+The shared patch is authenticated and used by the mobile bundle, development
+compiler, matching source launchers and refinement loader. Independently frozen
+snapshots keep their own revision contract and report an unapplied patch when
+the current reviewed preimage does not match.
+
+The mobile producer records both the original TaskService input hash and its
+effective patched hash. Source inventory admission checks producer fingerprints
+and the transformation record. The native Google host's measured graph has no
+TaskService input, and the separate workflow dependency producer reports 1,123
+inputs with zero selected core files.
+
+The voice additions cover ASR pipe settlement, piped capture and native frame
+buffers. Canonical Notes now has controller, draft, feedback, mutation and row
+projection models. The provider/store side and remaining view protocols retain
+separate open obligations. A scan of tracked Markdown and design HTML found no
+additional executable TLA or PlusCal block. Historical design metadata labels
+remain attached to the already-converted four view-refresh designs.
+
+The complete `c890a570` verification run finished with 3,868 passing Node tests,
+48 failures, seven skipped tests and one TODO. The failures were tracked to
+missing prepared-SDK inputs, stale source fixtures and a shell-load timeout.
+The run stopped before production build and bundle audit. The next complete
+run includes the corrections and uses the authenticated SDK environment.

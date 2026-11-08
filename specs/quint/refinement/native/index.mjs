@@ -19,8 +19,10 @@ import {checkSharedRecording} from './shared-recording.mjs';
 import {checkLiveCapture} from './live-capture.mjs';
 import {checkAsrPipe} from './asr-pipe.mjs';
 import {checkPipedCapture} from './piped-capture.mjs';
+import {checkCaptureFrames} from './capture-frames.mjs';
 
 const boundaryObligations = [
+  {model:'NativeCaptureFrames',obligation:'Physical microphone and unbounded PCM histories',reason:'Actual read/segment/pre-roll buffers execute with controlled PCM and detector ports. Device timing, arbitrary sample histories and engine behavior remain external.'},
   {model:'NativeAsrPipe',obligation:'Provider and continuous frame integration',reason:'Actual pipe futures, queued batches, bounds, cutoffs and cancellation execute against controlled ASR/provider ports. Actual transport and unrestricted continuous frame processing require additional source and platform evidence.'},
   {model:'NativePipedCapture',obligation:'Physical frame buffering and installed provider delivery',reason:'The shared bridge, controller, capture and ASR pipe execute together. Warmup, owner retirement and close confirmation are source-driven. Physical recorder timing and continuous frame-buffer behavior remain open.'},
   {model:'SharedRecordingAdmission',obligation:'Installed permission delivery and complete voice composition',reason:'The actual shared bridge executes permission, cancellation and worker settlement. Android prompt/call delivery and physical microphone release remain platform obligations.'},
@@ -71,6 +73,7 @@ export async function runNativeRefinement(extraSources = []) {
   receipts.push(await checkLiveCapture(sources));
   receipts.push(await checkAsrPipe(sources));
   receipts.push(await checkPipedCapture(sources));
+  receipts.push(await checkCaptureFrames(sources));
   const obligations = [...boundaryObligations,...credential.obligations];
   for (const model of new Set(receipts.map(receipt => receipt.model))) {
     const related = receipts.filter(receipt => receipt.model === model);

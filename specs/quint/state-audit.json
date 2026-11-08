@@ -7,7 +7,7 @@
   "toolSha256": "d339b75404966b1ec76650c90b0c4c5e466e145459ff4787e464b98973d8f284",
   "dependencyLockSha256": "19bcd50048bdf70d9d1aed2fb7b098c842fcc88ffa8f875a26da24fac927d03e",
   "sourcePin": "475a8d59dc1811c2cde093613519906a5a3f6457",
-  "ledgerSha256": "4b5be02e606da5fd4e211d662d3dee871bc138bc86850d8c5a93c2af8424bd4e",
+  "ledgerSha256": "04900bfb4fc76dc357741117dbcc909544f877ff354a41d20fd09f358f58a409",
   "method": "TypeScript syntax trees for JavaScript/TypeScript. Mutable fields, bindings, containers, state hooks, write sites and asynchronous registration calls are candidates for semantic review.",
   "limitations": [
     "Candidate extraction does not establish state-machine coverage or implementation refinement.",
@@ -11318,6 +11318,7 @@
       "allocatedModels": [
         "CanonicalNotesController",
         "CanonicalNotesFeedback",
+        "CanonicalNotesView",
         "NotesLifecycle"
       ],
       "sourceReview": "state-audit-required",
@@ -11354,6 +11355,7 @@
       "sha256": "af7c5ec7c1ef2be0ca599fd19a3ef644f60b46d6e9cfcb4f85d39f45345c3e1c",
       "allocatedModels": [
         "CanonicalNotesFeedback",
+        "CanonicalNotesView",
         "NotesLifecycle"
       ],
       "sourceReview": "state-audit-required",
@@ -23024,7 +23026,8 @@
       "path": "scripts/core-state-patch.mjs",
       "sha256": "8009421748b5ab2347f50ffa51799c297cd7525789f999387cb6a24b826993bc",
       "allocatedModels": [
-        "Application"
+        "Application",
+        "TaskServiceLifecycle"
       ],
       "sourceReview": "state-audit-required",
       "classification": "syntactic-candidates",
@@ -52982,7 +52985,8 @@
       "allocatedModels": [
         "AssistantConversation",
         "CoreRuntimeShutdown",
-        "ResidentRuntime"
+        "ResidentRuntime",
+        "TaskServiceLifecycle"
       ],
       "sourceReview": "state-audit-required",
       "classification": "syntactic-candidates",
@@ -57520,6 +57524,7 @@
       "path": "vendor/eliza/packages/core/src/services/task-scheduler.ts",
       "sha256": "1b2650b764ae7686042080c1e3955ce140980e4212673014b2472f5f735e8d27",
       "allocatedModels": [
+        "TaskServiceLifecycle",
         "WorkflowExecution"
       ],
       "sourceReview": "state-audit-required",
@@ -57558,7 +57563,8 @@
       "path": "vendor/eliza/packages/core/src/services/task.ts",
       "sha256": "c73a20cdc504f7f7a935078d7d7ad3ae6e368b6d90a1bbe580545c8421e9f4f7",
       "allocatedModels": [
-        "Application"
+        "Application",
+        "TaskServiceLifecycle"
       ],
       "sourceReview": "state-audit-required",
       "classification": "syntactic-candidates",
@@ -121138,6 +121144,7 @@
       "allocatedModels": [
         "AssistantConversation",
         "MediaLifecycle",
+        "NativeCaptureFrames",
         "NativeLiveCapture",
         "ResidentRuntime",
         "SpeechResources",
@@ -121193,6 +121200,7 @@
       "sha256": "88ffa75f81047a403293454e72bdd1c91038675af44579fc83e53458363ab962",
       "allocatedModels": [
         "AssistantConversation",
+        "NativeCaptureFrames",
         "ResidentRuntime",
         "SpeechResources",
         "StreamingPlayback",
@@ -121212,6 +121220,7 @@
       "allocatedModels": [
         "AssistantConversation",
         "MediaLifecycle",
+        "NativeCaptureFrames",
         "NativeLiveCapture",
         "NativePipedCapture",
         "ResidentRuntime",
@@ -155998,7 +156007,8 @@
       "path": "vendor/eliza/plugins/plugin-sql/src/base.ts",
       "sha256": "5a4ae3e5bca764b5a0f4af3d4a5d1bc88a48fdcddee0d45389c490788af5a610",
       "allocatedModels": [
-        "Application"
+        "Application",
+        "TaskServiceLifecycle"
       ],
       "sourceReview": "state-audit-required",
       "classification": "syntactic-candidates",
@@ -158102,7 +158112,8 @@
       "path": "vendor/eliza/plugins/plugin-sql/src/stores/task-wake.ts",
       "sha256": "16e6df0a708256f62ee6873802c2be44c082161a12439f0c9629d2dc18401074",
       "allocatedModels": [
-        "DurableStore"
+        "DurableStore",
+        "TaskServiceLifecycle"
       ],
       "sourceReview": "state-audit-required",
       "classification": "syntactic-candidates",
@@ -161740,6 +161751,6 @@
   ],
   "detail": {
     "path": "test-results/quint-state-audit/details.json",
-    "sha256": "28025bd14f69cad12502e51d9441fbbd83418e3519c805e0b2de193fa4adf1c4"
+    "sha256": "a1574e632fbef7c9f1966f8688a572ffa53458ddd90df13ea4143b8f27a5d15f"
   }
 }
