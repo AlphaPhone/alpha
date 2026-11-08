@@ -1252,5 +1252,35 @@
       "Canonical Calendar editor owner transition, opaque lifetime, durable slot reads/writes, consumed records, stale controls and recovery.",
       "Two owner identities, six lifetimes, synthetic title classes, one held read and write per owner. Pending operations bind to actual lifetime observations. Provider dispatch, reminder destination conversion, arbitrary invalid fields and native storage durability remain external."
     ]
+  },
+  {
+    "path": "specs/quint/application/AgentCalendarRefresh.qnt",
+    "module": "AgentCalendarRefresh",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "sameWindowTransportKeepsOldFeedTest",
+      "wrongWindowDoesNotKeepOldFeedTest",
+      "repeatQueuesOneTrailingReadTest",
+      "staleOwnerCannotReplaceCurrentTest",
+      "unreadableLegacyStopsCanonicalReadsTest"
+    ],
+    "invariants": [
+      "OwnsActiveRead",
+      "VerifiedNext",
+      "ResponseIdentity",
+      "Bounded"
+    ],
+    "sources": [
+      "apps/app/src/runtime/agent-calendar.ts",
+      "apps/app/src/runtime/agent-calendar-client.ts",
+      "apps/app/src/runtime/agent-calendar-view.ts",
+      "apps/app/src/prototype/agent-calendar-adapter.ts"
+    ],
+    "abstractions": [
+      "Actual owner/session and range refresh, held legacy preservation gate, independently settled feed/source/next reads, trailing same-query reads, and presentation freshness.",
+      "Two owners, sessions and windows and eight epochs. Observe real abort and private active controller state. Calendar write deferral, provider replay, Maps return, linked selection and live transport have separate scope."
+    ]
   }
 ]

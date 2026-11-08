@@ -32,6 +32,7 @@ import {checkLauncherFavorites} from './launcher-favorites.mjs';
 import {checkHomeGesture} from './home-gesture.mjs';
 import {checkDrawerInteraction} from './drawer-interaction.mjs';
 import {checkCanonicalCalendarDraft} from './canonical-calendar-draft.mjs';
+import {checkAgentCalendarRefresh} from './agent-calendar-refresh.mjs';
 import {checkPhotosWindow} from './photos-window.mjs';
 import {checkPhotosTrash} from './photos-trash.mjs';
 
@@ -40,7 +41,7 @@ const adapters = [application, shellNavigation, startupPermissions, assistantCon
   permissionWalkthrough, developmentDevice, permanentVoiceDeletion, developmentHost, filesTree,
   calendarPresentation, draftDispatch, notificationCollection, callbackLanding,
   runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, checkNotesCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
-  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkHomeGesture, checkDrawerInteraction, checkCanonicalCalendarDraft];
+  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkHomeGesture, checkDrawerInteraction, checkCanonicalCalendarDraft, checkAgentCalendarRefresh];
 
 /** Component traces, with remaining obligations kept explicit for the aggregate report. */
 export async function runApplicationRefinement() {
