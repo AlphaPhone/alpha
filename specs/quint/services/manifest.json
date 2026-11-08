@@ -1267,6 +1267,58 @@
         "maxSteps": 80,
         "seed": "123"
       }
+    },
+    {
+      "path": "specs/quint/services/CanonicalNotesStore.qnt",
+      "module": "CanonicalNotesStore",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "sources": [
+        "vendor/eliza/plugins/plugin-notes/src/store.ts",
+        "vendor/eliza/plugins/plugin-notes/src/service.ts",
+        "vendor/eliza/plugins/plugin-notes/src/interact.ts",
+        "vendor/eliza/plugins/plugin-notes/src/types.ts",
+        "vendor/eliza/plugins/plugin-notes/src/validation.ts",
+        ".eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts",
+        "patches/eliza/notes-state-runtime.patch"
+      ],
+      "tests": [
+        "canonicalReplayTest",
+        "tiedClockEditTest",
+        "backwardsClockEditTest",
+        "legacyTimestampFallbackTest",
+        "legacyTieUsesRawOrderTest",
+        "mixedLegacyEditTest",
+        "rawRestoreMembershipTest",
+        "lostAckPreservesStaleCacheTest",
+        "staleWriterRejectedTest",
+        "restartLoadsUnknownCommitTest",
+        "staleRevisionRejectedTest",
+        "projectionFailurePreservesDocumentTest",
+        "delayedReplyKeepsOwnCommitTest",
+        "firstEmptyClearAddsTrashTest",
+        "repeatEmptyClearPreservesRevisionTest",
+        "stoppedStoreCannotAdmitTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RawMembershipDisjoint",
+        "VisibleContentUnique",
+        "ReplyIdentityPresent",
+        "ConfirmedRevisionBounded",
+        "NewerOrderWins"
+      ],
+      "abstractions": [
+        "Two plain physical notes and two content classes; collection revisions zero through eight; wall-clock values zero through two.",
+        "Raw Trash/active membership, visible representative, private logical revision and exact committed reply are distinct. Restore returns raw membership.",
+        "One serialized cache and controlled independent encrypted-port writer. Cryptographic storage, unlimited data, full authorization and filesystem crash recovery remain separate obligations."
+      ],
+      "bounds": {
+        "maxSamples": 1000,
+        "maxSteps": 80,
+        "seed": "123"
+      }
     }
   ]
 }
