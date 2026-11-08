@@ -178,3 +178,21 @@ source probe shows that failed release previously left buffers uncleared and
 omitted the terminal callback. The patched source clears them and reports the
 capture failure. Clock timestamps, arbitrary PCM and detector accuracy are not
 in this finite equality projection.
+
+### Indicator provider admission
+
+`indicator-provider.mjs` executes the complete staged `IndicatorLeaseProvider`
+with the real `IndicatorLease` and `ListenerPolicy`. `IndicatorProviderTraces`
+reads private source fields and returned Bundles. Android identity, package
+signing, clocks, Binder handles and the `Listener.refresh` destination are
+controlled ports in `indicator-provider-platform.mjs`. All nineteen model fields
+and six entry actions have source observations. The authority and lease payload
+are synthetic.
+
+`IndicatorProviderProbe` separately holds the real provider monitor while two
+acquire calls reach it. Its final assertion checks actual captured callback
+identity, including across repeated replacement. This regression identified the
+source race fixed by `indicator-provider-generation.patch`. Native staging
+includes the exact shared Sense module and the product Gradle wrapper consumes
+that staged source. The full `ListeningService` reaction to refresh remains a
+separate coordinator obligation.

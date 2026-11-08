@@ -461,3 +461,26 @@ and byte buffers and detached source ownership. The campaign includes partial
 reads, exact threshold windows, non-finite and absent detector output, both
 cleanup failures and the previous cleanup regression. Physical inference and
 microphone timing remain external inputs.
+
+`NativeIndicatorProvider` covers the real `IndicatorLeaseProvider.call` boundary
+and the `IndicatorLease` fields it changes. The generation counter and active
+Binder death recipient are admitted under the same monitor. The source regression
+holds that monitor while two real public calls arrive, then compares the actual
+lease generation with the generation captured by the linked callback. The old
+source mismatched in 31 of 32 recorded schedules. The patched source matched in
+all 32 schedules; bounded symbolic checking covers the finite transition model.
+
+Twenty-seven source schedules cover failed caller authority, missing arguments,
+lease replacement, old death callbacks after unlink failure, reuse of a Binder,
+already-dead tokens, stale renewal/revocation, expiry, reboot and nine visibility
+report classes. A revoked lease retains its registered death link until a later
+acquisition. The model preserves that source behavior. Three lease generations
+and three Binder identities bound the campaign. The actual listener convergence
+method, operating-system Binder behavior, platform signing and SystemUI visibility
+remain external acceptance obligations.
+
+The Sense module is now included in authenticated native staging, and its shared
+consumer Gradle script obtains `src/main` from that staging. The standalone and
+launcher host descriptors include the same product listener project. Assertions
+check this configuration for its debug/release builds. These checks do not
+constitute an APK build or installed AOSP acceptance.

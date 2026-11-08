@@ -223,9 +223,22 @@
           "afterSha256": "dddb7789528de0bf2cbb716f8be9c74fd748667756e05c0c843017cb8176de4c"
         }
       ]
+    },
+    {
+      "file": "indicator-provider-generation.patch",
+      "sha256": "930773aa46cb0cc44157feb8daf70cd16df4349eba69582c0a96d6e3f7ab64b1",
+      "module": "packages/app/platforms/android/sense",
+      "targets": [
+        {
+          "path": "packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/IndicatorLeaseProvider.java",
+          "beforeSha256": "cd9ceb69a92c76ca7eb06ae8bb92b34db461e251f366dfad7036066f219bf373",
+          "afterSha256": "46d5b4779ce49a784bba12b8b37830783f1cd994a6e0c2c49ff2e52b0e680855"
+        }
+      ]
     }
   ],
   "modules": [
+    "packages/app/platforms/android/sense",
     "packages/auth/android",
     "plugins/plugin-local-inference/native/android",
     "plugins/plugin-native-action-journal/android",
