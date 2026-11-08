@@ -1,5 +1,6 @@
+import {formatTime} from '../prototype/locale-time';
 /** Photos view rules (design/view-refresh-2026-11 section 2, specs/photos-library Design.cfg).
- * Dependency-free so test/photos-view.test.mjs runs them in node. */
+ * Pure view rules with device-locale time formatting, exercised by test/photos-view.test.mjs. */
 
 export type ViewRow = { id: string; date: number; taken?: number; kind?: string; favorite?: boolean; trashed?: boolean; folder?: string; width?: number; height?: number; mutationRevision?: string; revision?: string; expiresAt?: number };
 const DAY = 86400000;
@@ -212,7 +213,7 @@ export function filterLabel(filter: PhotosFilter, albumName?: (album: string) =>
 export function viewerTitle(time: number, now = Date.now()): { day: string; time: string } {
   const section = sectionKey(time, now), d = new Date(time);
   const day = section.key.startsWith('m:') ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : section.label;
-  return { day, time: d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) };
+  return { day, time: formatTime(d) };
 }
 export function formatBytes(size: number | undefined): string {
   if (!size || !Number.isFinite(size) || size <= 0) return '';

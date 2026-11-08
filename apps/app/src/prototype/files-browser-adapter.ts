@@ -1,3 +1,4 @@
+import {formatTime} from './locale-time';
 import {createInlineModal} from '../runtime/inline-modal';
 import {registerPlugin} from '../platform-plugins';
 import {DailyApps, type NativeResult} from '../daily';
@@ -55,7 +56,7 @@ const iconFor = (entry: Pick<StorageEntry, 'directory' | 'mimeType'>) => entry.d
 const shortDate = (time: number) => {
   if (!time) return '';
   const date = new Date(time), now = new Date();
-  return date.toDateString() === now.toDateString() ? date.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})
+  return date.toDateString() === now.toDateString() ? formatTime(date)
     : date.toLocaleDateString(undefined, date.getFullYear() === now.getFullYear() ? {month: 'short', day: 'numeric'} : {year: 'numeric', month: 'short', day: 'numeric'});
 };
 const countLabel = (n: number) => n === 1 ? '1 item' : n + ' items';

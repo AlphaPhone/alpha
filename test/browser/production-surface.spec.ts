@@ -144,10 +144,15 @@ test('the chooser and Settings offer only production connections', async ({ page
   await expect(settings.getByText('Web app', { exact: true })).toHaveCount(0);
   await expect(settings.getByText('Development preview', { exact: true })).toHaveCount(0);
   await expect(settings.getByText(/^\d+\.\d+\.\d+/).first()).toBeVisible();
+  // The notices this build serves, unrouted: the page must render them, not the fallback.
+  const served = await page.request.get('/licenses/third-party-notices.json');
+  expect(served.ok()).toBe(true);
+  const notices = await served.json();
+  expect(Array.isArray(notices) && notices.length > 0).toBe(true);
   await settings.getByText('Open source licenses', { exact: true }).click();
   await expect(settings.getByText('Open source licenses', { exact: true }).first()).toBeVisible();
-  // Either the generated notices or the honest fallback, never an empty page.
-  await expect(settings.getByText(/License notices unavailable|MIT|Apache|BSD|ISC|MPL/).first()).toBeVisible();
+  await expect(settings.getByText(notices[0].name, { exact: true }).first()).toBeVisible();
+  await expect(settings.getByText('License notices unavailable', { exact: true })).toHaveCount(0);
 });
 
 test('Settings shows the flags and obligations of flagged license entries, and nothing extra on unflagged ones', async ({ page }) => {
@@ -398,7 +403,7 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
   const dialog=signedOut?page.locator('[role="main"].alpha-cloud-sign-in'):needsPlan?page.getByRole('dialog',{name:'Eliza Cloud account & plan',exact:true}):page.getByRole('region',{name:'Settings',exact:true});
   if(needsPlan){
    const notice=page.getByRole('region',{name:'Eliza Cloud plan notice'});
-   await expect(notice).toContainText('Your agent is running on this device. AI replies aren’t available right now');
+   await expect(notice).toContainText('AI replies are off. Your agent is still running.');
    await expect(page.getByRole('dialog')).toHaveCount(0);
    await expect(notice.getByRole('button',{name:'Choose a plan',exact:true})).toBeVisible();
    await notice.getByRole('button',{name:'Redeem code',exact:true}).click();

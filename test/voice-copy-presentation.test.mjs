@@ -1,30 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import {createRequire} from 'node:module';
-import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import {cloudVoiceViewFixture} from './fixtures/cloud-voice-view.mjs';
+import {voiceMarkup} from './fixtures/voice-markup.mjs';
 
-// The actual production template and DCLogic renderer, closed presentation ports only.
-test('actual voice error clears input activity, keeps failure internal without a banner and retains uncertain cleanup',async()=>{
- const template=fs.readFileSync('apps/app/src/prototype/template.html','utf8');
- const noticesStart=template.indexOf('<div class="alpha-chat-notices">');
- const noticesEnd=template.indexOf('<sc-if value="{{legacyChatRecorder}}">',noticesStart);
- const controlsStart=template.indexOf('<sc-if value="{{inlineChatRecorder}}">',noticesEnd);
- const controlsEnd=template.indexOf('<sc-if value="{{panelComposer}}">',controlsStart);
- assert.ok(noticesStart>=0&&noticesEnd>noticesStart&&controlsStart>noticesEnd&&controlsEnd>controlsStart);
- const fragment='<div class="os"><div data-screen="1">'+template.slice(noticesStart,noticesEnd)+template.slice(controlsStart,controlsEnd)+'</div></div>';
- const bundle=await build({stdin:{contents:`import React from 'react';import{renderToStaticMarkup}from'react-dom/server';import{DCLogic}from'./apps/app/src/prototype/dc-lite.js';import{VoiceActivity}from'./apps/app/src/prototype/voice-activity.tsx';export const createActivity=props=>React.createElement(VoiceActivity,props);class Fixture extends DCLogic{renderVals(){return this.props.values;}}export const render=values=>renderToStaticMarkup(React.createElement(Fixture,{phoneSurface:true,values}));`,resolveDir:process.cwd(),loader:'js'},bundle:true,platform:'node',format:'cjs',write:false,plugins:[{name:'actual-voice-template',setup(b){b.onResolve({filter:/template\.html\?raw$/},()=>({path:'voice',namespace:'actual-template'}));b.onLoad({filter:/.*/,namespace:'actual-template'},()=>({contents:'export default '+JSON.stringify(fragment),loader:'js'}));}}]});
- const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'voice-copy-markup-')),file=path.join(temporary,'renderer.cjs'),before=globalThis.document;
+// The actual production template and DCLogic renderer, closed presentation ports only. Terminal
+// Cloud failures are covered by voice-calm-cloud-errors.test.mjs.
+test('actual voice activity sits below the chat notices, and an unconfirmed cleanup stays quiet and blocked',async()=>{
+ const {render,createActivity}=await voiceMarkup(),before=globalThis.document;
  const env=new JSDOM('<!doctype html>'),beforeMedia=globalThis.matchMedia;
  let f;
  globalThis.matchMedia=()=>({matches:true});
  try{
-  globalThis.document=env.window.document;fs.writeFileSync(file,bundle.outputFiles[0].text);
-  const {render,createActivity}=createRequire(import.meta.url)(file);
+  globalThis.document=env.window.document;
   f=cloudVoiceViewFixture({cloudProfile:true});
   f.box.React={createElement:(_component,props)=>createActivity(props)};f.box.VoiceActivity=()=>null;
   f.box.BatchVoiceConversation=class {
@@ -36,7 +25,6 @@ test('actual voice error clears input activity, keeps failure internal without a
   await f.shell.startVoice();
   for(const state of ['starting','listening','error']){
    const error=state==='error';
-   // A Cloud 503 is now waited out quietly (voice-calm-cloud-errors.test.mjs); a refused sign-in is terminal.
    if(error)f.batchOptions.onState({phase:'error',error:Object.assign(new Error('PRIVATE_PROVIDER_BODY'),{code:'voice-http-401'})});
    const model=state==='starting'?f.initialView:f.renderChat();
    assert.equal(model.state,state);assert.equal(model.activity===null,error);
@@ -50,15 +38,13 @@ test('actual voice error clears input activity, keeps failure internal without a
    assert.equal(alert,null,'no voice error banner');
    assert.equal(notices.querySelector('.alpha-voice-error'),null,'no error or support-code content');
    if(error){
-    assert.equal(model.lines[0].t,'Sign in to Cloud again in Settings, then retry voice.','failure remains classified internally');assert.doesNotMatch(doc.body.textContent,/Sign in to Cloud|401|PRIVATE/);
+    assert.equal(model.lines[0].t,'Eliza Cloud sign-in expired. Sign in again in Settings, then retry voice.','failure remains classified internally');assert.doesNotMatch(doc.body.textContent,/Eliza Cloud sign-in expired|401|PRIVATE/);
     assert.equal(doc.querySelector('[role="status"][aria-label="Voice conversation status"]').textContent,'','the alert is not repeated in the status region');
     assert.equal(notices.querySelector('[data-alpha-voice-recovery]'),null,'uncertain capture keeps retry out of the composer');
    }else assert.equal(notices.querySelector('[data-alpha-voice-recovery]'),null);
    assert.ok(doc.querySelector('[aria-label="Stop voice conversation"]'));
    assert.equal(doc.querySelectorAll('[data-alpha-voice-animation]').length,error?0:1);
    assert.equal(doc.querySelectorAll('[aria-label="Voice activity"]').length,error?0:1);
-   if(error){assert.equal(model.muted,'mixed');assert.equal(model.muteLabel,'Microphone status unconfirmed');assert.equal(model.recoveryLabel,'');}
-
   }
   // The same actual adapter must preserve uncertain cleanup instead of claiming mic-off.
   f.cleanupError=Error('Cleanup could not be confirmed');
@@ -84,5 +70,5 @@ test('actual voice error clears input activity, keeps failure internal without a
    assert.doesNotMatch(legacy.body.textContent,/INTERNAL_FAILURE_DETAIL/);
    assert.equal(model.state,state,'failure identity is unchanged');
   }
- }finally{f?.close();globalThis.matchMedia=beforeMedia;globalThis.document=before;env.window.close();fs.rmSync(temporary,{recursive:true,force:true});}
+ }finally{f?.close();globalThis.matchMedia=beforeMedia;globalThis.document=before;env.window.close();}
 });

@@ -8,7 +8,7 @@ import {openNotificationRecovery} from '../browser/notification-recovery';
 import {openAlertSoundRecovery,openDevicePreferencesRecovery,openDeviceRolesRecovery} from '../browser/preference-recovery';
 import {notificationDocument} from '../browser/notification-store';
 import {alertSoundDocument,deviceRolesDocument} from '../browser/preference-documents';
-import {cachedDevicePreferences,initializeDevicePreferences,editDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
+import {cachedDevicePreferences,devicePreferencesStatus,initializeDevicePreferences,editDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import { registerPlugin } from '../platform-plugins';
 import { broaderPageNotice } from './native-adapter';
 import { Capacitor } from '@capacitor/core';
@@ -29,7 +29,7 @@ import { readNativeCloudStreamTiming } from '../runtime/cloud-voice';
 import { listenerStatus, openListenerSettings, pauseListener, turnOffListener, wakeListeningStopUnconfirmed, type ListenerStatus } from '../runtime/always-on-listener';
 import { reviewDataReset, type DataResetPlugin } from '@elizaos/capacitor-system/reset';
 import { androidRoleLabel, parseRoleStatuses } from '@elizaos/capacitor-system/settings';
-import { leavePasswordManager, passwordEntryPage, passwordManagerGroups, passwordManagerLifecycle, refreshPasswordManager, PASSWORD_PAGES } from '../passwords/password-manager';
+import { leavePasswordEntry, leavePasswordManager, passwordEntryPage, passwordManagerGroups, passwordManagerLifecycle, refreshPasswordManager, PASSWORD_PAGES } from '../passwords/password-manager';
 
 type Bag = Record<string, any>;
 type PhotoAccess = {scope:'full'|'partial'|'selected'|'denied';images:string;videos:string};
@@ -68,6 +68,8 @@ async function loadLicenses(changed: () => void) {
   } catch { licenses = { status: 'unavailable', items: [] }; }
   changed();
 }
+/** Native reset results that only echo the owner's own cancel (DataResetCopy); nothing else is hidden. */
+const RESET_CANCEL_TEXTS = new Set(['Reset review closed. Nothing reset.', 'Nothing reset.', 'Reset cancelled. Nothing reset.']);
 type RecoveryDomain = 'notifications' | 'device settings' | 'device roles' | 'alert sound history';
 const recoveryActions: Record<RecoveryDomain, { label: string; open: () => void }> = {
   notifications: { label: 'Recover notification data', open: openNotificationRecovery },
@@ -248,7 +250,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   let crashLog: CrashLog | null = null, crashBusy = false, diagnosticsBusy = false;
   let updateBusy: '' | 'check' | 'install' = '';
   let gmail = 'Not checked';
-  let inferenceProvider = 'Not reported by agent';
+  let inferenceProvider = 'Not reported';
   // The AOSP image's always-on listener (#424): status, Pause and Turn off only. Turning listening on
   // or resuming happens in the listener's own consent screen, never here.
   let listener: ListenerStatus = { available: false }, listenerBusy = false, listenerSequence = 0;
@@ -281,12 +283,12 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     capabilityAbort?.abort();
     // Hidden Settings must not turn a Home cache restore or account switch into remote discovery.
     if(!enteringSettings&&owner?.S?.().view!=='settings'){
-      capabilityAbort=null;gmailAccounts=[];gmail='Not checked';inferenceProvider='Not reported by agent';return;
+      capabilityAbort=null;gmailAccounts=[];gmail='Not checked';inferenceProvider='Not reported';return;
     }
     const abort = capabilityAbort = new AbortController();
     const cloud = connectionController.getCloudClient(), instance = owner;
     gmail = cloud ? 'Checking authorization…' : 'Cloud sign-in required'; gmailAccounts = [];
-    inferenceProvider = 'Not reported by agent';
+    inferenceProvider = 'Not reported';
     changed();
     const timeout = setTimeout(() => { abort.abort(); if (owner === instance && capabilityAbort === abort) { if (gmail === 'Checking authorization…') gmail = 'Authorization not verified'; changed(); } }, 10000);
     try {
@@ -361,7 +363,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       if (native) {
         const result = await device.shareDiagnostics({ text });
         if (result?.status !== 'opened') throw Error('Share unconfirmed');
-        if (owner === instance) api.toast('Choose where to share the diagnostics. They contain no notes, keys or account IDs.');
       } else {
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = diagnosticsFileName(report); link.hidden = true;
@@ -471,7 +472,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   const SETTINGS_PARENT: Record<string, string> = { history: 'agent-connection', problems: 'about', licenses: 'about', 'password-entry': 'password-provider' };
   const back = definition.back;
   definition.back = (state: Bag, api: Bag) => {
-    if (!state.sheet && SETTINGS_PARENT[state.page]) { api.set({ page: SETTINGS_PARENT[state.page] }); return true; }
+    if (!state.sheet && SETTINGS_PARENT[state.page]) { if (state.page === 'password-entry') leavePasswordEntry(); api.set({ page: SETTINGS_PARENT[state.page] }); return true; }
     if (!state.sheet && PASSWORD_PAGES.includes(state.page)) leavePasswordManager();
     return back ? back(state, api) : false;
   };
@@ -521,12 +522,13 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const googleRow = row('Google', () => googleConnectionController.open(), googleCount ? `${googleCount} account${googleCount === 1 ? '' : 's'}` : connectionController.getCloudClient() ? 'Connect' : '');
 
     // ---- Assistant
-    // An unreadable preference document fails closed: switches show off and change nothing.
-    const preferences = cachedDevicePreferences(), preferenceUnavailable = 'Preference unavailable. Reopen Settings to try again.';
+    // Missing preferences require review and cannot be changed until read or recovered.
+    const preferences = cachedDevicePreferences(), preferenceStatus = devicePreferencesStatus(), preferenceUnavailable = 'Action preference could not be read. Alpha asks before every action until it is recovered.';
     const askRow = toggle('Ask before acting', preferences?.askBeforeAgentActions === true, async () => {
       const saved = cachedDevicePreferences(); if (!saved) { api.toast(preferenceUnavailable); return; }
       try { await editDevicePreferences(value => { value.askBeforeAgentActions = !saved.askBeforeAgentActions; }); changed(); } catch { api.toast('Could not save. Try again.'); }
     });
+    Object.assign(askRow, { dis: preferenceStatus === 'loading', hasSub: preferenceStatus !== 'ready', sub: preferenceStatus === 'loading' ? 'Loading…' : preferenceStatus === 'unavailable' ? preferenceUnavailable : '' });
     const agentStatus = connection.session ? connection.kind === 'resident' ? 'Running' : testMocksEnabled ? 'Remote agent' : 'Unsupported connection' : connection.residentRecoveryReason ? 'Needs review' : connection.busy || connection.kind !== 'recovering' ? 'Starting…' : 'Not running';
     const agentRow = row('Agent', native && !testMocksEnabled ? go('agent-connection') : () => connectionController.open(), native && !testMocksEnabled ? agentStatus : connection.session ? connection.name : 'Not connected');
     const digestsRow = row('Scheduled digests', () => window.dispatchEvent(new Event('alpha:hosted-digests')));
@@ -589,12 +591,13 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const aboutRow = row('About', () => { api.set({ page: 'about' }); void refresh(); }, versionLabel(facts.appVersion || buildVersion, facts.appVersionCode));
     const developerRow = developerTools ? row('Developer', go('developer')) : null;
     const resetRow = native ? row('Reset Alpha data', async () => {
-      api.toast((await reviewDataReset(registerPlugin<DataResetPlugin>('AlphaReset'))).message);
+      const result = await reviewDataReset(registerPlugin<DataResetPlugin>('AlphaReset'));
+      if (!RESET_CANCEL_TEXTS.has(result.message)) api.toast(result.message);
     }, '', { labCss: 'color:var(--fg);font-weight:600' }) : null;
     const present = (rows: Array<Bag | null>) => rows.filter((value): value is Bag => !!value);
     top.groups = [
       group([cloudRow, googleRow], 'Account'),
-      group(present([askRow, agentRow, row('AI provider', () => connectionController.openProviderSettings(), connection.providerStatus?.selected && connection.providerStatus.provider === 'cerebras' ? 'Own API keys' : 'Cloud'), listeningRow, listeningWarning, digestsRow]), 'Assistant'),
+      group(present([askRow, preferenceStatus === 'unavailable' ? row('Recover device settings', () => openDevicePreferencesRecovery(), '', { hasSub: true, sub: 'Back up before resetting' }) : null, agentRow, row('AI provider', () => connectionController.openProviderSettings(), connection.providerStatus?.selected && connection.providerStatus.provider === 'cerebras' ? 'Own API keys' : 'Cloud'), listeningRow, listeningWarning, digestsRow]), 'Assistant'),
       group(present([row('Calendars', go('calendar')), native || browserDevProfile ? row('Passwords', go('password-provider')) : null, photosRow, mailImagesRow, homeRow]), 'Apps'),
       group(present([themeRow, textRow]), 'Appearance'),
       group(present([notificationsRow, crossRow]), 'Notifications'),
@@ -626,7 +629,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           if (recoveryState?.step === 'unavailable') rows.push(log('Recovery', 'Could not be checked. Your records were kept.'));
           if (recoveryState?.step === 'partial') rows.push(log('Recovery', 'Did not finish. Your records were kept.'));
           actions.push(row('Review recovery', () => void connectionController.reviewRecovery()));
-        }
+        } else actions.push(row('Export diagnostics', () => void exportDiagnostics(api), diagnosticsBusy ? 'Preparing…' : '', { hasSub: true, sub: 'If Alpha still cannot start. Contains no notes, keys or account IDs.' }));
       } else actions.push(row(connection.session ? 'Restart agent' : 'Start agent', () => void connectionController.startLocal()));
       if (connection.session && !connection.busy) actions.push(row('New conversation', () => void connectionController.newConversation()), row('Earlier conversations', () => { api.set({ page: 'history' }); void connectionController.listHistory(); }));
       const review: Bag[] = [];
@@ -690,15 +693,15 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const provider = facts.passwordProvider || {};
       const passwordAction = (label: string, kind: string, val = ''): Bag => row(label, async () => {
         if (passwordOpening) return; passwordOpening = true; const instance = owner; changed();
-        try { const result = await device.openPasswordProvider({ action: kind }); if (result?.status !== 'opened') throw Error('Unconfirmed provider handoff'); if (owner === instance && result.destination !== 'development') api.toast(result.destination === 'system-settings' ? 'Opened Android settings. Search for passwords or autofill, then choose your provider.' : 'Opened provider setup. Complete or cancel there; no change is confirmed yet.'); }
-        catch { if (owner === instance) api.toast('Password provider setup is unavailable. No provider change is confirmed.'); }
+        try { const result = await device.openPasswordProvider({ action: kind }); if (result?.status !== 'opened') throw Error('Unconfirmed provider handoff'); }
+        catch { if (owner === instance) api.toast('Password provider setup is unavailable.'); }
         finally { passwordOpening = false; if (owner === instance) { changed(); void refresh(); } }
       }, passwordOpening ? 'Opening…' : val);
       // The selection Android reports; a provider whose publisher is not verified is never named Proton Pass.
       const selection: Bag = { proton: provider.installation === 'installed' ? 'Proton Pass selected' : provider.installation === 'disabled' ? 'Proton Pass selected · app disabled' : 'Provider package selected · publisher not verified', other: 'Another provider selected', none: 'No provider selected', unknown: 'Selection unavailable' };
       const providerValue = provider.support === 'unavailable' ? 'Autofill unavailable for this device or user' : selection[provider.selection] || 'Selection unavailable';
       const others = browserDevProfile ? [passwordAction('Password provider', 'settings', provider.selection === 'proton' ? 'Development provider selected' : 'No provider selected'), provider.installation === 'installed' ? passwordAction('Open development vault', 'open') : passwordAction('Add development provider', 'install')]
-        : native ? [passwordAction('Password provider', 'settings', providerValue), ...(provider.installation === 'installed' ? [passwordAction('Open Proton Pass', 'open')] : provider.installation === 'absent' ? [passwordAction('Get Proton Pass from Proton', 'install')] : [])] : [];
+        : native ? [{...passwordAction('Password provider', 'settings', providerValue), hasSub: true, sub: 'In Android, search for passwords or autofill'}, ...(provider.installation === 'installed' ? [passwordAction('Open Proton Pass', 'open')] : provider.installation === 'absent' ? [passwordAction('Get Proton Pass from Proton', 'install')] : [])] : [];
       // Alpha's own vault first; another provider stays available.
       stack.push(subpage('Passwords', [...passwordManagerGroups(helpers), group(others, 'Other providers')], { back: () => { leavePasswordManager(); back(); } }));
       const entry = current === 'password-entry' ? passwordEntryPage(helpers, () => api.set({ page: 'password-provider' })) : null;
@@ -717,7 +720,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const appRows: Bag[] = [];
       for (const app of selected) {
         appRows.push(toggle(app.available === false ? `${app.label} (changed)` : app.label, true, () => policy({ apps: keep(selected.filter(a => a.packageName !== app.packageName)) }), `notification-app:${app.packageName}:collect`));
-        appRows.push(toggle(`Show previews: ${app.label}`, !!app.preview, () => {
+        if (devSurfacesEnabled) appRows.push(toggle(`Show previews: ${app.label}`, !!app.preview, () => {
           if (native && !app.preview && !window.confirm(`Show notification text from ${app.label} while unlocked? It is not stored or sent to your agent.`)) return;
           policy({ apps: selected.map(a => ({ packageName: a.packageName, preview: a.packageName === app.packageName ? !app.preview : a.preview })) });
         }, `notification-app:${app.packageName}:preview`));
@@ -759,7 +762,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       ] : [];
       stack.push(subpage('About', [group([info('Alpha Phone', versionLabel(facts.appVersion || buildVersion, facts.appVersionCode))]), group(updateRows, '', 'about-updates'), group([
         row('Problem log', () => { api.set({ page: 'problems' }); void refresh(); void refreshResidentDiagnostics(); }, problemCount === null ? '' : problemCount ? String(problemCount) : 'None'),
-        row('Export diagnostics', () => void exportDiagnostics(api), diagnosticsBusy ? 'Preparing…' : ''),
+        row('Export diagnostics', () => void exportDiagnostics(api), diagnosticsBusy ? 'Preparing…' : '', { hasSub: true, sub: 'Contains no notes, keys or account IDs' }),
         row('Open source licenses', () => { api.set({ page: 'licenses' }); void loadLicenses(changed); }),
       ])]));
       const toAbout = { z: 6, back: go('about'), backLabel: 'Back to About' };

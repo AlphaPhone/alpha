@@ -208,7 +208,7 @@ test('actual SDK and Alpha preserve A queued playback while B failure settles on
    '@elizaos/core/speech':process.cwd()+'/.eliza/client-features/packages/core/src/speech.ts',
    '@elizaos/core/view-interaction':process.cwd()+'/.eliza/client-features/packages/core/src/view-interaction.ts',
   },
-  nodePaths:process.env.ALPHA_CLOUD_COLLECTOR_SOURCE?[process.env.ALPHA_CLOUD_COLLECTOR_SOURCE+'/node_modules']:[],
+  nodePaths:process.env.ALPHA_CLOUD_COLLECTOR_SOURCE?[process.env.ALPHA_CLOUD_COLLECTOR_SOURCE+'/packages/ui/node_modules',process.env.ALPHA_CLOUD_COLLECTOR_SOURCE+'/node_modules']:[],
   bundle:true,platform:'browser',conditions:['eliza-source','browser'],format:'esm',write:false,
  });
  const {createVoiceSessionClient}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'));

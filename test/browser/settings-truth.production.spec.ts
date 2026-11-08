@@ -447,3 +447,17 @@ test('a delayed browser permission read preserves the focused Settings action',a
  await about.press('Enter');
  await expect(page.getByRole('heading',{name:'About',exact:true})).toBeVisible();
 });
+
+// The same stored preference governs the runtime gate and this current Settings row.
+test('unreadable action preferences stay visible and offer recovery without overwriting the record',async({page})=>{
+ await nativeStub(page);
+ await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1','{damaged settings'));
+ await openSettings(page);
+ const ask=current(page).getByRole('button',{name:'Ask before acting',exact:true});
+ await expect(ask).toContainText('Action preference could not be read. Alpha asks before every action until it is recovered.');
+ await ask.click();
+ await expect(page.getByText('Action preference could not be read. Alpha asks before every action until it is recovered.',{exact:true}).last()).toBeVisible();
+ await current(page).getByRole('button',{name:'Recover device settings',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Device settings recovery'})).toBeVisible();
+ expect(await page.evaluate(()=>localStorage.getItem('alpha.browser.device.v1'))).toBe('{damaged settings');
+});

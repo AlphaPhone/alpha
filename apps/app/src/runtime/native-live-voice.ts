@@ -25,7 +25,7 @@ const voice = createNativeLiveVoice({ port: plugin, available, resident });
 
 /** The live route is usable: the native capture with VAD is present and the agent reports a streaming loader. */
 export function nativeLiveVoiceReady(signal: AbortSignal): Promise<boolean> { return voice.ready(signal); }
-/** Opens one native capture and its agent live session. */
+/** Opens the native stream used for live Notes recording text. */
 export const openNativeLiveStream = voice.open;
 /** The voice assistant's listen port over the native capture (echo-cancelled; shared `liveAssistantListener`). */
 export function nativeAssistantListener(options: { roomId?: string; onInterim?: (text: string) => void; onLatency?: (latency: LiveVoiceLatency) => void } = {}) {

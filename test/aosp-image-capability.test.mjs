@@ -118,7 +118,7 @@ test("the Home Phone shortcut exists only in the launcher build (P-36)", () => {
 test("no Alpha Java lists or launches apps: installed apps and default hand-offs are the shared ElizaSystem", () => {
   assert.equal(fs.existsSync(`${JAVA}/DeviceAppsPlugin.java`), false);
   const product = read(`${JAVA}/AlphaDeviceAppsPlugin.java`);
-  assert.deepEqual([...product.matchAll(/@PluginMethod public void (\w+)/g)].map(m => m[1]), ["platformCapabilities"]);
+  assert.deepEqual([...product.matchAll(/@PluginMethod public void (\w+)/g)].map(m => m[1]), ["platformCapabilities", "openHomeChooser"], "the recovery Home chooser opens a stock Settings screen, not an app");
   // The password-provider hand-off opens one verified-publisher app by package; it is not the
   // launcher inventory. Nothing else in Alpha may list or launch apps.
   const handoffs = new Set(["PasswordProviderSupport.java"]);
@@ -178,6 +178,7 @@ test("permissions: standalone has none, the launcher declares read access only, 
   for (const permission of ["SEND_SMS", "READ_SMS"]) {
     assert.ok(!declared(main).includes(`android.permission.${permission}`) && !declared(standalone).includes(`android.permission.${permission}`), `${permission} is launcher-only`);
     assert.ok(declared(launcher).includes(`android.permission.${permission}`), `launcher declares ${permission}`);
+    assert.ok(removed(standalone).includes(`android.permission.${permission}`), `standalone removes ${permission}`);
   }
   assert.match(launcher, /android\.intent\.action\.SENDTO"\/><data android:scheme="smsto"/);
   assert.doesNotMatch(main, /<intent><action android:name="android\.intent\.action\.SENDTO"\/><data android:scheme="smsto"\/><\/intent>/, "only the image-capable flavor can see SMS handlers");

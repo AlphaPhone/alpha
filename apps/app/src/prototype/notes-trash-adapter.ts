@@ -19,13 +19,11 @@ const kindLabel:Record<string,string>={text:'Note',list:'Checklist',voice:'Voice
 export const NOTES_TRASH_MAINTENANCE_INTERVAL_MS=15*60*1000;
 
 /**
- * Deleted notes go to a durable Trash, shown as the "Recently deleted" folder, and are erased
- * 30 days after deletion.
- * Maintenance (drop rows whose note is live again, purge expired rows) runs at startup,
- * whenever Notes opens, when the app returns to the foreground (visibilitychange and the
- * native appResumed event) and on a 15-minute timer while the shell is alive, so expiry
- * never depends on the user opening Notes. It is idempotent and reads authoritative
- * storage only. On Android a native WorkManager sweep is the backstop while Alpha is closed.
+ * Deleted notes are kept in Recently deleted for 30 days. Legacy maintenance is
+ * scheduled at startup, on Notes entry and foreground return, and every 15 minutes,
+ * but runs only after the legacy source is opened in this session. Android also
+ * sweeps through WorkManager. Browser legacy rows can outlive the retention period
+ * until their source is opened.
  */
 export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag>){
  const notes=views.notes,render=notes.render,back=notes.back;
@@ -51,9 +49,10 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
  /** Idempotent: a second run with the same clock finds nothing to do. */
  async function maintain(shell:Shell,background:boolean,now=Date.now()){
   if(shell.notesSourceMode==='canonical')return;
-  // Interrupted voice deletions are settled with every pass (startup, resume, timer, Notes open), so
-  // a permanent deletion cut short by process death never waits for the person to open Notes. Not
-  // awaited: it queues for the deletion-effects lock on its own and never delays Trash upkeep.
+  // Interrupted voice deletions are settled with every pass that gets past the canonical check above,
+  // so only once the legacy source is selected in this session; until then a deletion cut short by
+  // process death stays under review. Not awaited: it queues for the deletion-effects lock on its
+  // own and never delays Trash upkeep.
   try{const recover=voice(shell).recoverVoiceDeletions;if(typeof recover==='function')void Promise.resolve(recover()).catch(()=>{/* The row stays under review. */});}catch{/* Unavailable. */}
   const result=await maintainNotesTrash({policy:notesTrashPolicy,read:readNotesTrash,edit:editNotesTrash,liveNoteIds:savedNoteIds,withLock:work=>withNotesDeletionLock(work),purge:entry=>purge(shell,entry)},now);
   // Source links of notes that are neither saved nor restorable from Trash give up their grants.
@@ -99,7 +98,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
    },
   };
  }
- const unavailableMessage=(shell:Shell)=>shell.notesPending&&!shell.notesStorageFailed?'Still saving. Try again in a moment. Nothing was deleted.':'Notes storage needs recovery. Nothing was deleted.';
+ const unavailableMessage=(shell:Shell)=>shell.notesPending&&!shell.notesStorageFailed?'Still saving. Try again in a moment.':'Notes storage needs attention. Try again after it recovers.';
 
  async function moveToTrash(shell:Shell,note:Bag,index:number){
   const outcome=await actionsFor(shell).moveToTrash(collection(shell),note as NoteRecord,index,()=>shell.notesStore.target(note.id));
@@ -141,7 +140,10 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
  }
 
  async function erase(shell:Shell,ids:'all'|string){
-  if(busy)return;busy=true;shell.vset('notes',{trashBusy:true,trashConfirm:null});
+  if(busy)return;
+  // A failed save can hold a restored copy in the unsaved draft; erasing now would let it return.
+  if(!ready(shell)){if(shell.live)shell.vset('notes',{trashConfirm:null});shell.toast(unavailableMessage(shell));return;}
+  busy=true;shell.vset('notes',{trashBusy:true,trashConfirm:null});
   try{
    const outcome=await actionsFor(shell).erase(ids);
    shell.toast(outcome.status==='unconfirmed'?'Permanent deletion is unconfirmed. Reopen Recently deleted to check.':outcome.failed?`${outcome.failed} item(s) could not be deleted yet. They stay in Recently deleted.`:ids==='all'?'Recently deleted emptied':outcome.erased?'Deleted':'This note is no longer in Recently deleted.');

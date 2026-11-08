@@ -26,7 +26,7 @@ assert.ok(start>0&&end>start,'actual Agent page located');
 function nativeFixture(overrides={},current='agent-connection'){
  const actions=[];
  const connection={...snapshot,kind:'recovering',residentInference:'unavailable',cloudAccount:null,conversations:[],actionHistory:[],...overrides};
- const context={current,native:true,testMocksEnabled:false,connection,agentStatus:'Needs review',serviceName:'Nebula',stack:[],
+ const context={current,native:true,testMocksEnabled:false,connection,agentStatus:'Needs review',serviceName:'Nebula',stack:[],diagnosticsBusy:false,exportDiagnostics:()=>actions.push('diagnostics'),
   info:(label,value)=>({label,value}),log:(label,value)=>({label,value}),row:(label,go)=>({label,go}),group:rows=>({rows}),subpage:(title,groups)=>({title,groups}),
   api:{set:value=>actions.push(value)},connectionController:{confirmRecovery:()=>actions.push('confirm'),reviewRecovery:()=>actions.push('review'),cancelRecoveryReview:()=>actions.push('cancel-review'),cancel:()=>actions.push('cancel'),startLocal:()=>actions.push('start')}};
  vm.createContext(context);vm.runInContext(transformSync(settings.slice(start,end),{loader:'ts'}).code,context);
@@ -56,7 +56,8 @@ test('partial and unavailable recovery keep a review action and do not claim com
 });
 test('unknown recovery cannot restart and archiving cannot be cancelled from Settings',()=>{
  const unknown=nativeFixture({residentRecoveryReason:'runtime-identity-unavailable',residentRecovery:undefined});
- assert.equal(unknown.rows.filter(row=>row.go).length,0);
+ assert.deepEqual(unknown.rows.filter(row=>row.go).map(row=>row.label),['Export diagnostics']);
+ unknown.rows.find(row=>row.label==='Export diagnostics').go();assert.deepEqual(unknown.actions,['diagnostics']);
  const archiving=nativeFixture({busy:true,residentRecovery:{step:'archiving'}});
  assert.equal(archiving.rows.filter(row=>row.go).length,0);
  assert.deepEqual(nativeFixture({},'agent-recovery-details').context.stack,[]);

@@ -14,7 +14,7 @@ const {NotesCommitUncertain}=await import(store);
 const source=readFileSync(new URL('../apps/app/src/prototype/agent-adapter.ts',import.meta.url),'utf8');
 const start=source.indexOf('  p.vset = function (key: string'),end=source.indexOf('  p.api = function',start);
 assert.ok(start>=0&&end>start);
-const assignment=stripTypeScriptTypes(source.slice(start,end),{mode:'transform'});
+const assignment=stripTypeScriptTypes(source.slice(start,end),{mode:'strip'});
 const makeEditor=new Function('originalSet','stampNoteChanges','context','failedNotesStatus','keepNotesDraft','NotesCommitUncertain','NotesStorageFull','isStorageFull',`const p={};${assignment};return p.vset;`);
 async function fixture(){
  let saved,revision=0,blocked=false,refuse=0;

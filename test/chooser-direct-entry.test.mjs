@@ -5,6 +5,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {transformSync} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import {readFileSync} from 'node:fs';
+import {assertBefore} from './fixtures/assert-order.mjs';
 const source=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
 const panelSource=readFileSync(new URL('../apps/app/src/runtime/cloud-sign-in-ui.tsx',import.meta.url),'utf8');
 const between=(text,start,end)=>{const a=text.indexOf(start),b=text.indexOf(end,a);assert.ok(a>=0&&b>a);return text.slice(a,b);};
@@ -24,7 +25,7 @@ test('production signed-out entry stays quiet until readiness and then shows the
  assert.match(ready,/Welcome to Alpha/);
  assert.match(ready,/Email me a code/);
  assert.doesNotMatch(ready,/Sign in with Eliza Cloud|unavailable|Try again/);
- assert.ok(ready.indexOf('cloud-sign-in-title')<ready.indexOf('Use my own API keys'));
+ assertBefore(ready,'cloud-sign-in-title','Use my own API keys');
  assert.match(ready,/<button type="button" class="alpha-btn alpha-btn--text">Use my own API keys<\/button>/);
 });
 test('a failed readiness check shows its reason and one retry instead of disabled forms',()=>{
@@ -87,7 +88,7 @@ async function inDom(run){
  const {createRoot}=await import('react-dom/client');const root=createRoot(dom.window.document.getElementById('root'));
  const document=dom.window.document,button=name=>[...document.querySelectorAll('button')].find(item=>item.textContent===name);
  const cancelled=[];
- const [OwnKeyForm,OwnProviderChoice]=new Function('React','useRef','useState','useEffect','Capacitor','browserCloudResidentEnabled','connectionController','OWN_KEY_CHECKING',ownSource+';return [OwnKeyForm,OwnProviderChoice];')(React,React.useRef,React.useState,React.useEffect,{isNativePlatform:()=>true},false,{cancel(){cancelled.push('cancel check');}},'Checking key…');
+ const [OwnKeyForm,OwnProviderChoice]=new Function('React','useRef','useState','useEffect','Capacitor','browserCloudResidentEnabled','connectionController','OWN_KEY_CHECKING','ownVoiceOnPhone',ownSource+';return [OwnKeyForm,OwnProviderChoice];')(React,React.useRef,React.useState,React.useEffect,{isNativePlatform:()=>true},false,{cancel(){cancelled.push('cancel check');}},'Checking key…',()=>true);
  try{await run({document,window:dom.window,root,button,OwnKeyForm,OwnProviderChoice,cancelled});}
  finally{await act(()=>root.unmount());dom.window.close();for(const [key,value] of Object.entries(previous)){if(value)Object.defineProperty(globalThis,key,value);else delete globalThis[key];}}
 }
