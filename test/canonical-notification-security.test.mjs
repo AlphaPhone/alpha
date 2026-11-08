@@ -69,3 +69,30 @@ test('actual acknowledgment body retains an undispatched tap and never revives a
  }} `;
  assert.match(run([['ActualAcknowledgmentTest.java',java]],'ai.elizaresearch.alphaphone.ActualAcknowledgmentTest'),/^PASS actual native acknowledgment state/);
 });
+
+test('actual tap capture bounds a shade tap by its capture time, not by when a connection hydrates',()=>{
+ const actor=readFileSync(nativeSource('AlphaCanonicalNotifications.java'),'utf8');const start=actor.indexOf(' static void captureTap('),end=actor.indexOf(' static JSONObject pending()',start);assert.ok(start>=0&&end>start);const tap=actor.slice(start,end);
+ const java=`package ai.elizaresearch.alphaphone;import java.util.*;import org.json.*;
+ class Context {}
+ class Intent {static final String ACTION_MAIN="main";final Map<String,String> extras=new HashMap<>();Intent(){}Intent(Intent o){extras.putAll(o.extras);}boolean hasExtra(String k){return extras.containsKey(k);}String getStringExtra(String k){return extras.get(k);}Intent setData(Object d){return this;}Intent setAction(String a){return this;}void removeExtra(String k){extras.remove(k);}}
+ class SystemClock {static long now=1000000;static long elapsedRealtime(){return now;}}
+ class NativeNotificationProjector {static boolean onOpened(Context c,Intent t,String owner){return true;}}
+ class NativeNotificationRoute {static String view(String link){return link==null?null:"chat";}}
+ class AlphaNotificationsPlugin {static int ready;static void canonicalTapReady(){ready++;}}
+ class AlphaCanonicalNotifications {static final long TAP_WINDOW_MS=300000;static Intent waitingTap;static long waitingTapAt;static JSONObject pendingTap;static AlphaCanonicalNotifications active;static java.util.concurrent.Executor SERIAL=Runnable::run;
+ final Context context=new Context();String owner="owner";JSONObject identity;AlphaCanonicalNotifications()throws Exception{identity=new JSONObject().put("subjectUserId","user").put("agentId","agent");}void check(){}
+ ${tap}
+ void hydrate(){consumeWaitingTap();}
+ }
+ public class TapAgeTest {static void check(boolean ok,String why){if(!ok)throw new AssertionError(why);}
+ static Intent shade(){Intent i=new Intent();i.extras.put("elizaNativeNotificationOwner","owner");i.extras.put("deepLink","eliza://chat");i.extras.put("notificationId","notice");return i;}
+ public static void main(String[]args)throws Exception{
+ AlphaCanonicalNotifications.captureTap(new Context(),shade());SystemClock.now+=360000;new AlphaCanonicalNotifications().hydrate();
+ check(AlphaCanonicalNotifications.pendingTap==null&&AlphaNotificationsPlugin.ready==0,"Six-minute-old tap opened");check(AlphaCanonicalNotifications.waitingTap==null,"Expired tap kept");
+ AlphaCanonicalNotifications.captureTap(new Context(),shade());SystemClock.now+=60000;long before=System.currentTimeMillis();new AlphaCanonicalNotifications().hydrate();
+ check(AlphaCanonicalNotifications.pendingTap!=null&&AlphaNotificationsPlugin.ready==1,"One-minute-old tap refused");
+ long expires=AlphaCanonicalNotifications.pendingTap.getLong("expiresAt");check(expires<=System.currentTimeMillis()+240000&&expires>=before+239000,"Window restarted at hydrate");
+ System.out.println("PASS actual native tap age");
+ }} `;
+ assert.match(run([['TapAgeTest.java',java]],'ai.elizaresearch.alphaphone.TapAgeTest'),/^PASS actual native tap age/);
+});
