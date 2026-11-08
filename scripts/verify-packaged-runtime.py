@@ -185,6 +185,37 @@ def verify(apk, release=False, runtime_profile="native", local_embeddings=False)
             expected_adapters = ['scripts/build-mobile-agent.mjs', 'scripts/mobile-uuid-adapter.mjs', 'scripts/mobile-bundle-smoke.mjs']
             if mobile_receipt.get('adapterFiles') != {name: file_hash(ROOT / name) for name in expected_adapters}:
                 raise ValueError('Packaged mobile producer adapter changed')
+            core_manifest_file = ROOT / 'patches/eliza/core-state-manifest.json'
+            core_manifest = json.loads(core_manifest_file.read_text())
+            core_target = 'packages/core/src/services/task.ts'
+            if (set(core_manifest) != {'schema', 'baseCommit', 'patches'} or
+                    core_manifest.get('schema') != 1 or core_manifest.get('baseCommit') != pin or
+                    len(core_manifest.get('patches', [])) != 1):
+                raise ValueError('Packaged core patch policy differs')
+            core_patch = core_manifest['patches'][0]
+            if (set(core_patch) != {'file', 'sha256', 'targets'} or
+                    core_patch.get('file') != 'task-service-stop.patch' or
+                    len(core_patch.get('targets', [])) != 1):
+                raise ValueError('Packaged core patch allowlist differs')
+            core_file = core_patch['targets'][0]
+            if (set(core_file) != {'path', 'beforeSha256', 'afterSha256'} or
+                    core_file.get('path') != core_target or
+                    any(not re.fullmatch('[a-f0-9]{64}', str(core_file.get(key, '')))
+                        for key in ['beforeSha256', 'afterSha256']) or
+                    core_patch.get('sha256') != file_hash(ROOT / 'patches/eliza/task-service-stop.patch')):
+                raise ValueError('Packaged core patch input differs')
+            core_inputs = ['scripts/core-state-patch.mjs', 'scripts/core-state-preload.mjs',
+                           'scripts/combined-agent-source.mjs',
+                           'patches/eliza/core-state-manifest.json', 'patches/eliza/task-service-stop.patch']
+            expected_core = {'version': 1, 'baseCommit': pin,
+                             'manifestSha256': file_hash(core_manifest_file),
+                             'inputHashes': {name: file_hash(ROOT / name) for name in core_inputs},
+                             'patches': [{'file': core_patch['file'], 'sha256': core_patch['sha256']}],
+                             'files': {core_target: {key: core_file[key] for key in ['beforeSha256', 'afterSha256']}},
+                             'transforms': [{'path': core_target, 'sourceSha256': core_file['beforeSha256'],
+                                             'outputSha256': core_file['afterSha256']}]}
+            if mobile_receipt.get('coreState') != expected_core:
+                raise ValueError('Packaged core state transformation differs')
         bundle_dependencies = json.loads(archive.read('assets/agent/agent-bundle-dependencies.json'))
         if (bundle_dependencies.get('version') != 1 or
                 bundle_dependencies.get('bundleSha256') != checks['assets/agent/agent-bundle.js'] or
