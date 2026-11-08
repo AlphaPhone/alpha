@@ -26,7 +26,7 @@ module NativeListenerService {
   action create = all {not(s.created), s' = {...s, created: true, modes: true, recordings: true,
     playback: true, observer: true, reapplyQueued: true}}
   action start = all {
-    s.created, not(s.destroyed), s.allocations < 2,
+    s.created, not(s.destroyed), s.allocations < 2 or s.capture or s.record,
     val opens = not(s.capture or s.record)
     s' = {...s, userEnabled: true, paused: false, foregroundRequested: true, reapplyQueued: false,
       indicatorTimer: true, leaseTimer: true, analyse: true, epoch: s.epoch + 2, epochActive: true,
@@ -79,6 +79,8 @@ module NativeListenerService {
     .expect(safety and s.allocations == 1 and not(s.capture))
   run successfulRetryAllowsNewCaptureTest = init.then(create).then(start).then(load).then(pause(false, false))
     .then(pause(true, true)).then(start).expect(safety and s.allocations == 2 and s.capture)
+  run repeatedStartAtCapacityTest = init.then(create).then(start).then(load).then(pause(true, true))
+    .then(start).then(start).expect(safety and s.allocations == 2 and s.capture)
   run lateEngineLoadIsClosedTest = init.then(create).then(start).then(destroy(true, true)).then(load)
     .expect(safety and s.engineClosed and not(s.enginePresent))
 }
