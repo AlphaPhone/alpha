@@ -286,3 +286,11 @@ credential store's real lifecycle coordinator, including strict shutdown,
 rebind, partial writes, concurrent owners and in-flight request/stream retirement.
 Its observation relation and platform boundaries are in
 [credential-coordinator-report.md](../refinement/native/credential-coordinator-report.md).
+
+## Executed MainActivity recovery
+
+The actual Activity campaign separates renderer-loss admission, posted recreation,
+Android destruction and successor creation. It checks the native escape controls,
+retained process budget and task handoff fallback through source entrypoints. The
+projection and remaining Android/WebView obligations are documented in
+[renderer-coordinator-report.md](../refinement/native/renderer-coordinator-report.md).

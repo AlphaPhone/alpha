@@ -11152,7 +11152,7 @@
         },
         {
           "line": 32,
-          "text": "@Override protected void onStart(){super.onStart();started=true;if(source==null)return;int token=++generation;status.setText(\"Opening PDF in isolated viewer…\");"
+          "text": "@Override protected void onStart(){super.onStart();started=true;if(source==null)return;int token=++generation;status.setText(\"Opening PDF in isolated viewer\u2026\");"
         },
         {
           "line": 33,
@@ -15223,7 +15223,7 @@
     },
     {
       "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/MainActivity.java",
-      "sha256": "8d00e766c7ef02c31988d28e8887cefac3230d36dff1fe83ed7965473f315241",
+      "sha256": "8a3637324effb4824a59eb6794abce07e88d9bc7be1233606e65c64953d8da51",
       "models": [
         "Application",
         "RendererRecovery"
@@ -15276,35 +15276,35 @@
           "text": "private static int unackedFrontStarts = 0;"
         },
         {
-          "line": 133,
-          "text": "private static int liveTaskId = -1;"
-        },
-        {
-          "line": 134,
-          "text": "private static boolean liveTaskHome = false;"
+          "line": 138,
+          "text": "private static final java.util.Map<Integer,TaskKind> taskKinds = new java.util.HashMap<>();"
         },
         {
           "line": 135,
+          "text": "java.lang.ref.WeakReference<MainActivity> owner;"
+        },
+        {
+          "line": 139,
           "text": "private boolean handedOff = false;"
         },
         {
-          "line": 136,
+          "line": 140,
           "text": "private boolean startedAsHome = false;"
         },
         {
-          "line": 159,
+          "line": 163,
           "text": "private static boolean handOffUnreliable = false;"
         },
         {
-          "line": 160,
+          "line": 164,
           "text": "private static boolean hasFrontMarker(Intent intent) {"
         },
         {
-          "line": 167,
+          "line": 171,
           "text": "private void handOff(MainActivity live) {"
         },
         {
-          "line": 209,
+          "line": 213,
           "text": "private boolean moveLiveTaskToFront(int taskId) {"
         }
       ]
@@ -20310,11 +20310,11 @@
         },
         {
           "line": 44,
-          "text": "const current=++generation;field.disabled=true;read.disabled=true;stop.disabled=false;status.textContent='Preparing local speech…';const owner=new AbortControll"
+          "text": "const current=++generation;field.disabled=true;read.disabled=true;stop.disabled=false;status.textContent='Preparing local speech\u2026';const owner=new AbortControll"
         },
         {
           "line": 46,
-          "text": "await speakLocalText(text,owner.signal,()=>{valid();if(active&&current===generation)status.textContent='Reading locally…';});"
+          "text": "await speakLocalText(text,owner.signal,()=>{valid();if(active&&current===generation)status.textContent='Reading locally\u2026';});"
         },
         {
           "line": 47,
@@ -22518,7 +22518,7 @@
         },
         {
           "line": 144,
-          "text": "if(desired?.key!==range.key){desired=range;++generation;status='Loading calendars…';schedule();}"
+          "text": "if(desired?.key!==range.key){desired=range;++generation;status='Loading calendars\u2026';schedule();}"
         },
         {
           "line": 258,
@@ -22917,7 +22917,7 @@
         },
         {
           "line": 595,
-          "text": "const token = ++epoch; phase = 'starting'; message('Starting camera…');"
+          "text": "const token = ++epoch; phase = 'starting'; message('Starting camera\u2026');"
         },
         {
           "line": 598,
@@ -22949,7 +22949,7 @@
         },
         {
           "line": 639,
-          "text": "recordingStarting = true; const token = epoch; message('Starting video with microphone…',true);"
+          "text": "recordingStarting = true; const token = epoch; message('Starting video with microphone\u2026',true);"
         },
         {
           "line": 643,
@@ -23195,7 +23195,7 @@
       "stateAnchors": [
         {
           "line": 9,
-          "text": "let owner:any,rows:Bag[]=[],status='Choose Contacts access to see this profile’s address book.',readable=false,loading=false,more=false,limit=50,epoch=0,active="
+          "text": "let owner:any,rows:Bag[]=[],status='Choose Contacts access to see this profile\u2019s address book.',readable=false,loading=false,more=false,limit=50,epoch=0,active="
         },
         {
           "line": 10,
@@ -24013,7 +24013,7 @@
         },
         {
           "line": 592,
-          "text": "await work('Loading selected attachment…',async({client},signal,valid)=>{const file=await client.gmailAttachment(accountId,source.message.id,attachment.partId,s"
+          "text": "await work('Loading selected attachment\u2026',async({client},signal,valid)=>{const file=await client.gmailAttachment(accountId,source.message.id,attachment.partId,s"
         },
         {
           "line": 593,
@@ -24025,7 +24025,7 @@
         },
         {
           "line": 603,
-          "text": "await work('Loading attachment bytes…',async({client},signal,valid)=>{const file=await client.gmailOpaqueAttachment(accountId,source.message.id,attachment.partI"
+          "text": "await work('Loading attachment bytes\u2026',async({client},signal,valid)=>{const file=await client.gmailOpaqueAttachment(accountId,source.message.id,attachment.partI"
         },
         {
           "line": 605,
@@ -24188,7 +24188,7 @@
         },
         {
           "line": 143,
-          "text": "const token=epoch, key=slot();shelf=null;shelfKey='';loading=true;status='Checking local draft…';publish();"
+          "text": "const token=epoch, key=slot();shelf=null;shelfKey='';loading=true;status='Checking local draft\u2026';publish();"
         },
         {
           "line": 144,
@@ -24441,7 +24441,7 @@
         },
         {
           "line": 152,
-          "text": "const controller = new AbortController(), state: Reading = { id, text, controller, message: 'Waiting for the previous audio to stop…' };"
+          "text": "const controller = new AbortController(), state: Reading = { id, text, controller, message: 'Waiting for the previous audio to stop\u2026' };"
         }
       ]
     },
@@ -24978,7 +24978,7 @@
         },
         {
           "line": 389,
-          "text": "var status = !live ? \"Calling…\" : (st.hold ? \"On hold · \" : \"\") + pnClock(el);"
+          "text": "var status = !live ? \"Calling\u2026\" : (st.hold ? \"On hold \u00b7 \" : \"\") + pnClock(el);"
         },
         {
           "line": 390,
@@ -25702,7 +25702,7 @@
         },
         {
           "line": 1178,
-          "text": "var words = e.title.toLowerCase().replace(/[·]/g, \" \").split(/\\s+/).filter(function (w) { return w.length > 2; });"
+          "text": "var words = e.title.toLowerCase().replace(/[\u00b7]/g, \" \").split(/\\s+/).filter(function (w) { return w.length > 2; });"
         },
         {
           "line": 1179,
@@ -25802,7 +25802,7 @@
         },
         {
           "line": 1281,
-          "text": "var title = who.length ? kind + \" · \" + who.map(function (id) { return calPerson(api, id).name.split(\" \")[0]; }).join(\", \") : kind;"
+          "text": "var title = who.length ? kind + \" \u00b7 \" + who.map(function (id) { return calPerson(api, id).name.split(\" \")[0]; }).join(\", \") : kind;"
         },
         {
           "line": 1282,
@@ -26550,7 +26550,7 @@
         },
         {
           "line": 1916,
-          "text": "var CAM_ZOOM = [[\".5\", 1], [\"1×\", 1.35], [\"2\", 2], [\"5\", 3.4]];"
+          "text": "var CAM_ZOOM = [[\".5\", 1], [\"1\u00d7\", 1.35], [\"2\", 2], [\"5\", 3.4]];"
         },
         {
           "line": 1917,
@@ -26878,7 +26878,7 @@
         },
         {
           "line": 2313,
-          "text": "var name = nm ? cap(nm) : r.label.replace(/ · /g, \" \");"
+          "text": "var name = nm ? cap(nm) : r.label.replace(/ \u00b7 /g, \" \");"
         },
         {
           "line": 2314,
@@ -27650,7 +27650,7 @@
         },
         {
           "line": 3061,
-          "text": "var body = parts.map(function (l) { return \"· \" + l; }).join(\"\\n\");"
+          "text": "var body = parts.map(function (l) { return \"\u00b7 \" + l; }).join(\"\\n\");"
         },
         {
           "line": 3062,
@@ -27698,7 +27698,7 @@
         },
         {
           "line": 3118,
-          "text": "var title = text.length <= 44 ? cap(text) : cap(text.split(/\\s+/).slice(0, 5).join(\" \")) + \"…\";"
+          "text": "var title = text.length <= 44 ? cap(text) : cap(text.split(/\\s+/).slice(0, 5).join(\" \")) + \"\u2026\";"
         },
         {
           "line": 3119,
@@ -28298,7 +28298,7 @@
         },
         {
           "line": 3803,
-          "text": "var note = { id: id, kind: \"voice\", title: \"Landlord\", when: \"Yesterday · 6:20 PM\", dur: f.dur, pinned: false,"
+          "text": "var note = { id: id, kind: \"voice\", title: \"Landlord\", when: \"Yesterday \u00b7 6:20 PM\", dur: f.dur, pinned: false,"
         },
         {
           "line": 3814,
@@ -29182,11 +29182,11 @@
         },
         {
           "line": 4827,
-          "text": "var lvlText = function (a) { var on = ST_TYPES.filter(function (x) { return a[x[0]]; }).map(function (x) { return x[1]; }); return on.length ? on.join(\" · \") : "
+          "text": "var lvlText = function (a) { var on = ST_TYPES.filter(function (x) { return a[x[0]]; }).map(function (x) { return x[1]; }); return on.length ? on.join(\" \u00b7 \") : "
         },
         {
           "line": 4828,
-          "text": "var persona = ST_VOICES[ch.voice] + \" · \" + (ch.brev < 40 ? \"Brief\" : (ch.brev > 65 ? \"Detailed\" : \"Balanced\")) + \" · \" + (ch.tone > 55 ? \"Casual\" : \"Formal\");"
+          "text": "var persona = ST_VOICES[ch.voice] + \" \u00b7 \" + (ch.brev < 40 ? \"Brief\" : (ch.brev > 65 ? \"Detailed\" : \"Balanced\")) + \" \u00b7 \" + (ch.tone > 55 ? \"Casual\" : \"Formal\");"
         },
         {
           "line": 4831,
@@ -29314,7 +29314,7 @@
         },
         {
           "line": 5037,
-          "text": "var gr = [{ plain: true, rows: rows }, { plain: true, rows: [stRow(\"kBtn\", { label: busy ? \"Signing in…\" : \"Sign in\", primary: true, dis: !ok || busy, css: ok ?"
+          "text": "var gr = [{ plain: true, rows: rows }, { plain: true, rows: [stRow(\"kBtn\", { label: busy ? \"Signing in\u2026\" : \"Sign in\", primary: true, dis: !ok || busy, css: ok ?"
         },
         {
           "line": 5048,
@@ -30018,7 +30018,7 @@
         },
         {
           "line": 5655,
-          "text": "var vShow = S.voice === \"speaking\" ? S.vcap : (S.vtext || \"…\");"
+          "text": "var vShow = S.voice === \"speaking\" ? S.vcap : (S.vtext || \"\u2026\");"
         },
         {
           "line": 5657,
@@ -30780,7 +30780,7 @@
         },
         {
           "line": 21,
-          "text": "event.preventDefault();busy=true;const token=generation;status.textContent='Opening browser…';"
+          "text": "event.preventDefault();busy=true;const token=generation;status.textContent='Opening browser\u2026';"
         },
         {
           "line": 22,
@@ -30966,7 +30966,7 @@
         },
         {
           "line": 170,
-          "text": "current = { result, status: 'Reading selected document…', epoch: requestEpoch };"
+          "text": "current = { result, status: 'Reading selected document\u2026', epoch: requestEpoch };"
         },
         {
           "line": 179,
@@ -31943,7 +31943,7 @@
         },
         {
           "line": 41,
-          "text": "active=true;busy=true;unreceipted=false;resendReview=false;draft=null;catalog=null;storage=null;status='Loading this agent’s workflow capabilities…';const token"
+          "text": "active=true;busy=true;unreceipted=false;resendReview=false;draft=null;catalog=null;storage=null;status='Loading this agent\u2019s workflow capabilities\u2026';const token"
         },
         {
           "line": 42,
@@ -33503,7 +33503,7 @@
         },
         {
           "line": 1445,
-          "text": "async function personalPoll(){await personalWork('Checking setup status…',async(binding,view,signal)=>{const generation=personalGeneration,expected=await person"
+          "text": "async function personalPoll(){await personalWork('Checking setup status\u2026',async(binding,view,signal)=>{const generation=personalGeneration,expected=await person"
         },
         {
           "line": 1448,
