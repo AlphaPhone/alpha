@@ -778,5 +778,27 @@
       "Source-bound projection of base and draft rows, current-owner public visibility, synthetic draft identities, Trash collection and navigation waiter admission/drain.",
       "Canonical snapshot and editor callback inputs have separate controller/draft models. Row payload uses bounded text, kind, pin, folder and local-handle classes. Recorder, dictation, Calendar handoff and full competing navigation policies remain obligations."
     ]
+  },
+  {
+    "path": "specs/quint/application/FilesBrowserController.qnt",
+    "module": "FilesBrowserController",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "staleDenialKeepsCurrentListingTest",
+      "staleGrantCannotReviveAccessTest",
+      "retiredListingCannotPublishTest",
+      "staleAgentReadDoesNotShareTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/files-browser-adapter.ts",
+      "apps/app/src/runtime/files-storage.ts",
+      "apps/app/src/runtime/files-agent-contract.ts"
+    ],
+    "abstractions": [
+      "Installed folder reader, current access/volume readback and registered agent share admission over deferred storage ports. Two folders, three entries, two volumes and six state-read identities.",
+      "Category/Trash aggregation, filters, selection, preview, mutation dialogs, native watch ownership and durable provider effects remain explicit extensions."
+    ]
   }
 ]

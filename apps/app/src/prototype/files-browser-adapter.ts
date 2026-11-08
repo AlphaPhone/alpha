@@ -85,7 +85,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
   let selection: Set<string> | null = null, filter: FilesFilter | null = null, filterRows: StorageEntry[] = [];
   let dialog: Dialog | undefined, dialogTrigger: HTMLElement | null = null, opened: {path: string; volume?: string; selectionId?: string} | undefined;
   let selectionEpoch = 0;
-  let generation = 0, filterGeneration = 0, revision = 0, watching = '', active = false, pressTimer: ReturnType<typeof setTimeout> | undefined, pressed = '';
+  let generation = 0, stateGeneration = 0, filterGeneration = 0, revision = 0, watching = '', active = false, pressTimer: ReturnType<typeof setTimeout> | undefined, pressed = '';
   const repaint = () => api?.set({filesBrowserRevision: ++revision});
   const modal = createInlineModal(() => { if (!busy) { dialog = undefined; repaint(); } }, () => dialogTrigger?.isConnected ? dialogTrigger : document.querySelector<HTMLElement>('[data-alpha-subview="files-folder"] button[aria-label="Sort and more"]'));
   const toast = (text: string) => { if (text) api?.toast(text); };
@@ -95,12 +95,18 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
     return false;
   };
 
-  async function refreshState() {
+  async function refreshState(current: () => boolean = () => true): Promise<boolean> {
+    const ticket = ++stateGeneration;
     try {
       const state = await storage.storageState();
+      if (ticket !== stateGeneration || !current()) return false;
       access = state.access || 'denied';
       volumes = [...(state.volumes || [])].sort((a, b) => Number(b.primary) - Number(a.primary));
-    } catch { access = 'unavailable'; volumes = []; }
+    } catch {
+      if (ticket !== stateGeneration || !current()) return false;
+      access = 'unavailable'; volumes = [];
+    }
+    return true;
   }
   const extraVolumes = () => volumes.filter(volume => !volume.primary).map(volume => volume.id);
   /** Trash across the primary and every extra volume. A volume that cannot be read adds nothing. */
@@ -119,7 +125,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
     await Promise.all(CATEGORIES.map(async ({id}) => { try { const value = await storage.storageCategory({category: id}); if (value.status === 'ready') next[id] = value.count ?? value.entries?.length ?? 0; } catch { /* Count stays blank. */ } }));
     let trash = 0;
     const rows = await trashAcross(); if (rows) trash = rows.length;
-    if (ticket === generation) { counts = next; trashCount = trash; }
+    if (active && ticket === generation) { counts = next; trashCount = trash; }
   }
   /** Reload what is on screen (spec Refresh): the same place, rows that still exist, a selection
    * pruned to rows that are still listed (SelectionExists). */
@@ -127,21 +133,23 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
     const ticket = ++generation, at = place;
     busy = true; repaint();
     try {
-      await refreshState();
+      if (!await refreshState(() => active && ticket === generation)) return;
       if (access !== 'granted') { entries = []; trashItems = []; loaded = true; return; }
       if (at.kind === 'browse') await loadCounts(ticket);
-      else if (at.kind === 'trash') { const rows = await trashAcross(); if (ticket !== generation) return; if (rows) trashItems = rows; else toast('Trash could not be read.'); }
+      else if (at.kind === 'trash') { const rows = await trashAcross(); if (!active || ticket !== generation) return; if (rows) trashItems = rows; else toast('Trash could not be read.'); }
       else {
         const value = at.kind === 'category' ? await storage.storageCategory({category: at.category}) : await storage.storageList({path: at.path, ...onVolume(at.volume)});
-        if (ticket !== generation) return;
+        if (!active || ticket !== generation) return;
         if (value.status === 'missing' && at.kind === 'folder') { up(); return; }
         if (!failed(value)) { entries = value.entries || []; categoryFolders = 'folders' in value && Array.isArray(value.folders) ? value.folders : undefined; error = ''; } else { entries = []; categoryFolders = undefined; }
       }
+      if (!active || ticket !== generation) return;
       if (filter) await runFilter(filter);
+      if (!active || ticket !== generation) return;
       if (selection) { const listed = new Set(entries.map(e => e.path)); selection = new Set([...selection].filter(path => listed.has(path))); }
       loaded = true;
       void watch();
-    } catch { if (ticket === generation) { error = 'Files could not be read.'; entries = []; } }
+    } catch { if (active && ticket === generation) { error = 'Files could not be read.'; entries = []; } }
     finally { if (ticket === generation) { busy = false; repaint(); } }
   }
   async function watch() {
@@ -306,7 +314,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
   async function showFilter(value: FilesFilter) {
     filter = value; place = {kind: 'browse'}; selection = null; dialog = undefined;
     api?.set({folder: null, open: null, menu: false});
-    await refreshState();
+    if (!await refreshState(() => filter === value)) return 0;
     await runFilter(value);
     repaint();
     return filterRows.length;
@@ -315,7 +323,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
     async run(op: FilesAgentOperation) {
       if (!api) return {status: 'failed', summary: 'Files is unavailable. Nothing was changed.'};
       if (!api.isActive?.()) api.open?.('files');
-      await refreshState();
+      if (!await refreshState()) return {status: 'failed', summary: 'Files changed. Nothing was changed.'};
       if (access !== 'granted') return {status: 'failed', summary: 'Files needs all-files access. Nothing was changed.'};
       if (op.type === 'files_filter') { const n = await showFilter(validateFilesFilter(filesFilterOf(op))); return {status: 'succeeded', summary: `Showing ${countLabel(n)} in Files.`}; }
       if (op.type === 'files_open') {
