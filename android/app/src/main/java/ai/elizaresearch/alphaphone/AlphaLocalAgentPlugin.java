@@ -741,6 +741,7 @@ private static final class ResidentAttachDiagnostic {
   String requestId=call.getString("requestId","");
   if(!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
   synchronized(lifecycleLock){
+   if(disposed){call.reject("Local agent bridge is closed.");return;}
    // A start that attached owns no launch: its cancellation retires nothing.
    if(attachedStarts.remove(requestId)){call.resolve();return;}
    if(requestId.equals(startRequestId)&&startRequestEpoch==lifecycleEpoch){
@@ -818,6 +819,7 @@ private static final class ResidentAttachDiagnostic {
  }
  @PluginMethod public void stop(PluginCall call) {
   synchronized(lifecycleLock){
+   if(disposed){call.reject("Local agent bridge is closed.");return;}
    startRequestId=null;startOwnsLaunch=false;
    AlphaCanonicalNotifications.forget(getContext());invalidateCalls();++lifecycleEpoch;accepting=false;stopping=true;clearEnrollment();
    // A retained, unconfirmed credential stop reports stopped only on its own ACK. Reissue the strict
