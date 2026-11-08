@@ -42,7 +42,7 @@ import { fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.mjs";
 import { licenceFlagLines, licenceFlagRecords } from "./licence-policy.mjs";
 import { packagedGzipProblems } from "./android-gzip-assets.mjs";
 import { appLinkFilters, requiredAppLinkProblems } from "./render-assetlinks.mjs";
-import { readVoiceHost, VOICE_BUNDLE_ASSETS, VOICE_BUNDLE_FORMAT } from "./voice-host.mjs";
+import { readVoiceHost, voiceBundleAdmission } from "./voice-host.mjs";
 import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage } from "./aosp-listener.mjs";
 import { listenerApkRow, listenerManifestSection, readListenerRecord } from "./listener-qualification.mjs";
 
@@ -100,36 +100,10 @@ function releaseFile(dir, variant) {
   return { file: present[0], signed: present[0] === signed };
 }
 
-/**
- * The packaged voice bundle (assets/paradee-voice/v1) and native engine against qualified-voice-host.json.
- * Records whether on-device voice is packaged; qualification is never inferred from bytes.
- */
+/** The packaged voice bundle and engine libraries against qualified-voice-host.json (scripts/voice-host.mjs). */
 function voiceHostAdmission(file) {
   const names = readApkEntries(file);
-  const root = `${VOICE_BUNDLE_ASSETS}/`, manifestEntry = `${root}manifest.json`;
-  const bundle = names.filter(name => name.startsWith(root));
-  if (!bundle.length) return { packaged: false, asr: false, differences: [], qualified: false };
-  const differences = [];
-  const host = readVoiceHost(".");
-  const read = entry => execFileSync("unzip", ["-p", file, entry], { maxBuffer: 1536 * 1024 * 1024 });
-  const digest = bytes => createHash("sha256").update(bytes).digest("hex");
-  const manifest = names.includes(manifestEntry) ? JSON.parse(read(manifestEntry).toString("utf8")) : null;
-  if (manifest?.format !== VOICE_BUNDLE_FORMAT) differences.push(`${manifestEntry} is missing or has another format`);
-  const pinned = new Map(host.models.map(row => [row.path, row]));
-  for (const row of manifest?.files ?? []) {
-    const entry = `${root}${row.path}`, expected = pinned.get(row.path);
-    if (!expected || !names.includes(entry)) { differences.push(`${entry}: not a recorded voice file`); continue; }
-    const bytes = read(entry);
-    if (bytes.length !== expected.bytes || digest(bytes) !== expected.sha256) differences.push(`${entry}: differs from the recorded bytes`);
-  }
-  for (const name of bundle) if (name !== manifestEntry && !(manifest?.files ?? []).some(row => `${root}${row.path}` === name)) differences.push(`${name}: unlisted voice entry`);
-  for (const abi of new Set(names.filter(name => /^lib\/[^/]+\/libparadeevoicejni\.so$/.test(name)).map(name => name.split("/")[1]))) {
-    const engine = host.abis.find(row => row.abi === abi)?.libraries.find(library => library.name === "libelizainference.so");
-    if (!engine) { differences.push(`lib/${abi}: no voice host engine is recorded for this ABI`); continue; }
-    const bytes = names.includes(`lib/${abi}/libelizainference.so`) ? read(`lib/${abi}/libelizainference.so`) : null;
-    if (!bytes || bytes.length !== engine.bytes || digest(bytes) !== engine.sha256) differences.push(`lib/${abi}/libelizainference.so: differs from the recorded voice host engine`);
-  }
-  return { packaged: true, asr: host.asrSlot.paths.every(slot => (manifest?.files ?? []).some(row => row.path === slot)), differences, qualified: host.qualified === true };
+  return voiceBundleAdmission({ names, read: entry => execFileSync("unzip", ["-p", file, entry], { maxBuffer: 1536 * 1024 * 1024 }) }, readVoiceHost("."));
 }
 
 const results = [];
@@ -238,8 +212,9 @@ if (release.some(row => row.signed) && !release.every(row => row.signed))
 const releaseSigner = readReleaseSigner();
 for (const row of release) {
   row.runtimeProfile = runtimeProfile;
-  row.releaseAdmission = releaseAdmission(row, releaseSigner);
-  if (!testMocks && row.releaseAdmission.failures.length)
+  // A test-mocks release signed with the release key fails: Android would accept it as an update over a production install.
+  row.releaseAdmission = releaseAdmission(row, releaseSigner, { testMocks });
+  if (row.releaseAdmission.failures.length)
     throw new Error(`Release signing admission failed for ${row.file}: ${row.releaseAdmission.failures.join("; ")}`);
 }
 
@@ -274,7 +249,7 @@ for (const row of release) {
   if(runtimeProfile==='cloud')row.cloudVoice=cloudVoiceAdmission(row.sha256,cloudEvidence,cloudEvidenceSha256);
   const speechQualified=runtimeProfile==='cloud'
     ? cloudVoiceBlockers(row,'cartesia').length===0
-    : row.voiceHost.packaged===true&&row.voiceHost.qualified===true;
+    : row.voiceHost.packaged===true&&row.voiceHost.asr===true&&row.voiceHost.qualified===true;
   row.distributable = !testMocks && row.signed === true && row.releaseAdmission.signerMatches === true &&
     row.releaseAdmission.blockers.length === 0 && row.releaseAdmission.failures.length === 0 &&
     runtime.distributable === true && row.runtimeNotices === true &&
@@ -339,7 +314,7 @@ fs.writeFileSync(
       evidence: "apk-build",
       testMocks,
       demoEntryPoints: testMocks,
-      mapsConfigured: buildRecord ? buildRecord.mapsConfigured : Boolean(process.env.VITE_MAPS_BASE_URL),
+      mapsProvider: buildRecord?.mapsProvider ?? (testMocks && process.env.VITE_MAPS_BASE_URL ? "regional-gateway" : "cloud"),
       allowUnpackagedRuntime: allowUnpackaged,
       runtimeProfile,
       ...(localEmbeddings ? {localEmbeddings:true} : {}),
@@ -367,7 +342,7 @@ fs.writeFileSync(
 console.log(JSON.stringify(results, null, 2));
 const undistributable = release.filter(row => !row.distributable);
 if (undistributable.length)
-  console.warn(`Not distributable: ${undistributable.map(row => `${row.file} (${[row.runtime !== "PACKAGED" && "no packaged runtime", testMocks && "test-mocks build", !row.runtimeNotices && "notices lack the packaged runtime (run node scripts/generate-licenses.mjs --packaged-runtime after staging)", ...(runtimeProfile === "cloud" ? cloudVoiceBlockers(row, "cartesia") : [!row.voiceHost.packaged && "no on-device voice packaged", row.voiceHost.packaged && !row.voiceHost.qualified && "on-device voice not qualified (no recorded device acceptance)"]), ...row.releaseAdmission.blockers, ...row.licenceBlockers].filter(Boolean).join(", ")})`).join("; ")}`);
+  console.warn(`Not distributable: ${undistributable.map(row => `${row.file} (${[row.runtime !== "PACKAGED" && "no packaged runtime", testMocks && "test-mocks build", !row.runtimeNotices && "notices lack the packaged runtime (run node scripts/generate-licenses.mjs --packaged-runtime after staging)", ...(runtimeProfile === "cloud" ? cloudVoiceBlockers(row, "cartesia") : [!row.voiceHost.packaged && "no on-device voice packaged", row.voiceHost.packaged && !row.voiceHost.asr && "no on-device ASR packaged", row.voiceHost.packaged && !row.voiceHost.qualified && "on-device voice not qualified (no recorded device acceptance)"]), ...row.releaseAdmission.blockers, ...row.licenceBlockers].filter(Boolean).join(", ")})`).join("; ")}`);
 console.warn(`Listener (${listener.record}): ${listener.blockers.join("; ")}.`);
 // Licence flags are warnings: recorded per APK above, printed once here, never a failure.
 for (const line of flagLines) console.warn(line);
