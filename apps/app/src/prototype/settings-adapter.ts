@@ -524,11 +524,11 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     // ---- Assistant
     // Missing preferences require review and cannot be changed until read or recovered.
     const preferences = cachedDevicePreferences(), preferenceStatus = devicePreferencesStatus(), preferenceUnavailable = 'Action preference could not be read. Alpha asks before every action until it is recovered.';
-    const askRow = toggle('Ask before acting', preferences?.askBeforeAgentActions === true, async () => {
+    const askRow = toggle('Ask before acting', preferences?.askBeforeAgentActions !== false, async () => {
       const saved = cachedDevicePreferences(); if (!saved) { api.toast(preferenceUnavailable); return; }
       try { await editDevicePreferences(value => { value.askBeforeAgentActions = !saved.askBeforeAgentActions; }); changed(); } catch { api.toast('Could not save. Try again.'); }
     });
-    Object.assign(askRow, { dis: preferenceStatus === 'loading', hasSub: preferenceStatus !== 'ready', sub: preferenceStatus === 'loading' ? 'Loading…' : preferenceStatus === 'unavailable' ? preferenceUnavailable : '' });
+    Object.assign(askRow, { dis: preferenceStatus !== 'ready', hasSub: preferenceStatus !== 'ready', sub: preferenceStatus === 'loading' ? 'Loading…' : preferenceStatus === 'unavailable' ? preferenceUnavailable : '' });
     const agentStatus = connection.session ? connection.kind === 'resident' ? 'Running' : testMocksEnabled ? 'Remote agent' : 'Unsupported connection' : connection.residentRecoveryReason ? 'Needs review' : connection.busy || connection.kind !== 'recovering' ? 'Starting…' : 'Not running';
     const agentRow = row('Agent', native && !testMocksEnabled ? go('agent-connection') : () => connectionController.open(), native && !testMocksEnabled ? agentStatus : connection.session ? connection.name : 'Not connected');
     const digestsRow = row('Scheduled digests', () => window.dispatchEvent(new Event('alpha:hosted-digests')));

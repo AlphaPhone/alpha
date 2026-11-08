@@ -454,9 +454,9 @@ test('unreadable action preferences stay visible and offer recovery without over
  await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1','{damaged settings'));
  await openSettings(page);
  const ask=current(page).getByRole('button',{name:'Ask before acting',exact:true});
- await expect(ask).toContainText('Action preference could not be read. Alpha asks before every action until it is recovered.');
- await ask.click();
- await expect(page.getByText('Action preference could not be read. Alpha asks before every action until it is recovered.',{exact:true}).last()).toBeVisible();
+ await expect(current(page).getByText('Action preference could not be read. Alpha asks before every action until it is recovered.',{exact:true})).toBeVisible();
+ await expect(ask).toHaveAttribute('aria-pressed','true');
+ await expect(ask).toBeDisabled();
  await current(page).getByRole('button',{name:'Recover device settings',exact:true}).click();
  await expect(page.getByRole('dialog',{name:'Device settings recovery'})).toBeVisible();
  expect(await page.evaluate(()=>localStorage.getItem('alpha.browser.device.v1'))).toBe('{damaged settings');
