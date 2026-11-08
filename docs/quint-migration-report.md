@@ -361,9 +361,9 @@ report uses parsed Quint declarations to list unobserved fields and unexecuted
 transitions, including nested records and imported instances.
 
 PR 825 is mergeable against main after the reconciliation merge at `2f14ad0302`.
-The frozen 76-model formal phases passed. Its full application test run remains
-in progress and has exposed fixture/environment failures. Follow-up fixes are
-being checked in the 83-model integration tree. Fourteen Cloud profile tests pass
+The frozen 76-model formal phases passed. Its full application test run finished
+with fixture and environment failures. Follow-up fixes passed the 83-model
+focused checkpoint and are included in the frozen 90-model verification run. Fourteen Cloud profile tests pass
 when supplied the exact verified SDK tree and pinned Bun used by CI. Eight
 background-restore tests pass after their fixture includes the actual operation
 settlement helper. Full repository and distribution acceptance remain open.
@@ -376,10 +376,11 @@ this reconciliation.
 ## Mutable state candidate inventory
 
 The syntax audit covers all 5,660 ledger inputs. It parses 4,928 JavaScript and
-TypeScript files without syntax errors and records 33,916 candidate bindings,
-49,803 write sites and 7,390 asynchronous registration calls. These include
-temporary local bindings and bundled paths whose runtime activation still needs
-review. Candidate counts describe the review backlog.
+TypeScript files and 678 Java files without syntax errors. It records 65,614
+candidate bindings, 65,492 write sites and 8,083 asynchronous registration calls.
+These include temporary local bindings and bundled paths whose runtime
+activation still needs review. The 284 test-support paths contribute 11,513
+candidates. Path classification is a review aid and requires semantic review.
 
 The committed [state-owner summary](../specs/quint/state-audit.json) records every
 file, owner, binding count and source hash. Running
@@ -387,14 +388,16 @@ file, owner, binding count and source hash. Running
 `test-results/quint-state-audit/details.json` report. The detailed report includes
 individual fields, line numbers, mutations, surrounding guards and asynchronous
 boundaries. `node scripts/quint-state-audit.mjs --check` checks the recorded input
-identities. The syntax-only tool uses the TypeScript 6.0.3 parser alias.
+identities. Parsing uses the TypeScript 6.0.3 alias and JDK 21 compiler trees.
+The Java parser reads immutable source copies and reports each consumed digest.
+Its helper source and wrapper are included in the authenticated configuration.
 
-There are 4,821 write sites without a syntactically matched declaration. Aliases,
+There are 10,104 write sites without a syntactically matched declaration. Aliases,
 computed access, injected references and closure lifetimes require review before
-assigning those writes to a state owner. Native and data inputs remain explicit
-work across 678 Java files, 39 Kotlin files, 12 JSON files and three HTML files.
-Effective client, native and core patch outputs retain their separate source
-provenance requirements.
+assigning those writes to a state owner. Remaining language and data review
+covers 39 Kotlin files, 12 JSON files and three HTML files. Effective client,
+native and core patch outputs retain their separate source provenance
+requirements.
 
 The largest candidate groups include the product's prototype model, connection
 controller, camera and voice adapters, the shared assistant planner, chat
