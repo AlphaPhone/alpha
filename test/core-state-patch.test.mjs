@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {execFileSync, spawnSync} from 'node:child_process';
+import childProcess, {execFileSync, spawnSync} from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
 import {CORE_STATE_TARGET, CORE_STATE_MANIFEST, coreStatePatch, coreStateReceipt,
   coreStateBuildPlugin, coreStateBuildRecord, verifyCoreStateBuildRecord, coreRuntimeArguments, combinedCoreRuntime} from '../scripts/core-state-patch.mjs';
@@ -113,4 +114,24 @@ test('independently frozen revisions retain their explicit version contract', t 
     assert.deepEqual(independent.args, args); assert.deepEqual(independent.environment, {});
     assert.equal(independent.status.applied, false);
   }
+});
+
+test('patch consumes the verified Buffer when its pathname is replaced before execution', t => {
+  const f = fixture(t), original = childProcess.execFileSync;
+  let intercepted = false;
+  try {
+    childProcess.execFileSync = (command, args, options) => {
+      if (command === 'patch') {
+        intercepted = true;
+        assert.equal(hash(options.input), f.manifest().patches[0].sha256);
+        assert.equal(args.includes('--input'), false);
+        fs.writeFileSync(path.join(f.root, 'patches/eliza/task-service-stop.patch'), 'changed after verification');
+      }
+      return original(command, args, options);
+    };
+    syncBuiltinESMExports();
+    const result = coreStatePatch(f.root, f.source);
+    assert.equal(intercepted, true);
+    assert.equal(hash(result.files.get(CORE_STATE_TARGET).bytes), f.manifest().patches[0].targets[0].afterSha256);
+  } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
 });
