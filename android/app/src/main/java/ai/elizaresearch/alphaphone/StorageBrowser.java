@@ -279,6 +279,9 @@ final class StorageBrowser {
   }
   /** Stops the current watch and voids every request not yet installed. */
   synchronized void clear(){generation++;stopCurrent();}
+  /** {@code ticket} was refused before it installed: while it is still the latest request, the
+   * previous watch stops (it watches a folder no longer shown). A newer request is untouched. */
+  synchronized void fail(long ticket){if(ticket==generation)stopCurrent();}
   synchronized boolean active(){return current!=null;}
   private void stopCurrent(){Watch old=current;current=null;if(old!=null)old.stop();}
  }

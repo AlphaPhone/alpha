@@ -39,18 +39,21 @@ public class AlphaFilesPlugin extends Plugin {
  private final Runnable changed=()->notifyListeners("storageChanged",new JSObject());
  private interface StorageWork {JSObject run(StorageBrowser browser)throws Exception;}
  private JSObject denied(){JSObject out=result("denied",StorageCatalog.legacy()?"Allow storage access to browse files.":"Allow all-files access to browse storage.");out.put("access",StorageCatalog.access(getContext()));out.put("legacy",StorageCatalog.legacy());return out;}
- private void storage(PluginCall call,StorageWork task){PluginWorkers.submit(storageWorker,()->{
+ private void storage(PluginCall call,StorageWork task){storage(call,task,null);}
+ /** {@code failed} runs (on the worker) before any refusal is resolved. */
+ private void storage(PluginCall call,StorageWork task,Runnable failed){PluginWorkers.submit(storageWorker,()->{
   try{
-   if(!"granted".equals(StorageCatalog.access(getContext()))){call.resolve(denied());return;}
+   if(!"granted".equals(StorageCatalog.access(getContext()))){refuse(call,failed,denied());return;}
    StorageCatalog.Volume volume=StorageCatalog.volume(getContext(),call.getString("volume","primary"));
-   if(volume==null){call.resolve(result("unavailable","This storage is not mounted."));return;}
+   if(volume==null){refuse(call,failed,result("unavailable","This storage is not mounted."));return;}
    JSObject out=task.run(new StorageBrowser(volume.directory));if(!out.has("status"))out.put("status","ready");call.resolve(out);
-  }catch(IllegalArgumentException e){call.resolve(result("invalid","Invalid name or path."));}
-  catch(IllegalStateException e){call.resolve(result("exists","That name is already used here."));}
-  catch(java.io.FileNotFoundException e){call.resolve(result("missing","This item is no longer there."));}
-  catch(SecurityException e){call.resolve(denied());}
-  catch(Exception e){call.resolve(result("failed","The operation could not be confirmed."));}
- },()->call.resolve(result("unavailable","Files closed.")));}
+  }catch(IllegalArgumentException e){refuse(call,failed,result("invalid","Invalid name or path."));}
+  catch(IllegalStateException e){refuse(call,failed,result("exists","That name is already used here."));}
+  catch(java.io.FileNotFoundException e){refuse(call,failed,result("missing","This item is no longer there."));}
+  catch(SecurityException e){refuse(call,failed,denied());}
+  catch(Exception e){refuse(call,failed,result("failed","The operation could not be confirmed."));}
+ },()->refuse(call,failed,result("unavailable","Files closed.")));}
+ private static void refuse(PluginCall call,Runnable failed,JSObject out){if(failed!=null)failed.run();call.resolve(out);}
  private static List<String> strings(PluginCall call,String key,int max){
   JSArray array=call.getArray(key);if(array==null||array.length()<1||array.length()>max)throw new IllegalArgumentException();
   List<String> out=new ArrayList<>();Set<String> seen=new HashSet<>();
@@ -197,7 +200,9 @@ public class AlphaFilesPlugin extends Plugin {
    return ()->{if(files!=null)files.stopWatching();resolver().unregisterContentObserver(media);main.removeCallbacks(changed);};
   });
   return new JSObject();
- });}
+ // A watch refused before it installs (invalid path, access denied) stops the previous folder's
+ // observers, so they emit nothing for a folder no longer shown.
+ },()->watch.fail(ticket));}
  @PluginMethod public void storageUnwatch(PluginCall call){stopWatching();call.resolve(new JSObject());}
  private void burst(){main.removeCallbacks(changed);main.postDelayed(changed,400);}
  private void stopWatching(){watch.clear();}

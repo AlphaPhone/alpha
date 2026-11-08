@@ -319,6 +319,8 @@ test('a watch whose unwatch lands before the storage worker registers leaves no 
  assert.match(plugin,/public void storageWatch\(PluginCall call\)\{long ticket=watch\.request\(\);storage\(call,b->\{/,'the request is taken on the plugin thread, before the worker runs');
  assert.match(plugin,/watch\.install\(ticket,\(\)->\{/,'observers are registered only through the slot');
  assert.match(plugin,/private void stopWatching\(\)\{watch\.clear\(\);\}/);
+ assert.match(plugin,/return new JSObject\(\);\n \/\/ A watch refused[^\n]*\n \/\/[^\n]*\n \},\(\)->watch\.fail\(ticket\)\);\}/,'a watch refused before it installs stops the previous folder\'s observers');
+ assert.match(plugin,/private static void refuse\(PluginCall call,Runnable failed,JSObject out\)\{if\(failed!=null\)failed\.run\(\);call\.resolve\(out\);\}/);
  assert.doesNotMatch(plugin,/\bmediaObserver=|\bobserver=new FileObserver/,'no observer field is assigned outside the slot');
 });
 test('the browser volume answers the folder filter with folders, as Android walks them (files_filter kind folder)',async()=>{
