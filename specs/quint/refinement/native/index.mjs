@@ -17,8 +17,12 @@ import {checkVoiceDraft} from './voice-draft.mjs';
 import {checkNotePermission} from './note-bridge.mjs';
 import {checkSharedRecording} from './shared-recording.mjs';
 import {checkLiveCapture} from './live-capture.mjs';
+import {checkAsrPipe} from './asr-pipe.mjs';
+import {checkPipedCapture} from './piped-capture.mjs';
 
 const boundaryObligations = [
+  {model:'NativeAsrPipe',obligation:'Provider and continuous frame integration',reason:'Actual pipe futures, queued batches, bounds, cutoffs and cancellation execute against controlled ASR/provider ports. Actual transport and unrestricted continuous frame processing require additional source and platform evidence.'},
+  {model:'NativePipedCapture',obligation:'Physical frame buffering and installed provider delivery',reason:'The shared bridge, controller, capture and ASR pipe execute together. Warmup, owner retirement and close confirmation are source-driven. Physical recorder timing and continuous frame-buffer behavior remain open.'},
   {model:'SharedRecordingAdmission',obligation:'Installed permission delivery and complete voice composition',reason:'The actual shared bridge executes permission, cancellation and worker settlement. Android prompt/call delivery and physical microphone release remain platform obligations.'},
   {model:'NativeLiveCapture',obligation:'ASR pipe and frame processing',reason:'The real bridge, live controller, admission and capture resource execute non-piped lifecycle and late-open cleanup. Provider warmup, piped ASR and frame buffering remain separate source campaigns.'},
   {model:'NativeNotePermission',obligation:'Shared parent lifecycle, overlapping prompts and installed consent',reason:'Complete product Notes methods execute across permission return, call changes, host retirement and failed capture. One pending request and two successful opens bound this campaign. The parent lifecycle/permission interface is supplied by a controlled port; shared LocalSpeechBridgePlugin and Android admission remain separate.'},
@@ -65,6 +69,8 @@ export async function runNativeRefinement(extraSources = []) {
   receipts.push(await checkNotePermission(sources));
   receipts.push(await checkSharedRecording(sources));
   receipts.push(await checkLiveCapture(sources));
+  receipts.push(await checkAsrPipe(sources));
+  receipts.push(await checkPipedCapture(sources));
   const obligations = [...boundaryObligations,...credential.obligations];
   for (const model of new Set(receipts.map(receipt => receipt.model))) {
     const related = receipts.filter(receipt => receipt.model === model);

@@ -8,7 +8,10 @@ export const quintRoot = join(repositoryRoot, 'specs/quint');
 export const sourceRoots = ['apps/app/src', 'apps/app/public', 'backend', 'android'];
 export const runtimeScriptPaths = ['scripts/browser-cloud-dev-bridge.ts', 'scripts/cloud-resident-host.mjs',
   'scripts/cloud-email-code.ts', 'scripts/dev-agent.mjs', 'scripts/dev-cloud.mjs', 'scripts/dev-local.mjs',
-  'scripts/start-local-agent.mjs', 'scripts/start-local-voice-agent.mjs', 'scripts/start-local-remote.mjs'];
+  'scripts/start-local-agent.mjs', 'scripts/start-local-voice-agent.mjs', 'scripts/start-local-remote.mjs',
+  'scripts/core-state-patch.mjs', 'scripts/core-state-preload.mjs',
+  'scripts/combined-agent-source.mjs', 'scripts/start-reviewed-workflow-agent.mjs',
+  'scripts/start-cloud-qa.mjs', 'scripts/start-combined-agent.mjs', 'scripts/native-google-host-artifact.mjs'];
 export const runtimeAssetPaths = ['apps/app/index.html'];
 const omittedDirectories = new Set(['node_modules', 'build', '.gradle', '.cxx', '.kotlin', 'assets', 'jniLibs', 'capacitor-cordova-android-plugins']);
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.java', '.kt', '.cpp', '.h', '.c', '.html', '.mjs', '.jsx', '.cc', '.hpp', '.rs', '.swift']);
@@ -34,6 +37,27 @@ function runtimeBundleSourcePaths(pin) {
       || graph.classification !== 'observed-product-android-bundle-inputs'
       || !graph.producer?.sourceTreeVerifiedBeforeAndAfter || !graph.producer?.inputHashesUnchanged) {
     throw Error('Refresh the authenticated runtime bundle inventory for the current upstream pin');
+  }
+  for (const [path, hash] of Object.entries(graph.producer.inputHashes || {})) {
+    if (path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '..' || part === '.')
+        || !/^[a-f0-9]{64}$/.test(hash)
+        || sha256(readFileSync(join(repositoryRoot, path))) !== hash) {
+      throw Error(`Runtime bundle producer input changed ${path}`);
+    }
+  }
+  const core = graph.producer.coreState;
+  if (core) {
+    if (core.baseCommit !== pin.commit || !Array.isArray(core.transforms) || core.transforms.length !== 1) {
+      throw Error('Runtime bundle core transformation is not bound to the source pin');
+    }
+    for (const transform of core.transforms) {
+      const source = graph.files[transform.path];
+      const expected = core.files?.[transform.path];
+      if (!source || source.sha256 !== transform.sourceSha256 || source.effectiveSourceSha256 !== transform.outputSha256
+          || expected?.beforeSha256 !== transform.sourceSha256 || expected?.afterSha256 !== transform.outputSha256) {
+        throw Error(`Runtime bundle effective source differs from its core transformation ${transform.path}`);
+      }
+    }
   }
   const inputs = new Map();
   const include = (path, digest) => {

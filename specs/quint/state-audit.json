@@ -7,7 +7,7 @@
   "toolSha256": "d339b75404966b1ec76650c90b0c4c5e466e145459ff4787e464b98973d8f284",
   "dependencyLockSha256": "19bcd50048bdf70d9d1aed2fb7b098c842fcc88ffa8f875a26da24fac927d03e",
   "sourcePin": "475a8d59dc1811c2cde093613519906a5a3f6457",
-  "ledgerSha256": "4e4e432f17802c30f168af951b6ec60110de731afed590b45057e2815ea42be3",
+  "ledgerSha256": "4b5be02e606da5fd4e211d662d3dee871bc138bc86850d8c5a93c2af8424bd4e",
   "method": "TypeScript syntax trees for JavaScript/TypeScript. Mutable fields, bindings, containers, state hooks, write sites and asynchronous registration calls are candidates for semantic review.",
   "limitations": [
     "Candidate extraction does not establish state-machine coverage or implementation refinement.",
@@ -16,15 +16,15 @@
     "The ledger supplies pinned source bytes. Effective client/native/runtime patch outputs require their separately authenticated source mappings."
   ],
   "counts": {
-    "files": 5653,
-    "parsedFiles": 4921,
+    "files": 5660,
+    "parsedFiles": 4928,
     "languageReview": 732,
     "parseErrors": 0,
-    "candidates": 33898,
-    "writeSites": 49762,
-    "writeAssociations": 47081,
-    "asynchronous": 7381,
-    "unassignedWrites": 4794
+    "candidates": 33916,
+    "writeSites": 49803,
+    "writeAssociations": 47096,
+    "asynchronous": 7390,
+    "unassignedWrites": 4821
   },
   "files": [
     {
@@ -11317,6 +11317,7 @@
       "sha256": "2b2f7617dc494e3a8b816fdb721ea1206632ee02ec8c56f3fb056b4e6c9d4e7e",
       "allocatedModels": [
         "CanonicalNotesController",
+        "CanonicalNotesFeedback",
         "NotesLifecycle"
       ],
       "sourceReview": "state-audit-required",
@@ -11338,6 +11339,7 @@
       "sha256": "1561fdc49f56b92c132a4df34c8b15c8dfc8668a8505402d4e8d1c0e80e58c4f",
       "allocatedModels": [
         "CanonicalNotesDraft",
+        "CanonicalNotesMutation",
         "NotesLifecycle"
       ],
       "sourceReview": "state-audit-required",
@@ -11351,6 +11353,7 @@
       "path": "apps/app/src/prototype/canonical-notes-ui.ts",
       "sha256": "af7c5ec7c1ef2be0ca599fd19a3ef644f60b46d6e9cfcb4f85d39f45345c3e1c",
       "allocatedModels": [
+        "CanonicalNotesFeedback",
         "NotesLifecycle"
       ],
       "sourceReview": "state-audit-required",
@@ -22517,7 +22520,7 @@
     },
     {
       "path": "backend/loader.ts",
-      "sha256": "6e19d0445e05790f0ed3276b445e06e5990816a61748ac3b1c92651b00eec012",
+      "sha256": "87e6003ae46c79d9118a2e6fd98682ada19cee7ae5a450ef3db4bc5f64e017f4",
       "allocatedModels": [
         "Application",
         "ResidentRuntime"
@@ -22958,7 +22961,7 @@
     },
     {
       "path": "scripts/cloud-resident-host.mjs",
-      "sha256": "70d0dd9467f77c31deff31b2af22280615527a986de589eaf4b823910ed9461e",
+      "sha256": "12727f6b21a33d5fcd3b4a30cabcd21fe83f69e0cf01c4f26f3fe626753c62ea",
       "allocatedModels": [
         "AssistantConversation",
         "DevelopmentHost",
@@ -22969,25 +22972,25 @@
       "owners": [
         {
           "owner": "createCloudResidentHost",
-          "line": 37,
+          "line": 38,
           "bindings": 11,
           "writes": 29
         },
         {
           "owner": "createCloudResidentHost.stop",
-          "line": 43,
+          "line": 44,
           "bindings": 1,
           "writes": 2
         },
         {
           "owner": "createCloudResidentHost.replace",
-          "line": 63,
+          "line": 64,
           "bindings": 1,
           "writes": 1
         },
         {
-          "owner": "createCloudResidentHost.selectOwn.ArrowFunction@88",
-          "line": 90,
+          "owner": "createCloudResidentHost.selectOwn.ArrowFunction@89",
+          "line": 91,
           "bindings": 1,
           "writes": 1
         }
@@ -22995,6 +22998,78 @@
       "parseErrors": [],
       "asynchronous": 8,
       "unassignedWrites": 2
+    },
+    {
+      "path": "scripts/combined-agent-source.mjs",
+      "sha256": "1e7409ec7c91439a2e73b77aaa32042ed989a725cd18b24bc3247685ed7e886d",
+      "allocatedModels": [
+        "AssistantConversation",
+        "ResidentRuntime"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [
+        {
+          "owner": "sourceManifest",
+          "line": 11,
+          "bindings": 4,
+          "writes": 8
+        }
+      ],
+      "parseErrors": [],
+      "asynchronous": 0,
+      "unassignedWrites": 0
+    },
+    {
+      "path": "scripts/core-state-patch.mjs",
+      "sha256": "8009421748b5ab2347f50ffa51799c297cd7525789f999387cb6a24b826993bc",
+      "allocatedModels": [
+        "Application"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [
+        {
+          "owner": "<module>",
+          "line": 10,
+          "bindings": 1,
+          "writes": 0
+        },
+        {
+          "owner": "readRegular",
+          "line": 18,
+          "bindings": 1,
+          "writes": 1
+        },
+        {
+          "owner": "coreStatePatch",
+          "line": 68,
+          "bindings": 1,
+          "writes": 0
+        },
+        {
+          "owner": "coreStateBuildPlugin",
+          "line": 75,
+          "bindings": 1,
+          "writes": 1
+        }
+      ],
+      "parseErrors": [],
+      "asynchronous": 0,
+      "unassignedWrites": 9
+    },
+    {
+      "path": "scripts/core-state-preload.mjs",
+      "sha256": "c5368c9075aa8c7660bee01338185fbe673c9b8dd6889dd1ab01d195efa17c10",
+      "allocatedModels": [
+        "Application"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [],
+      "parseErrors": [],
+      "asynchronous": 0,
+      "unassignedWrites": 1
     },
     {
       "path": "scripts/dev-agent.mjs",
@@ -23074,6 +23149,68 @@
       "unassignedWrites": 2
     },
     {
+      "path": "scripts/native-google-host-artifact.mjs",
+      "sha256": "d7711834ded6eca14adabb7601b8a07cbc0d229fd43c11147d93663c5eccb27a",
+      "allocatedModels": [
+        "GoogleAccounts",
+        "InboxDelivery"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [
+        {
+          "owner": "addNativeGoogleHostArtifact",
+          "line": 36,
+          "bindings": 3,
+          "writes": 4
+        }
+      ],
+      "parseErrors": [],
+      "asynchronous": 0,
+      "unassignedWrites": 0
+    },
+    {
+      "path": "scripts/start-cloud-qa.mjs",
+      "sha256": "d98e7a19365cef16cb3b0cc91618d81ad0428aca63c867d141fef01fdf856af0",
+      "allocatedModels": [
+        "Application"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [
+        {
+          "owner": "cloudQaConfiguration",
+          "line": 18,
+          "bindings": 1,
+          "writes": 1
+        }
+      ],
+      "parseErrors": [],
+      "asynchronous": 1,
+      "unassignedWrites": 8
+    },
+    {
+      "path": "scripts/start-combined-agent.mjs",
+      "sha256": "65006328a7b4cdf864c17ca57ab41f076db83807d9e8a204b274c89970be8594",
+      "allocatedModels": [
+        "AssistantConversation",
+        "ResidentRuntime"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [
+        {
+          "owner": "<module>",
+          "line": 31,
+          "bindings": 4,
+          "writes": 0
+        }
+      ],
+      "parseErrors": [],
+      "asynchronous": 5,
+      "unassignedWrites": 3
+    },
+    {
       "path": "scripts/start-local-agent.mjs",
       "sha256": "5d2648ea8dc55c128a150903845f5996334d4daf29b7c57afb38f1f50f40ab90",
       "allocatedModels": [
@@ -23090,7 +23227,7 @@
     },
     {
       "path": "scripts/start-local-remote.mjs",
-      "sha256": "16c59a1b03b9c05ceb27801e4d160e23eaadd1958804c06592f1a8f640a5fbea",
+      "sha256": "6346f8add014a080cc0d706456d7e5378c86e791fe55125361795e281f65ec29",
       "allocatedModels": [
         "Application",
         "DevelopmentHost"
@@ -23100,18 +23237,18 @@
       "owners": [
         {
           "owner": "<module>",
-          "line": 32,
+          "line": 34,
           "bindings": 1,
           "writes": 1
         }
       ],
       "parseErrors": [],
       "asynchronous": 0,
-      "unassignedWrites": 4
+      "unassignedWrites": 5
     },
     {
       "path": "scripts/start-local-voice-agent.mjs",
-      "sha256": "43a59764c15492e68894b1c777658297c00bf907e5e4eca4d0fa77bc82c4e486",
+      "sha256": "41e95a6923a2481dd747a9d3b37f3e62ae248e82e1d62772f81af4124c56c272",
       "allocatedModels": [
         "AssistantConversation",
         "DevelopmentHost",
@@ -23125,7 +23262,29 @@
       "owners": [
         {
           "owner": "<module>",
-          "line": 45,
+          "line": 46,
+          "bindings": 2,
+          "writes": 0
+        }
+      ],
+      "parseErrors": [],
+      "asynchronous": 3,
+      "unassignedWrites": 5
+    },
+    {
+      "path": "scripts/start-reviewed-workflow-agent.mjs",
+      "sha256": "2445e6e5d1a1564a2e73c05cb2cf875a7985759b8f5863ea5670ceedcea05e6a",
+      "allocatedModels": [
+        "AssistantConversation",
+        "ResidentRuntime",
+        "WorkflowExecution"
+      ],
+      "sourceReview": "state-audit-required",
+      "classification": "syntactic-candidates",
+      "owners": [
+        {
+          "owner": "<module>",
+          "line": 48,
           "bindings": 2,
           "writes": 0
         }
@@ -120844,6 +121003,7 @@
       "allocatedModels": [
         "AssistantConversation",
         "NativeLiveCapture",
+        "NativePipedCapture",
         "ResidentRuntime",
         "SharedRecordingAdmission",
         "SpeechResources",
@@ -120959,6 +121119,7 @@
         "AssistantConversation",
         "MediaLifecycle",
         "NativeLiveCapture",
+        "NativePipedCapture",
         "ResidentRuntime",
         "SpeechResources",
         "StreamingPlayback",
@@ -121013,6 +121174,8 @@
       "sha256": "01838880e19df9f5b12ed0741d808ac8cb17627a23eb841a4a5c98a5089ce7f9",
       "allocatedModels": [
         "AssistantConversation",
+        "NativeAsrPipe",
+        "NativePipedCapture",
         "ResidentRuntime",
         "SpeechResources",
         "StreamingPlayback",
@@ -121050,6 +121213,7 @@
         "AssistantConversation",
         "MediaLifecycle",
         "NativeLiveCapture",
+        "NativePipedCapture",
         "ResidentRuntime",
         "SpeechResources",
         "StreamingPlayback",
@@ -161576,6 +161740,6 @@
   ],
   "detail": {
     "path": "test-results/quint-state-audit/details.json",
-    "sha256": "40e22614ea562dbe8d651feaed60c315325028a829704f4510520a56dbd7946f"
+    "sha256": "28025bd14f69cad12502e51d9441fbbd83418e3519c805e0b2de193fa4adf1c4"
   }
 }

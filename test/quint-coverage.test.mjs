@@ -123,6 +123,8 @@ test('source discovery follows consumed shared modules and rejects a stale clien
         }},
       },
     };
+    graph.producer.inputHashes = {'scripts/builder.mjs': sha256('builder')};
+    write('scripts/builder.mjs', 'builder');
     write('specs/quint/refinement/services/runtime-bundle-inputs.json', graph);
     write('vendor/eliza/plugins/worker/src/state.ts', 'export let queued = false;');
     write('vendor/eliza/packages/ui/src/state.ts', 'export let active = false;');
@@ -143,6 +145,19 @@ test('source discovery follows consumed shared modules and rejects a stale clien
     ]);
     write('vendor/eliza/plugins/fixture/android/src/main/java/Added.java', 'class Added {}');
     assert.ok(JSON.parse(run().stdout).includes('vendor/eliza/plugins/fixture/android/src/main/java/Added.java'));
+    write('scripts/builder.mjs', 'changed builder');
+    assert.match(run().stderr, /Runtime bundle producer input changed/);
+    write('scripts/builder.mjs', 'builder');
+    const transformed = structuredClone(graph);
+    const before = transformed.files['packages/core/src/bundled.ts'].sha256;
+    const after = sha256('transformed');
+    transformed.files['packages/core/src/bundled.ts'].effectiveSourceSha256 = after;
+    transformed.producer.coreState = {baseCommit: 'fixture', files: {'packages/core/src/bundled.ts': {beforeSha256: before, afterSha256: after}}, transforms: [{path: 'packages/core/src/bundled.ts', sourceSha256: before, outputSha256: after}]};
+    write('specs/quint/refinement/services/runtime-bundle-inputs.json', transformed);
+    assert.equal(run().status, 0);
+    transformed.producer.coreState.transforms[0].outputSha256 = sha256('unreviewed');
+    write('specs/quint/refinement/services/runtime-bundle-inputs.json', transformed);
+    assert.match(run().stderr, /effective source differs/);
     write('specs/quint/refinement/services/runtime-bundle-inputs.json', {...graph, sourcePin: 'obsolete'});
     assert.match(run().stderr, /Refresh the authenticated runtime bundle inventory/);
     write('specs/quint/refinement/services/runtime-bundle-inputs.json', graph);
