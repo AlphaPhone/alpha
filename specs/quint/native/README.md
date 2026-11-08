@@ -543,3 +543,18 @@ verification if all exact bytes were already read. The process guard protects
 the active cache file from peer taps and sweeps. An unsuccessful file deletion
 can leave an orphan for a later idle bridge to sweep. A refused Android
 abandonment can likewise leave the copied uncommitted session listed.
+
+### Native Clock review and handoff
+
+`NativeClockReview` tracks the product Clock dialog, the exact journal-bound
+approval token and the one handoff to a resolved external Clock. The durable
+marker consumes the token before launch. A missing receipt or an ambiguous
+Activity error never authorizes an automatic second launch. A successful
+launch reports only `opened`. Android DeskClock owns alarm scheduling, ringing
+and manual acknowledgement.
+
+The as-built source traces preserve two divergences. A late callback from an
+abandoned dialog can remove its successor's claim. A caller can also supply a
+well-shaped `opened` result to the outer journal before a native Clock receipt
+exists. The JVM executes the relevant product bridge methods and the pinned
+journal and handoff classes over controlled ports.
