@@ -1,11 +1,12 @@
 --- a/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedCaptures.java
 +++ b/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedCaptures.java
-@@ -62,11 +62,20 @@
+@@ -62,11 +62,23 @@
      return new Result(true, id, null);
    }
  
 +  /** The capture of one operation, in the current capture folder or an earlier one of this host. */
    private Cursor lookup(String operation) throws IOException {
+-    Cursor row = resolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
 +    java.util.List<String> paths = new java.util.ArrayList<>();
 +    paths.add(config.captureRelativePath);
 +    paths.addAll(config.legacyCaptureRelativePaths);
@@ -14,7 +15,10 @@
 +    args.add(config.captureName(operation));
 +    args.addAll(paths);
 +    String placeholders = String.join(",", java.util.Collections.nCopies(paths.size(), "?"));
-     Cursor row = resolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
++    // Pending rows are excluded from queries by default; an interrupted keep is one, and must be
++    // found so it is cleaned up instead of reported unconfirmed (or published a second time).
++    Cursor row = resolver.query(
++        MediaStore.setIncludePending(MediaStore.Images.Media.EXTERNAL_CONTENT_URI),
          new String[] {"_id", "is_pending"},
 -        "owner_package_name=? AND _display_name=? AND relative_path=?",
 -        new String[] {owner, config.captureName(operation), config.captureRelativePath}, null);
@@ -23,6 +27,18 @@
      if (row == null)
        throw new IOException("Capture lookup is unavailable");
      return row;
+@@ -88,8 +100,9 @@
+       if (row.moveToNext())
+         throw new IOException("Ambiguous capture identity");
+       if (pending) {
+-        if (resolver.delete(uri, "is_pending=1 AND owner_package_name=?", new String[] {owner})
+-            != 1)
++        if (resolver.delete(MediaStore.setIncludePending(uri),
++              "is_pending=1 AND owner_package_name=?", new String[] {owner})
++          != 1)
+           throw new IOException("Capture cleanup was not confirmed");
+         JSONObject failed = new JSONObject(receipt.toString()).put("status", "failed");
+         persist(operation, failed);
 --- a/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedMediaConfig.java
 +++ b/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedMediaConfig.java
 @@ -20,6 +20,11 @@

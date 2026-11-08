@@ -1,7 +1,7 @@
 // patches/eliza/owned-captures-legacy-path.patch on the patched source: a host that moved its capture
 // folder (Alpha: Pictures/ to DCIM/Camera/) still finds a keep reserved under the earlier folder, so
 // retrying it resolves that row instead of reporting it unconfirmed forever. The pure-Java config runs
-// on the JVM; the MediaStore lookup is device-checked by KeptCaptureLegacyPathInstrumentedTest.
+// on the JVM; the MediaStore lookup (pending rows included) is device-checked by KeptCaptureLegacyPathInstrumentedTest.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -17,6 +17,8 @@ test('a keep reserved under the earlier capture folder is still looked up there'
   const captures=fs.readFileSync(path.join(media,'OwnedCaptures.java'),'utf8');
   const lookup=captures.slice(captures.indexOf('private Cursor lookup('),captures.indexOf('private Result recover('));
   assert.match(lookup,/paths\.addAll\(config\.legacyCaptureRelativePaths\)/);assert.match(lookup,/relative_path IN \(/);
+  // An interrupted keep is a pending row: the lookup and its cleanup must see it, or a retry reports it unconfirmed forever.
+  assert.match(lookup,/MediaStore\.setIncludePending\(MediaStore\.Images\.Media\.EXTERNAL_CONTENT_URI\)/);assert.match(captures,/resolver\.delete\(MediaStore\.setIncludePending\(uri\),/);
   assert.equal((captures.match(/RELATIVE_PATH, config\.captureRelativePath/g)||[]).length,1,'New keeps are published only in the current folder');
   const work=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-legacy-captures-'));t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
   fs.writeFileSync(path.join(work,'LegacyCapturesCheck.java'),`import ai.eliza.plugins.media.OwnedMediaConfig;

@@ -146,13 +146,13 @@
     },
     {
       "file": "owned-captures-legacy-path.patch",
-      "sha256": "dca98fd6b13493eb4da6e6dd8f0ccda62595ada2c138633647d76df34ceb225c",
+      "sha256": "5a5137ce9e2de642e0f842db103f2ae79a84683c3c06fb66b90b1645b835a7de",
       "module": "plugins/plugin-native-media/android",
       "targets": [
         {
           "path": "plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedCaptures.java",
           "beforeSha256": "ceb5ccf19584a0e571457626d09562f1c3acab3b0a8ebd37ac99f21818a33238",
-          "afterSha256": "32978b5a793ed4075091f25e79b0beb972d1dd8630b25b9656a0cbae9ca93c30"
+          "afterSha256": "bbf33f93615c2a7dbefe41cbb8b363136ce7d67712f76d46707f340624a148e0"
         },
         {
           "path": "plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedMediaConfig.java",
