@@ -11,6 +11,7 @@ import {runWorkflowTaskRefinement} from './workflow-scheduler/registration.mjs';
 import {runCoreRetirementRefinement} from './core-runtime/retirement.mjs';
 import {runCoreServiceLifecycleRefinement} from './core-runtime/lifecycle.mjs';
 import {runCoreRuntimeShutdownRefinement} from './core-runtime/shutdown.mjs';
+import {runTurnControllerRefinement} from './core-runtime/turns.mjs';
 import {runTaskServiceRefinement} from './task-service/index.mjs';
 import {policyRefinement} from './policies.mjs';
 import {readingRefinement} from './reading.mjs';
@@ -52,6 +53,7 @@ export async function runServicesRefinement() {
   receipts.push(await runCoreRetirementRefinement(driverSources));
   receipts.push(await runCoreServiceLifecycleRefinement(driverSources));
   receipts.push(await runCoreRuntimeShutdownRefinement(driverSources));
+  receipts.push(await runTurnControllerRefinement(driverSources));
   const taskService = await runTaskServiceRefinement(driverSources);
   receipts.push(...taskService.receipts);
   const obligations = [
@@ -80,6 +82,7 @@ export async function runServicesRefinement() {
   obligations.push({model: 'CoreRuntimeRetirement', obligation: 'Runtime admission and actual resource teardown', reason: 'The real retirement tracker executes pending-work publication, reentrant work, concurrent drains and retained failures. AgentRuntime shutdown admission and individual resource release require their own source relations.'});
   obligations.push({model: 'CoreServiceLifecycle', obligation: 'Runtime registration and complete shutdown composition', reason: 'Two implementations and three callers exercise the real startup registries, hook publication and stop identities. Eager retry timers, missing static methods, dynamic registration, reentrant observers and AgentRuntime shutdown remain separate source obligations.'});
   obligations.push({model: 'CoreRuntimeShutdown', obligation: 'Complete runtime and host shutdown composition', reason: 'The actual AgentRuntime runs admission, room and diagnostic draining, service teardown and strict retirement. Dynamic plugin registration, provider cancellation, completed initialization and product-host shutdown require additional source schedules.'});
+  obligations.push({model: 'CoreTurnControllers', obligation: 'Detached callbacks, reentrant observers and full provider composition', reason: 'Two actual registries and three turn identities exercise cancellation, lookup and cleanup. Work detached beyond handler settlement and arbitrary reentrant observers need additional schedules.'});
   obligations.push(...taskService.obligations);
   return {receipts, obligations};
 }

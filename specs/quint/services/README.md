@@ -69,3 +69,16 @@ The source campaign has 134 schedules and 771 observed checkpoints across
 separately. See `test-results/quint-main-services` for the current per-model
 logs, command/version records and hashes. Earlier b25-pin service, Inbox and scan
 receipts are historical evidence for their recorded source bytes only.
+
+## Turn registry source checkpoint
+
+`CoreTurnControllers` observes two real registries, two rooms and three turn
+identities. Fourteen source schedules pass 86 checkpoints with all 16 model
+fields observed. The authenticated shared patch gives each registry its own
+AsyncLocalStorage instance. Peer lookups previously returned the current
+signal from another runtime when the room name matched.
+
+The seven model scenarios and 1,000 samples of 80 transitions pass. Symbolic
+safety through four transitions also passes. This checkpoint uses `475a8d5`.
+The incoming `4787d51` adds closed-turn admission, which needs a model extension
+and a new source campaign before current-pin acceptance.
