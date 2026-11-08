@@ -763,5 +763,29 @@
       "Finite UI feedback event machine for phase, review reason and failure origin, with an interaction-failure history monitor. Actual controller/editor callbacks drive source traces.",
       "Collection rendering, navigation waits, dictation/recording and Calendar handoffs remain separate state machines."
     ]
+  },
+  {
+    "path": "specs/quint/application/CanonicalNotesMutation.qnt",
+    "module": "CanonicalNotesMutation",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "dirtyDeleteSavesFirstTest",
+      "changedTokenCancelsDeleteTest",
+      "queuedSaveBlocksDeleteTest",
+      "restoreRevisionTest",
+      "lostOwnerCannotPublishTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/canonical-notes-editor.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts"
+    ],
+    "abstractions": [
+      "Two record identities, five editor tokens and four edit versions/revisions. One remove/restore continuation, rejected concurrent probes and independent save queue use settled promise macrosteps.",
+      "Server response membership is controlled input. Provider mutation, revision allocation, durability, arbitrary reentrant hooks and multiple simultaneous remove continuations remain separate obligations."
+    ]
   }
 ]
