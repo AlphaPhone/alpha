@@ -183,6 +183,7 @@ import java.util.Arrays;
 import org.json.JSONObject;
 public final class PhotoRecoveryCheck {
  private static final String TOKEN="11111111-2222-4333-8444-555555555555";
+ private static final long DAY=24L*60*60*1000;
  private static final byte[] ORIGINAL=bytes("original-photo-bytes");
  private static final byte[] EDITED=bytes("encoded-edited-photo-bytes");
  private static byte[] bytes(String value) { return value.getBytes(StandardCharsets.UTF_8); }
@@ -214,7 +215,13 @@ public final class PhotoRecoveryCheck {
    saveRecord();
    for(String[] orphan:ORPHANS){
     File file=new File(backups,orphan[0]); Files.write(file.toPath(),ORIGINAL);
-    if(orphan[1]!=null) context.preferences.values.put(orphan[0].substring(0,orphan[0].lastIndexOf('.')),new JSONObject().put("replace",true).put("status",orphan[1]).put("backup",orphan[0]).toString());
+    if(orphan[1]!=null){
+     // writing-expired / writing-recent: another writer's bytes were found 8 days / 1 hour ago.
+     JSONObject journaled=new JSONObject().put("replace",true).put("status",orphan[1].startsWith("writing")?"writing":orphan[1]).put("backup",orphan[0]);
+     if(orphan[1].equals("writing-expired")) journaled.put("externalAt",System.currentTimeMillis()-8L*DAY);
+     if(orphan[1].equals("writing-recent")) journaled.put("externalAt",System.currentTimeMillis()-3600_000L);
+     context.preferences.values.put(orphan[0].substring(0,orphan[0].lastIndexOf('.')),journaled.toString());
+    }
    }
    OwnedMediaConfig config=OwnedMediaConfig.builder("fixture").edits("Pictures/Fixture/","edit_").captures("DCIM/Fixture/","capture_").build();
    recovery=new OwnedPhotoEdits(context,config,new OwnedPhotoEdits.SourceAccess() {
@@ -225,11 +232,15 @@ public final class PhotoRecoveryCheck {
   }
   void saveRecord() { context.preferences.values.put(TOKEN,record.toString()); }
   /** Other operations' files: {name, journal status or null for no record here}. */
-  static final String[][] ORPHANS={{"aaaaaaaa-0000-4000-8000-000000000001.original","incomplete"},{"aaaaaaaa-0000-4000-8000-000000000002.original","saved"},{"aaaaaaaa-0000-4000-8000-000000000003.edited","failed"},{"aaaaaaaa-0000-4000-8000-000000000004.original","writing"},{"aaaaaaaa-0000-4000-8000-000000000005.original",null}};
+  static final String[][] ORPHANS={{"aaaaaaaa-0000-4000-8000-000000000001.original","incomplete"},{"aaaaaaaa-0000-4000-8000-000000000002.original","saved"},{"aaaaaaaa-0000-4000-8000-000000000003.edited","failed"},{"aaaaaaaa-0000-4000-8000-000000000004.original","writing"},{"aaaaaaaa-0000-4000-8000-000000000005.original",null},{"aaaaaaaa-0000-4000-8000-000000000006.original","writing-expired"},{"aaaaaaaa-0000-4000-8000-000000000007.original","writing-recent"}};
   void expectSwept() {
    File backups=new File(directory,"photo-replace-backups");
-   for(String[] orphan:ORPHANS) check(new File(backups,orphan[0]).exists()==(orphan[1]==null||orphan[1].equals("writing")),directory.getName()+" sweep "+orphan[0]);
+   for(String[] orphan:ORPHANS) check(new File(backups,orphan[0]).exists()==(orphan[1]==null||orphan[1].equals("writing")||orphan[1].equals("writing-recent")),directory.getName()+" sweep "+orphan[0]);
+   // An externally rewritten Replace past its keep time is settled abandoned before its files go.
+   check(journalStatus("aaaaaaaa-0000-4000-8000-000000000006").equals("abandoned"),directory.getName()+" expired record settled");
+   check(journalStatus("aaaaaaaa-0000-4000-8000-000000000007").equals("writing"),directory.getName()+" recent record kept");
   }
+  String journalStatus(String token) { try { return new JSONObject(context.preferences.getString(token,"{}")).getString("status"); } catch(Exception e) { throw new AssertionError(e); } }
   void expect(String status,byte[] expected,int writes,boolean keepBackups) throws Exception {
    String actualStatus=recovery.result(TOKEN).getString("status");
    check(expected==null?!target.exists():Arrays.equals(expected,Files.readAllBytes(target.toPath())),directory.getName()+" preserved bytes");
@@ -247,6 +258,22 @@ public final class PhotoRecoveryCheck {
   File root=new File(args[0]); check(root.mkdir(),"create data directory");
   byte[] external=bytes("a later external photo edit");
   Case external0=new Case(root,"external",external,true);external0.expectSwept();external0.expect("unknown",external,0,true);
+  // Another writer's bytes are recorded once; the backups stay for inspection, then go after the keep time.
+  JSONObject seen=new JSONObject(external0.context.preferences.getString(TOKEN,"{}"));
+  long firstSeen=seen.getLong("externalAt");
+  check(firstSeen>0&&firstSeen<=System.currentTimeMillis(),"external rewrite recorded");
+  external0.expect("unknown",external,0,true);
+  check(new JSONObject(external0.context.preferences.getString(TOKEN,"{}")).getLong("externalAt")==firstSeen,"first sighting kept");
+  external0.context.preferences.values.put(TOKEN,seen.put("externalAt",System.currentTimeMillis()-8L*DAY).toString());
+  check(external0.recovery.result(TOKEN).getString("status").equals("unknown"),"expired external rewrite is still not a known outcome");
+  check(Arrays.equals(external,Files.readAllBytes(external0.target.toPath()))&&external0.context.getContentResolver().writes==0,"the other writer's bytes are untouched");
+  check(!external0.original.exists()&&!external0.edited.exists(),"expired backups are released");
+  check(external0.journalStatus(TOKEN).equals("abandoned"),"settled abandoned");
+  check(external0.recovery.result(TOKEN).getString("status").equals("unknown"),"repeat result");
+  // A partial write found after the keep time is still restored: only another writer's bytes expire.
+  Case latePrefix=new Case(root,"late-prefix",Arrays.copyOf(EDITED,9),true);
+  latePrefix.record.put("externalAt",System.currentTimeMillis()-8L*DAY);latePrefix.saveRecord();
+  latePrefix.expect("failed",ORIGINAL,1,false);
   // A deleted original settles as failed and its backups go; an unreadable one that still exists stays unknown.
   Case deleted=new Case(root,"deleted",null,true);deleted.expect("failed",null,0,false);
   Case unreadable=new Case(root,"unreadable",null,true);unreadable.context.getContentResolver().rows=1;unreadable.expect("unknown",null,0,true);
