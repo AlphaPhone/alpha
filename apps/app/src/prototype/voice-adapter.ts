@@ -1020,7 +1020,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const route = await noteSegmentTranscriber(new AbortController().signal, destination.route);
     if (destination!==noteDestination || !destination.current()) return null;
     noteProvenance = route?.provenance; return route?.transcribe ?? null;
-  }, () => { api?.setView('notes', { noteRecorderRevision: Date.now() }); }, { visible: () => !document.hidden, live: noteLivePartials, owner:captureNoteOwner });
+  }, () => { api?.setView('notes', { noteRecorderRevision: Date.now() }); }, { visible: () => !document.hidden, live: noteLivePartials, owner:captureNoteOwner, transcriptOnly: () => !!noteDestination?.canonical });
   const persistNoteRecording = async (saved: SavedNoteAudio, transcript: string) => {
     const destination = noteDestination;
     if (!destination?.current() || destination.api.storageReady?.() === false) return false;

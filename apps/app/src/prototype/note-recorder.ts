@@ -43,7 +43,12 @@ export interface NoteLiveHandlers { speechStart(): void; interim(text: string): 
 /** Opens a live transcription stream for display, or null when none is available. */
 export type NoteLivePort = (handlers: NoteLiveHandlers) => Promise<{ close(): Promise<void> | void } | null>;
 type NoteRecorderOwner = { identity: string; folderId: string | null; current(): boolean };
-type NoteRecorderOptions = { pollMs?: number; visible?: () => boolean; live?: NoteLivePort; owner?: () => NoteRecorderOwner | undefined };
+/**
+ * `transcriptOnly`: the destination keeps no audio (agent notes), so Done saves only a full
+ * transcript. A new recording then starts only when a transcription route is available; otherwise
+ * it could never be saved and Discard would be the only way out.
+ */
+type NoteRecorderOptions = { pollMs?: number; visible?: () => boolean; live?: NoteLivePort; owner?: () => NoteRecorderOwner | undefined; transcriptOnly?: () => boolean };
 /** Text of one finished segment; '' for silence. Throws when the route fails. */
 export type SegmentTranscriber = (segmentId: string, signal: AbortSignal) => Promise<string>;
 /** `failed`: the microphone did not start; the recorder stays open with one error line. */
@@ -60,6 +65,8 @@ export function noteRecorderError(reason: string | undefined): string {
   if (reason === 'transcription') return 'Transcription stopped. The audio is kept.';
   if (reason === 'unavailable') return 'No transcription is available. The audio is kept.';
   if (reason === 'sign-in') return 'Sign in to transcribe. The audio is kept.';
+  if (reason === 'no-route') return 'No transcription is available.';
+  if (reason === 'sign-in-first') return 'Sign in to transcribe.';
   if (reason === 'save') return 'Couldn’t save. Try Done again.';
   if (reason === 'owner') return 'Return to the original Notes account. Your recording is kept.';
   if (reason === 'capture') return 'The microphone isn’t available.';
@@ -225,6 +232,13 @@ export class NoteRecorderSession {
       if (!this.owned(epoch)) return;
       if (existing.state !== 'idle' && !this.matches(existing)) {
         this.phase = 'failed'; this.error = noteRecorderError('owner'); this.changed(); return;
+      }
+      if (existing.state === 'idle' && this.options.transcriptOnly?.()) {
+        let route: SegmentTranscriber | null = null, reason = 'no-route';
+        try { route = await this.transcriber(); }
+        catch (error) { if ((error as { code?: string })?.code === 'sign-in') reason = 'sign-in-first'; }
+        if (!this.owned(epoch)) return;
+        if (!route) { this.phase = 'failed'; this.error = noteRecorderError(reason); this.changed(); return; }
       }
       await this.attach(epoch);
       if (!this.owned(epoch)) return;

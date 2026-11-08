@@ -401,6 +401,42 @@ test('agent notes (no audio kept): Done never deletes the audio while the transc
   assert.equal(hidden.state.discarded, 1);
 });
 
+test('agent notes (no audio kept): no recording starts without a transcription route, so Done is never a dead end', async () => {
+  // No route at all: a recording could never be saved as an agent note, and Discard would drop it.
+  const none = fakeDriver();
+  let started = 0;
+  const start = none.start; none.start = async binding => { started++; return start(binding); };
+  const quiet = new NoteRecorderSession(none, async () => null, () => {}, {pollMs: 60_000, transcriptOnly: () => true});
+  await quiet.begin();
+  assert.equal(started, 0, 'the microphone does not start');
+  assert.equal(quiet.phase, 'failed');
+  assert.equal(quiet.error, 'No transcription is available.');
+  // A route that needs Cloud sign-in says so before any audio is recorded.
+  const signIn = new NoteRecorderSession(none, async () => { throw Object.assign(new Error('sign in'), {code: 'sign-in'}); }, () => {}, {pollMs: 60_000, transcriptOnly: () => true});
+  await signIn.begin();
+  assert.equal(started, 0);
+  assert.equal(signIn.error, 'Sign in to transcribe.');
+  // Once a route is available, the retried start records and Done saves the transcript.
+  let route = null;
+  const later = new NoteRecorderSession(none, async () => route, () => {}, {pollMs: 60_000, transcriptOnly: () => true});
+  await later.begin();
+  assert.equal(later.phase, 'failed');
+  route = async () => 'words';
+  await later.togglePause();
+  assert.equal(started, 1);
+  assert.equal(later.phase, 'recording');
+  none.segment();
+  const saved = [];
+  assert.equal(await later.finish(async (_audio, transcript) => { saved.push(transcript); return true; }, false), true);
+  assert.deepEqual(saved, ['words']);
+  // Device notes keep the audio, so they record without a route.
+  const device = fakeDriver();
+  const kept = new NoteRecorderSession(device, async () => null, () => {}, {pollMs: 60_000, transcriptOnly: () => false});
+  await kept.begin();
+  assert.equal(kept.phase, 'recording');
+  kept.close();
+});
+
 test('a retried Done after a restart saves into the note the stored audio already belongs to', async () => {
   const driver = fakeDriver(), owners = new Map();
   driver.save = async input => {
