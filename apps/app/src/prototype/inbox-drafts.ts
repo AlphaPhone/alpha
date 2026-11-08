@@ -75,7 +75,11 @@ export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider
  let retained:ReturnType<typeof inboxUnsaved>|null=null,baseRevision:string|null=null,staleBase=false;
  // The retained recovery record (runtime/inbox-unsaved-record.ts) does not yet admit forwarded source
  // attachments, so its copy omits them; the explicitly saved local draft keeps them.
- function persist(){reviewRevision++;if(draft){const {forward:_forward,...copy}=structuredClone(draft);retained?.edit({version:1,owner,baseRevision,draft:copy,toQ});}}
+ function persist(){reviewRevision++;if(draft){const {forward:_forward,...copy}=structuredClone(draft);
+  // Older saved provider drafts also carry readback-only fields such as messageId. Recovery keeps
+  // only the stable replacement reference admitted by the retained-draft format.
+  if(copy.provider)copy.provider={draftId:copy.provider.draftId,providerDigest:copy.provider.providerDigest};
+  retained?.edit({version:1,owner,baseRevision,draft:copy,toQ});}}
  function restoreRetained(value:any){draft=structuredClone(value.draft);toQ=value.toQ;baseRevision=value.baseRevision;staleBase=baseRevision!==(saved?.revision||null);open=true;confirm=false;status=staleBase?'The saved local draft changed. Review the latest saved copy before saving these edits.':draft?.mode==='forward'?'Retained forward edits restored without any original attachments; forward the message again to include them. Review before provider actions.':'Retained email edits restored. Review before provider actions.';publish();}
  let loading=false,ready=false,busy=false,open=false,confirm=false,toQ='',label='',status='',recipientDetails=false;
  let fromSwitch:{count():number;cycle():void}|null=null;
@@ -262,7 +266,26 @@ export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider
    return begin(undefined,'reply','',{to:[],subject:'',body,status:'Agent suggestion placed in a local draft. Review and edit before sending; nothing has been sent.'});
   },suggestionTarget,
 setFromSwitch(value:typeof fromSwitch){fromSwitch=value;},get ready(){return ready&&!busy;},get hasDraft(){return !!draft;},
-  async editProvider(proposal:Bag,reference:{draftId:string;providerDigest:string}){if(retained?.available&&!draft){toast('Resume retained email edits before editing another provider draft.');return false;}if(!ready||busy){toast('Local draft storage unavailable');return false;}if(draft&&(draft.body!==proposal.bodyText||draft.subject!==proposal.subject||JSON.stringify(draft.to)!==JSON.stringify(proposal.to)||JSON.stringify(draft.cc||[])!==JSON.stringify(proposal.cc||[])||JSON.stringify(draft.bcc||[])!==JSON.stringify(proposal.bcc||[])||JSON.stringify(draft.attachments||[])!==JSON.stringify(proposal.attachments||[])))return false;draft={version:1,id:crypto.randomUUID(),revision:crypto.randomUUID(),owner,to:[...proposal.to],cc:[...(proposal.cc||[])],bcc:[...(proposal.bcc||[])],subject:proposal.subject,body:proposal.bodyText,mode:proposal.mode,attachments:proposal.attachments||[],provider:reference,...(proposal.replyMessageId?{reply:{messageId:proposal.replyMessageId,threadId:''}}:{})};baseRevision=saved?.revision||null;staleBase=false;open=true;confirm=false;status='Editing provider draft. Save locally to preserve edits. Gmail replacement is not atomic.';publish();await update();return saved?.provider?.draftId===reference.draftId&&saved?.provider?.providerDigest===reference.providerDigest;},
+  async editProvider(proposal:Bag,reference:{draftId:string;providerDigest:string},review?:Bag|null){
+   if(retained?.available&&!draft){toast('Resume retained email edits before editing another provider draft.');return false;}
+   if(!ready||busy){toast('Local draft storage unavailable');return false;}
+   const mode=proposal.mode||(proposal.replyMessageId?'reply':'compose');
+   if(draft&&!sentContent(draft,{...proposal,mode},true))return false;
+   let forward:ForwardSource|undefined;
+   if(proposal.forwardAttachments){
+    const source=proposal.forwardAttachments,parts=review?.forwardedAttachments;
+    if(mode!=='forward'||!Array.isArray(source.partIds)||!Array.isArray(parts)||
+      !same(review?.forwardSource,{messageId:source.messageId,historyId:source.historyId})||
+      !same(parts.map((part:Bag)=>part?.partId),source.partIds))throw Error('Forwarded attachment review is unavailable. Review the original message again.');
+    forward={messageId:source.messageId,historyId:source.historyId,parts:parts.map((part:Bag)=>({partId:part.partId,name:part.name,mimeType:part.mimeType,size:part.size}))};
+    if(!forwardValid(forward)||!forward.parts.length||forward.parts.some(part=>!Number.isSafeInteger(part.size)||part.size<0||part.size>outgoingAttachmentLimits.maximumTotalBytes))throw Error('Forwarded attachment review is unavailable. Review the original message again.');
+   }
+   draft={version:1,id:crypto.randomUUID(),revision:crypto.randomUUID(),owner,to:[...proposal.to],cc:[...(proposal.cc||[])],bcc:[...(proposal.bcc||[])],subject:proposal.subject,body:proposal.bodyText,mode,attachments:proposal.attachments||[],
+    provider:{draftId:reference.draftId,providerDigest:reference.providerDigest},...(forward?{forward}:{}),
+    ...(proposal.replyMessageId?{reply:{messageId:proposal.replyMessageId,threadId:''}}:{})};
+   baseRevision=saved?.revision||null;staleBase=false;open=true;confirm=false;status='Editing provider draft. Save locally to preserve edits. Gmail replacement is not atomic.';publish();await update();
+   return saved?.provider?.draftId===reference.draftId&&saved?.provider?.providerDigest===reference.providerDigest;
+  },
   close(){if(!open)return false;if(busy){toast('Wait for the local draft update.');return true;}open=false;confirm=false;if(status==='Unsaved local draft')toast(retained?.status||'Edits remain in this session.');publish();return true;},
   /** The email now in the composer, in the shape Send reviews. A review of anything else is stale. */
   proposal():Bag|null{return draft?{mode:draft.mode||(draft.reply?'reply':'compose'),to:[...draft.to],cc:[...(draft.cc||[])],bcc:[...(draft.bcc||[])],subject:draft.subject,bodyText:draft.body,attachments:[...(draft.attachments||[])],...forwardProposal(draft),...(draft.reply?{replyMessageId:draft.reply.messageId}:{})}:null;},

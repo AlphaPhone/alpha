@@ -7,7 +7,7 @@ import { gmailInboxAllows, type GmailMailboxAction } from '../runtime/gmail-gran
 type Bag=Record<string,any>;
 /** Explicit provider review; state never enters prototype persistence or agent context. */
 export function inboxProviderControls(publish:()=>void,toast:(message:string)=>void){
- let editor:((proposal:Bag,reference:{draftId:string;providerDigest:string})=>Promise<boolean>)|null=null;
+ let editor:((proposal:Bag,reference:{draftId:string;providerDigest:string},review?:Bag|null)=>Promise<boolean>)|null=null;
  let selected='',session='',epoch=0,operation:InboxOperation|null=null,caps:GmailInboxCapabilities|null=null,busy=false,visible=false,status='';
  // Explicit refresh can overlap an older read without changing the account epoch.
  let capabilityRead:AbortController|null=null;
@@ -47,6 +47,7 @@ export function inboxProviderControls(publish:()=>void,toast:(message:string)=>v
   }catch{if(token===epoch&&capabilityRead===read)status='Provider actions unavailable. Your local drafts remain on this device.';}
   if(token===epoch)publish();
  }
+ const allowed=(proposal:Bag)=>gmailInboxAllows(caps,proposal.kind as GmailMailboxAction)&&(!proposal.forwardAttachments||caps?.forwardAttachments===true);
  // The buttons inside the review change when an operation started there finishes: Confirm gives
  // way to Undo or Edit, and Undo gives way to Confirm. The second tap of a double tap must not land
  // on the control that took its place (tap, tap, tap would otherwise trash, review the undo and
@@ -60,7 +61,7 @@ export function inboxProviderControls(publish:()=>void,toast:(message:string)=>v
   if(failure==='stale'&&(record.phase==='preparing'||record.phase==='review')){await run(async(owned,check)=>{await owned.clear();check();visible=false;});if(!operation?.snapshot()){failure=null;onStale?.();}return;}
   if(record.phase==='preparing'){await run(owned=>owned.reloadReview());return;}
   await run(owned=>owned.refresh());}
- async function prepare(proposal:Bag,source?:{draftId:string}){if(!operation)return;const kind=proposal.kind;if(!gmailInboxAllows(caps,kind as GmailMailboxAction)){toast('Reconnect Gmail, then try again.');return;}visible=true;
+ async function prepare(proposal:Bag,source?:{draftId:string}){if(!operation)return;const kind=proposal.kind;if(!allowed(proposal)){toast('Reconnect Gmail, then try again.');return;}visible=true;
   // An unsent review of an earlier version of this email was never dispatched. Discard it and
   // prepare the current content under a new request ID; the same content reopens its own review.
   const pending=unsent();
@@ -75,7 +76,7 @@ export function inboxProviderControls(publish:()=>void,toast:(message:string)=>v
   try{removed=await InboxOperation.discardUnsent(inboxLocalStore,pending.owner,pending.grant);if(token===epoch&&owned===operation&&owned)await owned.load();}
   catch(error){if(token===epoch)status=error instanceof Error?error.message:'The unsent review could not be discarded.';}
   finally{if(token===epoch){busy=false;if(removed){visible=false;status='';toast('Gmail change access was withdrawn, so the unsent review was discarded. Nothing was changed.');}publish();}}}
- async function editSavedDraft(){await run(async(owned,check)=>{const record=owned.snapshot(),reference=record?.receipt?.providerResult,binding=connectionController.getCloudClient(),grant=selected;if(!record||!binding||!reference||typeof reference.draftId!=='string'||typeof reference.providerDigest!=='string')throw new Error('No provider draft receipt');const controller=new AbortController();draftRead=controller;try{const current=await binding.client.gmailDraft(grant,reference.draftId,controller.signal);check();if(current.providerDigest!==reference.providerDigest)throw new Error('Gmail draft changed outside this app. The saved content will not overwrite it. Open Gmail to inspect the conflict.');if(!await editor?.(record.proposal,current))throw new Error('Save or discard changed local edits before opening this provider draft.');check();await owned.clear();check();visible=false;}finally{if(draftRead===controller)draftRead=null;controller.abort();}});}
+ async function editSavedDraft(){await run(async(owned,check)=>{const record=owned.snapshot(),reference=record?.receipt?.providerResult,binding=connectionController.getCloudClient(),grant=selected;if(!record||!binding||!reference||typeof reference.draftId!=='string'||typeof reference.providerDigest!=='string')throw new Error('No provider draft receipt');const controller=new AbortController();draftRead=controller;try{const current=await binding.client.gmailDraft(grant,reference.draftId,controller.signal);check();if(current.providerDigest!==reference.providerDigest)throw new Error('Gmail draft changed outside this app. The saved content will not overwrite it. Open Gmail to inspect the conflict.');if(!await editor?.(record.proposal,current,record.review))throw new Error('Save or discard changed local edits before opening this provider draft.');check();await owned.clear();check();visible=false;}finally{if(draftRead===controller)draftRead=null;controller.abort();}});}
  async function followup(kind:'delete-draft'|'undo'){await run(async(owned,check)=>{const record=owned.snapshot(),result=record?.receipt?.providerResult;if(!record||!result)throw new Error('No confirmed provider result');const proposal=kind==='delete-draft'?{kind:'draft-delete',draftId:result.draftId,expectedDigest:result.providerDigest,confirmPermanentDelete:true}:{kind:record.proposal.kind==='archive'?'unarchive':'untrash',messageId:result.messageId,expectedHistoryId:result.historyId};await owned.clear();check();await owned.prepare(proposal);});}
 
  return {bind,reset,prepare,withdrawn,setEditor:(value:typeof editor)=>{editor=value;},setComposer:(value:typeof composer)=>{composer=value;},
@@ -92,10 +93,10 @@ export function inboxProviderControls(publish:()=>void,toast:(message:string)=>v
   confirm:()=>{if(doubleTap())return;const state=binding();if(replaced(state)){void discardEdited();return;}if(state==='absent'){toast(reviewBindingRefusal.absent);return;}
    // A saved review cannot authorize a new request after the latest capability read was lost.
    const record=operation?.snapshot();
-   if(!record||!gmailInboxAllows(caps,record.proposal.kind as GmailMailboxAction)){
+   if(!record||!allowed(record.proposal)){
     toast('Reconnect Gmail, then try again.');return;
    }
    // The composer is read in the same turn as the comparison inside confirm(), before any await.
-   void run(owned=>owned.confirm(composer&&composerKind(owned.snapshot()?.proposal.kind)?composer():undefined)).finally(settle);},canConfirm:!stale&&!absent&&!!record&&record.phase==='review'&&record.receipt?.state==='prepared'&&gmailInboxAllows(caps,record.proposal.kind as GmailMailboxAction),check:()=>void run(owned=>owned.refresh()),reload:()=>void run(owned=>owned.reloadReview()),canReload:record?.phase==='preparing',clear:()=>void run(async(owned,check)=>{await owned.clear();check();visible=false;}),canClear:record?.phase==='review'||record?.phase==='preparing'||['succeeded','rejected'].includes(record?.receipt?.state||''),close:()=>{visible=false;publish();}}};}
+   void run(owned=>owned.confirm(composer&&composerKind(owned.snapshot()?.proposal.kind)?composer():undefined)).finally(settle);},canConfirm:!stale&&!absent&&!!record&&record.phase==='review'&&record.receipt?.state==='prepared'&&allowed(record.proposal),check:()=>void run(owned=>owned.refresh()),reload:()=>void run(owned=>owned.reloadReview()),canReload:record?.phase==='preparing',clear:()=>void run(async(owned,check)=>{await owned.clear();check();visible=false;}),canClear:record?.phase==='review'||record?.phase==='preparing'||['succeeded','rejected'].includes(record?.receipt?.state||''),close:()=>{visible=false;publish();}}};}
  };
 }

@@ -65,7 +65,8 @@ test("Inbox uses the single modify step and discards unsent reviews when change 
   assert.match(inbox, /const cached=key&&inboxPreview\?\.key===key&&inboxPreview\.sessionId===binding\?\.sessionId&&inboxPreview\.accountId===selected/, "Home shows the preview only under the identity it was read with");
   // Behaviour: scripts/test-inbox-cloud-flow.mjs (read grant withdrawn) and scripts/test-inbox-grant-withdrawal.mjs.
   const provider = fs.readFileSync("apps/app/src/prototype/inbox-provider-controls.ts", "utf8");
-  assert.match(provider, /if\(!gmailInboxAllows\(caps,kind as GmailMailboxAction\)\)/);
+  assert.match(provider, /const allowed=.*gmailInboxAllows\(caps,proposal.kind as GmailMailboxAction\).*forwardAttachments/);
+  assert.match(provider, /if\(!allowed\(proposal\)\)/);
   assert.match(provider, /static async discardUnsent|InboxOperation\.discardUnsent\(inboxLocalStore,pending\.owner,pending\.grant\)/, "the discard is bound to the grant, not the live operation");
 });
 

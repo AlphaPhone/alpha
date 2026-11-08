@@ -1,6 +1,6 @@
 # Service and data state models
 
-These fifteen modules model product-owned service boundaries in the current working
+These sixteen modules model product-owned service boundaries in the current working
 tree. The source-to-state map, exact source paths and finite-domain choices are
 listed in `manifest.json`. All transitions are local specification execution.
 
@@ -14,6 +14,7 @@ listed in `manifest.json`. All transitions are local specification execution.
 | [CalendarSync](CalendarSync.qnt) | phase/kind/holder/instance, undoOpen/clockKnown, baseRevision/remoteRevision/checked, retryAuthorized/applied/sends, consent/localRevision/consentReview | `NoAutomaticUnknownCreate`, `UndoBeforeDispatch`, `PausedNeedsDecision`, `DurableClaim`, `VisibleOwnerBound` |
 | [InboxDelivery](InboxDelivery.qnt) | phase/durable/opOwner/opGrant, reviewedRevision/reviewedAttachments/exactReview, outcome/providerConfirmed/draftExists, dispatches | `AtMostOneDispatch`, `PersistBeforeDispatch`, `CacheBound`, `SuccessfulCleanup`, `UnknownCannotRearm` |
 | [InboxCoordinator](InboxCoordinator.qnt) | two retained operations, capability readback, confirmation CAS, selected account, composer/attachment identity, current/saved/retained/shelved copies | `AtMostOneNetworkRequest`, `EffectHasDurableIntent`, `UnavailableCannotConfirm`, `CurrentComposerRequired`, `EditedCopiesPreserved`, `CleanupRequiresFreshSuccess` |
+| [InboxProviderDrafts](InboxProviderDrafts.qnt) | three retained requests, provider digest reads, local reference persistence, forward source snapshots | `EachRequestOnce`, `InFlightHasRequest`, `DurableRequests`, `VerifiedReferences`, `ProviderBytesReviewed` |
 | [MapsNavigation](MapsNavigation.qnt) | generation/requestGeneration/requestEpoch, locationGranted/fixFresh, route/previousRoute/guidance/rerouting, assistant/foreground | `GuidanceHasRoute`, `RerouteKeepsRoute`, `RetiredRouteHidden`, `FailedRerouteKept` |
 | [WorkflowExecution](WorkflowExecution.qnt) | version/reviewedVersion/phase, queued/sourceCurrent/enabled/mocks, intentSaved/submission/admittedSubmission/executions, approval/requestDigest/reviewedDigest/effects, cancelRequested/outcome | `AtMostOneExecution`, `DurableSubmission`, `ReviewedEffect`, `DisabledTriggersEmpty`, `ProductionTriggerGate` |
 | [NoticesAndCaches](NoticesAndCaches.qnt) | epoch/phase/retry, notice/claim/posted/consumed/acknowledgements, cacheOwner/cacheEpoch/cacheAge/cacheWritePending | `CacheOwnerIsolation`, `PostedOwnerIsolation`, `OneAcknowledgement`, `ClaimExclusive`, `NoPostAfterConsume` |
