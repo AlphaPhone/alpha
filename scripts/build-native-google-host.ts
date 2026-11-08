@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {isBuiltin} from 'node:module';
 
-import {coreStateBuildPlugin,coreStateBuildRecord} from './core-state-patch.mjs';
+import {coreStateBuildPlugin,coreStateBuildRecord,coreStateRequiredTargets} from './core-state-patch.mjs';
 
 const [root,sdk,file,metadataFile]=process.argv.slice(2);
 if(!root||!sdk||!file||!metadataFile)throw Error('Native host build paths are required');
@@ -36,4 +36,4 @@ for(const [name,value] of Object.entries(result.metafile.inputs)){
  if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw Error('Native host source graph escaped the product');
  inputs[relative.split(path.sep).join('/')]=value;
 }
-fs.writeFileSync(metadataFile,JSON.stringify({...result.metafile,inputs,coreState:coreStateBuildRecord(root,core.transforms)},null,2)+'\n');
+fs.writeFileSync(metadataFile,JSON.stringify({...result.metafile,inputs,coreState:coreStateBuildRecord(root,core.transforms,coreStateRequiredTargets(Object.keys(inputs)))},null,2)+'\n');

@@ -27,7 +27,7 @@ function fixture(t){
  const save=()=>json(MOBILE_UUID_POLICY,policy);save();
  const bundle=path.join(source,'packages/agent/dist-mobile/agent-bundle.js');write('source/packages/agent/dist-mobile/agent-bundle.js','fixture bundled output');
  const receipt=coreStateReceipt(root);
- const coreTransforms=[{path:CORE_STATE_TARGET,sourceSha256:receipt.files[CORE_STATE_TARGET].beforeSha256,outputSha256:receipt.files[CORE_STATE_TARGET].afterSha256}];
+ const coreTransforms=Object.entries(receipt.files).map(([path,entry])=>({path,sourceSha256:entry.beforeSha256,outputSha256:entry.afterSha256}));
  return {root,source,policy,write,json,save,bundle,coreTransforms};
 }
 function transform(f){

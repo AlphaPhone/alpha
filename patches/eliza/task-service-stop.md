@@ -1,8 +1,8 @@
 # TaskService stop admission
 
 The reviewed patch applies to `packages/core/src/services/task.ts` at upstream commit
-`475a8d59dc1811c2cde093613519906a5a3f6457`. Its only target is declared in
-`core-state-manifest.json`. The source checkout remains the original upstream tree.
+`475a8d59dc1811c2cde093613519906a5a3f6457`. Its target is declared in `core-state-manifest.json` alongside the independently
+reviewed Notes replay-identity patch. The source checkout remains the original upstream tree.
 
 The original implementation permits both a new manual worker invocation and a new
 poll timer after `stop()`. It also lets a manual invocation that is awaiting its
@@ -29,10 +29,10 @@ remain that worker's responsibility.
 | Development backend | `backend/loader.ts` preserves pinned-source admission, installs the plugin, and records its transform with the source map. |
 | Native Google host artifact | The builder installs the plugin and binds the core patch record. Its current 35-input graph does not select TaskService. |
 | Workflow dependency artifact | The actual upstream producer was observed with Bun 1.4.2. Its 1123-input graph selects no `packages/core/src` module. It needs no TaskService transform. |
-| Independently frozen combined host | Matching revision and task preimage receive the transform. The preload rechecks the host's frozen source manifest, including reviewed custom files. Other revisions/preimages retain their existing independent version contract and report `coreState.applied=false`. They require a separate patch review. |
+| Independently frozen combined host | Matching revision and all reviewed target preimages receive the transforms. The preload rechecks the host's frozen source manifest, including reviewed custom files. Other revisions/preimages retain their existing independent version contract and report `coreState.applied=false`. They require a separate patch review. |
 | Quint TaskService compiler | Uses the same byte map. The actual-class stop regressions already exercise the shared build plugin. The broader SQL-backed lifecycle refinement is a separate work item. The counted-ownership SQL regression already executes the actual runtime, migrations and adapter. |
 
-`core-state-patch.mjs` validates the product pin, manifest schema, single target,
+`core-state-patch.mjs` validates the product pin, manifest schema, explicit target allowlist,
 patch digest and exact patch headers, original bytes and resulting bytes. It
 rejects symlinked inputs and extra scratch outputs. Each consumer gets the same
 materialized bytes. The mobile receipt includes the patch manifest, helper,

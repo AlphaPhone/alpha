@@ -6,14 +6,14 @@ import {createRequire} from 'node:module';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
 import {captureInputs} from '../../check-traces.mjs';
-import {CORE_STATE_INPUTS, CORE_STATE_TARGET, coreStatePatch, coreStateBuildRecord} from '../../../../../scripts/core-state-patch.mjs';
+import {CORE_STATE_INPUTS, coreStatePatch, coreStateBuildRecord, coreStateRequiredTargets} from '../../../../../scripts/core-state-patch.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 /** Load actual TaskService and actual SQL fixtures, binding bytes before any evaluation. */
 export async function loadTaskService(extraSources = []) {
   const root = process.cwd(), source = path.join(root, 'vendor/eliza');
   const packages = createRequire(path.join(root, 'package.json'));
-  const core = coreStatePatch(root, source), compiled = new Map(), resources = new Set();
+  const core = coreStatePatch(root, source), compiled = new Map(), resources = new Set(), transforms = [];
   const pglite = path.dirname(path.dirname(packages.resolve('@electric-sql/pglite')));
   function bindResources(directory) {
     for (const entry of fs.readdirSync(directory, {withFileTypes: true})) {
@@ -37,7 +37,10 @@ export async function loadTaskService(extraSources = []) {
         compiled.set(args.path, hash(original));
         const relative = path.relative(source, args.path).split(path.sep).join('/');
         const patch = core.files.get(relative);
-        if (patch) assert.equal(hash(original), patch.beforeSha256);
+        if (patch) {
+          assert.equal(hash(original), patch.beforeSha256);
+          transforms.push({path: relative, sourceSha256: patch.beforeSha256, outputSha256: patch.afterSha256});
+        }
         const extension = args.path.split('.').at(-1);
         return {contents: patch?.bytes ?? original, loader: ['mjs', 'cjs'].includes(extension) ? 'js' : extension, resolveDir: path.dirname(args.path)};
       });
@@ -48,8 +51,7 @@ export async function loadTaskService(extraSources = []) {
   const driverHashes = captureInputs(sources);
   for (const [file, digest] of Object.entries(core.receipt.inputHashes)) assert.equal(driverHashes[path.resolve(file)], digest, 'Core patch input changed before driver capture');
   for (const [file, digest] of compiled) assert.equal(driverHashes[path.resolve(file)], digest, 'Task source changed during compilation');
-  const transform = core.files.get(CORE_STATE_TARGET);
-  const coreState = coreStateBuildRecord(root, [{path: CORE_STATE_TARGET, sourceSha256: transform.beforeSha256, outputSha256: transform.afterSha256}], true);
+  const coreState = coreStateBuildRecord(root, transforms, coreStateRequiredTargets([...compiled.keys()]));
   const module = await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64'));
   return {...module, sources, driverHashes, coreState};
 }

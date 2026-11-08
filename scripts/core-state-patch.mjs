@@ -7,7 +7,18 @@ import {isDeepStrictEqual} from 'node:util';
 
 export const CORE_STATE_MANIFEST = 'patches/eliza/core-state-manifest.json';
 export const CORE_STATE_TARGET = 'packages/core/src/services/task.ts';
-export const CORE_STATE_INPUTS = ['scripts/core-state-patch.mjs', 'scripts/core-state-preload.mjs', 'scripts/combined-agent-source.mjs', CORE_STATE_MANIFEST, 'patches/eliza/task-service-stop.patch'];
+export const TURN_STATE_TARGET = 'packages/core/src/runtime/turn-controller.ts';
+export const NOTES_STATE_TARGET = 'plugins/plugin-notes/src/service.ts';
+export const NOTES_STATE_TARGETS = [NOTES_STATE_TARGET, 'plugins/plugin-notes/src/store.ts',
+  'plugins/plugin-notes/src/types.ts', 'plugins/plugin-notes/src/validation.ts'];
+const reviewedPatches = [
+  {file: 'task-service-stop.patch', paths: [CORE_STATE_TARGET]},
+  {file: 'notes-state-runtime.patch', paths: NOTES_STATE_TARGETS},
+  {file: 'turn-controller-isolation.patch', paths: [TURN_STATE_TARGET]},
+];
+export const CORE_STATE_INPUTS = ['scripts/core-state-patch.mjs', 'scripts/core-state-preload.mjs',
+  'scripts/combined-agent-source.mjs', CORE_STATE_MANIFEST,
+  ...reviewedPatches.map(patch => 'patches/eliza/' + patch.file)];
 const sha = value => createHash('sha256').update(value).digest('hex');
 const hex = /^[a-f0-9]{64}$/;
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
@@ -29,82 +40,111 @@ export function coreStateReceipt(root) {
   const manifest = JSON.parse(manifestBytes);
   const pin = JSON.parse(readRegular(root, 'upstream.lock.json')).commit;
   if (!exact(manifest, ['schema', 'baseCommit', 'patches']) || manifest.schema !== 1 || manifest.baseCommit !== pin ||
-      !/^[a-f0-9]{40}$/.test(pin) || !Array.isArray(manifest.patches) || manifest.patches.length !== 1) throw Error('Core patch pin/schema mismatch');
-  const patch = manifest.patches[0];
-  if (!exact(patch, ['file', 'sha256', 'targets']) || patch.file !== 'task-service-stop.patch' || !hex.test(patch.sha256) ||
-      !Array.isArray(patch.targets) || patch.targets.length !== 1) throw Error('Invalid core patch record');
-  const target = patch.targets[0];
-  if (!exact(target, ['path', 'beforeSha256', 'afterSha256']) || target.path !== CORE_STATE_TARGET ||
-      !hex.test(target.beforeSha256) || !hex.test(target.afterSha256)) throw Error('Core patch target is not allowed');
-  const bytes = readRegular(root, 'patches/eliza/' + patch.file);
-  if (sha(bytes) !== patch.sha256) throw Error('Core patch digest mismatch');
-  const headers = bytes.toString('utf8').split('\n').filter(line => line.startsWith('--- ') || line.startsWith('+++ '));
-  if (JSON.stringify(headers) !== JSON.stringify(['--- a/' + target.path, '+++ b/' + target.path])) throw Error('Core patch headers mismatch');
+      !/^[a-f0-9]{40}$/.test(pin) || !Array.isArray(manifest.patches) || manifest.patches.length !== reviewedPatches.length) throw Error('Core patch pin/schema mismatch');
+  const patches = [], files = {};
+  for (const [index, reviewed] of reviewedPatches.entries()) {
+    const patch = manifest.patches[index];
+    if (!exact(patch, ['file', 'sha256', 'targets']) || patch.file !== reviewed.file || !hex.test(patch.sha256) ||
+        !Array.isArray(patch.targets) || patch.targets.length !== reviewed.paths.length) throw Error('Invalid core patch record');
+    for (const [targetIndex, target] of patch.targets.entries()) {
+      if (!exact(target, ['path', 'beforeSha256', 'afterSha256']) || target.path !== reviewed.paths[targetIndex] ||
+          !hex.test(target.beforeSha256) || !hex.test(target.afterSha256)) throw Error('Core patch target is not allowed');
+      files[target.path] = {beforeSha256: target.beforeSha256, afterSha256: target.afterSha256};
+    }
+    const bytes = readRegular(root, 'patches/eliza/' + patch.file);
+    if (sha(bytes) !== patch.sha256) throw Error('Core patch digest mismatch');
+    const headers = bytes.toString('utf8').split('\n').filter(line => line.startsWith('--- ') || line.startsWith('+++ '));
+    const expectedHeaders = reviewed.paths.flatMap(name => ['--- a/' + name, '+++ b/' + name]);
+    if (!isDeepStrictEqual(headers, expectedHeaders)) throw Error('Core patch headers mismatch');
+    patches.push({file: patch.file, sha256: patch.sha256});
+  }
   return {version: 1, baseCommit: pin, manifestSha256: sha(manifestBytes),
-    inputHashes: Object.fromEntries(CORE_STATE_INPUTS.map(name => [name, sha(readRegular(root, name))])),
-    patches: [{file: patch.file, sha256: patch.sha256}],
-    files: {[target.path]: {beforeSha256: target.beforeSha256, afterSha256: target.afterSha256}}};
+    inputHashes: Object.fromEntries(CORE_STATE_INPUTS.map(name => [name, sha(readRegular(root, name))])), patches, files};
 }
 
-/** Materialize only the allowlisted file in scratch space. Never change source checkouts. */
+/** Materialize exactly the reviewed targets in scratch space. */
 export function coreStatePatch(root, source = path.join(root, 'vendor/eliza')) {
   root = path.resolve(root); source = path.resolve(source);
   const receipt = coreStateReceipt(root);
-  const expected = receipt.files[CORE_STATE_TARGET];
-  const patchBytes = readRegular(root, 'patches/eliza/task-service-stop.patch');
-  if (sha(patchBytes) !== receipt.patches[0].sha256) throw Error('Core patch changed before application');
-  const original = readRegular(source, CORE_STATE_TARGET);
-  if (sha(original) !== expected.beforeSha256) throw Error('Core patch preimage mismatch');
+  const patchInputs = receipt.patches.map(patch => {
+    const bytes = readRegular(root, 'patches/eliza/' + patch.file);
+    if (sha(bytes) !== patch.sha256) throw Error('Core patch changed before application');
+    return bytes;
+  });
+  const originals = Object.entries(receipt.files).map(([name, expected]) => {
+    const bytes = readRegular(source, name);
+    if (sha(bytes) !== expected.beforeSha256) throw Error('Core patch preimage mismatch');
+    return [name, bytes];
+  });
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-core-patch-'));
   try {
-    const file = path.join(temporary, CORE_STATE_TARGET);
-    fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, original, {mode: 0o644});
-    execFileSync('patch', ['--batch', '--fuzz=0', '--forward', '-p1'], {cwd: temporary, input: patchBytes, stdio: 'pipe', timeout: 30000});
-    const output = readRegular(temporary, CORE_STATE_TARGET);
+    for (const [name, bytes] of originals) {
+      const file = path.join(temporary, name);
+      fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, bytes, {mode: 0o644});
+    }
+    for (const input of patchInputs) execFileSync('patch', ['--batch', '--fuzz=0', '--forward', '-p1'], {
+      cwd: temporary, input, stdio: 'pipe', timeout: 30000,
+    });
     const inventory = fs.readdirSync(temporary, {recursive: true, withFileTypes: true})
-      .filter(entry => !entry.isDirectory()).map(entry => path.relative(temporary, path.join(entry.parentPath, entry.name)));
-    if (inventory.length !== 1 || inventory[0] !== CORE_STATE_TARGET) throw Error('Core patch created unexpected files');
-    if (sha(output) !== expected.afterSha256) throw Error('Core patch postimage mismatch');
-    const files = new Map([[CORE_STATE_TARGET, {bytes: output, ...expected}]]);
+      .filter(entry => !entry.isDirectory()).map(entry => path.relative(temporary, path.join(entry.parentPath, entry.name))).sort();
+    if (!isDeepStrictEqual(inventory, Object.keys(receipt.files).sort())) throw Error('Core patch created unexpected files');
+    const files = new Map();
+    for (const [name, expected] of Object.entries(receipt.files)) {
+      const output = readRegular(temporary, name);
+      if (sha(output) !== expected.afterSha256) throw Error('Core patch postimage mismatch');
+      files.set(name, {bytes: output, ...expected});
+    }
     return {files, receipt};
   } finally { fs.rmSync(temporary, {recursive: true, force: true}); }
 }
 
+/** Find reviewed targets in a concrete producer graph, including prepared-source paths. */
+export function coreStateRequiredTargets(inputs) {
+  if (!Array.isArray(inputs) || !inputs.every(value => typeof value === 'string')) throw Error('Invalid core producer inputs');
+  const paths = inputs.map(value => value.replaceAll('\\', '/'));
+  return reviewedPatches.flatMap(patch => patch.paths).filter(target => paths.some(file => file === target || file.endsWith('/' + target)));
+}
+
 export function coreStateBuildPlugin(root, source) {
-  const prepared = coreStatePatch(root, source);
-  const transforms = [];
-  const filename = path.resolve(source, CORE_STATE_TARGET);
+  const prepared = coreStatePatch(root, source), transforms = [];
+  const byPath = new Map([...prepared.files].map(([name, entry]) => [path.resolve(source, name), {name, entry}]));
   const plugin = {name: 'authenticated-core-state', setup(build) {
-    build.onLoad({filter: /[\\/]packages[\\/]core[\\/]src[\\/]services[\\/]task\.ts$/}, args => {
-      if (path.resolve(args.path) !== filename) throw Error('Unexpected core patch module path');
-      const entry = prepared.files.get(CORE_STATE_TARGET);
-      if (sha(readRegular(source, CORE_STATE_TARGET)) !== entry.beforeSha256) throw Error('Core patch input changed before compilation');
-      if (!transforms.some(value => value.path === CORE_STATE_TARGET)) transforms.push({path: CORE_STATE_TARGET, sourceSha256: entry.beforeSha256, outputSha256: entry.afterSha256});
-      return {contents: entry.bytes.toString('utf8'), loader: 'ts', resolveDir: path.dirname(filename)};
+    build.onLoad({filter: /(?:[\\/]packages[\\/]core[\\/]src[\\/]services[\\/]task\.ts|[\\/]packages[\\/]core[\\/]src[\\/]runtime[\\/]turn-controller\.ts|[\\/]plugins[\\/]plugin-notes[\\/]src[\\/](?:service|store|types|validation)\.ts)$/}, args => {
+      const selected = byPath.get(path.resolve(args.path));
+      if (!selected) throw Error('Unexpected core patch module path');
+      const {name, entry} = selected;
+      if (sha(readRegular(source, name)) !== entry.beforeSha256) throw Error('Core patch input changed before compilation');
+      if (!transforms.some(value => value.path === name)) transforms.push({path: name, sourceSha256: entry.beforeSha256, outputSha256: entry.afterSha256});
+      return {contents: entry.bytes.toString('utf8'), loader: 'ts', resolveDir: path.dirname(args.path)};
     });
   }};
   return {...prepared, transforms, plugin};
 }
 
 export function verifyCoreStateTransforms(receipt, transforms, required = false) {
-  if (!Array.isArray(transforms) || transforms.length > 1 || (required && transforms.length !== 1)) throw Error('Missing or invalid core patch transformation');
+  if (!Array.isArray(transforms) || transforms.length > Object.keys(receipt.files).length ||
+      new Set(transforms.map(value => value.path)).size !== transforms.length) throw Error('Missing or invalid core patch transformation');
   for (const transform of transforms) {
     const expected = receipt.files[transform.path];
     if (!exact(transform, ['path', 'sourceSha256', 'outputSha256']) || !expected || transform.sourceSha256 !== expected.beforeSha256 || transform.outputSha256 !== expected.afterSha256) throw Error('Core patch transformation mismatch');
   }
+  const expectedTargets = required === true ? [CORE_STATE_TARGET] : required === false ? null : required;
+  if (expectedTargets !== null && (!Array.isArray(expectedTargets) ||
+      !expectedTargets.every(name => Object.hasOwn(receipt.files, name)) || new Set(expectedTargets).size !== expectedTargets.length ||
+      !isDeepStrictEqual([...expectedTargets].sort(), transforms.map(value => value.path).sort()))) throw Error('Missing or invalid selected core transformation');
 }
 
 export function coreStateBuildRecord(root, transforms, required = false) {
   const receipt = coreStateReceipt(root);
   verifyCoreStateTransforms(receipt, transforms, required);
-  return {...receipt, transforms};
+  return {...receipt, transforms: [...transforms].sort((a, b) => a.path.localeCompare(b.path))};
 }
 
 export function verifyCoreStateBuildRecord(root, record, required = false) {
   if (!isDeepStrictEqual(record, coreStateBuildRecord(root, record?.transforms, required))) throw Error('Core patch build receipt changed');
 }
 
-/** The preload authenticates the selected checkout before any core module is evaluated. */
+/** The preload authenticates the selected checkout before any patched module is evaluated. */
 export function coreRuntimeArguments(root, source, args) {
   if (!Array.isArray(args) || !args.every(value => typeof value === 'string')) throw Error('Invalid core runtime arguments');
   if (!path.isAbsolute(source)) throw Error('Core runtime source must be absolute');
@@ -115,9 +155,8 @@ export function coreRuntimeArguments(root, source, args) {
 /** Independently reviewed frozen snapshots retain their own version contract. */
 export function combinedCoreRuntime(root, source, manifest, snapshot, args) {
   const receipt = coreStateReceipt(root);
-  const target = receipt.files[CORE_STATE_TARGET];
-  const matches = snapshot.revision === receipt.baseCommit &&
-    snapshot.entries?.[CORE_STATE_TARGET]?.sha256 === target.beforeSha256;
+  const matches = snapshot.revision === receipt.baseCommit && Object.entries(receipt.files)
+    .every(([name, target]) => snapshot.entries?.[name]?.sha256 === target.beforeSha256);
   if (!matches) return {args, environment: {}, status: {applied: false,
     reason: 'independent-snapshot-requires-separate-patch-review', sourceRevision: snapshot.revision}};
   return {args: coreRuntimeArguments(root, source, args),
