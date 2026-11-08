@@ -57,3 +57,70 @@ test('stop drains already-admitted work and suppresses a queued due-task read', 
     assert.equal(f.service.executingTasks.size, 0); assert.equal(f.service.executingTaskPromises.size, 0);
   }
 });
+
+test('every concurrent manual owner retains the blocking marker until its own completion', async () => {
+  const [Original, Patched] = await classes;
+  for (const [TaskService, corrected] of [[Original, false], [Patched, true]]) {
+    for (const firstIndex of [0, 1]) {
+      for (const failFirst of [false, true]) {
+        const f = fixture(TaskService), finish = [], pending = [];
+        const reached = async count => {
+          for (let n=0; n<100 && finish.length<count; n++) await new Promise(resolve=>setImmediate(resolve));
+          assert.equal(finish.length, count);
+        };
+        f.runtime.patchTaskMetadata = async () => 'updated';
+        f.runtime.getTaskWorker = () => ({async execute() {
+          f.state.calls++;
+          await new Promise((resolve, reject) => finish.push({resolve, reject}));
+          return {preserveTask: true};
+        }});
+        try {
+          for (let i=0; i<2; i++) {
+            pending.push(f.service.executeTaskById(f.task.id).then(() => null, error => error));
+            await reached(i+1);
+          }
+          if (failFirst) finish[firstIndex].reject(Error('controlled worker failure'));
+          else finish[firstIndex].resolve();
+          await pending[firstIndex];
+          assert.equal((await f.service.getTaskStatus(f.task.id)).executing, corrected);
+          const tick = f.service.runDueTasks(); pending.push(tick.then(() => null, error => error));
+          for (let n=0; n<10; n++) await new Promise(resolve=>setImmediate(resolve));
+          assert.equal(f.state.calls, corrected ? 2 : 3);
+          if (corrected) assert.equal(f.service.executingTasks.get(f.task.id), 1);
+          let stopped = false; const stop = f.service.stop().then(() => { stopped = true; });
+          await Promise.resolve(); assert.equal(stopped, false);
+          for (const gate of finish) gate.resolve();
+          await Promise.all(pending); await stop;
+          assert.equal(f.service.executingTasks.size, 0);
+          assert.equal((await f.service.getTaskStatus(f.task.id)).executing, false);
+        } finally {
+          for (const gate of finish) gate.resolve();
+          await Promise.all(pending); await f.service.stop();
+        }
+      }
+    }
+  }
+});
+
+test('nonblocking scheduled execution retains every manual and automatic owner', async () => {
+  const [, Patched] = await classes;
+  const f = fixture(Patched), finish = [], pending = [];
+  f.task.metadata.blocking = false;
+  f.runtime.getTaskWorker = () => ({async execute() {
+    f.state.calls++; await new Promise(resolve => finish.push(resolve)); return {preserveTask: true};
+  }});
+  const reached = async count => {
+    for (let n=0; n<100 && finish.length<count; n++) await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(finish.length, count);
+  };
+  try {
+    pending.push(f.service.executeTaskById(f.task.id)); await reached(1);
+    pending.push(f.service.executeTaskById(f.task.id)); await reached(2);
+    pending.push(f.service.runDueTasks()); await reached(3);
+    assert.equal(f.service.executingTasks.get(f.task.id), 3);
+    finish[1](); await pending[1]; assert.equal(f.service.executingTasks.get(f.task.id), 2);
+    finish[2](); await pending[2]; assert.equal(f.service.executingTasks.get(f.task.id), 1);
+    assert.equal((await f.service.getTaskStatus(f.task.id)).executing, true);
+    finish[0](); await pending[0]; assert.equal((await f.service.getTaskStatus(f.task.id)).executing, false);
+  } finally { for (const release of finish) release(); await Promise.all(pending); await f.service.stop(); }
+});

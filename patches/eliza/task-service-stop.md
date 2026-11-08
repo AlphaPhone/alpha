@@ -7,12 +7,13 @@ The reviewed patch applies to `packages/core/src/services/task.ts` at upstream c
 The original implementation permits both a new manual worker invocation and a new
 poll timer after `stop()`. It also lets a manual invocation that is awaiting its
 task read enter the worker after stop. The patch closes these admission paths.
-Already admitted work still drains through the existing promise tracking.
+Already admitted work still drains through the existing promise tracking. The original per-task Set also loses its marker when the first of two overlapping manual executions finishes. A counted map now retains that marker until the final execution settles, preserving both truthful status and automatic blocking-run suppression.
 
 - `startTimer()` returns when stopped.
 - `executeTaskById()` rejects new admission with `TASK_SERVICE_STOPPED`.
 - The shared `executeTask()` entry checks again after asynchronous task reads.
 - `runDueTasks()` returns when stopped, including after waiting for an older tick.
+- Each admitted execution increments its task count and releases only its own count in `finally`.
 
 The patch does not change task metadata mutation APIs. A stopped instance can
 still receive a pause or resume metadata operation. Immediate resume reaches the
@@ -29,7 +30,7 @@ remain that worker's responsibility.
 | Native Google host artifact | The builder installs the plugin and binds the core patch record. Its current 35-input graph does not select TaskService. |
 | Workflow dependency artifact | The actual upstream producer was observed with Bun 1.4.2. Its 1123-input graph selects no `packages/core/src` module. It needs no TaskService transform. |
 | Independently frozen combined host | Matching revision and task preimage receive the transform. The preload rechecks the host's frozen source manifest, including reviewed custom files. Other revisions/preimages retain their existing independent version contract and report `coreState.applied=false`. They require a separate patch review. |
-| Quint TaskService compiler | Uses the same byte map. The actual-class stop regressions already exercise the shared build plugin. The broader SQL-backed lifecycle refinement is a separate work item. |
+| Quint TaskService compiler | Uses the same byte map. The actual-class stop regressions already exercise the shared build plugin. The broader SQL-backed lifecycle refinement is a separate work item. The counted-ownership SQL regression already executes the actual runtime, migrations and adapter. |
 
 `core-state-patch.mjs` validates the product pin, manifest schema, single target,
 patch digest and exact patch headers, original bytes and resulting bytes. It
@@ -45,6 +46,12 @@ TaskService class with its real internal modules. Controlled runtime read and
 worker ports reproduce the original defects and check the corrected schedules.
 It checks a stopped manual invocation, timer restart, a held task read, a held
 worker, stop drain, and a second due-task request queued behind the held worker.
+Counted ownership is checked in both completion orders, with successful and failed
+first completions, plus concurrent nonblocking manual/automatic executions.
+`test/task-service-sql-concurrency.test.mjs` repeats the four completion/failure
+schedules against actual AgentRuntime and PGlite, including persisted failure
+bookkeeping. Its source compiler binds all selected source and PGlite resource
+bytes before evaluation and uses the same patch map.
 
 `test/core-state-patch.test.mjs` checks missing/changed inputs, wrong pin and
 target, postimage mismatch, symlink refusal, build interception and the real Bun

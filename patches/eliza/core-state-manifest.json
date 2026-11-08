@@ -4,12 +4,12 @@
   "patches": [
     {
       "file": "task-service-stop.patch",
-      "sha256": "54d47551f0220d479ffb8162a822d025a419ea73928640195f14782475cdf5b2",
+      "sha256": "7a53ab6062db8ff795d82c14fa79ec957d7e2e6907d4e80fc0ff86497f13c116",
       "targets": [
         {
           "path": "packages/core/src/services/task.ts",
           "beforeSha256": "c73a20cdc504f7f7a935078d7d7ad3ae6e368b6d90a1bbe580545c8421e9f4f7",
-          "afterSha256": "0ff99170bfccffff0f60931982ead65c4cb389195659a7fc59120268b3b6e0b4"
+          "afterSha256": "036ab75df583964347f039018ef8a12018ba9834ef654ba7cab2397e96d1a3e3"
         }
       ]
     }
