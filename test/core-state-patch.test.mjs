@@ -6,8 +6,8 @@ import os from 'node:os';
 import childProcess, {execFileSync, spawnSync} from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
-import {CORE_STATE_TARGET, CORE_STATE_MANIFEST, coreStatePatch, coreStateReceipt,
-  coreStateBuildPlugin, coreStateBuildRecord, verifyCoreStateBuildRecord, coreRuntimeArguments, combinedCoreRuntime} from '../scripts/core-state-patch.mjs';
+import {CORE_STATE_TARGET, NOTES_STATE_TARGET, CORE_STATE_MANIFEST, coreStatePatch, coreStateReceipt,
+  coreStateBuildPlugin, coreStateBuildRecord, verifyCoreStateBuildRecord, coreRuntimeArguments, combinedCoreRuntime, coreStateRequiredTargets} from '../scripts/core-state-patch.mjs';
 import {sourceManifest} from '../scripts/combined-agent-source.mjs';
 import {writeCoreStateFixture} from './fixtures/core-state-root.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -28,7 +28,7 @@ test('reviewed TaskService patch materializes exact bytes while preserving origi
   assert.equal(hash(entry.bytes), entry.afterSha256);
   assert.match(entry.bytes.toString(), /assertAcceptingExecution\(\)/);
   assert.match(entry.bytes.toString(), /startTimer\(\) \{\s+if \(this.stopped\) return/);
-  assert.equal(prepared.files.size, 1);
+  assert.equal(prepared.files.size, 6);
 });
 test('missing, modified and wrong-pin patch inputs fail closed', t => {
   for (const mode of ['missing', 'digest', 'pin', 'target', 'output', 'input', 'linked']) {
@@ -104,7 +104,7 @@ test('all selected product source launchers install the authenticated core prelo
 
 test('independently frozen revisions retain their explicit version contract', t => {
   const f = fixture(t), receipt = coreStateReceipt(f.root), args = ['entry.ts'];
-  const snapshot = {revision: receipt.baseCommit, entries: {[CORE_STATE_TARGET]: {sha256: receipt.files[CORE_STATE_TARGET].beforeSha256}}};
+  const snapshot = {revision: receipt.baseCommit, entries: Object.fromEntries(Object.entries(receipt.files).map(([name, target]) => [name, {sha256: target.beforeSha256}]))};
   const matched = combinedCoreRuntime(f.root, f.source, '/frozen/manifest.json', snapshot, args);
   assert.equal(matched.status.applied, true);
   assert.deepEqual(matched.args.slice(0, 2), ['--preload', path.join(f.root, 'scripts/core-state-preload.mjs')]);
@@ -118,27 +118,42 @@ test('independently frozen revisions retain their explicit version contract', t 
 
 test('patch consumes the verified Buffer when its pathname is replaced before execution', t => {
   const f = fixture(t), original = childProcess.execFileSync;
-  let intercepted = false;
+  let intercepted = 0;
+  const expected = f.manifest();
   try {
     childProcess.execFileSync = (command, args, options) => {
       if (command === 'patch') {
-        intercepted = true;
-        assert.equal(hash(options.input), f.manifest().patches[0].sha256);
+        assert.equal(hash(options.input), expected.patches[intercepted++].sha256);
         assert.equal(args.includes('--input'), false);
-        fs.writeFileSync(path.join(f.root, 'patches/eliza/task-service-stop.patch'), 'changed after verification');
+        for (const patch of expected.patches) fs.writeFileSync(path.join(f.root, 'patches/eliza', patch.file), 'changed after verification');
       }
       return original(command, args, options);
     };
     syncBuiltinESMExports();
     const result = coreStatePatch(f.root, f.source);
-    assert.equal(intercepted, true);
+    assert.equal(intercepted, 3);
     assert.equal(hash(result.files.get(CORE_STATE_TARGET).bytes), f.manifest().patches[0].targets[0].afterSha256);
   } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
 });
 
 test('development backend requires its selected TaskService transformation', t => {
   const source = fs.readFileSync(new URL('../backend/loader.ts', import.meta.url), 'utf8');
-  assert.match(source, /coreStateBuildRecord\(resolve\(import.meta.dirname, "\.\."\), core.transforms, true\)/);
+  assert.ok(source.includes("coreStateRequiredTargets(Object.keys(built.metafile!.inputs))"));
   const f = fixture(t), skipped = coreStateBuildPlugin(f.root, f.source);
   assert.throws(() => coreStateBuildRecord(f.root, skipped.transforms, true), /transformation/);
+});
+
+test('each producer must transform exactly its selected reviewed targets', t => {
+  const f = fixture(t), prepared = coreStateBuildPlugin(f.root, f.source); let load;
+  prepared.plugin.setup({onLoad(_options, callback) { load = callback; }});
+  load({path: path.join(f.source, CORE_STATE_TARGET)});
+  const both = coreStateRequiredTargets([path.join(f.source, CORE_STATE_TARGET), path.join(f.source, NOTES_STATE_TARGET)]);
+  assert.deepEqual(both, [CORE_STATE_TARGET, NOTES_STATE_TARGET]);
+  assert.throws(() => coreStateBuildRecord(f.root, prepared.transforms, both), /selected core/);
+  assert.throws(() => coreStateBuildRecord(f.root, prepared.transforms, []), /selected core/);
+  load({path: path.join(f.source, NOTES_STATE_TARGET)});
+  const record = coreStateBuildRecord(f.root, prepared.transforms, both);
+  verifyCoreStateBuildRecord(f.root, record, both);
+  assert.throws(() => coreStateBuildRecord(f.root, [...prepared.transforms, prepared.transforms[0]], both), /transformation/);
+  assert.deepEqual(coreStateRequiredTargets(['/host/transport.ts']), []);
 });

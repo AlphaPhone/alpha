@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {prepareClientFeatures} from './prepare-client-features.mjs';
 import {sourceDirectory,verifySource} from './local-agent-source.mjs';
-import {CORE_STATE_INPUTS,verifyCoreStateBuildRecord} from './core-state-patch.mjs';
+import {CORE_STATE_INPUTS,verifyCoreStateBuildRecord,coreStateRequiredTargets} from './core-state-patch.mjs';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const safe=name=>typeof name==='string'&&!path.isAbsolute(name)&&name.split('/').every(part=>part&&part!=='.'&&part!=='..');
 export function verifyNativeGoogleHostArtifact(root,directory){
@@ -16,7 +16,7 @@ export function verifyNativeGoogleHostArtifact(root,directory){
   const file=path.join(root,name),stat=fs.lstatSync(file);
   if(!stat.isFile()||stat.isSymbolicLink()||hash(fs.readFileSync(file))!==digest)throw Error('Native Google host source changed; build a fresh host artifact');
  }
- verifyCoreStateBuildRecord(root,host.coreState);
+ verifyCoreStateBuildRecord(root,host.coreState,coreStateRequiredTargets(Object.keys(host.inputs)));
  const file=path.join(directory,host.module),stat=fs.lstatSync(file);
  if(!stat.isFile()||stat.isSymbolicLink()||hash(fs.readFileSync(file))!==manifest.files[host.module])throw Error('Native Google host bytes changed');
  return host;

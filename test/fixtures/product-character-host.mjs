@@ -9,21 +9,21 @@ import {verifyWorkerArtifact} from '../../scripts/workflow-worker-artifact.mjs';
 import {preparePrivateRuntimeProfile,writePrivateRuntimeJson,runtimeEnvironment} from '../../vendor/eliza/packages/agent/native-host/private-runtime-launch.mjs';
 import {LOCAL_EMBEDDING_ROUTE,localEmbeddingEnvironment} from '../../scripts/agent-embeddings.mjs';
 import {CLOUD_SDK_BASES} from '../../scripts/cloud-sdk-authority.mjs';
-import {coreRuntimeArguments,coreStateBuildRecord,verifyCoreStateBuildRecord} from '../../scripts/core-state-patch.mjs';
+import {coreRuntimeArguments,coreStateBuildRecord,verifyCoreStateBuildRecord,coreStateRequiredTargets} from '../../scripts/core-state-patch.mjs';
 import {writeCoreStateFixture} from './core-state-root.mjs';
 const hash=b=>createHash('sha256').update(b).digest('hex');
 // Real host function and admission helpers; only its product-root location and
 // process launch port are fixture-owned. No verifier is mocked or disabled.
 const nativeSource=fs.readFileSync('scripts/native-google-host-artifact.mjs','utf8');
 const verification=nativeSource.slice(nativeSource.indexOf('const hash='),nativeSource.indexOf('/** Product host code'));
-const {verifyNativeGoogleHostArtifact}=vm.runInNewContext(verification.replace('export function','function')+';({verifyNativeGoogleHostArtifact});',{fs,path,createHash,verifyCoreStateBuildRecord,JSON});
+const {verifyNativeGoogleHostArtifact}=vm.runInNewContext(verification.replace('export function','function')+';({verifyNativeGoogleHostArtifact});',{fs,path,createHash,verifyCoreStateBuildRecord,coreStateRequiredTargets,JSON});
 const source=fs.readFileSync('scripts/cloud-resident-host.mjs','utf8').replace(/^import .*;\n/gm,'').replaceAll('import.meta.dirname','scriptDirectory').replace(/^export /gm,'');
 export function productCharacterHostFixture(mode,options={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'product-character-host-')),sdk=path.join(root,'sdk'),profile=path.join(root,'profile'),worker=path.join(root,'artifacts','fixture-worker');
  fs.mkdirSync(sdk,{recursive:true});fs.writeFileSync(path.join(sdk,'bun.lock'),'{}');fs.writeFileSync(path.join(sdk,'package.json'),JSON.stringify({name:'fixture',workspaces:[]}));fs.writeFileSync(path.join(sdk,'turbo.json'),JSON.stringify({tasks:{}}));
  writeCoreStateFixture(root,sdk,'0'.repeat(40));
  const env={...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
- execFileSync('git',['-c','core.hooksPath=/dev/null','init','-q',sdk],{env});execFileSync('git',['-C',sdk,'-c','core.hooksPath=/dev/null','add','bun.lock','package.json','turbo.json','packages'],{env});execFileSync('git',['-C',sdk,'-c','core.hooksPath=/dev/null','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','-qm','fixture'],{env});
+ execFileSync('git',['-c','core.hooksPath=/dev/null','init','-q',sdk],{env});execFileSync('git',['-C',sdk,'-c','core.hooksPath=/dev/null','add','bun.lock','package.json','turbo.json','packages','plugins'],{env});execFileSync('git',['-C',sdk,'-c','core.hooksPath=/dev/null','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','-qm','fixture'],{env});
  const commit=execFileSync('git',['-C',sdk,'rev-parse','HEAD'],{encoding:'utf8',env}).trim();fs.writeFileSync(path.join(sdk,'.alpha-runtime-source.json'),'{}');fs.writeFileSync(path.join(root,'upstream.lock.json'),JSON.stringify({commit}));writeCoreStateFixture(root,sdk,commit);
  fs.mkdirSync(path.join(root,'backend'));const input='backend/native-cloud-runtime.ts';fs.writeFileSync(path.join(root,input),'synthetic product source');
  fs.mkdirSync(worker,{recursive:true});const entries=['dependencies.json','node_modules/smthrs/package.json','node_modules/zod/package.json','node_modules/effect/package.json','node_modules/@smthrs/engine/package.json','google-host.mjs'];const files={};

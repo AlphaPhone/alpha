@@ -14,15 +14,24 @@ export function writeCoreStateFixture(root, source, pin, simple = false) {
   for (const name of [...CORE_STATE_INPUTS.filter(name => name.startsWith('scripts/')),
     'scripts/local-agent-source.mjs', 'scripts/copy-file-clone.mjs',
     'vendor/eliza/packages/app/scripts/lib/immutable-workspace-source.mjs',
-    'vendor/eliza/packages/app/scripts/lib/committed-source.mjs']) {
-    write(name, fs.readFileSync(path.join(repository, name)));
+    'vendor/eliza/packages/app/scripts/lib/committed-source.mjs']) write(name, fs.readFileSync(path.join(repository, name)));
+  const manifest = JSON.parse(fs.readFileSync(path.join(repository, CORE_STATE_MANIFEST)));
+  manifest.baseCommit = pin;
+  for (const patch of manifest.patches) {
+    let patchBytes = fs.readFileSync(path.join(repository, 'patches/eliza', patch.file));
+    for (const target of patch.targets) {
+      const simpleTarget = simple && target.path === CORE_STATE_TARGET;
+      const before = simpleTarget ? 'export const value = "before";\n' : fs.readFileSync(path.join(repository, 'vendor/eliza', target.path));
+      if (simpleTarget) {
+        patchBytes = `--- a/${target.path}\n+++ b/${target.path}\n@@ -1 +1 @@\n-export const value = "before";\n+export const value = "after";\n`;
+        target.afterSha256 = hash('export const value = "after";\n');
+      }
+      fs.mkdirSync(path.dirname(path.join(source, target.path)), {recursive: true});
+      fs.writeFileSync(path.join(source, target.path), before);
+      target.beforeSha256 = hash(before);
+    }
+    write('patches/eliza/' + patch.file, patchBytes);
+    patch.sha256 = hash(patchBytes);
   }
-  const before = simple ? 'export const value = "before";\n' : fs.readFileSync(path.join(repository, 'vendor/eliza', CORE_STATE_TARGET));
-  const after = simple ? 'export const value = "after";\n' : null;
-  const patch = simple ? `--- a/${CORE_STATE_TARGET}\n+++ b/${CORE_STATE_TARGET}\n@@ -1 +1 @@\n-export const value = "before";\n+export const value = "after";\n` : fs.readFileSync(path.join(repository, 'patches/eliza/task-service-stop.patch'));
-  fs.mkdirSync(path.dirname(path.join(source, CORE_STATE_TARGET)), {recursive: true});
-  fs.writeFileSync(path.join(source, CORE_STATE_TARGET), before);
-  write('patches/eliza/task-service-stop.patch', patch);
-  const original = JSON.parse(fs.readFileSync(path.join(repository, CORE_STATE_MANIFEST)));
-  write(CORE_STATE_MANIFEST, JSON.stringify({schema: 1, baseCommit: pin, patches: [{file: 'task-service-stop.patch', sha256: hash(patch), targets: [{path: CORE_STATE_TARGET, beforeSha256: hash(before), afterSha256: after ? hash(after) : original.patches[0].targets[0].afterSha256}]}]}, null, 2));
+  write(CORE_STATE_MANIFEST, JSON.stringify(manifest, null, 2));
 }

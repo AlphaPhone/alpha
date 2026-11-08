@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
-import {verifyCoreStateBuildRecord} from '../../../../scripts/core-state-patch.mjs';
+import {verifyCoreStateBuildRecord,coreStateRequiredTargets} from '../../../../scripts/core-state-patch.mjs';
 
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const relative = (root, file) => path.relative(root, file).split(path.sep).join('/');
@@ -13,8 +13,8 @@ export function writeRuntimeBundleGraph(root, source, observationPath, outputPat
   if (!observation.passed || !observation.inputsUnchanged || observation.builds.length !== 1) {
     throw Error('A successful, stable single-entry producer observation is required');
   }
-  verifyCoreStateBuildRecord(root, observation.coreState, true);
   const build = observation.builds[0];
+  verifyCoreStateBuildRecord(root, observation.coreState, coreStateRequiredTargets(build.firstParty.map(file => file.path)));
   if (hash(build.rawMetafile) !== build.rawMetafileSha256) throw Error('Raw mobile build metafile changed');
   const metadata = JSON.parse(fs.readFileSync(build.rawMetafile, 'utf8'));
   const byInput = new Map(build.firstParty.map(file => [file.input, file.path]));
