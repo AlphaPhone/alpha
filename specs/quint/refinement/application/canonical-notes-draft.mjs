@@ -28,7 +28,8 @@ export async function compileCanonicalNotesEditor(extraSources) {
   const built = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `
     export {NotesEditor,__quintInspectSaved} from './${source}';
     export {CanonicalNotesController,CANONICAL_NOTES_INVALIDATED_EVENT} from './apps/app/src/prototype/canonical-notes-controller.ts';
-    export {projectNoteForModel} from './.eliza/client-features/plugins/plugin-notes/src/types.ts';
+    export {projectNoteForModel,reconstructNoteContent} from './.eliza/client-features/plugins/plugin-notes/src/types.ts';
+    export {authoredNoteText} from './.eliza/client-features/plugins/plugin-notes/src/note-authored.ts';
   `}, bundle: true, format: 'cjs', platform: 'node', write: false, metafile: true,
     plugins: [{name: 'observe-owned-save-snapshot', setup(builder) {
       builder.onLoad({filter: /\/notes-editor\.ts$/}, args => {

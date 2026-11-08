@@ -39,6 +39,9 @@ async function fixture(module) {
     return {'s.current': f.controller.current, 's.revision': f.controller.revision ?? -1,
       's.notes': qset((f.controller.snapshot?.notes ?? []).map(value => idOf(value.id))),
       's.trash': qset((f.controller.snapshot?.trash ?? []).map(value => idOf(value.note.id))),
+      's.authored': qset([...(f.controller.snapshot?.notes ?? []), ...(f.controller.snapshot?.trash ?? []).map(value => value.note)]
+        .filter(value => module.exports.reconstructNoteContent(module.exports.projectNoteForModel(value)).trim() ||
+          module.exports.authoredNoteText(value.format).trim()).map(value => idOf(value.id))),
       's.draft': {present: draft.present, id: draft.id, token: draft.token, base: draft.base, version: draft.version,
         authored: original.HasAuthoredContent}, 's.nextToken': original['s.nextToken'],
       's.saving': f.editor.saving, 's.queued': f.editor.queuedVersion ?? -1,
@@ -54,8 +57,8 @@ async function fixture(module) {
     await f.replyWith(request.id, {requestId: 'mutation-result', success: true,
       result: {success: true, text: 'Confirmed', state: snapshot, ...(options.missing ? {} : {data: {note: targetNote}})}});
   }
-  async function snapshot(revision, notes, trash) {
-    f.refresh(); await f.replyWith(f.requests.at(-1).id, {success: true, data: state(revision, notes, trash)});
+  async function snapshot(revision, notes, trash, changed = {}) {
+    f.refresh(); await f.replyWith(f.requests.at(-1).id, {success: true, data: state(revision, notes, trash, changed)});
   }
   async function probeCall(kind, id) {
     const value = await f.editor[kind === 'delete' ? 'remove' : 'restore'](wireId(id));
@@ -67,7 +70,7 @@ async function fixture(module) {
 export async function checkCanonicalNotesMutation(extraSources = []) {
   captureSources([driver, ...extraSources]);
   const module = await compileCanonicalNotesEditor(extraSources), traces = [];
-  const scenarios = ['delete-clean', 'delete-edit-held', 'delete-replace-held', 'delete-failure', 'delete-missing',
+  const scenarios = ['delete-empty-canonical', 'delete-empty-save-result', 'delete-clean', 'delete-edit-held', 'delete-replace-held', 'delete-failure', 'delete-missing',
     'delete-dirty', 'delete-dirty-failure', 'delete-dirty-replaced', 'delete-dirty-closed', 'delete-dirty-new-edit',
     'delete-dirty-queued', 'delete-dirty-queued-clear', 'delete-dirty-empty', 'delete-dirty-stale',
     'delete-dirty-target-missing', 'delete-owner-save', 'delete-owner-write', 'delete-save-already-pending',
@@ -83,7 +86,7 @@ export async function checkCanonicalNotesMutation(extraSources = []) {
     try {
       const restore = scenario.startsWith('restore') || scenario.startsWith('probe-restore') || scenario === 'save-during-restore';
       if (restore) {
-        if (scenario === 'restore-current-revision') {await f.snapshot(3, [1], [2]); step('new collection before restore', call('snapshot', 3, qset([1]), qset([2])));}
+        if (scenario === 'restore-current-revision') {await f.snapshot(3, [1], [2]); step('new collection before restore', call('snapshot', 3, qset([1]), qset([2]), qset([1, 2])));}
         if (scenario === 'restore-edit-held') {open(1); edit(true);}
         const target = scenario === 'restore-missing' ? 1 : 2;
         f.start('restore', target); await tick(); step('request restore', call('restore', target));
@@ -94,13 +97,15 @@ export async function checkCanonicalNotesMutation(extraSources = []) {
         if (scenario === 'save-during-restore') {open(1); edit(true); f.save(); await tick(); step('save rejected by existing writer', call('save'));}
         const bad = ['restore-failure', 'restore-owner', 'restore-codec-target'].includes(scenario);
         await f.reply(scenario === 'restore-current-revision' ? 4 : 2, [1, 2], [], 2, scenario !== 'restore-failure', {mismatched: scenario === 'restore-codec-target'});
-        step('restore settles', bad ? call('failed') : call('mutationReply', scenario === 'restore-current-revision' ? 4 : 2, qset([1, 2]), qset([])));
+        step('restore settles', bad ? call('failed') : call('mutationReply', scenario === 'restore-current-revision' ? 4 : 2, qset([1, 2]), qset([]), qset([1, 2])));
       } else {
-        const dirty = scenario.startsWith('delete-dirty') || scenario === 'delete-owner-save';
-        const opening = dirty || ['delete-clean', 'delete-edit-held', 'delete-replace-held', 'delete-save-already-pending'].includes(scenario);
+        if (scenario === 'delete-empty-canonical') {await f.snapshot(1, [1], [2], {1: note(1, '', '')});
+          step('empty canonical record is still deletable', call('snapshot', 1, qset([1]), qset([2]), qset([2])));}
+        const dirty = scenario.startsWith('delete-dirty') || ['delete-owner-save', 'delete-empty-save-result'].includes(scenario);
+        const opening = dirty || ['delete-clean', 'delete-empty-canonical', 'delete-edit-held', 'delete-replace-held', 'delete-save-already-pending'].includes(scenario);
         if (opening) open(1);
         if (dirty || scenario === 'delete-save-already-pending') edit(scenario !== 'delete-dirty-empty');
-        if (scenario === 'delete-dirty-stale') {await f.snapshot(2, [1], [2]); step('external revision before removal', call('snapshot', 2, qset([1]), qset([2])));}
+        if (scenario === 'delete-dirty-stale') {await f.snapshot(2, [1], [2]); step('external revision before removal', call('snapshot', 2, qset([1]), qset([2]), qset([1, 2])));}
         if (scenario === 'delete-save-already-pending') {f.save(); await tick(); step('save precedes removal', call('save'));}
         const target = scenario === 'delete-missing' ? 2 : 1;
         f.start('delete', target); await tick(); step('request removal', call('remove', target));
@@ -114,17 +119,17 @@ export async function checkCanonicalNotesMutation(extraSources = []) {
           const bad = ['delete-dirty-failure', 'delete-owner-save'].includes(scenario);
           const ids = scenario === 'delete-dirty-target-missing' ? [] : [1];
           const trash = scenario === 'delete-dirty-target-missing' ? [1, 2] : [2];
-          await f.reply(2, ids, trash, 1, !bad, {changed: {1: note(1, 'First')}});
-          step('prerequisite save and removal continuation', bad ? call('failed') : call('saveReply', 1, 2, qset(ids), qset(trash), true));
+          await f.reply(2, ids, trash, 1, !bad, {changed: {1: scenario === 'delete-empty-save-result' ? note(1, '', '') : note(1, 'First')}});
+          step('prerequisite save and removal continuation', bad ? call('failed') : call('saveReply', 1, 2, qset(ids), qset(trash), qset(scenario === 'delete-empty-save-result' ? [2] : [1, 2])));
           if (['delete-dirty-failure', 'delete-owner-save', 'delete-dirty-replaced', 'delete-dirty-closed', 'delete-dirty-target-missing', 'delete-dirty-queued-clear'].includes(scenario)) {traces.push(t); continue;}
           if (scenario === 'delete-dirty-queued') {
             await f.reply(3, [1], [2], 1, true, {changed: {1: note(1, 'First')}});
-            step('newer save completes after refused deletion', call('saveReply', 1, 3, qset([1]), qset([2]), true)); traces.push(t); continue;
+            step('newer save completes after refused deletion', call('saveReply', 1, 3, qset([1]), qset([2]), qset([1, 2]))); traces.push(t); continue;
           }
         }
         if (scenario === 'delete-save-already-pending') {
           await f.reply(2, [1], [2], 1, true, {changed: {1: note(1, 'First')}});
-          step('pre-existing save completes without deleting', call('saveReply', 1, 2, qset([1]), qset([2]), true)); traces.push(t); continue;
+          step('pre-existing save completes without deleting', call('saveReply', 1, 2, qset([1]), qset([2]), qset([1, 2]))); traces.push(t); continue;
         }
         if (scenario === 'delete-edit-held') edit(true);
         if (scenario === 'delete-replace-held') {f.editor.begin(); step('replace selection during delete', call('begin'));}
@@ -137,7 +142,7 @@ export async function checkCanonicalNotesMutation(extraSources = []) {
         const revision = scenario === 'delete-stale-reply' ? 0 : dirty ? 3 : 2;
         await f.reply(revision, unchanged ? [1] : [], unchanged ? [2] : [1, 2], 1, scenario !== 'delete-failure',
           {mismatched: scenario === 'delete-codec-target', missing: scenario === 'delete-codec-missing'});
-        step('delete settles', bad ? call('failed') : call('mutationReply', revision, qset(unchanged ? [1] : []), qset(unchanged ? [2] : [1, 2])));
+        step('delete settles', bad ? call('failed') : call('mutationReply', revision, qset(unchanged ? [1] : []), qset(unchanged ? [2] : [1, 2]), qset([1, 2])));
       }
       traces.push(t);
     } finally {f.cleanup(); await tick();}

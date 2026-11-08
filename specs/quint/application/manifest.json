@@ -775,6 +775,7 @@
       "changedTokenCancelsDeleteTest",
       "queuedSaveBlocksDeleteTest",
       "restoreRevisionTest",
+      "emptyCanonicalRecordCanDeleteTest",
       "lostOwnerCannotPublishTest"
     ],
     "sources": [
