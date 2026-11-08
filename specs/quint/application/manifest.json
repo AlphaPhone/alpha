@@ -1059,5 +1059,27 @@
       "Mounted Google panel with owner-bound account list generations, revoke readback, preserved Gmail tier, Calendar permission continuation and consent dispatch.",
       "Two Cloud bindings, six reads, three grant classes and four consent attempts. One held permission continuation, controlled provider and browser ports. Linked Calendar writes and native callback durability remain separate."
     ]
+  },
+  {
+    "path": "specs/quint/application/HomeFailureNotice.qnt",
+    "module": "HomeFailureNotice",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "failedInventoryReportsOnceTest",
+      "followupReadDoesNotDuplicateLaunchTest",
+      "drawerAndOtherViewsOwnTheirErrorsTest",
+      "recoveryPermitsNewInventoryNoticeTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/home-shell.ts",
+      ".eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts",
+      ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts"
+    ],
+    "abstractions": [
+      "Installed Home notice projection for shared launcher snapshot changes, exact error equality, inventory identity and failure notice deduplication.",
+      "Starts after a settled inventory. Surface and shared launcher snapshots are inputs. Native launch effects, inventory generation and favorites durability are separate obligations."
+    ]
   }
 ]
