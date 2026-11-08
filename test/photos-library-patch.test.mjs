@@ -84,6 +84,13 @@ test('Photos grid thumbnails can be read again by id, so off-screen rows drop th
  assert.match(js,/thumbnailPlan\(rows\.map\(row=>live\.get\(row\.id\)\?\?row\),from,to,LIBRARY_LIMITS\.thumbnailsKept\)/);
 });
 
+test('An interrupted Save copy is found while pending and cleaned up, not reported failed and stranded',{skip:!ready&&'vendor/eliza not checked out'},async()=>{
+ // Android 11+ leaves pending rows out of queries by default; the unfinished copy is one.
+ const result=method(await source('OwnedPhotoEdits'),'public JSObject result(String token)');
+ assert.match(result,/resolver\.query\(\s*MediaStore\.setIncludePending\(MediaStore\.Images\.Media\.EXTERNAL_CONTENT_URI\),\s*new String\[\] \{"_id", "is_pending"\}, "owner_package_name=\? AND _display_name=\?"/);
+ assert.match(result,/resolver\.delete\(MediaStore\.setIncludePending\(copy\), "is_pending=1", null\) != 1/);
+});
+
 // Exercise the real receipt/recovery entry point with private files and a file-backed resolver.
 // Graphics and Android storage consent are outside this host-JVM test's scope.
 test('Replace recovery restores its interrupted prefix and preserves later external edits',{

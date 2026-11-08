@@ -434,7 +434,7 @@
          geometry.recycle();
        throw e;
      }
-@@ -226,6 +349,8 @@
+@@ -226,12 +349,16 @@
      if (record == null)
        return receipt("not-started", token, null);
      JSONObject saved = new JSONObject(record);
@@ -443,7 +443,26 @@
      boolean published = saved.optString("status").equals("saved");
      String savedId = saved.optString("id", null);
      if (published && savedId != null)
-@@ -272,7 +397,8 @@
+       return receipt("saved", token, source(savedId));
+-    // The deterministic owned display name closes publish→receipt crash ambiguity.
+-    try (Cursor row = resolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
++    // The deterministic owned display name closes publish→receipt crash ambiguity. Pending rows
++    // are excluded from queries by default; an interrupted save's copy is one, and is cleaned up.
++    try (Cursor row = resolver.query(
++             MediaStore.setIncludePending(MediaStore.Images.Media.EXTERNAL_CONTENT_URI),
+              new String[] {"_id", "is_pending"}, "owner_package_name=? AND _display_name=?",
+              new String[] {context.getPackageName(), name(token)}, null)) {
+       if (row == null)
+@@ -251,7 +378,7 @@
+         // A previously confirmed save remains a historical success, even if its item changed.
+         if (published)
+           return receipt("saved", token, null);
+-        if (resolver.delete(copy, "is_pending=1", null) != 1)
++        if (resolver.delete(MediaStore.setIncludePending(copy), "is_pending=1", null) != 1)
+           throw new IOException("Pending copy cleanup was not confirmed");
+         saved.put("status", "failed");
+         if (!journal.edit().putString(token, saved.toString()).commit())
+@@ -272,7 +399,8 @@
      String existing = journal.getString(token, null);
      if (existing != null) {
        JSONObject previous = new JSONObject(existing);
@@ -453,7 +472,7 @@
            || !previous.optString("filter", "none").equals(filter))
          throw new IllegalArgumentException("This save identity already has a different edit");
        return result(token);
-@@ -329,6 +455,438 @@
+@@ -329,6 +457,438 @@
          bitmap.recycle();
      }
    }
