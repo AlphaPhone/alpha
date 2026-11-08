@@ -1,55 +1,60 @@
 # Settings
 
-Settings shows only what Alpha can change or must disclose, built from real device and agent
-state (`apps/app/src/prototype/settings-adapter.ts`). It repeats no Android fact Alpha cannot
-change (radios, volumes, battery, build), and each flow has one entry. This page describes source
-behaviour and browser tests; it is not emulator, AOSP-image or device evidence.
+Settings belongs to Alpha's renderer in `apps/app/src/prototype/settings-adapter.ts`. The top
+screen has General, Privacy, Apps and About. The Account control in its header opens the account
+category. Category pages have Back to Settings. App settings return to Apps.
 
-## Top level
+## Categories
 
-| Group | Row | Opens or does |
-| --- | --- | --- |
-| (header) | Agent name | edited in place |
-| Account | Eliza Cloud (the deployment's service name) · plan or `Sign in` | the account and plan page: plan facts, Approve this phone again (while the sign-in key is expiring), Redeem code, Manage plan, Sign out (confirmed) |
-| | Google · account count or `Connect` | the Google accounts sheet: connect, disconnect, calendars |
-| Assistant | Ask before acting | switch |
-| | Agent connection · status | the agent page (Android): status, Restart Alpha, recovery details, New conversation, Earlier conversations, actions to confirm. Elsewhere it opens the connection panel |
-| | AI · provider | the provider choice |
-| | Listening · status (AOSP listener only) | Pause, Turn off, the listener's settings |
-| | Wake listening (only when a stop was not confirmed) | a fact pointing to Android settings |
-| | Scheduled digests | the digests sheet |
-| Apps | Calendars | Google Calendar, a retry or access review when the calendar needs attention, recovery of saved events |
-| | Passwords | Alpha's password manager and the Android password provider |
-| | Photos access · scope (Android) | Android's photo access prompt |
-| | Load images in email | switch |
-| | Make Alpha your Home app (launcher, while not Home) | Android's role dialog |
-| Appearance | Theme | System, Light or Dark |
-| | Text size | slider |
-| Notifications | Notifications · state | Android's notification page for Alpha (the browser's alert settings in a browser build) |
-| | Notifications from other apps · state | collection, apps and previews, history, Android notification access |
-| Privacy | App permissions · summary (Android) | Android's permission page for Alpha |
-| | Finish setup (only while a startup permission is missing) | the startup access panel |
-| System | Android settings (launcher) | Android's Settings |
-| | Install update (only when the manifest offers one) | the verified download and Android's installer |
-| | About · version | version and install date, Problem log, Export diagnostics, Open source licenses, Check for updates |
-| | Developer (developer builds only) | developer facts |
-| (last) | Reset Alpha data (Android) | Android's confirmed reset |
+| Entry | Current controls |
+| --- | --- |
+| Account header | Account & plan, Google & email, AI connection |
+| General | Display, Notifications and the available device or recovery controls |
+| Privacy | App permissions and Ask before taking actions |
+| Apps | Browser, Calendar, Camera, Files, Inbox, Maps, Notes, Passwords, Photos and Workflows |
+| About | Version information and Open source licenses |
 
-Rules:
+Account & plan presents the account and the plan information that the current Cloud session
+verified. Redeem code opens code entry only when selected. Google & email opens the existing
+Google account dialog. AI connection opens the provider dialog. Each action retains its own
+account and session checks.
 
-- A row is a label with at most one short value at the right. A switch carries no sentence unless
-  it would otherwise mislead. Errors are toasts, not rows.
-- Destructive actions confirm first (Sign out, Clear history, Clear problem log).
-- Routes: `settingsPage` accepts only the pages in `SETTINGS_PAGES` (and `developer` behind the
-  developer gate); any other page opens the top level.
-- Android Back and each page's own back control go to the same parent (`SETTINGS_PARENT`):
-  Earlier conversations and recovery details to Agent connection, Problem log and licenses to
-  About, a password entry to Passwords, every other page to the top level.
+Display owns the app's theme and text-size controls. Notifications reads back the platform's
+notification state. Android notification settings are explicit handoffs. A browser offers its
+own alert toggle and does not claim Android permission or channel state.
 
-## Tests
+App permissions reports the permissions available to this platform. Android permission controls
+open the appropriate system settings. Browser facts identify browser-managed access. An unreadable action preference keeps required review on. Its switch is unavailable for editing
+until the preference can be read. The recovery control preserves the original bytes until the
+owner reviews recovery.
 
-- `test/settings-truth.test.mjs`: routing, Back parents, a top level without fact rows, the
-  account page (`cloudAccountPage`) and the permission summary.
-- `test/cloud-plan-cancel.test.mjs`: the account page's plan actions.
-- `test/browser/settings-navigation.spec.ts` and the Settings production specs
-  (`settings.production.spec.ts`, `settings-truth.production.spec.ts`).
+App settings remain with their existing owners. Calendar uses the canonical Calendar flow,
+Passwords uses the selected provider or development vault, Inbox links to Google & email, and
+Workflows opens Scheduled summaries. The other app pages expose the permissions or options that
+are currently available. They do not create alternate stores or provider connections.
+
+The product About page has no Problem log or Export diagnostics entry. The diagnostic data
+contracts remain covered by `test/diagnostics-export.test.mjs`. The former mail-image preference
+has no Settings control in this layout.
+
+## Navigation and identity
+
+Android Back follows the displayed parent. Leaving New or Edit password for the password list
+clears the in-memory draft, including its typed password, while leaving the list unlocked. Leaving
+the password surface locks it through the existing password owner.
+
+Repeated rows use stable entity identities, including package names, action identifiers and
+license identities. Loading additional permission or account information must preserve keyboard
+focus on the same control. A pending response from an earlier account cannot replace the current
+account's state or notification.
+
+## Verification
+
+`test/browser/settings.production.spec.ts` covers the grouped routes and product-only controls.
+`test/browser/settings-truth.production.spec.ts` covers native readback fixtures, account and plan
+presentation, unreadable preferences and delayed permission reads. `test/browser/password-entry-back.spec.ts`
+covers New and Edit password navigation. These browser fixtures do not establish Android device,
+AOSP image, provider or user acceptance.
+
+The earlier flat Settings and hidden-empty-card proposal remains in `docs/ui-refresh-2026-11`
+with its historical TLA inputs. The corresponding Quint legacy models retain those references.

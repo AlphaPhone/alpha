@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {preparePatchedNative} from '../scripts/prepare-patched-native.mjs';
+import {javaBinary} from './fixtures/jvm-tools.mjs';
 
 // Alpha's registration of the shared native Eliza Cloud sign-in client (elizaOS/eliza
 // packages/auth/android; its policy, plugin methods and contract vectors are tested there). These
@@ -16,7 +17,6 @@ import {preparePatchedNative} from '../scripts/prepare-patched-native.mjs';
 const root=resolve(import.meta.dirname,'..');
 const read=file=>readFileSync(join(root,file),'utf8');
 const between=(text,start,end)=>{const from=text.indexOf(start),to=text.indexOf(end,from+start.length);assert.ok(from>=0&&to>from,`${start} … ${end} located`);return text.slice(from,to);};
-const java=process.env.JAVA_HOME||(process.platform==='darwin'?'/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home':'');const binary=name=>java?join(java,'bin',name):name;
 const native='android/app/src/main/java/ai/elizaresearch/alphaphone/';
 const patched=preparePatchedNative({root});
 const shared=patched.root.slice(root.length+1)+'/packages/auth/android/src/main/java/ai/eliza/auth/cloud/';
@@ -68,18 +68,20 @@ test('Alpha callback contract vectors through the shared native parser',()=>{
  try{
   writeFileSync(join(temporary,'vectors.tsv'),lines.map(line=>line.join('\t')).join('\n')+'\n');
   const sources=['CloudSignInConfig.java','CloudSignInEnvironment.java','CloudSignInFlow.java'].map(file=>join(root,shared,file)).concat(join(root,'vendor/eliza/packages/auth/android/test/ai/eliza/auth/cloud/CloudSignInContractTest.java'));
-  execFileSync(binary('javac'),['--release','11','-d',temporary,...sources],{timeout:60000});
-  assert.match(execFileSync(binary('java'),['-cp',temporary,'ai.eliza.auth.cloud.CloudSignInContractTest',join(temporary,'vectors.tsv'),contract.callbackPath,contract.hosts.production,contract.hosts.staging],{encoding:'utf8',timeout:60000}),new RegExp(`^PASS callback contract \\(${lines.length} vectors\\)`));
+  execFileSync(javaBinary('javac'),['--release','11','-d',temporary,...sources],{timeout:60000});
+  assert.match(execFileSync(javaBinary('java'),['-cp',temporary,'ai.eliza.auth.cloud.CloudSignInContractTest',join(temporary,'vectors.tsv'),contract.callbackPath,contract.hosts.production,contract.hosts.staging],{encoding:'utf8',timeout:60000}),new RegExp(`^PASS callback contract \\(${lines.length} vectors\\)`));
  }finally{rmSync(temporary,{recursive:true,force:true});}
 });
 
-test('the sign-in App Link defaults to the configured Cloud host; staging lives in the test-mocks overlay',()=>{
+test('the sign-in App Link is on the configured Cloud host; staging lives in the test-mocks overlay',()=>{
  const strip=text=>text.replace(/<!--[\s\S]*?-->/g,'');
  const main=strip(read('android/app/src/main/AndroidManifest.xml')),mocks=strip(read('android/app/src/testMocks/AndroidManifest.xml')),gradle=read('android/app/product.gradle');
  const filter=host=>`<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${host}" android:path="/alphaphone/auth/callback"/></intent-filter>`;
- assert.ok(!main.includes('autoVerify'),'the generated overlay owns the HTTPS App Link');
- assert.match(gradle,/\? cloudWebHost : appLinkHostRaw\.toString\(\)\.trim\(\)/,'default builds declare the configured Cloud host');
- assert.ok(gradle.includes(filter('\\${appLinkHost}')),'the overlay adds the sign-in return beside the delegation return');
+ const activity=between(main,'<activity android:name=".MainActivity"','</activity>');
+ assert.match(gradle,/\? cloudWebHost : appLinkHostRaw\.toString\(\)\.trim\(\)/,'every build declares the configured Cloud host');
+ assert.ok(activity.includes(filter('${appLinkHost}')),'MainActivity declares the sign-in return');
+ assert.equal(main.match(/android:path="\/alphaphone\/auth\/callback"/g).length,1,'one sign-in return');
+ assert.doesNotMatch(main,/scheme="https"[^>]*cloud-delegation/,'Cloud delegation returns only through the custom scheme');
  assert.ok(!main.includes('staging.eliza.app'),'no staging host in a product manifest');
  assert.ok(between(main,'<activity android:name=".MainActivity"','</activity>').includes('<data android:scheme="alphaphone" android:host="cloud-delegation"/>'),'the delegation return is unchanged');
  // The shared DelegationCallback admits only the scheme and host the plugin passes; they must be the manifest's.
@@ -115,7 +117,7 @@ test('native sign-in never falls back to hosted login when readiness fails',asyn
  for(const methods of [null,{google:false},{google:true}]) {
   const updates=[];let ensured=false,checking='';
   const run=new Function('operation','cloudEnvironmentAllowed','work','inAppSignInMethods','cloudSignIn','CloudSignInError','cloud','residentCloudFlow','state','update','ensureResident','cloudServiceName',
-   'let epoch=0,signInReadinessOwner=null,googleSignInGeneration=0,inAppGoogle=false,inAppPhone=false,inAppEmail=true;'+compiled+';return controller.beginSignIn("production");');
+   'let epoch=0,signInReadinessOwner=null,googleSignInGeneration=0,providerStatusGeneration=0,inAppGoogle=false,inAppPhone=false,inAppEmail=true;'+compiled+';return controller.beginSignIn("production");');
   await run(false,()=>true,async(message,action)=>{checking=message;return action(new AbortController().signal);},async()=>methods,{},Error,{environment:'production',cancelLogin(){}},()=>true,{purpose:'agent'},v=>updates.push(v),async()=>{ensured=true;},()=> 'Independent Service');
   assert.equal(updates.at(-1).signIn.step,'choose');assert.equal(ensured,true);assert.equal(checking,'Checking Independent Service sign-in…');
  }

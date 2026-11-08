@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';import vm from 'node:vm';import {createRequire} from 'node:module';import {stripTypeScriptTypes} from './support/strip-types.mjs';
+import fs from 'node:fs';import vm from 'node:vm';import {createRequire} from 'node:module';
+import {stripTypeScriptTypes} from './support/strip-types.mjs';
 const require=createRequire(import.meta.url);const {JSDOM}=require('jsdom');
 // The adapter's camera session (design/view-refresh-2026-11/tla/camera-session, Design.cfg) run against the real shared
 // camera session (plugin-native-camera) with a synthetic camera bridge.
@@ -7,44 +8,46 @@ const source=fs.readFileSync(new URL('../apps/app/src/prototype/camera-adapter.t
 const slice=(from,to)=>{const a=source.indexOf(from),b=source.indexOf(to,a);assert.ok(a>=0&&b>a,`camera-adapter.ts still has ${from} … ${to}`);return source.slice(a,b);};
 const helpers=slice('const ZOOM_STOPS','/** Install after native').replace(/^export /gm,'');
 const scanWords=slice('const SCAN_REQUEST','const browserMode').replace(/^export /gm,'');
-const session=slice('  /** How many requests (an agent capture, a scan frame) need Camera active','  function askCameraFrame(');
+const lastTile=slice('  let lastCapture:', '  let accessPanel:');
+const session=slice('  let requestedCaptureHolds=0;','  function askCameraFrame(');
 const frameAsk=slice('  function askCameraFrame(','  /** The reviewed item is still');
 const syncCamera=source.match(/  const syncCamera = [^\n]+\n/)[0];
 const sessionSource=fs.readFileSync(new URL('../.eliza/client-features/plugins/plugin-native-camera/src/session.ts',import.meta.url),'utf8');
 const hostPorts=fs.readFileSync(new URL('../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts',import.meta.url),'utf8');
-const shared=stripTypeScriptTypes((hostPorts+sessionSource).replace(/^import[^;]*;$/gm,'').replace(/^export /gm,''),{mode:'strip'});
+const shared=stripTypeScriptTypes((hostPorts+sessionSource).replace(/^import[^;]*;$/gm,'').replace(/^export /gm,''),{mode:'transform'});
 const settle=async()=>{for(let i=0;i<16;i++)await Promise.resolve();};
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
-function fixture({permission=false,failing=true,receipt={width:1280,height:720,deviceId:'0',minZoom:0.5,maxZoom:10,hasFlash:true,zoom:1,flash:'off'}}={}){
+function fixture({permission=false,failing=true,navigateAfterPhoto=false,receipt={width:1280,height:720,deviceId:'0',minZoom:0.5,maxZoom:10,hasFlash:true,zoom:1,flash:'off'}}={}){
  const env=new JSDOM('<div data-alpha-camera-root data-alpha-layer><button data-alpha-camera="viewfinder"></button></div>',{pretendToBeVisual:true});const timers=new Map();let timerId=0;
  env.window.setTimeout=(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;};env.window.clearTimeout=id=>timers.delete(id);
- const calls={starts:0,stops:0,masked:false,captures:[],focus:0,switches:[],recordings:0,list:[],scans:0,questions:[],native:{flash:'on',zoom:0.5}};let failed=failing;
- const gates={start:undefined,capture:undefined};const clock={now:1000};
+ const calls={starts:0,stops:0,masked:false,captures:[],focus:0,switches:[],recordings:0,list:[],scans:0,questions:[],views:[],modes:[],native:{flash:"on",zoom:0.5}};let failed=failing;
+ const gates={start:undefined,capture:undefined,mode:undefined,switchError:undefined};const clock={now:1000};
  let context;
  const camera={
   startPreview:async()=>{calls.starts++;if(gates.start)await gates.start.promise;if(failed)throw permission?Object.assign(Error('Camera permission denied'),{code:'CAMERA_PERMISSION_DENIED'}):Error('Camera in use');return receipt;},
   stopPreview:async()=>{calls.stops++;},
   capturePhoto:async options=>{calls.captures.push(options);if(gates.capture)await gates.capture.promise;return options.saveToGallery?{format:'jpeg',width:4000,height:3000,path:'content://media/external/images/media/'+(41+calls.captures.length),thumbnail:'AAAA'}:{format:'jpeg',width:4000,height:3000,base64:'AAAA'};},
   setFocusPoint:()=>{calls.focus++;return new Promise(()=>{});},// a focus that never settles
-  switchCamera:async options=>{calls.switches.push({...options,flash:context.flashNow(),zoom:context.zoomNow()});return {...receipt,minZoom:1,maxZoom:4,hasFlash:false};},
-  setZoom:async o=>{calls.native.zoom=o.zoom;},setSettings:async o=>{calls.native.flash=o.settings.flash;},setCaptureMode:async o=>{if(globalThis.__modeImpl)return globalThis.__modeImpl(o);},
+  switchCamera:async options=>{calls.switches.push({...options,flash:context.flashNow(),zoom:context.zoomNow()});if(gates.switchError)throw gates.switchError;return {...receipt,minZoom:1,maxZoom:4,hasFlash:false};},
+  setZoom:async o=>{calls.native.zoom=o.zoom;},setSettings:async o=>{calls.native.flash=o.settings.flash;},
+  setCaptureMode:async o=>{calls.modes.push(o);if(globalThis.__modeImpl)return globalThis.__modeImpl(o);if(gates.mode)await gates.mode.promise;},
   startRecording:async()=>{calls.recordings++;},stopRecording:async()=>({path:'content://media/external/video/media/9',duration:1,width:1,height:1,fileSize:1}),
  };
  const rows={camera:[]};const library={list:async options=>{calls.list.push(options);return {items:options.album==='camera'?rows.camera:[]};},read:async({id})=>({id,image:'',width:1,height:1,date:0,revision:'r'})};
  let view={chat:'hidden',active:true};
  context=vm.createContext({window:env.window,document:env.window.document,console,camera,library,Date:{now:()=>clock.now},Uint8Array,atob,Blob:env.window.Blob,
   mask:enable=>calls.masked=enable,Capacitor:{isPluginAvailable:()=>true},validateCameraCaptureResult:value=>value,systemPickerActive:()=>false,device:{openSettings:async()=>({status:'opened'})},
-  openScanReview:()=>{calls.scans++;return ()=>{};},reviewContentQuestion:input=>{calls.questions.push(input);return ()=>{};},createScanCapture:()=>({keep:async()=>undefined,close(){}}),ScanKeepError:Error,importBrowserPhoto:async()=>({}),browserCamera:{flashAvailable:()=>false},view:()=>view});
- const prelude=`let accessPanel,disposed=false,direction='back',flash=false,duration=0,loaded=true,captures=[],closeQuestion,closeScan,scanRequest;
-  let frameQuestion;let lens={minZoom:1,maxZoom:1,hasFlash:false,zoom:1,flash:false},zoomRatio=1,lastCapture;let requestedPhoto;let lastEpoch=0;function setLast(item){++lastEpoch;lastCapture=item;}
+  openScanReview:()=>{calls.scans++;return ()=>{};},reviewContentQuestion:input=>{calls.questions.push(input);return ()=>{};},createScanCapture:()=>({keep:async()=>undefined,close(){}}),ScanKeepError:Error,importBrowserPhoto:async()=>({}),browserCamera:{flashAvailable:()=>false},view:()=>view,calls,navigateAfterPhoto});
+ const prelude=`let accessPanel,disposed=false,direction='back',flash=false,duration=0,loaded=true,captures=[],closeQuestion,closeScan,scanRequest,frameQuestion;
+  let lens={minZoom:1,maxZoom:1,hasFlash:false,zoom:1,flash:false},zoomRatio=1;let requestedPhoto;
   const browserMode=false,libraryAvailable=()=>true,normalize=row=>({...row,id:'native-camera-'+row.id}),nativeId=id=>id.replace(/^native-camera-/,''),cancelScan=()=>{};function schedule(){}
   const finder='[data-alpha-camera="viewfinder"]';let state={said:'',mode:'photo'};
-  const api={S:{get chat(){return view().chat;}},isActive:()=>view().active,set:patch=>Object.assign(state,patch),get:()=>state,setView:()=>{},shell:patch=>{view().chat=patch.chat;}};`;
- vm.runInContext(shared+stripTypeScriptTypes(prelude+helpers+scanWords+session+frameAsk+syncCamera+`;globalThis.testCamera={cameraFrameQuestionRequested,askAboutCameraFrame,bindMode,modeSettled:()=>modeChange,recordingOptions:()=>RECORDING,start,stop,control,capture,record,focusAt,takeRequestedPhoto,zoomStops,lensFromReceipt,photoReceiptPath,cameraScanRequested,scanRequest:()=>scanRequest(),active,installViewPresence,syncCamera,CHAT_GRACE_MS,
+  const api={S:{get chat(){return view().chat;}},isActive:()=>view().active,set:patch=>Object.assign(state,patch),get:()=>state,setView:name=>{calls.views.push(name);if(navigateAfterPhoto&&name==='photos')view().active=false;},shell:patch=>{view().chat=patch.chat;}};`;
+ vm.runInContext(shared+stripTypeScriptTypes(prelude+helpers+scanWords+lastTile+session+frameAsk+syncCamera+`;globalThis.testCamera={cameraFrameQuestionRequested,askAboutCameraFrame,recordingOptions:()=>RECORDING,bindMode,modeSettled:()=>modeChange,start,stop,control,capture,record,focusAt,takeRequestedPhoto,zoomStops,lensFromReceipt,photoReceiptPath,cameraScanRequested,scanRequest:()=>scanRequest(),active,installViewPresence,syncCamera,CHAT_GRACE_MS,
   flip:()=>flipLens(api),
   setFlash:on=>{flash=on;},setZoom:z=>{zoomRatio=z;},mode:m=>{state.mode=m;},
   state:()=>({phase:session.phase,denied:session.denied,said:state.said,capturing:session.capturing,recording:session.recording,flash,zoomRatio,lens,last:lastCapture,fl:state.fl})};
-  globalThis.flashNow=()=>flash;globalThis.zoomNow=()=>zoomRatio;`,{mode:'strip'}),context);
+  globalThis.flashNow=()=>flash;globalThis.zoomNow=()=>zoomRatio;`,{mode:'transform'}),context);
  return {env,timers,calls,gates,clock,rows,camera,api:context.testCamera,recover:()=>failed=false,setView:v=>Object.assign(view,v)};
 }
 // Video mode pre-binds VideoCapture for the quality every recording asks for, so starting one does not rebind;
@@ -59,13 +62,28 @@ function fixture({permission=false,failing=true,receipt={width:1280,height:720,d
  f.api.bindMode('photo');await f.api.modeSettled();await settle();
  assert.equal(f.api.state().phase,'off','A released preview ends the session');
  assert.equal(f.env.window.document.querySelector('[role="alert"]').getAttribute('aria-label'),'Camera unavailable');
- globalThis.__modeImpl=undefined;f.env.window.close();
+ const starts=f.calls.starts;
+ f.api.syncCamera();await settle();f.api.syncCamera();await settle();
+ assert.equal(f.calls.starts,starts,'Native preview refusal remains latched');
+ globalThis.__modeImpl=undefined;
+ f.env.window.document.querySelector('[role="alert"] button').click();await settle();
+ assert.equal(f.calls.starts,starts+1);assert.equal(f.api.state().phase,'ready');
+ globalThis.__modeImpl=async()=>{throw Object.assign(Error('Camera preview stopped'),{code:'PREVIEW_STOPPED'});};
+ f.api.bindMode('photo');await f.api.modeSettled();await settle();
+ assert.equal(f.api.state().phase,'off');
+ globalThis.__modeImpl=undefined;
+ f.setView({active:false});f.api.syncCamera();await settle();
+ f.setView({active:true});f.api.syncCamera();await settle();
+ assert.equal(f.calls.starts,starts+2,'A new visit can bind the preview');
+ f.env.window.close();
 }
 // A question about what the camera sees opens the reviewed question on one unsaved frame, with the asked text.
 {
  const f=fixture({failing:false});await f.api.start();await settle();
  for(const text of['What am I looking at?','what’s this','Describe what you see','What does this say?'])assert.equal(f.api.cameraFrameQuestionRequested(text),true,text);
- for(const text of['Scan this','take a photo','what am I doing tomorrow','Tell me what is this week'])assert.equal(f.api.cameraFrameQuestionRequested(text),false,text);
+ for(const text of['Scan this','take a photo','what am I doing tomorrow','Tell me what is this week',"What is this week's forecast?",'what’s that song called','What is that restaurant near me','read this article later','describe this to my sister','What do you see in the news today?', 'what is this?'+ ' '.repeat(200)+'another request'])assert.equal(f.api.cameraFrameQuestionRequested(text),false,text);
+ for(const text of['Hey Alpha, what is this?','what is that, please?','Read this to me','what do you see right now?'])assert.equal(f.api.cameraFrameQuestionRequested(text),true,text);
+ assert.equal(f.api.cameraFrameQuestionRequested({toString(){throw Error('Do not coerce arbitrary input');}}),false);
  f.setView({chat:'sheet'});
  assert.equal(f.api.askAboutCameraFrame('What am I looking at?'),true);
  assert.equal(f.calls.questions.length,1);assert.equal(f.setView({}).chat,'hidden','The chat closes so the review is visible');assert.equal(f.calls.questions[0].question,'What am I looking at?');assert.equal(f.calls.questions[0].name,'Camera frame');
@@ -131,11 +149,24 @@ function fixture({permission=false,failing=true,receipt={width:1280,height:720,d
  const f=fixture({failing:false});await f.api.start();assert.equal(f.api.state().said,'','No status pill while starting or after ready');
  await f.api.control(async()=>{throw Error('unsupported');},()=>{throw Error('must not complete');});const timer=[...f.timers.values()].find(t=>t.ms===5000);assert.ok(timer);assert.equal(f.api.state().said,'Not supported on this camera.');timer.fn();assert.equal(f.api.state().said,'');f.env.window.close();
 }
+// The Video preview and recording must use the same quality. A released preview cannot start recording.
+{
+ const f=fixture({failing:false});await f.api.start();await f.api.modeSettled();
+ f.api.mode('video');f.api.bindMode('video');await f.api.modeSettled();
+ assert.deepEqual(JSON.parse(JSON.stringify(f.calls.modes.at(-1))),{mode:'video',quality:'medium'});
+ f.gates.mode=deferred();f.api.bindMode('video');await settle();const recording=f.api.record();await settle();
+ f.gates.mode.reject(Object.assign(Error('Camera preview stopped'),{code:'PREVIEW_STOPPED'}));
+ await recording;await f.api.modeSettled();await settle();
+ assert.equal(f.calls.recordings,0,'A recording waiting on a released preview must not reach native');
+ assert.equal(f.api.state().phase,'off');
+ assert.equal(f.env.window.document.querySelector('[role="alert"]').getAttribute('aria-label'),'Camera unavailable');
+ f.env.window.close();
+}
 // The bound lens decides zoom chips and flash; its receipt is read on first frame; the last tile reads one row.
 {
  const f=fixture({failing:false});await f.api.start();await settle();
  assert.deepEqual(JSON.parse(JSON.stringify(f.api.state().lens)),{minZoom:0.5,maxZoom:10,hasFlash:true,zoom:1,flash:false});
- assert.deepEqual(JSON.parse(JSON.stringify(f.calls.list)),[{album:'camera',limit:1}],'The last-capture tile reads one Camera album row after ready');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.calls.list)),[{album:'camera',limit:1}],'The last-capture tile reads the newest Camera-album row after ready');
  assert.deepEqual(JSON.parse(JSON.stringify(f.api.zoomStops({minZoom:0.5,maxZoom:10}))).map(s=>s[1]),['.5','1×','2','5']);
  assert.deepEqual(JSON.parse(JSON.stringify(f.api.zoomStops({minZoom:1,maxZoom:4}))).map(s=>s[1]),['1×','2']);
  assert.deepEqual(JSON.parse(JSON.stringify(f.api.zoomStops({minZoom:1,maxZoom:1}))),[],'A fixed lens shows no chips');
@@ -150,15 +181,13 @@ function fixture({permission=false,failing=true,receipt={width:1280,height:720,d
  const f=fixture({failing:false});await f.api.start();f.api.setFlash(true);f.api.setZoom(0.5);await f.api.flip();
  assert.deepEqual(JSON.parse(JSON.stringify(f.calls.switches)),[{direction:'front',flash:false,zoom:1}]);assert.equal(f.api.state().lens.hasFlash,false);assert.equal(f.api.state().flash,false);f.env.window.close();
 }
-// A rejected flip leaves native and the view agreeing: flash off and 1× on the current lens, set before the switch.
+// When switching lenses fails, the UI and native old lens still agree on their reset controls.
 {
  const f=fixture({failing:false});await f.api.start();f.api.setFlash(true);f.api.setZoom(0.5);
- f.camera.switchCamera=async()=>{throw Object.assign(Error('unsupported'),{code:'WHITE_BALANCE_UNSUPPORTED'});};
- await f.api.flip();
- assert.equal(f.api.state().said,'Not supported on this camera.');
- assert.deepEqual({...f.calls.native},{flash:'off',zoom:1},'Native was reset before the switch');
+ f.gates.switchError=Error('Switch unavailable');await f.api.flip();
+ assert.deepEqual({...f.calls.native},{flash:'off',zoom:1});
  assert.equal(f.api.state().flash,false);assert.equal(f.api.state().zoomRatio,1);
- f.env.window.close();
+ assert.equal(f.api.state().said,'Not supported on this camera.');f.env.window.close();
 }
 // FixFocus: a focus that never settles does not block the shutter.
 {
@@ -167,6 +196,30 @@ function fixture({permission=false,failing=true,receipt={width:1280,height:720,d
  assert.equal(f.calls.captures[0].thumbnailOnly,true,'Native shutter returns a thumbnail, not the full JPEG');
  assert.equal(f.api.state().last.id,'native-camera-42','The capture becomes the last-capture tile');assert.equal(f.api.state().said,'','No "Saving photo" pill');
  assert.equal(f.api.state().fl,1,'Shutter flash');f.env.window.close();
+}
+// A tap during the first gallery write survives until the last queued shot opens Photos.
+{
+ const f=fixture({failing:false,navigateAfterPhoto:true});await f.api.start();await settle();
+ f.gates.capture=deferred();const first=f.api.capture();await settle();
+ await f.api.capture();await f.api.capture();assert.equal(f.calls.captures.length,1);
+ f.gates.capture.resolve();f.gates.capture=undefined;await first;await settle();await settle();
+ assert.equal(f.calls.captures.length,2,'One pending shutter press is retained until the current photo finishes');
+ assert.deepEqual(f.calls.views,['photos'],'Photos opens once after both captures');
+ f.env.window.close();
+}
+// A busy lens retains one pending shot, but a mode change or leaving clears the intent.
+{
+ const f=fixture({failing:false});await f.api.start();await settle();
+ const gate=deferred();const zoom=f.api.control(()=>gate.promise,()=>{});await settle();
+ await f.api.capture();assert.equal(f.calls.captures.length,0);
+ gate.resolve();await zoom;await settle();await settle();assert.equal(f.calls.captures.length,1);
+ const modeGate=deferred();const flash=f.api.control(()=>modeGate.promise,()=>{});await settle();
+ await f.api.capture();f.api.mode('video');modeGate.resolve();await flash;await settle();await settle();
+ assert.equal(f.calls.captures.length,1);assert.equal(f.calls.recordings,0);
+ f.api.mode('photo');const leaveGate=deferred();const control=f.api.control(()=>leaveGate.promise,()=>{});await settle();
+ await f.api.capture();f.setView({active:false});leaveGate.resolve();await control;await settle();await settle();
+ assert.equal(f.calls.captures.length,1,'A pending shot is never taken after leaving Camera');
+ f.env.window.close();
 }
 // FixLeave: leaving during a capture waits for the native result before the preview is released, and clears capturing.
 {
@@ -185,6 +238,22 @@ function fixture({permission=false,failing=true,receipt={width:1280,height:720,d
  const f=fixture({failing:false});f.gates.start=deferred();void f.api.start();await settle();
  const request=f.api.takeRequestedPhoto('op-2',new AbortController().signal,()=>{});await settle();f.setView({active:false});await f.api.stop();
  const result=await request;assert.equal(result.status,'failed');assert.match(result.summary,/No photo was taken/);assert.equal(f.calls.captures.length,0);f.gates.start.resolve();f.env.window.close();
+}
+// An agent capture queued past the chat grace keeps Camera active even when a scan request finishes first.
+{
+ const f=fixture({failing:false});await f.api.start();f.setView({chat:'sheet'});f.api.syncCamera();f.clock.now+=f.api.CHAT_GRACE_MS;f.api.syncCamera();await settle();assert.equal(f.api.state().phase,'off');
+ f.gates.start=deferred();
+ const request=f.api.takeRequestedPhoto('op-hold',new AbortController().signal,()=>{});await settle();
+ assert.equal(f.api.scanRequest(),true);await settle();
+ // The scan closes the chat; reopen it so only the agent request's hold keeps Camera active.
+ f.setView({chat:'sheet'});
+ f.gates.capture=deferred();f.gates.start.resolve();f.gates.start=undefined;await settle();await settle();await settle();
+ assert.equal(f.calls.captures.length,1,'The agent photo is being written');
+ f.api.syncCamera();await settle();
+ assert.equal(f.api.state().phase,'ready','The scan request ending does not release the hold of the agent capture still being written');
+ f.gates.capture.resolve();f.gates.capture=undefined;
+ const result=await request;assert.equal(result.status,'succeeded',result.summary);
+ f.env.window.close();
 }
 // A start failure fails the queued agent capture for its real cause.
 {

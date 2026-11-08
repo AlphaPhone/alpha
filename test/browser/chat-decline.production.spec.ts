@@ -1,5 +1,5 @@
 import {seedCompletedAccessSetup} from './flag-off-android';
-import { completeAccessSetup } from './flag-off-android';
+import { completeAccessSetup, openYourAgent } from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
@@ -146,16 +146,17 @@ test('a proposal is declined from its chat card and the agent records the reject
   await expect(page.getByText('Create note', { exact: true })).toHaveCount(0);
 });
 
-test('Settings › Agent connection reconciles a reconciliation-required entry as not applied', async ({ page }) => {
+test('Activity reconciles a reconciliation-required entry as not applied', async ({ page }) => {
   test.setTimeout(90_000);
   await residentAgent(page, 'reconcile');
   await connected(page, { review: true });
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Agent connection', exact: true }).click();
-  const app = page.locator('[data-settings-page]:not([inert])').last();
-  // The owner reads the history explicitly; only then is a reconciliation decision offered.
+  await openYourAgent(page);
+  const app = page.locator('[data-alpha-layer="app"]');
+  // Background proposal recovery stays passive. Activity loads its history only
+  // when the owner asks, before any reconciliation decision is available.
   await app.getByRole('button', { name: 'Refresh actions', exact: true }).click();
-  await expect(app.getByText('Actions to confirm', { exact: true })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Refresh actions', exact: true })).toBeVisible();
+  await expect(app.getByText('Needs your review · not dispatched by this phone', { exact: true })).toBeVisible();
   await expect(app.getByRole('button', { name: 'I verified it happened', exact: true })).toBeVisible();
   await app.getByRole('button', { name: 'I verified it did not happen', exact: true }).click();
   await expect.poll(async () => (await fixture(page)).states).toEqual([['fixture-reconcile', 'not_applied']]);

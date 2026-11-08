@@ -286,7 +286,7 @@ test("Capacitor's own permission request, and the shared plugins' requests an ap
       // Android version, rather than asking for the obsolete legacy permission together with the current media
       // grants, and a late request is answered with Alpha's LateLaunch wording.
       const media="vendor/eliza/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/";
-      const base=fs.readFileSync(media+(name==='AlphaPhotosPlugin.java'?"PhotosPlugin.java":"DeviceLibraryPlugin.java"),"utf8");
+      const base=fs.readFileSync(media+(name==='AlphaPhotosPlugin.java'?"PermittedPhotosPlugin.java":"DeviceLibraryPlugin.java"),"utf8");
       assert.match(base,/@Override\n {2}@PluginMethod\n {2}public void requestPermissions\(PluginCall call\) \{\n {4}(?:requestLibraryAccess|requestAccess)\(call\);\n {2}\}/);
       if(name==='AlphaPhotosPlugin.java'){
         assert.match(base,/ask\(call, \(\) -> requestPermissionForAliases\(aliases, call, "libraryPermissionResult"\)\);/);
@@ -306,7 +306,7 @@ test("Capacitor's own permission request, and the shared plugins' requests an ap
       assert.match(base,/protected boolean launch\(PluginCall call,Runnable request\)\{\n  try\{request\.run\(\);return true;\}catch\(IllegalStateException closed\)\{call\.reject\(LAUNCH_CLOSED\);return false;\}/);
       const prompts=[...base.matchAll(/requestPermissionForAlias\(/g)].map(match=>base.slice(Math.max(0,match.index-24),match.index));
       assert.equal(prompts.length,2);for(const before of prompts)assert.match(before,/launch\(call,\(\)->$/);
-      assert.match(read(name),/@Override protected boolean launch\(PluginCall call,Runnable request\)\{return LateLaunch\.ask\(call,request\);\}/);
+      assert.match(read(name),/@Override protected boolean launch\(PluginCall call,Runnable request\)\{if\(sensitiveSurfaceActive\(\)\)\{call\.reject\("Close the protected credential surface before using speech\."\);return false;\}return LateLaunch\.ask\(call,request\);\}/);
     } else assert.ok(guardedOverride(read(name), "requestPermissions"), `${name}: requestPermissions is overridden with the guard`);
   }
 
@@ -363,4 +363,10 @@ test("Contacts generic permission requests remain image and foreground gated",()
   const base=fs.readFileSync("vendor/eliza/plugins/plugin-native-contacts/android/src/main/java/ai/eliza/plugins/contacts/AddressBookPlugin.java","utf8");
   assert.match(base,/public void requestPermissions\(PluginCall call\) \{\n    if \(!foreground\(\)\) \{/);assert.match(base,/launch\(call, \(\) -> requestPermissionForAlias\("contacts", call, "permissionResult"\)\)/);
   assert.match(base,/launch\(call, \(\) -> startActivityForResult\(call, intent, "editorResult"\)\)/);assert.match(base,/catch \(IllegalStateException gone\) \{\n      call\.reject\(closedMessage\(\)\);/);
+});
+
+test("an attachments instance's teardown removes only its own viewer copies", async () => {
+  // Main surface and assistant each register AlphaMailAttachments over one cache folder.
+  const { nativeSource, fixture, runJvm } = await import("./fixtures/jvm-tools.mjs");
+  assert.match(runJvm([nativeSource("ReviewedCopies.java"), fixture("ReviewedCopiesTest.java")], "ai.elizaresearch.alphaphone.ReviewedCopiesTest"), /^PASS reviewed copies/);
 });

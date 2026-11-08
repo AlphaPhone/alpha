@@ -1,11 +1,12 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {guardCalendarFixture as guardNoMedia} from './calendar-draft-readiness';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page,type Locator} from '@playwright/test';
 test.beforeEach(async({context})=>guardNoMedia(context));
 const key='alpha.browser.execution.local.v1';
-async function open(page:Page){await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Agent connection',exact:true}).click();}
-async function setup(page:Page){await page.goto('/?mode=dev');await openLegacyNotes(page);await returnToApps(page);await open(page);await page.getByRole('button',{name:'Connect development profile'}).click();await page.getByRole('button',{name:'Agent connection',exact:true}).click();await page.getByText('Development device actions',{exact:true}).click();}
+async function open(page:Page){await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);}
+async function setup(page:Page){await page.goto('/?mode=dev');await openLegacyNotes(page);await returnToApps(page);await open(page);await page.getByRole('button',{name:'Connect development profile'}).click();await openConnectionDiagnostics(page);await page.getByText('Development device actions',{exact:true}).click();}
 async function queue(page:Page){await page.getByRole('button',{name:'Queue action for review'}).click();await expect(page.getByText('Action queued. Send a chat message to review it on the current screen.',{exact:true})).toBeVisible();}
 // A recovered card can appear before the first chat finishes saving its conversation.
 // Wait for this reply before injecting failures or confirming its action.
@@ -19,16 +20,51 @@ async function sendReviewMessage(page:Page,input:Locator,message:string){
 async function chat(page:Page){await page.getByRole('button',{name:'Close connection settings'}).click();await returnToApps(page);await sendReviewMessage(page,page.getByRole('textbox',{name:/^(Ask Alpha|Message Alpha)$/}),'Review my development action');await expect(page.getByText('Create note',{exact:true})).toBeVisible();}
 const state=(page:Page)=>page.evaluate(async()=>(await (await import('/src/browser/development-execution-document.ts')).readExecutionPart({namespace:'local'} as any,'actions',()=>({proposals:[],journal:[]}))));
 test('queued development action executes once only after review and preserves its receipt on reload',async({page})=>{
- await setup(page);await queue(page);expect((await state(page)).proposals[0].state).toBe('pending');expect((await state(page)).journal).toHaveLength(0);await chat(page);await expect(page.getByText('Create note',{exact:true})).toHaveCount(1);expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records.some((n:any)=>n.title==='Development note'))).toBe(false);await page.getByText('Create note',{exact:true}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect((await state(page)).journal[0].phase).toBe('terminal');await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Sync recorded receipts'}).click();await expect(page.getByText('completed',{exact:true})).toBeVisible();expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())!).records.filter((n:any)=>n.title==='Development note').length)).toBe(1);
+ await setup(page);await queue(page);expect((await state(page)).proposals[0].state).toBe('pending');expect((await state(page)).journal).toHaveLength(0);await chat(page);await expect(page.getByText('Create note',{exact:true})).toHaveCount(1);expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records.some((n:any)=>n.title==='Development note'))).toBe(false);await page.getByText('Create note',{exact:true}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect((await state(page)).journal[0].phase).toBe('terminal');await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Check with agent'}).click();await expect(page.getByText('completed',{exact:true})).toBeVisible();expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())!).records.filter((n:any)=>n.title==='Development note').length)).toBe(1);
+});
+for(const scenario of ['changed move','changed Trash','unchanged move'])test(`Files review binds the exact object: ${scenario}`,async({page})=>{
+ await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'));
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');const files=registerPlugin<any>('AlphaFiles');
+  await files.storageCreateFolder({parent:'',name:'Destination'});
+  const imported=await files.importFile(new File(['OLD!'],'reviewed.txt',{type:'text/plain'}));
+  await files.forgetSelected({selectionId:imported.selectionId});
+ });
+ const trash=scenario==='changed Trash';
+ const operation=trash?{type:'files_trash',paths:['reviewed.txt']}:{type:'files_move',paths:['reviewed.txt'],dest:'Destination'};
+ await page.getByRole('textbox',{name:'Action JSON'}).fill(JSON.stringify(operation));await queue(page);
+ await page.getByRole('button',{name:'Close connection settings'}).click();await returnToApps(page);
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Type',exact:true}).click();
+ const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
+ await input.fill('Review my Files action');await input.press('Enter');
+ const review=page.getByText(trash?'Move 1 item to Trash':'Move 1 item',{exact:true});await expect(review).toBeVisible();
+ if(scenario!=='unchanged move')await page.evaluate(async()=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');const files=registerPlugin<any>('AlphaFiles');
+  await files.storageRename({path:'reviewed.txt',name:'original.txt'});
+  const imported=await files.importFile(new File(['NEW!'],'reviewed.txt',{type:'text/plain'}));
+  await files.forgetSelected({selectionId:imported.selectionId});
+ });
+ await review.click();
+ await expect.poll(async()=>(await state(page)).journal[0]?.status).toBe(scenario==='unchanged move'?'succeeded':'failed');
+ const observed=await page.evaluate(async()=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');const files=registerPlugin<any>('AlphaFiles');
+  return {root:(await files.storageList({path:''})).entries.map((row:any)=>row.name),
+   dest:(await files.storageList({path:'Destination'})).entries.map((row:any)=>row.name),
+   trash:(await files.storageTrashList()).items.length};
+ });
+ expect(observed.dest).toEqual(scenario==='unchanged move'?['reviewed.txt']:[]);expect(observed.trash).toBe(0);
+ if(scenario!=='unchanged move')expect(observed.root).toEqual(expect.arrayContaining(['reviewed.txt','original.txt']));
 });
 test('rejecting a proposal persists without executing or reserving an effect',async({page})=>{
- await setup(page);await queue(page);await page.getByRole('button',{name:'Refresh actions'}).click();await page.getByRole('button',{name:'Reject proposal'}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('rejected');expect((await state(page)).journal).toHaveLength(0);
+ await setup(page);await queue(page);await page.getByRole('button',{name:'Refresh actions'}).click();await page.getByRole('button',{name:'Decline',exact:true}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('rejected');expect((await state(page)).journal).toHaveLength(0);
 });
 test('rejected chat review becomes unavailable after refresh and cannot dispatch',async({page})=>{
  await setup(page);await queue(page);await chat(page);
  const before=(await state(page)).proposals[0];
  await page.evaluate(async()=>{const {connectionController}=await import('/src/runtime/connection-ui.tsx');connectionController.open();});
- await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Refresh actions'}).click();await page.getByRole('button',{name:'Reject proposal'}).click();
+ await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Refresh actions'}).click();await page.getByRole('button',{name:'Decline',exact:true}).click();
  await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('rejected');await page.getByRole('button',{name:'Close connection settings'}).click();
  const unavailable=page.getByRole('button',{name:/Review unavailable/});await expect(unavailable).toBeVisible();await expect(unavailable).toBeDisabled();await expect(page.getByText('Create note',{exact:true})).toHaveCount(0);
  expect((await state(page)).proposals[0].id).toBe(before.id);expect((await state(page)).journal).toHaveLength(0);
@@ -95,7 +131,7 @@ test('development reminder recovers an applied effect after terminal journal per
  await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'));await setup(page);const operation=await page.evaluate(async()=>{const {DailyApps}=await import('/src/daily.ts');await DailyApps.scheduleReminder({id:'recovery_reminder',title:'Recovery reminder',at:Date.now()+3600000});window.dispatchEvent(new Event('alpha:reminders-committed'));return {type:'reminder_complete',target:await DailyApps.selectedReminder({id:'recovery_reminder'})};});
  await page.getByRole('textbox',{name:'Action JSON'}).fill(JSON.stringify(operation));await queue(page);await page.getByRole('button',{name:'Close connection settings'}).click();await returnToApps(page);await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.getByRole('button',{name:/^Recovery reminder,/}).click();await page.getByRole('button',{name:'Type',exact:true}).click();const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();await sendReviewMessage(page,input,'Review completion');await expect(page.getByText('Complete selected reminder',{exact:true})).toBeVisible();
  await page.evaluate(key=>{const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,k){if(k===key&&JSON.parse(JSON.parse(JSON.parse(v.raw).value).actions).journal.some((e:any)=>e.phase==='terminal'))throw Error('Full');return put.call(this,v,k);};},key);await page.getByText('Complete selected reminder',{exact:true}).click();await expect.poll(()=>page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders[0].status)).toBe('completed');await expect(page.getByText(/Action did not reach a confirmed result/).first()).toBeVisible();expect((await state(page)).journal[0].phase).toBe('applying');const before=await page.evaluate(async ()=>(await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw()));
- await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Sync recorded receipts'}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect((await state(page)).journal[0].summary).toContain('No action was repeated');expect(await page.evaluate(async ()=>(await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw()))).toBe(before);await page.getByRole('button',{name:'Sync recorded receipts'}).click();expect(await page.evaluate(async ()=>(await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw()))).toBe(before);
+ await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Check with agent'}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect((await state(page)).journal[0].summary).toContain('No action was repeated');expect(await page.evaluate(async ()=>(await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw()))).toBe(before);await page.getByRole('button',{name:'Check with agent'}).click();expect(await page.evaluate(async ()=>(await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw()))).toBe(before);
 });
 
 test('development selected no-alert reminder completes only after approval and keeps its receipt on reload',async({page})=>{
@@ -106,7 +142,7 @@ test('development selected no-alert reminder completes only after approval and k
  const rows=()=>page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders);
  await expect(page.getByText('Complete selected reminder',{exact:true})).toBeVisible();expect((await rows())[0].status).toBe('pending');expect((await state(page)).journal).toHaveLength(0);
  await page.getByText('Complete selected reminder',{exact:true}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect((await rows())[0].status).toBe('completed');expect((await rows())[0].alertMinutes).toBeNull();expect((await state(page)).journal).toHaveLength(1);expect((await state(page)).journal[0].phase).toBe('terminal');const recorded=await rows();
- await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Sync recorded receipts'}).click();await expect(page.getByText('completed',{exact:true})).toBeVisible();expect(await rows()).toEqual(recorded);expect((await state(page)).journal).toHaveLength(1);
+ await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Check with agent'}).click();await expect(page.getByText('completed',{exact:true})).toBeVisible();expect(await rows()).toEqual(recorded);expect((await state(page)).journal).toHaveLength(1);
 });
 
 test('agent legacy reminder refuses unsupported no-alert intent before approval',async({page})=>{
@@ -131,5 +167,5 @@ for(const mode of ['none','lead','repeat','lost-response','old-native'] as const
  if(mode==='lost-response')await expect.poll(async()=>(await state(page)).journal[0]?.status).toBe('unknown');else await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');
  const before=await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!));expect(before.reminders[0]).toMatchObject({title:operation.fields.title,body:operation.fields.body,at:schedule.at,dueAt:schedule.dueAt,alertMinutes:schedule.alertMinutes,status:mode==='lead'?'scheduled':'pending'});if(mode==='repeat')expect(before.reminders[0].recurrence).toEqual(schedule.recurrence);
  expect(Object.keys(before.receipts)).toHaveLength(1);
- await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Sync recorded receipts'}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!))).toEqual(before);await page.getByRole('button',{name:'Sync recorded receipts'}).click();expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!))).toEqual(before);
+ await page.reload();await open(page);await page.getByText('Development device actions',{exact:true}).click();await page.getByRole('button',{name:'Check with agent'}).click();await expect.poll(async()=>(await state(page)).proposals[0].state).toBe('completed');expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!))).toEqual(before);await page.getByRole('button',{name:'Check with agent'}).click();expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!))).toEqual(before);
 });

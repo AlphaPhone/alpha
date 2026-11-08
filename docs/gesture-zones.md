@@ -8,8 +8,10 @@ consumed through the pin) and `AlphaDevicePlugin.java`.
 Browser tests are Chromium on a development or production build. They are not emulator,
 TalkBack, AOSP-image or device evidence. The instrumented classes named at the end, except
 `NotificationChannelsInstrumentedTest`, ran at `69a4be6c` on an API 35 Google APIs emulator on
-2026-10-14 (class E, developer APKs, [verification](verification.md#emulator-results-at-69a4be6c-2026-10-14-system-shade-416-417));
-that is not AOSP-image, Pixel 10a, real TalkBack or device acceptance.
+2026-10-14 (class E, developer APKs, [verification](verification.md#emulator-results-at-69a4be6c-2026-10-14-system-shade-416-417)).
+There `AccessibilityInstrumentedTest` tested a Home **Open notifications** button that has since
+been removed; its current pull-only body has no recorded emulator run. None of this is AOSP-image,
+Pixel 10a, TalkBack, Switch Access or device acceptance.
 
 ## The rule
 
@@ -34,35 +36,29 @@ SystemUI, because a browser has none; it is a developer surface (`simulatedShade
 | Standalone app: any downward pull on Home | Nobody in Alpha | An ordinary app: Android's top-edge swipe is the way in. |
 | A swipe in from the left or right edge | Android (gesture navigation) | Android delivers Back. In the browser build the same swipe within 30px of an edge goes Back. |
 | A swipe up from the bottom edge | Android (gesture navigation) | Android delivers HOME; the launcher flavor shows Alpha Home. |
-| A swipe up on Alpha Home, away from the bottom edge and the dock | Nobody | Nothing opens. Home scrolls if it overflows. Alpha ignores the shared shell's `raise-assistant` swipe result. |
-| A tap on the Alpha mark, or a drag up that starts on the bar or pill | Alpha | Opens the conversation sheet. Only the dock opens the chat (see [The chat dock](#the-chat-dock)). |
+| A swipe up on Alpha Home, away from the bottom edge | Home content | Scrolls Home if its content overflows. Open the conversation from the chat dock. |
 | The open chat sheet: the Resize chat grabber | Alpha | The sheet follows the finger and rests where it is released. A release within 120 canvas pixels of the collapsed form collapses it, within 120 of the top goes full screen, and a flick (at least 1 canvas pixel per millisecond at release) jumps to either end (`chatRelease` in `chat-overlay-motion-adapter.ts`). |
-| Outside a raised chat (portrait): the open sheet, the bar raised from the pill, or the bar with the keyboard up | Alpha | Any touch (tap, drag, long press) lowers it to the view's resting form (pill, or the unfocused bar on Home and Browser), closes the keyboard and reaches nothing underneath; the next touch is ordinary. A tap lowers on its click, a drag on release, a long press without a click right after release. The draft stays. Assistive technology activates controls directly. In landscape the chat docks beside the app, which stays live and unguarded. Alpha's own layers above the dock (toasts, the voice panel and the standalone app's back fallback) keep their touches. |
-| The keyboard closes by itself (Android's hide key or Back) | Android, then Alpha | The composer lets go of focus, so the bar is no longer raised on Home and Browser and the next touch reaches Home. Detected against the keyboard-free window height (`keyboardFreeHeight`), since `adjustResize` shrinks the WebView. Leaving the app also ends typing. |
-| Back with a raised chat | Alpha | Unwinds one level: keyboard (Android's IME takes Back first), full to sheet, sheet to rest, raised bar to pill, then the view's own Back (see [The chat dock](#the-chat-dock)). |
+| Outside the open chat sheet (portrait) | Alpha | Any touch, tap or drag, collapses the chat and reaches nothing underneath; the next touch is ordinary. Assistive technology activates controls directly. In landscape the chat docks beside the app, which stays live. |
+| Outside a focused composer or a composer raised from the pill | Alpha | The first tap dismisses the keyboard and returns the dock to rest. The draft stays. The next tap reaches the app. |
 | Full-screen chat | Alpha | No grabber: nothing of Alpha's competes with Android's top-edge band. The header starts 16 screen pixels below Android's status bar on the launcher (`--alpha-chat-full-top`, at least 60px of canvas). Shrink chat returns to the last resting height, Minimize chat collapses. |
 
 ## The chat dock
 
-The dock has four forms: the **pill** (`chat: "hidden"`), the **bar** (`input`), the **sheet** and
-**full** screen, plus whether the composer has focus (the keyboard is up). Each view has a resting
-form: the unfocused bar on Home and Browser, the pill everywhere else.
+The dock has pill (`hidden`), bar (`input`), sheet and full-screen states. Home and Browser rest
+at the unfocused bar. Other views rest at the pill. A raised bar or sheet uses the existing
+`data-alpha-chat-scrim` to receive the first outside touch. That touch lowers the dock and keeps
+the app underneath untouched. The next touch can activate the app.
 
-1. **Raised** means above the resting form or with the keyboard up: the sheet or full chat, the bar
-   in a pill view, or the bar with the composer focused.
-2. While the dock is raised (portrait), the **first touch outside** the dock or sheet lowers it to
-   the resting form, closes the keyboard and reaches nothing underneath; the next touch is
-   ordinary. One guard (`data-alpha-dock-guard`, below the dock and above the views) does this for
-   every raised form (`chat-overlay-motion-adapter.ts`, `template.html`).
-3. **Only the dock opens the chat**: a tap on the Alpha mark, or a drag up that starts on the bar or
-   pill, through the dock's own drag handlers. A drag anywhere else scrolls or does nothing;
-   Android's bottom-edge swipe still goes Home. `model.js` `swipe()` has no swipe-up-to-chat rule.
-4. **Back unwinds one level** (`model.js` `back()`): the keyboard, then full to sheet, sheet to the
-   resting form, a raised bar to the pill, then the view's own Back.
-5. Lowering never discards a draft; raising the bar again shows it.
+Android can send the tap's click in a later task after pointerup. The scrim retains its press
+for up to 350 ms, giving that click the same target. A drag lowers on release. A released press
+without a click lowers when that wait ends. Cancellation lowers the dock, and navigation,
+backgrounding or unmounting retires the pending press. Lowering preserves the draft.
 
-`test/browser/full-chat-grabber.spec.ts` covers the guard on every raised form, the kept draft, the
-Back order and that nothing but the dock opens the chat.
+Only a gesture that starts on the dock opens the chat. Back dismisses the keyboard, then moves
+full screen to sheet, sheet to the resting form, and a raised bar to the pill before leaving the
+view. The existing desktop and touch cases in `test/browser/full-chat-grabber.spec.ts` cover the
+first-touch rule, delayed click, no-click release, draft retention and Back order. These are
+browser checks rather than measurements of a physical Android input pipeline.
 
 ## Empty Home
 
@@ -86,8 +82,8 @@ text or display size) scrolls normally; only at its top, where it cannot scroll 
 Alpha take a clearly downward drag on empty Home from the WebView (a non-passive `touchmove` that
 calls `preventDefault`, `overflowPullDecision` in `system-shade.ts`), so that pull reaches Alpha
 too. Upward drags, sideways drags and drags on a Home scrolled away from its top stay the
-WebView's. Chromium's touch pipeline is covered by the landscape case in
-`notifications-handle.spec.ts`; whether the AOSP image's WebView delivers either path is not
+WebView's. Chromium's touch pipeline is covered by the short portrait case (412x560) in
+`notifications-handle.spec.ts`, since the launcher is portrait only; whether the AOSP image's WebView delivers either path is not
 measured.
 
 ## Asking Android
@@ -113,12 +109,12 @@ Android accepted the call.
 | --- | --- | --- |
 | `test/system-shade.test.mjs` | `npm test` | The decision rules for empty Home, the surface choice, the fallback text, the template and model gates, the launcher-only permission and the native outcome mapping (source shape). |
 | `test/gesture-zones-single-instance.test.mjs` | `npm test` | The swipe handler only asks for Android's shade; the development stand-in is gated; no instrumented test still looks for an Alpha panel. |
-| `test/browser/notifications-handle.spec.ts` | `npm run test:browser` | Standalone: no button, no pull opens anything. Launcher (with the development stand-in): the button's name, size and position; tap, Enter, Space, accessibility click, a pull on the button and a pull on empty Home open it; the status bar band, sideways drags, an open sheet, an app view, a focused composer and a scrolled Home do not; in landscape an overflowing Home still scrolls with touch and a downward touch pull at its top opens the stand-in; the button clears a taller status bar at 360, 412 and 480px; 200% text. |
-| `test/browser/settings-truth.production.spec.ts` | `npm run test:browser:production` | The flag-off bundle with a stubbed Android bridge: no Alpha shade, tiles or brightness; the button and an empty-Home pull call `openNotificationShade`; a focused composer does not; every non-opened outcome shows its fallback; the browser build has no shade or button. |
+| `test/browser/notifications-handle.spec.ts` | `npm run test:browser` | Standalone: no notifications button on Home, and no pull opens anything. Launcher (with the development stand-in): no notifications button on Home; a pull down on empty Home (upper, middle or lower) opens the stand-in, and Close, Back, Escape and an upward swipe close it; the status bar band, sideways drags, an open conversation sheet, an app view, a focused composer and a scrolled Home do not; in landscape an overflowing Home still scrolls with touch and a downward touch pull at its top opens the stand-in; Home content starts 12 screen pixels below a taller status bar at 360, 412 and 480px; every Home app stays reachable above the dock at 200% text. |
+| `test/browser/settings-truth.production.spec.ts` | `npm run test:browser:production` | The flag-off bundle with a stubbed Android bridge: no Alpha shade, tiles, brightness or notifications button; an empty-Home pull calls `openNotificationShade`, and so does a second one; a focused composer does not; every non-opened outcome shows its fallback; the browser build has no shade or button. |
 | `SystemShadeInstrumentedTest` | emulator (Home method: test-mocks build) | Outcome mapping; EXPAND_STATUS_BAR declared and held by the launcher flavor only; launcher Home's request and empty-Home pull open Android's shade, each pull must reach Alpha's Home and the shade counts only when Alpha asked for it; a pull with the composer focused makes no request; standalone never asks. Passed on both flavors at `69a4be6c` on the API 35 emulator, and 5 of 5 runs with the launcher flavor selected as HOME. A production build covers Home with the Cloud sign-in gate, so there the Home method is skipped. |
 | `NotificationsInstrumentedTest` (test-mocks build) | emulator | A posted notice is found and tapped on its own row in Android's shade (opened with Android's global action) and its PendingIntent fires; a notice whose target was cancelled dispatches nothing and does not open its neighbour; the page has no Alpha shade. Passed on both flavors at `69a4be6c`, and 5 of 5 runs as HOME. Android 15 bundles two notices into a collapsed automatic group; tapping that group's summary sent nothing and cancelled both, so the test expands the group first, as a person would. |
 | `NotificationChannelsInstrumentedTest` | emulator (campaign `test-native-permissions.mjs channels`) | The recovered channel's notice is tapped in Android's shade. Not run at this source. |
-| `AccessibilityInstrumentedTest.homeShadeSettingsAndComposerAtDoubleFontScale` | emulator | A top-edge swipe opens Android's shade with no Alpha panel behind it; on the launcher the accessibility click action (sent through UiAutomation, not TalkBack itself) and a pull from the button open Android's shade; standalone has no button. Passed on both flavors (test-mocks build) at `69a4be6c`. |
+| `AccessibilityInstrumentedTest.homeShadeSettingsAndComposerAtDoubleFontScale` | emulator | A top-edge swipe opens Android's shade with no Alpha panel behind it; Home has no notifications button in either flavor; on the launcher a pull that starts on empty Home opens Android's shade. The pass on both flavors (test-mocks build) at `69a4be6c` covered the earlier body, which used the removed button (an accessibility click sent through UiAutomation, and a pull from the button); this pull-only body has not run. TalkBack and Switch Access on the image are unmeasured. |
 
 ## Left open
 

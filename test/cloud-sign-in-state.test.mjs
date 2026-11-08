@@ -126,13 +126,13 @@ test('resend starts at thirty seconds and cannot be clicked during the countdown
 
 function controllerFixture({isAndroid=false,browserCloudResidentEnabled=false}={}){
   const source=`
-    const ownProviderSelected=()=>false;let operation=null,residentStartInBackground=false,active=null,signInReadinessOwner=null,googleSignInGeneration=0;
+    const ownProviderSelected=()=>false;let planRecheck=null;let operation=null,residentStartInBackground=false,active=null,signInReadinessOwner=null,googleSignInGeneration=0,googleSignInPrior=null,providerStatusGeneration=0;
     const state={signIn:{step:'code',environment:'production',attemptId:'old',email:'person@example.invalid'},open:true,busy:false,message:'',error:''};
     const events=[],update=values=>{Object.assign(state,values);events.push({...values});};
     const cloud={cancelLogin(){events.push({cancel:true});}};
     const client={};
-    const signInClient=()=>client,ensureResident=async()=>{},residentRecoveryReason=()=>null;
-    const errorMessage=e=>e.message,runQueuedResidentRebind=()=>{},runQueuedSignInReturn=()=>{};
+    const signInClient=()=>client,ensureResident=async()=>{},residentRecoveryReason=()=>null,cloudCredentialStore={read:async()=>null};
+    const errorKindOf=()=>null;const errorMessage=e=>e.message,runQueuedResidentRebind=()=>{},runQueuedSignInReturn=()=>{},scheduleResidentAutoRetry=()=>{};
     const testMocksEnabled=false,isAndroid=${isAndroid},browserCloudResidentEnabled=${browserCloudResidentEnabled},expired=()=>false,residentCloudFlow=()=>true;
     let required=false;const productionCloudSignInRequired=()=>required,residentSignInRequired=()=>required;let pendingBillingReview=null;const clearPersonalSetup=()=>{};
     ${ui.includes('export function explicitSignedOutCloudEntry(')?part('export function explicitSignedOutCloudEntry(', 'export function connectionChooserVisible(').replace('export ',''):'function explicitSignedOutCloudEntry(){return false;}'}
@@ -141,7 +141,7 @@ function controllerFixture({isAndroid=false,browserCloudResidentEnabled=false}={
     class CodeExpiredError extends Error {constructor(){super('code-expired');}}
     const signInFailureMessage=code=>code,signInFailed=(environment,keep=false)=>{if(!keep)update({signIn:{step:'choose',environment}});};
     const signedIn=async()=>events.push({authenticated:true});
-    ${part('async function work(', '/** Start (or restart) the resident.')}
+    ${part('async function work(', '\n/** ')}
     const connectionController={
     ${part('  close() {', '  cancel() {')}
     cancel(){operation?.abort(new DOMException('Cancelled','AbortError'));cloud.cancelLogin();},
@@ -186,6 +186,18 @@ test('actual controller keeps wrong-code challenge and prevents duplicate verifi
   await f.connectionController.verifySignInCode('123456');assert.equal(calls,1);
   pending.reject(new f.CloudSignInError('invalid-code'));await first;
   assert.equal(f.state.signIn.attemptId,'old');assert.equal(f.state.error,'invalid-code');
+});
+
+test('a failed resend keeps the code step and the code already sent',async()=>{
+  for(const failure of ['rate-limited','offline']){
+    const f=controllerFixture();f.state.signIn={...f.state.signIn,resendAt:0,expiresAt:Date.now()+600000};
+    f.client.startEmailSignIn=async()=>{throw new f.CloudSignInError(failure);};
+    await f.connectionController.resendSignInCode();
+    assert.equal(f.state.signIn.step,'code');assert.equal(f.state.signIn.attemptId,'old','the first code can still be verified');
+    assert.equal(f.state.error,failure);assert.equal(f.state.busy,false);
+    let verified;f.client.verifyEmailSignIn=async attemptId=>{verified=attemptId;return {status:'authenticated'};};
+    await f.connectionController.verifySignInCode('123456');assert.equal(verified,'old');
+  }
 });
 
 test('an expired or exhausted code keeps the address with a new code ready; other refusals return with it filled in',async()=>{
@@ -281,7 +293,7 @@ test('Back on the required chooser keeps sign-in enabled instead of creating a r
 const entryStart=ui.indexOf('  const requiredSignInView:'),entryEnd=ui.indexOf('  const accountCreatedNotice=',entryStart);assert.ok(entryStart>=0&&entryEnd>entryStart);
 const selectorSource=ui.slice(entryStart,entryEnd);
 const explicitEntrySource=ui.includes('export function explicitSignedOutCloudEntry(')?part('export function explicitSignedOutCloudEntry(', 'export function connectionChooserVisible(').replace('export ',''):'function explicitSignedOutCloudEntry(){return false;}';
-const entryFunction=transformSync(`const isAndroid=false,browserCloudResidentEnabled=false,ownProviderSelected=()=>false,productionCloudSignInRequired=()=>false;${explicitEntrySource}function selectEntry(snapshot){const productionSignInRequired=false,explicitSignInEntry=explicitSignedOutCloudEntry(snapshot),signInEntryRequired=productionSignInRequired||explicitSignInEntry,signInPage=signInEntryPage(snapshot),sending=null;const providerChoice=null,panel=null,ownKeyEntry=false,setOwnKeyEntry=()=>{},ownKeyAttempted=false,setOwnKeyAttempted=()=>{},signInPageShown=!!snapshot.signIn||signInEntryRequired,OwnKeyForm=()=>null,ownKeySaving=false,LOCAL_PROVIDER_MODEL='qwen',automaticSignInProbe={current:false},signInProbeMessage=()=>'Checking Eliza Cloud sign-in…',residentEnvironment=()=> 'production',inAppGoogle=false,inAppPhone=false,inAppEmail=true,cloudSignInPhone=false,loadSignInService=()=>null,RESIDENT_UNPACKAGED='unpackaged',browserCloudResidentEnabled=false,testMocksEnabled=false;${selectorSource}return null;}`,{loader:'tsx',format:'cjs',jsx:'automatic'}).code;
+const entryFunction=transformSync(`const isAndroid=false,browserCloudResidentEnabled=false,ownProviderSelected=()=>false,productionCloudSignInRequired=()=>false;${explicitEntrySource}function selectEntry(snapshot){const productionSignInRequired=false,explicitSignInEntry=explicitSignedOutCloudEntry(snapshot),signInEntryRequired=productionSignInRequired||explicitSignInEntry,signInPage=signInEntryPage(snapshot),sending=null;const providerChoice=null,panel=null,ownKeyEntry=false,setOwnKeyEntry=()=>{},ownKeyAttempted=false,setOwnKeyAttempted=()=>{},signInPageShown=!!snapshot.signIn||signInEntryRequired,OwnKeyForm=()=>null,ownKeySaving=false,LOCAL_PROVIDER_MODEL='qwen',automaticSignInProbe={current:false},signInProbeMessage=()=>'Checking Eliza Cloud sign-in…',residentEnvironment=()=> 'production',inAppGoogle=false,inAppPhone=false,inAppEmail=true,cloudSignInPhone=false,loadSignInService=()=>null,RESIDENT_UNPACKAGED='unpackaged',residentStartFailure='',browserCloudResidentEnabled=false,testMocksEnabled=false;${selectorSource}return null;}`,{loader:'tsx',format:'cjs',jsx:'automatic'}).code;
 const noAuthCalls=[];const entryController=new Proxy({},{get:(_,name)=>()=>noAuthCalls.push(name)});
 const selectEntry=new Function('require','CloudSignInPanel','connectionController','ResidentRecoveryPanel','useState',entryFunction+';return selectEntry;')(createRequire(import.meta.url),CloudSignInPanel,entryController,()=>null,React.useState);
 test('explicit signed-out account and plan entry stay blank before the chooser is ready',async()=>{const {renderToStaticMarkup}=await import('react-dom/server');for(const purpose of['cloud-account','plan']){const element=selectEntry({open:true,purpose,cloudAccount:null,busy:false,message:'',error:'',signIn:null});assert.ok(element,'the actual root-page branch must select the existing sign-in component');const html=renderToStaticMarkup(element);assert.match(html,/aria-label="Loading Alpha"/);assert.doesNotMatch(html,/alpha-auth-mark|Welcome to Alpha|Checking|Continue with Google|Sign in with email|>Back</);assert.match(html,/role="dialog"/,'an opened sign-in stays a dialog');assert.deepEqual(noAuthCalls,[]);}});
@@ -289,7 +301,7 @@ test('verified account is not redirected from membership into first-run sign-in'
 
 test('explicit account chooser preserves newer in-app email/phone readiness and never starts hosted auth',async()=>{
  const begin=part('  async beginSignIn(', '  /** Leaves the sign-in screen');
- const body=`${explicitEntrySource}function make(purpose,methods){let operation=null,epoch=0,signInReadinessOwner=null,googleSignInGeneration=0,inAppGoogle=false,inAppPhone=false,inAppEmail=false;const cloudSignIn={},cloudServiceName=()=> 'Eliza Cloud',state={open:true,purpose,cloudAccount:null},updates=[],calls=[];const residentCloudFlow=()=>false,residentEnvironment=()=> 'production',cloudEnvironmentAllowed=()=>true,isAndroid=false;let cloud={environment:'production',cancelLogin(){calls.push('cancel');}};const inAppSignInMethods=async()=>{calls.push('status');return methods;},update=patch=>{updates.push(patch);Object.assign(state,patch);},work=async(_,fn)=>fn(new AbortController().signal),ensureResident=async()=>{},browserCloudLoginAction=async()=>calls.push('web-auth'),residentBrowserLoginAction=async()=>calls.push('resident-auth');const connectionController={${begin}};return {controller:connectionController,state,updates,calls,methods:()=>({google:inAppGoogle,phone:inAppPhone,email:inAppEmail})};}`;
+ const body=`${explicitEntrySource}function make(purpose,methods){let planRecheck=null;let operation=null,epoch=0,signInReadinessOwner=null,googleSignInGeneration=0,providerStatusGeneration=0,inAppGoogle=false,inAppPhone=false,inAppEmail=false;const cloudSignIn={},cloudServiceName=()=> 'Eliza Cloud',state={open:true,purpose,cloudAccount:null},updates=[],calls=[];const residentCloudFlow=()=>false,residentEnvironment=()=> 'production',cloudEnvironmentAllowed=()=>true,isAndroid=false;let cloud={environment:'production',cancelLogin(){calls.push('cancel');}};const inAppSignInMethods=async()=>{calls.push('status');return methods;},update=patch=>{updates.push(patch);Object.assign(state,patch);},work=async(_,fn)=>fn(new AbortController().signal),ensureResident=async()=>{},browserCloudLoginAction=async()=>calls.push('web-auth'),residentBrowserLoginAction=async()=>calls.push('resident-auth');const connectionController={${begin}};return {controller:connectionController,state,updates,calls,methods:()=>({google:inAppGoogle,phone:inAppPhone,email:inAppEmail})};}`;
  const compiled=transformSync(body,{loader:'ts',format:'cjs'}).code,make=new Function(compiled+';return make;')();
  for(const purpose of ['cloud-account','plan','agent'])for(const methods of [null,{google:false,phone:true,email:false}]){const f=make(purpose,methods);await f.controller.beginSignIn('production');assert.equal(f.state.signIn.step,'choose');assert.deepEqual(f.calls,['status','cancel']);assert.deepEqual(f.methods(),{google:false,phone:methods?.phone===true,email:methods===null||methods.email!==false});}
 });

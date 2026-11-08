@@ -8,7 +8,6 @@
  * Executors and the durable journal slots are registered by the composition
  * root (agent adapter / local-agent storage).
  */
-import {filesReviewIdentity} from './files-agent-contract';
 import {
   actionScope,
   deviceJournalContext,
@@ -81,13 +80,14 @@ export function publishCommittedDeviceChanges(receipt:OperationReceipt,client:Pi
 
 /** Authenticated structured actions only. Neither reply prose nor restored history
  * can enter this boundary. A durable journal gates every device effect. */
+let filesReviewIdentity: ((paths:string[],signal:AbortSignal)=>Promise<string[]>)|undefined;
+export function setFilesReviewIdentity(read: (paths:string[],signal:AbortSignal)=>Promise<string[]>) {
+  filesReviewIdentity=read;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    // filesIdentity: the Files move/trash review binds each file's identity (files-browser-agent.patch);
-    // a pin without that port ignores it.
-    const ports={session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:filesReviewIdentity,profile:alphaDeviceActionProfile};
-    super(ports,{currentRequestBrowserPolicy:true});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true});
   }
 }

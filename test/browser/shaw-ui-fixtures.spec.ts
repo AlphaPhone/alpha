@@ -32,7 +32,7 @@ async function emptyHome(page:Page){
   c.getCloudClient=()=>({client,sessionId:'fixture-cloud',credentialId:'fixture-credential'} as any);
   const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'fixture-owner',organizationId:'fixture-org',sessionId:'fixture-cloud',credentialId:'fixture-credential'}};c.getSnapshot=()=>snapshot as any;
   c.getWorkflowClient=()=>({sessionId:'fixture-agent',client:{list:async()=>[],lifecycleSupported:async()=>false}} as any);
-  c.getAutomationsClient=()=>({sessionId:'fixture-agent',request:async(path:string,method:string)=>{f.metadataReads++;if(method!=='GET'){f.writes++;throw Error('UI fixture forbids writes');}if(path==='/api/automations')return{automations:[]};if(path.includes('/scheduled-tasks'))return{tasks:[]};if(path.includes('/reminders'))return{reminders:[]};throw Error('Unexpected UI fixture metadata route');}});
+  c.getAutomationsClient=()=>({sessionId:'fixture-agent',request:async(path:string,method:string)=>{f.metadataReads++;if(method!=='GET'){f.writes++;throw Error('UI fixture forbids writes');}if(path==='/api/automations')return{automations:[]};if(path.includes('/scheduled-tasks'))return{tasks:[]};if(path.includes('/reminders'))return{reminders:[]};if(path==='/api/lifeops/definitions')return{definitions:[]};throw Error('Unexpected UI fixture metadata route');}});
   c.close();
  });
  await page.getByRole('button',{name:'Inbox',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).emptyHomeFixture.mailReads)).toBeGreaterThan(0);await returnToApps(page);
@@ -44,27 +44,33 @@ for(const [orientation,viewport] of [['portrait',{width:412,height:915}],['lands
  test.use({viewport,hasTouch:true,isMobile:true});
  test.beforeEach(async({page})=>{await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());});
  test('confirmed-empty Home collapses the rail and keeps every app entry',async({page},info)=>{await emptyHome(page);await capture(page,info,`home-confirmed-empty-${orientation}`);});
- test('unverified Home keeps recovery entries visible',async({page},info)=>{
+ test('unconnected Home keeps app entries without placeholder cards',async({page},info)=>{
   await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');
-  await expect(page.locator('[data-alpha-home-calendar]')).toBeVisible();await expect(page.locator('[data-alpha-home-inbox]')).toBeVisible();await expect(page.locator('[data-alpha-home-workflows]')).toBeVisible();await capture(page,info,`home-unverified-${orientation}`);
+  for(const name of ['Calendar','Inbox','Workflows'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
+  for(const kind of ['calendar','inbox','workflows'])await expect(page.locator(`[data-alpha-home-${kind}]`)).toHaveCount(0);
+  await capture(page,info,`home-unconnected-${orientation}`);
  });
- test('permitted Photos uses an edge-to-edge grid without requesting access',async({page},info)=>{
+ test('permitted Photos uses concise labels and inset thumbnails without requesting access',async({page},info)=>{
   await photosBridge(page,'selected');
   await page.evaluate(()=>{
    const w=window as any,base=w.Capacitor.nativePromise,f=w.mediaFixture;
    const items=Array.from({length:9},(_,index)=>({...f.row,id:`m:external_primary:i:${91+index}`,name:`Synthetic photo ${index+1}.jpg`,date:f.row.date-index*60000}));
-   w.Capacitor.nativePromise=async(plugin:string,method:string,input:any)=>plugin==='AlphaPhotos'&&(method==='list'||method==='listPermitted')?{items:input?.trashed?[]:items,next:'',access:{scope:'selected',images:'selected',videos:'selected'}}:base(plugin,method,input);
+   w.Capacitor.nativePromise=async(plugin:string,method:string,input:any)=>{
+    if(plugin==='AlphaPhotos'&&method==='list')return {items,next:''};
+    return base(plugin,method,input);
+   };
    f.emit();
   });
-  await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(9);
+  await expect(page.getByRole('button',{name:/^Photo,/})).toHaveCount(9);
+  await expect(page.getByRole('button',{name:'Library',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Search photos',exact:true})).toHaveCount(0);
-  await expect(page.getByText('Library',{exact:true})).toBeVisible();await expect(page.getByText(/up to 240 loaded items/)).toHaveCount(0);
-  const grid=page.locator('.photo-grid').filter({visible:true}).first();await expect(grid).toHaveCSS('margin-left','0px');await expect(grid).toHaveCSS('margin-right','0px');
+  await expect(page.getByText(/up to 240 loaded items/)).toHaveCount(0);
+  const grid=page.locator('.photo-grid').filter({visible:true}).first();await expect(grid).toHaveCSS('margin-left','12px');await expect(grid).toHaveCSS('margin-right','12px');
   expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((call:any)=>call.method==='requestLibraryAccess').length)).toBe(0);
   await capture(page,info,`photos-selected-access-${orientation}`);
  });
  test('empty Files stays quiet with existing entry controls',async({page},info)=>{
   await page.route(/\/src\/prototype\/fixtures\.js(\?.*)?$/,async route=>{const response=await route.fetch({url:route.request().url().replace('/fixtures.js','/fixtures.empty.js')});await route.fulfill({response});});
-  await page.goto('/');await page.getByRole('button',{name:'Files',exact:true}).click();await expect(page.getByText(/No recent files/)).toHaveCount(0);await expect(page.getByRole('button',{name:/Internal storage/})).toBeVisible();await capture(page,info,`files-empty-${orientation}`);
+  await page.goto('/');await page.getByRole('button',{name:'Files',exact:true}).click();await expect(page.getByText(/No recent files/)).toHaveCount(0);await expect(page.getByRole('button',{name:'Internal storage',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Downloads',exact:true})).toBeVisible();await capture(page,info,`files-empty-${orientation}`);
  });
 });

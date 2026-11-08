@@ -50,6 +50,9 @@ private static final class ResidentAttachDiagnostic {
  private static volatile long credentialMutationEpoch=-1;
  private static long credentialShutdownRequest=-1;
  private static long credentialShutdownRetryEpoch=-1;
+ // The stop request of a commit that threw: its write may or may not have landed. Starts stay
+ // fenced, and the owner's Start/Retry reissues strict teardown (retryCredentialShutdown).
+ private static long uncertainCommitRequest=-1;
  private static String startRequestId;
  private static long startRequestEpoch;
  private static boolean startOwnsLaunch;
@@ -57,6 +60,9 @@ private static final class ResidentAttachDiagnostic {
  private static final CredentialIntentFence credentialIntents=new CredentialIntentFence(lifecycleLock);
  private final CredentialRequestFence providerConfigurations=new CredentialRequestFence(lifecycleLock,credentialIntents);
  private static long powerAuthorizationMutationEpoch;
+ private volatile long providerSurfaceGeneration;
+ private volatile AutoCloseable providerReveal;
+ private volatile String providerRevealRequestId;
  static long credentialAuthorityEpoch(){synchronized(lifecycleLock){return powerAuthorizationMutationEpoch;}}
  /** Compound credential-slot operations must enter before acquiring the vault lock. */
  static Object credentialLifecycleLock(){return lifecycleLock;}
@@ -74,8 +80,13 @@ private static final class ResidentAttachDiagnostic {
    return read.call();
   }}
  }
+ /** Vault before lifecycle can deadlock against any writer; fail fast instead. */
+ private static void requireLockOrder(){
+  if(Thread.holdsLock(ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots.LOCK)&&!Thread.holdsLock(lifecycleLock))throw new IllegalStateException("lock order");
+ }
  /** Noncritical slots share the canonical lock order without changing credential authority. */
  static <T> T withCredentialSlotMutation(Runnable guard,java.util.concurrent.Callable<T> commit)throws Exception{
+  requireLockOrder();
   synchronized(lifecycleLock){synchronized(ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots.LOCK){
    guard.run();return commit.call();
   }}
@@ -84,6 +95,8 @@ private static final class ResidentAttachDiagnostic {
  static void powerAuthorizationChanged(){
   if(!Thread.holdsLock(lifecycleLock)||!Thread.holdsLock(ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots.LOCK))throw new IllegalStateException("Credential lock order required");
   powerAuthorizationMutationEpoch++;
+  AlphaVoiceCloudPlugin.retireProviderAuthority();
+  for(AlphaLocalAgentPlugin instance:new java.util.ArrayList<>(instances))instance.closeProviderReveal();
  }
  /** A protected launch constraint, never authority minted by stored account correlation alone. */
  static final class PowerLaunchPin implements ai.eliza.plugins.system.SenseListenerClient.PowerLaunchValidator {
@@ -191,9 +204,15 @@ private static final class ResidentAttachDiagnostic {
  private void rejectPending(PluginCall call,String message){synchronized(lifecycleLock){if(pending.remove(call))call.reject(message);}}
 
  private static final class Superseded extends Exception {}
- private static void clearEnrollment(){AlphaCanonicalNotifications.stop();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;}
+ // Owner, provider and account changes retire shade notices first (AlphaCanonicalNotifications.forget);
+ // start, cancel, 401 and destroy keep the same owner, so its posted notices stay.
+ private static void clearEnrollment(){AlphaCanonicalNotifications.suspendForRestart();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;}
  static long currentCredentialIntent(){return credentialIntents.current();}
  static long reserveCredentialIntent(){return credentialIntents.reserve();}
+ /** Check bridge ownership under lifecycle admission before superseding another credential intent. */
+ static long reserveCredentialIntent(Object ownerLock,Runnable assertOwner){
+  synchronized(lifecycleLock){synchronized(ownerLock){assertOwner.run();return credentialIntents.reserve();}}
+ }
  static void requireCredentialIntent(long intent){credentialIntents.require(intent);}
  interface CredentialMutation<T> {
   boolean requiresShutdown()throws Exception;
@@ -201,6 +220,7 @@ private static final class ResidentAttachDiagnostic {
  }
  /** Slot classification/commit are atomic; observing shutdown must never hold the vault lock. */
  static <T> T mutateCredentials(Context context,Runnable assertOwner,CredentialMutation<T> mutation)throws Exception {
+  requireLockOrder();
   final long epoch;
   synchronized(lifecycleLock){
    assertOwner.run();
@@ -231,11 +251,16 @@ private static final class ResidentAttachDiagnostic {
     Thread.sleep(50);
    }
   }catch(Throwable failure){
-   // Only the commit follows commitAttempted, so a failure after it is an uncertain write.
+   // Only the commit follows commitAttempted. A failure after it may be a written slot or a refusal
+   // before any write (a changed or expired credential); both keep the fence until the owner retries.
    commitFailed=commitAttempted;throw failure;
   }finally{
    synchronized(lifecycleLock){
-    if(stopRequest>=0){if(!commitAttempted)ElizaAgentService.abandonCredentialShutdown(stopRequest);else if(!commitFailed)ElizaAgentService.releaseCredentialShutdown(stopRequest);}
+    if(stopRequest>=0){
+     if(!commitAttempted)ElizaAgentService.abandonCredentialShutdown(stopRequest);else if(!commitFailed)ElizaAgentService.releaseCredentialShutdown(stopRequest);
+     // This request superseded any earlier uncertain one in the lease.
+     uncertainCommitRequest=commitFailed?stopRequest:-1;
+    }
     if(credentialMutationEpoch==epoch)credentialMutationEpoch=-1;
    }
   }
@@ -274,14 +299,28 @@ private static final class ResidentAttachDiagnostic {
  /** Alpha's encrypted provider slot, as the shared binding sees it. */
  static NativeProviderSlot.Store providerSlot(AlphaCredentialStore store){return new NativeProviderSlot.Store(){
   public String readProvider()throws Exception{return store.readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT);}
+  public long authorityEpoch(){return credentialAuthorityEpoch();}
   public void assertCurrent(){store.assertCurrent();}
-  public String compareExchangeProvider(String previous,String selection)throws Exception{return store.compareExchangeProviderAdmission(previous,selection,null,null,null);}
+  public String compareExchangeProvider(String previous,String selection)throws Exception{
+   JSONObject next=new JSONObject(selection);
+   if(next.optBoolean("unbound")){
+    if(!store.compareExchangeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,previous,selection))return null;
+    return store.readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT);
+   }
+   if(!"elizacloud".equals(next.optString("provider")))return store.compareExchangeProviderAdmission(previous,selection,null,null,null);
+   String cloud=store.readCredentialSlot("cloud:production");
+   if(previous!=null&&LocalAgentProviderAdmission.currentGeneration(previous,cloud)!=null
+      &&"elizacloud".equals(new JSONObject(previous).optString("provider")))
+    return store.compareExchangeProviderAdmission(previous,selection,"cloud:production",cloud,new JSONObject(previous).getJSONObject("verifiedCloudIdentity"));
+   if(!store.compareExchangeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,previous,selection))return null;
+   return store.readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT);
+  }
   public void removeProvider(boolean onlyIfPresent)throws Exception{if(onlyIfPresent)store.removeProviderIfPresent();else store.removeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT);}
  };}
  /** Verify before saving: a key is stored only after the check accepts it, then read back. */
  static String saveVerifiedProvider(AlphaCredentialStore store,String key,String model,NativeProviderSlot.KeyCheck check) throws Exception {return NativeProviderSlot.saveVerifiedProvider(providerSlot(store),key,model,check,PRODUCT_NAME);}
  static final String PRODUCT_NAME="Alpha Phone";
- /** Deletes the provider slot and confirms by reading it back. */
+ /** Retires the provider binding and confirms by reading it back. */
  static JSObject clearProviderSlot(AlphaCredentialStore store,boolean onlyIfPresent) throws Exception {
   try{return new JSObject(NativeProviderSlot.clearProviderSlot(providerSlot(store),onlyIfPresent).toString());}
   catch(org.json.JSONException impossible){throw new IllegalStateException(impossible);}
@@ -328,44 +367,56 @@ private static final class ResidentAttachDiagnostic {
    }}
   }catch(Exception unavailable){call.resolve(new JSObject().put("attachable",false).put("reason","unavailable"));}},()->{call.reject("Local agent bridge is closed.");});
  }
+ /** The owner's Settings switches for agent Gmail changes and Calendar edits. Off never disconnects Google;
+  * the on-device Google host refuses agent writes unless this file says on. */
+ @PluginMethod public void setGoogleAgentAccess(PluginCall call){
+  final Boolean gmailChanges=call.getBoolean("gmailChanges"),calendarEdits=call.getBoolean("calendarEdits");
+  if(gmailChanges==null||calendarEdits==null){call.reject("Invalid Google access.");return;}
+  PluginWorkers.submit(workers,()->{
+   try{GoogleAgentAccessFile.write(GoogleAgentAccessFile.in(getContext().getFilesDir()),gmailChanges,calendarEdits);call.resolve();}
+   catch(Exception unavailable){call.reject("Google access could not be saved.");}
+  },()->{call.reject("Local agent bridge is closed.");});
+ }
  /** Owner-selected direct provider configuration; shared admission owns validation and secure CAS. */
  static boolean directProviderAllowed(boolean testMocks){return NativeProviderSlot.directProviderAllowed(testMocks);}
  @PluginMethod public void configureProvider(PluginCall call) {
+  try{requireProviderOwner(true);}catch(Exception unavailable){call.reject("Open unlocked Settings to manage provider keys.");return;}
+  final long surface=providerSurfaceGeneration;
   if(!directProviderAllowed(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)){call.reject(PRODUCT_NAME+" uses your Cloud plan for AI.");return;}
   if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
   String key=call.getString("apiKey",""),model=call.getString("model",CEREBRAS_PROVIDER_MODEL);
   String cartesia=call.getString("cartesiaKey",null);
-  if(cartesia!=null&&!validProviderToken(cartesia,1024)){call.reject("Enter a valid Cartesia key or leave voice off.");return;}
+  if(cartesia!=null&&!validProviderToken(cartesia,1024)){call.reject("Enter a valid Voice key or leave it unchanged.");return;}
   if(!validProviderToken(key,1024)||!model.matches("[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")){call.reject("Enter a valid Cerebras key.");return;}
   if(!CEREBRAS_PROVIDER_MODEL.equals(model)){call.reject(PRODUCT_NAME+" uses "+CEREBRAS_PROVIDER_MODEL+" on Cerebras.");return;}
   final String requestId=call.getString("requestId","");final long configuration;
-  try{configuration=providerConfigurations.begin(requestId);}catch(Exception unavailable){call.reject("Provider request was cancelled or is unavailable.");return;}
+  try{synchronized(lifecycleLock){if(disposed)throw new IllegalStateException("Local agent bridge closed");configuration=providerConfigurations.begin(requestId);}}catch(Exception unavailable){call.reject("Provider request was cancelled or is unavailable.");return;}
   PluginWorkers.submit(workers,()->{try{
-   AlphaCredentialStore store=new AlphaCredentialStore(getContext(),()->{if(disposed)throw new IllegalStateException("Local agent bridge closed");providerConfigurations.require(requestId,configuration);});
+   AlphaCredentialStore store=new AlphaCredentialStore(getContext(),()->{requireProviderOwner(false);if(surface!=providerSurfaceGeneration)throw new SecurityException("Settings closed");providerConfigurations.require(requestId,configuration);});
    store.assertCurrent();
    String failure=NativeProviderSlot.saveVerifiedProvider(providerSlot(store),key,model,cartesia,NativeProviderSlot::checkCerebrasKey,PRODUCT_NAME);
    if(failure!=null){call.reject(failure);return;}
-   store.assertCurrent();call.resolve(providerIdentity(store.readCredentialSlot("local-agent-provider:v1")));
+   store.assertCurrent();call.resolve(providerManagementStatus(store));
   }catch(Exception error){call.reject("Provider could not be saved securely.");}finally{providerConfigurations.finish(requestId,configuration);}},()->{providerConfigurations.finish(requestId,configuration);call.reject("Local agent bridge is closed.");});
  }
  /** Reserve a native-issued lease before receiving any provider keys or removal request. */
  @PluginMethod public void prepareProviderConfiguration(PluginCall call){
-  try{call.resolve(new JSObject().put("requestId",providerConfigurations.reserve()));}
+  try{synchronized(lifecycleLock){requireProviderOwner(true);call.resolve(new JSObject().put("requestId",providerConfigurations.reserve()));}}
   catch(Exception unavailable){call.reject("Provider setup is busy. Try again shortly.");}
  }
  /** Cancels only this request's still-current credential intent; no store write or runtime stop. */
  @PluginMethod public void cancelProviderConfiguration(PluginCall call){
-  try{providerConfigurations.cancel(call.getString("requestId",""));call.resolve();}
+  try{String requestId=call.getString("requestId","");synchronized(lifecycleLock){if(disposed)throw new IllegalStateException("Local agent bridge closed");providerConfigurations.cancel(requestId);if(requestId.equals(providerRevealRequestId))closeProviderReveal();}call.resolve();}
   catch(Exception invalid){call.reject("Invalid provider cancellation request.");}
  }
- /** Deletes the provider slot and reads it back; resolves only when the slot is gone. */
+ /** Retires routing and reads it back; saved Own keys remain in encrypted custody. */
  @PluginMethod public void clearProvider(PluginCall call) {
   final boolean onlyIfPresent=Boolean.TRUE.equals(call.getBoolean("onlyIfPresent"));
   final String requestId=call.getString("requestId",null);final long configuration;
-  try{configuration=requestId==null?reserveCredentialIntent():providerConfigurations.begin(requestId);}catch(Exception cancelled){call.reject("Provider change was cancelled or is unavailable.");return;}
+  try{synchronized(lifecycleLock){if(disposed)throw new IllegalStateException("Local agent bridge closed");configuration=requestId==null?reserveCredentialIntent():providerConfigurations.begin(requestId);}}catch(Exception cancelled){call.reject("Provider change was cancelled or is unavailable.");return;}
   PluginWorkers.submit(workers,()->{try{
    call.resolve(clearProviderSlot(new AlphaCredentialStore(getContext(),()->{if(disposed)throw new IllegalStateException("Local agent bridge closed");if(requestId==null)requireCredentialIntent(configuration);else providerConfigurations.require(requestId,configuration);}),onlyIfPresent));
-  }catch(Exception error){call.reject("The provider key could not be removed.");}finally{if(requestId!=null)providerConfigurations.finish(requestId,configuration);}},()->{if(requestId!=null)providerConfigurations.finish(requestId,configuration);call.reject("Local agent bridge is closed.");});
+  }catch(Exception error){call.reject("The provider binding could not be cleared.");}finally{if(requestId!=null)providerConfigurations.finish(requestId,configuration);}},()->{if(requestId!=null)providerConfigurations.finish(requestId,configuration);call.reject("Local agent bridge is closed.");});
  }
  @PluginMethod public void clearProviderIfCurrent(PluginCall call){
   String guard=call.getString("bindingGuard","");
@@ -383,28 +434,40 @@ private static final class ResidentAttachDiagnostic {
   if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
   String credentialId=call.getString("credentialId",""),model=call.getString("model","");
   if(!CLOUD_PROVIDER_MODEL.equals(model)){call.reject("Choose a supported Cloud model.");return;}
-  final long configuration=reserveCredentialIntent();
+  final long configuration;
+  synchronized(lifecycleLock){if(disposed){call.reject("Local agent bridge is closed.");return;}configuration=reserveCredentialIntent();}
   PluginWorkers.submit(workers,()->{try{
    AlphaCredentialStore store=new AlphaCredentialStore(getContext(),()->{if(disposed)throw new IllegalStateException("Local agent bridge closed");requireCredentialIntent(configuration);});
    String applied=bindCloudProvider(store,credentialId,model);store.assertCurrent();
    call.resolve(new JSObject().put("configured",true).put("bindingGuard",store.providerBindingGuard(applied)));
   }catch(Exception unavailable){
-   String code="NATIVE_CLOUD_ADMISSION_UNAVAILABLE";
-   if(unavailable instanceof LocalAgentProviderAdmission.CloudBindingFailure){LocalAgentProviderAdmission.CloudBindingFailure failure=(LocalAgentProviderAdmission.CloudBindingFailure)unavailable;code="NATIVE_CLOUD_ADMISSION_"+failure.stage.toUpperCase(java.util.Locale.ROOT).replace('-','_');android.util.Log.w("AlphaCloudAdmission",failure.diagnostic.toString());}
-   call.reject("Cloud account changed or is unavailable. Sign in again before starting the local agent.",code);
+   String code="NATIVE_CLOUD_ADMISSION_UNAVAILABLE";JSObject data=null;
+   if(unavailable instanceof LocalAgentProviderAdmission.CloudBindingFailure){LocalAgentProviderAdmission.CloudBindingFailure failure=(LocalAgentProviderAdmission.CloudBindingFailure)unavailable;code="NATIVE_CLOUD_ADMISSION_"+failure.stage.toUpperCase(java.util.Locale.ROOT).replace('-','_');android.util.Log.w("AlphaCloudAdmission",failure.diagnostic.toString());
+    // The renderer tells a transient identity read (0 = transport, 408, 429, 5xx) from a refused key.
+    if("identity-read".equals(failure.stage))data=new JSObject().put("stage","identity-read").put("httpStatus",failure.diagnostic.optInt("httpStatus",0));}
+   if(data!=null)call.reject("Cloud account changed or is unavailable. Sign in again before starting the local agent.",code,data);
+   else call.reject("Cloud account changed or is unavailable. Sign in again before starting the local agent.",code);
   }},()->{call.reject("Local agent bridge is closed.");});
  }
  /** Preserve the previous selection when admission loses its account, without replacing a newer selection. */
  static String bindCloudProvider(AlphaCredentialStore store,String credentialId,String model) throws Exception {
+  return bindCloudProvider(store,credentialId,model,false,null);
+ }
+ static String bindCloudProvider(AlphaCredentialStore store,String credentialId,String model,boolean selectCloud,String expectedPrevious) throws Exception {
   return LocalAgentProviderAdmission.bindCloudProvider(new LocalAgentProviderAdmission.CloudBindingStore(){
    public String readProvider()throws Exception{return store.readCredentialSlot("local-agent-provider:v1");}
    public String readCloud()throws Exception{return store.readCredentialSlot("cloud:production");}
    public void assertCurrent()throws Exception{store.assertCurrent();}
    public JSONObject identity(String token)throws Exception{return AlphaConnectionPlugin.readCloudIdentity(token);}
    public String admit(String previous,String selection,String cloud,JSONObject identity)throws Exception{
-    if(previous!=null&&"cerebras".equals(new JSONObject(previous).optString("provider"))){
+    if(selectCloud&&!java.util.Objects.equals(expectedPrevious,previous))throw new SecurityException("Provider changed");
+    if(!selectCloud&&previous!=null&&"cerebras".equals(new JSONObject(previous).optString("provider"))){
      String services=LocalAgentProviderAdmission.admit(null,selection,cloud,identity);
-     selection=new JSONObject(LocalAgentProviderAdmission.withoutAdmission(previous)).put("cloudServices",new JSONObject(services)).toString();
+     selection=new JSONObject(LocalAgentProviderAdmission.withoutAdmission(previous)).put("cloudServices",NativeProviderSlot.cloudServices(new JSONObject(services))).toString();
+    }
+    if(new JSONObject(selection).optBoolean("unbound")){
+     if(!store.compareExchangeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,previous,selection))return null;
+     return store.readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT);
     }
     return store.compareExchangeProviderAdmission(previous,selection,"cloud:production",cloud,identity);
    }
@@ -432,19 +495,101 @@ private static final class ResidentAttachDiagnostic {
   try{return new JSObject(LocalAgentProviderAdmission.providerIdentity(saved).toString());}
   catch(org.json.JSONException impossible){throw new IllegalStateException(impossible);}
  }
+ private static JSObject providerManagementStatus(AlphaCredentialStore store)throws Exception{
+  return withCredentialRead(()->new JSObject(NativeProviderSlot.managementStatus(
+   store.readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT),store.readCredentialSlot("cloud:production"),
+   System.currentTimeMillis(),credentialAuthorityEpoch()).toString()));
+ }
  @PluginMethod public void providerStatus(PluginCall call) {
   PluginWorkers.submit(workers,()->{
-   try{
-    AlphaCredentialStore store=new AlphaCredentialStore(getContext());
-    String saved=store.readCredentialSlot("local-agent-provider:v1");
-    JSONObject provider=LocalAgentProviderAdmission.providerIdentity(saved);
-    String cloud="elizacloud".equals(provider.optString("provider"))?store.readCredentialSlot("cloud:production"):null;
-    if(BuildConfig.DEBUG){try{android.util.Log.i("AlphaCloudAdmission","credential-schema="+LocalAgentProviderAdmission.cloudCredentialDiagnostics(store.readCredentialSlot("cloud:production"),null,System.currentTimeMillis()));}catch(Exception unavailable){android.util.Log.i("AlphaCloudAdmission","credential-schema-read-unavailable");}}
-    call.resolve(new JSObject(LocalAgentProviderAdmission.providerStatus(saved,cloud,System.currentTimeMillis()).toString()));
-   }
+   try{if(disposed)throw new IllegalStateException();call.resolve(providerManagementStatus(new AlphaCredentialStore(getContext())));}
    catch(Exception unavailable){call.reject("Provider status unavailable.");}
-  },()->{call.reject("Local agent bridge is closed.");});
+  },()->call.reject("Local agent bridge is closed."));
  }
+ /** Only the resumed owner app can manage secrets; the lock-screen assistant is not this surface. */
+ private void requireProviderOwner(boolean requireFocus){
+  android.app.Activity activity=getActivity();
+  android.app.KeyguardManager keyguard=getContext().getSystemService(android.app.KeyguardManager.class);
+  android.os.UserManager user=getContext().getSystemService(android.os.UserManager.class);
+  if(disposed||!(activity instanceof MainActivity)||((MainActivity)activity).isAssistantSurface()||activity.isFinishing()||activity.isDestroyed()
+    ||!getActivity().getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+    ||requireFocus&&!activity.hasWindowFocus()||keyguard==null||keyguard.isKeyguardLocked()||keyguard.isDeviceLocked()
+    ||user==null||!user.isUserUnlocked())throw new SecurityException("Open unlocked Settings to manage provider keys");
+ }
+ private void closeProviderReveal(){
+  AutoCloseable held=providerReveal;providerReveal=null;providerRevealRequestId=null;
+  if(held!=null)try{held.close();}catch(Exception ignored){/* Native surface handle only. */}
+ }
+ private interface ProviderChange {void apply(AlphaCredentialStore store)throws Exception;}
+ private void changeProvider(PluginCall call,ProviderChange change){
+  final String requestId=call.getString("requestId","");final long intent,surface=providerSurfaceGeneration;
+  try{requireProviderOwner(true);intent=providerConfigurations.begin(requestId);}
+  catch(Exception refused){call.reject("Provider request expired. Reopen Settings and try again.");return;}
+  PluginWorkers.submit(workers,()->{try{
+   AlphaCredentialStore store=new AlphaCredentialStore(getContext(),()->{
+    requireProviderOwner(false);if(surface!=providerSurfaceGeneration)throw new SecurityException("Settings closed");
+    providerConfigurations.require(requestId,intent);
+   });
+   store.assertCurrent();change.apply(store);store.assertCurrent();call.resolve(providerManagementStatus(store));
+  }catch(Exception unavailable){call.reject("Provider change could not be confirmed. Reload Settings.");}
+  finally{providerConfigurations.finish(requestId,intent);}},()->{providerConfigurations.finish(requestId,intent);call.reject("Local agent bridge is closed.");});
+ }
+ @PluginMethod public void selectProvider(PluginCall call){
+  String mode=call.getString("mode","");
+  if(!"cloud".equals(mode)&&!"own".equals(mode)){call.reject("Choose Cloud or Own keys.");return;}
+  if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
+  changeProvider(call,store->{
+   String previous=NativeProviderSlot.requireManagementRevision(providerSlot(store),call.getString("expectedRevision"));
+   if("own".equals(mode))NativeProviderSlot.selectOwn(providerSlot(store),call.getString("expectedRevision"));
+   else{
+    String cloud=store.readCredentialSlot("cloud:production");
+    String credentialId=new JSONObject(cloud).getString("credentialId");
+    bindCloudProvider(store,credentialId,CLOUD_PROVIDER_MODEL,true,previous);
+   }
+  });
+ }
+ @PluginMethod public void editProviderKeys(PluginCall call){
+  // JSON null, empty strings and other values never mean removal; Remove is a separate action.
+  for(String field:new String[]{"textKey","voiceKey"})if(call.getData().has(field)&&!(call.getData().opt(field) instanceof String)){
+   call.reject("Enter a key or leave the field unchanged.");return;
+  }
+  changeProvider(call,store->{
+   String failure=NativeProviderSlot.editKeys(providerSlot(store),call.getString("expectedRevision"),
+    call.getString("textKey"),call.getString("voiceKey"),NativeProviderSlot::checkCerebrasKey);
+   if(failure!=null)throw new IllegalArgumentException("Provider validation refused");
+  });
+ }
+ @PluginMethod public void removeProviderKey(PluginCall call){
+  changeProvider(call,store->NativeProviderSlot.removeKey(providerSlot(store),call.getString("expectedRevision"),call.getString("key")));
+ }
+ /** Reveal stays in the canonical FLAG_SECURE native surface, never in bridge/model output. */
+ @PluginMethod public void revealProviderKey(PluginCall call){
+  final String requestId=call.getString("requestId",""),expected=call.getString("expectedRevision"),key=call.getString("key");
+  final long intent,surface=providerSurfaceGeneration;
+  try{requireProviderOwner(true);intent=providerConfigurations.begin(requestId);}
+  catch(Exception refused){call.reject("Provider reveal expired. Reopen Settings and try again.");return;}
+  PluginWorkers.submit(workers,()->{try{
+   AlphaCredentialStore store=new AlphaCredentialStore(getContext(),()->{
+    requireProviderOwner(false);if(surface!=providerSurfaceGeneration)throw new SecurityException("Settings closed");providerConfigurations.require(requestId,intent);
+   });
+   String value=withCredentialRead(()->NativeProviderSlot.revealKey(providerSlot(store),expected,key));
+   getActivity().runOnUiThread(()->{try{
+    requireProviderOwner(true);store.assertCurrent();
+    withCredentialRead(()->{NativeProviderSlot.requireManagementRevision(providerSlot(store),expected);return null;});
+    closeProviderReveal();
+    final long revealAuthority=credentialAuthorityEpoch();
+    providerRevealRequestId=requestId;
+    providerReveal=ai.eliza.plugins.passwords.SecretSurfaces.revealOwned(getActivity(),"text".equals(key)?"Text key":"Voice key",value,()->{
+     try{requireProviderOwner(false);requireCredentialIntent(intent);return surface==providerSurfaceGeneration&&revealAuthority==credentialAuthorityEpoch();}
+     catch(Exception retired){return false;}
+    });
+    call.resolve(new JSObject().put("key",key).put("shown",true).put("hidesAfterMs",30000).put("revision",expected));
+   }catch(Exception retired){call.reject("Provider reveal is unavailable. Reopen Settings.");}
+   finally{providerConfigurations.finish(requestId,intent);}});
+  }catch(Exception unavailable){providerConfigurations.finish(requestId,intent);call.reject("Provider reveal is unavailable. Reopen Settings.");}
+  },()->{providerConfigurations.finish(requestId,intent);call.reject("Local agent bridge is closed.");});
+ }
+ @Override protected void handleOnPause(){providerSurfaceGeneration++;closeProviderReveal();super.handleOnPause();}
  static void configureNativeViews(java.io.InputStream policy,java.util.Map<String,String> env) throws java.io.IOException {
   try(policy){
    java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();
@@ -469,7 +614,10 @@ private static final class ResidentAttachDiagnostic {
   catch(java.io.FileNotFoundException absent) { /* Older payloads do not contain a workflow worker. */ }
   if(workerIndex!=null){
    String root=env.get("AGENT_ROOT");if(root==null){workerIndex.close();throw new java.io.IOException("Agent resource directory unavailable");}
-   java.io.File worker=WorkflowWorkerAssets.install(new java.io.File(root),workerIndex,path->context.getAssets().open("agent/workflow-worker/"+path));
+   String packageStamp;
+   try{packageStamp=BuildConfig.VERSION_CODE+"/"+context.getPackageManager().getPackageInfo(context.getPackageName(),0).lastUpdateTime;}
+   catch(android.content.pm.PackageManager.NameNotFoundException unknown){packageStamp=null;}
+   java.io.File worker=WorkflowWorkerAssets.install(new java.io.File(root),workerIndex,path->context.getAssets().open("agent/workflow-worker/"+path),packageStamp);
    WorkflowWorkerAssets.configureEnvironment(worker,env);
    nativeHostResources=worker;
   }
@@ -478,6 +626,8 @@ private static final class ResidentAttachDiagnostic {
   java.io.File google=nativeHostResources==null?null:new java.io.File(nativeHostResources,"google-host.mjs");
   if(google!=null&&google.isFile())env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",google.getCanonicalPath());
   else if("cloud".equals(BuildConfig.ELIZA_RUNTIME_PROFILE))throw new java.io.IOException("Native Cloud routing module unavailable");
+  // The owner's Gmail changes / Calendar edits switches (setGoogleAgentAccess), read before every agent write.
+  env.put("ALPHA_GOOGLE_AGENT_ACCESS_FILE",GoogleAgentAccessFile.in(context.getFilesDir()).getAbsolutePath());
   try {
   // Decision P-43: the resident always runs. With no provider slot it launches with no hosted
   // provider environment; upstream then reports no_provider for each turn.
@@ -489,21 +639,29 @@ private static final class ResidentAttachDiagnostic {
    provider=saved==null?null:new JSONObject(saved);
    cloudSaved=provider!=null&&("elizacloud".equals(provider.optString("provider"))||provider.has("cloudServices"))?new AlphaCredentialStore(context).readCredentialSlot("cloud:production"):null;
   }catch(Exception unreadable){saved=null;provider=null;cloudSaved=null;}
-  // Shared provider admission and native embedding order. Keep the verified
-  // product module independently of credential availability for Alpha identity.
-  if(!NativeProviderSlot.applyLaunchEnvironment(BuildConfig.ELIZA_RUNTIME_PROFILE,provider,cloudSaved,new File(context.getApplicationInfo().nativeLibraryDir),context.getFilesDir(),env,System.currentTimeMillis())){provider=null;saved=null;cloudSaved=null;}
-  if(google!=null&&google.isFile())env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",google.getCanonicalPath());
+  // The Cloud Google binding is decided before the shared launch: a stripped, legacy or changed
+  // admission is not a lifecycle race, so the resident launches unbound instead (P-43).
+  java.util.Map<String,String> googleBinding=null;
   if(provider!=null&&("elizacloud".equals(provider.optString("provider"))||provider.has("cloudServices"))){
    if(google==null||!google.isFile())throw new java.io.IOException("Native Cloud routing module unavailable");
-   {
-    JSONObject binding=LocalAgentProviderAdmission.applyManagedGoogleEnvironment(saved,cloudSaved,env,System.currentTimeMillis());
+   try{
+    googleBinding=new java.util.HashMap<>();
+    JSONObject binding=LocalAgentProviderAdmission.applyManagedGoogleEnvironment(saved,cloudSaved,googleBinding,System.currentTimeMillis());
     if(binding!=null){
     JSONObject current=new AlphaCredentialStore(context).providerAdmissionSnapshot();
     if(!binding.getString("accountRef").equals(current.getString("accountRef"))||!binding.getString("sessionGeneration").equals(current.getString("sessionGeneration"))||!LocalAgentProviderAdmission.sameCloudCredential(cloudSaved,new AlphaCredentialStore(context).readCredentialSlot("cloud:production")))throw new SecurityException("Native Google provider changed");
-    env.put("ELIZA_NATIVE_GOOGLE_BINDING_JSON",binding.toString());
+    googleBinding.put("ELIZA_NATIVE_GOOGLE_BINDING_JSON",binding.toString());
     }
+   }catch(Exception unbindable){
+    android.util.Log.w("AlphaLocalAgent","provider-unbound "+unbindable.getClass().getSimpleName());
+    googleBinding=null;provider=null;saved=null;cloudSaved=null;
    }
   }
+  // Shared provider admission and native embedding order. Keep the verified
+  // product module independently of credential availability for Alpha identity.
+  if(!NativeProviderSlot.applyLaunchEnvironment(BuildConfig.ELIZA_RUNTIME_PROFILE,provider,cloudSaved,new File(context.getApplicationInfo().nativeLibraryDir),context.getFilesDir(),env,System.currentTimeMillis())){provider=null;saved=null;cloudSaved=null;googleBinding=null;}
+  if(google!=null&&google.isFile())env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",google.getCanonicalPath());
+  if(googleBinding!=null)env.putAll(googleBinding);
   // The agent process has no /etc/localtime on Android and would run in UTC; calendar dates and
   // "tomorrow at 3pm" resolve in the process zone when no owner resolver is registered.
   env.put("TZ",java.util.TimeZone.getDefault().getID());
@@ -532,9 +690,7 @@ private static final class ResidentAttachDiagnostic {
   final long retryEpoch,retryIntent;
   synchronized(lifecycleLock){
    if(credentialShutdownRetryEpoch>=0){call.reject("Provider shutdown is already being checked; wait before retrying.");return true;}
-   // An ordinary refused stop also latches stopping, without a credential request.
-   // Only a new Start/Retry request enters this existing strict owner/absence recheck.
-   if((credentialShutdownRequest==-1&&!stopping)||(credentialShutdownRequest>=0&&ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest)))return false;
+   if(!shutdownRetryRequired())return false;
    if(disposed||getActivity()==null||!getActivity().hasWindowFocus()){call.reject("Return to the app before retrying provider shutdown.");return true;}
    if(credentialMutationEpoch>=0){call.reject("Provider shutdown is already being checked; wait before retrying.");return true;}
    if(requestId!=null&&cancelledStarts.remove(requestId)){call.reject("Local startup cancelled");return true;}
@@ -547,13 +703,7 @@ private static final class ResidentAttachDiagnostic {
     final long stopRequest;
     synchronized(lifecycleLock){
      requireShutdownRetry(call,retryEpoch,retryIntent);
-     credentialShutdownRequest=-2;
-     stopRequest=ElizaAgentService.reserveCredentialShutdown();
-     credentialShutdownRequest=stopRequest;
-     // Retain the exact request even if Android dispatch throws. Retry commits nothing;
-     // abandonment keeps starts fenced until this request's actual stop ACK.
-     try{ElizaAgentService.retryCredentialShutdown(getContext(),stopRequest);}
-     finally{ElizaAgentService.abandonCredentialShutdown(stopRequest);}
+     stopRequest=reissueCredentialShutdownLocked();
     }
     ResidentCredentialShutdownRetry.await(
      ()->{synchronized(lifecycleLock){requireShutdownRetry(call,retryEpoch,retryIntent);}},
@@ -563,7 +713,8 @@ private static final class ResidentAttachDiagnostic {
     synchronized(lifecycleLock){
      requireShutdownRetry(call,retryEpoch,retryIntent);
      if(credentialShutdownRequest!=stopRequest||!ElizaAgentService.isCredentialShutdownConfirmed(stopRequest))throw new Superseded();
-     credentialShutdownRequest=-1;credentialShutdownRetryEpoch=-1;stopping=false;accepting=true;pending.remove(call);
+     // The new confirmed stop superseded an uncertain commit's request in the lease.
+     credentialShutdownRequest=-1;uncertainCommitRequest=-1;credentialShutdownRetryEpoch=-1;stopping=false;accepting=true;pending.remove(call);
     }
     // Exact continuation epoch rejects cancellation/account changes between acknowledgment and start.
     startAfterShutdown(call,retryEpoch,retryIntent);
@@ -577,6 +728,24 @@ private static final class ResidentAttachDiagnostic {
   },()->{synchronized(lifecycleLock){if(credentialShutdownRetryEpoch==retryEpoch)credentialShutdownRetryEpoch=-1;if(pending.remove(call))call.reject("Local agent bridge is closed.");}});
   return true;
  }
+ /** Caller holds lifecycleLock. An ordinary refused stop also latches stopping, without a credential
+  * request; an uncertain commit leaves its stop fenced. Only a new Start/Retry request enters the
+  * strict owner/absence recheck. */
+ static boolean shutdownRetryRequired(){
+  if(uncertainCommitRequest>=0)return true;
+  return !((credentialShutdownRequest==-1&&!stopping)||(credentialShutdownRequest>=0&&ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest)));
+ }
+ /** Caller holds lifecycleLock. Sends a fresh strict stop for a retained credential shutdown.
+  * Retain the exact request even if Android dispatch throws. It commits nothing; abandonment
+  * keeps starts fenced until this request's actual stop ACK. */
+ private long reissueCredentialShutdownLocked() {
+  credentialShutdownRequest=-2;
+  final long stopRequest=ElizaAgentService.reserveCredentialShutdown();
+  credentialShutdownRequest=stopRequest;
+  try{ElizaAgentService.retryCredentialShutdown(getContext(),stopRequest);}
+  finally{ElizaAgentService.abandonCredentialShutdown(stopRequest);}
+  return stopRequest;
+ }
  /** Caller holds lifecycleLock. Never lets focus loss or another intent authorize this retry. */
  private void requireShutdownRetry(PluginCall call,long epoch,long intent)throws Superseded {
   if(disposed||!credentialIntents.isCurrent(intent)||epoch!=lifecycleEpoch||credentialShutdownRetryEpoch!=epoch||credentialMutationEpoch>=0||!pending.contains(call)
@@ -586,12 +755,14 @@ private static final class ResidentAttachDiagnostic {
   String requestId=call.getString("requestId");
   if(requestId!=null&&!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
   if(retryCredentialShutdown(call,requestId))return;
-  startAfterShutdown(call,-1,-1);
+  // Boot state reads take the service's processLock; never on the shared Capacitor thread.
+  PluginWorkers.submit(workers,()->startAfterShutdown(call,-1,-1),()->call.reject("Local agent bridge is closed."));
  }
  private void startAfterShutdown(PluginCall call,long continuationEpoch,long continuationIntent) {
   String requestId=call.getString("requestId");
   if(requestId!=null&&!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
   try {
+   ai.eliza.plugins.agent.updater.RuntimeUpdatePause.beforeStart();
    if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
    // No provider is required: without an admitted Eliza Cloud plan the agent runs unbound.
    final AlphaCredentialStore providerStore=new AlphaCredentialStore(getContext());
@@ -616,6 +787,7 @@ private static final class ResidentAttachDiagnostic {
      if(requestId!=null&&cancelledStarts.remove(requestId)){call.reject("Local startup cancelled");return;}
      if(observedEpoch!=lifecycleEpoch||continuationEpoch>=0&&!credentialIntents.isCurrent(continuationIntent)){if(continuationEpoch>=0){call.reject("Local agent connection changed; retry from the app.");return;}continue;}
      if(continuationEpoch>=0&&(getActivity()==null||!getActivity().hasWindowFocus())){call.reject("Return to the app before starting.");return;}
+     ai.eliza.plugins.agent.updater.RuntimeUpdatePause.beforeStart();
      if(disposed){call.reject("Local agent bridge is closed.");return;}
      if(credentialMutationEpoch>=0){call.reject("Local provider is changing; wait before starting.");return;}
      if(credentialShutdownRequest!=-1&&(credentialShutdownRequest<0||!ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest))){call.reject("Provider shutdown is unconfirmed; check the local agent before starting.");return;}
@@ -650,28 +822,56 @@ private static final class ResidentAttachDiagnostic {
     return;
    }
    PluginWorkers.submit(workers,()->{
-    long deadline=android.os.SystemClock.elapsedRealtime()+90000;
+    long launched=android.os.SystemClock.elapsedRealtime(),deadline=launched+START_DEADLINE_MS;
     boolean ready=false;
     while(android.os.SystemClock.elapsedRealtime()<deadline){
-     try{if(rejectStartupRefusal(call,epoch,ElizaAgentService.getLocalAgentBootState(getContext())))return;String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;}
+     long pause=1000;
+     try{
+      JSONObject boot=ElizaAgentService.getLocalAgentBootState(getContext());
+      if(rejectStartupRefusal(call,epoch,boot))return;
+      // A launch the service already reports as ended fails now, not at the deadline. The first
+      // seconds may still show the previous process's state.
+      if(android.os.SystemClock.elapsedRealtime()-launched>=3000&&startFailed(boot)){android.util.Log.w("AlphaLocalAgent","start-failed "+boot.optString("reason"));rejectStartFailed(call,epoch);return;}
+      // Once the request socket listens, readiness is close: poll it closely.
+      if(boot.optBoolean("socketListening"))pause=200;
+      String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;
+     }
      catch(Superseded stale){rejectSuperseded(call);return;}
-     catch(Exception unavailable){try{Thread.sleep(1000);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}}
+     catch(Exception unavailable){try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}}
     }
     if(ready){
      // Never poll enrollment: a failed response may follow a committed pairing POST.
      try{enroll(epoch);resolveCurrent(call,epoch,new JSObject().put("state","ready"));return;}
      catch(Superseded stale){rejectSuperseded(call);return;}
-     catch(Exception uncertain){rejectPending(call,"Local enrollment did not complete. Check runtime status before reconnecting.");return;}
+     catch(Exception uncertain){rejectStartFailed(call,epoch);return;}
     }
-    rejectPending(call,"Local agent startup did not complete. Check runtime status; no chat was sent.");
+    rejectStartFailed(call,epoch);
    },()->rejectPending(call,"Local agent bridge is closed."));
-  }catch(Exception error){synchronized(lifecycleLock){pending.remove(call);}call.reject("The on-device agent could not start. Try again or connect another agent.");}
+  }catch(Exception error){synchronized(lifecycleLock){pending.remove(call);}call.reject(START_FAILED,"start-failed");}
+ }
+ /** The service keeps a launch alive for its boot grace (ElizaAgentService.AGENT_BOOT_GRACE_MS,
+  * 120 s); the start call waits as long before it reports failure. */
+ private static final long START_DEADLINE_MS=120000;
+ static final String START_FAILED="Your agent couldn't start. Try again.";
+ /** A terminal boot state no retry within this launch can change; watchdog restarts are "restarting". */
+ static boolean startFailed(JSONObject boot){
+  if(!"dead".equals(boot.optString("state")))return false;
+  String reason=boot.optString("reason");
+  return reason.endsWith("-failed")||"fatal".equals(reason)||reason.startsWith("agent exited:")||reason.startsWith("missing-");
+ }
+ /** This launch ended or timed out: cancelStart no longer owns it. */
+ private void rejectStartFailed(PluginCall call,long epoch){
+  synchronized(lifecycleLock){
+   if(startRequestEpoch==epoch){startRequestId=null;startOwnsLaunch=false;}
+   if(pending.remove(call))call.reject(START_FAILED,"start-failed");
+  }
  }
  /** Only the current startup caller may retire a launch it created; reused services are never stopped here. */
  @PluginMethod public void cancelStart(PluginCall call) {
   String requestId=call.getString("requestId","");
   if(!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
   synchronized(lifecycleLock){
+   if(disposed){call.reject("Local agent bridge is closed.");return;}
    // A start that attached owns no launch: its cancellation retires nothing.
    if(attachedStarts.remove(requestId)){call.resolve();return;}
    if(requestId.equals(startRequestId)&&startRequestEpoch==lifecycleEpoch){
@@ -726,7 +926,8 @@ private static final class ResidentAttachDiagnostic {
   },()->rejectPending(call,"Recovery is unavailable right now. Your records were kept."));
  }
  @PluginMethod public void getStatus(PluginCall call) {
-  try{
+  // Boot state reads take the service's processLock, held across asset extraction.
+  PluginWorkers.submit(workers,()->{try{
    boolean packaged=runtimePackaged();
    for(int attempt=0;attempt<3;attempt++){
     final long observedEpoch;
@@ -744,14 +945,33 @@ private static final class ResidentAttachDiagnostic {
     }
    }
    call.reject("Local runtime changed while checking status; check again.");
-  }catch(Exception error){call.reject("Local runtime status unavailable.");}
+  }catch(Exception error){call.reject("Local runtime status unavailable.");}},()->call.reject("Local agent bridge is closed."));
  }
+ /** Updater owns a service shutdown lease; no vault/lifecycle monitor is held during the wait. */
+ static long pauseForUpdate(Context context){
+  final long request;
+  synchronized(lifecycleLock){
+   if(credentialMutationEpoch>=0)throw new IllegalStateException("Provider mutation pending");
+   startRequestId=null;startOwnsLaunch=false;
+   AlphaCanonicalNotifications.forget(context);invalidateCalls();++lifecycleEpoch;accepting=false;stopping=true;clearEnrollment();
+   request=ElizaAgentService.reserveCredentialShutdown();
+  }
+  return request;
+ }
+ static boolean updateShutdownConfirmed(Context context,long request)throws Exception{return ElizaAgentService.isCredentialShutdownConfirmed(request)&&shutdownConfirmed(ElizaAgentService.getLocalAgentBootState(context));}
+ static void releaseUpdateShutdown(long request){ElizaAgentService.releaseCredentialShutdown(request);}
  @PluginMethod public void stop(PluginCall call) {
   synchronized(lifecycleLock){
+   if(disposed){call.reject("Local agent bridge is closed.");return;}
    startRequestId=null;startOwnsLaunch=false;
    AlphaCanonicalNotifications.forget(getContext());invalidateCalls();++lifecycleEpoch;accepting=false;stopping=true;clearEnrollment();
-   try{ElizaAgentService.stop(getContext());call.resolve(new JSObject().put("state","stopping"));}
-   catch(Exception unavailable){call.reject("Stop requested locally, but native shutdown could not be confirmed. Check runtime status.");}
+   // A retained, unconfirmed credential stop reports stopped only on its own ACK. Reissue the strict
+   // stop so that ACK can arrive once whatever refused it has exited; nothing launches here. A
+   // credential write in flight still owns its request. A Retry in flight is superseded above.
+   boolean strict=credentialShutdownRequest>=0&&credentialMutationEpoch<0
+     &&!ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest);
+   try{if(strict)reissueCredentialShutdownLocked();else ElizaAgentService.stop(getContext());call.resolve(new JSObject().put("state","stopping"));}
+   catch(Exception unavailable){call.reject("Your agent may still be running. Try stopping it again.");}
   }
  }
  /** Native speech uses only the existing enrollment, bound to its exact token and runtime epoch. */
@@ -894,7 +1114,7 @@ private static final class ResidentAttachDiagnostic {
   synchronized(lifecycleLock){synchronized(ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots.LOCK){checkNotificationSession(expected);T result=work.call();checkNotificationSession(expected);return result;}}
  }
  static JSONObject readNotificationPage(JSONObject expected,JSONObject cursor)throws Exception{
-  String path=NativeNotificationWire.pagePath(cursor);checkNotificationSession(expected);
+  String path=NativeNotificationSession.pagePath(cursor);checkNotificationSession(expected);
   JSONObject result=raw(path,"GET",null,expected.getString("token"),null,10000);checkNotificationSession(expected);return result;
  }
  static JSONObject markNotificationRead(JSONObject expected,String id)throws Exception{
@@ -1010,6 +1230,14 @@ private static final class ResidentAttachDiagnostic {
   PluginWorkers.submit(workers,()->{try{
    String token=enroll(epoch);JSONObject headers=new JSONObject().put("Authorization","Bearer "+token).put("Accept","text/event-stream").put("Content-Type","application/json");
    if(supplied!=null)for(String key:new String[]{"X-Eliza-Device-Id","X-Eliza-Device-Key","X-Eliza-Device-Capabilities","X-ElizaOS-Client-Id"})if(supplied.has(key)){String value=supplied.getString(key);if(value.length()>2048||value.contains("\r")||value.contains("\n")||("X-ElizaOS-Client-Id".equals(key)&&!value.matches("[A-Za-z0-9._-]{1,128}")))throw new IllegalArgumentException();headers.put(key,value);}
+   if(supplied!=null&&supplied.has("X-Eliza-Trace-Id")){
+    String traceId=supplied.getString("X-Eliza-Trace-Id");
+    JSONObject turn=new JSONObject(body);
+    String turnId=turn.optString("clientMessageId");
+    if(!"VOICE_DM".equals(turn.optString("channelType"))||!traceId.matches("[a-f0-9]{32}")||traceId.matches("0{32}")||
+       !turnId.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")||!traceId.equals(turnId.replace("-","")))throw new IllegalArgumentException();
+    headers.put("X-Eliza-Trace-Id",traceId);
+   }
    synchronized(lifecycleLock){requireCurrent(epoch);if(!owner.equals(ownerIdentity)||streams.get(id)!=handle)throw new Superseded();}
    JSONObject input=new JSONObject().put("path",path).put("method","POST").put("body",body).put("headers",headers).put("timeoutMs",120000);
    ElizaAgentService.requestLocalAgentStream(input.toString(),event->{synchronized(lifecycleLock){try{requireCurrent(epoch);if(streams.get(id)!=handle)return;JSONObject value=new JSONObject(event);if("response".equals(value.optString("type"))&&value.optInt("status")==401)clearEnrollment();notifyListeners("alphaAgentStream",new JSObject().put("streamId",id).put("event",value));}catch(Exception ignored){}}},handle);
@@ -1079,5 +1307,5 @@ private static final class ResidentAttachDiagnostic {
   * calls and streams. The shared runtime, its epoch and the owner enrollment stay valid for
   * other surfaces. When the last surface goes away (the app is closed or recreated) the epoch
   * advances and the enrollment is cleared, as before; the next surface enrolls again. */
- @Override protected void handleOnDestroy(){synchronized(lifecycleLock){disposed=true;invalidateOwnCalls();instances.remove(this);if(instances.isEmpty()&&!AlphaCanonicalNotifications.ownsSession()){++lifecycleEpoch;clearEnrollment();}}workers.shutdownNow();voiceWorkers.shutdownNow();rendererWorkers.shutdownNow();super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){providerSurfaceGeneration++;closeProviderReveal();synchronized(lifecycleLock){disposed=true;invalidateOwnCalls();instances.remove(this);if(instances.isEmpty()&&!AlphaCanonicalNotifications.ownsSession()){++lifecycleEpoch;clearEnrollment();}}workers.shutdownNow();voiceWorkers.shutdownNow();rendererWorkers.shutdownNow();super.handleOnDestroy();}
 }

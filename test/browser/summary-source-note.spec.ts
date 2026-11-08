@@ -1,10 +1,11 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 import {createHash} from 'node:crypto';
 const contents='Public fact: twelve raised beds.\nPRIVATE OMIT: do not send this line.';
 async function setup(page:Page,legacy=false){
- await page.goto('/?mode=dev');await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Agent connection',exact:true}).click();await page.getByRole('button',{name:'Connect development profile'}).click();await returnToApps(page);await openLegacyNotes(page);await returnToApps(page);
+ await page.goto('/?mode=dev');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();await returnToApps(page);await openLegacyNotes(page);await returnToApps(page);
  await page.evaluate(async(contents)=>{const{registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File([contents],'summary-source.txt',{type:'text/plain'}));},contents);
  if(legacy)await page.evaluate(async()=>{const{BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');const read=BrowserMailAttachments.prototype.readSelected;BrowserMailAttachments.prototype.readSelected=async function(input:any){const value=await read.call(this,input);delete (value as any).sourceReferenceVersion;return value;};BrowserMailAttachments.prototype.retainSourceReference=async()=>{throw Error('Old bridge has no source reference method');};});
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open summary-source.txt',exact:true}).click();await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();const review=page.getByRole('dialog',{name:'Ask about selected content'});await review.getByRole('textbox',{name:'Content excerpt'}).fill('Public fact: twelve raised beds.');await review.getByRole('button',{name:'Use in conversation',exact:true}).click();await expect(review).toHaveCount(0);await page.getByRole('button',{name:'Send',exact:true}).click();await expect(page.getByText('Review summary note',{exact:true})).toBeVisible();
@@ -32,5 +33,5 @@ test('unverifiable source can be explicitly omitted without blocking the reviewe
 });
 
 test('older document bridges retain fingerprint-only summary saving',async({page})=>{
- await setup(page,true);await page.getByText('Review summary note',{exact:true}).click();const review=page.getByRole('dialog',{name:'Save reviewed summary note'});await expect(review).toContainText('requires choosing matching file bytes');await review.getByRole('button',{name:'Save reviewed note',exact:true}).click();await expect(review).toHaveCount(0);const saved=await notes(page);expect(saved).toHaveLength(1);expect(saved[0].documentSource.sha256).toBe(createHash('sha256').update(contents).digest('hex'));expect(saved[0].documentSource.reference).toBeUndefined();
+ await setup(page,true);await page.getByText('Review summary note',{exact:true}).click();const review=page.getByRole('dialog',{name:'Save reviewed summary note'});await expect(review).toContainText('To reopen it, choose the same file again.');await review.getByRole('button',{name:'Save reviewed note',exact:true}).click();await expect(review).toHaveCount(0);const saved=await notes(page);expect(saved).toHaveLength(1);expect(saved[0].documentSource.sha256).toBe(createHash('sha256').update(contents).digest('hex'));expect(saved[0].documentSource.reference).toBeUndefined();
 });

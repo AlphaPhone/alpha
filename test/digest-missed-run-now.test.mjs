@@ -4,6 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {javaBinary} from './fixtures/jvm-tools.mjs';
 // #394: a missed digest is never replayed. Run now is one new, explicitly reviewed run whose identity
 // is derived from the missed record, so repeats and retries return the same run. Resident schedules
 // run in the resident, which is brought back natively after boot, update and clock/time-zone changes
@@ -61,7 +62,7 @@ test('Run now goes through the reviewed dossier path with the derived identity a
  const ui=read('apps/app/src/runtime/hosted-digest-ui.tsx');
  assert.match(ui,/missedRunNowOffers\(/);
  assert.match(ui,/setReview\(\{path:'dossier',body:\{sourceId:offer\.sourceId,sourceRevision:offer\.sourceRevision,mutationId:offer\.mutationId,confirmed:true\}/);
- assert.match(ui,/The missed occurrence stays recorded as missed and nothing from that time is replayed/);
+ assert.match(ui,/The missed time is not replayed and your schedule doesn’t change/);
  assert.match(ui,/onClick=\{\(\)=>reviewMissedRunNow\(/,'only an owner tap opens the review');
  assert.match(ui,/\{missedOffers\.has\(result\.runId\)&&!ranMissed\.has\(result\.runId\)&&<button[^>]*onClick=\{\(\)=>reviewMissedRunNow\(missedOffers\.get\(result\.runId\)!\)\}/,'the button renders only for an offer, so revoked or rebound sources never show it');
  assert.doesNotMatch(ui,/reviewMissedRunNow\([^)]*\)\s*;?\s*\}\s*,\s*\[/,'never invoked from an effect');
@@ -86,11 +87,9 @@ test('the resident is brought back after boot, update and clock or time-zone cha
 });
 
 test('resident schedule re-arming policy runs on the JVM',()=>{
- const java=process.env.JAVA_HOME||(process.platform==='darwin'?'/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home':'');
- const binary=name=>java?join(java,'bin',name):name;
  const temporary=mkdtempSync(join(tmpdir(),'resident-rearm-'));
  try{
-  execFileSync(binary('javac'),['--release','11','-d',temporary,join(root,'android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java'),join(root,'test/fixtures/ResidentScheduleRearmTest.java')],{timeout:60000});
-  assert.match(execFileSync(binary('java'),['-cp',temporary,'ai.elizaresearch.alphaphone.ResidentScheduleRearmTest'],{encoding:'utf8',timeout:60000}),/^PASS resident schedule rearm/);
+  execFileSync(javaBinary('javac'),['--release','11','-d',temporary,join(root,'android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java'),join(root,'test/fixtures/ResidentScheduleRearmTest.java')],{timeout:60000});
+  assert.match(execFileSync(javaBinary('java'),['-cp',temporary,'ai.elizaresearch.alphaphone.ResidentScheduleRearmTest'],{encoding:'utf8',timeout:60000}),/^PASS resident schedule rearm/);
  }finally{rmSync(temporary,{recursive:true,force:true});}
 });

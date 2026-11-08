@@ -1,4 +1,6 @@
-// Source-only CI proposal. Explicit --init-script only; no install/global hook/finalizer.
+// Applied only through --init-script by scripts/ci/calendar-bridge.py in the android.yml build job
+// (an input to the required Android check); no install, global hook or finalizer. It qualifies the
+// Calendar bridge against a controlled JVM host on the runner, not on a device.
 import groovy.json.JsonOutput
 import org.gradle.api.tasks.compile.JavaCompile
 import java.nio.file.*
@@ -35,6 +37,8 @@ gradle.projectsEvaluated {
     if (gradle.rootProject.projectDir.canonicalFile != new File(root, 'android'))
         throw new GradleException('Unexpected normal production project')
     def readRoots = cfg.readRoots.collect { new File(it).toPath().toRealPath() }
+    // CI run 42418923481 needed 1,610,673,552 bytes for its complete Node 26 readback.
+    final long maxHashBytes = 1600L * 1024 * 1024
     long readBytes = 0
     int entries = 0
     def checked = { File file ->
@@ -58,7 +62,7 @@ gradle.projectsEvaluated {
             long count = 0
             for (int n; (n = stream.read(buffer)) != -1;) {
                 count += n; readBytes += n
-                if (count > 160L * 1024 * 1024 || readBytes > 1536L * 1024 * 1024)
+                if (count > 160L * 1024 * 1024 || readBytes > maxHashBytes)
                     throw new GradleException('Actual streamed hash budget exceeded')
                 md.update(buffer, 0, n)
             }

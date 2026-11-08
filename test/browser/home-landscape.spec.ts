@@ -21,9 +21,7 @@ test('landscape lays Home and the composer side by side and keeps every Home con
   const home = page.locator('[data-alpha-layer="home"]'), composer = page.locator('[data-alpha-layer="composer"]');
   const homeBox = (await home.boundingBox())!, composerBox = (await composer.boundingBox())!;
   expect(homeBox.x + homeBox.width).toBeLessThanOrEqual(composerBox.x + 1);
-  // Home draws no card without something to show (docs/daily-overview.md); the date line stands in the row.
-  await expect(page.locator('[data-alpha-home-date]')).toBeVisible();
-  for (const name of ['Settings', 'Notes', 'Calendar', 'Apps'])
+  for (const name of ['Settings', 'Notes', 'Calendar', 'Apps', 'Workflows'])
     await reachable(page, page.getByRole('button', { name, exact: true }));
   await page.screenshot({ path: info.outputPath('landscape-home.png') });
 

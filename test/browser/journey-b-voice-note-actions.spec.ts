@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {openBrowserCalendar} from './helpers/browser-calendar';
 /*
@@ -5,7 +6,7 @@ import {openBrowserCalendar} from './helpers/browser-calendar';
  * rendered controls in the browser build with the development agent profile.
  *
  * Loop covered in one test:
- *  1. Notes "Record and transcribe" -> Done -> Cloud transcript saved as a voice note.
+ *  1. Notes "Record voice note" -> Done -> Cloud transcript saved as a voice note.
  *  2. Reload, reopen the saved recording and "Read aloud" / "Stop reading".
  *  3. "Review transcript with Alpha" -> Send -> "Review summary note" -> "Save recording summary".
  *  4. Hand-offs from the note: "Review reminder draft" -> Calendar form -> Save (a reminder), and
@@ -32,7 +33,7 @@ import {openBrowserCalendar} from './helpers/browser-calendar';
  * Native-only / not provable here:
  *  - A physically spoken note, real speech recognition quality and audible playback/read-aloud.
  *  - OS notification delivery, snooze from the notification and reboot survival of the reminder
- *    (the browser reports "Scheduled · approximate delivery").
+ *    (the browser reports "Scheduled. Alerts may arrive a few minutes late.").
  *  - Android Calendar provider accounts, attendees and provider-side read-back.
  *  - A real agent deciding to propose these actions.
  *
@@ -63,7 +64,7 @@ const ready=async(page:Page,withNotes=false)=>{await expect(page.getByRole('butt
 async function openDeviceActions(page:Page){
  await returnToApps(page);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  await page.getByText('Development device actions',{exact:true}).click();
 }
 async function queueAction(page:Page,operation:unknown){
@@ -101,7 +102,7 @@ test('Journey B: recorded note is read aloud, summarized, and becomes an event a
 
  // Development agent profile with the summary answer the reviewed recording question will receive.
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  await page.getByRole('textbox',{name:'Scripted reply'}).fill(JSON.stringify({summary,actions:actionText.split('\n')}));
  await page.getByRole('button',{name:'Save development reply'}).click();
  await page.getByRole('button',{name:'Connect development profile'}).click();
@@ -118,7 +119,7 @@ test('Journey B: recorded note is read aloud, summarized, and becomes an event a
   Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:async()=>sink.stream},configurable:true});(window as any).fixture={ctx,osc};
  });
  await openLegacyNotes(page);
- await page.getByRole('button',{name:'Record and transcribe',exact:true}).click();
+ await page.getByRole('button',{name:'Record voice note',exact:true}).click();
  // The recorder starts at once; Done transcribes and saves one voice note (corrections happen in the note).
  const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
  await expect(recorder).toHaveAttribute('data-recorder-state','recording');
@@ -272,7 +273,7 @@ test('Journey B: recorded note is read aloud, summarized, and becomes an event a
  expect(recordedActions.journal.map((j:any)=>[j.record.operation.type,j.phase,j.status])).toEqual([['create_reminder','terminal','succeeded'],['calendar_create','terminal','succeeded']]);
  expect(recordedActions.proposals[1].receipt.result).toMatchObject({kind:'calendar_create',sourceId:'local',eventId:(await events(page)).find(e=>e.title==='Venue booking call').id});
  await openDeviceActions(page);
- await page.getByRole('button',{name:'Sync recorded receipts'}).click();
+ await page.getByRole('button',{name:'Check with agent'}).click();
  const connection=page.getByRole('dialog',{name:'Development connections'});
  await expect(connection.getByText(/Create event · “Venue booking call” · Completed · this phone: succeeded/)).toHaveCount(1);
  await expect(connection.getByText(/Create reminder · .*Email the caterer.* · Completed · this phone: succeeded/)).toHaveCount(1);
@@ -343,7 +344,7 @@ test('Journey B: recorded note is read aloud, summarized, and becomes an event a
 test('Journey B: a calendar proposal for a changed source is refused, and leaving an open review saves nothing',async({page})=>{
  await page.goto('/?mode=dev');await ready(page);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  await page.getByRole('button',{name:'Connect development profile'}).click();
  await returnToApps(page);await openBrowserCalendar(page);await returnToApps(page);
  const hour=Math.ceil(Date.now()/3_600_000)*3_600_000;

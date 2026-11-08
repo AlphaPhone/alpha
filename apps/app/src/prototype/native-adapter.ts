@@ -1,5 +1,11 @@
+import {cloudServiceName} from '../runtime/cloud-protocol';
 import {browserDevProfile} from '../browser/dev-profile';
+import { cloudRuntimeEnabled, testMocksEnabled } from '../build-flags';
+import { Capacitor } from '@capacitor/core';
 import { DailyApps, type Action, type NativeResult } from '../daily';
+import { registerPlugin } from '../platform-plugins';
+import { connectionController, agentAvailabilityNotice, agentPendingText, type ConnectionSnapshot } from '../runtime/connection-ui';
+import { modelLabel } from '../runtime/local-agent';
 import { askAboutCapture } from './camera-adapter';
 import { broaderPageNotice, handoffGate, switchValue, SYSTEM_TILE_SETTINGS_PAGES, tileAccessibleName, tileFactsFromSystemFacts, tileStateText, type SystemTileFacts, type SystemTileKey } from '@elizaos/capacitor-system/settings';
 import { captureQuestion, locationMimeTypes } from './context-selection';
@@ -11,6 +17,51 @@ export type PrototypeNativeOptions = {
   onSelection?: (module: string, result: NativeResult, api: Bag) => void;
 };
 const installed = new WeakSet<object>();
+const systemPages = new Set(['wifi', 'bluetooth', 'mobile', 'sound', 'notifications', 'battery', 'models', 'developer', 'privacy']);
+/** Non-secret resident provider identity. The native method never returns the stored key. */
+const residentProvider = registerPlugin<{ providerStatus(): Promise<Record<string, unknown>> }>('Agent');
+const providerModelPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+type ProviderStatus = { sessionId: string; label: string | null };
+let providerStatus: ProviderStatus | null = null, providerReading: string | null = null;
+/** Session whose phone action history this view read successfully; an unread history is never shown as empty. */
+let actionHistoryRead: string | null = null;
+
+export type EgressPrivacy = { big: string; sub: string };
+/** Per-connection wording. Only the packaged Android resident runtime is known to enable
+ * the upstream secret and PII swaps; every other agent decides for itself and does not report it. */
+export function egressPrivacy(connection: Pick<ConnectionSnapshot, 'kind' | 'session' | 'cloudAccount'>, native = Capacitor.isNativePlatform()): EgressPrivacy {
+  if (cloudRuntimeEnabled && (connection.session || connection.cloudAccount)) {
+    const serviceName = cloudServiceName(connection.cloudAccount?.environment ?? 'production');
+    return { big: `Uses ${serviceName}`, sub: `When used, messages and selected content go to ${serviceName} for AI. Voice recordings and text for playback also go to Cloud.` };
+  }
+  if (connection.session && connection.kind === 'resident' && native)
+    return { big: 'Partly masked', sub: 'Keys and contact details are masked before AI requests. Names and message text are not.' };
+  if (connection.session || connection.cloudAccount) return { big: 'Not reported', sub: 'Depends on your agent' };
+  // P-43: no session means the resident is starting or recovering, never "no agent".
+  if (connection.kind === 'recovering') return { big: 'Agent not running', sub: 'No AI requests until your agent is running and AI is set up' };
+  if (connection.kind === 'starting') return { big: 'Agent starting', sub: 'No AI requests until your agent is running and AI is set up' };
+  // Only a build without the resident (the production web preview, test mocks) gets here.
+  return { big: 'Offline', sub: testMocksEnabled ? 'No remote agent connected; no hosted inference requests' : 'Your agent runs on your phone. No AI requests from here.' };
+}
+/** Only a verified resident session on Android reports its configured hosted model.
+ * Exported for the Settings rows that show it (About and Models). */
+export function residentModelLabel(connection: ConnectionSnapshot, refresh: () => void): string | null {
+  const sessionId = connection.session?.sessionId;
+  if (!sessionId || connection.kind !== 'resident' || !Capacitor.isNativePlatform()) return null;
+  if (providerStatus?.sessionId === sessionId) return providerStatus.label;
+  if (providerReading !== sessionId) {
+    providerReading = sessionId;
+    void residentProvider.providerStatus().then(status => {
+      const provider = status?.provider, model = status?.model;
+      // Copy only the two identity fields; ignore anything else a bridge might return.
+      const providerLabel = provider === 'elizacloud' ? cloudServiceName(connection.cloudAccount?.environment ?? 'production') : provider === 'cerebras' ? 'Cerebras' : null;
+      const label = status?.configured === true && providerLabel && typeof model === 'string' && providerModelPattern.test(model) ? modelLabel(providerLabel, model) : null;
+      if (providerReading === sessionId) providerStatus = { sessionId, label };
+    }).catch(() => { if (providerReading === sessionId) providerStatus = { sessionId, label: null }; })
+      .finally(() => { if (providerReading === sessionId) { providerReading = null; refresh(); } });
+  }
+  return null;
+}
 const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'wallet', 'workflows']);
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
@@ -59,7 +110,7 @@ export function installPrototypeNativeAdapters(
   const restore: Array<() => void> = [];
   const busy = new Set<string>();
   const notify = (api: Bag, message: string) => api.toast(message);
-  const unavailable = (api: Bag, message = 'This action needs a connected native provider. Nothing has been changed.') => () => notify(api, message);
+  const unavailable = (api: Bag, message = 'This isn’t available on this phone.') => () => notify(api, message);
   async function perform(module: string, api: Bag, action: Action, payload: Bag = {}) {
     if (busy.has(module)) return;
     busy.add(module);
@@ -71,7 +122,7 @@ export function installPrototypeNativeAdapters(
         notify(api, result.message || 'No installed app can complete this action.');
       }
     } catch {
-      notify(api, 'Native action unavailable. Use the installed Android app.');
+      notify(api, 'This isn’t available here.');
     } finally { busy.delete(module); }
   }
   function browser(module: string, api: Bag, value: unknown) {
@@ -117,16 +168,16 @@ export function installPrototypeNativeAdapters(
     };
     // Camera and Photos questions go to the reviewed local flow with the exact subject: the
     // live frame, or the one saved item that is open. A typed library search names no
-    // capture, so it stays visibly unavailable below instead of reaching a capture review.
+    // capture: product builds hide that chip (walk below), and a stale one never reaches a capture review.
     const capture = captureQuestion(module, key, path, st);
-    if (capture?.kind === 'frame') return () => { if (!askAboutCapture()) notify(api, 'Start the camera, or finish the current capture, then ask again. Nothing has been sent.'); };
+    if (capture?.kind === 'frame') return () => { if (!askAboutCapture()) notify(api, 'Start the camera or finish the capture, then ask again.'); };
     if (capture?.kind === 'item') return () => {
       // Read the open item when pressed: the render that built this control may be stale.
       const open = api.get(module).open;
-      if (open !== capture.id || !askAboutCapture({ id: capture.id })) notify(api, 'Open a saved photo or video, then ask again. Nothing has been sent.');
+      if (open !== capture.id || !askAboutCapture({ id: capture.id })) notify(api, 'Open a saved photo or video, then ask again.');
     };
-    if (['camera', 'photos', 'files'].includes(module) && ['ask', 'askQ', 'askSearch'].includes(key)) return unavailable(api, 'Content analysis is not connected. No photo or document content has been sent.');
-    if (module === 'workflows' && ['run', 'again', 'toggle', 'save'].includes(key)) return unavailable(api, 'Workflow execution is not connected. No automation has been activated or run.');
+    if (['camera', 'photos', 'files'].includes(module) && ['ask', 'askQ', 'askSearch'].includes(key)) return unavailable(api);
+    if (module === 'workflows' && ['run', 'again', 'toggle', 'save'].includes(key)) return unavailable(api, 'Workflow execution is not connected.');
     const native = (action: Action, payload: Bag = {}) => () => perform(module, api, action, payload);
     if (module === 'phone') {
       if (key === 'dialCall') return () => perform(module, api, 'phone', { query: text(api.get('phone').dial) });
@@ -198,6 +249,19 @@ export function installPrototypeNativeAdapters(
       if (['onNum', 'onCvv', 'onExp', 'onCode', 'onName'].includes(key)) return unavailable(api, 'Payment credentials are not collected by this app.');
       if (['pay', 'auth', 'verify', 'next', 'scan', 'reload', 'remove', 'setDef', 'startPay'].includes(key)) return unavailable(api, 'Wallet payments and verification are not connected. Nothing has been charged or verified.');
     }
+    if (module === 'settings') {
+      // Opening Activity only shows what is already known; reading history is a separate explicit step.
+      if (st.page === 'privacy' && key === 'go' && row.label === 'Activity') return () => api.set({ log: true });
+      if (key === 'pick' && st.page !== 'display') return unavailable(api);
+      if (key === 'onPw' || (st.adding && ['change', 'onKey', 'go', 'ok'].includes(key))) return native('settings');
+      // Memory deletion is not offered; a stale wipe sheet only closes.
+      if (key === 'ok') return st.sheet?.kind === 'wipe' ? () => api.set({ sheet: null }) : native('settings');
+      if (['toggle', 'sw', 'change', 'set'].includes(key)) {
+        if (st.page === 'display' && row.label === 'Text size') return original;
+        return native(st.page === 'notifications' ? 'notifications' : 'settings');
+      }
+      if (key === 'go' && (systemPages.has(st.page) || (st.page === 'accounts' && (st.acct || row.label === 'Add account')))) return native(st.page === 'notifications' ? 'notifications' : 'settings');
+    }
     return undefined;
   }
   function walk(value: any, module: string, st: Bag, api: Bag, path = ''): any {
@@ -209,12 +273,94 @@ export function installPrototypeNativeAdapters(
         ? replacement(module, key, path + key, value, st, api, child as Callback) || child
         : walk(child, module, st, api, path + key + '.');
     }
+    // A typed Photos or Files search names no content to analyze; product builds offer no Ask chip for it.
+    if (!browserDevProfile && (module === 'photos' || module === 'files') && ('askQ' in result || 'askSearch' in result)) {
+      delete result.askQ; delete result.askSearch;
+      if (module === 'photos') result.hasQ = false;
+    }
+    if (module === 'settings') {
+      if (result.big === 'Redaction on') Object.assign(result, egressPrivacy(connectionController.getSnapshot()));
+      if (result.label === 'Privacy & data') result.val = 'Review';
+      if (result.label === 'Leaves this device') {
+        const connection=connectionController.getSnapshot();
+        result.val=connection.session&&connection.kind==='resident'&&!Capacitor.isNativePlatform()
+          ? 'Prompts and selected context go to the development host and its configured inference provider'
+          : 'Depends on active services';
+      }
+      // Nothing here reads on-device model or speech readiness; say so instead of guessing.
+      if (result.label === 'On-device model') result.val = 'Not reported';
+      if (st.page === 'privacy' && ['Microphone','Location','Camera','Contacts'].includes(result.label)) result.val = 'Review access';
+      if (st.page === 'privacy' && result.label === 'Activity') result.val = activityValue(connectionController.getSnapshot());
+    }
     return result;
   }
-  /** Runs after every later settings adapter: a group left without rows is not drawn. */
-  function dropEmptyGroups(out: Bag): Bag {
+  function activityState(state: string) {
+    const labels: Record<string, string> = { pending: 'Waiting for approval', reconciliation_required: 'Needs your review', executing: 'Outcome unknown', approved: 'Approved', rejected: 'Declined', succeeded: 'Completed', completed: 'Completed', failed: 'Failed', expired: 'Expired', not_applied: 'Did not happen', cancelled: 'Cancelled' };
+    return labels[state] ?? state;
+  }
+  function activityValue(connection: ConnectionSnapshot) {
+    if (!connection.session) return agentPendingText(connection, 'Not connected');
+    if (!connection.phoneActionsAvailable) return 'Not reported';
+    return connection.actionHistory.length ? connection.actionHistory.length + ' recorded' : 'Review';
+  }
+  /** Runs after every later settings adapter so fixture or placeholder facts cannot reappear. */
+  function honestSettings(out: Bag, st: Bag, api: Bag): Bag {
     if (!out || !Array.isArray(out.stack)) return out;
-    for (const page of out.stack) if (page && Array.isArray(page.groups)) page.groups = page.groups.filter((group: Bag) => !Array.isArray(group?.rows) || group.rows.length);
+    const connection = connectionController.getSnapshot();
+    const info = (label: string, val: string): Bag => ({ kInfo: true, label, val, hasVal: !!val, noAB: true });
+    const nav = (label: string, go: () => void): Bag => ({ kNav: true, label, lbl: label, chev: true, noAB: true, go });
+    const model = residentModelLabel(connection, () => { try { api.set({ providerReadAt: Date.now() }); } catch { /* view closed */ } });
+    for (const page of out.stack) {
+      if (!page || !Array.isArray(page.groups)) continue;
+      if ((page.title === 'Models' || page.title === 'About') && model)
+        for (const group of page.groups) for (const row of group.rows || []) if (row.label === 'Inference model' || row.label === 'AI model') { row.val = model; row.hasVal = true; }
+      if (st.page === 'privacy' && st.log && page.title === 'Activity') {
+        const sessionId = connection.session?.sessionId ?? null;
+        // Reading history is an explicit step; its progress and errors appear in the connection panel.
+        // Decline and reconcile controls are rendered here, beside each entry, and report their own failures.
+        const load = (label: string) => nav(label, () => {
+          const before = connectionController.getSnapshot().actionHistory;
+          void connectionController.actionHistory().then(() => {
+            const after = connectionController.getSnapshot();
+            if (sessionId && after.session?.sessionId === sessionId && !after.error && after.actionHistory !== before) actionHistoryRead = sessionId;
+            try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ }
+          });
+        });
+        // A decision clears the read history; show it as unread rather than as empty.
+        // One decision per entry at a time; a failed one says so instead of leaving the row unchanged.
+        const decide = (id: string, label: string, run: () => Promise<unknown>) => nav(label, () => {
+          const key = 'activity:' + id;
+          if (busy.has(key)) return;
+          busy.add(key);
+          void run().catch(error => {
+            const reason = error instanceof Error ? error.message.trim() : '';
+            notify(api, reason ? 'Not recorded. ' + reason + (/[.!?]$/.test(reason) ? '' : '.') : 'Not recorded. Nothing was repeated.');
+          }).finally(() => { busy.delete(key); actionHistoryRead = null; try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ } });
+        });
+        const entryRows = (entry: ConnectionSnapshot['actionHistory'][number]): Bag[] => [
+          info(entry.description, activityState(entry.state)),
+          ...(entry.state === 'pending' ? [decide(entry.id, 'Decline', () => connectionController.rejectProposal(entry.id))]
+            : ['executing', 'reconciliation_required'].includes(entry.state) ? [
+              info('Check your phone, then confirm whether this happened.', ''),
+              decide(entry.id, 'It happened', () => connectionController.reconcile(entry.id, true)),
+              decide(entry.id, 'It did not happen', () => connectionController.reconcile(entry.id, false)),
+            ] : []),
+        ];
+        const groups: Bag[] = !connection.session
+          ? [{ rows: [...(connection.kind==='starting'?[]:[info(connection.kind === 'recovering' ? agentAvailabilityNotice(connection) : (testMocksEnabled ? 'Connect your remote agent to see activity' : 'Activity appears on the phone that runs your agent'), '')]), nav('Your agent', () => connectionController.open())] }]
+          : !connection.phoneActionsAvailable
+            ? [{ rows: [info('Phone action history', 'Not reported')] }]
+            : connection.actionHistory.length
+              ? [...connection.actionHistory.map(entry => ({ rows: entryRows(entry) })), { rows: [load('Refresh phone action history')] }]
+              : actionHistoryRead === sessionId
+                ? [{ rows: [info('No phone actions recorded', ''), load('Refresh phone action history')] }]
+                : [{ rows: [info('Phone action history', 'Not loaded'), load('Load phone action history')] }];
+        page.groups = groups;
+      }
+      // Memory deletion is not connected; do not offer a control that only explains that.
+      for (const group of page.groups) if (Array.isArray(group?.rows)) group.rows = group.rows.filter((row: Bag) => row?.label !== 'Wipe memory' && (page.title !== 'Privacy & data' || row?.label !== 'Memory'));
+      page.groups = page.groups.filter((group: Bag) => !Array.isArray(group?.rows) || group.rows.length);
+    }
     return out;
   }
   for (const [module, definition] of Object.entries(views)) {
@@ -233,8 +379,8 @@ export function installPrototypeNativeAdapters(
   }
   const settings = views.settings;
   if (settings && typeof settings.render === 'function') {
-    // Later adapters replace settings.render; keep this pass outermost.
-    const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => dropEmptyGroups(next(state, api)) : next;
+    // Later adapters replace settings.render; keep this honesty pass outermost.
+    const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
     let exposed = finalize(settings.render);
     Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
     restore.unshift(() => { delete settings.render; settings.render = exposed; });

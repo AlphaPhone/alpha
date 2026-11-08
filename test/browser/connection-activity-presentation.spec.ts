@@ -1,9 +1,10 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { test, expect } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
-// Real Settings › Agent connection over the real connection controller and DeviceActions; only the Android
+// Real Settings Activity over the real connection controller and DeviceActions; only the Android
 // IPC boundary is synthetic. No runtime, model or account is used and no action is performed.
 
-test('Agent connection presents recorded phone actions in plain language with reconcile controls', async ({ page }) => {
+test('Activity presents recorded phone actions in plain language with reconcile controls', async ({ page }) => {
   await installResidentAgentPlugin(page);
   await page.addInitScript(() => {
     const w = window as any; w.androidBridge = {};
@@ -56,21 +57,23 @@ test('Agent connection presents recorded phone actions in plain language with re
     };
   });
   await page.goto('/');
-  if (!await page.locator('.alpha-connection-scrim').isVisible()) await page.getByRole('button', { name: 'Agent connection', exact: true }).click();
+  if (!await page.locator('.alpha-connection-scrim').isVisible()) await openConnectionDiagnostics(page);
   await page.locator('.alpha-connection').getByRole('button', { name: 'Start local agent', exact: true }).click();
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
-  // Settings › Agent connection opens the connection panel here (a development build); the owner
-  // reads the recorded actions explicitly.
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Agent connection', exact: true }).click();
+  if (await page.locator('html').getAttribute('data-active-view') !== 'settings')
+    await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await openConnectionDiagnostics(page);
   const panel = page.locator('.alpha-connection');
-  await panel.getByText('Phone action history', { exact: true }).first().click();
-  await panel.getByRole('button', { name: 'Refresh actions', exact: true }).first().click();
-  // The uncertain action opens with its reconcile controls in the connection panel.
+  const history = panel.locator('details').filter({has: page.locator('summary').filter({hasText: 'Phone action history'})});
+  await history.locator('summary').click();
+  await history.getByRole('button', {name: 'Refresh actions', exact: true}).click();
+  // The uncertain action stays with its reconcile controls in the connection dialog.
   await expect(panel.getByText('Create note', { exact: true }).first()).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'I verified it happened', exact: true })).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'Reject proposal', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'It happened', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Decline', exact: true })).toBeVisible();
   expect(await panel.innerText()).not.toContain('{"type"');
+  await expect(panel.getByText(/Needs your review · this phone: applying/)).toBeVisible();
+  await expect(panel.getByText(/Waiting for your review · not dispatched by this phone/)).toBeVisible();
   const text = await page.locator('body').innerText();
   expect(text).not.toContain('{"type"');
   expect(text).not.toContain('"title"');

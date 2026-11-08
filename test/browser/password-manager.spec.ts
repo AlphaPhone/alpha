@@ -9,6 +9,7 @@ const SECRET_MARKERS = ['synthetic-dev-', 'typed-synthetic-Z9q', 'abcdefghjkmnpq
 async function devVault(page: Page) {
   await page.goto('/?mode=dev');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
   await page.getByRole('button', { name: 'Passwords', exact: true }).click();
 }
 async function agentContext(page: Page) {
@@ -28,7 +29,7 @@ test('development vault: unlock, search, add, generate, edit and delete without 
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await devVault(page);
   await expect(page.getByText('Locked', { exact: true })).toBeVisible();
-  await expect(page.getByText('Other password providers', { exact: true })).toBeVisible();
+  await expect(page.getByText('Other providers', { exact: true })).toBeVisible();
   // The agent observation is paused for the whole password surface.
   expect((await agentContext(page)).sensitive).toBe(true);
   await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
@@ -86,9 +87,12 @@ test('development vault locks when leaving and reports autofill selection only a
   await devVault(page);
   await expect(page.getByText('None selected', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Set as autofill service', exact: true }).click();
-  await expect(page.getByText('Confirm Alpha Phone passwords in Android, then return here.', { exact: true })).toBeVisible();
+  // The instruction is on the row before the handoff; no toast follows it.
+  await expect(page.getByText('Confirm in Android, or search there for autofill', { exact: true })).toBeVisible();
+  await expect(page.getByText('Confirm Alpha Phone passwords in Android, then return here.', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refresh autofill status', exact: true }).click();
   await expect(page.getByText('Alpha Phone passwords', { exact: true }).last()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Set as autofill service', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open Example sign-in', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to Settings', exact: true }).click();
@@ -98,28 +102,11 @@ test('development vault locks when leaving and reports autofill selection only a
   await expect(page.getByRole('button', { name: 'Open Example sign-in', exact: true })).toHaveCount(0);
 });
 
-test('Android Back from a password entry forgets the draft, as Back to Passwords does', async ({ page }) => {
-  await devVault(page);
-  await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
-  const draftHeld = () => page.evaluate(async () => (await import('/src/passwords/password-manager.ts')).passwordDraftHeld());
-  for (const leave of ['button', 'android'] as const) {
-    await page.getByRole('button', { name: 'Add password', exact: true }).click();
-    await expect(page.getByText('New password', { exact: true }).first()).toBeVisible();
-    await page.locator('input[aria-label="Password"]').fill('typed-synthetic-Z9q');
-    expect(await draftHeld()).toBe(true);
-    if (leave === 'button') await page.getByRole('button', { name: 'Back to Passwords', exact: true }).click();
-    else await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', { cancelable: true })));
-    await expect(page.getByRole('button', { name: 'Add password', exact: true })).toBeVisible();
-    expect(await draftHeld()).toBe(false);
-  }
-  await noSecretOutsideDialogs(page);
-});
-
 test('browser build without the development profile offers no simulated vault', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Passwords', exact: true }).click();
-  await expect(page.getByText('Available in the Android app', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Passwords', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Unlock passwords', exact: true })).toHaveCount(0);
 });
 
@@ -167,6 +154,7 @@ async function nativeVault(page: Page, options: { leak?: boolean; selected?: str
   }, options);
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
   await page.getByRole('button', { name: 'Passwords', exact: true }).click();
 }
 
@@ -178,7 +166,7 @@ test('native vault: Android unlock, app bindings, copy and autofill picker with 
   await bank.click();
   await expect(page.getByText('App · verified publisher', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Copy password', exact: true }).click();
-  await expect(page.getByText('Copied. We try to clear it after 45 s, or when you return to the app.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Copied. Alpha tries to clear it in 45 s.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to Passwords', exact: true }).click();
   await page.getByRole('button', { name: 'Set as autofill service', exact: true }).click();
   // Opening Android's confirmation is not a selection; only the readback changes the status.
@@ -188,7 +176,7 @@ test('native vault: Android unlock, app bindings, copy and autofill picker with 
   const calls = await page.evaluate(() => (window as any).vaultFixture.calls.map((c: any) => c.method));
   expect(calls).toEqual(expect.arrayContaining(['status', 'unlock', 'list', 'copy', 'openAutofillSettings']));
   // Proton Pass remains an alternative provider on the same page.
-  await expect(page.getByText('Other password providers', { exact: true })).toBeVisible();
+  await expect(page.getByText('Other providers', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Get Proton Pass from Proton', exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Export passwords', exact: true }).click();
@@ -249,12 +237,13 @@ test('outbound capture: vault work sends no request containing typed or stored v
   await page.locator('input[aria-label="Password"]').fill('typed-synthetic-Z9q');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Password saved.', { exact: true })).toBeVisible();
-  // Agent turns are refused while the vault is open, so nothing can be observed or sent.
-  const refused = await page.evaluate(async () => {
+  // The open vault marks the agent context sensitive. That AlphaClient then refuses every turn is
+  // tested in test/alpha-client-sensitive.test.mjs.
+  const sensitive = await page.evaluate(async () => {
     const { alphaClient } = await import('/src/runtime/alpha-client.ts');
     return alphaClient.getState().context.sensitive;
   });
-  expect(refused).toBe(true);
+  expect(sensitive, 'context is marked sensitive').toBe(true);
   await page.getByRole('button', { name: 'Back to Settings', exact: true }).click();
   const leaked = await page.evaluate(markers => {
     const w = window as any; const text = (w.consoleText || '') + (w.capturedBeacons || []).join('\n');
@@ -274,6 +263,7 @@ test('leaving Settings for another view locks the development vault', async ({ p
   // Locked and forgotten as soon as Settings is left, not only when it is reopened.
   expect(await page.evaluate(async () => (await import('/src/passwords/password-manager.ts')).passwordManagerHoldsEntries())).toBe(false);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Apps', exact: true }).click();
   await page.getByRole('button', { name: 'Passwords', exact: true }).click();
   await expect(page.getByText('Locked', { exact: true })).toBeVisible();
 });

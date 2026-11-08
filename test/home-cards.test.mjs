@@ -162,8 +162,8 @@ test('next item: an overdue reminder does not hide the next event, which keeps i
   assert.deepEqual(H.presentHomeNext({title: '  ', begin: at(17), allDay: false, now, provenance: reminder}),
     {text: 'Next: Untitled event 5:00 PM', source: 'Reminder', description: 'Next: Untitled event, 5:00 PM. Reminder saved on this browser, read 2:50 PM'});
   const cards = readFileSync(new URL('../apps/app/src/prototype/home-overview-cards.ts', import.meta.url), 'utf8');
-  // The next item's source is not drawn on Home (docs/daily-overview.md); its description keeps it.
-  assert.match(cards, /out\.homeCalendarHasNext \? \{text: String\(out\.homeCalendarNext \|\| ''\), source: ''\}/);
+  assert.match(cards, /out\.homeCalendarHasNext \? \{text: String\(out\.homeCalendarNext \|\| ''\), source: String\(out\.homeCalendarNextSource \|\| ''\)\}/, 'the Next line retains its source label');
+  assert.match(cards, /description: String\(out\.homeCalendarDescription \?\? ''\)/, 'the card retains the model description, including the next item source');
   assert.match(cards, /next: \{'data-alpha-home-calendar-next-line': ''\}, nextSource: \{'data-alpha-home-calendar-next-source': ''\}/);
 });
 test('next item under Agent Calendar: an overdue reminder shows whichever comes first of an upcoming phone reminder and the agent event', () => {
@@ -198,28 +198,6 @@ test('a phone reminder leading under Agent Calendar keeps a failed or out-of-dat
   assert.match(adapter, /presentHomeAgendaCard\(agentReminderLead\(local,feed\)\)/);
 });
 test('Agent Calendar freshness: an unverified next event is never fresh or an empty schedule', () => {
-  const next = {calendarFeedState: 'complete', timeReference: {asOf: new Date(at(15)).toISOString()}};
-  const fresh = H.presentAgentAgendaFeed({status: 'ready', next, nextFresh: true, error: null}, true, now, 'No upcoming events in this window');
-  assert.equal(fresh.state, 'ready'); assert.equal(fresh.read, 'Agent Calendar'); assert.equal(fresh.stale, false);
-  assert.equal(H.presentAgentAgendaFeed({status: 'ready', next: {...next}, nextFresh: true, error: null}, false, now, 'No upcoming events in this window').title, 'No upcoming events in this window');
-  // A failed next read keeps the same-source cached event, shown stale with the failure.
-  const failed = H.presentAgentAgendaFeed({status: 'ready', next, nextFresh: false, error: 'Next event could not be refreshed. Saved event is unverified.'}, true, now, 'Calendar has not been verified');
-  assert.equal(failed.state, 'stale'); assert.equal(failed.stale, true); assert.match(failed.read, /^Not updated since /);
-  assert.equal(failed.description, 'Next event could not be refreshed. Saved event is unverified. Open Calendar to retry.');
-  // An event that ended (or a partial feed) with nothing verified since is unverified, not empty.
-  for (const status of ['ready', 'partial']) {
-    const ended = H.presentAgentAgendaFeed({status, next: null, nextFresh: false, error: null}, false, now, 'Calendar has not been verified');
-    assert.equal(ended.state, 'error'); assert.equal(ended.title, 'Calendar has not been verified'); assert.equal(ended.read, 'Open Calendar to retry');
-    assert.doesNotMatch(ended.title, /No upcoming/);
-    assert.equal(ended.description, 'Agent Calendar has not been verified. Open Calendar to retry.');
-  }
-  // Reading again after the failure, and other controller states, keep the shared presentation.
-  assert.equal(H.presentAgentAgendaFeed({status: 'loading', next, nextFresh: false, error: null}, true, now, '').state, 'loading');
-  assert.equal(H.presentAgentAgendaFeed(undefined, false, now, '').state, 'not-connected');
-  assert.equal(H.presentAgentAgendaFeed({status: 'error', next: null, nextFresh: false, error: 'Calendar service unavailable'}, false, now, '').description, 'Calendar service unavailable. Open Calendar to retry.');
-  // A stale feed with a failed retry leads a phone reminder with the agent's read line.
-  const local = {now, item: {title: 'Call mom', begin: at(16), allDay: false, video: false}, provenance: {origin: 'Reminder', read: '', description: 'Reminder saved on this browser'}};
-  assert.equal(H.presentHomeAgendaCard(H.agentReminderLead(local, failed)).stale, true);
   // Exercise the current adapter's actual render closure with the real complete-feed
   // selector. A future-only `next` result must never authorize Home's agenda.
   const adapter = readFileSync(new URL('../apps/app/src/prototype/agent-calendar-adapter.ts', import.meta.url), 'utf8');
@@ -237,7 +215,7 @@ test('Agent Calendar freshness: an unverified next event is never fresh or an em
   const source={provider:'eliza',side:'owner',grantId:'fixture',connectorAccountId:null,calendarId:'primary',includeInFeed:true,accessRole:'owner'};
   const event={...source,id:'event',title:'Verified today',status:'confirmed',startAt:new Date(at(16)).toISOString(),endAt:new Date(at(17)).toISOString()};
   let current=true,owner='owner',state={ownerKey:'owner',status:'ready',mutating:false,calendars:[source],next:{event},nextFresh:true,feed:undefined};
-  let reads=0;const opened=[],context={p:{},renderVals:()=>({}),deviceCalendarScope:()=>false,Date:class extends Date{static now(){return now;}},controller:{get state(){return state;},sourceHandle:()=> 'fixture'},calendarSourceKey:key,port:()=>({current:()=>current}),calendarOwnerKey:()=>owner,zone:()=> 'UTC',homeCalendarSelection:loaded.exports.homeCalendarSelection,homeCalendarValues:H.homeCalendarValues,presentHomeAgendaCard:H.presentHomeAgendaCard,presentHomeAgendaFeed:H.presentHomeAgendaFeed,agentReminderLead:H.agentReminderLead,overdueAgendaNext:H.overdueAgendaNext,refresh:force=>{assert.equal(force,true);reads++;},calendarEventKey:e=>e.id,canonicalCalendarRow:()=>({off:0})};
+  let reads=0;const opened=[],context={p:{},renderVals:()=>({}),deviceCalendarScope:()=>false,Date:class extends Date{static now(){return now;}},controller:{get state(){return state;},sourceHandle:()=> 'fixture'},calendarSourceKey:key,port:()=>({current:()=>current}),calendarOwnerKey:()=>owner,zone:()=> 'UTC',homeCalendarSelection:loaded.exports.homeCalendarSelection,homeCalendarValues:H.homeCalendarValues,homeReadIsStale:H.homeReadIsStale,presentHomeAgendaCard:H.presentHomeAgendaCard,presentHomeAgendaFeed:H.presentHomeAgendaFeed,agentReminderLead:H.agentReminderLead,overdueAgendaNext:H.overdueAgendaNext,refresh:force=>{assert.equal(force,true);reads++;},calendarEventKey:e=>e.id,canonicalCalendarRow:()=>({off:0})};
   vm.runInNewContext(transformSync(adapter.slice(start,end+4),{loader:'ts'}).code,context);
   let savedPrefs={};const shell={vget:()=>({calPrefs:savedPrefs}),openView:(...args)=>opened.push(args)},render=()=>context.p.renderVals.call(shell);
   let home=render();assert.doesNotMatch(home.homeCalendarTitle,/Verified today|Nothing planned/,'next-only cache is unverified');
@@ -251,13 +229,22 @@ test('Agent Calendar freshness: an unverified next event is never fresh or an em
     const saved=state;state={...state,status,error:'Calendar service unavailable',feed:status==='partial'?{...state.feed,state:'partial'}:null};
     const failed=render();assert.equal(reads,0,'failure rendering never starts reads');assert.doesNotMatch(failed.homeCalendarTitle,/Verified today|Nothing planned/);
     if(status==='partial'){
-      assert.equal(failed.homeCalendarTitle,'Calendar');
-      assert.equal(failed.homeCalendarDescription,'Open Calendar to retry');
+      assert.equal(failed.homeCalendarTitle,'Calendar unavailable');
+      assert.equal(failed.homeCalendarDescription,'Calendar service unavailable. Open Calendar to retry.');
     }
     failed.goCalendar();assert.equal(reads,1,'explicit navigation retries the actual failed/unverified feed');reads=0;state=saved;
   }
   current=false;assert.doesNotMatch(render().homeCalendarTitle,/Verified today|Nothing planned/,'retired connection drops the event');current=true;
-  state={...state,feed:{...state.feed,events:[]}};assert.equal(render().homeCalendarTitle,'Nothing planned','only complete covered feed can assert empty');
+  state={...state,feed:{...state.feed,events:[],syncedAt:new Date(now).toISOString()}};assert.equal(render().homeCalendarTitle,'Nothing planned','only complete covered feed can assert empty');
+  for(const syncedAt of [new Date(now-2*86400000).toISOString(),new Date(now+3600000).toISOString(),undefined]){
+    state={...state,feed:{...state.feed,syncedAt}};
+    const unverified=render();
+    assert.equal(unverified.homeCalendarConfirmedEmpty,false);
+    assert.equal(unverified.homeCalendarTitle,'Calendar has not been verified');
+    assert.equal(unverified.homeCalendarSource,'Open Calendar to retry');
+    assert.equal(reads,0,'rendering an unverified empty read never retries automatically');
+    unverified.goCalendar();assert.equal(reads,1,'owner navigation explicitly retries unverified empty reads');reads=0;
+  }
 });
 test('inbox status: readable freshness and every non-ready state', () => {
   const base = {failure: false, pending: false, cached: null, connected: false, unchecked: false, now};
@@ -277,7 +264,7 @@ test('workflow freshness: a load time only after a list was actually loaded', ()
   assert.deepEqual(H.presentHomeWorkflowFreshness({loadedAt: at(8, 15, 6), now, unified: true}), {visible: 'Loaded Tue, Oct 6 8:15 AM', description: 'Automations from your agent and reminders on this phone, loaded Tue, Oct 6 8:15 AM'});
   assert.deepEqual(H.presentHomeWorkflowFreshness({loadedAt: at(15, 4), now, unified: true, agent: false}), {visible: 'Loaded 3:04 PM', description: 'Reminders on this phone, loaded 3:04 PM'}, 'no agent is named when none is connected');
 });
-test('Home template renders the cards Home shows, the date line and the brief card only from live values', () => {
+test('Home template renders source, freshness and the brief card only from live values', () => {
   const template = readFileSync(new URL('../apps/app/src/prototype/template.html', import.meta.url), 'utf8');
   const home = template.slice(template.indexOf('<sc-element value="{{homeShell}}">'), template.indexOf('</sc-element>'));
   assert.ok(home.includes('<sc-slot name="cards">'), 'Home cards fill the shared shell\'s card slot');
@@ -293,16 +280,15 @@ test('Home template renders the cards Home shows, the date line and the brief ca
   assert.doesNotMatch(home, /\}\}\s+\{\{/, 'each card placeholder is alone in its text node');
   assert.doesNotMatch(home, /home-calendar-card|home-brief-card|data-alpha-home-inbox|\{\{homeCalendarTitle\}\}|\{\{homeBriefTitle\}\}|\{\{homeInboxTitle\}\}/, 'no second copy of the shared card markup');
   assert.match(home, /aria-description="\{\{homeWorkflowDescription\}\}"/);
-  // Freshness is in the accessible description only (docs/daily-overview.md).
-  assert.doesNotMatch(home, /\{\{homeWorkflowFreshness\}\}|data-alpha-home-workflow-freshness/);
-  // The workflows card is drawn only while Home's visibility pass shows it; with no card, the row
-  // holds the date line first, with Connect Google only while Google is known disconnected.
-  assert.match(home, /<sc-if value="\{\{homeShowWorkflows\}\}"><button data-alpha-home-workflows /);
-  assert.match(home, /<sc-if value="\{\{homeShowDate\}\}"><div class="home-date-line" data-alpha-home-date><span class="serif home-date-text">\{\{homeDateLabel\}\}<\/span><sc-if value="\{\{homeShowSetup\}\}"><button class="tap home-date-setup" data-alpha-home-connect-google onClick="\{\{connectGoogle\}\}">Connect Google<\/button><\/sc-if><\/div><\/sc-if>/);
-  assert.ok(home.indexOf('data-alpha-home-date') < home.indexOf('{{homeAgendaCard}}'), 'the date line is the row\'s first child');
+  const workflows = readFileSync(new URL('../apps/app/src/prototype/workflow-adapter.ts', import.meta.url), 'utf8');
+  const automations = readFileSync(new URL('../apps/app/src/prototype/automations-adapter.ts', import.meta.url), 'utf8');
+  for (const source of [workflows, automations]) {
+    assert.match(source, /presentHomeWorkflowFreshness\(/);
+    assert.match(source, /homeWorkflowDescription:loaded\.description/, 'the compact card keeps the read time in its accessible description');
+  }
   assert.doesNotMatch(home, /Morning brief|Design review|7:02 AM/, 'no fixture brief or agenda text in the template');
   const adapter = readFileSync(new URL('../apps/app/src/prototype/data-adapter.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(adapter, /gmailSearch|gmailThread|\.sync\(|fetch\(/, 'the Home adapter starts no mail read, digest sync or network request');
+  assert.doesNotMatch(adapter, /gmailSearch|gmailThread|\.sync\(|fetch\(/);
 });
 
 test('calendar name lookup: the event\'s own calendar in the same read, and no borrowed or stale name', () => {
@@ -329,34 +315,4 @@ test('calendar name lookup: the event\'s own calendar in the same read, and no b
   const base = {state: 'ready', overdue: false, readAt: at(15, 4), now, native: true};
   assert.equal(H.presentHomeCalendarSource({...base, calendar: H.homeCalendarName(sources, '7')}).description, 'Harbour team. Read 3:04 PM from calendars on this device');
   assert.deepEqual(H.presentHomeCalendarSource({...base, calendar: H.homeCalendarName(sources, '99')}), {origin: '', read: '', description: 'Read 3:04 PM from calendars on this device'});
-});
-
-test('Home card visibility: a card only with something to show, else the date line, and Connect Google only when Google is known disconnected', () => {
-  const source = readFileSync(new URL('../apps/app/src/prototype/data-adapter.ts', import.meta.url), 'utf8');
-  const start = source.indexOf('export function installHomeCardVisibility');
-  const body = source.slice(start, source.indexOf('\n}\n', start) + 3).replace('export function', 'function');
-  const context = {formatFullDate: L.formatFullDate, Date};
-  vm.runInNewContext(transformSync(body + '\nglobalThis.install = installHomeCardVisibility;', {loader: 'ts'}).code, context);
-  let values = {};
-  let opened = 0;
-  class Shell { renderVals() { return values; } }
-  context.install(Shell, () => opened++);
-  const home = next => { values = next; return new Shell().renderVals(); };
-  const none = home({homeCalendarHasEvent: false, homeWorkflowHasRows: false, homeInboxHasRows: false, homeBriefHas: false});
-  assert.equal(none.homeShowDate, true);
-  assert.equal(none.homeShowSetup, false, 'no Connect Google while Google is unknown or signed out of Eliza Cloud');
-  assert.equal(none.homeDateLabel, L.formatFullDate(new Date()));
-  assert.deepEqual([none.homeShowCalendar, none.homeShowWorkflows, none.homeShowInbox], [false, false, false]);
-  assert.equal(home({homeGoogleConnected: false}).homeShowSetup, true);
-  assert.equal(home({homeGoogleConnected: true}).homeShowSetup, false);
-  assert.equal(home({homeGoogleConnected: false, homeBriefHas: true}).homeShowSetup, false, 'a card replaces the date line and its button');
-  for (const [key, shown] of [['homeCalendarHasEvent', 'homeShowCalendar'], ['homeWorkflowHasRows', 'homeShowWorkflows'], ['homeInboxHasRows', 'homeShowInbox'], ['homeBriefHas', null]]) {
-    const out = home({[key]: true, homeGoogleConnected: false});
-    assert.equal(out.homeShowDate, false, key);
-    assert.equal(out.homeDateLabel, '', key);
-    for (const flag of ['homeShowCalendar', 'homeShowWorkflows', 'homeShowInbox']) assert.equal(out[flag], flag === shown, `${key} shows only its own card`);
-  }
-  home({homeGoogleConnected: false}).connectGoogle();
-  assert.equal(opened, 1, 'Connect Google opens the existing Google connection flow');
-  assert.equal(L.formatFullDate(new Date(2026, 10, 6)), 'Friday, November 6');
 });

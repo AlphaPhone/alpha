@@ -1,11 +1,12 @@
 import {parseNoteFormat} from '../../../../.eliza/client-features/plugins/plugin-notes/src/note-format.ts';
-import {projectNoteForModel,type NoteJson,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
+import {projectNoteForModel,reconstructNoteContent,type NoteJson,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import {noteScheduleDraft,type NoteScheduleKind} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/note-schedule-draft.ts';
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {agentPendingText,agentAvailabilityNotice} from '../runtime/connection-ui';
 import {DailyApps} from '../daily';
 import {CanonicalNotesController,type NotesPhase} from './canonical-notes-controller';
 import {CanonicalNotesEditor} from './canonical-notes-editor';
+import type {CanonicalNoteSaveIntent} from './note-recorder';
 type Bag=Record<string,any>;
 const UNAVAILABLE='Notes is unavailable for this agent connection. Check Settings › Agent connection.';
 /** Device-local handles (a recording, a picked document, a web source) belong to Older notes adapters, never to an agent record's view. */
@@ -18,9 +19,17 @@ const filled=(value:unknown)=>Array.isArray(value)&&value.length>0;
 /** Alpha's card for a record: voice, link and checklist only when the record carries that data, otherwise text. */
 function shownKind(kind:string,data:Bag):string{
  if(kind==='list')return 'list';
- if(kind==='voice'&&(filled(data.lines)||filled(data.summary)||filled(data.actions)))return 'voice';
+ if(kind==='voice'&&(filled(data.lines)||filled(data.summary)||filled(data.actions)||voiceAudio(data)))return 'voice';
  if(kind==='link'&&typeof data.url==='string'&&data.url)return 'link';
  return 'text';
+}
+/** Only an opaque recording handle is persisted. Paths and arbitrary audio metadata
+ * never become view handles; playback additionally checks native ownership by canonical note id. */
+function voiceAudio(data:Bag):{audioId:string;durationMs:number}|undefined{
+ const audio=data.audio;
+ if(!audio||typeof audio!=='object'||Array.isArray(audio)||Object.keys(audio).some(key=>!['audioId','durationMs'].includes(key)))return;
+ if(typeof data.recordingId!=='string'||audio.audioId!==data.recordingId||!/^[A-Za-z0-9_-]{1,128}$/.test(audio.audioId)||!Number.isFinite(audio.durationMs)||audio.durationMs<0)return;
+ return {audioId:audio.audioId,durationMs:audio.durationMs};
 }
 function domainOf(url:string):string{try{return new URL(url).hostname;}catch{return url;}}
 
@@ -37,7 +46,7 @@ export class CanonicalNotesUi {
  private openValue:string|null=null;
  private blankCreationValue:string|null=null;
  private trashValue:{id:string;title:string;kind:string}[]=[];
- constructor(port:AppRecordPort,private readonly hooks:{paint():void;review():void;committed?(id:string):void}){
+ constructor(port:AppRecordPort,private readonly hooks:{paint():void;review():void;committed?(id:string):void;dropped?(title:string):void}){
   this.controller=new CanonicalNotesController(port,{
    snapshot:(snapshot,reason)=>{
     this.trashValue=(snapshot.trash??[]).map(entry=>({id:entry.note.id,title:entry.note.title,kind:entry.note.format?.kind??'text'}));
@@ -64,11 +73,12 @@ export class CanonicalNotesUi {
  private needsReview():void{this.reviewPending='change';this.phase='review';this.hooks.paint();this.hooks.review();}
  /** The record as Alpha's Notes view reads it: authored rich fields at the top level, local handles left out. */
  private row(note:StickyNote,revision:number):Bag{
-  const data:Bag=structuredClone(note.format?.data??{});for(const key of LOCAL_HANDLES)delete data[key];
+  const data:Bag=structuredClone(note.format?.data??{}),audio=note.format?.kind==='voice'?voiceAudio(data):undefined;for(const key of LOCAL_HANDLES)delete data[key];
+  if(audio)data.audio=audio;
   const parts=projectNoteForModel(note),kind=shownKind(note.format?.kind??'text',data);
   const row:Bag={...data,id:note.id,kind,title:parts.title,body:parts.body,canonicalRevision:revision};
   if(typeof row.when!=='string'){const at=Date.parse(note.updatedAt);row.when=Number.isFinite(at)?new Date(at).toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';}
-  if(kind==='voice'){for(const key of ['lines','summary','actions'])if(!Array.isArray(row[key]))row[key]=[];row.lines=row.lines.map((line:Bag)=>({...line,at:Number.isFinite(line?.at)?line.at:0}));}
+  if(kind==='voice'){if(audio)row.audio={...audio,noteId:note.id,transcript:parts.body};for(const key of ['lines','summary','actions'])if(!Array.isArray(row[key]))row[key]=[];row.lines=row.lines.map((line:Bag)=>({...line,at:Number.isFinite(line?.at)?line.at:0}));}
   if(kind==='link'&&typeof row.domain!=='string')row.domain=domainOf(row.url);
   return row;
  }
@@ -76,8 +86,9 @@ export class CanonicalNotesUi {
   const rows=this.baseRows.slice(),draft=this.editor?.draft;
   this.openValue=draft?draft.id??'draft-'+draft.token:null;this.blankCreationValue=draft&&!draft.id?this.openValue:null;
   if(draft){
-   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{});for(const key of LOCAL_HANDLES)delete data[key];
-   const record={...base,...data,id:this.openValue,kind:base?.kind??shownKind(draft.format?.kind??'text',data),title:draft.title,body:draft.body,canonicalRevision:draft.baseRevision};
+   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of LOCAL_HANDLES)delete data[key];
+   if(audio&&draft.id)data.audio={...audio,noteId:draft.id,transcript:draft.body};
+   const record={...base,...data,id:this.openValue,kind:base?.kind??kind,title:draft.title,body:draft.body,canonicalRevision:draft.baseRevision};
    if(draft.format?.kind==='list'||draft.format?.kind==='text')record.kind=draft.format.kind;
    const index=rows.findIndex(row=>row.id===draft.id);if(index<0)rows.unshift(record);else rows[index]=record;
   }
@@ -93,12 +104,13 @@ export class CanonicalNotesUi {
  notes():StickyNote[]{return this.controller.current?this.controller.snapshot?.notes??[]:[];}
  selection(){return this.editor.selection();}
  private status():string{
-  if(this.phase==='review')return this.editor.draft?.version?'Your draft is kept here. Reload the current notes to discard it.':this.failure==='read'&&this.reviewPending==='read'?'Notes could not be opened. Check the agent connection, then reload.':'That change could not be confirmed. Reload Notes to see what was saved.';
+  if(this.phase==='review')return this.editor.draft?.version?'Your draft is shown here until you reload or the connection changes. Reload the current notes to discard it.':this.failure==='read'&&this.reviewPending==='read'?'Notes could not be opened. Check the agent connection, then reload.':'That change could not be confirmed. Reload Notes to see what was saved.';
   return this.controller.revision===null?'Opening Notes…':'';
  }
  renderState(previous:Bag):Bag{return {...previous,...DEVICE_ONLY_STATE,list:this.list,open:this.open,storageStatus:this.status(),blankCreationId:this.blankCreationValue};}
  async refresh():Promise<void>{await this.controller.refresh();}
- retire():void{this.editor.close();this.controller.retire();this.baseRows=[];this.rowsValue=[];this.openValue=null;this.trashValue=[];}
+ /** A connection change ends this binding; an unsaved edit is not carried over, so the owner is told. */
+ retire():void{const draft=this.editor.draft;if(draft?.version)this.hooks.dropped?.(draft.title||'Untitled');this.editor.close();this.controller.retire();this.baseRows=[];this.rowsValue=[];this.openValue=null;this.trashValue=[];}
  /** Wait out an in-flight save and the follow-up it queued for edits typed meanwhile. */
  private async settle():Promise<void>{
   for(let attempt=0;attempt<8&&this.controller.pending;attempt++){await new Promise<void>(resume=>this.idleWaiters.push(resume));await new Promise(resume=>setTimeout(resume,0));}
@@ -150,23 +162,55 @@ export class CanonicalNotesUi {
   if(this.editor.draft&&!this.editor.draft.id&&id===this.open){this.editor.close();return true;}
   const title=this.list.find(row=>row.id===id)?.title||'Note';
   const removed=await this.editor.remove(id);
-  if(removed&&this.controller.current)api.toast('Moved to Recently deleted',{undo:()=>void this.editor.restore(id)});
+  if(removed&&this.controller.current)api.toast('Moved to Recently deleted',{undo:()=>void this.undoRemove(id,api)});
   return removed;
  }
+ /** Undo waits out an in-flight save; restoring over one would only fail into review. */
+ private async undoRemove(id:string,api:Bag):Promise<void>{
+  await this.settle();
+  if(!this.controller.current)return;
+  if(this.controller.pending){api.toast('Wait for the current save, then restore it from Trash.');return;}
+  await this.editor.restore(id);
+ }
  /**
-  * A finished Notes recording as an agent voice note: its transcript and length, in the selected
-  * folder. Agent notes keep no audio (as dictation), so the recording itself is not stored.
+  * A separate canonical voice note. Audio is retained by the existing device store,
+  * bound to the confirmed canonical id; only its opaque attachment handle is metadata.
   */
- async saveVoice(transcript:string,durationMs:number,folderId:string|null,current:()=>boolean):Promise<boolean>{
+ async saveVoice(recordingId:string,transcript:string,durationMs:number,folderId:string|null,current:()=>boolean,intent:CanonicalNoteSaveIntent):Promise<boolean>{
+  let canonicalRecordConfirmed=false;
   try{
-   if(!current()||!await this.leave(null))return false;
-   if(this.controller.revision===null)await this.controller.refresh();
-   if(!current())return false;
-   this.editor.begin('voice');
-   const data:Record<string,NoteJson>={lines:transcript?[{s:'me',at:0,t:transcript}]:[],summary:[],actions:[],dur:Math.round(durationMs)/1000,...(folderId?{folderId}:{})};
-   this.editor.edit({title:'Voice note',body:transcript,format:parseNoteFormat({kind:'voice',data})});
-   return await this.editor.save();
-  }catch{if(this.controller.current)this.needsReview();return false;}
+   if(!current()||this.pending)return false;
+   if(typeof recordingId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(recordingId)||!Number.isFinite(durationMs)||durationMs<0)return false;
+   await this.controller.refresh();
+   if(!current()||this.pending)return false;
+   const duration=Math.round(durationMs)/1000,audioOnly=typeof intent.retainAudio==='function';
+   const content=transcript?`Voice note\n${transcript}`:'Voice note';
+   const belongs=(note:StickyNote)=>note.format?.kind==='voice'&&note.format.data.recordingId===recordingId;
+   const matches=(note:StickyNote)=>belongs(note)&&reconstructNoteContent(note)===content&&
+    note.format?.data.dur===duration&&(note.format?.data.folderId??null)===folderId&&
+    (!audioOnly||voiceAudio(note.format?.data??{})?.audioId===recordingId);
+   const complete=async(note:StickyNote)=>{
+    if(!matches(note)||!current()||this.pending)return false;
+    canonicalRecordConfirmed=true;
+    if(audioOnly){const saved=await intent.retainAudio!(note.id);if(!current()||saved.audioId!==recordingId||saved.noteId!==note.id||saved.durationMs!==durationMs)return false;}
+    // Recording from an open text note creates a new voice note without replacing its draft.
+    if(!this.dirty){this.editor.open(note.id);this.hooks.committed?.(note.id);}
+    return true;
+   };
+   const snapshot=this.controller.snapshot;
+   // A recording already moved to Trash is not resurrected by a delayed Stop.
+   if((snapshot?.trash??[]).some(entry=>belongs(entry.note)))return false;
+   const prior=(snapshot?.notes??[]).filter(belongs);
+   if(prior.length)return prior.length===1&&await complete(prior[0]);
+   if(intent.pending||!await intent.claim()||!current()||this.pending)return false;
+   const data:Record<string,NoteJson>={recordingId,lines:transcript?[{s:'me',at:0,t:transcript}]:[],summary:[],actions:[],dur:duration,...(audioOnly?{audio:{audioId:recordingId,durationMs}}:{}),...(folderId?{folderId}:{})};
+   const result=await this.controller.interact('create-note',{
+    content,
+    forceNew:true,format:parseNoteFormat({kind:'voice',data}),
+   });
+   if(!current()||!result.note||!result.target||!matches(result.note))return false;
+   return await complete(result.note);
+  }catch{if(this.controller.current&&!canonicalRecordConfirmed)this.needsReview();return false;}
  }
  async saveCard(content:string,api:Bag):Promise<boolean>{
   try{const result=await this.controller.interact('create-note',{content});if(!this.controller.current||!result.target)return false;this.hooks.committed?.(result.target.id);return true;}
@@ -176,7 +220,8 @@ export class CanonicalNotesUi {
   const id=this.editor.draft?.id;this.reviewPending=false;this.failure=null;this.editor.close();
   try{await this.controller.refresh();if(id&&this.controller.hasViewNote(id))this.editor.open(id);}catch{this.needsReview();}
  }
- /** A reviewed Calendar event or reminder draft from the open record. Nothing is written until Save in Calendar; the saved record keeps the draft's canonical origin link. */
+ /** A reviewed Calendar event or reminder draft from the open record. Nothing is written until Save in Calendar; the saved record keeps the draft's canonical origin link.
+  * An event goes through Calendar's own admission, which binds it to Agent Calendar's owner and source or opens the device draft. */
  private async scheduleDraft(id:string,kind:NoteScheduleKind,api:Bag):Promise<void>{
   if(this.editor.draft?.version&&!await this.leave(id))return;
   const note=this.controller.viewNote(id);if(!note||!api.isActive()||this.open!==id)return;
@@ -184,8 +229,9 @@ export class CanonicalNotesUi {
   if(!this.controller.current||!api.isActive()||this.open!==id)return;
   if(result.status!=='ready'){api.toast(result.message);return;}
   const {draft}=result,shared={id:null,title:draft.title,off:1,t:9,d:1,where:'',video:false,who:[],repeat:'none',notes:draft.notes,origin:draft.origin};
-  api.open('calendar',{calendarAuthority:api.get('calendar').calendarAuthority,form:kind==='event'?{...shared,creationId:crypto.randomUUID(),separateCreation:false,cal:'native:local',alert:null}:{...shared,cal:'alpha-reminders',alert:0},open:null,month:null,day:1},'hidden');
-  api.toast(kind==='event'?'Review the time, then Save. Nothing is on your calendar yet.':'Review the time, then Save. Nothing scheduled yet.');
+  if(kind==='event'){if(!api.reviewCalendarDraft?.({...shared,creationId:crypto.randomUUID(),separateCreation:false,cal:'native:local',alert:null})){api.toast("Calendar can't open this event yet. Finish any open Calendar draft and try again.");return;}}
+  else api.open('calendar',{calendarAuthority:api.get('calendar').calendarAuthority,form:{...shared,cal:'alpha-reminders',alert:0},open:null,month:null,day:1},'hidden');
+  api.toast('Review the time, then Save.');
  }
  /** Speech recognition through the platform port; the transcript lands at the caret of the note it was started from. */
  private async dictate(id:string,api:Bag):Promise<void>{
@@ -204,7 +250,7 @@ export class CanonicalNotesUi {
   }catch{api.toast('Speech recognition is unavailable.');}
  }
  /** Canonical behaviour on top of Alpha's Notes view: the restore-only Trash as the Recently deleted
-  * folder, review and reload, and the Notes recorder saving the transcript (agent notes keep no audio). */
+  * folder, review and reload, and the Notes recorder saving one voice record with an owned opaque audio attachment. */
  decorate(view:Bag,api:Bag,state:Bag):Bag{
   const rows=this.controller.current?this.trashValue:[],ready=this.controller.revision!==null,busy=this.controller.pending,open=this.open,saved=!!open&&this.controller.hasViewNote(open);
   const trashOpen=state.folder==='deleted'&&rows.length>0;
@@ -218,10 +264,16 @@ export class CanonicalNotesUi {
    trashAskOpen:!!asked,trashAskTitle:asked?ask!.title:'',trashAskClose:()=>api.set({trashAsk:null}),trashAskRecover:()=>{if(asked)restore(asked.id);},trashAskDelete:()=>{},
    openTrash:()=>{void this.leave(null).then(left=>{if(left&&this.controller.current){api.set({folder:'deleted',filter:null,folderSheet:null,sheet:null,q:null});void this.controller.refresh().catch(()=>{});}});},
    closeTrash:()=>api.set({folder:null,trashAsk:null}),emptyTrash:()=>{},trashConfirmGo:()=>{},trashCancel:()=>api.set({trashConfirm:null,trashFull:null})};
-  if(out.ed&&open){out.ed={...out.ed,dictate:()=>void this.dictate(open,api),...(saved?{draftReminder:()=>void this.scheduleDraft(open,'reminder',api),draftEvent:()=>void this.scheduleDraft(open,'event',api)}:{})};}
-  if(out.vo&&open){out.vo={...out.vo,hasPlayback:false,play:()=>api.toast('No audio is available for this note.'),
-   toCal:()=>void this.scheduleDraft(open,'reminder',api),calLabel:'Review reminder draft',calText:'Review reminder',calIcon:api.ic?.cal??out.vo.calIcon,
-   toEvent:()=>void this.scheduleDraft(open,'event',api),eventLabel:'Review calendar event draft',eventText:'Review event'};}
+  if(out.ed&&open){out.ed={...out.ed,dictate:()=>void this.dictate(open,api),
+   toCal:saved?()=>{out.ed.closeMenu?.();void this.scheduleDraft(open,'reminder',api);}:undefined,
+   toEvent:saved?()=>{out.ed.closeMenu?.();void this.scheduleDraft(open,'event',api);}:undefined,
+   saveStatus:busy?'Saving…':this.phase==='review'?'Not saved':this.dirty?'Unsaved changes':saved?'Saved':'',
+   doneDisabled:busy,done:()=>{void this.leave(null).then(left=>{if(!left&&this.controller.current)api.toast('Your draft is kept. Finish saving before closing.');}).catch(()=>this.needsReview());}};}
+  if(out.vo&&open){const note=this.controller.viewNote(open),audio=note?.format?.kind==='voice'?voiceAudio(note.format.data):undefined;
+   const owned=!!audio&&out.vo.playbackAudioId===audio.audioId&&out.vo.hasPlayback===true;
+   out.vo={...out.vo,...(owned?{}:{hasPlayback:false,play:()=>api.toast('No audio is available for this note.')}),
+   toCal:()=>{out.vo.closeMenu?.();void this.scheduleDraft(open,'reminder',api);},calLabel:'Review reminder draft',calText:'Review reminder',calIcon:api.ic?.cal??out.vo.calIcon,
+   toEvent:()=>{out.vo.closeMenu?.();void this.scheduleDraft(open,'event',api);},eventLabel:'Review calendar event draft',eventText:'Review event'};}
   return out;
  }
  /** Decorate this view's API only. No global client or shared NotesStore swap. */
@@ -244,7 +296,7 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  prototype.vget=function(key:string){const state=get.call(this,key);return key==='notes'&&this.canonicalNotesUi?this.canonicalNotesUi.renderState(state):state;};
  prototype.api=function(key:string){
   const value=api.call(this,key);if(key!=='notes')return value;
-  if(this.canonicalNotesUi)return this.canonicalNotesUi.api(value);
+  if(this.canonicalNotesUi)return this.canonicalNotesUi.api({...value,reviewCalendarDraft:(draft:Bag)=>this.reviewScannedCalendarDraft?.(draft)??false});
   // Agent Notes are the default source (agent-adapter.ts); Older notes is an explicit choice.
   if(this.notesSourceMode==='legacy')return value;
   // Waiting for a connection: an attempted action explains why, nothing is drafted.
@@ -252,8 +304,8 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  };
  const notes=views.notes,render=notes.render;
  notes.render=(state:Bag,value:Bag)=>{
-  const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'),main=sources.find((source:Bag)=>source.id==='canonical');
-  if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Older notes',primaryNotes:false,returnToNotesAction:main?.choose};
+  const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
+  if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
   const olderNotesAction=older&&!older.selected?older.choose:null;
   if(ui)return {...ui.decorate(render(state,value),value,state),olderNotesAction,listActions:true};
   // A pending New note request waits for the binding instead of drafting into no collection.

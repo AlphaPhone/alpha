@@ -14,6 +14,30 @@ final class NativeNotificationSession {
   void current()throws Exception;
   JSONObject get(String path,String bearer)throws Exception;
  }
+ /** Validates the bounded native-notification cursor before building its authenticated route. */
+ static String pagePath(JSONObject cursor)throws Exception{
+  for(java.util.Iterator<String> keys=cursor.keys();keys.hasNext();)if(!java.util.Set.of("afterSequence","nativeEpoch","throughSequence").contains(keys.next()))throw new SecurityException("Notification cursor field unavailable");
+  long after=sequence(cursor,"afterSequence");
+  StringBuilder path=new StringBuilder("/api/notifications?nativeTransport=true&afterSequence=").append(after);
+  if(cursor.has("nativeEpoch")){
+   Object raw=cursor.get("nativeEpoch");
+   if(!(raw instanceof String)||!((String)raw).matches("[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"))throw new SecurityException("Invalid notification cursor epoch");
+   path.append("&nativeEpoch=").append(raw);
+  }else if(after!=0||cursor.has("throughSequence"))throw new SecurityException("Notification continuation epoch required");
+  if(cursor.has("throughSequence")){
+   long through=sequence(cursor,"throughSequence");
+   if(through<after)throw new SecurityException("Invalid notification cursor range");
+   path.append("&throughSequence=").append(through);
+  }
+  return path.append("&limit=128").toString();
+ }
+ private static long sequence(JSONObject cursor,String key)throws Exception{
+  Object raw=cursor.get(key);
+  if(!(raw instanceof Number))throw new SecurityException("Invalid notification sequence");
+  double value=((Number)raw).doubleValue();
+  if(!Double.isFinite(value)||value!=Math.rint(value)||value<0||value>9007199254740991L)throw new SecurityException("Invalid notification sequence");
+  return ((Number)raw).longValue();
+ }
  static JSONObject record(JSONObject session,JSONObject identity,String installation,String provider)throws Exception{
   if(!identity.getString("subjectUserId").equals(session.getString("ownerId")))throw new SecurityException("Notification owner mismatch");
   return new JSONObject().put("version",1).put("session",new JSONObject(session.toString())).put("agentId",identity.getString("agentId"))
@@ -38,7 +62,11 @@ final class NativeNotificationSession {
   if(!owner.equals(identity.getString("id"))||!"owner".equals(identity.getString("kind"))||!"OWNER".equals(access.getString("role"))||!"session".equals(access.getString("mode"))
     ||!"machine".equals(machine.getString("kind"))||!token.equals(machine.getString("id"))||machine.getLong("expiresAt")!=expiry)throw new SecurityException("Notification owner session rejected");
   JSONArray agents=ports.get("/api/agents",token).getJSONArray("agents");current.check();
-  if(agents.length()!=1||!agent.equals(agents.getJSONObject(0).getString("id"))||!"running".equals(agents.getJSONObject(0).getString("status")))throw new SecurityException("Notification agent changed");
+  if(agents.length()!=1)throw new SecurityException("Notification agent changed");
+  // A resident that is still starting or restarting reports another status or the placeholder id; retry.
+  JSONObject running=agents.getJSONObject(0);
+  if(!"running".equals(running.getString("status"))||ResidentResultSession.PLACEHOLDER_AGENT.equals(running.getString("id")))throw new java.io.IOException("Notification agent not ready");
+  if(!agent.equals(running.getString("id")))throw new SecurityException("Notification agent changed");
   // The process bearer rotates on every service boot. Only verified existing
   // owner authority on this same installation may adopt its current value.
   return new JSONObject().put("session",ResidentResultSession.snapshot(owner,token,expiry,root)).put("agentId",agent)

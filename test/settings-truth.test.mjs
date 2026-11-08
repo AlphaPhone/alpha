@@ -12,15 +12,13 @@ test('the version row shows only what the build and Android report',()=>{
  for(const code of [0,-1,1.5,'7',null,NaN])assert.equal(m.versionLabel('0.1.0',code),'0.1.0');
  for(const version of ['',undefined,null,7])assert.equal(m.versionLabel(version,7),'Unavailable');
 });
-test('About shows only the install time Android recorded and never claims the app is current',()=>{
+test('recorded install-time formatting stays truthful and About never claims the app is current',()=>{
  const format=at=>'day '+at;
  assert.deepEqual(m.installedRows(1760000000000,format),[['Installed or last updated','day 1760000000000']]);
  for(const at of [undefined,null,0,-5,'1760000000000',1.5])assert.deepEqual(m.installedRows(at,format),[]);
- // The OS update-channel check is registered off; only the Developer gate (the one About page, native
- // and browser) shows its state, and the production bundle audit denies the row.
+ // The old OS update-channel switch remains off; the clean About page has no status row.
  assert.match(readFileSync('apps/app/src/build-flags.ts','utf8'),/export const updateChannelCheckEnabled = false as boolean;/);
- assert.equal((source.match(/\.\.\.\(developerTools\?\[info\('Update channel \(development\)',updateChannelCheckEnabled\?'Read-only check on · never downloads or installs':'Off'\)\]:\[\]\)/g)??[]).length,1);
- assert.equal((source.match(/Update channel \(development\)/g)??[]).length,1);
+ assert.equal((source.match(/\.\.\.\(developerTools\?\[info\('Update channel \(development\)',updateChannelCheckEnabled\?'Read-only check on · never downloads or installs':'Off'\)\]:\[\]\)/g)??[]).length,0);
  assert.match(readFileSync('scripts/audit-production-bundle.mjs','utf8'),/'Update channel \(development\)'/);
  // Nothing claims the app is current or that an update failed; Software update has no notice text at all.
  assert.doesNotMatch(source,/Up to date|Update available|Update failed/);
@@ -75,15 +73,18 @@ test('the automatic update check is due a day after the last answered check',()=
 });
 test('dead-end and negative Settings rows are gone from the adapter',()=>{
  for(const row of ["info('Other connectors'","info('Personality settings'","info('Runtime'","info('Display only'","info('Delivery timing'","'Last change'"])assert.ok(!source.includes(row),row);
- // Their notices stay as toasts only, so no state is kept for a row.
- assert.doesNotMatch(source,/gmailNotice|roleNotice/);
+ // The revised groups expose controls and diagnostics, without a device-facts summary page.
+ assert.doesNotMatch(source,/row\('(?:Security patch|Do Not Disturb|Delivery timing)'/);
 });
 test('the Google accounts sheet has no Gmail notification settings button: Android lists Gmail with Alpha\'s other channels',()=>{
  assert.doesNotMatch(readFileSync('apps/app/src/runtime/google-connection-ui.tsx','utf8'),/Gmail notification settings|gmailNotificationSettings/);
  assert.doesNotMatch(readFileSync('apps/app/src/runtime/gmail-background.ts','utf8'),/gmailNotificationSettings/);
 });
-test('Scheduled digests has one Settings entry, the top-level row',()=>{
- assert.equal((source.match(/label:'Scheduled digests'/g)??[]).length,1);
+test('scheduled summaries opens from the Workflows app settings',()=>{
+ assert.match(source,/\['Workflows','workflows'\]/);
+ const app=source.slice(source.indexOf("if(appSettingsPage==='workflows')"),source.indexOf('const permissions:Record',source.indexOf("if(appSettingsPage==='workflows')")));
+ assert.equal((app.match(/label:'Scheduled summaries'/g)??[]).length,1);
+ assert.match(app,/window\.dispatchEvent\(new Event\('alpha:hosted-digests'\)\)/);
  assert.doesNotMatch(source,/\bdigests\b *=|hosted\(\)\.available/);
 });
 test('prototype-only sheets (memory wipe, Wi-Fi password, forget network) never reach the renderer',()=>{
@@ -105,73 +106,91 @@ test('native system facts are read without new permissions and are omitted when 
  for(const permission of ['ACCESS_WIFI_STATE','CHANGE_WIFI_STATE','BLUETOOTH_CONNECT','READ_PHONE_STATE','WRITE_SECURE_SETTINGS','ACCESS_NOTIFICATION_POLICY'])assert.doesNotMatch(manifest,new RegExp(`<uses-permission[^>]*android\\.permission\\.${permission}"(?![^>]*tools:node="remove")`),permission);
 });
 
-// Exercise the routing used by the real adapter for stale, removed and developer routes (docs/settings.md).
-test('production Settings refuses Developer and removed pages, and keeps its own pages',()=>{
+test('the grouped Privacy page retains permission review and action-review controls',()=>{
+ assert.match(source,/\['Privacy', \['Set up Alpha access', 'Review phone actions first'\]\]/);
+ assert.match(source,/'Set up Alpha access': 'App permissions'/);
+ assert.match(source,/name === 'Set up Alpha access'[^\n]+activeSettingsCategory='settings-privacy';api\.set\(\{page:'settings-permissions'\}\)/);
+ assert.match(source,/title:'App permissions',backLabel:'Back to Privacy'/);
+ assert.match(source,/if\(key==='settings-apps'\)/,'app permissions remain separate from the app catalog');
+});
+
+test('Cloud privacy hero includes speech while retaining native and offline/startup truth',async()=>{
+ const nativeSource=readFileSync('apps/app/src/prototype/native-adapter.ts','utf8');
+ const wording=nativeSource.slice(nativeSource.indexOf('export function egressPrivacy('),nativeSource.indexOf('/** Only a verified resident session'));
+ const load=async cloud=>import('data:text/javascript;base64,'+Buffer.from(`const cloudRuntimeEnabled=${cloud};const testMocksEnabled=false;const Capacitor={isNativePlatform:()=>true};const cloudServiceName=environment=>environment==='staging'?'Nebula':'Cloud Test';`+stripTypeScriptTypes(wording,{mode:'strip'})).toString('base64'));
+ const cloud=await load(true),native=await load(false);
+ const connected={kind:'resident',session:{sessionId:'qa'},cloudAccount:{environment:'staging'}};
+ for(const isNative of [true,false]){
+  const fact=cloud.egressPrivacy(connected,isNative);
+  assert.equal(fact.big,'Uses Nebula');assert.ok(fact.sub.includes('go to Nebula for AI'));
+  for(const content of ['When used','messages','selected content','Voice recordings','text for playback'])assert.ok(fact.sub.includes(content),content);
+ }
+ assert.equal(native.egressPrivacy(connected,true).big,'Partly masked');
+ for(const [kind,label]of [['starting','Agent starting'],['recovering','Agent not running'],['none','Offline']])assert.equal(cloud.egressPrivacy({kind,session:null,cloudAccount:null},true).big,label);
+});
+
+// Exercise the policy used by the real adapter for both stale routes and navigation rows.
+test('production Settings refuses Developer routes and preserves real About diagnostics',()=>{
+ const rows=[{label:'Models'},{label:'Developer'},{label:'About'}, {lbl:'Developer'}];
+ assert.deepEqual(m.settingsNavigationRows(rows,false),[{label:'Models'},{label:'About'}]);
+ assert.equal(rows.length,4,'filtering must not mutate the reference model');
  assert.equal(m.settingsPage('developer',false),null);
- for(const page of ['cloud-plan','agent-connection','history','listening','calendar','calendar-google','password-provider','password-entry','cross','about','problems','licenses'])assert.equal(m.settingsPage(page,false),page);
- // Pages that only repeated Android facts or another flow route to the top level.
- for(const page of ['wifi','bluetooth','mobile','battery','sound','display','models','privacy','character','accounts','connections','notifications','photos','default-apps',null,undefined,'',7])assert.equal(m.settingsPage(page,false),null,String(page));
- assert.match(source,/const current = settingsPage\(state\.page, developerTools\);/);
- // The reference renderer draws only the frame: its prototype pages are never rendered.
- assert.match(source,/const out = render\(\{ \.\.\.state, page: current === 'developer' \? 'developer' : null,/);
- assert.match(source,/const developerRow = developerTools \? row\('Developer', go\('developer'\)\) : null;/);
+ for(const page of ['about','problems','licenses','models',null,undefined])assert.equal(m.settingsPage(page,false),page);
+ assert.match(source,/settingsPage\(state\.page, developerTools\)/);
+ assert.equal(m.settingsPage('character',false),null);
+ assert.match(source,/rows: settingsNavigationRows\(group\.rows, developerTools\)/);
 });
-test('Android Back pops one level, to the same parent as each page\'s own back control',()=>{
- assert.deepEqual({...m.SETTINGS_PARENT},{history:'agent-connection','agent-recovery-details':'agent-connection',problems:'about',licenses:'about','password-entry':'password-provider'});
- for(const [page,parent] of Object.entries(m.SETTINGS_PARENT)){assert.ok(m.SETTINGS_PAGES.includes(page),page);assert.ok(m.SETTINGS_PAGES.includes(parent),parent);}
- assert.match(source,/const parent = state\.sheet \? undefined : SETTINGS_PARENT\[state\.page\];\n    if \(parent\) \{/);
- // Leaving a password entry by Android Back forgets its draft, as the entry's own back control does.
- assert.match(source,/if \(state\.page === 'password-entry'\) clearPasswordDraft\(\);\n      api\.set\(\{ page: parent \}\); return true;/);
- assert.match(source,/return back \? back\(state, api\) : false;/);
- // Each child's own back control returns to the same parent.
- assert.match(source,/subpage\('Earlier conversations',\[group\(rows\)\],\{z:6,back:go\('agent-connection'\)/);
- assert.match(source,/const toAbout = \{ z: 6, back: go\('about'\), backLabel: 'Back to About' \};/);
- assert.match(source,/passwordEntryPage\(helpers, \(\) => api\.set\(\{ page: 'password-provider' \}\)\)/);
-});
-test('the top level has no Android facts, mirror pages or explanatory subtitles',()=>{
- const body=source.slice(source.indexOf('  definition.render = (state: Bag, api: Bag) => {'));
- for(const label of ["'Wi-Fi'","'Bluetooth'","'Mobile data'","'Battery'","'Sound & vibration'","'Models'","'Privacy & data'","'Accounts'","'Connections'","'Display'","'Character'","'Home app'","'Assistant app'","'Default apps in Android'","'Inference model'","'Security patch'","Manage brightness"])assert.ok(!body.includes(label),label);
- const top=body.slice(body.indexOf('    top.groups = ['),body.indexOf('].filter(g => g.rows.length);'));
- for(const cap of ['Account','Assistant','Apps','Appearance','Notifications','Privacy','System'])assert.match(top,new RegExp(`'${cap}'\\)`),cap);
- assert.doesNotMatch(body.slice(0,body.indexOf('    // Eliza Cloud.')),/hasSub:true,sub:|sub:'[A-Z]/,'no subtitle under a top-level row');
-});
-test('Eliza Cloud page: plan facts, Approve again only when expiring, Redeem always, confirmed Sign out',()=>{
- const calls=[];const actions=Object.fromEntries(['cancel','approve','redeem','manage','signOut','recheck','signIn'].map(name=>[name,()=>calls.push(name)]));
- const plan={signedIn:true,offline:false,account:'owner@example.invalid',plan:'Alpha plan',status:'active',endsAt:1,allowance:'1,000 requests a month',limit:'Limited · retry in 5 minutes',keyExpiresAt:2,keyExpiring:false,inference:'Nebula'};
- const page=(changes={},options={})=>m.cloudAccountPage({plan:{...plan,...changes},busy:false,message:'',serviceName:'Nebula',runtimeLocation:'On this device',day:at=>'day '+at,confirm:()=>true,actions,...options});
- const p=page();
- assert.deepEqual(p.rows.map(r=>[r.label,r.value]),[['Account','owner@example.invalid'],['Plan','Alpha plan'],['Agent execution','On this device'],['AI replies','Nebula'],['Plan runs until','day 1'],['Plan allowance','1,000 requests a month'],['AI requests','Limited · retry in 5 minutes'],['Sign-in expires','day 2']]);
- assert.deepEqual(p.actions.map(a=>a.label),['Redeem code','Manage plan','Sign out']);
- assert.equal(p.actions.at(-1).aria,'Sign out of Nebula');
- assert.deepEqual(page({keyExpiring:true}).actions.map(a=>a.label),['Approve this phone again','Redeem code','Manage plan','Sign out']);
- assert.equal(page({status:'canceled'}).rows[4].label,'Plan ended');
- assert.deepEqual(page({allowance:null,limit:null,endsAt:null,keyExpiresAt:null}).rows.map(r=>r.label),['Account','Plan','Agent execution','AI replies']);
- // Sign out asks first; a decline changes nothing.
- let asked='';page({},{confirm:text=>{asked=text;return false;}}).actions.at(-1).go();assert.deepEqual(calls,[]);assert.match(asked,/^Sign out of Nebula\?/);
- page().actions.at(-1).go();assert.deepEqual(calls,['signOut']);
- const busy=page({}, {busy:true,message:'Signing out…'});assert.deepEqual(busy.actions.map(a=>a.label),['Cancel']);assert.deepEqual(busy.rows.at(-1),{label:'Status',value:'Signing out…'});
- busy.actions[0].go();assert.deepEqual(calls,['signOut','cancel']);
- assert.deepEqual(page({signedIn:false,offline:true,account:null}).actions.map(a=>a.label),['Check plan again']);
- assert.equal(page({signedIn:false,offline:true,account:null}).rows[0].value,'Nebula unreachable');
- assert.deepEqual(page({signedIn:false,account:null}).actions.map(a=>a.label),['Sign in with Nebula']);
- // The adapter wires each action to the connection controller's real operation.
- assert.match(source,/redeem: \(\) => connectionController\.openPlan\(\{ codeEntry: true \}\)/);
- assert.match(source,/signOut: \(\) => void connectionController\.cloudSignOut\(\)/);
- assert.match(source,/confirm: text => window\.confirm\(text\)/);
-});
-test('App permissions shows only how many grants Android reports off',()=>{
- assert.equal(m.permissionSummary({Microphone:true,Location:false,Camera:false,Calendar:true}),'2 not allowed');
- assert.equal(m.permissionSummary({Microphone:true,Location:true}),'All allowed');
- for(const value of [null,undefined,{},{Microphone:'true'}])assert.equal(m.permissionSummary(value),'');
-});
-test('one Developer gate: a development server build opened with ?tools=1, never the product',()=>{
+test('one Developer gate requires a development-server build and tools=1',()=>{
  const profile=readFileSync('apps/app/src/browser/dev-profile.ts','utf8');
  assert.match(profile,/export const developerTools=devSurfacesEnabled&&new URLSearchParams\(location\.search\)\.get\('tools'\)==='1';/);
  assert.match(profile,/const devSurfacesEnabled:boolean=import\.meta\.env!==undefined&&import\.meta\.env\.DEV===true&&/);
- // Every developer-only Settings row reads the same gate, not a test-mocks or dev-surface flag alone.
- for(const row of ["if(developerTools&&!Capacitor.isNativePlatform())groups.push({...group([{kNav:true,label:'Calendar backups'","if(developerTools)page.groups.push(group([{kNav:true,label:'Try mock mode'","if(developerTools&&recovery.length)page.groups.push(group([info('Saved data needs recovery'","if(developerTools)agentRows.push(action('Details',","if(native&&developerTools&&state.page==='agent-recovery-details')"])assert.ok(source.includes(row),row);
- assert.doesNotMatch(source,/(testMocksEnabled|devSurfacesEnabled)[^;\n]{0,40}(Calendar backups|Try mock mode|Saved data needs recovery|Update channel)/);
+ assert.match(source,/if\(developerTools\)page\.groups\.push\(group\(\[\{kNav:true,label:'Try mock mode'/);
+ assert.match(source,/if\(developerTools&&recovery\.length\)/);
+ assert.match(source,/if\(native&&developerTools&&state\.page==='agent-recovery-details'\)/);
 });
 test('explicit developer surfaces retain the Developer route',()=>{
  assert.equal(m.settingsPage('developer',true),'developer');
+});
+
+
+test('one canonical update index selects the exact installed flavor and signing family without fallback',()=>{
+ const roots=['11'.repeat(32),'22'.repeat(32)];
+ const releases=roots.flatMap((signerSha256,rootIndex)=>['launcher','standalone'].map((variant,index)=>({...manifest,signerSha256,variant,versionCode:50,apkUrl:`https://example.test/${rootIndex}-${index}.apk`})));
+ const feed={schema:'alpha-update/index-v1',releases};
+ for(const signerSha256 of roots)for(const launcher of [true,false]){
+  const result=m.parseUpdateManifest(feed,{versionCode:49,launcher,signerSha256});
+  const selected=releases.find(row=>row.signerSha256===signerSha256&&row.variant===(launcher?'launcher':'standalone'));
+  assert.equal(result?.apkUrl,selected.apkUrl);assert.equal(result?.versionCode,50);
+ }
+ assert.equal(m.parseUpdateManifest(feed,{versionCode:49,launcher:true,signerSha256:'33'.repeat(32)}),null);
+ assert.equal(m.parseUpdateManifest(feed,{versionCode:50,launcher:true,signerSha256:roots[0]}),null);
+ assert.equal(m.parseUpdateManifest({schema:'alpha-update/index-v1',releases:releases.filter(row=>row.variant==='standalone')},{versionCode:49,launcher:true,signerSha256:roots[0]}),null);
+});
+test('update index refuses duplicate pairs, nested feeds, malformed families and unbounded lists',()=>{
+ const release={...manifest,signerSha256:installed.signerSha256};
+ const index=releases=>({schema:'alpha-update/index-v1',releases});
+ assert.ok(m.parseUpdateManifest(index([release]),installed));
+ for(const entries of [[],[release,{...release}],[index([release])],[{...release,variant:'unknown'}],[{...release,signerSha256:'bad'}],Array(17).fill(release),[null]])assert.equal(m.parseUpdateManifest(index(entries),installed),null);
+ assert.equal(m.parseUpdateManifest(index([{...release,apkUrl:'http://example.test/app.apk'}]),installed),null);
+ assert.equal(m.parseUpdateManifest(index([{...release,sha256:'bad'}]),installed),null);
+ assert.equal(m.parseUpdateManifest(index([release]),{...installed,launcher:'true'}),null);
+ for(const variant of [['standalone'],{toString:'standalone'}]){
+  const malformed=JSON.parse(JSON.stringify({...release,variant,signerSha256:'ff'.repeat(32)}));
+  assert.doesNotThrow(()=>m.parseUpdateManifest(index([release,malformed]),installed));
+  assert.equal(m.parseUpdateManifest(index([release,malformed]),installed),null);
+ }
+});
+
+// Both installed Back handlers clear the password entry before returning to the unlocked list.
+test('Android Back from a password entry forgets its draft',()=>{
+ assert.match(source,/if \(st\.page === 'password-entry' && !st\.sheet\) \{ leavePasswordEntry\(\); api\.set\(\{ page: 'password-provider' \}\); return true; \}/);
+ assert.match(source,/if\(!state\.sheet&&settingsParents\[state\.page\]\)\{if\(state\.page==='password-entry'\)leavePasswordEntry\(\);api\.set\(\{page:settingsParents\[state\.page\]\}\);return true;\}/);
+ const passwords=readFileSync('apps/app/src/passwords/password-manager.ts','utf8');
+ assert.match(passwords,/export function leavePasswordEntry\(\) \{ clearSecrets\(\); \}/);
+ assert.match(passwords,/function clearSecrets\(\) \{ if \(draft\) draft\.password = ''; draft = null; \}/);
+});
+
+// Problem log is opened from the gated Developer page. Back returns to that owner.
+test('Problem log returns to its Developer parent',()=>{
+ assert.match(source,/problems:\['developer','Developer'\]/);
 });

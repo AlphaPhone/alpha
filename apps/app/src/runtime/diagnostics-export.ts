@@ -15,10 +15,11 @@ import type {VoiceTimingLive,VoiceTimingEndpoint} from './voice-timing.ts';
  * labels and build/model hashes only; it never carries audio, transcripts or replies.
  */
 export const DIAGNOSTICS_FORMAT='alpha-diagnostics/v1';
-const VOICE_STARTUP_STAGES=['conversation-selection','draft-binding','agent-attach','media-retirement'] as const;
-const VOICE_STARTUP_OUTCOMES=['pending','prepared','timeout','cancelled','failed'] as const;
+const VOICE_STARTUP_STAGES=['conversation-selection','draft-binding','agent-attach','media-retirement','renderer-channel','speech-session'] as const;
+const VOICE_STARTUP_OUTCOMES=['pending','prepared','listening','timeout','cancelled','failed'] as const;
+const VOICE_STARTUP_ROUTES=['direct-cartesia','cloud-cartesia'] as const;
 export type VoiceStartupStage=typeof VOICE_STARTUP_STAGES[number];
-export type VoiceStartupTiming={stage:VoiceStartupStage;outcome:typeof VOICE_STARTUP_OUTCOMES[number];elapsedMs:number};
+export type VoiceStartupTiming={route?:typeof VOICE_STARTUP_ROUTES[number];stage:VoiceStartupStage;outcome:typeof VOICE_STARTUP_OUTCOMES[number];elapsedMs:number;phaseMs?:Partial<Record<VoiceStartupStage,number>>};
 export const RUNTIME_ASSETS=['agent/alpha-source.json','agent/agent-bundle.js','agent/workflow-worker/manifest.json','agent/workflow-worker/files.sha256'] as const;
 const PERMISSIONS=['Microphone','Location','Camera','Calendar','Notifications'] as const;
 const ROLES=['home','assistant','dialer','sms'] as const;
@@ -32,6 +33,7 @@ const VOICE_LIMIT=200;
 // Fixed upstream inference flow categories; arbitrary span labels never leave the host.
 const INFERENCE_STAGES=['document-augmentation','providers','embedding','model-queue','model-routing','model-preprocess','llm-inference','model-postprocess','actions','evaluators','planner-overhead','response-finalization','message-ingress','message-delivery','message-lifecycle','message-service-overhead','unattributed'] as const;
 export type NativeInferenceTiming={version:1;traceId?:string;totalMs:number|null;timeToFirstVisibleMs:number|null;timeToReplyMs:number|null;timeToResponseFinalizedMs:number|null;stages:{stage:typeof INFERENCE_STAGES[number];totalMs:number;toFirstVisibleMs:number|null}[]};
+export type NativeInferenceVoiceJoin={traceId:string;voiceTurnId:string};
 /** Optional existing /api/status projection; copy only known enums and finite durations. */
 export function sanitizeNativeInferenceTiming(input:unknown):NativeInferenceTiming|undefined{
  try{
@@ -92,6 +94,7 @@ export type DiagnosticsInput={
  /** AlphaCloudSpeechStream.cloudStreamTiming() output, absent on older builds. */
  nativeCloudStreamTiming?:unknown;
  nativeInferenceTiming?:unknown;
+ nativeInferenceVoiceJoin?:unknown;
 };
 type NativeVoiceTimingIdentity={sourceCommit:string;sourceDirty:boolean;engineSha256:string;modelSha256:string;models?:Record<string,string>;device:string;environment:'device'|'emulator';abi:'arm64-v8a'|'x86_64';sdk?:number;build:string};
 type NativeVoiceTimingRow={id:string;turnId:string;pipeline:string;clock:'native-monotonic-ms';captureClock:string;cold:boolean;coldReason?:string;outcome:string;reason?:string;audibleClock?:string;network?:string;thermal?:string;thermalHeadroom?:number;identity:NativeVoiceTimingIdentity;marks:Record<string,number>};
@@ -102,6 +105,7 @@ type VoiceTimingRow={version:1;id:string;recordedAt:number;route:string;cold:boo
  path?:'live'|'batch'};
 export type DiagnosticsReport={
  nativeInferenceTiming?:NativeInferenceTiming;
+ nativeInferenceVoiceTurnId?:string;
  realtimeVoiceTiming?:ReturnType<typeof sanitizeRealtimeTiming>;
  format:typeof DIAGNOSTICS_FORMAT;generatedAt:string;platform:'android'|'web';
  app:{version:string|null;versionCode?:number;variant?:'launcher'|'standalone';buildType?:'debug'|'release';testMocks?:boolean};
@@ -249,12 +253,25 @@ export function buildDiagnostics(input:DiagnosticsInput,now=Date.now()):Diagnost
  const startup=input.voiceStartup;
  if(startup&&typeof startup==='object'){
   const value=startup as Partial<VoiceStartupTiming>,stage=one(value.stage,VOICE_STARTUP_STAGES),outcome=one(value.outcome,VOICE_STARTUP_OUTCOMES);
-  const elapsedMs=value.elapsedMs;
-  if(stage&&outcome&&typeof elapsedMs==='number'&&Number.isSafeInteger(elapsedMs)&&elapsedMs>=0&&elapsedMs<=120000)report.voiceStartup={stage,outcome,elapsedMs};
+  const elapsedMs=value.elapsedMs,route=one(value.route,VOICE_STARTUP_ROUTES);
+  if(stage&&outcome&&typeof elapsedMs==='number'&&Number.isSafeInteger(elapsedMs)&&elapsedMs>=0&&elapsedMs<=120000){
+   const phaseMs:NonNullable<VoiceStartupTiming['phaseMs']>={};
+   if(value.phaseMs&&typeof value.phaseMs==='object'&&!Array.isArray(value.phaseMs)){
+    for(const key of VOICE_STARTUP_STAGES){
+     const duration=value.phaseMs[key];
+     if(typeof duration==='number'&&Number.isSafeInteger(duration)&&duration>=0&&duration<=elapsedMs)phaseMs[key]=duration;
+    }
+   }
+   const complete=Object.hasOwn(phaseMs,stage)&&Object.values(phaseMs).reduce((sum,duration)=>sum+duration,0)===elapsedMs;
+   report.voiceStartup={...(route?{route}:{}),stage,outcome,elapsedMs,...(complete?{phaseMs}:{})};
+  }
  }
  if(report.platform==='android'){
   const inference=sanitizeNativeInferenceTiming(input.nativeInferenceTiming);
   if(inference)report.nativeInferenceTiming=inference;
+  const join=input.nativeInferenceVoiceJoin as Partial<NativeInferenceVoiceJoin>|undefined;
+  if(inference?.traceId&&join?.traceId===inference.traceId&&typeof join.voiceTurnId==='string'&&
+     report.voiceTiming.records.some(row=>row.entry==='conversation'&&row.id===join.voiceTurnId))report.nativeInferenceVoiceTurnId=join.voiceTurnId;
   const cloudTiming=nativeCloudStreamTiming(input.nativeCloudStreamTiming);
   if(cloudTiming)report.nativeCloudStreamTiming=cloudTiming;
  }

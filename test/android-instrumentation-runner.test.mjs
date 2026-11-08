@@ -173,6 +173,16 @@ test("every registered class exists in the app's instrumentation sources and dec
   for (const scenario of ["notice", "notice-denied"]) assert.equal(permissionCases[scenario].testClass, "HostedResultNoticeInstrumentedTest");
 });
 
+test("guarded app, recording and catalog cases require an owned secondary user", () => {
+  for (const name of ["AppInfo", "NoteRecorder", "NoteRecordingSave", "StorageCategories", "PhotosCatalogOrder"]) {
+    assert.equal(CLASS_REGISTRY[name].secondaryUser, true, name);
+    assert.throws(() => parseInstrumentationArgs(["--classes", name]), /requires --owned-emulator/);
+  }
+  assert.equal(CLASS_REGISTRY.NoteRecorder.grant, undefined, "preserve the effective guarded recorder policy");
+  const catalog = fs.readFileSync("android/app/src/androidTest/java/ai/elizaresearch/alphaphone/PhotosCatalogOrderInstrumentedTest.java", "utf8");
+  assert.match(catalog, /assertTrue\("Disposable secondary user required",android\.os\.Process\.myUid\(\)\/100000>0\)/);
+});
+
 test("every @Test class is run by a runner or listed with a reason, and neither list goes stale", () => {
   const classes = testClasses();
   assert.ok(classes.size > 100, "instrumentation sources were found");
@@ -194,10 +204,14 @@ test("every @Test class is run by a runner or listed with a reason, and neither 
     assert.ok(classes.has(name) || classes.has(`${name}InstrumentedTest`), `NOT_RUN_BY_A_RUNNER lists ${name}, which is not a @Test class`);
     assert.ok(typeof reason === "string" && reason.trim().length >= 40, `NOT_RUN_BY_A_RUNNER.${name} needs a specific reason`);
   }
-  // Registry entries must be classes too (the test above checks each file); nothing is registered twice.
-  assert.equal(new Set(Object.keys(CLASS_REGISTRY)).size, Object.keys(CLASS_REGISTRY).length);
-  // What this package registered stays registered.
-  for (const name of ["BrowserPageQuestion", "ConnectionChooser", "LauncherHome", "SettingsRoles", "NotesSecureStorage"]) assert.ok(Object.hasOwn(CLASS_REGISTRY, name), name);
+  // Check source keys: Object.keys alone has already discarded duplicate object properties.
+  const registrySource = fs.readFileSync("scripts/android-instrumentation.mjs", "utf8").split("export const CLASS_REGISTRY = {")[1].split("\n};")[0];
+  const keys = [...registrySource.matchAll(/^  ([A-Za-z]\w*):/gm)].map(match => match[1]);
+  assert.equal(new Set(keys).size, keys.length, "every instrumentation class has one policy entry");
+  assert.deepEqual(keys, Object.keys(CLASS_REGISTRY));
+  // Current shared-storage/catalog coverage remains registered; retired SAF-picker classes do not.
+  for (const name of ["BrowserPageQuestion", "ConnectionChooser", "LauncherHome", "SettingsRoles", "NotesSecureStorage", "StorageLegacyAccess", "PhotosCatalogOrder"]) assert.ok(Object.hasOwn(CLASS_REGISTRY, name), name);
+  for (const name of ["FilesTree", "FilesTreeBatch", "FilesFolderQuestion"]) assert.ok(!Object.hasOwn(CLASS_REGISTRY, name), `${name} is a retired SAF-picker class`);
   for (const cls of ["VoicePermissionDeniedInstrumentedTest", "VoicePermissionRevokeInstrumentedTest", "HostedResultNoticeInstrumentedTest", "LocalVoiceRecordingLimitInstrumentedTest"])
     assert.deepEqual(namedBy(cls), ["scripts/test-native-permissions.mjs"], cls);
 });
@@ -535,7 +549,7 @@ test("round-9 registrations: new classes, campaigns and removed reasons", () => 
   // --classes SelectedDocument runs its ungated methods; only the restart phase stays with its campaign.
   assert.equal(parseInstrumentationArgs(["--classes", "SelectedDocument"]).classes[0], C("SelectedDocument"));
   assert.equal(CLASS_REGISTRY.SelectedDocument.args, undefined);
-  assert.equal(CLASS_REGISTRY.WorkflowLegacyReminderUpgrade.campaign.split(" ").slice(0, 2).join(" "), "node scripts/test-installed-upgrade.mjs");
+  assert.equal(CLASS_REGISTRY.WorkflowLegacyReminderUpgrade.campaign.split(" ").slice(0, 3).join(" "), "node scripts/test-installed-upgrade.mjs reminder");
   assert.throws(() => parseInstrumentationArgs(["--classes", "WorkflowLegacyReminderUpgrade"]), /test-installed-upgrade/);
   // SettingsCrashLog has its two-process runner now.
   assert.ok(!Object.hasOwn(NOT_RUN_BY_A_RUNNER, "SettingsCrashLog"));
@@ -565,6 +579,23 @@ test("round-9 registrations: new classes, campaigns and removed reasons", () => 
   assert.doesNotMatch(fill, /By\.pkg\(Pattern\.compile\("com\\\\\.android/);
   assert.equal((fill.match(/^\s+PasswordVaultFixture\.confirmDeviceCredential\(\);$/gm) ?? []).length, 3);
   assert.match(fill, /asks for the device credential before listing sign-ins", PasswordVaultFixture\.credentialPromptShown\(10_000\)/);
+});
+
+test("PrototypeFlow and CalendarFlow are registered; the retired resident Activity test is gone", () => {
+  // PrototypeFlow's four methods need no host: the class runs by name, and its live-agent journey is LiveAgent's.
+  assert.ok(Object.hasOwn(CLASS_REGISTRY, "PrototypeFlow") && !Object.hasOwn(NOT_RUN_BY_A_RUNNER, "PrototypeFlow"));
+  assert.equal(parseInstrumentationArgs(["--classes", "PrototypeFlow"]).classes[0], C("PrototypeFlow"));
+  // CalendarFlow changes the device time zone: gated, in a disposable user, with Calendar access granted.
+  assert.deepEqual(CLASS_REGISTRY.CalendarFlow.args, { calendarFlow: "1" });
+  assert.equal(CLASS_REGISTRY.CalendarFlow.secondaryUser, true);
+  assert.deepEqual(CLASS_REGISTRY.CalendarFlow.grant, ["READ_CALENDAR", "WRITE_CALENDAR"]);
+  assert.throws(() => parseInstrumentationArgs(["--classes", "CalendarFlow"]), /requires --owned-emulator/);
+  assert.deepEqual(instrumentArgs(C("CalendarFlow")).slice(-6, -1), ["calendarFlow", "1", "-e", "class", C("CalendarFlow")]);
+  assert.ok(!Object.hasOwn(CLASS_REGISTRY, "ResidentAgent") && !Object.hasOwn(NOT_RUN_BY_A_RUNNER, "ResidentAgent"));
+  assert.ok(!testClasses().has("ResidentAgentInstrumentedTest"));
+  // Each BrowserContinuity method drives the views, so a signed-out flag-off default run could only skip it.
+  assert.ok(!DEFAULT_CLASSES.includes("BrowserContinuity"));
+  assert.throws(() => parseInstrumentationArgs(["--classes", "BrowserContinuity"]), /test-mocks app build/);
 });
 
 test("restart runner wires the migration, crash-log, theme and source-reference phases to real methods and gates", () => {
@@ -608,11 +639,32 @@ test("round-9 journeys and links: J01, J05, the note link and the Maps return ar
 });
 
 test("no registered instrumented class drives a control the view refresh removed", () => {
-  // Files' SAF folder tree, Camera's Scan mode and its Choose image picker are gone from the renderer.
-  const removed = ["Choose folder", "Scan mode", "Choose image"];
+  // The SAF folder chooser and Camera Scan mode are gone. The composed Camera tools retain image import.
+  const removed = ["Choose folder", "Scan mode"];
   for (const name of Object.keys(CLASS_REGISTRY)) {
     const java = sourceOf(name);
     for (const label of removed) assert.ok(!java.includes(`"${label}"`), `${name} still clicks "${label}"`);
   }
-  for (const label of removed) assert.equal(fs.readFileSync("apps/app/src/prototype/template.html", "utf8").includes(label), false, `the renderer has no "${label}"`);
+  const template = fs.readFileSync("apps/app/src/prototype/template.html", "utf8");
+  for (const label of removed) assert.equal(template.includes(label), false, `the renderer has no "${label}"`);
+  assert.match(template, /data-alpha-camera="tools"[\s\S]*camera\.importAvailable[\s\S]*camera\.importImage[\s\S]*Choose image/, "image import remains an explicit Camera tool");
+});
+
+test("documented campaign commands name current classes or explicitly retained historical entries", () => {
+  const documents = ["docs/runbooks/676-hosted-ci-emulator-campaigns.md", "docs/core-loop-audit.md"];
+  const retiredAuditEntries = new Set(["LocalAgentOfflineApps", "FusedSpeech"]);
+  for (const document of documents) {
+    let commands = 0;
+    for (const line of fs.readFileSync(document, "utf8").split("\n")) {
+      for (const match of line.matchAll(/--classes ([A-Za-z0-9,]+)/g)) {
+        commands += 1;
+        for (const name of match[1].split(",")) {
+          if (document === "docs/core-loop-audit.md" && retiredAuditEntries.has(name)) continue;
+          if (name === "FilesTree" && line.includes("Historical command retained from the round-8 plan. FilesTree has since retired")) continue;
+          assert.ok(Object.hasOwn(CLASS_REGISTRY, name) && !Object.hasOwn(NOT_RUN_BY_A_RUNNER, name), `${document} names an unavailable class ${name}`);
+        }
+      }
+    }
+    assert.ok(commands > 0, `${document} contains campaign commands`);
+  }
 });

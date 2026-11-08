@@ -1,5 +1,5 @@
 // Alpha's Home and app grid render from the shared mobile shell (@elizaos/ui/mobile-shell), its Apps
-// drawer from apps-drawer.tsx, with the product record in config/alpha-product.json. Shared controller and search cases live in
+// drawer from the shared installed-app grid, with the product record in config/alpha-product.json. Shared controller and search cases live in
 // the upstream mobile-shell and native-system suites.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,8 +15,9 @@ const apps=[
 ];
 const PRODUCT=['alpha:inbox','alpha:calendar','alpha:browser','alpha:camera','alpha:photos','alpha:maps','alpha:notes','alpha:files','alpha:automations','alpha:settings'];
 
-function shellClass(opened){
+function shellClass(opened,toasts=[]){
   return class Shell {
+    toast(message){toasts.push(message);}
     constructor(){this.state={drawer:false,drawerQ:''};}
     S(){return {view:null,stack:[],...this.state};}
     setState(patch){this.state={...this.state,...patch};}
@@ -208,6 +209,42 @@ test('default Alpha Home performs no installed-app scan until the drawer opens',
   } finally { if(previous===undefined)delete globalThis.document;else globalThis.document=previous; }
 });
 
+test('with the drawer closed, Home toasts a failed launch and a failed app read once', async () => {
+  const previous=globalThis.document;
+  globalThis.document=Object.assign(new EventTarget(),{hidden:false});
+  let saved=[...PRODUCT,'com.android.settings'],listing='ok';const toasts=[];
+  const Shell=shellClass([],toasts);
+  const shell=installHomeShell(Shell,{},{list:async()=>{if(listing==='fail')throw new Error('offline');return {apps};},launch:async()=>{throw new Error('Work apps are paused.');}},
+    {favorites:{read:()=>saved,write:keys=>{saved=[...keys];}}});
+  const home=new Shell();home.renderVals();home.componentDidMount();
+  try {
+    home.openAllApps();await new Promise(setImmediate);
+    const settings=shell.launcher.snapshot().apps.find(app=>app.packageName==='com.android.settings');
+    // The open drawer shows the launch error inline; no toast.
+    await shell.launcher.launch(settings);
+    assert.match(shell.launcher.snapshot().launchError,/Work apps are paused/);
+    assert.deepEqual(toasts,[]);
+    home.setState(home.shellNavigate({type:'drawer',open:false}));
+    await shell.launcher.launch(shell.launcher.snapshot().apps.find(app=>app.packageName==='com.android.settings'));
+    assert.deepEqual(toasts,['Settings could not be opened. Work apps are paused.']);
+    // A failed read drops the pinned app from Home; repeated failed refreshes report it once.
+    listing='fail';
+    await shell.launcher.refresh();await shell.launcher.refresh();
+    assert.equal(shell.launcher.snapshot().status,'failed');
+    assert.deepEqual(toasts.slice(1),["Apps couldn't load. Open All apps to try again."]);
+    // A failed launch whose follow-up read also fails reports only the launch.
+    listing='ok';await shell.launcher.refresh();toasts.length=0;listing='fail';
+    await shell.launcher.launch(shell.launcher.snapshot().apps.find(app=>app.packageName==='com.android.settings'));
+    assert.equal(shell.launcher.snapshot().status,'failed');
+    assert.deepEqual(toasts,['Settings could not be opened. Work apps are paused.']);
+    // A background read that fails while another app is open does not toast over it.
+    listing='ok';await shell.launcher.refresh();toasts.length=0;home.setState({view:'inbox'});listing='fail';
+    await shell.launcher.refresh();
+    assert.equal(shell.launcher.snapshot().status,'failed');
+    assert.deepEqual(toasts,[]);
+  } finally { home.componentWillUnmount(); if(previous===undefined)delete globalThis.document;else globalThis.document=previous; }
+});
+
 test('installed favorites with older Alpha view ids are migrated to canonical ids before the first read', () => {
   const store=new Map([['alpha.launcher.favorites.v1',JSON.stringify({version:2,keys:['alpha:notes','com.android.settings','alpha:workflows'],defaultPolicy:'alpha-apps'})]]);
   const storage=()=>({getItem:key=>store.get(key)??null,setItem:(key,value)=>{store.set(key,value);}});
@@ -235,17 +272,23 @@ test('Home has its built-in tiles without an installed app inventory', () => {
   home.openAllApps();
   assert.equal(reads, 0);
   assert.equal(home.state.drawer, false);
+  home.state.homeEdit = true;
+  const staleEdit = renderToStaticMarkup(home.renderVals().homeShell);
+  assert.doesNotMatch(staleEdit, /data-alpha-home-editing|Remove Calendar from Home/);
+  assert.ok(tiles(staleEdit).includes('Calendar'));
 });
 
-test('the Home card row keeps its place when no card shows, so the grid never moves', () => {
+test('the empty Home card row is hidden without hiding app tiles', () => {
   const Shell = shellClass([]);
+  const render = Shell.prototype.renderVals;
+  Shell.prototype.renderVals = function () {
+    return {...render.call(this), homeHasOverviewCards: false};
+  };
   installHomeShell(Shell, {}, {list: async () => ({apps: []}), launch: async () => {}},
     {favorites: {read: () => null, write: () => {}}});
   const {homeShell} = new Shell().renderVals();
   const markup = renderToStaticMarkup(cloneElement(homeShell, {cards: createElement('div')}));
-  // The row is never hidden: with no card it holds the date line at the same fixed height.
-  assert.match(markup, /<div class="scr home-card-row"[^>]*data-mobile-shell-cards=""/);
-  assert.doesNotMatch(markup, /data-mobile-shell-cards=""[^>]*hidden|hidden=""[^>]*data-mobile-shell-cards/);
+  assert.match(markup, /<div class="scr home-card-row" hidden="" style="display:none" data-mobile-shell-cards=""/);
   assert.ok(tiles(markup).includes('Calendar'));
 });
 

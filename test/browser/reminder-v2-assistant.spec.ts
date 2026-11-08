@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {presentDeviceRecordOperation} from '../../apps/app/src/runtime/device-record-presentation.ts';
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
@@ -78,7 +79,7 @@ for (const mode of ['read', 'update', 'complete', 'cancel', 'stale', 'recurring-
     await page.clock.setFixedTime(new Date('2026-10-02T12:00:00Z'));
     await page.goto('/?mode=dev');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.getByRole('button', { name: 'Agent connection', exact: true }).click();
+    await openConnectionDiagnostics(page);
     await page.getByText('Local development agent', { exact: true }).click();
     const local = page.locator('.alpha-connection details').filter({ has: page.getByText('Local development agent', { exact: true }) });
     await local.getByLabel('Local agent address').fill('http://127.0.0.1:47842');
@@ -96,7 +97,7 @@ for (const mode of ['read', 'update', 'complete', 'cancel', 'stale', 'recurring-
       // Browser reminders use the runtime scheduler, not a second phone-creation
       // lifecycle. The saved unsupported proposal is explained, never approved.
       await expect(page.getByText(/An agent action could not be shown on this phone/).first()).toBeVisible();
-      await expect(page.getByText(/Pending phone actions are available for separate review/)).toHaveCount(0);
+      await expect(page.getByText(/Review the action below\./)).toHaveCount(0);
       const fixture=await page.evaluate(()=>(window as any).recoveryFixture);
       expect(fixture.lists).toBeGreaterThan(0);
       expect(fixture.proposal.state).toBe('pending');
@@ -119,7 +120,7 @@ for (const mode of ['read', 'update', 'complete', 'cancel', 'stale', 'recurring-
       expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders)).toEqual(rows);
       return;
     }
-    await expect(page.getByText(/Pending phone actions are available for separate review/)).toBeVisible();
+    await expect(page.getByText(/Review the action below\./)).toBeVisible();
     expect(await page.evaluate(()=>(window as any).calendarSent.metadata.clientDevice.context.selectedObject)).toMatchObject({kind:'reminder',timingVersion:2});
     const before=await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders);expect(before).toHaveLength(1);
     expect(JSON.stringify(await page.evaluate(()=>(window as any).calendarSent))).not.toContain('Private reminder details');

@@ -4,17 +4,11 @@
  *
  * The recording has no length limit. The native recorder (AlphaNoteRecorder) writes it as
  * finished segments of under 30 s, so a crash keeps every finished segment
- * (CrashKeepsAudio). Each finished segment is transcribed in order while recording goes on and
- * Notes is shown (TranscriptKeepsUp); segments recorded while it is hidden (screen off, another
- * view) are transcribed when it is shown again, or at Done. Any route the user selected is used; every route accepts a segment, since
- * each is under the on-device window and the 60 s request bound of the paired and Cloud
- * routes. The transcript is always a prefix of the audio (TranscriptPrefixOfAudio). Only
- * Done, Discard, low storage or a microphone error end a recording (NoLengthLimit).
- *
- * While recording, an optional live port (the on-device streaming ASR) adds words as they are
- * spoken. Live text is display only: it is never journaled or saved, and it is shown only for
- * audio after the last transcribed segment, so the committed per-segment transcript stays the
- * source of truth.
+ * (CrashKeepsAudio). Alpha saves audio directly on Stop; remote transcription is a later,
+ * explicit action on the saved note. The optional session transcriber remains available to
+ * callers that explicitly enable it. Saved-note transcription checks the same note/audio owner
+ * before every bounded request and before its single save. It never retries a paid request or
+ * deletes recording bytes. Only Stop, Discard, low storage or a microphone error end a recording.
  *
  * This module has no imports so its logic runs under `node --test`.
  */
@@ -24,9 +18,43 @@ export type NoteRecordingStatus = {
   state: 'idle' | 'recording' | 'paused' | 'stopped';
   recordingId?: string; recovered?: boolean; stopReason?: string;
   binding?: NoteRecordingBinding;
+  canonicalSavePending?: boolean;
   durationMs?: number; segments?: NoteSegment[]; peak?: number;
 };
 export type SavedNoteAudio = { audioId: string; noteId: string; durationMs: number; transcript: string };
+/** An explicit saved-note action. It never records, deletes, or retries a provider/mutation. */
+export async function addSavedNoteTranscript(
+  audio: Pick<SavedNoteAudio, 'audioId' | 'noteId' | 'durationMs'>,
+  port: {
+    current(): boolean;
+    describe(): Promise<SavedNoteAudio & { deletedAt?: number }>;
+    transcribe(offsetMs: number, signal: AbortSignal): Promise<string>;
+    save(text: string): Promise<boolean>;
+  }, signal: AbortSignal,
+): Promise<boolean> {
+  if (!Number.isSafeInteger(audio.durationMs) || audio.durationMs <= 0) throw Error('Recording unavailable');
+  const check = () => { signal.throwIfAborted(); if (!port.current()) throw new DOMException('Note changed', 'AbortError'); };
+  const owned = async () => {
+    check(); const value = await port.describe(); check();
+    if (value.audioId !== audio.audioId || value.noteId !== audio.noteId || value.durationMs !== audio.durationMs || value.deletedAt !== undefined) throw Error('Recording unavailable');
+  };
+  const parts: string[] = [];
+  for (let offset = 0; offset < audio.durationMs; offset += 25_000) {
+    await owned();
+    const text = await port.transcribe(offset, signal); check();
+    if (typeof text !== 'string') throw Error('Transcript unavailable');
+    if (text.trim()) parts.push(text.trim());
+  }
+  await owned();
+  if (!parts.length) throw Object.assign(Error('No speech was found. Your recording is kept.'), {code: 'no-speech'});
+  return port.save(parts.join('\n'));
+}
+export type CanonicalNoteSaveIntent = {
+  pending: boolean;
+  claim(): Promise<boolean>;
+  /** Retain audio for the confirmed canonical record, never for an unrelated draft. */
+  retainAudio?(noteId: string): Promise<SavedNoteAudio>;
+};
 export interface NoteRecorderDriver {
   start(binding?: NoteRecordingBinding): Promise<NoteRecordingStatus>;
   status(): Promise<NoteRecordingStatus>;
@@ -35,6 +63,7 @@ export interface NoteRecorderDriver {
   stop(recordingId: string): Promise<NoteRecordingStatus>;
   discard(recordingId: string): Promise<NoteRecordingStatus>;
   setText(recordingId: string, segmentId: string, text: string): Promise<void>;
+  claimCanonicalSave(recordingId: string): Promise<boolean>;
   save(input: { recordingId: string; noteId: string; transcript: string }): Promise<SavedNoteAudio>;
   listen(callback: (status: NoteRecordingStatus) => void): Promise<{ remove(): Promise<void> | void }>;
 }
@@ -43,7 +72,7 @@ export interface NoteLiveHandlers { speechStart(): void; interim(text: string): 
 /** Opens a live transcription stream for display, or null when none is available. */
 export type NoteLivePort = (handlers: NoteLiveHandlers) => Promise<{ close(): Promise<void> | void } | null>;
 type NoteRecorderOwner = { identity: string; folderId: string | null; current(): boolean };
-type NoteRecorderOptions = { pollMs?: number; visible?: () => boolean; live?: NoteLivePort; owner?: () => NoteRecorderOwner | undefined };
+type NoteRecorderOptions = { pollMs?: number; visible?: () => boolean; live?: NoteLivePort; owner?: () => NoteRecorderOwner | undefined; remoteTranscription?: () => boolean; automaticTranscription?: boolean };
 /** Text of one finished segment; '' for silence. Throws when the route fails. */
 export type SegmentTranscriber = (segmentId: string, signal: AbortSignal) => Promise<string>;
 /** `failed`: the microphone did not start; the recorder stays open with one error line. */
@@ -55,11 +84,13 @@ const aborted = (error: unknown) => (error as { name?: string })?.name === 'Abor
 /** One short line, only for errors the user can act on. */
 export function noteRecorderError(reason: string | undefined): string {
   if (reason === 'storage') return 'Storage is full.';
+  if (reason === 'recovery') return 'Recording recovery is unavailable. Your audio is kept.';
   if (reason === 'permission') return 'Allow the microphone in Settings.';
   if (reason === 'call') return 'Paused for a call.';
   if (reason === 'transcription') return 'Transcription stopped. The audio is kept.';
+  if (reason === 'unavailable') return 'No transcription is available. The audio is kept.';
   if (reason === 'sign-in') return 'Sign in to transcribe. The audio is kept.';
-  if (reason === 'save') return 'Couldn’t save. Try Done again.';
+  if (reason === 'save') return 'Couldn’t save. Try again.';
   if (reason === 'owner') return 'Return to the original Notes account. Your recording is kept.';
   if (reason === 'capture') return 'The microphone isn’t available.';
   return 'The microphone stopped.';
@@ -68,6 +99,7 @@ export function noteRecorderError(reason: string | undefined): string {
 function startFailure(error: unknown): string {
   const { code, name, message } = (error ?? {}) as { code?: string; name?: string; message?: string };
   if (String(code || message || '').toLowerCase().includes('storage')) return 'storage';
+  if (code === 'recovery') return 'recovery';
   if (code === 'permission-denied' || name === 'NotAllowedError') return 'permission';
   if (code === 'call-active') return 'call';
   return 'capture';
@@ -90,6 +122,7 @@ export class NoteRecorderSession {
   private transcribing?: AbortController;
   private pumping?: Promise<void>;
   private transcriptionFailed = false;
+  private noRoute = false;
   private handle?: { remove(): Promise<void> | void };
   private poll?: ReturnType<typeof setTimeout>;
   private epoch = 0;
@@ -97,6 +130,7 @@ export class NoteRecorderSession {
   private ownerDigest?: string;
   private ownedRecordingId?: string;
   private recordingFolder: string | null = null;
+  canonicalSavePending = false;
   /** The epoch a Discard ended while the microphone was still starting. */
   private abandoned = -1;
   /** Live utterances (display only), tagged with the recording time their speech started. */
@@ -119,6 +153,10 @@ export class NoteRecorderSession {
 
   get open() { return this.phase !== 'closed'; }
   get folderId() { return this.recordingFolder; }
+  get needsTranscriptionConsent() {
+    return this.phase === 'stopped' && !this.canonicalSavePending && this.options.remoteTranscription?.() === true &&
+      this.segments.some(segment => !this.texts.has(segment.segmentId));
+  }
   private owned(epoch: number) {
     return epoch === this.epoch && (!this.options.owner || this.owner?.current() === true);
   }
@@ -176,7 +214,8 @@ export class NoteRecorderSession {
   }
   /** Opens the live stream while recording and visible; closes it otherwise. */
   private syncLive() {
-    const want = this.owned(this.epoch) && this.phase === 'recording' && !!this.options.live && !this.liveLost && this.options.visible?.() !== false;
+    const want = this.owned(this.epoch) && this.phase === 'recording' && !!this.options.live && !this.liveLost &&
+      !this.options.remoteTranscription?.() && this.options.visible?.() !== false;
     if (!want) { this.closeLive(); return; }
     if (this.liveStream || this.liveOpening) return;
     const epoch = this.epoch; this.liveOpening = true;
@@ -209,7 +248,12 @@ export class NoteRecorderSession {
     if (stream) void Promise.resolve(stream.close()).catch(() => {});
   }
   /** Notes is shown again: a lost live stream may reopen. */
-  visibilityChanged() { this.liveLost = false; this.syncLive(); if (this.open) void this.pump(); }
+  visibilityChanged() {
+    this.liveLost = false;
+    this.syncLive();
+    if (this.options.visible?.() === false) this.transcribing?.abort();
+    else if (this.open) void this.pump();
+  }
   /** Adopt a recording that is already open (a recovered one, or one left running), else start one. */
   async begin(): Promise<void> {
     if (this.open && this.phase !== 'failed') return;
@@ -238,11 +282,6 @@ export class NoteRecorderSession {
       if (!this.matches(status) || binding && existing.state === 'idle' && status.binding?.folderId !== binding.folderId)
         throw Error('Notes recording owner could not be verified');
       this.apply(status);
-      // Say at once when transcription needs the user (Cloud sign-in); recording goes on regardless.
-      void this.transcriber().then(() => {}, error => {
-        if (epoch !== this.epoch || (error as { code?: string })?.code !== 'sign-in') return;
-        this.transcriptionFailed = true; this.error = noteRecorderError('sign-in'); this.changed();
-      });
     } catch (error) {
       if (epoch !== this.epoch) return;
       this.detach(); this.phase = 'failed';
@@ -298,6 +337,7 @@ export class NoteRecorderSession {
     this.changed();
   }
   private absorb(status: NoteRecordingStatus) {
+    if (status.canonicalSavePending === true) this.canonicalSavePending = true;
     if (Number.isFinite(status.durationMs)) this.durationMs = Number(status.durationMs);
     if (Array.isArray(status.segments)) {
       this.segments = status.segments.map(s => ({ segmentId: String(s.segmentId), durationMs: Number(s.durationMs) || 0, ...(typeof s.text === 'string' ? { text: s.text } : {}) }));
@@ -315,7 +355,9 @@ export class NoteRecorderSession {
     }, this.options.pollMs ?? 120);
   }
   /** Transcribes finished segments in order, one at a time, while the recording goes on. */
-  pump(force = false): Promise<void> {
+  private pump(force = false, remoteApproved = false): Promise<void> {
+    if (!force && this.options.automaticTranscription === false) return Promise.resolve();
+    if (this.canonicalSavePending || this.options.remoteTranscription?.() && !remoteApproved) return Promise.resolve();
     if (force) this.transcriptionFailed = false;
     if (this.pumping) return this.pumping;
     const epoch = this.epoch;
@@ -334,8 +376,9 @@ export class NoteRecorderSession {
             if ((error as { code?: string })?.code === 'sign-in') { this.transcriptionFailed = true; this.error = noteRecorderError('sign-in'); this.changed(); }
             return;
           }
-          if (!this.owned(epoch)) return;
+          if (!this.owned(epoch) || this.options.visible?.() === false) return;
         }
+        this.noRoute = !route;
         if (!route) return; // No transcription route: the recording is saved with its audio only.
         const controller = new AbortController(); this.transcribing = controller;
         let text: string;
@@ -364,7 +407,7 @@ export class NoteRecorderSession {
   }
   async resume() {
     const id = this.recordingId;
-    if (!this.owned(this.epoch) || !id || !['paused', 'stopped'].includes(this.phase)) return;
+    if (!this.owned(this.epoch) || this.canonicalSavePending || !id || !['paused', 'stopped'].includes(this.phase)) return;
     const epoch = this.epoch;
     try {
       this.error = this.transcriptionFailed ? this.error : '';
@@ -377,6 +420,24 @@ export class NoteRecorderSession {
     }
   }
   async togglePause() { if (this.phase === 'failed') await this.begin().catch(() => {}); else if (this.phase === 'recording') await this.pause(); else await this.resume(); }
+  /** Finalize the audio locally so the owner can decide whether to transcribe it. */
+  async stop(): Promise<boolean> {
+    const id = this.recordingId, epoch = this.epoch;
+    if (!this.owned(epoch) || !id) return false;
+    if (this.phase === 'stopped') return true;
+    if (this.phase !== 'recording' && this.phase !== 'paused') return false;
+    const before = this.phase;
+    this.phase = 'finishing'; this.confirmingDiscard = false; this.closeLive(); this.changed();
+    try {
+      const stopped = await this.driver.stop(id);
+      if (!this.owned(epoch)) return false;
+      if (stopped.recordingId !== id || stopped.state !== 'stopped' || !this.matches(stopped)) throw Error('Recording changed');
+      this.phase = 'stopped'; this.apply(stopped); return true;
+    } catch {
+      if (this.owned(epoch)) { this.phase = before; this.error = noteRecorderError('capture'); this.schedulePoll(); this.syncLive(); this.changed(); }
+      return false;
+    }
+  }
   /**
    * Done: stop, let the transcript catch up with the audio, and save both as one voice note
    * through `persist` (with `keepAudio` false, only the transcript and length, and only once every
@@ -384,23 +445,33 @@ export class NoteRecorderSession {
    * closes only after `persist` confirms the note; saving the same recording again returns the
    * audio already saved into the same note, so Done can be retried.
    */
-  async finish(persist: (saved: SavedNoteAudio, transcript: string) => Promise<boolean>, keepAudio = true): Promise<boolean> {
+  async finishAudio(persist: (saved: SavedNoteAudio, transcript: string, intent?: CanonicalNoteSaveIntent) => Promise<boolean>, canonicalDestination = false): Promise<boolean> {
+    return this.finish(persist, !canonicalDestination, false, true);
+  }
+  async finish(persist: (saved: SavedNoteAudio, transcript: string, intent?: CanonicalNoteSaveIntent) => Promise<boolean>, keepAudio = true, remoteApproved = false, audioOnly = false): Promise<boolean> {
     const id = this.recordingId;
     if (!this.owned(this.epoch) || !id || !['recording', 'paused', 'stopped'].includes(this.phase)) return false;
+    if (!audioOnly && this.options.remoteTranscription?.() && (this.phase !== 'stopped' || this.needsTranscriptionConsent && !remoteApproved)) return false;
     const epoch = this.epoch;
+    const alreadyStopped = this.phase === 'stopped';
+    let savePending = false;
     this.phase = 'finishing'; this.confirmingDiscard = false; if (this.poll) clearTimeout(this.poll); this.poll = undefined; this.closeLive(); this.changed();
     try {
-      const stopped = await this.driver.stop(id);
+      const stopped = alreadyStopped ? await this.driver.status() : await this.driver.stop(id);
       if (!this.owned(epoch)) return false;
       if (stopped.recordingId !== id || stopped.state !== 'stopped' || !this.matches(stopped)) throw Error('Recording changed');
       this.absorb(stopped);
-      await this.pump(true);
+      savePending = stopped.canonicalSavePending === true;
+      if (audioOnly) {
+        this.transcribing?.abort();
+        await this.pumping?.catch(() => {});
+      } else await this.pump(true, remoteApproved);
       if (!this.owned(epoch)) return false;
       if (!this.segments.length) throw Error('No audio');
       // A destination that keeps no audio saves only a transcript of every segment; until then
       // the recording stays, so Done never leaves a note without the words or the audio.
-      if (!keepAudio && (this.transcriptionFailed || this.segments.some(s => !this.texts.has(s.segmentId)))) {
-        this.phase = 'stopped'; if (!this.transcriptionFailed || !this.error) this.error = noteRecorderError('transcription'); this.changed(); return false;
+      if (!audioOnly && (!keepAudio || this.options.remoteTranscription?.()) && (this.transcriptionFailed || this.segments.some(s => !this.texts.has(s.segmentId)))) {
+        this.phase = 'stopped'; if (!this.transcriptionFailed || !this.error) this.error = noteRecorderError(this.noRoute ? 'unavailable' : 'transcription'); this.changed(); return false;
       }
       const transcript = this.transcript();
       // The note is named by its recording, so a retried Done (also after a restart) saves into
@@ -410,7 +481,24 @@ export class NoteRecorderSession {
       const saved = keepAudio ? await this.driver.save({ recordingId: id, noteId, transcript }) : { audioId: id, noteId, durationMs: this.durationMs, transcript };
       if (!this.owned(epoch)) return false;
       if (saved.noteId !== noteId || saved.audioId !== id || !Number.isFinite(saved.durationMs)) throw Error('Invalid saved recording');
-      if (!await persist(saved, transcript)) throw Error('Note not saved');
+      const intent = keepAudio ? undefined : {
+        pending: savePending,
+        claim: async () => {
+          if (savePending || !this.owned(epoch)) return false;
+          // A rejected bridge response can still have durably claimed the save.
+          savePending = true;
+          const claimed = await this.driver.claimCanonicalSave(id);
+          if (claimed && this.owned(epoch)) this.canonicalSavePending = true;
+          return claimed && this.owned(epoch);
+        },
+        ...(audioOnly ? {retainAudio: async (canonicalNoteId: string) => {
+          if (!this.owned(epoch) || typeof canonicalNoteId !== 'string' || !canonicalNoteId || canonicalNoteId.length > 128) throw Error('Recording destination changed');
+          const audio = await this.driver.save({recordingId: id, noteId: canonicalNoteId, transcript});
+          if (!this.owned(epoch) || audio.audioId !== id || audio.noteId !== canonicalNoteId || !Number.isFinite(audio.durationMs)) throw Error('Saved recording changed');
+          return audio;
+        }} : {}),
+      };
+      if (!await persist(saved, transcript, intent)) throw Error('Note not saved');
       if (!this.owned(epoch)) return false;
       // The note holds the audio now; the segments go. Until here a failed save can retry.
       if (epoch === this.epoch) this.close();
@@ -418,12 +506,15 @@ export class NoteRecorderSession {
       return true;
     } catch {
       if (epoch !== this.epoch) return false;
-      this.phase = 'stopped'; this.error = noteRecorderError('save'); this.changed(); return false;
+      this.phase = 'stopped';
+      this.error = savePending ? 'Check Notes. Your recording is kept.' : noteRecorderError('save');
+      this.changed(); return false;
     }
   }
   /** Discard asks once; the second call deletes every segment. */
   async discard(confirmed = false) {
     if (!this.open || this.owner && !this.owned(this.epoch)) return;
+    if (this.phase === 'finishing' || this.canonicalSavePending) return;
     if (!confirmed && this.durationMs >= 1000 && this.phase !== 'starting') { this.confirmingDiscard = true; this.changed(); return; }
     const id = this.recordingId;
     if (this.phase === 'starting') this.abandoned = this.epoch;
@@ -435,9 +526,10 @@ export class NoteRecorderSession {
   close() {
     ++this.epoch; this.detach();
     this.phase = 'closed'; this.recordingId = undefined; this.durationMs = 0; this.segments = []; this.levels = [];
-    this.texts.clear(); this.transcriptionFailed = false; this.confirmingDiscard = false; this.error = '';
+    this.texts.clear(); this.transcriptionFailed = false; this.noRoute = false; this.confirmingDiscard = false; this.error = '';
     this.liveFinals = []; this.liveInterim = ''; this.liveLost = false;
     this.owner = undefined; this.ownerDigest = undefined; this.ownedRecordingId = undefined; this.recordingFolder = null;
+    this.canonicalSavePending = false;
     this.changed();
   }
   /**
@@ -448,7 +540,8 @@ export class NoteRecorderSession {
   leave(pause = false) {
     if (!this.open) return;
     const id = this.recordingId, recording = this.phase === 'recording';
-    ++this.epoch; this.detach(); this.phase = 'closed'; this.recordingId = undefined; this.segments = []; this.texts.clear(); this.levels = []; this.error = ''; this.confirmingDiscard = false; this.transcriptionFailed = false; this.liveFinals = []; this.liveInterim = ''; this.liveLost = false;
+    ++this.epoch; this.detach(); this.phase = 'closed'; this.recordingId = undefined; this.segments = []; this.texts.clear(); this.levels = []; this.error = ''; this.confirmingDiscard = false; this.transcriptionFailed = false; this.noRoute = false; this.liveFinals = []; this.liveInterim = ''; this.liveLost = false;
+    this.canonicalSavePending = false;
     if (pause && recording && id) void this.driver.pause(id).catch(() => { /* Closed already. */ });
   }
 }

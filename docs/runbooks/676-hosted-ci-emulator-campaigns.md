@@ -60,7 +60,7 @@ Other findings that change how the campaigns are run:
    passes `--home-role`, so `LauncherHome`, `SettingsRoles` and `AccessibilityHomeRole` are local
    owned-emulator only; 28 of the 31 listed classes have no hosted job at all.
 7. The `apkVariants` gate in `android/aosp/pixel10a-qualification-gates.json` cites
-   `https://github.com/AlphaCompute/alphaphone/actions/runs/39918054977`; the same run ID is the
+   `https://github.com/eliza-research/alphaphone/actions/runs/39918054977`; the same run ID is the
    `eliza-research/alphaphone` run above. AlphaCompute is now a fork, so that link may stop resolving.
 
 ## Dispatch runbook (prepared, not executed)
@@ -116,7 +116,7 @@ give each run its own `--output test-results/android-instrumentation/<batch>-<bu
 
 | Batch | Build pair | Arguments |
 | --- | --- | --- |
-| `h31-flagoff` | flag-off | `--classes ResidentAlwaysPresent,Assistant,Flow,ChatContinuity,AssistantResidentReuse,SettingsFlow,ResetPolicy,LauncherApps,PasswordBrowserFill,Accessibility,Rotation,CameraScan,PhotoEdit,PhotoFilter,PhotosBatch,FilesTree` |
+| `h31-flagoff` | flag-off | `--classes ResidentAlwaysPresent,Assistant,Flow,ChatContinuity,AssistantResidentReuse,SettingsFlow,ResetPolicy,LauncherApps,PasswordBrowserFill,Accessibility,Rotation,CameraScan,PhotoEdit,PhotoFilter,PhotosBatch,StorageCategories` |
 | `h31-home-role` | flag-off | `--variants launcher --home-role --classes SettingsRoles,LauncherHome` |
 | `h31-test-mocks` | test-mocks | `--test-mocks --classes AccessibilityViews,AccessibilityLifecycle,HostedProcessRestart,BrowserIsolatedReading,BrowserDownload,BrowserAutofill` |
 | `h31-test-mocks-home-role` | test-mocks | `--variants launcher --home-role --test-mocks --classes AccessibilityHomeRole` |
@@ -201,8 +201,8 @@ dispatched job. A cell is filled with the result file path and its status, never
 | Media | PhotoFilter | launcher | h31-flagoff | not run | not run | n/a |
 | Media | PhotosBatch | standalone | h31-flagoff | not run | not run | n/a |
 | Media | PhotosBatch | launcher | h31-flagoff | not run | not run | n/a |
-| Media | FilesTree | standalone | h31-flagoff | not run | not run | n/a |
-| Media | FilesTree | launcher | h31-flagoff | not run | not run | n/a |
+| Media | StorageCategories | standalone | h31-flagoff | not run | not run | n/a |
+| Media | StorageCategories | launcher | h31-flagoff | not run | not run | n/a |
 | Upgrade | from earlier installs that saved mock state | both | manual (pilot runbook procedure) | not run | not run | n/a |
 
 The accessibility classes need the screen-reader stand-in service the classes install themselves;

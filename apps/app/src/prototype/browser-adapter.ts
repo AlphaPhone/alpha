@@ -1,3 +1,4 @@
+import {cloudRuntimeEnabled} from '../build-flags';
 import {parseNativeHistoryCommand} from "../../../../.eliza/client-features/plugins/plugin-browser/src/native-client-command.ts";
 import {parseBrowserAddressInput} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/address-input.ts";
 import {browsingSnapshot, restoreBrowsing, DEFAULT_BROWSING_LIMITS} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts";
@@ -105,6 +106,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   const unsubscribeReading = connectionController.subscribe(()=>{ if(reading && (connectionController.getSnapshot().open || document.hidden)) stopReading(); });
   async function readPage() {
     if(reading){stopReading();return;}
+    if(Capacitor.isNativePlatform()&&cloudRuntimeEnabled)return;
     const id=state()?.cur, info=tabInfo(id), revision=tabs.revision(id);
     if(!Capacitor.isNativePlatform()){
       // The refusal is not left behind an open menu (the same rule as Ask about page).
@@ -126,7 +128,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     const unsubscribe=connectionController.subscribe(()=>{try{valid();}catch{stopReading();}});
     try {
       shell.vset('browser',{menu:false});await new Promise(resolve=>setTimeout(resolve,150));valid();lastGeometry='';await update();
-      if(!await voice.ready(controller.signal))throw new Error('The selected agent is not ready for speech.');valid();
+      if(!await voice.ready(controller.signal))throw new Error('Your agent isn’t ready for speech.');valid();
       const result=await Browser.reviewReading({session,id,url:info.url,navigation:info.navigation,...binding});valid();
       await voice.speak(result.readingToken,controller.signal);valid();
     }catch(error){if(!controller.signal.aborted)report(error);}finally{unsubscribe();if(reading===controller){reading=undefined;void Browser.cancelReading({session}).catch(()=>{});}}
@@ -184,6 +186,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       }
     } catch { if (approvedSignal) throw new Error('Invalid approved browser destination'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
     const s = state(); if (!s) { if (approvedSignal) throw new Error('Browser unavailable'); return; }
+    // Restored rows count: an agent open past the cap fails visibly instead of being dropped.
+    if (newTab && s.tabs.length >= MAX_TABS) { const full = new Error('Close a tab before opening another.'); if (approvedSignal) throw full; report(full); return; }
     profileUnsupportedTab=undefined;
     const selectedTab=s.cur;
     const id = newTab ? newTabId() : s.cur, priv = newTab ? privateTab : isPrivate(id);
@@ -291,13 +295,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     } catch (error) { report(error); }
     finally { sharing=false; confirming=false; lastGeometry=''; await update(); }
   }
-  /** Remove renderer tabs whose native WebView is already gone. */
+  /** Remove renderer tabs whose native WebView is already gone. A closed pop-up returns to its opener. */
   function forgetTabs(ids: string[]) {
     tabs.forget(ids); for (const id of ids) restored.delete(id);
     const s = state(); if (!s) return;
     const rest = s.tabs.filter((tab: Bag) => !ids.includes(tab.id));
     const next = rest.length ? rest : [{ id: newTabId(), hist: ['newtab'], pos: 0 }];
-    shell.vset('browser', { tabs: next, cur: next.some((tab: Bag) => tab.id === s.cur) ? s.cur : next[0].id });
+    const opener = s.tabs.find((tab: Bag) => tab.id === s.cur)?.opener;
+    shell.vset('browser', { tabs: next, cur: next.some((tab: Bag) => tab.id === s.cur) ? s.cur : next.some((tab: Bag) => tab.id === opener) ? opener : next[0].id });
   }
   function savedSnapshot() {
     const s = state(); if (!s) return null;
@@ -401,8 +406,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       host:url?.host || 'Search or address',hostCss:url?'':'color:var(--mut)',path:url ? url.pathname + url.search : '', hasLock:Capacitor.isNativePlatform() && !!url && url.protocol==='https:' && !!info?.committed && !info?.loading && !info?.error,
       pageShareAvailable:Capacitor.isNativePlatform(),pageContentAvailable:Capacitor.isNativePlatform()||!!info?.committed&&!info.loading&&!info.error&&!info.externalOnly,nativeControls:true,externalBrowserAvailable:Capacitor.isNativePlatform(),openExternalBrowser:()=>void openExternalBrowser(),openPasswordProvider:()=>{api.set({menu:false});api.open('settings',{page:'password-provider'});},openDownloads:()=>{api.set({menu:false});void Browser.downloads({session}).catch(report);},reload:()=>{api.set({menu:false});void command('reload');},stopLoading:()=>{api.set({menu:false});void command('stop');},loading:!!info?.loading,goBack:()=>void command('back'),goFwd:()=>void command('forward'),backOp:info?.canBack?1:0.3,fwdOp:info?.canForward?1:0.3,
       startEdit:()=>api.set({editing:true,addr:info?.url||'',menu:false}),onAddrKey:(e:KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();void navigate((e.target as HTMLInputElement).value);} else if(e.key==='Escape')api.set({editing:false}); },
-      toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('Load an HTTPS page before bookmarking it.');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{title:'Recover saved bookmarks',host:'Saved bookmarks could not be opened. Their original data is retained.',ini:'!',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...(s.lib==='history'?s.visits:s.marks).map((u:string)=>({title:u,host:u,ini:new URL(u).hostname[0],go:()=>void navigate(u),canRemove:s.lib!=='history',removeAria:'Remove bookmark',remove:()=>saveBookmark(u,false)}))],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!(s.lib==='history'?s.visits:s.marks).length,newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,bookNow:unavailable,cfOk:unavailable,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),
-      tabCards:s.tabs.map((tab:Bag)=>{const page=known(tab.id),label=page?.title||(tab.priv?'New private tab':'New tab');return {title:page?.title || page?.url || (tab.priv?'New private tab':'New tab'),host:(tab.priv?'Private · ':'')+(page?.url||''),css:tab.id===s.cur?'box-shadow:inset 0 0 0 2px var(--acc)':'',prev:tab.priv?'background:var(--fg);opacity:.85':'background:var(--s2)',aria:'Switch to '+(tab.priv?'private tab ':'')+label,closeAria:tab.priv?'Close private tab':'Close tab',pick:()=>api.set({cur:tab.id,tabsOpen:false}),close:()=>{ const rest=state().tabs.filter((t:Bag)=>t.id!==tab.id); const fallback=newTabId();if(tabs.has(tab.id))void Browser.close({session,id:tab.id}).catch(report);tabs.forget([tab.id]);restored.delete(tab.id);api.set({tabs:rest.length?rest:[{id:fallback,hist:['newtab'],pos:0}],cur:state().cur===tab.id?(rest[0]?.id||fallback):state().cur}); }};}),
+      toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('Load an HTTPS page before bookmarking it.');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{id:'bookmark-recovery',title:'Recover saved bookmarks',host:'Saved bookmarks could not be opened. Their original data is retained.',ini:'!',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...Array.from(new Set<string>(s.lib==='history'?s.visits:s.marks)).map((u:string)=>({id:u,title:u,host:u,ini:new URL(u).hostname[0],go:()=>void navigate(u),canRemove:s.lib!=='history',removeAria:'Remove bookmark',remove:()=>saveBookmark(u,false)}))],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!(s.lib==='history'?s.visits:s.marks).length,newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,readAloudAvailable:!(Capacitor.isNativePlatform()&&cloudRuntimeEnabled),bookNow:unavailable,cfOk:unavailable,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),
+      tabCards:s.tabs.map((tab:Bag)=>{const page=known(tab.id),label=page?.title||(tab.priv?'New private tab':'New tab');return {id:tab.id,title:page?.title || page?.url || (tab.priv?'New private tab':'New tab'),host:(tab.priv?'Private · ':'')+(page?.url||''),css:tab.id===s.cur?'box-shadow:inset 0 0 0 2px var(--acc)':'',prev:tab.priv?'background:var(--fg);opacity:.85':'background:var(--s2)',aria:'Switch to '+(tab.priv?'private tab ':'')+label,closeAria:tab.priv?'Close private tab':'Close tab',pick:()=>api.set({cur:tab.id,tabsOpen:false}),close:()=>{ const rest=state().tabs.filter((t:Bag)=>t.id!==tab.id); const fallback=newTabId();if(tabs.has(tab.id))void Browser.close({session,id:tab.id}).catch(report);tabs.forget([tab.id]);restored.delete(tab.id);api.set({tabs:rest.length?rest:[{id:fallback,hist:['newtab'],pos:0}],cur:state().cur===tab.id?(rest[0]?.id||fallback):state().cur}); }};}),
       rootRef:(element:HTMLElement)=>{out.rootRef?.(element); if(!element)return; const viewport=element.querySelector('[data-bscroll]'); if(viewport){viewport.setAttribute('data-native-browser-viewport','true'); viewport.setAttribute('aria-label',info?.error || (info?.externalOnly?'Open page in browser':info?.loading?'Loading website':'Browser page'));} },
     };
   };
@@ -475,7 +480,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   void Browser.addListener('tabOpened',(event:BrowserTabOpened)=>{
     const s=state();if(disposed||!s||s.tabs.some((tab:Bag)=>tab.id===event.id))return;
     const opened=tabs.applyOpened(event);if(!opened)return;
-    shell.vset('browser',{tabs:[...s.tabs,{id:opened.id,hist:['newtab'],pos:0,...(opened.private?{priv:true}:{})}],cur:event.id,editing:false,tabsOpen:false,menu:false,lib:null,share:false});refresh();
+    if(s.tabs.length>=MAX_TABS){tabs.forget([opened.id]);void Browser.close({session,id:opened.id}).catch(()=>{});shell.toast('Close a tab before opening another.');return;}
+    // The opener is kept only in memory, so a pop-up that closes itself returns to the page that opened it.
+    const opener=event.opener&&s.tabs.some((tab:Bag)=>tab.id===event.opener)?{opener:event.opener}:{};
+    shell.vset('browser',{tabs:[...s.tabs,{id:opened.id,hist:['newtab'],pos:0,...(opened.private?{priv:true}:{}),...opener}],cur:event.id,editing:false,tabsOpen:false,menu:false,lib:null,share:false});refresh();
   }).then((value:any)=>{openedListener=value;}).catch(()=>{});
   void Browser.addListener('tabClosed',(event:BrowserTabEvent)=>{const id=disposed?undefined:tabs.applyClosed(event);if(id)forgetTabs([id]);}).then((value:any)=>{closedListener=value;}).catch(()=>{});
   void Browser.addListener('notice',(event:BrowserTabNotice)=>{const message=disposed?undefined:tabs.notice(event);if(message!==undefined)shell?.toast(message);}).then((value:any)=>{noticeListener=value;}).catch(()=>{});
@@ -493,10 +501,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   const nativeUnderAssistant = () => Capacitor.isNativePlatform() && (['sheet','full'].includes(shell?.S().chat) || !!shell?.chatMotion?.moved);
   const update = () => {
     if(disposed)return;
+    saveSession();
+    // A stopped Activity is already hidden by the native host. Withdrawing its tab here
+    // would cancel the autofill session retained for a password provider's unlock screen.
+    if(document.hidden){if(reading)stopReading();return;}
     const s=state(), S=shell?.S();
     const element=document.querySelector('[data-native-browser-viewport]') as HTMLElement|null;
-    const hidden=questionReview || confirming || hostModalOpen(document, Capacitor.isNativePlatform()) || !s || !element || !element.isConnected || !element.getClientRects().length || S?.view!=='browser' || s.editing || s.tabsOpen || s.menu || s.lib || s.share || s.ag || s.confirm || S?.shade || S?.screen !== 'home' || nativeUnderAssistant() || document.hidden;
-    if(reading && (disposed || document.hidden || document.documentElement.hasAttribute('data-dev-background') || S?.screen!=='home' || S?.view!=='browser' || s?.tabsOpen || s?.editing || S?.shade || ['sheet','full'].includes(S?.chat)))stopReading();
+    const hidden=questionReview || confirming || hostModalOpen(document, Capacitor.isNativePlatform()) || !s || !element || !element.isConnected || !element.getClientRects().length || S?.view!=='browser' || s.editing || s.tabsOpen || s.menu || s.lib || s.share || s.ag || s.confirm || S?.shade || S?.screen !== 'home' || nativeUnderAssistant();
+    if(reading && (disposed || document.documentElement.hasAttribute('data-dev-background') || S?.screen!=='home' || S?.view!=='browser' || s?.tabsOpen || s?.editing || S?.shade || ['sheet','full'].includes(S?.chat)))stopReading();
     const rect=element?.getBoundingClientRect();
     // The page ends above the resting dock's reserve (template.html), never above the dock's current
     // painted position: a composer pulled up with the sheet, or the sheet itself, does not resize it.
@@ -504,7 +516,6 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     const height=rect ? Math.max(0,Math.min(rect.bottom,page?.bottom ?? rect.bottom)-rect.top) : 0;
     // A restored cold-start tab loads its last committed page when first shown.
     if(!hidden && s && restored.has(s.cur) && !tabs.has(s.cur) && !clearingData){const saved=restored.get(s.cur)!;void navigate(saved.url,false,undefined,false,true);}
-    saveSession();
     const payload=hidden || !tabs.has(s?.cur) ? {session,id:null} : {session,id:s.cur,x:rect!.x,y:rect!.y,width:rect!.width,height};
     const next=JSON.stringify(payload);
     if(next!==lastGeometry){lastGeometry=next;return Browser.present(payload).catch(()=>{lastGeometry='';});}

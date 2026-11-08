@@ -16,10 +16,8 @@ async function openHome(page:Page,theme:string,size:{width:number;height:number}
  },kind);
  await installHomeCalendar(page,expected&&{title:expected.title,startAt:expected.startAt,endAt:expected.endAt,isAllDay:expected.isAllDay});
  const card=page.locator('[data-alpha-home-calendar]');
- // Nothing planned is nothing to show: no card, and the row holds the date line (docs/daily-overview.md).
- if(!expected){await expect(page.locator('[data-alpha-home-date]')).toBeVisible();await expect.poll(()=>page.evaluate(()=>(window as any).homeCalendarFixture.requests.length)).toBeGreaterThan(0);await expect(card).toHaveCount(0);return {card,expected};}
- await expect(card).toBeVisible();await page.evaluate(()=>document.fonts.ready);
- await expect(card).toHaveAccessibleName(`Open calendar event: ${expected.title}, ${expected.day}, ${expected.footer}`);await expect(card.locator('.home-calendar-footer')).toHaveText(expected.footer);
+ if(expected){await expect(card).toBeVisible();await page.evaluate(()=>document.fonts.ready);await expect(card).toHaveAccessibleName(`Open calendar event: ${expected.title}, ${expected.day}, ${expected.footer}`);await expect(card.locator('.home-calendar-footer')).toHaveText(expected.footer);}
+ else {await expect(card).toBeVisible();await expect(card).toHaveAttribute('data-alpha-home-calendar-event','false');await expect(card).toContainText('Nothing planned');}
  return {card,expected};
 }
 
@@ -31,12 +29,11 @@ for(const [theme,size,kind] of [
  ['light',{width:960,height:1020},'long'],
 ] as const)test(`Home Calendar keeps complete line boxes and its time footer: ${theme} ${size.width} ${kind}`,async({page},info)=>{
  const {card,expected}=await openHome(page,theme,size,kind);
- if(!expected){await expect(page.getByRole('region',{name:'Home',exact:true})).not.toContainText('Nothing planned');await page.screenshot({path:info.outputPath('home-calendar.png'),animations:'disabled'});return;}
+ if(!expected){await expect(page.getByRole('button',{name:'Calendar',exact:true})).toBeVisible();return;}
  const geometry=await card.evaluate(element=>{
   const box=element.getBoundingClientRect(),title=element.querySelector<HTMLElement>('.home-calendar-title')!,r=title.getBoundingClientRect(),style=getComputedStyle(title),scale=box.width/(element as HTMLElement).offsetWidth,footerElement=element.querySelector('.home-calendar-footer'),footer=footerElement?.getBoundingClientRect();
   return {font:parseFloat(style.fontSize),line:parseFloat(style.lineHeight),height:r.height/scale,clamp:style.webkitLineClamp,titleTop:r.top,titleBottom:r.bottom,footerTop:footer?.top,footerBottom:footer?.bottom,footerText:footerElement?.textContent,footerOverflow:footerElement?footerElement.scrollWidth-footerElement.clientWidth:0,cardBottom:box.bottom,scale,overflow:element.scrollWidth-element.clientWidth,titleOverflow:title.scrollWidth-title.clientWidth,cardHeight:box.height/scale};
  });
- // The card row has one fixed height (docs/daily-overview.md).
  expect(geometry.cardHeight).toBeCloseTo(212,1);expect(geometry.overflow).toBe(0);expect(geometry.titleOverflow).toBe(0);expect(geometry.clamp).toBe('3');
  expect(geometry.font).toBe(26);expect(geometry.height/geometry.line).toBeCloseTo(3,1);expect(geometry.footerText).toBe(expected.footer);expect(geometry.footerOverflow).toBe(0);expect(geometry.footerTop!-geometry.titleBottom).toBeGreaterThanOrEqual(11*geometry.scale);expect(geometry.cardBottom-geometry.footerBottom!).toBeGreaterThanOrEqual(21*geometry.scale);
  await writeFile(info.outputPath('geometry.json'),JSON.stringify(geometry,null,2));await page.screenshot({path:info.outputPath('home-calendar.png'),animations:'disabled'});

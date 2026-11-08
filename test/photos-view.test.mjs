@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
 // Photos view rules (design/view-refresh-2026-11 section 2). Each block names the specs/photos-library
 // Design.cfg rule it implements. Source-level: browser specs drive the rendered view.
-const v=await import('../apps/app/src/runtime/photos-view.ts');
+const v=await import('../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts');
 const now=new Date(2026,10,6,15,0).getTime(),DAY=86400000;
 const row=(id,date,extra={})=>({id,date,...extra});
 
@@ -157,4 +157,17 @@ test('thumbnails are kept only around the rendered rows; rendered rows without o
  const back=v.thumbnailPlan(rows.map(r=>({...r,image:''})),10,30,240);
  assert.deepEqual(back.fetch,Array.from({length:20},(_,i)=>'r'+(10+i)),'scrolling back fetches the rendered rows');
  assert.deepEqual(v.thumbnailPlan(rows.slice(0,100),0,50,240).drop,[],'a small library keeps every thumbnail');
+});
+
+test('Photos 8: a deep reload decodes thumbnails for its first page only; unchanged rows keep theirs',async()=>{
+ const all=Array.from({length:240},(_,i)=>({id:'r'+i,date:1e12-i,revision:'1'})),asked=[];
+ const list=async o=>{asked.push(o.thumbnails);const at=o.before?all.findIndex(r=>r.id===o.before)+1:0;const items=all.slice(at,at+24).map(r=>o.thumbnails===false?r:{...r,image:'data:'+r.id});return {items,next:at+24<all.length?items[items.length-1].id:''};};
+ const reload=await v.readWindow(list,{more:false,cursor:'',loaded:240,limit:2000});
+ assert.equal(reload.rows.length,240);
+ assert.deepEqual(asked,[undefined,...Array(9).fill(false)],'only the first page of a reload asks for thumbnails');
+ asked.length=0;await v.readWindow(list,{more:true,cursor:'r23',loaded:24,limit:2000});
+ assert.deepEqual(asked,[undefined],'a page the grid scrolls into keeps its thumbnails');
+ const before=[{id:'r100',date:0,revision:'1',image:'old100'},{id:'r101',date:0,revision:'1',image:'old101'}];
+ const fresh=[{id:'r100',date:0,revision:'1',image:''},{id:'r101',date:0,revision:'2',image:''},{id:'r0',date:0,revision:'1',image:'new0'}];
+ assert.deepEqual(v.keepThumbnails(fresh,before).map(r=>r.image),['old100','','new0'],'an edited row is read again, not shown stale');
 });

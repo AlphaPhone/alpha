@@ -1,7 +1,7 @@
 // Synthetic transport only. No OAuth, provider, or network requests.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-if(!process.execArgv.some(arg=>arg==='--import=tsx'||arg==='tsx')){
+if(!process.execArgv.some(arg => arg === '--import=tsx' || arg === 'tsx')){
  const child=spawnSync(process.execPath,['--import=tsx',process.argv[1]],{stdio:'inherit'});process.exit(child.status??1);
 }
 const {CloudProtocol}=await import('../apps/app/src/runtime/cloud-protocol.ts');

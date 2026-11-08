@@ -71,7 +71,8 @@ export const CLASS_REGISTRY = {
   BrowserCookiePolicy: { note: "Synthetic intercepted HTTPS origins; private method requires scoped WebView deletion support" },
   BrowserSignins: { note: "signinProcessRestartPhase is skipped here; run node scripts/test-native-restart.mjs signin" },
   BrowserFlow: { liveArgs: { browserFlowLive: "1" }, note: "loopback fixture methods need --test-mocks; by default the search method asserts the submitted www.google.com/search URL and the javascript: refusal offline; only --live-network (browserFlowLive=1) needs live HTTPS to www.google.com and records INSTRUMENTATION_STATUS browserFlowSearch=results or provider-check (the provider's own check page for that exact search)" },
-  BrowserContinuity: { note: "bookmarkProcessRestartPhase is skipped here; run node scripts/test-native-restart.mjs bookmark" },
+  // Every method drives the views, which P-43's required sign-in covers on a signed-out flag-off build.
+  BrowserContinuity: { requiresTestMocksBuild: true, note: "bookmarkProcessRestartPhase is skipped here; run node scripts/test-native-restart.mjs bookmark" },
   BrowserDownload: { note: "needs --test-mocks (loopback HTTP fixtures); skipped on any other build, so it is not a default class" },
   // src/testMocks/androidTest: compiled only into the test-mocks instrumentation APK.
   BrowserAutofill: { testMocks: true },
@@ -96,18 +97,15 @@ export const CLASS_REGISTRY = {
   // Core-loop classes (docs/core-loop-audit.md). Registered so their opt-in gates are passed; none
   // has a recorded run through this runner yet. An unmet device assumption reports "skipped".
   // Decision P-43 replaced LocalAgentOfflineApps (the retired "without AI" path); written, no recorded run.
-  ResidentAlwaysPresent: { flagOffOnly: true, note: "signed out with the network off and a legacy local-apps selection: the resident starts, the required Eliza Cloud sign-in dialog opens over Home with the agent state and cannot be dismissed; not a device or full-image run" },
+  ResidentAlwaysPresent: { flagOffOnly: true, note: "signed out with the network off and a legacy local-apps selection: the resident starts, the required Eliza Cloud sign-in page opens over Home and cannot be dismissed; not a device or full-image run" },
   LauncherHome: { homeRole: "held", note: "launcher variant with Alpha selected as HOME by --home-role; not boot-time HOME or device acceptance" },
   SettingsRoles: { homeRole: "requests", note: "removes, declines and accepts the HOME role in Android's dialog and restores the previous holder; --home-role proves the restoration" },
   NotesTrashBackstop: {},
   // Added by the round-2 integration (PR 388); no recorded run.
   AssistantResidentReuse: { note: "synthetic runtime observation, enrollment and streams; not evidence that a live resident stream survives" },
   LauncherApps: { note: "upstream SystemLauncherApps through Alpha's identity; resolves against this image's package manager only; two methods skip when the image has no other launchable app" },
-  AppInfo: { note: "opens Android Settings for its installed package and checks invalid targets; returns with Back without changing settings" },
   NotesDocument: { note: "Production migration refusal and unchanged Notes; test-mocks builds exercise SAF migration. Restart phase requires the explicit notes development campaign." },
   NotesStorageDurability: { args: { notesStorage: "1" } },
-  NoteRecorder: { grant: ["RECORD_AUDIO"], note: "records microphone segments, checks recovery and joined-file playback readiness, then removes its recording; emulator results do not establish physical microphone quality" },
-  NoteRecordingSave: { note: "synthetic WAV and long transcript exercise local recording retention and retry without microphone or network use" },
   CloudDeploymentStorage: {},
   CloudSignInAuthorization: { note: "Actual native Authorize/Cancel gate with an isolated plugin and no session; not live authentication or remote key issuance" },
   DailyApps: {},
@@ -135,15 +133,7 @@ export const CLASS_REGISTRY = {
   SystemShade: { note: "homeAsksAndroidForItsShadeOnTheLauncherOnly needs --test-mocks (skipped otherwise). Launcher Home asks Android for its shade (EXPAND_STATUS_BAR); standalone never does (#416, #417). Not AOSP-image or device acceptance" },
   CameraScan: {},
   CameraLatency: { args: { cameraLatency: "1" }, note: "cold/warm first frame (PreviewView STREAMING, also traced as alpha.camera.firstFrame) and shutter-to-thumbnail, reported as cameraLatency.* status; -e cameraLatencyAssert 1 fails on a missed Pixel 10a target; emulator numbers are not device evidence" },
-  // View refresh (November 2026). Written in the fix rounds; no recorded run yet.
-  AppInfo: { note: "Settings' App details for exactly the asked package (intercepted intent) and the refusals; no other app is changed" },
-  NoteRecorder: { note: "real microphone audio across three segment rollovers and a simulated process loss; grants RECORD_AUDIO itself; about 90 s" },
-  NoteRecordingSave: { note: "retains one recording twice into the same voice note, with a 200k-character transcript" },
-  KeptCaptureLegacyPath: { note: "A scan Keep reserved under the old Pictures/ capture folder, pending or published, resolves there after the move to DCIM/Camera/ with no second copy" },
-  PhotosCatalogOrder: { note: "two owned JPEGs with EXIF capture times 2010 and now, the old one inserted last: the permitted catalog pages newest capture first, one row per page, no repeats; grants READ_MEDIA_IMAGES itself" },
-  PhotoReplace: { note: "Replace over its own owned PNG fixtures with an injected write failure: restored from the backup, kept until a later result restores it, or saved when the write completed" },
   StorageLegacyAccess: { note: "API 29: legacy storage in effect, both storage permissions granted by the test, one uniquely named Download/ folder created and removed; API 30+: all-files access unchanged" },
-  StorageCategories: { note: "every Browse category id over a private cache root; the Downloads listing is a temporary Download/ folder, not shared storage" },
   // J05-2: native page excerpt -> reviewed question -> composer; a note's web source across recreation.
   BrowserPageQuestion: { args: { browserPageQuestion: "1" }, note: "offline: every page is served from memory to the tab's WebView (the first tab opens on https://reading.invalid/start, which never resolves); needs a WebView provider with isolated-world injection; the agent's answer and the summary-note save that follows it need a connected agent and are not covered" },
   // Mock mode and loopback fixtures exist only in a test-mocks app build.
@@ -172,9 +162,14 @@ export const CLASS_REGISTRY = {
   BrowserUnsupportedReading: { args: { browserUnsupportedReading: "1" }, requiresTestMocksBuild: true, note: "the negative flow: needs a WebView provider WITHOUT isolated-world injection" },
   LargeInboxAttachment: { args: { largeInboxAttachmentNative: "1" } },
   NoteAudioMetadataEncrypted: { args: { notesAudioEncryption: "1" } },
+  AppInfo: { secondaryUser: true, note: "opens Android Settings for the named fixture package in an owned disposable user" },
+  NoteRecorder: { secondaryUser: true, note: "uses the microphone and recovers an owned synthetic segmented recording in a disposable user; refuses existing audio" },
+  NoteRecordingSave: { secondaryUser: true, note: "synthetic audio store and repeatable save in a disposable user" },
+  StorageCategories: { secondaryUser: true, note: "synthetic storage categories and isolated MediaStore queries in a disposable user" },
   NotesSecureStorage: { args: { notesSecureStorage: "1" }, note: "the legacy-layout migration runs across a process restart in node scripts/test-native-restart.mjs notes-secure-migration; its in-process variant (notesSecureMigration=1) is skipped here" },
   PdfViewer: { args: { isolatedPdfNative: "1" } },
   PhotosBatch: { args: { photosBatch: "1" } },
+  KeptCaptureLegacyPath: { note: "A scan Keep reserved under the old Pictures/ capture folder, pending or published, resolves there after the move to DCIM/Camera/ with no second copy" },
   PhotoLibrary: { args: { photoLibrary: "1" }, note: "grants READ_MEDIA_IMAGES/VIDEO (Android 13+), creates and deletes only its own uniquely named fixtures; permission revoke, selected-only grants and reboot need separate campaigns" },
   PhotosForeignLibrary: { args: {}, note: "requires an explicit disposable user, separate-UID synthetic ledger and expected permission scope; no implicit media access" },
   PhotosLibrary: { args: { photosLibrary: "1" }, note: "requires an owned disposable secondary user; synthetic generation fence only, not foreign-media permission acceptance" },
@@ -193,6 +188,8 @@ export const CLASS_REGISTRY = {
   HostedResultsLifecycle: {},
   LocalAgentProvider: {},
   PhotoEdit: {},
+  PhotosCatalogOrder: { secondaryUser: true, note: "two owned JPEGs with EXIF capture times 2010 and now, the old one inserted last: the permitted catalog pages newest capture first, one row per page, no repeats; grants READ_MEDIA_IMAGES itself" },
+  PhotoReplace: { note: "owned synthetic PNGs only; injected write failures and newer-edit recovery" },
   PhotoFilter: {},
   PhotosMultiShare: {},
   PhotosTrash: {},
@@ -200,6 +197,8 @@ export const CLASS_REGISTRY = {
   CalendarDeletionReview: { secondaryUser: true, args: { calendarDeletionReview: "1" }, grant: ["READ_CALENDAR", "WRITE_CALENDAR"], note: "Actual native review, Cancel, Undo and expiry against an owned disposable Calendar" },
   CalendarSyncProvider: { secondaryUser: true, args: { calendarSyncProvider: "1" }, grant: ["READ_CALENDAR", "WRITE_CALENDAR"], note: "Exact rich-event CalendarProvider CAS in a fresh disposable user; no Google or agent traffic" },
   ScopedCalendarDeletion: { secondaryUser: true, args: { scopedCalendarDeletion: "1" }, grant: ["READ_CALENDAR", "WRITE_CALENDAR"], note: "Exact synthetic provider rows in a fresh owned secondary user; no real account integration" },
+  CalendarFlow: { secondaryUser: true, args: { calendarFlow: "1" }, grant: ["READ_CALENDAR", "WRITE_CALENDAR"], note: "changes the emulator's time zone and automatic time zone setting and restores them when it closes; node scripts/test-calendar-regression.mjs --case=CalendarFlowInstrumentedTest also restores them if the process dies. Skipped on a signed-out flag-off build (P-43); run it with --test-mocks" },
+  PrototypeFlow: { note: "the Wallet method runs on a flag-off build only; the view methods skip on a signed-out flag-off build (P-43)" },
   ReminderCapacity: {},
   ReminderHeadsUp: { note: "skips unless notifications are enabled for the app and Do Not Disturb is off" },
   ReminderStale: {},
@@ -214,7 +213,7 @@ export const CLASS_REGISTRY = {
   VoicePermissionDenied: { campaign: "node scripts/test-native-permissions.mjs voice APP.apk TEST.apk OUTPUT (RECORD_AUDIO revoked before the app starts)" },
   VoicePermissionRevoke: { campaign: "node scripts/test-native-permissions.mjs voice-revoke APP.apk TEST.apk OUTPUT (RECORD_AUDIO revoked while recording; the process is killed)" },
   LocalVoiceRecordingLimit: { campaign: "node scripts/test-native-permissions.mjs voice-limit APP.apk TEST.apk OUTPUT (RECORD_AUDIO granted before the app starts)" },
-  WorkflowLegacyReminderUpgrade: { campaign: "node scripts/test-installed-upgrade.mjs (installed-upgrade campaign; runs upgradedLegacyOneOffReminderIsIncludedInNativeDigest after the candidate verify phase)" },
+  WorkflowLegacyReminderUpgrade: { campaign: "node scripts/test-installed-upgrade.mjs reminder (installed-upgrade campaign; runs upgradedLegacyOneOffReminderIsIncludedInNativeDigest after the candidate verify phase)" },
   SettingsCrashLog: { campaign: "node scripts/test-native-restart.mjs crash-log APP.apk TEST.apk OUTPUT (the crash phase kills the process; readback in a new one)" },
   NativeVoiceLatency: { campaign: "node scripts/native-voice-latency-emulator.mjs --serial <owned emulator> --avd <name> --python <grpc venv python> --wav <speech.wav> --out <dir> (issue #395; injects speech into the virtual microphone while the harness runs)" },
   HomeCalendarCard: { campaign: "node scripts/test-calendar-regression.mjs --case=HomeCalendarCardInstrumentedTest (granted, then with calendar access revoked before the process starts)" },
@@ -242,7 +241,7 @@ export const CAMPAIGN_RUNNERS = [
  * gained a registry entry or a campaign, and for any new class that has neither.
  */
 export const NOT_RUN_BY_A_RUNNER = {
-  PosterCalendarJourney: "J01 drives the Camera Scan mode and Choose image picker that the view refresh removed (decision C1: scanning is asked of the agent in Camera); it needs a rewrite to the agent scan path with a camera that can show a poster before any runner takes it again",
+  PosterCalendarJourney: "J01 drives the removed Camera Scan mode (decision C1); Choose image remains in the composed Camera tools, but this old mode-based journey needs a rewrite to the agent scan path before any runner takes it again",
   LocalServerSocketRelease: "platform probe for an upstream resident defect (docs/on-device-speech-2026-11-05.md, defect 4): it measures Android, not Alpha, and is run by hand when that defect is revisited",
   ResetExternalFixture: "requires an external host controller, disposable non-owner user, synthetic device credential and separate companion/media sentinels; reset kills instrumentation, so phases cannot run as a single generic campaign (see docs/evidence/reset-native-2026-10-12.json)",
   AllViewAgentContext: "needs a real local agent with inference and a forwarding observer on the host (agentContext=true); its runner was removed with the smoke suites in 49b1bf4c",
@@ -255,10 +254,8 @@ export const NOT_RUN_BY_A_RUNNER = {
   PairedReminder: "needs a real paired host (pairedReminder=1); no runner pairs one",
   PhotosFixtureRecovery: "operator tool that inventories or deletes stranded test-owned media (alphaPhotoRecovery=inventory|delete); never part of a campaign",
   VideoCopyClosedFailureReview: "native-only preservation operator for one existing closed failed copy; requires the exact operation, reviewed record SHA, owner UID and explicit main-process lifecycle approval. Never a generic or bulk campaign; the signed entry is admitted separately after fixture qualification",
-  PrototypeFlow: "needs the same live provider host as LiveAgent (liveAgent=true)",
   PublicCloudTransportProbe: "probes the public Eliza Cloud endpoint with an owned account (publicCloudProbe=1, ownedCloudRead=1); a human sign-in step",
   RemoteAgent: "needs the real local Eliza app host at 10.0.2.2:47839 and a pairing-code file (localRemote=true); its runner was removed in 49b1bf4c",
-  ResidentAgent: "needs the packaged ARM64 resident runtime and a run id; scripts/android-resident-instrumentation.mjs runs ResidentService and ResidentEgressRedaction, not this class",
   ResidentModelResponseContractTest: "plain contract test without the InstrumentedTest suffix; it runs under --all or by its full dotted name and needs no registry entry",
   SpeechPipelineTrace: "diagnostic acquisition for the on-device speech failure, explicitly not acceptance evidence",
   VoiceFloatPathDiagnostic: "root-cause diagnostic for the on-device speech round trip, explicitly not acceptance evidence",
@@ -269,10 +266,11 @@ export const NOT_RUN_BY_A_RUNNER = {
  * flag-off build, so a default run can pass. BrowserDownload is not listed: its only
  * method needs a test-mocks app build, so on the default build the class could only be recorded
  * "skipped", which fails the run. It runs with `--test-mocks --classes BrowserDownload`.
+ * BrowserContinuity is not listed for the same reason: each of its methods drives the views, which
+ * P-43's required sign-in covers on a signed-out flag-off build. It runs with `--test-mocks`.
  */
 export const DEFAULT_CLASSES = [
   "NoMockProduct", "Shell", "StartupReadiness", "TextScale", "BrowserSignins", "BrowserFlow",
-  "BrowserContinuity",
 ];
 
 const short = name => name.replace(new RegExp(`^${PACKAGE.replace(/\./g, "\\.")}\\.`), "").replace(/InstrumentedTest$/, "");
@@ -599,7 +597,8 @@ export async function runLeased({ options, serial, adb, timing = {}, withSeconda
             for (const cls of secondary.filter(cls => !classes.some(row => row.variant === variant && row.class === cls)))
               record(cls, { started: 0, passed: 0, failed: [], ignored: [], status: "missing" }, { user: "secondary", note: `secondary user phase failed: ${error.message}` });
           }
-          // An unremoved user keeps this run's state on the emulator: stop, and keep the packages for recovery.
+          // An unremoved user keeps this run's state on the emulator (its packages were still uninstalled):
+          // stop further variants; remove the retained user by hand with the recovery command printed at the end of the run.
           if (!lifecycle.removed) break;
         }
         if (home && variant === "launcher") {

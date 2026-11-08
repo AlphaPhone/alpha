@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
 
@@ -70,7 +71,7 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
     }, mode);
     await page.goto('/');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.getByRole('button', { name: 'Agent connection', exact: true }).click();
+    await openConnectionDiagnostics(page);
     await page.getByText('Local development agent', { exact: true }).click();
     const local = page.locator('.alpha-connection details').filter({ has: page.getByText('Local development agent', { exact: true }) });
     await local.getByLabel('Local agent address').fill('http://127.0.0.1:47842');
@@ -104,7 +105,7 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
     await page.getByRole('button', { name: 'Type', exact: true }).click();
     const input = page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
     await input.fill('Propose a synthetic action; await explicit approval.'); await input.press('Enter');
-    await expect(page.getByText(/Pending phone actions are available for separate review/)).toBeVisible();
+    await expect(page.getByText(/Review the action below\./)).toBeVisible();
     const sent=await page.evaluate(()=>(window as any).mapsSent);
     expect(JSON.stringify(sent)).not.toContain('Private fixture destination');
     expect(JSON.stringify(sent)).not.toContain('43.738');
@@ -136,7 +137,7 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
     } else if(mode==='stale-before-approval') {
       await expect(page.getByText(/Review|context|confirmed result/i).last()).toBeVisible();
     } else {
-      await expect(page.getByText(/Shared the exact selected Maps snapshot with approval/).last()).toBeVisible();
+      await expect(page.getByText(/Shared the selected Maps view\./).last()).toBeVisible();
       const result=await page.evaluate(()=>(window as any).mapsUploaded);
       expect(result.target).toEqual(sent.metadata.alphaPhone.context.selectedObject);
       expect(result.fields.kind).toBe(mode==='route'?'map-route':'map-place');

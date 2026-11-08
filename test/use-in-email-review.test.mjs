@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import {stripTypeScriptTypes} from './support/strip-types.mjs';
+import {stripTypeScriptTypes} from 'node:module';
 
 const source = async () => {
   let text = await readFile(new URL('../apps/app/src/prototype/use-in-email-review.ts', import.meta.url), 'utf8');
@@ -181,7 +181,7 @@ test('destination wording covers a new email and an open draft', async () => {
     { account: 'From me@example.invalid', destination: 'A new email. You add the recipients and subject.', effect: 'A local draft opens with this text for you to edit.', confirmLabel: 'Insert into draft', blocked: false });
   assert.equal(describe({ ready: true, kind: 'draft', append: false, reply: false, subject: '', to: [], account: 'me@example.invalid', token: 't' }).destination, 'Your open email draft · (no subject) · to no recipients yet');
   assert.equal(describe({ ready: true, kind: 'draft', append: true, reply: true, subject: 'Re: Plan', to: ['a@example.invalid', 'b@example.invalid'], account: 'me@example.invalid', token: 't' }).destination, 'Your open reply draft · Re: Plan · to a@example.invalid, b@example.invalid');
-  assert.equal(describe({ ready: false, reason: 'Connect a Gmail account in Inbox first. Nothing was added.', token: '' }).blocked, true);
+  assert.equal(describe({ ready: false, reason: 'Connect a Gmail account in Inbox first.', token: '' }).blocked, true);
   // A draft that was set aside is named as off screen; over another message the review says it is not a reply to it.
   const aside = { ready: true, kind: 'draft', append: true, aside: true, elsewhere: false, reply: true, subject: 'Re: Plan', to: ['a@example.invalid'], account: 'me@example.invalid', token: 't' };
   assert.equal(describe(aside).destination, 'Your unfinished reply draft (not on screen) · Re: Plan · to a@example.invalid');

@@ -30,7 +30,9 @@ async function drag(page: Page, from: { x: number; y: number }, dy: number, dx =
   await page.mouse.up();
 }
 async function closed(page: Page, why: string) {
-  await page.waitForTimeout(120);
+  // The pull is decided while the pointer moves and lifts, and the shell renders the result before
+  // the next frame: after two frames an opened shade would show.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(shade(page), why).toHaveAttribute('aria-hidden', 'true');
 }
 
@@ -90,11 +92,11 @@ test.describe('launcher', () => {
     // A mostly sideways drag is a card row or Back, not the shade.
     await drag(page, { x: 120, y: 420 }, 120, 160);
     await closed(page, 'sideways');
-    // An upward drag on Home opens nothing: only the dock opens the chat (docs/gesture-zones.md).
+    // Home content scrolls independently. The dock is the explicit chat entry.
     await drag(page, { x: 206, y: 600 }, -260);
+    await expect(page.locator('[data-screen]')).toHaveAttribute('data-alpha-chat-half', 'false');
     await expect(page.locator('[data-alpha-layer="conversation"]')).toHaveAttribute('aria-hidden', 'true');
-    // While the sheet is open a pull down closes it.
-    await page.locator('[data-alpha-layer="composer"]').getByRole('button', { name: 'Open conversation', exact: true }).click();
+    await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
     await expect(page.locator('[data-alpha-transcript]')).toBeVisible();
     await drag(page, { x: 206, y: 300 }, 260);
     await closed(page, 'pull while the conversation sheet was open');
@@ -158,8 +160,10 @@ const contentTop = (page: Page) => page.locator('[data-alpha-home-layout]').eval
 
 // The inset Android reports is in screen pixels; Home is laid out on a 412px canvas scaled to the
 // screen. On a phone narrower than the canvas the margin must still be measured on the screen.
+// Home's top padding has a floor (phone.css), so under a short status bar content starts lower than
+// the margin alone: only the lower bound holds at every inset.
 for (const width of [360, 412, 480]) {
-  test(`launcher Home starts 12 screen pixels below any status bar on a ${width}px wide screen`, async ({ page }) => {
+  test(`launcher Home starts at least 12 screen pixels below any status bar on a ${width}px wide screen`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await home(page);
     for (const inset of [24, 48, 56, 72, 100]) {
@@ -196,8 +200,10 @@ async function touchDrag(page: Page, x: number, y: number, dy: number) {
   await cdp.detach();
 }
 
-test.describe('launcher Home taller than the screen (landscape)', () => {
-  test.use({ hasTouch: true, isMobile: true, viewport: { width: 915, height: 412 } });
+// The launcher is portrait only (docs/decisions.md P-27). A short portrait window, as on a short
+// phone with large text, is the geometry in which its Home overflows.
+test.describe('launcher Home taller than a short portrait screen', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 560 } });
 
   test('a downward touch pull at the top of an overflowing Home opens the shade; upward still scrolls', async ({ page }) => {
     await home(page);
@@ -207,26 +213,29 @@ test.describe('launcher Home taller than the screen (landscape)', () => {
     // Empty Home, clear of every control and below the status bar, where vertical touch would scroll Home.
     const start = await page.evaluate(() => {
       const screen = document.querySelector('[data-screen]')!.getBoundingClientRect();
-      for (let y = screen.top + 90; y < screen.bottom; y += 4) for (let x = screen.left + 12; x < screen.right; x += 12) {
+      // Below Android's 44px status band in canvas pixels (the canvas is scaled to the screen).
+      for (let y = screen.top + Math.ceil(60 * screen.width / 412); y < screen.bottom; y += 4) for (let x = screen.left + 12; x < screen.right; x += 12) {
         const hit = document.elementFromPoint(x, y);
         if (hit?.closest('[data-alpha-layer="home"]') && !hit.closest('button,.scr')) return { x, y };
       }
       return null;
     });
     expect(start).not.toBeNull();
-    const icons = (await page.getByRole('button', { name: 'Browser', exact: true }).boundingBox())!;
+    // The first app row is on screen; the lower rows may sit under the dock.
+    const icons = (await page.locator('[data-alpha-home-apps] button').first().boundingBox())!;
     // An upward drag on the app row is ordinary scrolling: Home moves, no shade.
     await touchDrag(page, icons.x + icons.width / 2, icons.y + icons.height / 2, -160);
     await expect.poll(() => layer.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
     await closed(page, 'upward scroll');
     // Scrolled away from its top, a downward drag scrolls Home back instead of opening the shade.
+    // Drag on empty Home: the cards keep vertical drags for themselves.
     const scrolled = await layer.evaluate(element => element.scrollTop);
-    await touchDrag(page, icons.x + icons.width / 2, 200, 120);
+    await touchDrag(page, start!.x, start!.y, 120);
     await expect.poll(() => layer.evaluate(element => element.scrollTop)).toBeLessThan(scrolled);
     await closed(page, 'scrolled Home scrolls back');
     await layer.evaluate(element => { element.scrollTop = 0; });
     // At the top, a downward pull on empty Home reaches Alpha and opens the shade.
-    await touchDrag(page, start!.x, start!.y, 280);
+    await touchDrag(page, start!.x, start!.y, 160);
     await expect(shade(page)).toHaveAttribute('aria-hidden', 'false');
   });
 });

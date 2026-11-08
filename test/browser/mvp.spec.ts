@@ -1,6 +1,7 @@
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { returnToApps } from './app-navigation';
 const views = ['Inbox', 'Calendar', 'Browser', 'Camera', 'Photos', 'Maps', 'Notes', 'Files', 'Workflows', 'Settings'];
 for (const theme of ['light', 'dark']) {
   for (const width of [360, 412, 1440]) {
@@ -9,8 +10,15 @@ for (const theme of ['light', 'dark']) {
       await page.setViewportSize({ width, height: 915 });
       const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
+      // One boot per test; Maps is reached through a fresh load to keep one reload case. Home must be
+      // rendered before returnToApps reads it and before the deferred apps are checked absent.
+      const boot = async () => { await page.goto(`/?theme=${theme}`); await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible(); };
+      await boot();
       for (const name of views) {
-        await page.goto(`/?theme=${theme}`);
+        if (name === 'Maps') await boot();
+        else await returnToApps(page);
+        // The Home grid is drawn first, so a deferred tile would already be there.
+        await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
         for (const deferred of ['Phone', 'Messages', 'Contacts', 'Wallet']) await expect(page.getByRole('button', {name: deferred, exact: true})).toHaveCount(0);
         await page.getByRole('button', { name, exact: true }).click();
         await expect(page.locator('html')).toHaveAttribute('data-active-view', name.toLowerCase());
@@ -139,13 +147,15 @@ test('Notes rejects invalid text and cancels an empty file selection without cre
 });
 test('Scheduled digests traps focus, closes on native Back, and restores the triggering control',async({page})=>{
   await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();
-  const trigger=page.getByRole('button',{name:'Scheduled digests',exact:true});
+  await page.getByRole('button',{name:'Apps',exact:true}).click();
+  await page.getByRole('button',{name:'Workflows',exact:true}).click();
+  const trigger=page.getByRole('button',{name:'Scheduled summaries',exact:true});
   await trigger.focus();await trigger.press('Enter');
   const dialog=page.getByRole('dialog',{name:'Scheduled digests',exact:true});
   await expect(dialog).toBeVisible();await expect(dialog).toBeFocused();
   await expect(dialog.getByRole('button',{name:'Result notifications',exact:true})).toBeVisible();
   await expect(dialog).not.toContainText('Result link is waiting for a verified connection.');
-  await expect(dialog).toContainText('Choose where your agent runs to set up scheduled digests.');
+  await expect(dialog).not.toContainText('Choose where your agent runs');
   await expect(page.locator('.os')).toHaveAttribute('inert','');
   await page.keyboard.press('Shift+Tab');
   expect(await dialog.evaluate(el=>el.contains(document.activeElement))).toBe(true);
@@ -156,18 +166,20 @@ test('Scheduled digests traps focus, closes on native Back, and restores the tri
 test('Unsigned recorder opens without a sign-in step and a refused microphone shows one line',async({page})=>{
   await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).microphoneRequests=0;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{(window as any).microphoneRequests++;throw Error('Unexpected microphone request');}}});});
   await page.goto('/');await openLegacyNotes(page);
-  await page.getByRole('button',{name:'Record and transcribe',exact:true}).click();
+  await page.getByRole('button',{name:'Record voice note',exact:true}).click();
   const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
   await expect(recorder).toHaveAttribute('data-recorder-state','failed');
   await expect(recorder.getByRole('alert')).toHaveText('The microphone isn’t available.');
-  await expect(recorder.getByRole('button',{name:'Done',exact:true})).toBeDisabled();
+  await expect(recorder.getByRole('button',{name:'Stop recording',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:/Connect Eliza Cloud|Record without transcription|Start recording/})).toHaveCount(0);
   expect(await page.evaluate(()=>(window as any).microphoneRequests)).toBe(1);
   await recorder.getByRole('button',{name:'Discard recording',exact:true}).click();
   await expect(recorder).toHaveCount(0);
 });
-test('Theme survives reload and mock preview does not overwrite it',async({page})=>{
+test('Display theme survives reload and mock preview does not overwrite it',async({page})=>{
   await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'General',exact:true}).click();
+  await page.getByRole('button',{name:'Display',exact:true}).click();
   await page.getByRole('button',{name:'Theme: Dark',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>localStorage.getItem('alpha.appearance.v1'))).toBe('dark');
   await page.reload();
@@ -181,7 +193,7 @@ test('Theme survives reload and mock preview does not overwrite it',async({page}
 test('MVP mock account and privacy journeys exclude Contacts controls', async ({page}) => {
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/?mode=mock&start=settings:privacy');
-  await expect(page.getByRole('button',{name:'Microphone',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Leaves this device',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Contacts',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Microphone',exact:true}).click();
   await expect(page.getByRole('button',{name:'Alpha microphone',exact:true})).toBeVisible();

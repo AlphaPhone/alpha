@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 // P-10 (#394): a typed workflow's scheduled time that passed while the agent was not running is
@@ -7,7 +8,7 @@ import {test,expect,type Page} from '@playwright/test';
 type FixtureOptions={kind?:'typed'|'generic'|'hosted';occurrence?:'missed'|'overlap'};
 async function setup(page:Page,options:FixtureOptions={}){
  await page.goto('/?mode=dev&workflows=agent');
- await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Agent connection',exact:true}).click();await page.getByRole('button',{name:'Connect development profile'}).click();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();
  await page.evaluate(async(options:FixtureOptions)=>{
   const {WorkflowProtocol}=await import('/src/runtime/workflow-protocol.ts');const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
   const trigger={kind:'time',localTime:'07:30',timeZone:'UTC',days:[3]};
@@ -48,10 +49,10 @@ const posts=(page:Page,suffix:string)=>page.evaluate(suffix=>(window as any).age
 test('a missed scheduled time says nothing ran and offers Run now only through the reviewed run confirmation',async({page})=>{
  await setup(page);await page.getByRole('region',{name:'Workflows',exact:true}).getByText('Morning notes digest',{exact:true}).first().click();
  await page.getByRole('button',{name:'Missed — did not run execution',exact:true}).click();await page.getByText('Execution details',{exact:true}).click();
- await expect(page.getByText(/nothing ran at this scheduled time: the phone or agent was off, or Android delayed the run past its start window\. It is never run later/)).toBeVisible();
+ await expect(page.getByText(/Missed\. The phone or agent was off, or Android delayed it\. It won't run later\./)).toBeVisible();
  await page.waitForTimeout(500);expect(await posts(page,'/run')).toBe(0);
  await page.getByRole('button',{name:'Back to workflow to review and start one new run now',exact:true}).click();
- await expect(page.getByText(/Review the steps, then tap Run now again to start this workflow once/).first()).toBeVisible();expect(await posts(page,'/run')).toBe(0);
+ await expect(page.getByText(/Tap Run now again to start it\./).first()).toBeVisible();expect(await posts(page,'/run')).toBe(0);
  await page.getByRole('button',{name:'Run now',exact:true}).click();await expect.poll(()=>posts(page,'/run')).toBe(1);
  const sent=await page.evaluate(()=>(window as any).agentRequests.find((r:any)=>r.path.endsWith('/run')).body);expect(sent.expectedVersionId).toBe('morning-v1');
  await expect(page.getByText('Synthetic digest text',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Back to Morning notes digest',exact:true}).click();
@@ -64,11 +65,11 @@ test('a missed-run action starts a fresh confirmation even after Run now was alr
  await setup(page);await page.getByRole('region',{name:'Workflows',exact:true}).getByText('Morning notes digest',{exact:true}).first().click();
  // Arm an ordinary run, then choose to inspect the missed occurrence instead.
  await page.getByRole('button',{name:'Run now',exact:true}).click();
- await expect(page.getByText(/Review the steps, then tap Run now again to start this workflow once/).first()).toBeVisible();
+ await expect(page.getByText(/Tap Run now again to start it\./).first()).toBeVisible();
  expect(await posts(page,'/run')).toBe(0);
  await page.getByRole('button',{name:'Missed — did not run execution',exact:true}).click();
  await page.getByRole('button',{name:'Back to workflow to review and start one new run now',exact:true}).click();
- await expect(page.getByText(/Review the steps, then tap Run now again to start this workflow once/).first()).toBeVisible();
+ await expect(page.getByText(/Tap Run now again to start it\./).first()).toBeVisible();
  // Merely leaving the receipt must not reuse the earlier confirmation or submit anything.
  expect(await posts(page,'/run')).toBe(0);
  await page.getByRole('button',{name:'Run now',exact:true}).click();
@@ -85,7 +86,7 @@ for(const fixture of [
  await page.getByRole('button',{name:label,exact:true}).click();
  await expect(page.getByRole('button',{name:'Back to workflow',exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Back to workflow to review and start one new run now',exact:true})).toHaveCount(0);
- if(fixture.occurrence==='missed'){await page.getByText('Execution details',{exact:true}).click();await expect(page.getByText(/nothing ran at this scheduled time: .* It is never run later\./)).toBeVisible();await expect(page.getByText(/Use Run now to start it once/)).toHaveCount(0);}
+ if(fixture.occurrence==='missed'){await page.getByText('Execution details',{exact:true}).click();await expect(page.getByText(/Missed\. The phone or agent was off, or Android delayed it\. It won't run later\./)).toBeVisible();await expect(page.getByText(/Use Run now to start it once/)).toHaveCount(0);}
  if(fixture.kind==='hosted')await expect(page.getByText(/This digest runs again only at its next scheduled occurrence/)).toBeVisible();
  expect(await posts(page,'/run')).toBe(0);
 });

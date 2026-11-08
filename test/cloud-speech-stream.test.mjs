@@ -12,8 +12,8 @@ function runSpeechFragment(name,source,options){
   return runJvm([java],name,options);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 }
-test('native streaming speech validates bounded PCM and preserves every phrase before dispatch',()=>{
- assert.match(runJvm([sharedSpeechSource('CloudSpeechWire.java'),fixture('CloudSpeechWireTest.java')],'ai.eliza.voice.CloudSpeechWireTest'),/^PASS streaming speech/);
+test('native streaming speech validates bounded PCM, preserves every phrase before dispatch and bounds relay renewals',()=>{
+ assert.match(runJvm([sharedSpeechSource('CloudSpeechWire.java'),fixture('CloudSpeechWireTest.java')],'ai.eliza.voice.CloudSpeechWireTest'),/^PASS streaming speech.*relay renewal bounds/);
 });
 test('native Cloud streaming keeps credentials native and feeds PCM before provider completion',()=>{
  const source=fs.readFileSync(sharedSpeechSource('SpeechStreamBridgePlugin.java'),'utf8');
@@ -30,7 +30,7 @@ test('validated mint gets a separate relay window within the native startup and 
  const source=fs.readFileSync(sharedSpeechSource('SpeechStreamBridgePlugin.java'),'utf8');
  const budgets=source.match(/^ private static final long HTTP_STARTUP_MS=.*$/m)?.[0];
  const start=source.indexOf('  final long startupStartedMs=');
- const end=source.indexOf('  Session(String id',start);
+ const end=source.indexOf('  final Runnable expiry=',start);
  const ownership=source.match(/^  void check\(\)throws IOException.*$/m)?.[0];
  assert.ok(budgets&&ownership&&start>=0&&end>start);
  assert.match(source,/mark\(own,"start"\);own\.scheduleStartupDeadline\(\)/);
@@ -51,7 +51,8 @@ public final class CloudSpeechStartupBudgetTest {
  }
  static final Handler main=new Handler();
  static Session session;
- static boolean destroyed,foreground=true;
+ static boolean destroyed,foreground=true,protectedSurface;
+ static boolean sensitiveSurfaceActive(){return protectedSurface;}
  static long authority=1;
  static long authorityEpoch(){return authority;}
  static void fail(Session own,String code){own.failure=code;own.closed.set(true);main.removeCallbacks(own.deadline);}
@@ -64,7 +65,7 @@ public final class CloudSpeechStartupBudgetTest {
   ${ownership}
  }
  static Session start(){
-  SystemClock.now=0;authority=1;main.pending=null;
+  SystemClock.now=0;authority=1;protectedSurface=false;main.pending=null;
   session=new Session();session.scheduleStartupDeadline();
   if(main.when!=12_000)throw new AssertionError("credential and HTTP bound changed");
   return session;
@@ -100,6 +101,10 @@ public final class CloudSpeechStartupBudgetTest {
   refused(start(),9474,0);
   Session stopped=start();stopped.closed.set(true);refused(stopped,9474,60_000);
   Session changed=start();authority++;refused(changed,9474,60_000);
+  Session protectedStart=start();protectedSurface=true;refused(protectedStart,9474,60_000);
+  Session protectedRelay=start();mint(protectedRelay,9474,60_000);protectedSurface=true;
+  try{protectedRelay.check();throw new AssertionError("protected surface admitted relay work");}
+  catch(IOException expected){}
   java.lang.System.out.println("PASS separately bounded relay startup");
  }
 }`),/^PASS separately bounded relay startup/);
@@ -149,7 +154,7 @@ test('known pre-ready relay failures retain their bounded code and malformed fra
  const parser=source.indexOf('private static String preReadyError(');
  const parserEnd=source.indexOf('private final class RelayListener',parser);
  const gate=source.indexOf('if(!own.ready){',parserEnd);
- const gateEnd=source.indexOf('if("stt".equals(type))',gate);
+ const gateEnd=source.indexOf('if("extended".equals(type))',gate);
  assert.ok(parser>=0&&parserEnd>parser&&gate>parserEnd&&gateEnd>gate);
  assert.match(runSpeechFragment('CloudSpeechStartupErrorTest',`import java.io.IOException;
 import org.json.JSONObject;

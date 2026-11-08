@@ -33,19 +33,19 @@ test('actual history projection preserves source text and only attaches a truste
  const source=readFileSync('apps/app/src/runtime/connection-ui.tsx','utf8');
  const a=source.indexOf('function restoredMessages('),b=source.indexOf('/** Eliza Cloud\'s API',a);
  assert.ok(a>=0&&b>a);
- const project=new Function('checkinDisplayText','systemNoticeKind','systemNoticeDisplayText','restoredText',
-  stripTypeScriptTypes(source.slice(a,b),{mode:'strip'})+';return restoredMessages;'
- )(checkinDisplayText,systemNoticeKind,systemNoticeDisplayText,value=>value);
+ const project=new Function('checkinDisplayText','systemNoticeKind','systemNoticeDisplayText','restoredText','failureKindOf','calendarRefusalKept',
+  stripTypeScriptTypes(source.slice(a,b),{mode:'transform'})+';return restoredMessages;'
+ )(checkinDisplayText,systemNoticeKind,systemNoticeDisplayText,value=>value,()=>undefined,()=>false);
  const [checkin,user,quoted]=project([row,{...row,id:'user',role:'user'},{...row,id:'quoted',source:'client_chat'}]);
  assert.equal(checkin.displayText,'Take twenty quiet minutes before bed.');
  assert.equal(checkin.text,text);
  assert.equal(user.text,text);assert.equal(user.displayText,undefined);
  assert.equal(quoted.text,text);assert.equal(quoted.displayText,undefined);
  const model=readFileSync('apps/app/src/prototype/model.js','utf8');
- const begin=model.indexOf('    var msgs = S.msgs.map('),end=model.indexOf('    var baseSug =',begin);
+ const begin=model.indexOf('    var msgs = this.transcriptWindow('),end=model.indexOf('    var baseSug =',begin);
  assert.ok(begin>=0&&end>begin);
- const render=new Function('S','IC','self',model.slice(begin,end)+';return msgs;');
- const [rendered,renderedUser]=render({msgs:[checkin,{...user,displayText:'untrusted projection'}]}, {}, {});
+ const render=new Function('S','IC','self','panelOpen','isOn',model.slice(begin,end)+';return msgs;');
+ const [rendered,renderedUser]=render.call({transcriptWindow:rows=>rows},{msgs:[checkin,{...user,displayText:'untrusted projection'}]}, {}, {}, true, true);
  assert.equal(rendered.displayText,'Take twenty quiet minutes before bed.');
  assert.equal(rendered.text,text,'copy and reply retain the original text');
  assert.equal(renderedUser.displayText,text,'a user row cannot supply a display projection');

@@ -12,6 +12,7 @@ import {openBrowserCalendar} from './helpers/browser-calendar';
 import {canonicalNotesFixture,openCanonicalNotes} from './helpers/canonical-notes';
 test.setTimeout(240_000);
 const button=(page:Page,name:string|RegExp)=>page.getByRole('button',{name,exact:true});
+async function noteAction(page:Page,name:string){await button(page,'More').click();return page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name,exact:true});}
 const notes=(page:Page)=>page.evaluate(async()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records as any[]);
 const reminders=(page:Page)=>page.evaluate(async()=>(JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())||'{"reminders":[]}').reminders as any[]).filter(r=>r.status!=='cancelled'));
 const events=(page:Page)=>page.evaluate(async()=>JSON.parse((await (await import('/src/browser/calendar-store.ts')).calendarDocument.readRaw())||'{"events":[]}').events as any[]);
@@ -22,6 +23,10 @@ const title=(page:Page)=>page.getByRole('textbox',{name:'Title',exact:true});
 
 /** Two saved recordings with reviewed action items, written through the real Notes port. */
 async function setup(page:Page){
+ // The hand-off drafts for tomorrow 9:00 and the Calendar week strip runs Monday to Sunday, so on a
+ // Sunday the saved day is in the next week, which openCalendarItem cannot reach. Start the clock on
+ // a Wednesday morning (local time); it keeps running, so timed steps such as pending deletions still elapse.
+ await page.clock.install({time:new Date(2027,2,10,8,0,0)});
  await page.addInitScript(()=>{if(!localStorage.getItem('alpha.connection.selection.v1'))localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));});
  await page.goto('/?mode=dev&tools=1',{waitUntil:'domcontentloaded'});
  await openLegacyNotes(page);
@@ -51,15 +56,22 @@ async function setup(page:Page){
 async function openCalendarItem(page:Page,name:string){
  await returnToApps(page);await openBrowserCalendar(page);
  const item=page.getByRole('button',{name:new RegExp(`^${name},`)}).first();
- // The hand-off picks the time, so look through the visible week for the saved day.
- const days=page.getByRole('button',{name:/^Day \d+$/});
- for(let i=0,n=await days.count();i<n&&!await item.isVisible();i++){await days.nth(i).click();await item.waitFor({timeout:500}).catch(()=>{});}
+ // The saved day can fall in the following week, so select its date explicitly.
+ const timestamp=(await events(page)).find(event=>event.title===name)?.begin
+  ?? (await reminders(page)).find(reminder=>reminder.title===name)?.at;
+ expect(timestamp).toBeGreaterThan(0);
+ const dateLabel=await page.evaluate(value=>{
+  const date=new Date(value);
+  return `${date.toLocaleDateString('en-US',{month:'long'})} ${date.getDate()}`;
+ },timestamp);
+ await button(page,'Month view').click();
+ await page.getByRole('dialog',{name:'Choose calendar date'}).getByRole('button',{name:new RegExp(` ${dateLabel}$`)}).click();
  await item.click();
 }
 /** Reload and open Older notes, where the linked recordings live, so links can name their note. */
 async function reloadWithOlderNotes(page:Page){
  await page.reload({waitUntil:'domcontentloaded'});await selectLegacyNotes(page);
- await expect(page.getByRole('heading',{name:'Older notes',exact:true})).toBeVisible();await returnToApps(page);
+ await expect(page.getByRole('heading',{name:'Previous notes',exact:true})).toBeVisible();await returnToApps(page);
 }
 async function openRecording(page:Page,name:string){
  await returnToApps(page);await selectLegacyNotes(page);await button(page,`Open ${name}`).click();
@@ -73,14 +85,15 @@ async function saveEventDraft(page:Page,name:string){
 test('an event draft writes nothing until Save, then links to exactly the note it came from',async({page})=>{
  await setup(page);
  await openRecording(page,'Venue meeting');
- // Both hand-offs are offered side by side and clearly named.
+ // Both hand-offs are clearly named in the existing More menu.
+ await button(page,'More').click();
  await expect(button(page,'Review reminder draft')).toBeVisible();
  await expect(button(page,'Review calendar event draft')).toBeVisible();
  const before=await notes(page);
  await button(page,'Review calendar event draft').click();
  await expect(title(page)).toHaveValue('');
  await expect(page.getByRole('textbox',{name:'Notes',exact:true})).toHaveValue('Book the venue\nEmail the caterer');
- await expect(page.getByText('Choose one action and review its time, then Save. Nothing is on your calendar yet.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Choose one action, then Save.',{exact:true})).toBeVisible();
  await expect(button(page,'Save event')).toBeDisabled();
  expect(await events(page)).toEqual([]);expect(await reminders(page)).toEqual([]);expect(await links(page)).toEqual({});
  // Leaving the draft saves nothing and changes no note.
@@ -89,7 +102,7 @@ test('an event draft writes nothing until Save, then links to exactly the note i
 
  // A second hand-off from another note replaces the unsaved draft; the saved event names that note only.
  await openRecording(page,'Garden meeting');
- await button(page,'Review calendar event draft').click();
+ await (await noteAction(page,'Review calendar event draft')).click();
  await expect(page.getByRole('textbox',{name:'Notes',exact:true})).toHaveValue('Water the plants');
  await saveEventDraft(page,'Water the plants');
  const saved=await events(page);
@@ -113,7 +126,7 @@ test('an event draft writes nothing until Save, then links to exactly the note i
  // the note lives without claiming it is gone; Open note opens Older notes and then that note.
  await page.reload({waitUntil:'domcontentloaded'});
  await openCalendarItem(page,'Water the plants');
- await expect(page.getByText('From a voice note in Older notes',{exact:true})).toBeVisible();
+ await expect(page.getByText('From a voice note in Previous notes',{exact:true})).toBeVisible();
  await expect(page.getByText('From a note that is no longer in Notes',{exact:true})).toHaveCount(0);
  await button(page,'Open note').click();
  await expect(button(page,'Play recording')).toBeVisible();
@@ -128,7 +141,7 @@ test('an event draft writes nothing until Save, then links to exactly the note i
 test('a reminder from a note carries the same link; an unrelated event and reminder have none',async({page})=>{
  await setup(page);
  await openRecording(page,'Venue meeting');
- await button(page,'Review reminder draft').click();
+ await (await noteAction(page,'Review reminder draft')).click();
  await expect(page.getByRole('textbox',{name:'Notes',exact:true})).toHaveValue('Book the venue\nEmail the caterer');
  expect(await reminders(page)).toEqual([]);
  await title(page).fill('Book the venue');await button(page,'Save event').click();
@@ -154,22 +167,22 @@ test('a reminder from a note carries the same link; an unrelated event and remin
  expect(await links(page)).toEqual({});
 });
 
-test('the open-note action fails closed when the note was deleted or replaced, and says when it was edited',async({page})=>{
+test('the open-note action fails closed when the note was deleted or replaced, and says when its content was edited',async({page})=>{
  await setup(page);
  await openRecording(page,'Venue meeting');
- await button(page,'Review calendar event draft').click();
+ await (await noteAction(page,'Review calendar event draft')).click();
  await saveEventDraft(page,'Venue walkthrough');
  const event=(await events(page))[0];
  const openEvent=async()=>{await openCalendarItem(page,'Venue walkthrough');await expect(page.getByRole('heading',{name:'Venue walkthrough',level:1})).toBeVisible();};
 
- // Edited after the hand-off (an action ticked): still the same note, opened with a notice.
+ // An action ticked after the hand-off is not a content edit: the note opens without a notice.
  await openRecording(page,'Venue meeting');
  await button(page,/Book the venue/).first().click();
  await expect.poll(async()=>(await notes(page)).find(n=>n.title==='Venue meeting').actions[0].done).toBe(true);
  await openEvent();
  await button(page,'Open note Venue meeting').click();
- await expect(page.getByText('This note was edited after this was created from it.',{exact:true})).toBeVisible();
  await expect(page.locator('input[aria-label="Title"]:visible').last()).toHaveValue('Venue meeting');
+ await expect(page.getByText('This note may have changed since this was created from it.',{exact:true})).toHaveCount(0);
 
  // Renamed after the hand-off: the link shows the note's current title, never the old one, and no
  // title is kept with the link.
@@ -185,6 +198,7 @@ test('the open-note action fails closed when the note was deleted or replaced, a
  expect(JSON.stringify(await stored(page))).not.toMatch(/Private debrief|Venue meeting/);
  await button(page,'Open note Private debrief').click();
  await expect(page.locator('input[aria-label="Title"]:visible').last()).toHaveValue('Private debrief');
+ await expect(page.getByText('This note may have changed since this was created from it.',{exact:true})).toBeVisible();
  await page.evaluate(async raw=>{const port=await import('/src/runtime/browser-notes-document.ts');await port.browserNotesPort.compareExchange((await port.browserNotesPort.read())!,raw);},beforeRename);
  await page.reload({waitUntil:'domcontentloaded'});
 
@@ -225,7 +239,7 @@ test('double activation makes one draft; a reload mid hand-off keeps the draft a
  await setup(page);
  await openRecording(page,'Venue meeting');
  // Two activations in the same task: one Calendar form, not two.
- await button(page,'Review calendar event draft').evaluate((el:HTMLElement)=>{el.click();el.click();});
+ await (await noteAction(page,'Review calendar event draft')).evaluate((el:HTMLElement)=>{el.click();el.click();});
  await expect(title(page)).toHaveCount(1);
  await title(page).fill('Booked once');
  const venue=(await notes(page)).find(n=>n.title==='Venue meeting');
@@ -246,7 +260,7 @@ test('double activation makes one draft; a reload mid hand-off keeps the draft a
  await expect.poll(()=>links(page)).toEqual({[`event:${saved[0].id}`]:'Venue meeting'});
  // A draft switched from the reminder list to the in-app calendar keeps its note too.
  await openRecording(page,'Garden meeting');
- await button(page,'Review reminder draft').click();
+ await (await noteAction(page,'Review reminder draft')).click();
  await button(page,'In this app').click();
  await saveEventDraft(page,'Garden walk');
  await expect(page.getByText('From note: Garden meeting',{exact:true})).toBeVisible();
@@ -266,9 +280,9 @@ test('a canonical note opens a reminder draft whose saved reminder links back to
  await button(page,'Back to notes').click();
  await button(page,'Open Venue plan').click();
  const before=await page.evaluate(()=>structuredClone((window as any).canonicalNotesFixture.state.notes));
- await button(page,'Review reminder draft').click();
+ await (await noteAction(page,'Review reminder draft')).click();
  await expect(page.getByRole('textbox',{name:'Notes',exact:true})).toHaveValue('Book the venue');
- await expect(page.getByText('Review the time, then Save. Nothing scheduled yet.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Review the time, then Save.',{exact:true})).toBeVisible();
  expect(await reminders(page)).toEqual([]);expect(await stored(page)).toEqual({});
  await button(page,'Save event').click();
  await expect.poll(async()=>(await reminders(page)).length).toBe(1);

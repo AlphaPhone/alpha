@@ -3,10 +3,10 @@ import { test, expect } from '@playwright/test';
 for (const theme of ['light', 'dark']) {
   test(`Mock ${theme}: workflow builder excludes deferred integrations and runs an allowed flow`, async ({ page }) => {
     await page.goto(`/?mode=mock&theme=${theme}&start=workflows`);
-    await expect(page.getByText('Protect focus', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('Receipts to Files', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Morning brief Spoken rundown of your day, weekdays at 7', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Weekly review One-page recap of your week, Fridays at 5', exact: true })).toBeVisible();
+    await expect(page.getByText('Protect focus', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Receipts to Files', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'New automation', exact: true }).click();
     await page.getByRole('button', { name: 'Edit When step', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Message trigger', exact: true })).toHaveCount(0);
@@ -39,7 +39,7 @@ for (const prompt of ['whenever Maya texts, check my calendar', 'every day at 6,
     await page.goto('/?mode=mock&start=sheet');
     await page.getByRole('textbox', { name: 'Message Alpha', exact: true }).fill(prompt);
     await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(page.getByText("I can't set up that workflow on this phone yet.", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^I can't set up that workflow on this phone yet\.$/})).toBeVisible();
     await expect(page.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0);
     await expect(page.getByText('Everything went through.', { exact: false })).toHaveCount(0);
   });
@@ -50,7 +50,7 @@ test('Mock assistant keeps email triggers and call-note summaries in scope', asy
   await page.getByRole('button', { name: 'Describe it to Alpha', exact: true }).click();
   await page.getByRole('textbox', { name: 'Message Alpha', exact: true }).fill('whenever Maya emails, summarize call notes');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(page.getByText("Here's the workflow. Turn it on?", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Here's the workflow\. Turn it on\?$/})).toBeVisible();
   await expect(page.getByText(/When an email mentions “maya”/)).toBeVisible();
-  await expect(page.getByText("I can't set up that workflow on this phone yet.", { exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^I can't set up that workflow on this phone yet\.$/})).toHaveCount(0);
 });

@@ -16,12 +16,11 @@ test('selected access shows one row that opens the system access sheet',async({p
  await allow.click();await expect(allow).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='requestLibraryAccess').length)).toBe(1);
 });
-test('Settings shows selected photo access and its row requests more access',async({page})=>{
+test('Settings shows selected photo access and its choice control requests more access',async({page})=>{
  await photosBridge(page,'selected');
  await page.getByRole('button',{name:'Back to apps',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();
- // Settings › Apps › Photos access: one row whose value is the scope Android reports.
- const access=page.getByRole('button',{name:'Photos access',exact:true});
- await expect(access).toContainText('Selected');
+ const access=page.getByRole('button',{name:'Photos access',exact:true});await expect(access).toContainText('Selected');
+ expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='requestLibraryAccess').length)).toBe(0);
  await access.click();await expect(access).toContainText('All');
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='requestLibraryAccess').length)).toBe(1);
 });

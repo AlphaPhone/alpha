@@ -1,5 +1,21 @@
 # Dependency and artifact supply chain
 
+## Staged Cloud runtime review — November 7
+
+The Android Cloud payload at Alpha `6f9e00c2` and SDK `9237023aee38`
+passed source, bundle, native Bun and staging verification. A live npm audit of
+its 457 packaged versions reported one moderate UUID advisory and no high or
+critical findings. The emitted legacy UUID namespaces have no callers of the
+affected v3/v5 buffer functions. The existing exception retains its original
+terms and review deadline.
+
+The source review now names this SDK. Five exceptions and 24 pending rows
+that the current full-lock snapshot no longer reports were removed. All 84
+retained exception objects are unchanged. The exact files, UUID references and
+removed records are in the [staged runtime review](security/resident-staged-review-a2b3f601e26f-2026-11-07.json).
+Final APK, native-library and device verification remain open.
+
+
 ## Reviewed native Android APK npm closure (2026-10-25)
 
 The exact signed ARM64 APK `d3f1fd7792071e0ac76484e437e9a15cd1aa082e75f236ea8c4e4b8e5bdd5e10`
@@ -333,9 +349,10 @@ cache, and the 71 shipped coordinates were fetched again directly from their rep
 SHA-256, as did the three `aapt2` archives. The remaining components (plugins, lint, build
 tools and test libraries) were not fetched a second time.
 
-Not covered: the two side projects built with their own Gradle root
-(`android/private-peer-fixture`, and the calendar consumer fixture of
-`scripts/test-native-calendar-consumer.mjs`) have no verification metadata. Neither ships.
+`android/private-peer-fixture` is a debug-only module of the verified build
+(`:private-peer-fixture:assembleDebug`). Not covered: the calendar consumer fixture of
+`scripts/test-native-calendar-consumer.mjs` is built with its own Gradle root and has no
+verification metadata. It does not ship.
 
 Both branches of the 2026-10-13 merge had generated a metadata file independently; the merge
 keeps the one described above (with `scripts/gradle-verification.mjs` and its reviewed groups).
@@ -399,8 +416,8 @@ it. Before P-09 this command stopped on 24 entries. Result: exit 0, 660 entries,
 named by the agent bundle and 53 workflow-worker dependencies, 550 distinct name and version
 pairs, none missing), no entry without text, 66 entries flagged. This is notice generation
 on a staged payload on a development machine. No APK was built from it, and the packaged
-notices were not committed: the committed notices are the form without a staged runtime
-(109 entries, 15 flagged), which `test/licenses.test.mjs` checks byte for byte.
+notices were not committed: the committed notices are the form without a staged runtime,
+which `test/licenses.test.mjs` checks byte for byte against the generator.
 
 | Flag | Entries (660 total) |
 | --- | --- |

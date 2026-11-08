@@ -18,13 +18,13 @@ final class NativeDigestHost {
   String action=request.getString("action");java.util.Set<String> allowed=new java.util.HashSet<>(java.util.Arrays.asList("provider","ownerId","agentId","installationId","enrollmentId","sourceId","revision","action"));if("read".equals(action)){allowed.add("occurrence");if(request.has("template"))allowed.add("template");}else if(!"describe".equals(action))throw new SecurityException("Unsupported native source operation");
   if(!"native".equals(request.getString("provider"))||request.length()!=allowed.size())throw new SecurityException("Invalid native source request");for(java.util.Iterator<String> keys=request.keys();keys.hasNext();)if(!allowed.contains(keys.next()))throw new SecurityException("Unexpected native source request field");
   return HostedDelivery.get(context).nativeSource(null,(binding,guard)->{
-   for(String field:new String[]{"ownerId","agentId","installationId","enrollmentId"})if(!binding.getString(field).equals(request.getString(field)))throw new SecurityException("Native source binding changed");
+   for(String field:new String[]{"ownerId","agentId","installationId","enrollmentId"})if(!binding.getString(field).equals(request.getString(field)))throw new NativeDigestSources.SourceChanged("Native source binding changed");
    String id=request.getString("sourceId"),revision=request.getString("revision");long now=System.currentTimeMillis();
    JSONObject grant=sources.current(binding,id,revision,now,guard);NativeDigestSources.Guard sourceGuard=()->{guard.check();ai.eliza.plugins.calendar.read.SelectedCalendarReader.assertSourceIdentities(context.getContentResolver(),grant.getJSONObject("scope").getJSONArray("calendars"));};sourceGuard.check();
    if("describe".equals(request.getString("action")))return grant;
    if(!"read".equals(request.getString("action")))throw new SecurityException("Unsupported native source operation");
    long occurrence=java.time.Instant.parse(request.getString("occurrence")).toEpochMilli();
-   if(Math.abs(Math.subtractExact(now,occurrence))>120000)throw new SecurityException("Native source occurrence expired");
+   NativeDigestSources.checkOccurrence(occurrence,now);
    // Only the evening window is named; an absent template keeps the reviewed morning read.
    String template=request.has("template")?request.getString("template"):"morning";if(!"evening".equals(template)&&request.has("template"))throw new SecurityException("Unsupported native digest template");
    return sources.read(binding,id,revision,occurrence,now,template,new NativeDigestSources.Reader(){

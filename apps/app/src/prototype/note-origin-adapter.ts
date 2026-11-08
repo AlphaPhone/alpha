@@ -1,7 +1,6 @@
 import {Capacitor} from '@capacitor/core';
 import {secureConnectionStore} from '../runtime/native-connection';
-import {addNoteOrigin,removeNoteOrigin,findNoteLink,noteOriginIndex,noteLinkOf,noteOriginTitle,recordNoteRevision,resolveNoteLink,resolveNoteOrigin,type NoteLink,type NoteOrigin,type NoteOriginKind,type NoteOriginIndex} from '../runtime/note-origin';
-import {recordingRevision} from './summary-source';
+import {addNoteOrigin,removeNoteOrigin,voiceNoteChanged,findNoteLink,noteOriginIndex,noteLinkOf,noteOriginTitle,recordNoteRevision,resolveNoteLink,resolveNoteOrigin,type NoteLink,type NoteOrigin,type NoteOriginKind,type NoteOriginIndex} from '../runtime/note-origin';
 type Bag=Record<string,any>;
 const slot='note-origins:v1:device';
 let cache:NoteOriginIndex|null=null,loading:Promise<void>|null=null;
@@ -20,7 +19,7 @@ async function change(update:(index:NoteOriginIndex)=>NoteOriginIndex){
 }
 /** Reads the saved links once. A failed read shows no links; it never invents one. */
 export function loadNoteOrigins(){return loading??=readNoteOrigins().then(index=>{cache=index;for(const listener of listeners)listener();},()=>{loading=null;});}
-/** Reminders and in-app (browser) events are linked by their ids. Device calendar row ids are
+/** Reminders and in-app (browser) events are linked by their ids, Agent Calendar events by their canonical event key. Device calendar row ids are
  * provider-assigned and can be reused after a deletion, so a native event is linked by the
  * creationId Alpha saved it with, which the pinned calendar reader returns on events this app
  * created (elizaOS/eliza#35912). That id is a link, not proof of ownership: another app with
@@ -63,39 +62,54 @@ export function installNoteOriginAdapter(Component:Bag,views:Bag){
  const olderNotes=(api:Bag)=>(shell&&olderNotesOpen()?shell.notesStore?.list:undefined)??api.get('notes')?.list;
  views.calendar.render=(state:Bag,api:Bag)=>{
   const out=render(state,api),selected=out.ev&&state.open?(state.events||[]).find((e:Bag)=>e.id===state.open):undefined;
-  const origin=selected?.alphaReminderId?savedNoteOrigin('reminder',selected.alphaReminderId):selected?.alphaCalendarId?savedNoteOrigin('event',eventNoteOriginId(selected.nativeEvent)||''):undefined;
+  const origin=selected?.alphaReminderId?savedNoteOrigin('reminder',selected.alphaReminderId):selected?.alphaCalendarId?savedNoteOrigin('event',eventNoteOriginId(selected.nativeEvent)||''):typeof selected?.canonicalEventKey==='string'?savedNoteOrigin('event',selected.canonicalEventKey):undefined;
   if(!origin||!out.ev)return out;
   const openId=state.open;
   if(origin.version===2)return canonicalOrigin(out,origin,api,openId);
   // The title is the note's current one. A link whose note is gone names no note at all.
   const known=olderNotesOpen(),live=known?resolveNoteOrigin(origin as NoteOrigin,olderNotes(api)):undefined,name=live?.status==='found'?noteOriginTitle(live.note):'';
-  out.ev.hasOrigin=true;out.ev.originLabel=!known?'From a voice note in Older notes':name?`From note: ${name}`:'From a note that is no longer in Notes';out.ev.originOpenLabel=name?`Open note ${name}`:'Open note';
+  out.ev.hasOrigin=true;out.ev.originLabel=!known?'From a voice note in Previous notes':name?`From note: ${name}`:'From a note that is no longer in Notes';out.ev.originOpenLabel=name?`Open note ${name}`:'Open note';
   out.ev.openOrigin=async()=>{
    if(opening)return;opening=true;
    try{
     const gone=()=>api.toast('The note this came from was deleted or replaced. Nothing was opened.');
-    if(!await openOlderNotes()){if(api.isActive()&&!document.hidden)api.toast('Older notes could not be opened. Nothing was changed.');return;}
+    if(!await openOlderNotes()){if(api.isActive()&&!document.hidden)api.toast('Previous notes could not be opened. Nothing was changed.');return;}
     if(!api.isActive()||document.hidden||api.get('calendar').open!==openId)return;
     const found=resolveNoteOrigin(origin as NoteOrigin,olderNotes(api));
     if(found.status!=='found'){gone();return;}
-    const changed=await recordingRevision(found.note)!==origin.revision;
+    const changed=await voiceNoteChanged(found.note,origin.revision);
     if(!api.isActive()||document.hidden||api.get('calendar').open!==openId)return;
     // The note may have been deleted while its revision was computed.
     if(resolveNoteOrigin(origin as NoteOrigin,olderNotes(api)).status!=='found'){gone();return;}
     api.open('notes',{open:origin.noteId});
-    if(changed)api.toast('This note was edited after this was created from it.');
+    // An older link hashed the whole record, so a pin or a ticked item also counts as a change.
+    if(changed)api.toast('This note may have changed since this was created from it.');
    }finally{opening=false;}
   };
   return out;
  };
  /** A canonical Notes record link: resolved against the open agent Notes collection only. */
  const canonicalNotes=()=>shell?.canonicalNotesUi?.current?shell.canonicalNotesUi:undefined;
+ /** Previous notes being open retires the agent Notes binding. Like the Older notes path, choose
+  * the agent Notes source first; only a missing binding after that is "unavailable". A refused
+  * switch (an unfinished recording or note) has already said why. */
+ const openCanonicalNotes=async():Promise<'open'|'refused'>=>{
+  if(!shell||shell.notesSourceMode!=='legacy')return 'open';
+  const main=shell.api?.('notes')?.notesSourceOptions?.find((source:Bag)=>source.id==='canonical');
+  if(!main)return 'open';main.choose();
+  if(shell.notesSourceMode==='legacy')return 'refused';
+  await Promise.resolve(shell.notesReady).catch(()=>{});
+  return 'open';
+ };
  const canonicalOrigin=(out:Bag,origin:NoteLink,api:Bag,openId:unknown)=>{
   const ui=canonicalNotes(),live=ui?resolveNoteLink(origin,ui.notes()):undefined,name=live?.status==='found'?noteOriginTitle(live.note,'Note'):'';
   out.ev.hasOrigin=true;out.ev.originLabel=!ui?'From a note in Notes':name?`From note: ${name}`:'From a note that is no longer in Notes';out.ev.originOpenLabel=name?`Open note ${name}`:'Open note';
   out.ev.openOrigin=async()=>{
    if(opening)return;opening=true;
    try{
+    const open=await openCanonicalNotes();
+    if(open==='refused')return;
+    if(!api.isActive()||document.hidden||api.get('calendar').open!==openId)return;
     const notes=canonicalNotes(),found=notes?resolveNoteLink(origin,notes.notes()):undefined;
     if(!notes){if(api.isActive()&&!document.hidden)api.toast('Notes is unavailable for this agent connection. Nothing was opened.');return;}
     if(found?.status!=='found'){api.toast('The note this came from was deleted or replaced. Nothing was opened.');return;}

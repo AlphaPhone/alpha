@@ -6,16 +6,15 @@ const flag = (value: unknown) => (value === true ? 'true' : 'false');
 const maskIcon = (name: string, color: string) => createElement('span', {style: {display: 'block', flexShrink: 0, width: 24, height: 24, background: color,
   mask: `url('/icons/lucide/${name}.svg') center/contain no-repeat`, WebkitMask: `url('/icons/lucide/${name}.svg') center/contain no-repeat`}});
 
-/** The Home agenda card: the shared upstream card with Alpha's classes and installed selectors.
- * Absent while Home's visibility pass hides it (no next event or overdue reminder). Origin, source
- * and read time are not drawn (docs/daily-overview.md); the accessible description carries them. */
+/** The Home agenda card: the shared upstream card with Alpha's classes and installed selectors. */
 export function homeAgendaCard(out: Bag): ReactElement | null {
   if (out.homeShowCalendar === false) return null;
-  const next = out.homeCalendarHasNext ? {text: String(out.homeCalendarNext || ''), source: ''} : null;
+  const next = out.homeCalendarHasNext ? {text: String(out.homeCalendarNext || ''), source: String(out.homeCalendarNextSource || '')} : null;
   return createElement(OverviewAgendaCard, {
-    heading: String(out.homeCalendarTime ?? ''), origin: '', title: String(out.homeCalendarTitle ?? ''),
+    heading: String(out.homeCalendarTime ?? ''), origin: String(out.homeCalendarOrigin ?? ''), title: String(out.homeCalendarTitle ?? ''),
     footer: String(out.homeCalendarFooter ?? ''), hasItem: out.homeCalendarHasEvent === true,
-    source: '',
+    // The read line appears only when the data adapter put one in the meta row.
+    source: out.homeCalendarHasMeta === false ? '' : String(out.homeCalendarSource ?? ''),
     next, overdue: out.homeCalendarOverdue === true, stale: out.homeCalendarStale === true,
     label: String(out.homeCalendarLabel ?? 'Open your calendar'), description: String(out.homeCalendarDescription ?? ''),
     onActivate: typeof out.goCalendar === 'function' ? out.goCalendar : undefined,
@@ -41,14 +40,12 @@ const INBOX_STATES = new Set(['not-connected', 'idle', 'loading', 'ready', 'stal
  * selectors. It shows no message body and reads no mail.
  */
 export function homeAttentionCard(out: Bag): ReactElement | null {
-  // Absent while Home's visibility pass hides it (no unread mail loaded from a connected account).
   if (out.homeShowInbox === false) return null;
   const rows = Array.isArray(out.homeInboxRows) && out.homeInboxHasRows !== false
     ? out.homeInboxRows.map((row: Bag) => ({title: String(row?.subject ?? ''), detail: String(row?.from ?? '')})) : [];
   const people = Array.isArray(out.homeAttentionPeople) ? out.homeAttentionPeople.map((person: Bag) => String(person?.ini ?? '')) : [];
   return createElement(OverviewAttentionCard, {
-    // The read line is not drawn; the accessible description carries it.
-    count: String(out.homeInboxCount ?? ''), rows, title: String(out.homeInboxTitle ?? ''), status: '', people,
+    count: String(out.homeInboxCount ?? ''), rows, title: String(out.homeInboxTitle || (rows.length ? '' : 'Inbox')), status: String(out.homeInboxStatus || (rows.length ? '' : out.homeInboxState === 'not-connected' ? 'Connect email' : out.homeInboxState === 'pending' || out.homeInboxState === 'loading' ? 'Loading…' : out.homeInboxState === 'ready' ? 'No unread email' : 'Open to view')), people,
     ...(INBOX_STATES.has(out.homeInboxState) ? {state: out.homeInboxState} : {}),
     label: String(out.homeAttentionLabel ?? 'Open Inbox'), description: String(out.homeInboxDescription ?? ''),
     onActivate: typeof out.goTriage === 'function' ? out.goTriage : undefined,
@@ -66,7 +63,7 @@ export function homeAttentionCard(out: Bag): ReactElement | null {
       rowTitle: {fontSize: 18, fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
       rowDetail: {fontSize: 12, lineHeight: 1.4, color: 'var(--mut)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
       title: {fontSize: 26, lineHeight: 1.1, minWidth: 0, maxWidth: 260, textAlign: 'left', overflowWrap: 'anywhere'},
-      status: {display: 'none'},
+      status: {fontSize: 12, lineHeight: 1.4, minHeight: 17, color: 'var(--mut)', textAlign: 'left'},
       people: {display: 'flex', gap: 2, visibility: out.homePeopleVisibility === 'hidden' ? 'hidden' : 'visible'},
       person: {width: 28, height: 28, borderRadius: 14, background: 'var(--s3)', fontSize: 9.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
         boxShadow: '0 0 0 2px var(--s2)', whiteSpace: 'nowrap'},
@@ -74,15 +71,15 @@ export function homeAttentionCard(out: Bag): ReactElement | null {
   });
 }
 
-/** The Home brief card, present only while a retained brief exists for this connection. */
+/** Keep the brief widget available; show an honest empty state until a retained brief exists. */
 export function homeBriefCard(out: Bag): ReactElement | null {
-  if (out.homeBriefHas !== true) return null;
+  const retained=out.homeBriefHas===true,failed=retained&&out.homeBriefFailed===true;
   return createElement(OverviewBriefCard, {
-    title: String(out.homeBriefTitle ?? ''), status: String(out.homeBriefStatus ?? ''), failed: out.homeBriefFailed === true,
-    label: String(out.homeBriefLabel ?? ''), onActivate: typeof out.goBrief === 'function' ? out.goBrief : undefined,
+    title: retained?String(out.homeBriefTitle || 'Your brief'):'Your brief', status: retained?String(out.homeBriefStatus || 'No brief yet'):'No brief yet', failed,
+    label: retained?String(out.homeBriefLabel || 'Open your brief'):'Open your brief', onActivate: typeof out.goBrief === 'function' ? out.goBrief : undefined,
     icon: maskIcon('sparkles', 'var(--acct)'),
     classNames: {card: 'home-brief-card', head: 'home-brief-head', title: 'home-brief-title', status: 'home-brief-status'},
-    dataAttributes: {'data-alpha-home-brief': '', 'data-alpha-home-brief-failed': flag(out.homeBriefFailed)},
+    dataAttributes: {'data-alpha-home-brief': '', 'data-alpha-home-brief-failed': flag(failed)},
   });
 }
 
@@ -95,6 +92,9 @@ export function installHomeOverviewCards(Component: any) {
   const p = Component.prototype, render = p.renderVals;
   p.renderVals = function () {
     const out = render.call(this);
-    return {...out, homeAgendaCard: homeAgendaCard(out), homeAttentionCard: homeAttentionCard(out), homeBriefCard: homeBriefCard(out)};
+    const agenda = homeAgendaCard(out), attention = homeAttentionCard(out), brief = homeBriefCard(out);
+    const showWorkflow = out.homeShowWorkflows !== false;
+    return {...out, homeAgendaCard: agenda, homeAttentionCard: attention, homeBriefCard: brief, homeShowWorkflow: showWorkflow,
+      homeHasOverviewCards: !!(agenda || attention || brief || showWorkflow)};
   };
 }

@@ -29,28 +29,26 @@ test('agenda card keeps the installed selectors for an event, an overdue reminde
   const out={};
   const base={homeCalendarTime:'Wed, Oct 7',homeCalendarOrigin:'Work',homeCalendarTitle:'Design review',homeCalendarFooter:'4:00 PM – 5:00 PM',homeCalendarHasEvent:true,homeCalendarHasMeta:true,homeCalendarSource:'',homeCalendarOverdue:false,homeCalendarHasNext:false,homeCalendarLabel:'Open calendar event: Design review',homeCalendarDescription:'Work. Read 3:04 PM from calendars on this device',homeCalendarVideo:true,ic:{video:'M1 1'},goCalendar:()=>{}};
   out.event=html(c.homeAgendaCard(base));
-  out.overdue=html(c.homeAgendaCard({...base,homeCalendarTime:'Overdue reminder',homeCalendarOrigin:'',homeCalendarTitle:'Pay rent',homeCalendarFooter:'Due 9:00 AM',homeCalendarOverdue:true,homeCalendarVideo:false,homeCalendarHasNext:true,homeCalendarNext:'Next: Design review 4:00 PM',homeCalendarNextSource:'Work'}));
+  out.overdue=html(c.homeAgendaCard({...base,homeCalendarTime:'Overdue reminder',homeCalendarOrigin:'',homeCalendarTitle:'Pay rent',homeCalendarFooter:'Due 9:00 AM',homeCalendarOverdue:true,homeCalendarVideo:false,homeCalendarHasNext:true,homeCalendarNext:'Next: Design review 4:00 PM',homeCalendarNextSource:'Work',homeCalendarDescription:'Overdue reminder saved on this device. Next: Design review, 4:00 PM. Work. Read 3:04 PM from calendars on this device'}));
   out.empty=html(c.homeAgendaCard({...base,homeCalendarTitle:'No upcoming events',homeCalendarFooter:'',homeCalendarHasEvent:false,homeCalendarHasMeta:false,homeCalendarVideo:false,homeCalendarLabel:'Open your calendar',homeCalendarDescription:''}));
-  out.error=html(c.homeAgendaCard({...base,homeCalendarTitle:'Calendar unavailable',homeCalendarHasEvent:false,homeCalendarHasMeta:true,homeCalendarSource:'Open Calendar to retry',homeCalendarVideo:false}));
+  out.error=html(c.homeAgendaCard({...base,homeCalendarTitle:'Calendar unavailable',homeCalendarHasEvent:false,homeCalendarHasMeta:true,homeCalendarSource:'Open Calendar to retry',homeCalendarDescription:'Calendar could not be read. Open Calendar to retry.',homeCalendarVideo:false}));
   assert.match(out.event,/^<button type="button" data-overview-part="card" class="home-calendar-card" data-overview-card="agenda"/);
   for(const attribute of ['data-alpha-home-calendar=""','data-alpha-home-calendar-event="true"','data-alpha-home-calendar-meta="true"','data-alpha-home-calendar-overdue="false"','data-alpha-home-calendar-next="false"','aria-label="Open calendar event: Design review"','aria-description="Work. Read 3:04 PM from calendars on this device"'])assert.ok(out.event.includes(attribute),attribute);
-  // Origin, source and read time are not drawn (docs/daily-overview.md); the description keeps them.
-  assert.match(out.event,/class="home-calendar-time">Wed, Oct 7<\/span><span data-overview-part="origin" class="home-calendar-origin" data-alpha-home-calendar-origin=""><\/span>/);
-  assert.doesNotMatch(out.event,/data-alpha-home-calendar-source/);
+  assert.match(out.event,/class="home-calendar-time">Wed, Oct 7<\/span><span data-overview-part="origin" class="home-calendar-origin" data-alpha-home-calendar-origin="">Work<\/span>/);
   assert.match(out.event,/class="serif home-calendar-title">Design review</);
   assert.match(out.event,/class="home-calendar-footer">4:00 PM – 5:00 PM</);
   assert.match(out.event,/<svg width="16" height="16" viewBox="0 0 24 24"><path d="M1 1"><\/path><\/svg>/);
   assert.match(out.event,/style="flex-shrink:0;scroll-snap-align:start;border-radius:30px;background:var\(--acc\);color:#ffffff;padding:22px;box-sizing:border-box"/);
   assert.ok(out.overdue.includes('data-alpha-home-calendar-overdue="true"')&&out.overdue.includes('data-alpha-home-calendar-next="true"'));
-  assert.match(out.overdue,/class="home-calendar-meta home-calendar-next" data-alpha-home-calendar-next-line=""><span data-overview-part="nextText" class="home-calendar-next-text">Next: Design review 4:00 PM<\/span><\/span>/);
-  assert.doesNotMatch(out.overdue,/data-alpha-home-calendar-next-source/);
+  assert.match(out.overdue,/class="home-calendar-meta home-calendar-next" data-alpha-home-calendar-next-line=""><span data-overview-part="nextText" class="home-calendar-next-text">Next: Design review 4:00 PM<\/span>/);
+  assert.match(out.overdue,/data-overview-part="nextSource" class="home-calendar-source" data-alpha-home-calendar-next-source="">Work<\/span>/, 'the next item identifies its calendar');
+  assert.match(out.overdue,/aria-description="Overdue reminder saved on this device\. Next: Design review, 4:00 PM\. Work\. Read 3:04 PM from calendars on this device"/, 'the next item keeps its own source and read time');
   assert.doesNotMatch(out.overdue,/<svg/,'no video icon without a meeting link');
   assert.ok(out.empty.includes('data-alpha-home-calendar-event="false"')&&out.empty.includes('data-alpha-home-calendar-meta="false"'));
   assert.doesNotMatch(out.empty,/class="home-calendar-meta|class="home-calendar-footer|aria-description/);
-  assert.doesNotMatch(out.error,/class="home-calendar-footer|data-alpha-home-calendar-source|Open Calendar to retry/);
-  // Home's visibility pass hides the card when there is nothing to show.
-  assert.equal(c.homeAgendaCard({...base,homeShowCalendar:false}),null);
-  assert.ok(html(c.homeAgendaCard({...base,homeShowCalendar:true})).includes('data-alpha-home-calendar=""'));
+  assert.match(out.error,/aria-description="Calendar could not be read\. Open Calendar to retry\."/);
+  assert.match(out.error,/data-overview-part="source" class="home-calendar-source" data-alpha-home-calendar-source="">Open Calendar to retry<\/span>/, 'the recovery action is visible and described');
+  assert.doesNotMatch(out.error,/class="home-calendar-footer/);
 });
 
 test('a calendar read from an earlier day is presented as stale on the agenda card', () => {
@@ -62,16 +60,16 @@ test('a calendar read from an earlier day is presented as stale on the agenda ca
   assert.equal(out.provenance.read.startsWith('Not updated since '),true);
   assert.match(out.provenance.description,/today's changes may be missing\. Open Calendar to refresh\.$/);
   assert.ok(out.card.includes('data-alpha-home-calendar-stale="true"')&&out.card.includes('data-overview-state="stale"'));
-  assert.doesNotMatch(out.card,/data-alpha-home-calendar-source|Not updated since /,'the read line is in the description only');
-  assert.match(out.card,/aria-description="Calendar not updated since /);
+  assert.match(out.card,/aria-description="Calendar not updated since Tue, Oct 6 9:05 PM; today&#x27;s changes may be missing\. Open Calendar to refresh\."/);
+  assert.match(out.card,/data-overview-part="source" class="home-calendar-source" data-alpha-home-calendar-source="">Not updated since Tue, Oct 6 9:05 PM<\/span>/);
 });
 
-test('brief card renders only a retained brief, with its failure state and installed selectors', () => {
+test('brief card keeps an empty shell and renders retained data with its failure state', () => {
   const out={};
-  out.none=html(c.homeBriefCard({homeBriefHas:false,homeBriefTitle:'x'}));
+  out.none=html(c.homeBriefCard({homeBriefHas:false,homeBriefTitle:'STALE_TITLE',homeBriefStatus:'STALE_STATUS',homeBriefFailed:true,homeBriefLabel:'STALE_LABEL'}));
   out.ran=html(c.homeBriefCard({homeBriefHas:true,homeBriefTitle:'Two meetings today.',homeBriefStatus:'Alpha · Ran 7:02 AM',homeBriefFailed:false,homeBriefLabel:'Open scheduled digests. Latest brief from Alpha, ran 7:02 AM: Two meetings today.',goBrief:()=>{}}));
   out.failed=html(c.homeBriefCard({homeBriefHas:true,homeBriefTitle:'Source expired',homeBriefStatus:'Alpha · Failed 7:00 AM',homeBriefFailed:true,homeBriefLabel:'Open scheduled digests.'}));
-  assert.equal(out.none,null);
+  assert.match(out.none,/Your brief/);assert.match(out.none,/No brief yet/);assert.doesNotMatch(out.none,/STALE_TITLE|STALE_STATUS|STALE_LABEL|Ran [0-9]|Two meetings today/);assert.match(out.none,/data-alpha-home-brief-failed="false"/);
   assert.match(out.ran,/^<button type="button" data-overview-part="card" class="home-brief-card" data-overview-card="brief"/);
   for(const attribute of ['data-alpha-home-brief=""','data-alpha-home-brief-failed="false"','aria-haspopup="dialog"','aria-label="Open scheduled digests. Latest brief from Alpha, ran 7:02 AM: Two meetings today."'])assert.ok(out.ran.includes(attribute),attribute);
   assert.match(out.ran,/class="home-brief-head"><span data-overview-part="heading">Latest brief<\/span>/);
@@ -119,17 +117,13 @@ test('mail card keeps the installed selectors, styles and order of the Home Inbo
   assert.match(out.ready,/<div data-overview-part="rowTitle" style="font-size:18px;font-weight:600;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Invoice<\/div><div data-overview-part="rowDetail" style="font-size:12px;line-height:1.4;color:var\(--mut\);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Billing<\/div>/);
   assert.match(out.ready,/rowTitle"[^>]*>\(no subject\)</);
   assert.doesNotMatch(out.ready,/Third|Private body|data-overview-part="title"/,'two rows, no body, no headline beside rows');
-  // The read line is not drawn (docs/daily-overview.md); the accessible description keeps it.
-  assert.match(out.ready,/<span data-overview-part="status" style="display:none"><\/span><\/button>$/);
-  assert.equal(c.homeAttentionCard({...values(h.presentHomeInboxCard(base)),homeShowInbox:false}),null,'hidden by Home\'s visibility pass');
+  assert.match(out.ready,/<span data-overview-part="status" style="font-size:12px;line-height:1.4;min-height:17px;color:var\(--mut\);text-align:left">work@example.test · Updated 3:04 PM<\/span><\/button>$/);
   assert.match(out.idle,/data-overview-state="idle"/);
   assert.match(out.idle,/<span data-overview-part="title" class="serif" style="font-size:26px;line-height:1.1;min-width:0;max-width:260px;text-align:left;overflow-wrap:anywhere">Inbox<\/span>/);
   assert.doesNotMatch(out.idle,/data-alpha-home-inbox-subjects/);
   assert.ok(out.disconnected.includes('data-overview-state="not-connected"')&&out.disconnected.includes('>Connect email<')&&out.disconnected.includes('aria-label="Connect email"'));
-  // Without unread rows Home's visibility pass hides the card; these states keep their markup for
-  // the shared card's other hosts, with the read line left undrawn.
-  assert.ok(out.failed.includes('data-overview-state="error"')&&out.failed.includes('>Reconnect email<')&&!out.failed.includes('>Open to retry<'));
-  assert.ok(out.stale.includes('data-overview-state="stale"')&&!out.stale.includes('>Not updated since Tue, Oct 6 8:15 AM<'));
+  assert.ok(out.failed.includes('data-overview-state="error"')&&out.failed.includes('>Reconnect email<')&&out.failed.includes('>Open to retry<'));
+  assert.ok(out.stale.includes('data-overview-state="stale"')&&out.stale.includes('>Not updated since Tue, Oct 6 8:15 AM<'));
   assert.match(out.stale,/aria-label="Open Inbox: work@example.test has not updated since Tue, Oct 6 8:15 AM; 2 unread emails when last read"/);
   assert.match(out.people,/<div aria-hidden="true" data-overview-part="people" style="display:flex;gap:2px;visibility:hidden"><span data-overview-part="person" style="width:28px;height:28px;border-radius:14px;background:var\(--s3\);font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var\(--s2\);white-space:nowrap">AL<\/span><\/div>/);
 });
@@ -150,24 +144,31 @@ test('the Home agenda values come from the shared card model for an event, an ov
   // The rendered card carries those values into the installed selectors.
   const markup=html(c.homeAgendaCard({...overdue,goCalendar:()=>{}}));
   assert.ok(markup.includes('data-alpha-home-calendar-overdue="true"')&&markup.includes('data-alpha-home-calendar-next="true"')&&markup.includes('>Next: Design review 4:00 PM<'));
+  assert.ok(markup.includes('aria-description="'+overdue.homeCalendarDescription+'"'));
+  assert.match(overdue.homeCalendarDescription,/Next: Design review, 4:00 PM\. Work\. Read 3:04 PM from calendars on this device/);
   const none=h.homeCalendarValues(h.presentHomeAgendaCard({now,item:null,provenance:{origin:'',read:'',description:''},emptyTitle:'Calendar has not been verified',sourceName:'Agent Calendar'}));
   assert.deepEqual([none.homeCalendarTitle,none.homeCalendarTime,none.homeCalendarLabel,none.homeCalendarHasEvent,none.homeCalendarHasMeta],['Calendar has not been verified','Wed, Oct 7','Open Agent Calendar',false,false]);
 });
 
-test('the card builders draw what they are given; installHomeCardVisibility decides what shows', () => {
+test('Home keeps all widgets visible for confirmed empty sources and retained briefs', () => {
   class Shell {
     renderVals() { return this.values; }
   }
   c.installHomeOverviewCards(Shell);
   const shell = new Shell();
-  shell.values = {homeBriefHas: true, homeBriefTitle: 'Follow up on the failed run', homeBriefFailed: true};
+  const empty = {homeCalendarConfirmedEmpty: true, homeInboxConfirmedEmpty: true, homeWorkflowConfirmedEmpty: true};
+  shell.values = empty;
   let rendered = shell.renderVals();
+  assert.ok(rendered.homeAgendaCard);assert.ok(rendered.homeAttentionCard);assert.ok(rendered.homeBriefCard);assert.equal(rendered.homeShowWorkflow,true);assert.equal(rendered.homeHasOverviewCards,true);
+  assert.match(html(rendered.homeBriefCard),/No brief yet/);
+  shell.values = {...empty, homeBriefHas: true, homeBriefTitle: 'Follow up on the failed run', homeBriefFailed: true};
+  rendered = shell.renderVals();
+  assert.equal(rendered.homeHasOverviewCards, true);
   assert.match(html(rendered.homeBriefCard), /Follow up on the failed run/);
   shell.values = {homeCalendarTitle: 'Calendar unavailable', homeInboxTitle: 'Reconnect email'};
   rendered = shell.renderVals();
+  assert.equal(rendered.homeHasOverviewCards, true);
+  assert.equal(rendered.homeShowWorkflow, true);
   assert.match(html(rendered.homeAgendaCard), /Calendar unavailable/);
   assert.match(html(rendered.homeAttentionCard), /Reconnect email/);
-  // No visibility flags here: the "card only with content" rule lives in one place.
-  assert.equal('homeHasOverviewCards' in rendered, false);
-  assert.equal('homeShowWorkflow' in rendered, false);
 });

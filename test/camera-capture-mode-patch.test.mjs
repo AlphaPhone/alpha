@@ -20,6 +20,6 @@ test('Video mode binds the recording options; a released preview is reported',{s
  assert.match(mode,/"PREVIEW_STOPPED"/);assert.match(mode,/notifyListeners\("error"/);
  const record=fn('private fun startRecordingInternal(');
  assert.match(record,/quality = recordingQuality\(call\)/,'Recording and Video mode map quality the same way');
- const js=fs.readFileSync(path.join(root,'apps/app/src/prototype/camera-adapter.ts'),'utf8');
+ const js=fs.readFileSync(path.join(root,'apps/app/src/prototype/camera-adapter.ts'),'utf8').replace(/\s+/g,'');
  assert.match(js,/recording:\(\)=>RECORDING/);assert.match(js,/setCaptureMode\(\{mode:wanted,quality:RECORDING\.quality\}\)/);
 });

@@ -44,6 +44,8 @@ const adapterCases = Object.freeze([
   'Cloud startup bounds a stalled draft and fences its late completion',
   'Cloud startup timeout keeps the media retirement fence',
   'Cloud preparation records success separately from bridge startup',
+  'renderer preparation measures each phase once on the same clock',
+  'browser startup measures Talk through microphone listening for both voice routes',
   'typed native 503 is waited out quietly, then voice ends with one calm line',
   'unknown native voice failures retain their existing recovery',
 ]);
@@ -76,7 +78,11 @@ function fixture(preference){
   // Public startVoice is default-only. Substitute only its call argument to exercise
   // explicit internal choices through the unchanged actual enter/begin bodies.
   const h=cloudVoiceViewFixture({native:false,platform:'web',account:null,
-    adapterSourceTransform:preference?source=>source.replace("enter(undefined,'default',chat)","enter(undefined,'"+preference+"',chat)"):undefined,
+    adapterSourceTransform:preference?source=>{
+      const entry="enter(undefined,'default',chat)";
+      assert.ok(source.includes(entry),'The explicit route fixture must reach the actual start entry');
+      return source.replace(entry,"enter(undefined,'"+preference+"',chat)");
+    }:undefined,
   });
   h.box.developmentCartesiaVoiceEnabled=enabled();
   h.box.HTMLElement=class {};
@@ -177,7 +183,7 @@ adapterTest('Cloud startup bounds a stalled draft and fences its late completion
     assert.equal(h.renderChat().lines[0].t,'Connecting to voice…');
     await clock.advance(12001);
     assert.match(h.renderChat().lines[0].t,/setup is taking too long/i);
-    assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{stage:'draft-binding',outcome:'timeout',elapsedMs:12000});
+    assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{stage:'draft-binding',outcome:'timeout',elapsedMs:12000,phaseMs:{'conversation-selection':0,'draft-binding':12000}});
     assert.equal(finished,true);
     release();release=undefined;await clock.flush();
     assert.equal(started,0,'timeout itself fences the late preparation');
@@ -197,7 +203,7 @@ adapterTest('Cloud startup timeout keeps the media retirement fence',async t=>{
   try{
     await clock.flush();assert.equal(typeof release,'function');
     await clock.advance(12001);await opening;
-    assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{stage:'media-retirement',outcome:'timeout',elapsedMs:12000});
+    assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{stage:'media-retirement',outcome:'timeout',elapsedMs:12000,phaseMs:{'conversation-selection':0,'media-retirement':12000}});
     const stop=Promise.resolve(h.shell.stopVoiceConversation()).then(()=>{stopped=true;});
     await clock.flush();assert.equal(stopped,false,'Stop waits for the original media retirement');
     release();await stop;
@@ -210,8 +216,65 @@ adapterTest('Cloud preparation records success separately from bridge startup',a
   h.box.nativeCloudStreamingAvailable=()=>true;
   h.box.createCloudStreamingSpeech=()=>{throw Error('Bridge unavailable before start');};
   await h.shell.startVoice();
-  assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{stage:'media-retirement',outcome:'prepared',elapsedMs:0});
+  assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{stage:'media-retirement',outcome:'prepared',elapsedMs:0,phaseMs:{'conversation-selection':0,'media-retirement':0}});
   assert.equal(h.starts,0,'preparation success does not claim microphone capture');
+});
+adapterTest('renderer preparation measures each phase once on the same clock',async t=>{
+  const clock=voiceFakeClock(),h=cloudFixture({clock});t.after(()=>h.close());
+  const prepared=await h.box.runVoiceStartupPreparation(new AbortController(),async mark=>{
+    await clock.advance(100);mark('draft-binding');
+    await clock.advance(40);mark('draft-binding');
+    await clock.advance(60);mark('agent-attach');
+    await clock.advance(30);mark('media-retirement');
+    await clock.advance(20);
+    return 'ready';
+  });
+  assert.equal(prepared,'ready');
+  await clock.advance(1000);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.box.voiceStartupTiming())),{
+    stage:'media-retirement',outcome:'prepared',elapsedMs:250,
+    phaseMs:{'conversation-selection':100,'draft-binding':100,'agent-attach':30,'media-retirement':20},
+  });
+});
+adapterTest('browser startup measures Talk through microphone listening for both voice routes',async t=>{
+  const clock=voiceFakeClock(),h=cloudFixture({clock,native:false,platform:'web'});t.after(()=>h.close());
+  h.box.HTMLElement=class {};
+  h.box.React={createElement:()=>null};h.box.VoiceActivity=()=>null;
+  h.box.connectionController.voiceRendererMetadata=()=>({viewDelivery:'completed-action'});
+  const snapshot=h.box.connectionController.getSnapshot.bind(h.box.connectionController);
+  let own=true;
+  h.box.connectionController.getSnapshot=()=>({...snapshot(),...(own?{residentInference:'direct',providerStatus:{voiceConfigured:true}}:{})});
+  const prepare=h.shell.prepareVoiceConversation.bind(h.shell);
+  h.shell.prepareVoiceConversation=async(signal,mark)=>{
+    await clock.advance(100);mark?.('draft-binding');
+    await clock.advance(50);mark?.('agent-attach');
+    await clock.advance(150);return prepare(signal);
+  };
+  let listening;
+  h.box.developmentCartesiaConversation=async options=>{
+    await clock.advance(200);
+    listening=()=>options.onState('listening');
+    return {async start(){options.onState('ready');},async stop(){},recheck(){}};
+  };
+  const startup=()=>JSON.parse(JSON.stringify(h.box.voiceStartupTiming()??null));
+  await h.shell.startVoice();
+  assert.equal(startup()?.outcome,'pending','server readiness is not microphone capture');
+  await clock.advance(350);listening();
+  assert.deepEqual(startup(),{route:'direct-cartesia',stage:'speech-session',outcome:'listening',elapsedMs:850,
+    phaseMs:{'conversation-selection':100,'draft-binding':50,'agent-attach':150,'media-retirement':0,'renderer-channel':200,'speech-session':350}});
+  await h.shell.stopVoiceConversation();
+  own=false;h.box.developmentCloudRealtimeVoiceEnabled=true;
+  await h.shell.startVoice();
+  assert.equal(startup()?.route,'cloud-cartesia');
+  await clock.advance(500);listening();
+  assert.equal(startup()?.outcome,'listening');
+  assert.equal(startup()?.phaseMs['speech-session'],500);
+  await h.shell.stopVoiceConversation();
+  await h.shell.startVoice();
+  await h.shell.stopVoiceConversation();
+  assert.equal(startup()?.outcome,'cancelled');
+  listening();
+  assert.equal(startup()?.outcome,'cancelled','late microphone status cannot revive a stopped attempt');
 });
 adapterTest('Cloud conversation keeps the composer focused on the current voice phase',async t=>{
   const h=cloudFixture();t.after(()=>h.close());
@@ -222,12 +285,12 @@ adapterTest('Cloud conversation keeps the composer focused on the current voice 
     recheck(){}
   };
   await h.shell.startVoice();
-  assert.equal(h.initialView.state,'starting');assert.equal(h.initialView.voiceDetails,false);
+  assert.equal(h.initialView.state,'starting');assert.ok(!h.initialView.voiceDetails);
   for(const [phase,caption] of [['listening','Listening…'],['transcribing','Transcribing…'],['thinking','Thinking…'],['preparing-speech','Thinking…'],['speaking','Speaking…']]){
     h.batchOptions.onState({phase});const view=h.renderChat();
     assert.equal(view.lines[0].t,caption);
     assert.equal(view.cloudDisclosureText,undefined);
-    assert.equal(view.voiceDetails,false);
+    assert.ok(!view.voiceDetails);
     assert.equal(typeof view.stop,'function');assert.equal(typeof view.keyboard,'function');
   }
   // The loop's own idle is shown once its retire settles (a failure it is about to report replaces it).
@@ -243,7 +306,7 @@ adapterTest('typed native 503 is waited out quietly, then voice ends with one ca
   await h.shell.startVoice();await clock.flush();
   for(let attempt=1;attempt<=2;attempt++){
     const view=h.renderChat();assert.equal(view.state,'starting');
-    assert.equal(view.errorDetail,'');assert.equal(view.voiceDetails,false);assert.ok(!view.recoveryLabel);
+    assert.ok(!view.errorDetail);assert.ok(!view.voiceDetails);assert.ok(!view.recoveryLabel);
     assert.doesNotMatch(JSON.stringify(view),/PRIVATE_PROVIDER_BODY|Voice is unavailable|Try voice again|503/);
     assert.equal(typeof view.stop,'function');assert.equal(typeof view.keyboard,'function');
     assert.equal(h.starts,attempt);await clock.advance(2_000);
@@ -259,7 +322,7 @@ adapterTest('typed native 503 is waited out quietly, then voice ends with one ca
 adapterTest('unknown native voice failures retain their existing recovery',async t=>{
   const h=cloudFixture({startError:Object.assign(new Error('Unknown voice failure remains'),{code:'voice-http-503-extra'})});t.after(()=>h.close());
   await h.shell.startVoice();await h.tick();const view=h.renderChat();
-  assert.equal(view.state,'error');assert.equal(view.errorDetail,'');
+  assert.equal(view.state,'error');assert.ok(!view.errorDetail);
   assert.doesNotMatch(view.lines[0].t,/Voice is unavailable right now/);
-  assert.equal(view.recoveryLabel,'');assert.equal(view.statusLines.length,0);assert.equal(view.voiceDetails,false);assert.equal(h.startError?.code,'voice-http-503-extra','underlying failure is retained');assert.deepEqual(h.shell.messages,[]);
+  assert.equal(view.recoveryLabel,'');assert.equal(view.statusLines.length,0);assert.ok(!view.voiceDetails);assert.equal(h.startError?.code,'voice-http-503-extra','underlying failure is retained');assert.deepEqual(h.shell.messages,[]);
 });

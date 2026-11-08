@@ -17,8 +17,8 @@ const RESIZE_TRANSITION = `height .42s ${SHEET_EASE}, border-radius .42s, opacit
 /** How long a tap close keeps the sheet's composer, then fades it to show the bar in its place. */
 const CLOSE_MS = 400;
 const CLOSE_FADE_MS = 120;
-/** How long a released press on the dock guard waits for its click before lowering anyway. */
-const GUARD_CLICK_WAIT_MS = 350;
+/** Android may deliver the click in a later gesture task after pointerup. */
+const SCRIM_CLICK_WAIT_MS = 350;
 type Shell = any;
 // chat-release:begin (dependency-free; exercised by test/chat-release.test.mjs)
 type Mode = "hidden" | "input" | "sheet" | "full";
@@ -350,7 +350,7 @@ export function installChatOverlayMotion(Component: Shell) {
 					free(now.width, now.layout, isEditing(document.activeElement)) -
 						now.height >
 					150;
-			if (keyboardOpen && !covered && this.dockComposerFocused) {
+			if (keyboardOpen && !covered && this.chatInputFocused) {
 				const active = document.activeElement;
 				if (active instanceof HTMLElement && active.matches("[data-alpha-composer]"))
 					active.blur();
@@ -363,10 +363,9 @@ export function installChatOverlayMotion(Component: Shell) {
 		this.dockHiddenWatch = () => {
 			if (!document.hidden) return;
 			const active = document.activeElement;
-			if (active instanceof HTMLElement && active.matches("[data-alpha-composer]"))
-				active.blur();
-			this.dockComposerFocused = false;
-			this.dockGuardPress = undefined;
+			if (active instanceof HTMLElement && active.matches("[data-alpha-composer]")) active.blur();
+			this.chatInputFocused = false;
+			this.chatScrimPress = undefined;
 		};
 		document.addEventListener("visibilitychange", this.dockHiddenWatch);
 	};
@@ -375,12 +374,10 @@ export function installChatOverlayMotion(Component: Shell) {
 		const drag: Drag | undefined = this.chatMotion,
 			s = this.S();
 		// The bar's composer unmounts without a blur event: its focus ends with it.
-		if (
-			(s.chat !== "input" || (args[1] && args[1].view !== s.view)) &&
-			(this.dockComposerFocused || this.dockGuardPress)
-		) {
-			this.dockComposerFocused = false;
-			this.dockGuardPress = undefined;
+		const previousView = args[1]?.view;
+		if ((s.chat !== "input" || (args[1] && previousView !== s.view)) && (this.chatInputFocused || this.chatScrimPress)) {
+			this.chatInputFocused = false;
+			this.chatScrimPress = undefined;
 		}
 		if (
 			drag &&
@@ -397,6 +394,7 @@ export function installChatOverlayMotion(Component: Shell) {
 		}
 	};
 	p.componentWillUnmount = function () {
+		this.chatScrimPress = undefined;
 		retire(this, false);
 		window.removeEventListener("resize", this.cancelChatMotion);
 		window.removeEventListener("blur", this.cancelChatMotion);
@@ -746,18 +744,40 @@ export function installChatOverlayMotion(Component: Shell) {
 					: shell.rest(),
 			});
 		};
-		out.scrimTap = out.closeChat;
-		// Any touch outside the open sheet collapses it and reaches nothing underneath. A tap
-		// collapses on its click, so no compatibility click can land on what the sheet uncovers;
-		// a drag has no click, so it collapses on release. Assistive technology activates
-		// controls directly and keeps reaching the app.
+		if (!out.showComposer) shell.chatInputFocused = false;
+		const setInputFocus = (focused: boolean) => {
+			if (!focused && shell.chatScrimPress || !!shell.chatInputFocused === focused) return;
+			shell.chatInputFocused = focused;
+			shell.setState({});
+		};
+		out.inputComposerFocus = () => setInputFocus(true);
+		out.inputComposerBlur = () => setInputFocus(false);
+		const dockScrim =
+			s.chat === "input" && !!out.showComposer && !s.shade &&
+			s.voice === "off" && !shell.props.assistantSurface &&
+			(shell.chatInputFocused || shell.rest() === "hidden");
+		out.dockScrim = dockScrim;
+		out.scrimZ = dockScrim ? 39 : 45;
+		out.scrimTap = () => {
+			shell.chatScrimPress = undefined;
+			const active = document.activeElement;
+			if (dockScrim && active instanceof HTMLElement && active.matches("[data-alpha-composer]"))
+				active.blur();
+			out.closeChat();
+		};
+		// An outside tap lowers the sheet or dock without activating what it uncovers.
+		// A drag has no click, so it collapses on release. Assistive technology can
+		// still activate app controls directly.
 		out.scrimPE =
-			s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface
+			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface
 				? "auto"
 				: "none";
 		out.scrimSw = {
 			down(event: PointerEvent) {
 				event.stopPropagation();
+				// Keep focus until the scrim receives the click. An early blur would
+				// otherwise uncover the app between pointer down and pointer up.
+				if (dockScrim) event.preventDefault();
 				if (event.isPrimary === false) return;
 				shell.chatScrimPress = {
 					id: event.pointerId,
@@ -783,101 +803,14 @@ export function installChatOverlayMotion(Component: Shell) {
 			up(event: PointerEvent) {
 				event.stopPropagation();
 				const press = shell.chatScrimPress;
-				shell.chatScrimPress = undefined;
-				if (press?.id === event.pointerId && press.moved) out.scrimTap();
-			},
-			cancel() {
-				shell.chatScrimPress = undefined;
-			},
-		};
-		// One rule for every raised dock (docs/gesture-zones.md): the bar
-		// above a pill view's resting form, or any composer bar with the keyboard up, takes the
-		// first touch outside it. That touch lowers the dock to its resting form, closes the
-		// keyboard and reaches nothing underneath; the next touch is ordinary. The draft stays.
-		const raisedBar =
-			s.chat === "input" &&
-			!!out.showComposer &&
-			s.voice === "off" &&
-			!shell.props.assistantSurface &&
-			(shell.rest() === "hidden" || !!shell.dockComposerFocused);
-		out.dockGuardPE = raisedBar ? "auto" : "none";
-		out.dockComposerFocus = () => {
-			if (shell.dockComposerFocused) return;
-			shell.dockComposerFocused = true;
-			shell.setState({});
-		};
-		out.dockComposerBlur = () => {
-			// A press on the guard keeps the dock raised until it lowers it, so the press cannot
-			// fall through to what the guard covers.
-			if (shell.dockGuardPress || !shell.dockComposerFocused) return;
-			shell.dockComposerFocused = false;
-			shell.setState({});
-		};
-		const lowerDock = () => {
-			shell.dockGuardPress = undefined;
-			shell.dockComposerFocused = false;
-			const active = document.activeElement;
-			if (active instanceof HTMLElement && active.matches("[data-alpha-composer]"))
-				active.blur();
-			retire(shell, false);
-			shell.setState({ chat: shell.rest() });
-		};
-		// A long press opens no menu and lowers the dock like any other touch.
-		out.dockGuardMenu = (event: MouseEvent) => {
-			event.preventDefault();
-			event.stopPropagation();
-			lowerDock();
-		};
-		out.dockGuardTap = (event: MouseEvent) => {
-			event.stopPropagation();
-			lowerDock();
-		};
-		out.dockGuardSw = {
-			down(event: PointerEvent) {
-				event.stopPropagation();
-				// No focus change and no compatibility mouse events: the click alone lowers.
-				event.preventDefault();
-				if (event.isPrimary === false) return;
-				shell.dockGuardPress = {
-					id: event.pointerId,
-					x: event.clientX,
-					y: event.clientY,
-					moved: false,
-				};
-			},
-			// Captured only once it is a drag, as on the scrim above.
-			move(event: PointerEvent) {
-				const press = shell.dockGuardPress;
-				if (
-					press?.id !== event.pointerId ||
-					press.moved ||
-					Math.hypot(event.clientX - press.x, event.clientY - press.y) <
-						TAP_SLOP * geometry.scale
-				)
-					return;
-				press.moved = true;
-				(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-			},
-			up(event: PointerEvent) {
-				event.stopPropagation();
-				const press = shell.dockGuardPress;
 				if (press?.id !== event.pointerId) return;
-				// A drag has no click: it lowers on release.
-				if (press.moved) lowerDock();
-				// A tap lowers on its click. On Android the click is a separate gesture-tap input
-				// that can arrive after this pointerup's tasks, so the guard stays raised and
-				// waits for it. A press that sends no click lowers once the tap-to-click window
-				// (350ms, as for a drag's compatibility click) has passed, so the press is never left stuck.
-				else
-					setTimeout(() => {
-						if (shell.dockGuardPress === press) lowerDock();
-					}, GUARD_CLICK_WAIT_MS);
+				if (press.moved) out.scrimTap();
+				else setTimeout(() => {
+					if (shell.chatScrimPress === press) out.scrimTap();
+				}, SCRIM_CLICK_WAIT_MS);
 			},
 			cancel(event: PointerEvent) {
-				// A cancelled press (the system took the touch) still lowers: the dock is never
-				// left raised with its guard holding a stale press.
-				const press = shell.dockGuardPress;
-				if (press?.id === event.pointerId) lowerDock();
+				if (shell.chatScrimPress?.id === event.pointerId) out.scrimTap();
 			},
 		};
 		return out;

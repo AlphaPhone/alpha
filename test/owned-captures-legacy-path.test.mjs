@@ -17,6 +17,9 @@ test('a keep reserved under the earlier capture folder is still looked up there'
   const captures=fs.readFileSync(path.join(media,'OwnedCaptures.java'),'utf8');
   const lookup=captures.slice(captures.indexOf('private Cursor lookup('),captures.indexOf('private Result recover('));
   assert.match(lookup,/paths\.addAll\(config\.legacyCaptureRelativePaths\)/);assert.match(lookup,/relative_path IN \(/);
+  assert.match(lookup,/QUERY_ARG_MATCH_PENDING, MediaStore\.MATCH_INCLUDE/);
+  assert.match(lookup,/MediaStore\.setIncludePending\(images\)/);
+  assert.match(captures,/if \(!recordedReservation\) throw new IOException/);
   assert.equal((captures.match(/RELATIVE_PATH, config\.captureRelativePath/g)||[]).length,1,'New keeps are published only in the current folder');
   const work=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-legacy-captures-'));t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
   fs.writeFileSync(path.join(work,'LegacyCapturesCheck.java'),`import ai.eliza.plugins.media.OwnedMediaConfig;

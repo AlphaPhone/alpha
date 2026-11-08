@@ -76,6 +76,10 @@ final class AlphaCredentialStore {
  static String readSlotBeforeAttach(Context base,String name)throws Exception{
   return new JsonCredentialSlots(new File(base.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit).read(CloudDeployment.storageSlot(name));
  }
+ /** The raw pre-namespace slot (LegacyCloudRecovery's source), for reset revocation only. */
+ static String readLegacySlotBeforeAttach(Context base,String name)throws Exception{
+  return new JsonCredentialSlots(new File(base.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit).read(name);
+ }
  /** Critical credential changes cannot leave a child process using the old environment. */
  void writeCredentialSlot(String name,String value)throws Exception{if(value==null)throw new IllegalArgumentException("Credential value required");requireCapacity(name,value);mutateSlot(name,null,value,false);}
  void removeCredentialSlot(String name)throws Exception{mutateSlot(name,null,null,false);}
@@ -114,7 +118,7 @@ final class AlphaCredentialStore {
     // Only a replaced or removed Cloud key retires Cloud-bound background state; changing the agent's
     // inference provider does not (background Gmail binds the Cloud credential, not the provider).
     if("cloud:production".equals(name)&&!LocalAgentProviderAdmission.sameCloudCredential(before,value))cloudChange.changed();
-    String committed=LocalAgentProviderAdmission.PROVIDER_SLOT.equals(name)&&value!=null?LocalAgentProviderAdmission.withoutAdmission(value):value;
+    String committed=LocalAgentProviderAdmission.PROVIDER_SLOT.equals(name)?value==null?LocalAgentProviderAdmission.unbindProvider(before):LocalAgentProviderAdmission.withoutAdmission(value):value;
     // Metadata/valid expiry refresh is not replacement; use the same canonical credential
     // comparison that retains provider admission. Provider writes still strip admission.
     boolean authorityChanged=LocalAgentProviderAdmission.PROVIDER_SLOT.equals(name)
@@ -122,7 +126,7 @@ final class AlphaCredentialStore {
     if(authorityChanged)AlphaLocalAgentPlugin.powerAuthorizationChanged();
     invalidateProviderAdmission(name,value);
     if("cloud:production".equals(name)&&authorityChanged)slots.remove(CloudDeployment.storageSlot(GoogleWorkspaceReturn.SLOT));
-    if(value==null)slots.remove(CloudDeployment.storageSlot(name));
+    if(committed==null)slots.remove(CloudDeployment.storageSlot(name));
     else slots.write(CloudDeployment.storageSlot(name),committed);
     return true;
    }
@@ -140,7 +144,7 @@ final class AlphaCredentialStore {
   * Explicit clear still uses removeCredentialSlot and durably blocks legacy recovery. */
  void removeProviderIfPresent()throws Exception{
   String before=recoveryStep(()->slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT)));
-  if(before==null)return;
+  if(before==null||new org.json.JSONObject(before).optBoolean("unbound"))return;
   if(!compareExchangeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,before,null))throw new IllegalStateException("Provider changed");
  }
  /** Opaque cleanup authority for the exact binding and existing intent, never a credential. */
@@ -180,8 +184,9 @@ final class AlphaCredentialStore {
        ||!java.util.Objects.equals(provider,slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT)))
        ||!java.util.Objects.equals(cloud,slots.read(CloudDeployment.storageSlot("cloud:production"))))throw new ProviderChanged();
      AlphaLocalAgentPlugin.powerAuthorizationChanged();
-     slots.remove(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
-     if(slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT))!=null)throw new IllegalStateException("Provider removal unconfirmed");
+     String retained=LocalAgentProviderAdmission.unbindProvider(provider);
+     if(retained==null)slots.remove(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));else slots.write(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT),retained);
+     if(!java.util.Objects.equals(retained,slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT))))throw new IllegalStateException("Provider removal unconfirmed");
      return true;
     }
    });
@@ -189,12 +194,25 @@ final class AlphaCredentialStore {
   catch(Exception failure){if(intent[0]>=0&&AlphaLocalAgentPlugin.currentCredentialIntent()!=intent[0])return false;throw failure;}
  }
  boolean legacyCloudRecoveryEligible()throws Exception{return recoveryStep(()->legacyRecovery().eligible());}
+ /** A saved sign-in that cannot be restored by retrying: {@code expired} or {@code rejected}. */
+ static final class RecoveryRefused extends Exception{
+  final String code;
+  RecoveryRefused(String code){super("Saved sign-in refused");this.code=code;}
+ }
  boolean restoreLegacyCloudCredential()throws Exception{
   LegacyCloudRecovery.Snapshot before=recoveryStep(()->legacyRecovery().snapshot());
   if(before==null)return false;
+  String token;
+  try{token=before.token();}catch(Exception expired){throw new RecoveryRefused("expired");}
   // Never hold lifecycle or vault locks across HTTP. The second critical section rechecks
   // intent/owner, exact old bytes, journal and absent targets before committing.
-  AlphaConnectionPlugin.readCloudIdentity(before.token());
+  try{AlphaConnectionPlugin.readCloudIdentity(token);}
+  catch(LocalAgentProviderAdmission.CloudReadFailure failure){
+   // Cloud refused the key itself; any other failure stays retryable.
+   if(failure.status!=401&&failure.status!=403)throw failure;
+   recoveryStep(()->{legacyRecovery().reject(before);return null;});
+   throw new RecoveryRefused("rejected");
+  }
   return recoveryStep(()->{boolean restored=legacyRecovery().commit(before);if(restored)AlphaLocalAgentPlugin.powerAuthorizationChanged();return restored;});
  }
  void assertCurrent(){assertOwner.run();}

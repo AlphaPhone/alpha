@@ -79,9 +79,20 @@ test('a non-array or unreadable earlier record is kept ahead of the new one',()=
 
 test('product labels never describe an unexpected non-resident connection as on this device',()=>{
  const settings=readFileSync(new URL('../apps/app/src/prototype/settings-adapter.ts',import.meta.url),'utf8');
- assert.match(settings,/testMocksEnabled\?'Remote agent':'Unsupported connection'/);
+ const location=/const runtimeLocation=([^\n]+);/.exec(settings)?.[1];
+ const start=settings.indexOf('          const agentStatus = '),end=settings.indexOf('          if(connection.message)',start);
+ assert.ok(location&&start>=0&&end>start,'the current Settings Agent status row is present');
+ const rows=settings.slice(start,end);
+ const label=(kind,testMocksEnabled=false)=>{
+  const row=new Function('connection','serviceName','testMocksEnabled','Capacitor','info',`const runtimeLocation=${location};${rows};return agentRows[0];`)(
+   {session:{},kind,residentInference:'cloud'},'Eliza Cloud',testMocksEnabled,{isNativePlatform:()=>true},(label,val)=>({label,val}));
+  assert.equal(row.label,'Agent');
+  return row.val;
+ };
+ assert.equal(label('resident'),'Running on this device');
+ for(const kind of ['cloud','local','remote'])assert.equal(label(kind),'Unsupported connection',kind);
+ for(const kind of ['cloud','local','remote'])assert.equal(label(kind,true),'Remote agent',kind);
  assert.match(source,/testMocksEnabled \? \(snapshot\.kind === 'cloud' \? serviceName : snapshot\.kind === 'local' \? 'Local development' : 'Remote agent'\) : 'Unsupported connection'\}/);
- assert.doesNotMatch(settings,/testMocksEnabled\?'Remote agent':'On this device'/);
 });
 
 test('other saved choices are not migrated',()=>{

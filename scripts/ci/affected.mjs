@@ -24,7 +24,9 @@ export function affected(paths) {
       continue;
     }
     result.verify = true;
-    if (/^test\/browser\//.test(path) || path === 'playwright.config.ts' || path === 'scripts/storage-specs.mjs') {
+    if (/^specs\/quint\//.test(path) || /^scripts\/(check-quint|quint-lib)\.mjs$/.test(path)) {
+      // Executable formal models are checked by verify and do not change APK or browser bytes.
+    } else if (/^test\/browser\//.test(path) || path === 'playwright.config.ts' || path === 'scripts/storage-specs.mjs') {
       result.browser = true;
     } else if (/^test\//.test(path)) {
       // Host contract tests run in verify, not in an emulator.
@@ -68,7 +70,7 @@ export function browserPlan(paths, exists = existsSync) {
     browser_total: shards.length,
     browser_development: !narrow || development.length > 0,
     browser_production: !narrow || specs.some(path => productionSpec.test(path)),
-    browser_speech: !narrow || development.some(path => /\/browser-(agent-recording|agent-tts|host-disclosure)\.spec\.ts$/.test(path)),
+    browser_speech: !narrow || development.some(path => /\/(browser-(agent-tts|host-disclosure)|host-reminder-recovery)\.spec\.ts$/.test(path)),
   };
 }
 
@@ -82,7 +84,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   let result;
   let paths = [];
-  if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
+  // Manual and scheduled runs have no diff; they select every lane.
+  if (['workflow_dispatch', 'schedule'].includes(process.env.GITHUB_EVENT_NAME)) {
     result = { verify: true, browser: true, android: true, prepare: true };
   } else {
     try {
@@ -101,5 +104,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   Object.assign(result, browserPlan(paths));
   for (const [key, value] of Object.entries(result)) appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
-  appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Change selection\n\n${paths.length} changed paths. Missing diff or manual run selects all lanes.\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`);
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Change selection\n\n${paths.length} changed paths. Missing diff, manual or scheduled run selects all lanes.\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`);
 }

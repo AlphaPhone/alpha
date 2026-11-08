@@ -1,3 +1,4 @@
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 /*
  * Journey D (docs/mvp-completion-plan.md "D. Two hosted loops with the phone powered off"), browser build.
  *
@@ -40,7 +41,7 @@ const digests=(page:Page)=>page.evaluate(async()=>{
 });
 /**
  * The workflows tile, which in this profile only ever carried the brief. Home draws a card only when
- * it has something to show (docs/daily-overview.md): with no enabled workflow it is absent, and the
+ * it has something to show (docs/ui-refresh-2026-11): with no enabled workflow it is absent, and the
  * brief is the dedicated card below.
  */
 const homeBrief=(page:Page)=>page.locator('button[aria-label^="Open workflows"]');
@@ -60,7 +61,7 @@ async function advanceTo(page:Page,iso:string){const delta=Date.parse(iso)-await
 async function connect(page:Page){
  await page.goto('/?mode=dev');
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Agent connection',exact:true}).click();
+ await openConnectionDiagnostics(page);
  const dialog=page.getByRole('dialog',{name:'Development connections'});
  await dialog.getByRole('textbox',{name:'Scripted reply'}).fill(OUTPUT);
  await dialog.getByRole('button',{name:'Save development reply'}).click();
@@ -76,7 +77,7 @@ async function openDigests(page:Page){
 }
 async function createSchedules(page:Page){
  const panel=await openDigests(page);
- await expect(panel.getByText('Schedules run while this app is open. If scheduled times pass while it is not running, one is recorded below as missed and none is run later.',{exact:true})).toBeVisible();
+ await expect(panel.getByText('Schedules run while this app is open. Missed times don’t run later.',{exact:true})).toBeVisible();
  await panel.getByText('Share a snapshot',{exact:true}).click();
  await panel.getByLabel('Label',{exact:true}).fill('Journey source');
  await panel.getByLabel('Snapshot text',{exact:true}).fill('Reviewed snapshot content');
@@ -88,8 +89,8 @@ async function createSchedules(page:Page){
  for(const [template,label,time] of [['morning','Morning','07:00'],['evening','Evening','19:00']] as const){
   await panel.getByLabel(label,{exact:true}).fill(time);
   await panel.getByRole('button',{name:`Review ${template} schedule`,exact:true}).click();
-  await expect(panel.getByText(new RegExp(`^Enable ${template} digest at ${time} in UTC, every day\\. Source: Journey source\\.`))).toBeVisible();
-  await expect(panel.getByText(/No email delivery or device action is authorized\.$/)).toBeVisible();
+  await expect(panel.getByText(new RegExp(`^Turn on the ${template} digest\\?\\s+Runs daily at ${time} \\(UTC\\) and reads the Journey source snapshot\\.`))).toBeVisible();
+  await expect(panel.getByText(/It can’t send email or act on your phone\. Digests use the configured development reply\.$/)).toBeVisible();
   await panel.getByRole('button',{name:'Confirm',exact:true}).click();
   await expect(panel.getByRole('region',{name:'Digest schedules'}).getByRole('listitem').filter({hasText:`${label} at ${time} (UTC) · Journey source · On`})).toHaveCount(1);
  }

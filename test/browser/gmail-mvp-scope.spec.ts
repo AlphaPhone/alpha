@@ -57,12 +57,10 @@ async function setup(page:Page,options:Options={}){
    initiateGmail:async()=>{throw Error('No live OAuth in fixture');},
   };
   c.getCloudClient=()=>({client,sessionId:'fixture-cloud',credentialId:'fixture'} as any);
-  const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'fixture-owner',sessionId:'fixture-cloud',credentialId:'fixture'}} as any;c.getSnapshot=()=>snapshot;
+  const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'fixture-owner',organizationId:'fixture-org',sessionId:'fixture-cloud',credentialId:'fixture'}} as any;c.getSnapshot=()=>snapshot;
  },options);
 }
 const gm=(page:Page)=>page.evaluate(()=>(window as any).gm);
-// The Google accounts sheet binds to a Cloud organization; the Inbox fixture's account has none until a test needs the sheet.
-const withOrganization=(page:Page)=>page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');const snapshot={...c.getSnapshot(),cloudAccount:{...c.getSnapshot().cloudAccount!,organizationId:'fixture-org'}};c.getSnapshot=()=>snapshot as any;});
 // The Home app grid is the shared mobile shell's (prototype/home-shell.ts); its tile marks unread with this badge.
 const inboxBadge=(page:Page)=>page.getByRole('button',{name:'Inbox',exact:true}).locator('[data-mobile-shell-tile-badge]');
 
@@ -90,7 +88,7 @@ for(const scenario of ['connected','empty','error','restored'] as const)test(`Sh
  await page.evaluate(scenario=>{const f=(window as any).gm;if(scenario==='empty')f.accounts=[];if(scenario==='error')f.accountFailure=true;f.accountGate=null;f.releaseAccounts();},scenario);
  if(scenario==='empty'){
   await expect(page.getByRole('button',{name:'Connect Gmail',exact:true})).toBeVisible();
-  await expect(page.getByText('Shared content is ready for a new email. Connect Gmail to continue; nothing has been sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('Shared content is ready for a new email. Connect Gmail to continue.',{exact:true})).toBeVisible();
   await page.evaluate(()=>{const f=(window as any).gm;f.accounts=f.originalAccounts;window.dispatchEvent(new Event('alpha:google-accounts-changed'));});
  }else if(scenario==='error'){
   await expect(page.getByRole('button',{name:'Retry',exact:true})).toBeVisible();
@@ -191,34 +189,27 @@ for(const [kind,text] of [['offline',/offline/],[409,/revoked or needs authoriza
  expect((await gm(page)).searches.length).toBe(2);
 });
 
-// Settings › Google opens the one Google accounts sheet; its disconnect asks first in the sheet itself.
 test('Settings disconnect asks first and Inbox then shows the honest disconnected state',async({page})=>{
  await setup(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('region',{name:'Inbox',exact:true}).getByText('Subject in-0-a',{exact:true})).toBeVisible();
- await withOrganization(page);await page.getByRole('button',{name:'Back to apps',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Google',exact:true}).click();
- const sheet=page.getByRole('dialog',{name:'Google accounts',exact:true});
- const disconnect=sheet.getByRole('button',{name:'Disconnect Google account owner@example.test',exact:true});await expect(disconnect).toBeVisible();
- await disconnect.click();await sheet.getByRole('button',{name:'Keep connected',exact:true}).click();expect((await gm(page)).disconnects).toEqual([]);
- await disconnect.click();const alert=sheet.getByRole('alert');await expect(alert).toContainText('including Gmail and Calendar');await expect(alert).toContainText('mail and calendar events are not deleted');
- await sheet.getByRole('button',{name:'Confirm disconnect Google account',exact:true}).click();
+ await page.getByRole('button',{name:'Back to apps',exact:true}).click();await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Account',exact:true}).filter({visible:true}).click();await page.getByRole('button',{name:'Google & email',exact:true}).click();
+ const disconnect=page.getByRole('button',{name:'Disconnect Google account owner@example.test',exact:true});await expect(disconnect).toBeVisible();
+ await disconnect.click();await page.getByRole('button',{name:'Keep connected',exact:true}).click();expect((await gm(page)).disconnects).toEqual([]);
+ await disconnect.click();const review=page.getByRole('alert');await expect(review).toContainText('including Gmail and Calendar');await expect(review).toContainText('mail and calendar events are not deleted');await review.getByRole('button',{name:'Confirm disconnect Google account',exact:true}).click();
  await expect(disconnect).toHaveCount(0);expect((await gm(page)).disconnects).toEqual(['grant-0']);
- await page.getByRole('button',{name:'Close Google accounts',exact:true}).click();await expect(sheet).toHaveCount(0);
- await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
- await page.getByRole('button',{name:'Inbox',exact:true}).click();await expect(page.getByText('Subject in-0-a',{exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Close Google accounts',exact:true}).click();await returnToApps(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();await expect(page.getByText('Subject in-0-a',{exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toHaveCount(0);
 });
 
-test('Settings Google disconnects one confirmed account and reports the read-back',async({page})=>{
- await setup(page,{accounts:['first@example.test','second@example.test']});await withOrganization(page);
+test('Settings Connections disconnects one confirmed account and reports the read-back',async({page})=>{
+ await setup(page,{accounts:['first@example.test','second@example.test']});
  await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'Google',exact:true}).click();
- const sheet=page.getByRole('dialog',{name:'Google accounts',exact:true});
- await expect(sheet.getByRole('button',{name:'Disconnect Google account second@example.test',exact:true})).toBeVisible();
- await sheet.getByRole('button',{name:'Disconnect Google account second@example.test',exact:true}).click();
- await expect(sheet.getByRole('alert')).toContainText('Calendar');
- await sheet.getByRole('button',{name:'Confirm disconnect Google account',exact:true}).click();
- await expect(page.getByText(/second@example\.test is disconnected/).first()).toBeVisible();
- await expect(sheet.getByRole('button',{name:'Disconnect Google account second@example.test',exact:true})).toHaveCount(0);
- await expect(sheet.getByRole('button',{name:'Disconnect Google account first@example.test',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Account',exact:true}).filter({visible:true}).click();await page.getByRole('button',{name:'Google & email',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Disconnect Google account second@example.test',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Disconnect Google account second@example.test',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('Calendar');await page.getByRole('button',{name:'Confirm disconnect Google account',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Google accounts',exact:true}).getByText('first@example.test',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Disconnect Google account second@example.test',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Disconnect Google account first@example.test',exact:true})).toBeVisible();
  expect((await gm(page)).disconnects).toEqual(['grant-1']);
 });
 
@@ -311,19 +302,19 @@ test('a failed Load more drops the stale cursor and Retry reloads from the first
 
 test('From switcher returns the email to its account when the other account already has a local draft',async({page})=>{
  await setup(page,{accounts:['first@example.test','second@example.test']});
- await page.evaluate(()=>{const owner=JSON.stringify(['production','fixture-owner','','grant-1']);(window as any).gmSlots['inbox-drafts:v1:'+owner]={version:1,id:'saved-1',revision:'rev-1',owner,to:[],subject:'Second saved',body:'Kept'};});
+ await page.evaluate(()=>{const owner=JSON.stringify(['production','fixture-owner','fixture-org','grant-1']);(window as any).gmSlots['inbox-drafts:v1:'+owner]={version:1,id:'saved-1',revision:'rev-1',owner,to:[],subject:'Second saved',body:'Kept'};});
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Compose',exact:true}).click();
  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Stays subject');
  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Stays body');
  await page.getByRole('button',{name:'From account',exact:true}).click();
- await expect(page.getByText(/already has a local draft, so this email stays with first@example\.test/).first()).toBeVisible();
+ await expect(page.getByText(/already has a draft\. This email stays with first@example\.test/).first()).toBeVisible();
  await expect(page.getByRole('button',{name:'From account',exact:true})).toContainText('From first@example.test');
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Stays subject');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Stays body');
  const f=await gm(page);expect(f.prepares).toEqual([]);
- expect((await page.evaluate(()=>(window as any).gmSlots['inbox-drafts:v1:'+JSON.stringify(['production','fixture-owner','','grant-1'])])).subject).toBe('Second saved');
+ expect((await page.evaluate(()=>(window as any).gmSlots['inbox-drafts:v1:'+JSON.stringify(['production','fixture-owner','fixture-org','grant-1'])])).subject).toBe('Second saved');
 });
 
 for(const saved of [false,true])test(`Share to email opens a new populated draft and preserves ${saved?'saved':'unsaved'} earlier email`,async({page})=>{

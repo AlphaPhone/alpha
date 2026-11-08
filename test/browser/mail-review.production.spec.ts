@@ -1,5 +1,5 @@
 import {seedCompletedAccessSetup} from './flag-off-android';
-import {completeAccessSetup} from './flag-off-android';
+import {completeAccessSetup,expectNoDevelopmentSurface,fenceNetwork} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
@@ -13,7 +13,6 @@ import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 // native encrypted journal, Eliza Cloud, Google or delivery.
 const AGENT = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
 type Wire = { requestId: string; digest: string; proposal: string };
-test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'production', 'Production bundle only'); });
 const button = (page: Page, name: string) => name==='Inbox'
   ? page.getByRole('button', { name, exact: true }).and(page.locator('[data-mobile-shell-tile]'))
   : page.getByRole('button', { name, exact: true });
@@ -170,8 +169,10 @@ async function connected(page: Page) {
 
 test('Android: the send review shows Cc and Bcc, an edit after review is reviewed again, and only the last reviewed request is dispatched, byte for byte', async ({ page }) => {
   test.setTimeout(120_000);
+  const foreign = await fenceNetwork(page);
   await androidWithMailbox(page);
   await connected(page);
+  await expectNoDevelopmentSurface(page);
   await button(page, 'Inbox').click();
   await expect(button(page, 'Synthetic sender, Harbour schedule')).toBeVisible({ timeout: 30_000 });
   await button(page, 'Compose').click();
@@ -212,20 +213,21 @@ test('Android: the send review shows Cc and Bcc, an edit after review is reviewe
   expect(JSON.parse(state.dispatches[0].proposal)).toEqual({ kind: 'send', mode: 'compose', to: ['friend@example.invalid'], cc: ['carol@example.invalid'], bcc: ['audit@example.invalid'], subject: 'Flag-off reviewed send', bodyText: 'Second body', attachments: [] });
   expect(state.sent).toEqual(['Flag-off reviewed send | Second body']);
   expect(state.unexpected).toEqual([]);
+  expect(foreign).toEqual([]);
 });
 
 test('Android: Home withholds the old count until a changed account is reverified', async ({ page }) => {
   test.setTimeout(120_000);
-  // Home draws the mail card only for unread mail (docs/daily-overview.md), so the listed message is unread.
+  const foreign = await fenceNetwork(page);
   await androidWithMailbox(page, true);
   await connected(page);
+  await expectNoDevelopmentSurface(page);
   await button(page, 'Inbox').click();
   await expect(button(page, 'Unread, Synthetic sender, Harbour schedule')).toBeVisible({ timeout: 30_000 });
   await button(page, 'Back to apps').click();
   const card = page.locator('[data-alpha-layer="home"] [data-alpha-home-inbox]');
-  // The read time is in the card's accessible description, not drawn (docs/daily-overview.md).
-  await expect(card).toHaveAttribute('aria-description', /Updated \d{1,2}:\d{2}/);
-  await expect(card).not.toHaveAttribute('aria-description', /Not updated since/);
+  await expect(card).toContainText(/Updated \d{1,2}:\d{2}/);
+  await expect(card).not.toContainText('Not updated since');
   await expect(card).toHaveAccessibleName('Open Inbox: 1 unread email');
   // Hold the new account lookup: the old read cannot become current merely because
   // Settings announced a change. Home now refreshes its authorized source itself.
@@ -243,20 +245,19 @@ test('Android: Home withholds the old count until a changed account is reverifie
   });
   // The current-account background reader clears the old identity while it is
   // unverified, rather than retaining another account's count or timestamp.
-  // With no verified unread mail Home has nothing to show, so the card is gone (docs/daily-overview.md).
   await expect(card).toHaveCount(0);
-  await expect(page.locator('[data-alpha-layer="home"]')).not.toContainText(/Updated|Read \d|unread/);
+  await expect(page.locator('[data-alpha-layer="home"] [data-alpha-home-date]')).toBeVisible();
   expect((await fixture(page)).searches).toBe(searches);
   await page.evaluate(()=>(window as any).releaseHomeAccountRead());
-  // The read time is in the card's accessible description, not drawn (docs/daily-overview.md).
-  await expect(card).toHaveAttribute('aria-description', /Updated \d{1,2}:\d{2}/);
-  await expect(card).not.toHaveAttribute('aria-description', /Not updated since/);
+  await expect(card).toContainText(/Updated \d{1,2}:\d{2}/);
+  await expect(card).not.toContainText('Not updated since');
   await expect(card).toHaveAccessibleName('Open Inbox: 1 unread email');
   await expect.poll(async()=>(await fixture(page)).searches).toBeGreaterThan(searches);
   // The current card still opens the same verified mailbox.
   await card.click();
   await expect(button(page, 'Unread, Synthetic sender, Harbour schedule')).toBeVisible({ timeout: 30_000 });
   expect((await fixture(page)).unexpected).toEqual([]);
+  expect(foreign).toEqual([]);
 });
 
 // UI progress only: this feature fixture does not manufacture OS/provider grants.

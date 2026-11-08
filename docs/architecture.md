@@ -19,11 +19,10 @@ records the migration order and the gaps that prevent a completion claim.
 ### Shell host pieces and their upstream targets
 
 The shared mobile shell (`@elizaos/ui/mobile-shell`) renders Home, its app grid, the view
-registry and navigation from `config/alpha-product.json`. Apps (the installed-app drawer) and
-Home edit mode are Alpha's own (`prototype/apps-drawer.tsx`, `prototype/home-shell.ts`) over the
-shell's launcher join: the shell's All apps drawer lists product views beside installed apps,
-while Alpha lists installed Android apps only (view refresh 2026-11, PLAN section 5). Upstream
-target: a drawer filter and Home edit hooks in the shared shell. App info is
+registry and navigation from `config/alpha-product.json`. Alpha uses the shared installed-app
+grid drawer and supplies its classes, icons, menu state and Home edit mode in `prototype/home-shell.ts`.
+The grid lists installed Android apps only (view refresh 2026-11, PLAN section 5).
+Shared Home edit hooks remain a migration target. App info is
 `AlphaSystemPlugin.openAppInfo` (ElizaSystem under Alpha's plugin class). A view whose registration carries a
 lazy loader renders through `MobileViewHost`; Alpha contributes none today. Notes, live and mock
 alike, is Alpha's own Notes template (`prototype/template.html`, `model.js`): live agent notes are
@@ -68,8 +67,9 @@ canonical HTTPS origins on the default port, without base paths or credentials.
 Alpha retains its own package/client ID and `/alphaphone/auth/callback` return
 path. The configured deployment must register that client, approve its callback
 and publish the app's signing certificate in its web host's assetlinks document.
-`ELIZAOS_APP_LINK_HOST`, when enabled, must equal the configured production web
-host. The staging return uses the configured staging web host in test-mocks
+Android builds declare the configured production web host by default.
+`ELIZAOS_APP_LINK_HOST`, when supplied, must equal that host. APK verification
+requires the exact sign-in return filter. The staging return uses the configured staging web host in test-mocks
 builds only. Changing the backend does not import another product's identity.
 
 Cloud credentials, pending sign-in state, acknowledgments and the local agent's
@@ -119,7 +119,9 @@ remains required before shipping it. The coordinator, native review, authorizati
 recovery surface are the shared `plugin-native-system` `reset` package (`DataReset`,
 `DataResetPlugin`, `DataResetRecoveryActivity`); Alpha registers only its installed names
 (`AlphaReset`, `reset-alpha` marker, `:reset_recovery` process), copy and the bounded
-Cloud key revocation before dispatch (`AlphaDataReset`). Settings and tile system facts
+work before dispatch (`AlphaDataReset`): deleting its own "On this phone" LOCAL calendar,
+which lives in the system Calendar provider and survives the clear (skipped without
+Calendar access), then Cloud key revocation, including a retained pre-namespace key. Settings and tile system facts
 (switch states, transport, battery), the allowlisted Android settings handoffs, the
 launcher's shade request and Android role wording are likewise the shared ElizaSystem
 bridge (`SystemFacts`, `SystemSettingsPages`, `SystemShade`) and
@@ -151,11 +153,15 @@ Gmail attachments and PDF file creation remain available.
 
 Maps, Files and Notes implementations are copied from authenticated upstream
 source into a generated cache outside the submodule. Gradle includes the shared
-password manager directly from the reviewed pin. The secure store and notification ledger use explicit
-reviewed patches in `patches/eliza/native-manifest.json`: admission authenticates the pin,
-patch digest, target before/after hashes and complete staged module inventory. Gradle
-compiles the generated copy under `.eliza/patched-native`, never a modified submodule.
-No source patch is applied during client, worker or resident-runtime builds. Photo edits, capture publication, the opt-in notification mirror and the delivery-receipt
+password manager directly from the reviewed pin. `patches/eliza/native-manifest.json` lists the
+staged native modules and two reviewed patches: `google-browser-sign-in.patch` for
+`packages/auth/android` and `cloud-speech-native.patch` for
+`plugins/plugin-local-inference/native/android`. The other listed modules are copied unchanged.
+Admission authenticates the pin, patch digest, target before/after hashes and complete staged
+module inventory. Gradle compiles the generated copy under `.eliza/patched-native`, never a
+modified submodule. Client builds also add the files of `cloud-speech-client.patch`, listed in
+`patches/eliza/cloud-speech-client-manifest.json`, to the prepared copy of `packages/voice`.
+Worker and resident-runtime builds apply no source patch. Photo edits, capture publication, the opt-in notification mirror and the delivery-receipt
 ledger for Alpha's own workflow and approval notices (`NoticeDelivery`, configured by
 `WorkflowNoticeDelivery`) also use shared native modules. Alpha wrappers retain installed storage names, media paths and Android components.
 The workflow notice tap routes, tap capture, owner fence, approval coordination, journal recovery and poster are the
@@ -211,7 +217,8 @@ providers and stores rather than introducing competing implementations.
 [its provenance file](eliza-app-baseline-provenance.json). There is one product renderer
 in `apps/app`. The remaining `backend` files compose a development host from shared
 runtime packages; the product character, allowed views and proposal-only behavior
-stay here. Product build admission and acceptance campaigns also stay in `scripts`.
+stay here. `backend/native-google-agent-host.ts` is not development code: it is the
+production native Google host (see Build surfaces). Product build admission and acceptance campaigns also stay in `scripts`.
 Moving those directories intact would move product policy into the shared platform.
 
 ## October 18 explicit Cloud QA profile
@@ -275,6 +282,11 @@ on that field, not on `BuildConfig.DEBUG`. The switch is on for `npm run dev`,
 Playwright and explicit test-mocks builds, and off for `npm run build`,
 `npm run android:sync` and `npm run android:build`. No `ALPHA_*` switch or widened
 `ELIZA_` env prefix is used.
+
+The resident runtime carries the native Google host. `scripts/build-native-google-host.ts` bundles
+`backend/native-google-agent-host.ts` and its imports into `google-host.mjs`;
+`scripts/stage-local-agent-runtime.mjs` verifies and stages it with the resident runtime, and
+`AlphaLocalAgentPlugin` loads it through `ELIZA_NATIVE_GOOGLE_HOST_MODULE`.
 
 ## Runtime and permissions
 
@@ -382,13 +394,19 @@ There is no automatic Eliza Cloud website sign-in fallback.
   - For in-app sign-in, Cloud must register `ai.elizaresearch.alphaphone` in
     `ELIZA_MOBILE_APP_AUTH_CLIENTS_JSON`, allowlist the return URL for tenant `elizacloud`, serve
     `/.well-known/assetlinks.json` on `eliza.app` with the release certificate
-    (`scripts/render-assetlinks.mjs`), and deploy the email code routes. The APK must be built with
-    `ELIZAOS_APP_LINK_HOST=eliza.app` so it declares the return App Link. `staging.eliza.app`
+    (`scripts/render-assetlinks.mjs`), and deploy the email code routes. The APK automatically
+    declares the configured return App Link (`eliza.app` by default). `staging.eliza.app`
     serves the same with the debug certificate added.
   - The callback fallback page (`/alphaphone/auth/callback` when Android did not hand the link to
     Alpha) forwards no code: it only brings Alpha forward without parameters.
 - **Test-mocks only:** the staging return host (`src/testMocks/AndroidManifest.xml`), the
   development Cloud bridge's email sign-in, and the diagnostic button.
+
+The production signed-out page opens the method choices directly. Setup keeps form labels,
+verification destinations and actionable errors; it has no explanatory or collapsible sections.
+The shared native transport maps DNS and connection failures to offline, timeout and TLS
+failures to unavailable, and preserves cancellation without exposing exception text or credentials. See [the October 31 diagnosis](login-setup-troubleshooting.md)
+for the installed-build mismatch and the remaining real-service checks.
 
 Third-party web content runs in an isolated native browser surface; it must not
 receive the application's Capacitor bridge. Origin, context revision, consent,
@@ -435,7 +453,8 @@ capability is decided natively by the shared plugin-native-messages `ImageCapabi
 `AlphaImageCapability` feeds with Alpha's build flags and provisioning resource: the release
 launcher build without test mocks, installed from a system partition (`FLAG_SYSTEM`), with the `<package>.aosp_image`
 system feature that `scripts/stage-aosp.mjs` declares in the image product (see the release
-tooling paragraph below). The launcher
+tooling paragraph below). The provisioning resource comes from the overlay `stage-aosp.mjs` writes
+only for `--production`, so a development image never passes the capability. The launcher
 flavor, test mocks, URLs and saved state never establish it. Only then does `MainActivity`
 register `AlphaTelephonyPlugin` (read-only contacts through the shared `ContactsCatalog`, role
 and SIM status, dialer and SMS handoffs, SMS/MMS provider reads and reviewed native sends); the
