@@ -323,6 +323,7 @@ export const CLIENT_FEATURE_PATCHES = [
   ['mapsHiddenFallbackPatch', 'maps-hidden-fallback-client', 'plugins/plugin-maps/src/client/maps-screen.ts'],
   ['launcherObserverPatch', 'launcher-observer-client', 'plugins/plugin-native-system/src/client/launcher.ts'],
   ['launcherLegacyViewKeyPatch', 'launcher-legacy-view-key-client', 'packages/ui/src/mobile-shell/view-registry.ts'],
+  ['launcherDrawerOwnershipPatch', 'launcher-drawer-ownership-client', 'packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx'],
 ];
 
 /** Copy authenticated upstream source outside the immutable vendor checkout. With check, only
