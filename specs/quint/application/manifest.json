@@ -1400,5 +1400,33 @@
       "Current renderer review, selection, resume, pause, recovery and linked event readback. Capture the exact owner/session/scope, control revision and selected source version, and observe draft and preservation fences.",
       "Two owner/session/scope classes, two destinations, eight epochs and seven attempts. Calendar settings modal, Google grant/link orchestration, provider idempotency and remote effects remain separate."
     ]
+  },
+  {
+    "path": "specs/quint/application/GoogleCalendarLinkFlow.qnt",
+    "module": "GoogleCalendarLinkFlow",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "selectResumeAndFinalReadbackTest",
+      "pendingDispatchNeedsChangedReadbackTest",
+      "priorReviewClearsOnlyAtSendTest",
+      "cancellationWhileWaitingMakesNoReadTest",
+      "changedControlRevisionDoesNotResumeTest"
+    ],
+    "invariants": [
+      "ReviewBudget",
+      "NoGrantNoRequest",
+      "ReadbackRequired",
+      "RetainedReview"
+    ],
+    "sources": [
+      "apps/app/src/runtime/google-accounts.ts",
+      "apps/app/src/runtime/agent-calendar.ts"
+    ],
+    "abstractions": [
+      "Current Google Calendar setup from verified grants through bounded review, select, resume and final readback. Preserve exact destination, captured control revision, stable key and most recent readback.",
+      "Two owners and account identities, three destinations, three reviews and at most two writes. AgentCalendar control is a controlled interface in this campaign. Mounted caller and installed provider obligations remain separate."
+    ]
   }
 ]
