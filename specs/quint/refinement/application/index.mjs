@@ -38,6 +38,7 @@ import {checkAgentCalendarEventReturn} from './agent-calendar-event-return.mjs';
 import {checkMapsEventReturn} from './maps-event-return.mjs';
 import {checkAgentCalendarSyncControl} from './agent-calendar-sync-control.mjs';
 import {checkGoogleCalendarLinkFlow} from './google-calendar-link-flow.mjs';
+import {checkGoogleCalendarDisconnect} from './google-calendar-disconnect.mjs';
 import {checkPhotosWindow} from './photos-window.mjs';
 import {checkPhotosTrash} from './photos-trash.mjs';
 
@@ -46,7 +47,7 @@ const adapters = [application, shellNavigation, startupPermissions, assistantCon
   permissionWalkthrough, developmentDevice, permanentVoiceDeletion, developmentHost, filesTree,
   calendarPresentation, draftDispatch, notificationCollection, callbackLanding,
   runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, checkNotesCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
-  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkHomeGesture, checkDrawerInteraction, checkCanonicalCalendarDraft, checkAgentCalendarRefresh, checkAgentCalendarMutation, checkAgentCalendarEventReturn, checkMapsEventReturn, checkAgentCalendarSyncControl, checkGoogleCalendarLinkFlow];
+  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkHomeGesture, checkDrawerInteraction, checkCanonicalCalendarDraft, checkAgentCalendarRefresh, checkAgentCalendarMutation, checkAgentCalendarEventReturn, checkMapsEventReturn, checkAgentCalendarSyncControl, checkGoogleCalendarLinkFlow, checkGoogleCalendarDisconnect];
 
 /** Component traces, with remaining obligations kept explicit for the aggregate report. */
 export async function runApplicationRefinement() {
