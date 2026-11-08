@@ -498,3 +498,25 @@ updates. Store calls are checked at serialized method boundaries with controlled
 SharedPreferences outcomes. Concurrent arbitrary preference writers, real
 filesystem power loss and whole-service stop acceptance remain external to this
 component campaign.
+
+`NativeListenerService` executes the shared `Listener`, `ListeningService`,
+`ListenerStore`, lease and policy together for service creation, capture startup,
+ASR allocation, pause, disable and destruction. Its source regression showed that
+an `AudioRecord.release()` exception escaped destruction before audio callbacks,
+the ASR engine, executor and superclass lifecycle were cleaned up.
+`listener-service-cleanup.patch` now completes those lifecycle steps, retains an
+unreleased record, preserves its durable open marker and refuses a replacement
+capture while that handle remains. A later Stop can retry the release.
+
+Twelve source schedules observe all thirty-one lifecycle fields. They include
+successful and failed release, a failed stop plus failed release, retry, attempted
+replacement, late service start, and ASR allocation completing after destruction.
+Physical recording and confirmed resource release are separate observations. A
+failed stop and release can leave the synthetic AudioRecord active; the model
+preserves that uncertainty while checking callback and executor retirement.
+
+The component uses one explicitly opted-in service instance, a fresh visible
+lease and at most two recording allocations. Notification visibility, AudioRecord
+and ASR allocation are controlled platform ports. Arbitrary recording/playback
+callback interleavings, frame content and installed Android scheduling remain
+separate from these lifecycle traces.
