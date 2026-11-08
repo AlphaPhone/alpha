@@ -508,7 +508,7 @@ the ASR engine, executor and superclass lifecycle were cleaned up.
 unreleased record, preserves its durable open marker and refuses a replacement
 capture while that handle remains. A later Stop can retry the release.
 
-Twelve source schedules observe all thirty-one lifecycle fields. They include
+Thirteen source schedules observe all thirty-one lifecycle fields. They include
 successful and failed release, a failed stop plus failed release, retry, attempted
 replacement, late service start, and ASR allocation completing after destruction.
 Physical recording and confirmed resource release are separate observations. A

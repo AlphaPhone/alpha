@@ -71,6 +71,7 @@ public final class ListenerServiceTraces {
      case "disabled": stop(true,true,true);destroy(true,true);break;
      case "retained-refuses-replacement": stop(false,false,false);start();stop(false,true,true);destroy(true,true);break;
      case "retained-release-retry": stop(false,true,false);stop(false,true,true);destroy(true,true);break;
+     case "repeated-start": stop(false,true,true);start();start();destroy(true,true);break;
      case "reopen": stop(false,true,true);start();destroy(true,true);break;
      case "late-start": destroy(true,true);service.onStartCommand(new android.content.Intent(),0,2);trace.stutter("late start after destruction",observe());break;
      default: throw new AssertionError(mode);
