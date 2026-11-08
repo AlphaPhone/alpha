@@ -51,7 +51,9 @@ public final class PhotoReplaceInstrumentedTest {
   ContentValues published=new ContentValues();published.put("is_pending",0);assertEquals(1,r.update(uri,published,null,null));return uri;
  }
  private String begin(OwnedPhotoEdits edits,ContentResolver r,Uri uri)throws Exception{
-  JSONObject session=edits.begin(Long.toString(ContentUris.parseId(uri)),revision(r,uri));assertTrue(session.getBoolean("canReplace"));return session.getString("token");
+  // begin answers the edit's identity as sessionId (also operationId), the token the plugin passes to replace and result.
+  JSONObject session=edits.begin(Long.toString(ContentUris.parseId(uri)),revision(r,uri));assertTrue(session.getBoolean("canReplace"));
+  String token=session.optString("sessionId",null);assertNotNull("begin names the edit session",token);assertEquals(token,session.optString("operationId",null));return token;
  }
 
  @Test public void aWriteThatFailsPartWayIsUndoneFromTheBackup()throws Exception{
