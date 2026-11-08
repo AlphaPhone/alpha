@@ -133,7 +133,8 @@ test('production Settings refuses Developer routes and preserves real About diag
  assert.equal(m.settingsPage('developer',false),null);
  for(const page of ['about','problems','licenses','models',null,undefined])assert.equal(m.settingsPage(page,false),page);
  assert.match(source,/page: settingsPage\(state\.page, developerTools\)/);
- assert.match(source,/rows: settingsNavigationRows\(group\.rows, developerTools\)/);
+ assert.match(source,/rows: settingsNavigationRows<Bag>\(group\.rows, developerTools\)\.map\(row => \(\{ \.\.\.row, id: row\.id \?\? row\.label \}\)\)/);
+ assert.match(source,/id: `settings:\$\{group\.rows\[0\]\.label\}`/);
 });
 test('one Developer gate: a development server build opened with ?tools=1, never the product',()=>{
  const profile=readFileSync('apps/app/src/browser/dev-profile.ts','utf8');
