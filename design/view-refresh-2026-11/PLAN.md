@@ -183,7 +183,7 @@ before numbers are captured on-device in phase 0. This review doesn't claim them
   60 s. There's no user-visible limit on any route.
 - Recording continues with the screen off, in a foreground service with a notification,
   as Recorder apps do.
-- **Accepted limitation (owner decision 2026-11-07):** transcription runs only while Notes
+- **Accepted limitation (integrator decision 2026-11-07, open to owner override):** transcription runs only while Notes
   is shown. Audio keeps recording with the screen off or Notes hidden; those segments are
   transcribed when Notes is shown again, or at Done (spec notes-view `shown`,
   AsrWhileHidden = FALSE). Native background transcription is not part of this refresh.
@@ -325,7 +325,7 @@ Final:
 - **F2:** No Recents.
 - **A1:** Apps drawer is a 4-column icon grid.
 
-Owner decisions on the review (2026-11-07):
+Integrator decisions during the review (2026-11-07), open to owner override:
 - **Module ceiling 555 → 564.** The refresh adds a net nine Alpha-owned behavioural modules (the
   Files, Photos, Notes and Apps ports), so `config/feature-parity.json` `ceiling.modules`
   is raised once to the real count, 564, against its shrink-only rule. It shrinks again as
