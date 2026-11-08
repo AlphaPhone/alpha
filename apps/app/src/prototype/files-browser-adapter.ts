@@ -17,7 +17,8 @@ import {filesFilterOf, registerFilesAgent, type FilesAgentOperation, type FilesI
  * only a confirmed Empty deletes, and listings reload after an external change.
  */
 type Bag = Record<string, any>;
-type Result = {status: string; message?: string; access?: string};
+/** `legacy`: Android 10 (API 29), where access is the storage permissions, not all-files access. */
+type Result = {status: string; message?: string; access?: string; legacy?: boolean};
 type Outcome = {path: string; status: string; to?: string};
 const storage = registerPlugin<{
   storageState(): Promise<Result & {volumes?: StorageVolume[]}>;
@@ -80,7 +81,7 @@ const EMPTY_BATCH = 500;
 export function installFilesBrowserAdapter(views: Bag, accept: (module: string, result: NativeResult, api: Bag, recent?: false) => Promise<void>, clearSelected: () => void) {
   const module = views.files, render = module.render, back = module.back, leave = module.onLeave;
   let api: Bag | undefined, place: Place = {kind: 'browse'};
-  let access = 'unknown', volumes: StorageVolume[] = [], counts: Partial<Record<FilesCategory, number>> = {}, trashCount = 0;
+  let access = 'unknown', legacy = false, volumes: StorageVolume[] = [], counts: Partial<Record<FilesCategory, number>> = {}, trashCount = 0;
   let entries: StorageEntry[] = [], categoryFolders: CategoryFolder[] | undefined, trashItems: TrashRow[] = [], loaded = false, busy = false, error = '';
   let selection: Set<string> | null = null, filter: FilesFilter | null = null, filterRows: StorageEntry[] = [];
   let dialog: Dialog | undefined, dialogTrigger: HTMLElement | null = null, opened: {path: string; volume?: string; selectionId?: string} | undefined;
@@ -90,7 +91,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
   const modal = createInlineModal(() => { if (!busy) { dialog = undefined; repaint(); } }, () => dialogTrigger?.isConnected ? dialogTrigger : document.querySelector<HTMLElement>('[data-alpha-subview="files-folder"] button[aria-label="Sort and more"]'));
   const toast = (text: string) => { if (text) api?.toast(text); };
   const failed = (value: Result) => {
-    if (value.status === 'denied') { access = value.access || 'denied'; repaint(); return true; }
+    if (value.status === 'denied') { access = value.access || 'denied'; legacy = value.legacy === true; repaint(); return true; }
     if (value.status !== 'ready' && value.status !== 'opened' && value.status !== 'selected') { toast(value.message || 'The operation could not be confirmed.'); return true; }
     return false;
   };
@@ -98,7 +99,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
   async function refreshState() {
     try {
       const state = await storage.storageState();
-      access = state.access || 'denied';
+      access = state.access || 'denied'; legacy = state.legacy === true;
       volumes = [...(state.volumes || [])].sort((a, b) => Number(b.primary) - Number(a.primary));
     } catch { access = 'unavailable'; volumes = []; }
   }
@@ -391,7 +392,7 @@ export function installFilesBrowserAdapter(views: Bag, accept: (module: string, 
     out.notSearching = true; out.searching = false; out.hasQuery = false; out.noQuery = true; out.results = []; out.recent = []; out.noRecent = false; out.locs = [];
     out.top = place.kind === 'browse';
     out.browse = {
-      ready: granted && !filter, denied: access === 'denied', unavailable: access === 'unavailable' || access === 'unsupported',
+      ready: granted && !filter, denied: access === 'denied', deniedLabel: legacy ? 'Allow storage access' : 'Allow all files access', unavailable: access === 'unavailable' || access === 'unsupported',
       grant: async () => { try { const value = await storage.storageRequestAccess(); access = value.access || access; } catch { /* Read back below. */ } void reload(); },
       cats: CATEGORIES.map(({id, label}) => ({name: label, d: ICONS[id], count: counts[id] === undefined ? '' : String(counts[id]), label, go: () => go({kind: 'category', category: id})})),
       vols: volumes.map(volume => ({name: volume.name, free: formatFree(volume), barW: volume.total > 0 ? Math.round(100 * (volume.total - volume.free) / volume.total) + '%' : '0%', hasBar: volume.total > 0, d: ICONS.storage, label: volume.name, go: () => go({kind: 'folder', path: '', ...onVolume(volume.primary ? undefined : volume.id)})})),

@@ -67,3 +67,29 @@ test('on API 29 a refusal names storage access, not all-files access, which that
   assert.doesNotMatch(adapter, /needs all-files access/);
   assert.match(readFileSync('docs/prototype-camera-integration.md', 'utf8'), /replaces that maximum with\nAPI 29/);
 });
+
+test('on API 29 the Files access banner names storage access, the permission that release requests', async () => {
+  const {stripTypeScriptTypes} = await import('node:module');
+  const vm = await import('node:vm');
+  const strip = path => stripTypeScriptTypes(readFileSync(path, 'utf8').replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, ''), {mode: 'transform'});
+  const source = strip('apps/app/src/prototype/files-browser-adapter.ts'), rules = strip('apps/app/src/runtime/files-storage.ts');
+  const banner = async legacy => {
+    const state = {}, api = {ic: {}, get: () => state, set: patch => Object.assign(state, patch), isActive: () => true, toast() {}};
+    const storage = {storageState: async () => ({status: 'ready', access: 'denied', ...(legacy === undefined ? {} : {legacy}), volumes: []}), storageCategory: async () => ({status: 'denied', access: 'denied', legacy}), storageTrashList: async () => ({status: 'denied', access: 'denied', legacy}), storageWatch: async () => ({status: 'ready'}), storageUnwatch: async () => ({status: 'ready'}), addListener: async () => ({remove: async () => {}})};
+    const view = {render: () => ({}), onLeave() {}};
+    const ctx = vm.createContext({setTimeout, clearTimeout, queueMicrotask, window: new EventTarget(), CustomEvent: class {}, HTMLElement: class {}, document: Object.assign(new EventTarget(), {hidden: false}), registerPlugin: () => storage, DailyApps: {}, createInlineModal: () => ({}), registerFilesAgent() {}});
+    vm.runInContext(rules + ';' + source + ';globalThis.install=installFilesBrowserAdapter', ctx);
+    ctx.install({files: view}, async () => {}, () => {});
+    view.render(state, api);
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    const browse = view.render(state, api).browse;
+    assert.equal(browse.denied, true);
+    return browse.deniedLabel;
+  };
+  assert.equal(await banner(true), 'Allow storage access');
+  assert.equal(await banner(false), 'Allow all files access');
+  assert.equal(await banner(undefined), 'Allow all files access', 'an older native answer keeps the API 30+ wording');
+  assert.match(readFileSync('apps/app/src/prototype/template.html', 'utf8'), /<span style="flex-grow: 1; font-size: 15px">\{\{files\.browse\.deniedLabel\}\}<\/span>/);
+  assert.match(plugin, /out\.put\("access",StorageCatalog\.access\(getContext\(\)\)\);out\.put\("legacy",StorageCatalog\.legacy\(\)\);return out;\}/, 'a refusal says which access applies');
+  assert.match(plugin, /out\.put\("access",access\);out\.put\("legacy",StorageCatalog\.legacy\(\)\);/, 'storageState says which access applies');
+});

@@ -38,7 +38,7 @@ public class AlphaFilesPlugin extends Plugin {
  private final android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());
  private final Runnable changed=()->notifyListeners("storageChanged",new JSObject());
  private interface StorageWork {JSObject run(StorageBrowser browser)throws Exception;}
- private JSObject denied(){JSObject out=result("denied",StorageCatalog.legacy()?"Allow storage access to browse files.":"Allow all-files access to browse storage.");out.put("access",StorageCatalog.access(getContext()));return out;}
+ private JSObject denied(){JSObject out=result("denied",StorageCatalog.legacy()?"Allow storage access to browse files.":"Allow all-files access to browse storage.");out.put("access",StorageCatalog.access(getContext()));out.put("legacy",StorageCatalog.legacy());return out;}
  private void storage(PluginCall call,StorageWork task){PluginWorkers.submit(storageWorker,()->{
   try{
    if(!"granted".equals(StorageCatalog.access(getContext()))){call.resolve(denied());return;}
@@ -65,7 +65,7 @@ public class AlphaFilesPlugin extends Plugin {
   if(!files.isEmpty())android.media.MediaScannerConnection.scanFile(getContext(),files.toArray(new String[0]),null,null);
  }
  @PluginMethod public void storageState(PluginCall call){PluginWorkers.submit(storageWorker,()->{
-  JSObject out=new JSObject();out.put("status","ready");String access=StorageCatalog.access(getContext());out.put("access",access);JSArray volumes=new JSArray();
+  JSObject out=new JSObject();out.put("status","ready");String access=StorageCatalog.access(getContext());out.put("access",access);out.put("legacy",StorageCatalog.legacy());JSArray volumes=new JSArray();
   if("granted".equals(access))for(StorageCatalog.Volume v:StorageCatalog.volumes(getContext()))volumes.put(StorageCatalog.describe(v));
   out.put("volumes",volumes);call.resolve(out);
  },()->call.resolve(result("unavailable","Files closed.")));}
