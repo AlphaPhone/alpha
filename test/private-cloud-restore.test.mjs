@@ -8,12 +8,12 @@ const section=(a,b)=>{const start=source.indexOf(a),end=source.indexOf(b,start+a
 const initialize=section('  async initialize() {','  /** Test mocks and the flag-off web preview only:');
 const work=section('async function work(', '/** Start (or restart) the resident.');
 const helper=source.includes('async function restoreOptionalBrowserCloudAccount(')?section('async function restoreOptionalBrowserCloudAccount(', 'export const connectionController ='):'';
-const code=stripTypeScriptTypes(work+'\n'+helper+'\nglobalThis.controller={'+initialize+'};',{mode:'transform'});
+const code=stripTypeScriptTypes(section('let operationSettled:', 'let startup:')+'\n'+work+'\n'+helper+'\nglobalThis.controller={'+initialize+'};',{mode:'transform'});
 const credential={credentialId:'fixture-id',credentialReference:'browser-cloud-reference:fixture'};
 function fixture({values=[credential,credential],choice={kind:'resident'},attachFails=false,android=false,profile=false,cloudResident=false,accepts=true,search='',readChoice,testMocks=false}={}){
  const calls=[],history={messages:[{id:'retained',text:'Exact retained history'}]};let context;
  const state={open:false,error:'',busy:false,history,cloudAccount:null};
- context=vm.createContext({state,epoch:1,startup:null,operation:null,active:null,residentStartInBackground:false,privateLocalPreviewEnabled:true,
+ context=vm.createContext({state,epoch:1,startup:null,operation:null,signInReadinessOwner:null,active:null,residentStartInBackground:false,privateLocalPreviewEnabled:true,
   browserDevProfile:profile,browserCloudResidentEnabled:cloudResident,isAndroid:android,testMocksEnabled:testMocks,
   update:patch=>Object.assign(state,patch),AbortController,DOMException,URLSearchParams,location:{search},residentRecoveryReason:()=>undefined,errorMessage:error=>error.message,expired:()=>false,
   runQueuedResidentRebind(){},runQueuedSignInReturn(){},residentCloudFlow:()=>false,settleResidentAfterStartup(){},selection:()=>context.choice,choice,
