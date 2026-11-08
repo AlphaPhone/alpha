@@ -1,13 +1,13 @@
 --- a/packages/core/src/services/task.ts
 +++ b/packages/core/src/services/task.ts
-@@ -78,2 +78,2 @@
+@@ -199,2 +199,2 @@
 -	/** Tracks task IDs currently being executed to prevent overlapping runs. WHY: blocking tasks must not run again until current run finishes. */
 -	private executingTasks: Set<string> = new Set();
-+	/** Counts overlapping manual executions so blocking scheduler runs wait for every owner to finish. */
-+	private executingTasks: Map<string, number> = new Map();
-@@ -219,0 +220 @@
++	/** Count overlapping invocations so exclusivity sees every active owner. */
++	private executingTasks = new Map<string, number>();
+@@ -257,0 +258 @@
 +		if (this.stopped) return;
-@@ -794,0 +796,9 @@
+@@ -831,0 +833,15 @@
 +	private assertAcceptingExecution(): void {
 +		if (this.stopped) {
 +			throw new ElizaError("Task service has stopped accepting execution", {
@@ -17,19 +17,31 @@
 +		}
 +	}
 +
-@@ -795,0 +806 @@
++	private releaseExecution(taskId: string): void {
++		const remaining = this.executingTasks.get(taskId)! - 1;
++		if (remaining > 0) this.executingTasks.set(taskId, remaining);
++		else this.executingTasks.delete(taskId);
++	}
++
+@@ -842,0 +859 @@
 +		this.assertAcceptingExecution();
-@@ -830 +841 @@
+@@ -886 +903 @@
 -		this.executingTasks.add(task.id);
 +		this.executingTasks.set(task.id, (this.executingTasks.get(task.id) ?? 0) + 1);
-@@ -1042 +1053,3 @@
+@@ -895 +912 @@
+-				this.executingTasks.delete(task.id);
++				this.releaseExecution(task.id);
+@@ -898,2 +915,2 @@
+-			if (!current) {
+-				this.executingTasks.delete(task.id);
++			if (!current || this.stopped) {
++				this.releaseExecution(task.id);
+@@ -1114 +1131 @@
 -			this.executingTasks.delete(task.id);
-+			const remaining = this.executingTasks.get(task.id)! - 1;
-+			if (remaining > 0) this.executingTasks.set(task.id, remaining);
-+			else this.executingTasks.delete(task.id);
-@@ -1071,0 +1085 @@
++			this.releaseExecution(task.id);
+@@ -1148,0 +1166 @@
 +		if (this.stopped) return;
-@@ -1074,0 +1089 @@
+@@ -1151,0 +1170 @@
 +		if (this.stopped) return;
-@@ -1102,0 +1118 @@
+@@ -1179,0 +1199 @@
 +		this.assertAcceptingExecution();

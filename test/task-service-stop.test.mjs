@@ -17,19 +17,19 @@ function fixture(TaskService, holdWorker = false) {
   const task = {id: '00000000-0000-4000-8000-000000000002', name: 'CONTROLLED_WORKER', tags: ['queue', 'repeat'], metadata: {updatedAt: 0, updateInterval: 1}};
   const worker = {async execute() { state.calls++; entered.resolve(); if (holdWorker) await released.promise; return {preserveTask: true}; }};
   const runtime = {agentId: '00000000-0000-4000-8000-000000000001',
-    logger: {debug() {}, info() {}, warn() {}, error() {}}, reportError() {}, getService() { return null; },
+    logger: {debug() {}, info() {}, warn() {}, error() {}}, reportError() {}, getSetting() {}, getService() { return null; },
     async getTask() { return task; }, async getTasks() { state.queries++; return [task]; }, getTaskWorker() { return worker; }};
   const service = new TaskService(runtime, {now: () => 100000, setInterval(callback) { intervals.add(callback); return callback; }, clearInterval(callback) { intervals.delete(callback); }});
   return {service, runtime, state, task, intervals, entered, released};
 }
 
-test('patched stop refuses manual execution and timer resurrection while original source reproduces both', async () => {
+test('patched stop refuses manual execution and leaves the stopped timer mode retired', async () => {
   const [Original, Patched] = await classes;
   const old = fixture(Original); await old.service.stop(); await old.service.executeTaskById(old.task.id); old.service.startTimer();
-  assert.equal(old.state.calls, 1); assert.equal(old.intervals.size, 1); await old.service.stop();
+  assert.equal(old.state.calls, 1); assert.equal(old.intervals.size, 0); assert.equal(old.service.localTimer, true); await old.service.stop();
   const current = fixture(Patched); await current.service.stop();
   await assert.rejects(current.service.executeTaskById(current.task.id), error => error.code === 'TASK_SERVICE_STOPPED');
-  current.service.startTimer(); assert.equal(current.state.calls, 0); assert.equal(current.intervals.size, 0);
+  current.service.startTimer(); assert.equal(current.state.calls, 0); assert.equal(current.intervals.size, 0); assert.equal(current.service.localTimer, false);
 });
 
 test('stop while the public task read is held fences later worker admission', async () => {
@@ -64,6 +64,7 @@ test('every concurrent manual owner retains the blocking marker until its own co
     for (const firstIndex of [0, 1]) {
       for (const failFirst of [false, true]) {
         const f = fixture(TaskService), finish = [], pending = [];
+        f.task.metadata.blocking = false;
         const reached = async count => {
           for (let n=0; n<100 && finish.length<count; n++) await new Promise(resolve=>setImmediate(resolve));
           assert.equal(finish.length, count);
@@ -83,6 +84,7 @@ test('every concurrent manual owner retains the blocking marker until its own co
           else finish[firstIndex].resolve();
           await pending[firstIndex];
           assert.equal((await f.service.getTaskStatus(f.task.id)).executing, corrected);
+          f.task.metadata.blocking = true;
           const tick = f.service.runDueTasks(); pending.push(tick.then(() => null, error => error));
           for (let n=0; n<10; n++) await new Promise(resolve=>setImmediate(resolve));
           assert.equal(f.state.calls, corrected ? 2 : 3);
@@ -123,4 +125,37 @@ test('nonblocking scheduled execution retains every manual and automatic owner',
     assert.equal((await f.service.getTaskStatus(f.task.id)).executing, true);
     finish[0](); await pending[0]; assert.equal((await f.service.getTaskStatus(f.task.id)).executing, false);
   } finally { for (const release of finish) release(); await Promise.all(pending); await f.service.stop(); }
+});
+
+
+test('a one-shot reread held across stop drains without entering its worker', async () => {
+  const [Original, Patched] = await classes;
+  for (const [TaskService, expectedCalls] of [[Original, 1], [Patched, 0]]) {
+    const f = fixture(TaskService), read = deferred(), entered = deferred();
+    f.task.tags = ['queue'];
+    let reads = 0;
+    f.runtime.getTask = async () => {
+      if (++reads === 2) { entered.resolve(); await read.promise; }
+      return f.task;
+    };
+    const running = f.service.executeTaskById(f.task.id);
+    await entered.promise;
+    const stop = f.service.stop();
+    read.resolve();
+    await Promise.all([running, stop]);
+    assert.equal(f.state.calls, expectedCalls);
+    assert.equal(f.service.executingTasks.size, 0);
+  }
+});
+
+test('blocking repeats exclude second manual invocation in both source versions', async () => {
+  for (const TaskService of await classes) {
+    const f = fixture(TaskService, true);
+    const first = f.service.executeTaskById(f.task.id);
+    try {
+      await f.entered.promise;
+      await f.service.executeTaskById(f.task.id);
+      assert.equal(f.state.calls, 1);
+    } finally { f.released.resolve(); await first; await f.service.stop(); }
+  }
 });

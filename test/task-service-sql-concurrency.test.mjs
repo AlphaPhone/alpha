@@ -19,7 +19,7 @@ test('actual runtime and SQL preserve overlapping execution ownership through co
           await new Promise((resolve, reject) => gates.push({resolve, reject})); return {preserveTask: true};
         }});
         const id = await fixture.runtime.createTask({name: 'SQL_OWNERSHIP', tags: ['queue','repeat'],
-          metadata: {updatedAt: 0, updateInterval: 1, blocking: true}});
+          metadata: {updatedAt: 0, updateInterval: 1, blocking: false}});
         service = new TaskService(fixture.runtime, {now: () => 100000, setInterval: () => 0, clearInterval() {}});
         try {
           for (let i=0; i<2; i++) {
@@ -32,6 +32,7 @@ test('actual runtime and SQL preserve overlapping execution ownership through co
           assert.equal(Boolean(first), failFirst);
           assert.equal((await service.getTaskStatus(id)).executing, true);
           assert.equal(service.executingTasks.get(id), 1);
+          await fixture.runtime.patchTaskMetadata(id, {set: {blocking: true}, unset: []});
           await service.runDueTasks(); assert.equal(gates.length, 2);
           let stopped = false; const stop = service.stop().then(() => { stopped = true; });
           await Promise.resolve(); assert.equal(stopped, false);

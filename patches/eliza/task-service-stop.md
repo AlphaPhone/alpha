@@ -1,19 +1,22 @@
 # TaskService stop admission
 
 The reviewed patch applies to `packages/core/src/services/task.ts` at upstream commit
-`475a8d59dc1811c2cde093613519906a5a3f6457`. Its target is declared in `core-state-manifest.json` alongside the independently
+`4787d51a142c63c98371c832997184c53f7218d3`. Its target is declared in `core-state-manifest.json` alongside the independently
 reviewed Notes replay-identity patch. The source checkout remains the original upstream tree.
 
-The original implementation permits both a new manual worker invocation and a new
-poll timer after `stop()`. It also lets a manual invocation that is awaiting its
-task read enter the worker after stop. The patch closes these admission paths.
-Already admitted work still drains through the existing promise tracking. The original per-task Set also loses its marker when the first of two overlapping manual executions finishes. A counted map now retains that marker until the final execution settles, preserving both truthful status and automatic blocking-run suppression.
+Upstream now arms a one-shot timer and enforces exclusivity for blocking repeats
+and one-shots across manual, automatic and immediate-resume execution. The
+patch preserves that policy and its timing. It guards stopped-instance admission
+and retains every owner when nonblocking invocations overlap.
 
-- `startTimer()` returns when stopped.
+- `startTimer()` returns before selecting local or daemon mode when stopped.
 - `executeTaskById()` rejects new admission with `TASK_SERVICE_STOPPED`.
 - The shared `executeTask()` entry checks again after asynchronous task reads.
+- A one-shot with a held existence reread drains without entering its worker if
+  stop retired the service while the read was pending.
 - `runDueTasks()` returns when stopped, including after waiting for an older tick.
-- Each admitted execution increments its task count and releases only its own count in `finally`.
+- Each invocation releases only its own count. Status remains truthful during
+  nonblocking overlap, and changing the row to blocking preserves exclusivity.
 
 The patch does not change task metadata mutation APIs. A stopped instance can
 still receive a pause or resume metadata operation. Immediate resume reaches the
@@ -27,8 +30,8 @@ remain that worker's responsibility.
 | Android mobile bundle | `build-mobile-agent.mjs` installs the shared Bun plugin and requires its transform in `alpha-mobile-build.json`. Staging and APK verification bind the patch inputs and before/after hashes. |
 | Source-mode Cloud, local, voice and reviewed-workflow hosts | Each launcher supplies the owned source path and preloads `core-state-preload.mjs`. The preload authenticates the original source tree before installing the same transform. |
 | Development backend | `backend/loader.ts` preserves pinned-source admission, installs the plugin, and records its transform with the source map. |
-| Native Google host artifact | The builder installs the plugin and binds the core patch record. Its current 35-input graph does not select TaskService. |
-| Workflow dependency artifact | The actual upstream producer was observed with Bun 1.4.2. Its 1123-input graph selects no `packages/core/src` module. It needs no TaskService transform. |
+| Native Google host artifact | The builder installs the plugin and binds the core patch record. The 475a 35-input graph did not select TaskService. Current graph verification is separate. |
+| Workflow dependency artifact | The actual upstream producer was observed with Bun 1.4.2. The 475a 1123-input graph selected no `packages/core/src` module. Current graph verification is separate. |
 | Independently frozen combined host | Matching revision and all reviewed target preimages receive the transforms. The preload rechecks the host's frozen source manifest, including reviewed custom files. Other revisions/preimages retain their existing independent version contract and report `coreState.applied=false`. They require a separate patch review. |
 | Quint TaskService compiler | Uses the same byte map. The actual-class stop regressions already exercise the shared build plugin. The broader SQL-backed lifecycle refinement is a separate work item. The counted-ownership SQL regression already executes the actual runtime, migrations and adapter. |
 

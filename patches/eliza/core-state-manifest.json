@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "baseCommit": "475a8d59dc1811c2cde093613519906a5a3f6457",
+  "baseCommit": "4787d51a142c63c98371c832997184c53f7218d3",
   "patches": [
     {
       "file": "task-service-stop.patch",
-      "sha256": "7a53ab6062db8ff795d82c14fa79ec957d7e2e6907d4e80fc0ff86497f13c116",
+      "sha256": "d3b80ffb0dad32e3a17b50dbbb0d4c0dfb3f60b0f2a35f577be4612aa2f9db1e",
       "targets": [
         {
           "path": "packages/core/src/services/task.ts",
-          "beforeSha256": "c73a20cdc504f7f7a935078d7d7ad3ae6e368b6d90a1bbe580545c8421e9f4f7",
-          "afterSha256": "036ab75df583964347f039018ef8a12018ba9834ef654ba7cab2397e96d1a3e3"
+          "beforeSha256": "c72514809e0f6a3a5c592ed3d0d0015319ca4dbfb8fd9e949fa06c1982c35fc3",
+          "afterSha256": "24b1b783a903cb4c8d284dd3f375f18a3fe720c65f0430bada7cebb236cf1f3f"
         }
       ]
     },
@@ -41,12 +41,12 @@
     },
     {
       "file": "turn-controller-isolation.patch",
-      "sha256": "4182d0c97fc57dc790836d3e8201713d3bdb11a4cf06eae47d4fe5c626f394a4",
+      "sha256": "d587459e0123599d17f886fcc855eb90ce7ec20b286a42ce47a02a1ab1bd110b",
       "targets": [
         {
           "path": "packages/core/src/runtime/turn-controller.ts",
-          "beforeSha256": "3296758ba771cdf9499ef94b5c28f1d7e6227ef300a5fb5ae29051ff9c11fd4f",
-          "afterSha256": "7c526c20b6bd15dd7a1c7f40bdde37697da7e058228288597dbf85b6cc6257d3"
+          "beforeSha256": "c04907565ac8c7f483b2e4c6db29d6bf007f85f7a15fdae447bd2c1f82fed46b",
+          "afterSha256": "a69049036ad8848609ac9113090dd16dd45517a5ab03d62d506e1c17156f8111"
         }
       ]
     }
