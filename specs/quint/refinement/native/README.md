@@ -196,3 +196,18 @@ source race fixed by `indicator-provider-generation.patch`. Native staging
 includes the exact shared Sense module and the product Gradle wrapper consumes
 that staged source. The full `ListeningService` reaction to refresh remains a
 separate coordinator obligation.
+
+### Listener consent and durable settings
+
+`listener-store.mjs` compiles the actual shared store, epoch and crash breaker.
+`StorePorts` implements the external preferences API with independently observed
+memory and disk maps. Its four commit outcomes preserve successful persistence,
+failed disk acknowledgement, an early exception and a lost acknowledgement after
+durable persistence. `ListenerStoreTraces` observes source fields and getters;
+a fresh JVM reads the disk file for each restart checkpoint. The retained history
+includes eight entries and malformed input normalized by the actual decoder.
+
+The settings coordinator is bounded to serialized source calls. Android's real
+SharedPreferences implementation, stopService acceptance, unrestricted concurrent
+writers and the service's reaction remain explicit obligations. This campaign
+adds no runtime source patch.
