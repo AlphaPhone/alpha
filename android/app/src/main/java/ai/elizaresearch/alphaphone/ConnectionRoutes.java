@@ -27,6 +27,11 @@ final class ConnectionRoutes {
  static boolean externalHost(String scheme,String host,int port,boolean testMocks){return POLICY.externalHost(scheme,host,port,testMocks);}
  static boolean externalCliLogin(String host,String path,boolean testMocks){return POLICY.externalCliLogin(host,path,testMocks);}
  static boolean admittedHeader(String name,boolean testMocks){return CloudConnectionPolicy.admittedHeader(name,testMocks);}
+ /**
+  * The X-Eliza-Device-Capabilities value is bounded by syntax only, as on the resident path: the agent validates each
+  * value (device-action-routes) and the header carries no authority, so a renderer capability is never refused here.
+  */
+ static boolean deviceCapabilities(String value){return value!=null&&value.length()<=2048&&value.matches("[a-z0-9.-]{1,64}(,[a-z0-9.-]{1,64}){0,31}");}
  static boolean mapsRequestIdentity(String name,String value,String path,String method){return CloudConnectionPolicy.mapsRequestIdentity(name,value,path,method);}
  static boolean cloudSelfRevocation(String scheme,String host,int port,String rawPath,String rawQuery,String method,boolean hasBody,boolean testMocks){return POLICY.cloudSelfRevocation(scheme,host,port,rawPath,rawQuery,method,hasBody,testMocks);}
 }

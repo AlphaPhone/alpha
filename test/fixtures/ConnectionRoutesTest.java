@@ -17,6 +17,10 @@ public final class ConnectionRoutesTest {
   for(String name:new String[]{"x-eliza-device-id","x-eliza-device-key","x-eliza-device-capabilities","x-eliza-phone-protocol"}){check(!ConnectionRoutes.admittedHeader(name,false),"flag-off refuses "+name);check(ConnectionRoutes.admittedHeader(name,true),"test mocks keep "+name);}
   for(String name:new String[]{"cookie","x-eliza-agent-id","Authorization","X-Eliza-Phone-Protocol","",null})check(!ConnectionRoutes.admittedHeader(name,true)&&!ConnectionRoutes.admittedHeader(name,false),"header "+name);
 
+  // The capability header is bounded by syntax only; the agent validates each value.
+  for(String value:new String[]{"calendar.local-event.v1,notes.local-record.v1","camera.capture-photo.v1","calendar.local-event.v1,calendar.availability-read.v1,sms.send.v1,calendar.named-read.v1"})check(ConnectionRoutes.deviceCapabilities(value),"capabilities "+value);
+  check(ConnectionRoutes.deviceCapabilities(String.join(",",java.util.Collections.nCopies(32,"a.v1"))),"32 capabilities");
+  for(String value:new String[]{null,"","a.v1,","a.v1, b.v1","A.v1","a.v1\r\nx: y","a_v1","a".repeat(65),String.join(",",java.util.Collections.nCopies(33,"a.v1"))})check(!ConnectionRoutes.deviceCapabilities(value),"capabilities refused "+value);
   for(String path:new String[]{"geocode","reverse","places/search","places/details","routes"})check(ConnectionRoutes.mapsRequestIdentity("idempotency-key","request_1","/api/v1/maps/"+path,"POST"),"Maps request identity "+path);
   for(String path:new String[]{"/api/v1/subscription/redeem","/api/v1/maps/capabilities","/api/v1/maps/routes/","//api/v1/maps/routes",null})check(!ConnectionRoutes.mapsRequestIdentity("idempotency-key","request_1",path,"POST"),"identity route refused "+path);
   for(String value:new String[]{"","bad id","query=location","line\r\nbreak",null,"x".repeat(129)})check(!ConnectionRoutes.mapsRequestIdentity("idempotency-key",value,"/api/v1/maps/routes","POST"),"invalid Maps identity");
