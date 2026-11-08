@@ -26,6 +26,7 @@ import {checkFilesBrowserController} from './files-browser-coordinator.mjs';
 import {checkFilesFilter} from './files-filter.mjs';
 import {checkGoogleConsentAdmission} from './google-consent-admission.mjs';
 import {checkHomeFailureNotice} from './home-failure-notice.mjs';
+import {checkLauncherOwnership} from './launcher-ownership.mjs';
 import {checkPhotosWindow} from './photos-window.mjs';
 import {checkPhotosTrash} from './photos-trash.mjs';
 
@@ -34,7 +35,7 @@ const adapters = [application, shellNavigation, startupPermissions, assistantCon
   permissionWalkthrough, developmentDevice, permanentVoiceDeletion, developmentHost, filesTree,
   calendarPresentation, draftDispatch, notificationCollection, callbackLanding,
   runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, checkNotesCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
-  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice];
+  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership];
 
 /** Component traces, with remaining obligations kept explicit for the aggregate report. */
 export async function runApplicationRefinement() {
