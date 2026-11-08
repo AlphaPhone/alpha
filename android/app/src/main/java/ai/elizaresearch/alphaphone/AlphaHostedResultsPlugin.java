@@ -18,6 +18,9 @@ public class AlphaHostedResultsPlugin extends Plugin {
  static final String CHANNEL="alpha-hosted-results", ACTION="ai.elizaresearch.alphaphone.OPEN_HOSTED_RESULT", PREFIX="alpha-hosted-result:";
  static final String ASK_ACTION="ai.elizaresearch.alphaphone.ASK_HOSTED_RESULT";
  private final ExecutorService io=Executors.newSingleThreadExecutor();
+ // A tap whose capture failed. MainActivity keeps its own intent for sign-in return, so the tap
+ // is held here and retried on resume and when the page asks for it.
+ private volatile Intent retained,retainedRenewal;
  // Capacitor can deliver an already queued bridge call after Activity destruction.
  // Reject it without recreating a worker or crashing the bridge HandlerThread.
  private void submit(PluginCall call,Runnable task){
@@ -73,20 +76,36 @@ public class AlphaHostedResultsPlugin extends Plugin {
   Long expiresAt=call.getLong("expiresAt");if(expiresAt==null)throw new IllegalArgumentException();
   String status=WorkflowNoticeTapsFactory.delivery(getContext()).resumeApproval(WorkflowNoticeTapsFactory.create(getContext()),call.getString("id"),call.getString("bindingHash"),call.getObject("route"),expiresAt,System.currentTimeMillis());JSObject out=new JSObject();out.put("status",status);call.resolve(out);
  }catch(Exception error){call.reject("Approval notice remains suspended until it can be revalidated");}});}
- @PluginMethod public void pendingSourceRenewal(PluginCall call){submit(call,()->{try{sourceForeground();call.resolve(new JSObject(SourceRenewalHost.get(getContext()).pending(System.currentTimeMillis()).toString()));}catch(Exception unavailable){call.reject("Renewal source unavailable");}});}
+ @PluginMethod public void pendingSourceRenewal(PluginCall call){submit(call,()->{try{sourceForeground();Intent again=retainedRenewal;if(again!=null)captureRenewalNow(again,false);call.resolve(new JSObject(SourceRenewalHost.get(getContext()).pending(System.currentTimeMillis()).toString()));}catch(Exception unavailable){call.reject("Renewal source unavailable");}});}
  @PluginMethod public void settleSourceRenewal(PluginCall call){submit(call,()->{try{sourceForeground();SourceRenewalHost.get(getContext()).settle(call.getString("token",""),Boolean.TRUE.equals(call.getBoolean("discard",false)),System.currentTimeMillis());call.resolve();}catch(Exception stale){call.reject("Renewal source changed");}});}
- private void captureRenewal(Intent intent){if(intent==null||(!HostedNoticePoster.RENEW_ACTION.equals(intent.getAction())&&!HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction()))||intent.getData()==null)return;String data=intent.getData().toString();if(!data.startsWith(HostedNoticePoster.RENEW_PREFIX))return;String key=data.substring(HostedNoticePoster.RENEW_PREFIX.length());boolean question=HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction());submit(null,()->{try{SourceRenewalHost.get(getContext()).capture(key,question,System.currentTimeMillis());intent.setData(null);notifyListeners("renewSource",new JSObject(),true);}catch(Exception unavailable){}});}
+ private static boolean renewalTap(Intent intent){return intent!=null&&(HostedNoticePoster.RENEW_ACTION.equals(intent.getAction())||HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction()))&&intent.getData()!=null&&intent.getData().toString().startsWith(HostedNoticePoster.RENEW_PREFIX);}
+ private void captureRenewal(Intent intent){if(!renewalTap(intent))return;submit(null,()->captureRenewalNow(intent,true));}
+ /** Runs on io, in tap order: the latest failed tap is kept for a retry, and any success clears it. */
+ private void captureRenewalNow(Intent intent,boolean notify){if(!renewalTap(intent))return;String key=intent.getData().toString().substring(HostedNoticePoster.RENEW_PREFIX.length());boolean question=HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction());try{SourceRenewalHost.get(getContext()).capture(key,question,System.currentTimeMillis());intent.setData(null);retainedRenewal=null;if(notify)notifyListeners("renewSource",new JSObject(),true);}catch(Exception unavailable){retainedRenewal=intent;}}
  @Override public void load(){channel();capture(getActivity().getIntent());captureRenewal(getActivity().getIntent());}
  @Override protected void handleOnNewIntent(Intent intent){capture(intent);captureRenewal(intent);}
- @Override protected void handleOnResume(){notifyListeners("pendingResult",new JSObject(),true);}
- private void capture(Intent intent){if(intent==null||(!ACTION.equals(intent.getAction())&&!ASK_ACTION.equals(intent.getAction()))||intent.getData()==null)return;String data=intent.getData().toString();if(!data.startsWith(PREFIX))return;String key=data.substring(PREFIX.length());boolean question=ASK_ACTION.equals(intent.getAction());submit(null,()->{try{notices().capture(key,question);intent.setData(null);notifyListeners("pendingResult",new JSObject(),true);}catch(Exception ignored){/* Keep Intent for a later retry; never expose a result from an uncommitted tap. */}});}
+ @Override protected void handleOnResume(){Intent again=retained,renewal=retainedRenewal;if(again!=null)submit(null,()->captureNow(again,false));if(renewal!=null)submit(null,()->captureRenewalNow(renewal,true));notifyListeners("pendingResult",new JSObject(),true);}
+ // Only a panel on screen posts silently; a paused app always alerts.
+ @Override protected void handleOnPause(){submit(null,()->notices().panel(null));}
+ private static boolean resultTap(Intent intent){return intent!=null&&(ACTION.equals(intent.getAction())||ASK_ACTION.equals(intent.getAction()))&&intent.getData()!=null&&intent.getData().toString().startsWith(PREFIX);}
+ private void capture(Intent intent){if(!resultTap(intent))return;submit(null,()->captureNow(intent,true));}
+ /** Runs on io. Never exposes a result from an uncommitted tap; a failed capture is retried later. */
+ private void captureNow(Intent intent,boolean notify){if(!resultTap(intent))return;String key=intent.getData().toString().substring(PREFIX.length());boolean question=ASK_ACTION.equals(intent.getAction());try{notices().capture(key,question);intent.setData(null);retained=null;if(notify)notifyListeners("pendingResult",new JSObject(),true);}catch(Exception failed){retained=intent;}}
  @PluginMethod public void publishResult(PluginCall call){submit(call,()->{try{String phase=notices().publish(call.getData());JSObject out=new JSObject();out.put("phase",phase);call.resolve(out);}catch(Exception error){call.reject("Result notice unavailable; saved history is unchanged");}});}
- @PluginMethod public void pendingResult(PluginCall call){submit(call,()->{try{sourceForeground();call.resolve(new JSObject(notices().peek().toString()));}catch(Exception error){call.reject("Saved result link unavailable");}});}
+ @PluginMethod public void pendingResult(PluginCall call){submit(call,()->{try{sourceForeground();Intent again=retained;if(again!=null)captureNow(again,false);call.resolve(new JSObject(notices().peek().toString()));}catch(Exception error){call.reject("Saved result link unavailable");}});}
+ /** The panel shows this run: its OS notice is withdrawn. Ledger first, then the OS effect. */
+ @PluginMethod public void withdrawResult(PluginCall call){submit(call,()->{try{notices().withdraw(call.getString("scope"),call.getString("runId"));call.resolve();}catch(Exception error){call.reject("Result notice could not be withdrawn; it clears within a day");}});}
+ /** Scope whose brief panel is on screen (null when closed); a new result for it posts silently. */
+ @PluginMethod public void resultsPanel(PluginCall call){submit(call,()->{notices().panel(Boolean.TRUE.equals(call.getBoolean("open"))?call.getString("scope"):null);call.resolve();});}
  @PluginMethod public void consumeResult(PluginCall call){submit(call,()->{try{sourceForeground();notices().consume(call.getString("token",""));call.resolve();}catch(Exception error){call.reject("Result link changed");}});}
  @PluginMethod public void releaseResultQuestion(PluginCall call){submit(call,()->{try{sourceForeground();notices().releaseQuestion(call.getString("token",""));call.resolve();}catch(Exception error){call.reject("Result question changed");}});}
  @PluginMethod public void status(PluginCall call){try{JSObject out=new JSObject(HostedDelivery.get(getContext()).status().toString());out.put("enabled",enabled());call.resolve(out);}catch(Exception error){call.reject("Result status unavailable");}}
  @PluginMethod public void enable(PluginCall call){if(Build.VERSION.SDK_INT>=33&&getPermissionState("notifications")!=PermissionState.GRANTED){LateLaunch.ask(call,()->requestPermissionForAlias("notifications",call,"permissionResult"));return;}Intent settings=new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,getContext().getPackageName()).putExtra(Settings.EXTRA_CHANNEL_ID,CHANNEL);try{getActivity().startActivity(settings);}catch(RuntimeException unavailable){call.reject("Android notification settings are unavailable");return;}status(call);}
- @PermissionCallback private void permissionResult(PluginCall call){status(call);}
+ /** Android no longer prompts after repeated denial, so a refusal opens the app's notification settings. */
+ @PermissionCallback private void permissionResult(PluginCall call){
+  if(Build.VERSION.SDK_INT>=33&&getPermissionState("notifications")!=PermissionState.GRANTED){Intent settings=new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,getContext().getPackageName());try{if(!LateLaunch.ask(call,()->getActivity().startActivity(settings)))return;}catch(RuntimeException unavailable){call.reject("Android notification settings are unavailable");return;}}
+  status(call);
+ }
  /** Capacitor's own permission request launches through the activity; see {@link LateLaunch}. */
  @Override @PluginMethod public void requestPermissions(PluginCall call){LateLaunch.ask(call,()->super.requestPermissions(call));}
  @Override protected void handleOnDestroy(){io.shutdown();}

@@ -148,6 +148,15 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
         const node=document.getElementById('hosted-result-'+tap.runId);if(!node)return;node.scrollIntoView({block:'nearest'});node.focus();
         void hostedResultNative.consumeResult({token:tap.token}).then(()=>setTap(current=>current?.token===tap.token?null:current)).catch(()=>{});
     },[open,tap,results]);
+    const withdrawn=useRef(new Set<string>());
+    // Android: a result shown here clears its notice, and a new one for this account arrives silently while the panel is on screen.
+    useEffect(()=>{
+        const b=binding.current;if(!isAndroid||!open||!b||b.sessionId!==connection.session?.sessionId)return;const scope=b.notices.scope;
+        const update=()=>{const shown=!document.hidden;void hostedResultNative.resultsPanel?.({scope,open:shown}).catch(()=>{});if(!shown)return;
+            for(const result of results){const key=scope+':'+result.runId;if(withdrawn.current.has(key))continue;withdrawn.current.add(key);void hostedResultNative.withdrawResult?.({scope,runId:result.runId}).catch(()=>withdrawn.current.delete(key));}};
+        update();document.addEventListener('visibilitychange',update);
+        return()=>{document.removeEventListener('visibilitychange',update);void hostedResultNative.resultsPanel?.({scope,open:false}).catch(()=>{});};
+    },[open,results,connection.session?.sessionId]);
 	const refresh = (afterMutation=false):Promise<void> => {
 		const b = binding.current;
 		if (!b || !canSyncResults() || (mutationBusy.current && !afterMutation)) return Promise.resolve();

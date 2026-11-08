@@ -12,7 +12,7 @@ import java.util.UUID;
 /** Durable, redacted notice projection; it never schedules or executes a workflow. */
 final class HostedResultNotices {
  interface Storage { String read(String slot)throws Exception; void write(String slot,String value)throws Exception; }
- interface Poster { boolean allowed(); boolean active(String key); void post(String key); void cancel(String key); }
+ interface Poster { boolean allowed(); boolean active(String key); void post(String key); default void post(String key,boolean silent){post(key);} void cancel(String key); }
  /** A daily brief supersedes the previous one; an unopened result notice withdraws itself after a day. History stays in the inbox. */
  static final long SUPERSEDE_AFTER_MS=24L*3600000;
  /** Source renewal notices appear within the final 24 hours of a reviewed source and withdraw themselves at expiry. */
@@ -24,6 +24,8 @@ final class HostedResultNotices {
  static long renewalTimeout(long expiresAt,long now){return Math.max(1,expiresAt-now);}
  static final String LEDGER="hosted-notices:v1", PENDING="hosted-notices:pending:v1", OWNER="hosted-notices:owner:v1";
  private final Storage storage; private final Poster poster;
+ /** Scope whose brief panel is on screen; process memory only, cleared when the app pauses. */
+ private volatile String openScope;
  HostedResultNotices(Storage storage,Poster poster){this.storage=storage;this.poster=poster;}
  static String hash(String value)throws Exception {byte[] digest=MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));StringBuilder out=new StringBuilder();for(byte b:digest)out.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return out.toString();}
  private JSONObject read(String slot)throws Exception {String value=storage.read(slot);return value==null?new JSONObject():new JSONObject(value);}
@@ -65,8 +67,16 @@ final class HostedResultNotices {
   for(String other:keys){JSONObject prior=ledger.optJSONObject(other);if(prior==null||other.equals(key)||other.equals(pendingKey)||!"posted".equals(prior.optString("phase"))||!record.getString("scope").equals(prior.optString("scope"))||!record.getString("workflowId").equals(prior.optString("workflowId")))continue;prior.put("phase","superseded");poster.cancel(other);}
   write(LEDGER,ledger); // Exact route and uncertain dispatch state precede any OS effect.
   if(record.getString("phase").equals("denied"))return "denied";
-  try {poster.post(key);record.put("phase","posted");write(LEDGER,ledger);return "posted";}
+  try {poster.post(key,record.getString("scope").equals(openScope));record.put("phase","posted");write(LEDGER,ledger);return "posted";}
   catch(SecurityException denied){record.put("phase","denied");write(LEDGER,ledger);return "denied";}
+ }
+ void panel(String scope){openScope=scope!=null&&scope.matches("[a-f0-9]{64}")?scope:null;}
+ /** The result is on screen in the app: withdraw its OS notice. A pending tap keeps its token. */
+ synchronized void withdraw(String scope,String run)throws Exception {
+  if(scope==null||run==null||!scope.matches("[a-f0-9]{64}")||!run.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,127}"))throw new IllegalArgumentException("Invalid notice identity");
+  String key=hash(scope+":"+run);JSONObject ledger=read(LEDGER),record=ledger.optJSONObject(key);if(record==null)return;
+  String phase=record.optString("phase");if(phase.equals("posted")||phase.equals("uncertain")){record.put("phase","seen");write(LEDGER,ledger);}
+  poster.cancel(key);
  }
  synchronized void capture(String key)throws Exception {
   capture(key,false);

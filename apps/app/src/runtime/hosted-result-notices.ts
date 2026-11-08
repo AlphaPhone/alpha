@@ -7,6 +7,8 @@ export interface HostedResultNative {
  pendingResult():Promise<Partial<HostedResultRoute>&{token?:string;retained?:boolean;question?:boolean}>;
  releaseResultQuestion?(input:{token:string}):Promise<void>;
  consumeResult(input:{token:string}):Promise<void>;
+ withdrawResult?(input:{scope:string;runId:string}):Promise<void>;
+ resultsPanel?(input:{scope:string;open:boolean}):Promise<void>;
  status():Promise<{enabled:boolean;backgroundEnabled?:boolean;backgroundStatus?:string;lastSuccess?:number}>;
  setBackgroundPolling(input:{enabled:boolean}):Promise<{enabled:boolean;backgroundEnabled?:boolean}>;
  enable():Promise<{enabled:boolean}>;
