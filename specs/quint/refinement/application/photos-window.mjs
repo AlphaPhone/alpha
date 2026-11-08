@@ -43,7 +43,8 @@ async function compilePhotosWindow(extraSources = []) {
       builder.onLoad({ filter: /\/camera-adapter\.ts$/ }, (args) => {
         const text = readFileSync(args.path, "utf8"), marker = "  async function refresh(more = false) {";
         assert.equal(text.split(marker).length, 2, "One real Photos window observer seam");
-        const observed = text.replace("loading = true; const token = ++libraryEpoch;", "loading = true; const token = ++libraryEpoch;__ports.loadInfo={more,token};");
+        const observed = text.replace("loading = true; const token = ++libraryEpoch;", "loading = true; const token = ++libraryEpoch;__ports.loadInfo={more,token};")
+          .replace("trashLoading = true; const token = ++trashEpoch;", "trashLoading = true; const token = ++trashEpoch;__ports.trashInfo={more,token};");
         return { loader: "ts", contents: observed.replace(marker, `  __ports.inspect=()=>({disposed,captures,loaded,loading,next,libraryEpoch,libraryAccess,refreshAgain,counts,countsBusy,countsError,countsEpoch,albumRows,albumKey,albumNext,albumBusy,albumEpoch,trash,trashNext,trashLoaded,trashLoading,trashRefreshAgain,trashEpoch,selection,preview,reading,photoReadEpoch});
 ${marker}`) };
       });
@@ -53,12 +54,12 @@ ${marker}`) };
   captureSources(sources);
   return { code: built.outputFiles[0].text, sources };
 }
-async function createPhotosWindowFixture(compiled, { holdCounts = false } = {}) {
+async function createPhotosWindowFixture(compiled, { holdCounts = false, holdTrash = false } = {}) {
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { url: "https://fixture.invalid" });
   const { window } = dom, { document } = window;
   Object.defineProperty(document, "hidden", { configurable: true, value: false, writable: true });
-  const accesses = [], pages = [], updates = [], summaries = [];
-  const ports = {};
+  const accesses = [], pages = [], updates = [], summaries = [], trashes = [];
+  const ports = {}, listeners = new Map();
   const native = {
     libraryAccess() {
       const task = deferred();
@@ -66,7 +67,11 @@ async function createPhotosWindowFixture(compiled, { holdCounts = false } = {}) 
       return task.promise;
     },
     list(options = {}) {
-      if (options.trashed) return Promise.resolve({ items: [], next: "" });
+      if (options.trashed) {
+        const request = { settled: !holdTrash, task: holdTrash ? deferred() : null, options, ...ports.trashInfo };
+        trashes.push(request);
+        return request.task ? request.task.promise : Promise.resolve({ items: [], next: "" });
+      }
       const task = deferred();
       pages.push({ options, task, settled: false });
       return task.promise;
@@ -81,9 +86,9 @@ async function createPhotosWindowFixture(compiled, { holdCounts = false } = {}) 
     },
     async watchLibrary() {
     },
-    async addListener() {
-      return { async remove() {
-      } };
+    async addListener(event, listener) {
+      listeners.set(event, listener);
+      return { async remove() { listeners.delete(event); } };
     },
     async cancelPhotoSelected() {
     }
@@ -194,16 +199,27 @@ async function createPhotosWindowFixture(compiled, { holdCounts = false } = {}) 
     await tick();
     await tick();
   }
+  async function trash(index, items, next = "", success = true) {
+    const request = trashes[index];
+    assert.ok(request?.task && !request.settled);
+    request.settled = true;
+    if (success) request.task.resolve({ items, next });
+    else request.task.reject(Error("Trash failed"));
+    await tick();
+    await tick();
+  }
+  async function enter() { active = true; await render(); }
+  async function emitLibrary() { listeners.get("libraryChanged")?.(); await tick(); await tick(); }
   async function close() {
     retire();
-    for (const request of [...accesses, ...pages, ...summaries]) if (!request.settled) {
+    for (const request of [...accesses, ...pages, ...summaries, ...trashes]) if (!request.settled) {
       request.settled = true;
       request.task.reject(Error("Fixture teardown"));
     }
     await tick();
     window.close();
   }
-  return { state, shell, api, views, window, document, accesses, pages, updates, summaries, render, retry, more, access, page, counts, hide, show, leave, retire, close, get active() {
+  return { state, shell, api, views, window, document, accesses, pages, updates, summaries, trashes, render, retry, more, access, page, counts, trash, hide, show, leave, enter, emitLibrary, retire, close, get active() {
     return active;
   }, onSet(callback) {
     afterSet = callback;
@@ -392,5 +408,6 @@ async function checkPhotosWindow(extraSources = []) {
 export {
   checkPhotosWindow,
   compilePhotosWindow,
-  createPhotosWindowFixture
+  createPhotosWindowFixture,
+  rawRow, rowOf, cursorOf
 };

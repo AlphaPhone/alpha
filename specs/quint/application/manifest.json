@@ -857,5 +857,27 @@
       "Native Photos catalog access/window request epochs, serialized/coalesced reads, pagination/reload window and hidden/disposed completion fencing. Three media identities and bounded provider page classes.",
       "Album, Trash, counts, selection/viewer, thumbnail, reviews and provider persistence remain explicit obligations. Browser media follows a separate lifecycle."
     ]
+  },
+  {
+    "path": "specs/quint/application/PhotosTrash.qnt",
+    "module": "PhotosTrash",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "resumeReloadsClearedTrashTest",
+      "hiddenReplyCannotRepopulateTest",
+      "resumedPendingReadQueuesCurrentTest",
+      "oldHiddenFailureIsQuietTest",
+      "disposedReplyDoesNotPublishTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/camera-adapter.ts",
+      "apps/app/src/runtime/photos-view.ts"
+    ],
+    "abstractions": [
+      "Native Photos Trash read lifecycle with coalesced requests, current epochs, hidden loaded-marker invalidation and resume. Three media identities and four request identities.",
+      "Deletion/restore effects, selection, native retention and browser Trash are separate obligations."
+    ]
   }
 ]
