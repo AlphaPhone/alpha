@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { dirtyPaths, parseQualifyArgs, readCiArchive, recordCandidate } from "../scripts/qualify-head.mjs";
+import { candidateManifest, dirtyPaths, parseQualifyArgs, readCiArchive, recordCandidate } from "../scripts/qualify-head.mjs";
 
 const git = (cwd, ...args) => {
   const out = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -66,4 +66,14 @@ test("resident instrumentation binds by apkSha256 and resident CI binds only to 
   // A different archive does not admit this run's CI evidence.
   assert.equal(row(recordCandidate(head(), root, { manifest: "other", apkSha256: ["4".repeat(64)] }), "resident-android").status, "mismatched");
   assert.throws(() => readCiArchive(path.join(root, "missing.json")), /not a readable/);
+});
+
+test('a separate CI archive retains its evidence without qualifying different local APKs', () => {
+  const local = '1'.repeat(64), archived = '2'.repeat(64);
+  const campaign = {id:'resident', kind:'resident-ci', present:true, passed:true, apkSha256:[archived]};
+  const separate = candidateManifest([{sha256:local}], [campaign], {manifest:'archive.json', apkSha256:[archived]});
+  assert.equal(separate.campaigns[0].status, 'passed');
+  assert.equal(separate.complete, false);
+  const matching = candidateManifest([{sha256:archived}], [campaign], {manifest:'archive.json', apkSha256:[archived]});
+  assert.equal(matching.complete, true);
 });

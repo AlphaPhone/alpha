@@ -126,7 +126,10 @@ export function voiceBundleAdmission({names, read}, host) {
   const asrListed = slot.filter(file => listed.has(file));
   if (asrListed.length && asrListed.length !== slot.length) differences.push(`${root}: the ASR slot is incomplete (${slot.filter(file => !listed.has(file)).join(', ')} missing)`);
   for (const name of bundle) if (name !== manifestEntry && !listed.has(name.slice(root.length))) differences.push(`${name}: unlisted voice entry`);
-  for (const abi of new Set(names.filter(name => /^lib\/[^/]+\/libparadeevoicejni\.so$/.test(name)).map(name => name.split('/')[1]))) {
+  const abis = new Set(names.filter(name => /^lib\/[^/]+\/[^/]+\.so$/.test(name)).map(name => name.split('/')[1]));
+  if (!abis.size) differences.push(`${root}: no native voice bridge is packaged`);
+  for (const abi of abis) {
+    if (!names.includes(`lib/${abi}/libparadeevoicejni.so`)) differences.push(`lib/${abi}/libparadeevoicejni.so: native voice bridge is not packaged`);
     const libraries = host.abis.find(row => row.abi === abi)?.libraries;
     if (!libraries) { differences.push(`lib/${abi}: no voice host engine is recorded for this ABI`); continue; }
     for (const library of libraries) {

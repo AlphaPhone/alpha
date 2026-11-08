@@ -181,8 +181,8 @@ export function candidateManifest(apks, campaigns, ciArchive) {
   return { evidenceScope: "emulator (E) and resident CI campaigns bound to this candidate's APK hashes; not device or user acceptance",
     candidateApks: [...candidate].sort(),
     ...(archive ? { ciArchive: { manifest: ciArchive.manifest, apkSha256: [...archive].sort(),
-      note: "resident CI campaigns are bound to this CI archive, not to the local build in apks[]" } } : {}),
-    campaigns: rows, complete: rows.length > 0 && rows.every(row => row.status === "passed") };
+      note: "resident CI campaigns are bound to this CI archive. Only matching APK hashes qualify the local build in apks[]." } } : {}),
+    campaigns: rows, complete: rows.length > 0 && rows.every(row => row.status === "passed" && row.apkSha256.every(sha => candidate.has(sha))) };
 }
 
 /** Read a CI archive's apk-manifest.json as the candidate set for resident CI campaigns. */

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { archiveWebPayload, readBuildFlags, verifyOwnerRouteTable } from "../scripts/apk.mjs";
-import { voiceBundleAdmission } from "../scripts/voice-host.mjs";
+import { voiceBundleAdmission, VOICE_BUNDLE_FORMAT } from "../scripts/voice-host.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 test("Cloud QA evidence requires one explicit Cloud profile before any APK work", () => {
   for (const args of [["--cloud-voice-evidence=missing.json"], ["--runtime-profile=cloud", "--cloud-voice-evidence=a.json", "--cloud-voice-evidence=b.json"]]) {
@@ -291,12 +291,14 @@ test("APK voice admission requires the complete recorded bundle and every record
   };
   const apk = (change = () => {}, listed = Object.keys(bytes)) => {
     const files = { "lib/x86_64/libparadeevoicejni.so": "jni", "lib/x86_64/libelizainference.so": "engine", "lib/x86_64/libc++_shared.so": "stl",
-      "assets/paradee-voice/v1/manifest.json": JSON.stringify({ format: "eliza-paradee-voice-v1", files: listed.map(file => ({ path: file })) }) };
+      "assets/paradee-voice/v1/manifest.json": JSON.stringify({ format: VOICE_BUNDLE_FORMAT, files: listed.map(file => ({ path: file })) }) };
     for (const file of listed) files[`assets/paradee-voice/v1/${file}`] = bytes[file];
     change(files);
     return { names: Object.keys(files), read: entry => Buffer.from(files[entry]) };
   };
   assert.deepEqual(voiceBundleAdmission(apk(), host), { packaged: true, asr: true, differences: [], qualified: true });
+  assert.match(voiceBundleAdmission(apk(files => { delete files["lib/x86_64/libparadeevoicejni.so"]; }), host).differences.join(), /native voice bridge is not packaged/);
+  assert.match(voiceBundleAdmission(apk(files => { for (const name of Object.keys(files)) if (name.startsWith('lib/')) delete files[name]; }), host).differences.join(), /no native voice bridge is packaged/);
   assert.deepEqual(voiceBundleAdmission({ names: ["classes.dex"], read: () => null }, host), { packaged: false, asr: false, differences: [], qualified: false });
   // Without the ASR slot the bundle is admitted, but asr:false keeps a release distributable:false (verify-apks).
   const noAsr = voiceBundleAdmission(apk(undefined, Object.keys(bytes).filter(file => !file.startsWith("asr/"))), host);
@@ -304,7 +306,7 @@ test("APK voice admission requires the complete recorded bundle and every record
   assert.equal(noAsr.asr, false);
   // A manifest that lists a subset of the non-ASR files, or none, is a difference.
   assert.match(voiceBundleAdmission(apk(undefined, ["tts/paradee/paradee.gguf", "asr/phonon.gguf"]), host).differences.join(), /misaki\.lex: recorded voice file is not packaged.*silero\.gguf: recorded voice file is not packaged/);
-  const empty = voiceBundleAdmission(apk(files => { files["assets/paradee-voice/v1/manifest.json"] = JSON.stringify({ format: "eliza-paradee-voice-v1", files: [] }); }, []), host);
+  const empty = voiceBundleAdmission(apk(files => { files["assets/paradee-voice/v1/manifest.json"] = JSON.stringify({ format: VOICE_BUNDLE_FORMAT, files: [] }); }, []), host);
   assert.equal(empty.differences.length, 3);
   // A differing libc++_shared.so beside the pinned engine is reported, not only the engine.
   assert.deepEqual(voiceBundleAdmission(apk(files => { files["lib/x86_64/libc++_shared.so"] = "other"; }), host).differences,
@@ -318,4 +320,3 @@ test("APK voice admission requires the complete recorded bundle and every record
   assert.match(voiceBundleAdmission(apk(undefined, ["tts/paradee/paradee.gguf", "tts/paradee/misaki.lex", "vad/silero.gguf", "asr/phonon.gguf"]), pair).differences.join(), /ASR slot is incomplete \(asr\/mmproj\.gguf missing\)/);
   assert.equal(voiceBundleAdmission(apk(), pair).asr, true);
 });
-
