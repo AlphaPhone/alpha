@@ -42,7 +42,7 @@ source paths remain historical metadata when their implementations are removed.
 ## Next canonical Notes split
 
 The current canonical source adds three linked controllers. The controller and draft/save core now have current source-bound models.
-Delete/restore continuations and UI state remain separate from the
+Delete/restore now have a bounded source model. Full UI state remains separate from the
 retained-device Notes contract.
 
 - `CanonicalNotesController` is modeled and source-executed through fourteen bounded schedules. It owns an authority-bound snapshot, a coalesced read,
@@ -50,11 +50,12 @@ retained-device Notes contract.
   operation, monotonic accepted revisions and authenticated event subscription.
   An interrupted read and a later write can both still have outstanding transport
   promises. Retiring the controller ends authority before those promises settle.
-- Shared `NotesEditor` has a source-bound `CanonicalNotesDraft` model for open/begin/edit/save/reconcile/close and selection. Delete/restore continuations remain open. It owns a draft token, record identity, base revision, edit
+- Shared `NotesEditor` has a source-bound `CanonicalNotesDraft` model for open/begin/edit/save/reconcile/close and selection. It owns a draft token, record identity, base revision, edit
   version, authored content/format, an active save and one queued edit version.
   A successful save updates only its captured draft token. Dirty external
   revisions require review, while clean drafts follow current snapshots. Empty
   new drafts, delete-after-save and restore use separate guarded paths.
+- `CanonicalNotesMutation` exercises actual remove/restore continuations, prerequisite dirty saves, changed tokens, queued newer edits, rejected concurrent commands, owner loss and codec guards. Backend create/update/delete/restore, collection revision allocation, Trash guarantees and persistence remain source-refinement obligations.
 - `CanonicalNotesUi` now has source-bound `CanonicalNotesFeedback` coverage for failure/review classification, including delete/restore callbacks. Collection presentation and the remaining command joins are still open. It owns pending idle
   waiters, projected base rows and editable rows, open/draft identity, Trash
   rows, source-derived status and action decoration. It also mediates selection
