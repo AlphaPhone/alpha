@@ -115,6 +115,7 @@
     "pg": "8.23.1",
     "uuid": "14.0.2",
     "yaml": "2.9.1",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "typescript-ast": "npm:typescript@6.0.3"
   }
 }

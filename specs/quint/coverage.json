@@ -73485,6 +73485,13 @@
       "sha256": "88e026f4fb5a2892e051834bc96ee5c877d1ce9ceddc2881b427204b21edd557"
     },
     {
+      "path": "scripts/quint-state-audit.mjs",
+      "models": [
+        "Application"
+      ],
+      "sha256": "d339b75404966b1ec76650c90b0c4c5e466e145459ff4787e464b98973d8f284"
+    },
+    {
       "path": "specs/quint/refinement/services/runtime-bundle-audit.mjs",
       "models": [
         "AlwaysOnListener",
