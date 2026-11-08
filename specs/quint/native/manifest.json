@@ -1150,6 +1150,38 @@
         "Three lease generations and Binder identities; nine visibility report classes and boundary clocks.",
         "The real provider and lease execute against controlled Android primitives. Full service convergence and installed Binder/authority behavior require platform acceptance."
       ]
+    },
+    {
+      "path": "specs/quint/native/NativeListenerStore.qnt",
+      "module": "NativeListenerStore",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "sources": [
+        "vendor/eliza/packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/ListenerStore.java",
+        "vendor/eliza/packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/ListeningEpoch.java",
+        "vendor/eliza/packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/CrashLoopBreaker.java",
+        "vendor/eliza/packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/ListenerPolicy.java"
+      ],
+      "tests": [
+        "failedCommitCannotRestoreConsentTest",
+        "resetRecoversLatchButNeedsNewConsentTest",
+        "durableLostAcknowledgementStillFailsClosedTest",
+        "thirdUncleanStartTripsTest",
+        "crashWindowExpiryDoesNotClearLatchTest",
+        "fullHistoryRetainsEightNewestTest",
+        "failedCloseRetainsDurableOpenMarkerTest"
+      ],
+      "invariants": [
+        "FailedStoreCannotAdmit",
+        "ConsentNeedsCurrentProcess",
+        "WritesBounded"
+      ],
+      "abstractions": [
+        "Serialized actual source methods with separate in-memory and durable preference records.",
+        "Bounded crash history and reset generations; new JVM observes actual persisted restart data.",
+        "Android storage/stopService and full listener-service lifecycle remain explicit external obligations."
+      ]
     }
   ]
 }

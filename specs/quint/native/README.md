@@ -484,3 +484,20 @@ consumer Gradle script obtains `src/main` from that staging. The standalone and
 launcher host descriptors include the same product listener project. Assertions
 check this configuration for its debug/release builds. These checks do not
 constitute an APK build or installed AOSP acceptance.
+
+`NativeListenerStore` observes the actual shared `ListenerStore`,
+`ListeningEpoch` and `CrashLoopBreaker`. Separate memory and durable preference
+records preserve the outcome when a commit changes memory but fails to persist,
+or durably writes and then throws. The failed-write latch gates consent getters
+until a successful reset. Reset retires old consent generations and still
+requires a new explicit opt-in. Restart observations execute a fresh JVM against
+the stored fixture file, including a retained open-session marker after a failed
+close. Persisted consent alone remains insufficient in that new process.
+
+The model also covers timed and indefinite pauses across boot changes, epoch
+retirement, explicit clearing of speech/indicator/crash stops, all eight retained
+crash entries, malformed legacy history, permission-revoked starts and package
+updates. Store calls are checked at serialized method boundaries with controlled
+SharedPreferences outcomes. Concurrent arbitrary preference writers, real
+filesystem power loss and whole-service stop acceptance remain external to this
+component campaign.
