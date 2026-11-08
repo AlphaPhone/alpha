@@ -30,10 +30,10 @@ No violation in any of the four models.
 | CameraSession | safety | 2,742 | no violation | model extended with the chat-sheet grace rule (TLA+ 1,344 before it) |
 | CameraSession | CheckedTemporal (fairness ⇒ liveness) | 2,742 | no violation | |
 | NotesView | safety | 8,398,068 | no violation | identical to TLA+ |
-| NotesView | CheckedTemporal | — | **not concluded**: the TLC JVM crashed (exit 139) under system memory pressure | passed under TLA+/TLC on the same 8,398,068-state model |
+| NotesView | CheckedTemporal | 8,398,068 | no violation (re-run with an 8 GB heap, 1 h 17 min; the first attempt's JVM crashed under memory pressure) | |
 | FilesBrowser | safety | 1,763,736 | no violation | identical to TLA+ |
 | FilesBrowser | CheckedTemporal | 1,763,736 | no violation | |
 | PhotosLibrary | safety | 7,272,244 | no violation | larger than TLA+ (204,208): the port added open/share/Replace |
 | PhotosLibrary | CheckedTemporal | 7,272,244 | no violation | |
 
-Open item: re-run `quint verify --backend=tlc --main=NotesView --init=checkerInit --step=step --temporal=CheckedTemporal specs/quint/legacy/NotesView.qnt` with JVM_ARGS=-Xmx8g on a machine with free memory.
+All eight exhaustive checks (safety and liveness for the four designs) pass.
