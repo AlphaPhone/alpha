@@ -55,7 +55,7 @@ retained-device Notes contract.
   A successful save updates only its captured draft token. Dirty external
   revisions require review, while clean drafts follow current snapshots. Empty
   new drafts, delete-after-save and restore use separate guarded paths.
-- `CanonicalNotesUi` owns presentation/review classification, pending idle
+- `CanonicalNotesUi` now has source-bound `CanonicalNotesFeedback` coverage for failure/review classification, including delete/restore callbacks. Collection presentation and the remaining command joins are still open. It owns pending idle
   waiters, projected base rows and editable rows, open/draft identity, Trash
   rows, source-derived status and action decoration. It also mediates selection
   after saves, creation in a folder, voice transcript creation, note-to-Calendar
