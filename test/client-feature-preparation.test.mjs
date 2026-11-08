@@ -121,7 +121,8 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.equal(stamp.sourceFiles[mapPath],stamp.files[mapPath]);
  assert.match(fs.readFileSync(path.join(source,mapPath),'utf8'),/export interface GlobalBasemap/);
  const calendarPath='packages/contracts/src/calendar-linked-sync.ts';
- assert.equal(stamp.sourceFiles[calendarPath],stamp.files[calendarPath]);
+ assert.equal(stamp.calendarSemanticPatch.beforeSha256,stamp.sourceFiles[calendarPath]);
+ assert.equal(stamp.calendarSemanticPatch.afterSha256,stamp.files[calendarPath]);
  const calendarBundle=buildSync({entryPoints:[path.join(source,calendarPath)],bundle:true,write:false,platform:'browser',format:'esm',metafile:true});
  assert.equal(Object.keys(calendarBundle.metafile.inputs).length,1,'shared Calendar reconciliation has no Node, SQL, or runtime dependency');
  const voiceFiles=['packages/ui/src/voice/voice-session-client-core.ts','packages/ui/src/voice/voice-session-status.ts','packages/core/src/logging.ts','packages/core/src/view-interaction.ts','packages/host/src/voice/ui-context.ts'];
