@@ -135,3 +135,10 @@ test('patch consumes the verified Buffer when its pathname is replaced before ex
     assert.equal(hash(result.files.get(CORE_STATE_TARGET).bytes), f.manifest().patches[0].targets[0].afterSha256);
   } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
 });
+
+test('development backend requires its selected TaskService transformation', t => {
+  const source = fs.readFileSync(new URL('../backend/loader.ts', import.meta.url), 'utf8');
+  assert.match(source, /coreStateBuildRecord\(resolve\(import.meta.dirname, "\.\."\), core.transforms, true\)/);
+  const f = fixture(t), skipped = coreStateBuildPlugin(f.root, f.source);
+  assert.throws(() => coreStateBuildRecord(f.root, skipped.transforms, true), /transformation/);
+});
