@@ -36,6 +36,7 @@ import {checkAgentCalendarRefresh} from './agent-calendar-refresh.mjs';
 import {checkAgentCalendarMutation} from './agent-calendar-mutation.mjs';
 import {checkAgentCalendarEventReturn} from './agent-calendar-event-return.mjs';
 import {checkMapsEventReturn} from './maps-event-return.mjs';
+import {checkAgentCalendarSyncControl} from './agent-calendar-sync-control.mjs';
 import {checkPhotosWindow} from './photos-window.mjs';
 import {checkPhotosTrash} from './photos-trash.mjs';
 
@@ -44,7 +45,7 @@ const adapters = [application, shellNavigation, startupPermissions, assistantCon
   permissionWalkthrough, developmentDevice, permanentVoiceDeletion, developmentHost, filesTree,
   calendarPresentation, draftDispatch, notificationCollection, callbackLanding,
   runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, checkNotesCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
-  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkHomeGesture, checkDrawerInteraction, checkCanonicalCalendarDraft, checkAgentCalendarRefresh, checkAgentCalendarMutation, checkAgentCalendarEventReturn, checkMapsEventReturn];
+  checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkHomeFailureNotice, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkHomeGesture, checkDrawerInteraction, checkCanonicalCalendarDraft, checkAgentCalendarRefresh, checkAgentCalendarMutation, checkAgentCalendarEventReturn, checkMapsEventReturn, checkAgentCalendarSyncControl];
 
 /** Component traces, with remaining obligations kept explicit for the aggregate report. */
 export async function runApplicationRefinement() {
