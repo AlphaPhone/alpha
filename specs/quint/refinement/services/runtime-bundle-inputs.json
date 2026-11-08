@@ -17,37 +17,37 @@
       "scripts/core-state-patch.mjs": "25c66e40aaaa340e1813f7268db913d46134f132116a45278d267ff3d8deb759",
       "scripts/core-state-preload.mjs": "c5368c9075aa8c7660bee01338185fbe673c9b8dd6889dd1ab01d195efa17c10",
       "scripts/combined-agent-source.mjs": "1e7409ec7c91439a2e73b77aaa32042ed989a725cd18b24bc3247685ed7e886d",
-      "patches/eliza/core-state-manifest.json": "9705bb17092b1a85116f34a0a8b2db88743056e0fd56e2c3eee65e72060169f8",
-      "patches/eliza/task-service-stop.patch": "54d47551f0220d479ffb8162a822d025a419ea73928640195f14782475cdf5b2"
+      "patches/eliza/core-state-manifest.json": "ef8f3e590d9661f019dacdd68d5a481cf5fd98b4d5f570801604d3fc858e16a2",
+      "patches/eliza/task-service-stop.patch": "7a53ab6062db8ff795d82c14fa79ec957d7e2e6907d4e80fc0ff86497f13c116"
     },
     "coreState": {
       "version": 1,
       "baseCommit": "475a8d59dc1811c2cde093613519906a5a3f6457",
-      "manifestSha256": "9705bb17092b1a85116f34a0a8b2db88743056e0fd56e2c3eee65e72060169f8",
+      "manifestSha256": "ef8f3e590d9661f019dacdd68d5a481cf5fd98b4d5f570801604d3fc858e16a2",
       "inputHashes": {
         "scripts/core-state-patch.mjs": "25c66e40aaaa340e1813f7268db913d46134f132116a45278d267ff3d8deb759",
         "scripts/core-state-preload.mjs": "c5368c9075aa8c7660bee01338185fbe673c9b8dd6889dd1ab01d195efa17c10",
         "scripts/combined-agent-source.mjs": "1e7409ec7c91439a2e73b77aaa32042ed989a725cd18b24bc3247685ed7e886d",
-        "patches/eliza/core-state-manifest.json": "9705bb17092b1a85116f34a0a8b2db88743056e0fd56e2c3eee65e72060169f8",
-        "patches/eliza/task-service-stop.patch": "54d47551f0220d479ffb8162a822d025a419ea73928640195f14782475cdf5b2"
+        "patches/eliza/core-state-manifest.json": "ef8f3e590d9661f019dacdd68d5a481cf5fd98b4d5f570801604d3fc858e16a2",
+        "patches/eliza/task-service-stop.patch": "7a53ab6062db8ff795d82c14fa79ec957d7e2e6907d4e80fc0ff86497f13c116"
       },
       "patches": [
         {
           "file": "task-service-stop.patch",
-          "sha256": "54d47551f0220d479ffb8162a822d025a419ea73928640195f14782475cdf5b2"
+          "sha256": "7a53ab6062db8ff795d82c14fa79ec957d7e2e6907d4e80fc0ff86497f13c116"
         }
       ],
       "files": {
         "packages/core/src/services/task.ts": {
           "beforeSha256": "c73a20cdc504f7f7a935078d7d7ad3ae6e368b6d90a1bbe580545c8421e9f4f7",
-          "afterSha256": "0ff99170bfccffff0f60931982ead65c4cb389195659a7fc59120268b3b6e0b4"
+          "afterSha256": "036ab75df583964347f039018ef8a12018ba9834ef654ba7cab2397e96d1a3e3"
         }
       },
       "transforms": [
         {
           "path": "packages/core/src/services/task.ts",
           "sourceSha256": "c73a20cdc504f7f7a935078d7d7ad3ae6e368b6d90a1bbe580545c8421e9f4f7",
-          "outputSha256": "0ff99170bfccffff0f60931982ead65c4cb389195659a7fc59120268b3b6e0b4"
+          "outputSha256": "036ab75df583964347f039018ef8a12018ba9834ef654ba7cab2397e96d1a3e3"
         }
       ]
     },
@@ -55,11 +55,11 @@
       "version": "1.4.2",
       "revision": "744846f844374847c902b5e7fd59b4342a51ef99"
     },
-    "bundleSha256": "37c4685ad7440669186762fd5451b41cf510522c16b012195e4ac4badfa28783",
+    "bundleSha256": "34e95f1397b7db289381fda6d481a8ad7ac89d9a852483100725bf6519877756",
     "sourceTreeVerifiedBeforeAndAfter": true,
     "inputHashesUnchanged": true,
-    "rawMetafileSha256": "a893d7616ea975fb17c2479f25898371214f56d3027102e6d55bcee220fbe33b",
-    "producerObservationSha256": "172c593783ec2a06b425f9243a48f0741f1c56cdbfa225628131086ce84fb71f"
+    "rawMetafileSha256": "fcc3c518dcf4c902d176c483394cd1492a06f77b7003d04a142026657adb3ff7",
+    "producerObservationSha256": "3b07d5cf115e8f91a164f91cba821d8c47ae5d11154b487bed694a273f187cd3"
   },
   "counts": {
     "parsed": 9988,
@@ -29589,9 +29589,9 @@
     },
     "packages/core/src/services/task.ts": {
       "sha256": "c73a20cdc504f7f7a935078d7d7ad3ae6e368b6d90a1bbe580545c8421e9f4f7",
-      "effectiveSourceSha256": "0ff99170bfccffff0f60931982ead65c4cb389195659a7fc59120268b3b6e0b4",
+      "effectiveSourceSha256": "036ab75df583964347f039018ef8a12018ba9834ef654ba7cab2397e96d1a3e3",
       "transformation": "authenticated-core-state",
-      "bytesInOutput": 19160,
+      "bytesInOutput": 19312,
       "tracked": true,
       "gitObject": "479623b52a96bc5be125a0f798dafee91fe74bbb",
       "imports": [
@@ -68338,7 +68338,7 @@
     },
     "plugins/plugin-assistant/src/features/advanced-capabilities/evaluators/preference-items.ts": {
       "sha256": "95be14edcca6f75dc36537503f22b4ac00280154fa747692fb78fc05bb24c601",
-      "bytesInOutput": 15848,
+      "bytesInOutput": 15846,
       "tracked": true,
       "gitObject": "07bd6f95cb668e60cc0d2228deac6214204c485e",
       "imports": [
