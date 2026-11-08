@@ -704,5 +704,29 @@
       "Two canonical records, five draft token identities, four versions and finite text/format classes. Current save snapshots and queued newer edits retain independent identity.",
       "Delete/restore and UI selection continuations remain separate obligations. Captured save locals are observed through a read-only build-time WeakMap."
     ]
+  },
+  {
+    "path": "specs/quint/application/CanonicalNotesFeedback.qnt",
+    "module": "CanonicalNotesFeedback",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "acceptedReadClearsReadFailureTest",
+      "dirtyReadFailureRetainedTest",
+      "uncertainReadbackKeepsReviewTest",
+      "explicitDiscardReclassifiesReadFailureTest",
+      "ownedCommitClearsUncertaintyTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/canonical-notes-ui.ts",
+      "apps/app/src/prototype/canonical-notes-controller.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts",
+      ".eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts"
+    ],
+    "abstractions": [
+      "Finite UI feedback event machine for phase, review reason and failure origin, with an interaction-failure history monitor. Actual controller/editor callbacks drive source traces.",
+      "Collection rendering, navigation waits, dictation/recording and Calendar handoffs remain separate state machines."
+    ]
   }
 ]
