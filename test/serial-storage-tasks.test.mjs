@@ -19,6 +19,13 @@ test('all renderer slot operations use the serialized lane through response disp
   const start=source.indexOf('@PluginMethod public void '+method+'('),end=source.indexOf('\n }',start),body=source.slice(start,end);
   assert.match(body,/submitStorage\(call,/);assert.doesNotMatch(body,/\bsubmit\(call,/);assert.ok(body.indexOf('call.resolve(')>body.indexOf('submitStorage(call,'));
  }
- assert.match(source,/requests\.cancelAll\(\);\n\s+synchronized\(foregroundLock\)\{foregroundLock\.notifyAll\(\);\}\n\s+storageTasks\.close\(\);workers\.shutdownNow\(\)/);
+ const destroyStart=source.indexOf('@Override protected void handleOnDestroy()');
+ const destroy=source.slice(destroyStart,source.indexOf('\n }',destroyStart));
+ assert.ok(destroyStart>=0,'destruction callback exists');
+ assert.match(destroy,/synchronized\(foregroundLock\)\{destroyed=true;foregroundLock\.notifyAll\(\);\}/);
+ const cancelled=destroy.indexOf('requests.cancelAll()'),storageClosed=destroy.indexOf('storageTasks.close()'),workersStopped=destroy.indexOf('workers.shutdownNow()');
+ assert.ok(cancelled>destroy.indexOf('destroyed=true'),'retire admission before cancelling requests');
+ assert.ok(storageClosed>cancelled,'cancel requests before closing serialized storage');
+ assert.ok(workersStopped>storageClosed,'close storage before shutting down workers');
  assert.match(source,/workers = Executors\.newFixedThreadPool\(4\)/);
 });
