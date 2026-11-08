@@ -1156,5 +1156,36 @@
       "Actual ordered favorites storage, legacy view-ID and default-policy migration, unavailable storage, held-load external writes, profile identity and visible-only reorder.",
       "Two product views and a legacy alias, three installed app keys and one uninstalled key. One held inventory request and a separate recreation. Full storage durability, general load overlap and pointer gestures have separate obligations."
     ]
+  },
+  {
+    "path": "specs/quint/application/HomeGesture.qnt",
+    "module": "HomeGesture",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "unrelatedPointerCannotCancelHoldTest",
+      "drawerRetiresHeldTimeoutTest",
+      "coveredHomeDropsHeldTimeoutTest",
+      "wrongPointerCannotDropTest",
+      "remountDoesNotSwallowEarlierClickTest"
+    ],
+    "invariants": [
+      "UniqueFavorites",
+      "SingleGesture",
+      "RetiredOwnsNothing",
+      "EditingOwnsDrag"
+    ],
+    "sources": [
+      "apps/app/src/prototype/home-shell.ts",
+      ".eliza/client-features/packages/ui/src/mobile-shell/MobileHomeScreen.tsx",
+      ".eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx",
+      ".eliza/client-features/packages/ui/src/mobile-shell/navigation.ts",
+      ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts"
+    ],
+    "abstractions": [
+      "Mounted Home long press, drag, click swallowing, keyboard focus and edit-sheet layering, including stale timer and owner retirement.",
+      "Two pointers, three favorite keys, one keyboard frame and controlled geometry/storage ports. A completed drop is one macrostep. Multiple successful writes are observed at completion; partial storage failure and real touch delivery have separate scope."
+    ]
   }
 ]
