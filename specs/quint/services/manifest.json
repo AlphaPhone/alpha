@@ -2026,7 +2026,6 @@
         "patches/eliza/room-queue-admission.patch",
         "patches/eliza/task-service-stop.patch",
         "patches/eliza/turn-controller-isolation.patch",
-        "scripts/client-speech-patch.mjs",
         "scripts/combined-agent-source.mjs",
         "scripts/core-state-preload.mjs",
         "scripts/gmail-agent-mailbox-host.ts",
