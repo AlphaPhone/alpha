@@ -364,11 +364,12 @@ test('A Calendar feed too large for the agent is refused whole, never returned i
   await assert.rejects(f.reader.calendarFeed(calendarInput(source.grantId)),refused('result-too-large'));
  }finally{await f.close();}
 });
-test('A long email body is cut to a fixed size and marked truncated',async()=>{
+test('A long Gmail body is preserved within the shared transport limit',async()=>{
  const f=await fixture();try{
-  const id=(await f.reader.list({}))[0].id;assert.equal((await f.reader.message(id)).truncated,undefined);
-  f.setBody('a'.repeat(31_999)+'\u{1F600}'+'b'.repeat(100_000));const read=await f.reader.message(id);
-  assert.equal(read.truncated,true);assert.equal(read.bodyText,'a'.repeat(31_999));
+  const id=(await f.reader.list({}))[0].id;
+  const body='a'.repeat(31_999)+'😀'+'b'.repeat(100_000);
+  f.setBody(body);const read=await f.reader.message(id);
+  assert.equal(read.truncated,undefined);assert.equal(read.bodyText,body);
  }finally{await f.close();}
 });
 test('A Gmail search and its date clause stay within what Cloud admits',async()=>{
