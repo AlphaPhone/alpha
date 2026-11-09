@@ -15,7 +15,7 @@ const forkPath='plugins/plugin-local-inference/native/llama.cpp';
 // Bind the exact manifest transition without relabeling the original native qualification.
 const formalOnlyManifestAdvance = {
   qualifiedAt: '99b49439ce9d0cb5607e9831b9f7f58d89525029',
-  sourcePin: '5500c73b3d8ff8395999bbb620e7e3fc0ebb1df4',
+  sourcePin: 'c51ea9cbfaec927220fa8bfa161f5c5a1a8c04c9',
   files: {
     'package.json': {
       reviewed: 'd0c735b8ea487c192a9f6839a64db6c6185ec753f177836d96f73b86abf35f6a',
