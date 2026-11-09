@@ -19,8 +19,8 @@ test('native admission cancels permission/start before the serialized worker can
  // and gating events on its own lifecycle epoch (LiveCaptureControllerTest covers the ordering).
  const controller=fs.readFileSync(upstreamVoiceSource('LiveCaptureController.java'),'utf8');
  assert.match(controller,/admission\.attach\(ticket,[\s\S]*next\.start\(\)/);
- assert.match(controller,/admission\.stop\(id\);\s*submit\(worker/);
- assert.match(controller,/next\.start\(\);\s*if\(!host\.open\(epoch\)\|\|!admission\.current\(ticket\)\)/);
+ assert.match(controller,/admission\.stop\(id,discard\);\s*if\(pipe!=null[^\n]*pipe\.close\(true,cutoff\);\s*submit\(worker/);
+ assert.match(controller,/next\.start\(\);[\s\S]*?current=next;\s*if\(!host\.canStart\(epoch\)\|\|!admission\.run\(ticket\)\|\|!startup\.report\(\)\)/);
  const plugin=fs.readFileSync(upstreamBridgeSource('LocalSpeechBridgePlugin.java'),'utf8');
  assert.match(plugin,/LiveCaptureAdmission\.Ticket ticket=live\.reserve\(id,epoch\.get\(\)\);\s*if\(getPermissionState\("microphone"\)/);
  assert.match(plugin,/public boolean open\(long admitted\)\{return !destroyed&&speechForeground&&admitted==epoch\.get\(\);\}/);

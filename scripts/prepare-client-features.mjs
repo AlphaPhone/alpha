@@ -169,6 +169,8 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-calendar/src/components/event-editor-policy.ts',
   'plugins/plugin-calendar/src/index.ts',
   'plugins/plugin-calendar/src/internal/time.ts',
+  'packages/app/src/runtime/managed-google-agent',
+  'plugins/plugin-assistant/src/utils/html-entities.ts',
   'plugins/plugin-calendar/src/service/managed-calendar-host.ts',
   'plugins/plugin-notes/src/capabilities.ts',
   'plugins/plugin-notes/src/client/notes-api.ts',

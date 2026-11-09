@@ -119,6 +119,7 @@ export default defineConfig({
       "@elizaos/capacitor-system/reset": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-native-system/src/reset.ts", import.meta.url)),
       "@elizaos/capacitor-system/settings": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-native-system/src/settings.ts", import.meta.url)),
       "@elizaos/contracts/stated-clock-time": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/stated-clock-time.ts", import.meta.url)),
+      "@elizaos/contracts/client-turn-observation": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/client-turn-observation.ts", import.meta.url)),
       "@elizaos/contracts/browser-request-grounding": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/browser-request-grounding.ts", import.meta.url)),
       "@elizaos/contracts/phone-dial": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/phone-dial.ts", import.meta.url)),
       "@elizaos/contracts/device-action-execution": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/device-action-execution.ts", import.meta.url)),
@@ -144,6 +145,7 @@ export default defineConfig({
       "@elizaos/contracts/sms-send": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/sms-send.ts",import.meta.url)),
       "@elizaos/contracts/native-notes-query": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/native-notes-query.ts",import.meta.url)),
       "@elizaos/contracts": fileURLToPath(new URL("./.eliza/client-features/client-contracts.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-clock-review": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-review-executor.ts", import.meta.url)),
       "@elizaos/plugin-assistant/device-calendar-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-foreground-review": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/foreground-review-contract.ts",import.meta.url)),
       "@eliza-system": fileURLToPath(

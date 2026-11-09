@@ -1,5 +1,14 @@
 # Dependency and artifact supply chain
 
+## Full-lock source audit — November 9
+
+A fresh npm bulk advisory audit of SDK `c51ea9cbfa` covers 3,694 exact
+package versions. The prior SDK `b1817660a0` contained 3,675 versions. All 103
+findings, including affected versions and severities, are identical. The 84
+reviewed exceptions retain their original terms and deadlines, and the 12
+pending advisory and package records remain open. The staged and installed
+artifact reviews below retain their original inputs and do not qualify this SDK.
+
 ## Staged Cloud runtime review — November 7
 
 The Android Cloud payload at Alpha `6f9e00c2` and SDK `9237023aee38`

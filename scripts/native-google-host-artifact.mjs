@@ -45,7 +45,7 @@ function fixedInputHashes(root,sdk){
 }
 
 function candidateInputs(metadata,fixed){
- if(!record(metadata.inputs)||!record(metadata.inputHashes)||!Object.hasOwn(metadata.inputs,'backend/native-google-agent-host.ts')
+ if(!record(metadata.inputs)||!record(metadata.inputHashes)||!Object.hasOwn(metadata.inputs,'scripts/native-google-product-host.ts')
   ||!isDeepStrictEqual(Object.keys(metadata.inputs).sort(),Object.keys(metadata.inputHashes).sort()))
   throw Error('Native Google compiler input graph lacks exact byte bindings');
  for(const [name,digest] of Object.entries(metadata.inputHashes)){

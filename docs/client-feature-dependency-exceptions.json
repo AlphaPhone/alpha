@@ -2,6 +2,34 @@
   "description": "Reviewed gaps between a copied client feature package's declared dependency range and the version Alpha installs. scripts/prepare-client-features.mjs fails on any other gap and on an entry that no longer matches.",
   "exceptions": [
     {
+      "package": "packages/app",
+      "dependency": "@capacitor/android",
+      "range": "8.5.1",
+      "installed": "8.5.2",
+      "reason": "The copied managed Google host uses Node APIs and shared service contracts. It imports no React or Capacitor APIs from the upstream app package."
+    },
+    {
+      "package": "packages/app",
+      "dependency": "@capacitor/core",
+      "range": "8.5.0",
+      "installed": "8.5.2",
+      "reason": "The copied managed Google host uses Node APIs and shared service contracts. It imports no React or Capacitor APIs from the upstream app package."
+    },
+    {
+      "package": "packages/app",
+      "dependency": "react",
+      "range": "^19.3.1",
+      "installed": "19.3.0",
+      "reason": "The copied managed Google host uses Node APIs and shared service contracts. It imports no React or Capacitor APIs from the upstream app package."
+    },
+    {
+      "package": "packages/app",
+      "dependency": "react-dom",
+      "range": "^19.3.1",
+      "installed": "19.3.0",
+      "reason": "The copied managed Google host uses Node APIs and shared service contracts. It imports no React or Capacitor APIs from the upstream app package."
+    },
+    {
       "package": "packages/ui",
       "dependency": "react",
       "range": "19.3.1",
