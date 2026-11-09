@@ -36,6 +36,7 @@ import {checkRetainedReminderTapAdmission} from './retained-reminder-tap-admissi
 import {checkReminderOpenIntent} from './reminder-open-intent.mjs';
 import {checkFirstSendDraftMigration} from './first-send-draft-migration.mjs';
 import {checkShadeNoticeQuestionAdmission} from './shade-notice-question-admission.mjs';
+import {checkWorkflowClockAdmission} from './workflow-clock-admission.mjs';
 import {checkSharePanelAdmission} from './share-panel-admission.mjs';
 import {checkAppearancePreferenceAdmission} from './appearance-preference-admission.mjs';
 import {checkAgentCalendarSyncControl} from './agent-calendar-sync-control.mjs';
@@ -95,7 +96,7 @@ const adapters = [checkChatAttachments, application, shellNavigation, startupPer
   checkCanonicalCalendarDraftHandoff,
   checkCameraPreviewRetirement,
   checkNotesRecorderMediaAdmission, checkRetainedReminderTapAdmission, checkReminderOpenIntent, checkFirstSendDraftMigration,
-  checkShadeNoticeQuestionAdmission,
+  checkShadeNoticeQuestionAdmission, checkWorkflowClockAdmission,
   checkSharePanelAdmission,
   checkAppearancePreferenceAdmission,
   runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, checkNotesCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
