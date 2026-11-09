@@ -2,7 +2,7 @@
 
 ## Full-lock source audit — November 9
 
-A fresh npm bulk advisory audit of SDK `5500c73b3d` covers 3,694 exact
+A fresh npm bulk advisory audit of SDK `c51ea9cbfa` covers 3,694 exact
 package versions. The prior SDK `b1817660a0` contained 3,675 versions. All 103
 findings, including affected versions and severities, are identical. The 84
 reviewed exceptions retain their original terms and deadlines, and the 12
