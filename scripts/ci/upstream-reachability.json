@@ -2,14 +2,31 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "c51ea9cbfaec927220fa8bfa161f5c5a1a8c04c9",
-  "head": "5500c73b3d8ff8395999bbb620e7e3fc0ebb1df4",
+  "baseCommit": "a82e2257c69a9bbbf671d3cfc422d3c1b78014b2",
+  "head": "c51ea9cbfaec927220fa8bfa161f5c5a1a8c04c9",
   "recordedAt": "2026-11-09",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...5500c73b3d8ff8395999bbb620e7e3fc0ebb1df4",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...c51ea9cbfaec927220fa8bfa161f5c5a1a8c04c9",
   "status": "behind",
   "aheadBy": 0,
-  "behindBy": 311,
-  "mergeBase": "5500c73b3d8ff8395999bbb620e7e3fc0ebb1df4",
+  "behindBy": 3,
+  "mergeBase": "c51ea9cbfaec927220fa8bfa161f5c5a1a8c04c9",
   "pinOnlyCommits": [],
-  "pullRequests": []
+  "pullRequests": [
+    {
+      "number": 39134,
+      "title": "Share the resident managed Google host",
+      "url": "https://github.com/elizaOS/eliza/pull/39134",
+      "head": "e59d62f00e18bf30da0c8766f50211594b9c2d61",
+      "mergeCommit": "948d513b419bcc68723309536d6bba13b7037e0c",
+      "mergedAt": "2026-11-09T18:51:41Z"
+    },
+    {
+      "number": 39148,
+      "title": "Integrate author PRs and resolve runtime, Cloud and native conflicts",
+      "url": "https://github.com/elizaOS/eliza/pull/39148",
+      "head": "4825e6b84ec9992a3986b5286c3b4608cda99584",
+      "mergeCommit": "c51ea9cbfaec927220fa8bfa161f5c5a1a8c04c9",
+      "mergedAt": "2026-11-09T18:51:38Z"
+    }
+  ]
 }
