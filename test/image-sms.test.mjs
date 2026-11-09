@@ -43,7 +43,7 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
  const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'sms-retry-'));const priorDocument=globalThis.document,priorWindow=globalThis.window;const pending=[],calls=[],inputs=[];let visibility;
  globalThis.document={hidden:false,addEventListener(type,listener){if(type==='visibilitychange')visibility=listener;},removeEventListener(){},createElement(){const input={files:[],value:'',click(){inputs.push(input);}};return input;}};
  globalThis.window={addEventListener(){},removeEventListener(){}};
- globalThis.__smsRetryPort={smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},mmsSend:true,subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[{id:'thread:1',addresses:['+15555550100']}],next:null}),messagePage:async()=>({rows:[],next:null}),observeMessages:async()=>async()=>{},sendSms:(review,operationId)=>{calls.push({...review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));}};
+ globalThis.__smsRetryPort={smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},mmsSend:true,subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[{id:'thread:1',addresses:['+15555550100']},{id:'thread:2',date:1700000001000,incomplete:true,reason:'too-many-addresses'}],next:null}),messagePage:async id=>({rows:id==='thread:2'?[{id:'sms:2',threadId:id,kind:'sms',date:1700000001000,incomplete:true,reason:'body-too-long'},{id:'sms:1',threadId:id,kind:'sms',date:1700000000000,addresses:['+15555550101'],direction:'incoming',status:'received',attachments:0,subscriptionId:3,body:'A readable message'}]:[],next:null}),observeMessages:async()=>async()=>{},sendSms:(review,operationId)=>{calls.push({...review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));}};
  const refusal=(message,code)=>Object.assign(Error(message),{code});
  try{
   const result=await build({entryPoints:[resolve('apps/app/src/prototype/sms-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'native-fixture',setup(builder){builder.onResolve({filter:/platform-plugins|aosp-image|aosp-telephony|native-adapter$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({resolveDir:process.cwd(),contents:args.path.includes('aosp-telephony')?'export const MMS_MAX_ATTACHMENTS=5;export const reviewMms=()=>({problem:"mms-unavailable"});export {reviewSms} from '+JSON.stringify(resolve('.eliza/client-features/packages/contracts/src/native-telephony.ts'))+';export const createAospTelephony=()=>globalThis.__smsRetryPort;export const registerTelephonyProfile=()=>()=>{};':args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__smsRetryPort;':args.path.includes('aosp-image')?'export const aospImage=true;':'export const watchReturnToApp=()=>()=>{};'}));}}]});
@@ -76,6 +76,26 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
   inputs[0].files=[{type:'image/jpeg',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];await inputs[0].onchange();
   globalThis.document.hidden=false;visibility();
   assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.jpg · 1 KB']);assert.equal(model().nativeBody,'hello');assert.equal(model().nativeRecipients,'+15555550100');
+  await tick();
+  model().nativeOnRecipients({target:{value:''}});
+  model().nativeThreads[0].open();await tick();assert.equal(model().nativeRecipients,'+15555550100');
+  model().nativeBack();await tick();
+  assert.equal(model().nativeThreads[1].label,'Conversation details unavailable');
+  assert.match(model().nativeThreads[1].snippet,/system messaging app/);
+  model().nativeThreads[1].open();await tick();
+  assert.equal(model().nativeRecipients,'','opening an incomplete thread clears the previous thread’s autofill');
+  const [incomplete,complete]=model().nativeRows;
+  assert.equal(incomplete.title,'Message details unavailable');
+  assert.match(incomplete.preview,/system messaging app/);
+  assert.doesNotMatch(incomplete.details,/incoming|outgoing|received|sent|Subscription/);
+  assert.equal(complete.title,'+15555550101');assert.match(complete.details,/incoming · SMS · received.*Subscription 3/);
+  assert.equal(complete.preview,'A readable message');
+  model().nativeBack();await tick();
+  model().nativeThreads[0].open();await tick();
+  model().nativeOnRecipients({target:{value:'+15555550100'}});
+  model().nativeBack();await tick();
+  model().nativeThreads[1].open();await tick();
+  assert.equal(model().nativeRecipients,'+15555550100','opening an incomplete thread keeps an explicitly entered recipient');
   globalThis.document.hidden=true;visibility();assert.equal(model().nativeBody,'','without a picker, leaving still clears the draft');assert.equal(model().nativeAttachments.length,0);
   globalThis.document.hidden=false;visibility();owner.view='home';owner.componentDidUpdate();owner.componentWillUnmount();
  }finally{globalThis.document=priorDocument;globalThis.window=priorWindow;delete globalThis.__smsRetryPort;rmSync(dir,{recursive:true,force:true});}
