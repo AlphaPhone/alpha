@@ -49,6 +49,7 @@ import {checkDevelopmentDigestPending} from './development-digest-pending.mjs';
 import {checkAndroidGzipAssetStage} from './android-gzip-asset-stage.mjs';
 import {checkResidentJavaSourceStage} from './resident-java-source-stage.mjs';
 import {checkAndroidBrowserModuleStage} from './android-browser-module-stage.mjs';
+import {checkAndroidBuildInputReadiness} from './android-build-input-readiness.mjs';
 import {checkLifeOpsScheduledTaskRoute} from './lifeops-scheduled-task-route.mjs';
 
 export async function runServicesRefinement() {
@@ -65,7 +66,7 @@ export async function runServicesRefinement() {
       checkCoreConnectorCustody, checkMobileBundleAdmission, checkWorkflowWorkerStaging, checkNativeGoogleHostArtifact,
       checkPreparedSourceStamp, checkCloudQaLauncher, checkBrowserCloudRequestCustody, checkGmailAgentMailboxRecovery,
       checkDevelopmentDigestPending, checkAndroidGzipAssetStage, checkResidentJavaSourceStage,
-      checkAndroidBrowserModuleStage, checkLifeOpsScheduledTaskRoute].map(withDriver),
+      checkAndroidBrowserModuleStage, checkAndroidBuildInputReadiness, checkLifeOpsScheduledTaskRoute].map(withDriver),
     ...[runInboxCoordinatorRefinement, runInboxCleanupRefinement, runInboxProviderDraftsRefinement,
       runWorkflowEngineRefinement, runWorkflowWakeupRefinement, runWorkflowTaskRefinement, runCanonicalNotesRefinement,
       runTaskServiceRefinement, runTaskSchedulerRuntimeRefinement, runPilotApkUpdateRefinement,
@@ -100,6 +101,8 @@ export async function runServicesRefinement() {
       reason: 'The scratch replay exercises the actual wrapper and byte comparison. The modeled merge uses a one-layer fixture. Independent APK checks and installed OCR have separate evidence.'},
     {model: 'ResidentJavaSourceStage', obligation: 'Concurrent readers, process interruption and Gradle consumption',
       reason: 'Serial source replay observes exact settled trees and manifests, including a retained backup when restore is refused. Reader timing, cleanup failures and actual Gradle builds remain separate.'},
+    {model: 'AndroidBuildInputReadiness', obligation: 'Full runtime and APK admission',
+      reason: 'The native prerequisite gates and report execute on bounded private inputs with controlled verification ports. A successful report does not exercise Gradle, APK verification, signing or installed behavior.'},
     {model: 'AndroidBrowserModuleStage', obligation: 'Concurrent module publication, Gradle configuration and APK consumption',
       reason: 'The selected browser module executes actual source staging, Gradle host generation and receipt verification in scratch. Concurrent processes, the full module graph, Gradle and installed input handling remain separate.'},
     {model: 'NativeGoogleHostArtifact', obligation: 'Cross-process publication, interruption and installed use',
