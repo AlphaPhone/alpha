@@ -51,6 +51,6 @@ test('source snapshot binds the shared client source preparer and managed source
  const before=snapshot(root);
  for(const name of Object.keys(before.files))assert.equal(before.files[name],sha('first'));
  assert.equal(Object.keys(before.files).length,2);
- write(root,'changed helper');
+ write(root,'scripts/prepare-client-features.mjs','changed preparer');
  assert.notEqual(snapshot(root).digest,before.digest);
 });
