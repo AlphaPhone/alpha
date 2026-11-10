@@ -21,4 +21,5 @@ final class FirstWriteSpeechOutput implements StreamingSpeechPlayback.Output {
  @Override public void abort(){output.abort();}
  @Override public void stop(){output.stop();}
  @Override public void release(){output.release();}
+ @Override public int startFrames(){return output.startFrames();}
 }

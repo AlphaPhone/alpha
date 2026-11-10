@@ -199,6 +199,8 @@ export class CalendarSyncController {
 				paused: 0,
 				dirty: 0,
 			};
+			// One lookup per linked row instead of a scan of every local event.
+			const localMissing = missingLocalEvent(events);
 			for (let row of await store.list()) {
 				await opted();
 				if (row.state === "quarantined") {
@@ -210,7 +212,7 @@ export class CalendarSyncController {
 					continue;
 				}
 				if (
-					!events.some((event) => event.id === row.localEventId) &&
+					localMissing(row.localEventId) &&
 					row.providerEventId &&
 					row.state !== "paused" &&
 					row.state !== "conflicted"
@@ -241,4 +243,12 @@ export class CalendarSyncController {
 			if (this.operation === controller) this.operation = null;
 		}
 	}
+}
+
+/** Answers whether a linked row's local event is no longer among the local events (it was deleted on this phone). */
+export function missingLocalEvent(
+	events: ReadonlyArray<{ id: string }>,
+): (localEventId: string) => boolean {
+	const ids = new Set(events.map((event) => event.id));
+	return (localEventId) => !ids.has(localEventId);
 }

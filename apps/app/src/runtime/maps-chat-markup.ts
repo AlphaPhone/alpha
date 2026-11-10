@@ -42,3 +42,18 @@ export function mapsChatText(text:string){
  const displayText=cards.length||choice?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered;
  return {displayText,cards,specs,choice:choice as MapsShareChoice|null};
 }
+export type MapsChatParse=ReturnType<typeof mapsChatText>;
+/** Parses of the messages on screen, by message id. A message whose text has not changed keeps
+ * its parse (the same object, which callers must not change), so a render parses only new or
+ * edited messages. `retain` forgets the ids that are no longer in the conversation. */
+export function createMapsChatParses(){
+ const known=new Map<string,{text:string;parsed:MapsChatParse}>();
+ return {
+  parse(id:string,text:string):MapsChatParse{
+   const hit=known.get(id);if(hit&&hit.text===text)return hit.parsed;
+   const parsed=mapsChatText(text);known.set(id,{text,parsed});return parsed;
+  },
+  retain(ids:Iterable<string>){const keep=new Set(ids);for(const id of [...known.keys()])if(!keep.has(id))known.delete(id);},
+  get size(){return known.size;},
+ };
+}

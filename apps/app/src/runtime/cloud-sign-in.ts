@@ -69,6 +69,42 @@ export class CloudSignInError extends Error {
 export const SIGN_IN_WAITING = 'Waiting for connection';
 /** A Resend on the code step that could not reach Cloud: no new code was sent. */
 export const SIGN_IN_RESEND_FAILED = 'Couldn’t send a new code. Check your connection.';
+/** The host no longer holds the attempt the code step shows, although its deadline has not passed. */
+export const SIGN_IN_CODE_LOST = 'That code can’t be checked any more. Resend the code.';
+/** Failures that only mean this request did not reach Cloud. */
+export const SIGN_IN_TRANSPORT_FAILURES: readonly CloudSignInFailureCode[] = ['offline', 'dns', 'timeout', 'secure-connection'];
+/**
+ * What the code or second-verification step does after a failed check.
+ * `stay`: a wrong code, or a request that never reached Cloud. The host may keep the attempt (the
+ * same code can be entered again) or may have dropped it, in which case the next check answers
+ * `expired`.
+ * `resend`: the host reports the emailed or texted attempt gone before its own deadline (it dropped
+ * the attempt after a failed check or a failed resend). The code step stays and asks for a new code.
+ * `restart`: anything else returns to the method choice.
+ */
+export function verifyFailureStep(code: CloudSignInFailureCode, view: { step: 'code' | 'mfa'; expiresAt: number }, now: number): 'stay' | 'resend' | 'restart' {
+  if (code === 'invalid-code' || SIGN_IN_TRANSPORT_FAILURES.includes(code)) return 'stay';
+  if (code === 'expired' && view.step === 'code' && view.expiresAt > now) return 'resend';
+  return 'restart';
+}
+/**
+ * Whether a step started on the method choice waits behind "Waiting for connection" after it
+ * failed. An unreachable Cloud always waits. A step that was already waiting and is sent again by
+ * itself also waits out the host's send cooldown: a host that counts an unsent code toward the
+ * cooldown refuses the automatic send for up to a minute, and the owner never asked twice.
+ */
+export function signInStepHeld(failure: 'waiting' | 'cooldown' | 'other', resumed: boolean): boolean {
+  return failure === 'waiting' || (resumed && failure === 'cooldown');
+}
+/**
+ * Whether the method choice re-checks Cloud by itself (when the network returns, when Alpha comes
+ * back to the front, and on a timer). Only states the re-check can change keep it running:
+ * unconfirmed or missing methods, a step waiting for the connection, or a connection error. A
+ * refusal Cloud already answered (cooldown, rate limit, a bad address) never polls.
+ */
+export function signInMethodsRecheck(input: { step: string; methodsUnconfirmed: boolean; connectionError: boolean; pending: boolean; anyMethod: boolean }): boolean {
+  return input.step === 'choose' && (input.methodsUnconfirmed || input.connectionError || input.pending || !input.anyMethod);
+}
 /** Owner-facing copy. Never includes server text, codes or addresses. */
 export function signInFailureMessage(code: CloudSignInFailureCode, serviceName: string): string {
   switch (code) {

@@ -54,7 +54,8 @@ import org.json.JSONTokener;
  * inference keep their existing credential path. That slot is renderer-readable, as the Cloud
  * sign-in hand-off's key always was: the renderer reads the key to send it as its Bearer. So this
  * client stays on Cloud's default 30-day key lifetime. Plugin call results carry no secret. A key
- * this sign-in replaces is revoked once, best effort, after the new key is active.
+ * this sign-in replaces is revoked once, best effort, after the new key is active; until then it is
+ * recorded in a native-only slot, so an activation that only completes after a restart still revokes it.
  *
  * Readiness: status() reports `inApp` only after CloudSignInReadiness confirms Cloud is ready for this
  * phone (cached). Email stays in Alpha even if this probe fails. Returns follow the shared
@@ -65,6 +66,8 @@ public final class AlphaCloudSignInPlugin extends Plugin {
  /** Native-only namespace (RendererCredentialSlots): the renderer can neither read nor write it. */
  static final String PENDING_SLOT = "cloud-signin:v1:pending";
  static String receiptSlot(CloudSignInFlow.Environment environment) { return "cloud-signin:v1:ack:" + environment.name; }
+ /** Keys a sign-in replaced that are not yet revoked (CloudSignInFlow.replacedKeys). */
+ static String replacedSlot(CloudSignInFlow.Environment environment) { return "cloud-signin:v1:replaced:" + environment.name; }
  /** Non-secret readiness cache (plain preferences): booleans and a timestamp per environment. */
  private static final String READINESS_PREFERENCES = "alpha-cloud-signin-readiness-" + CloudDeployment.STORAGE_NAMESPACE;
  private static final int RESPONSE_LIMIT = 256 * 1024;
@@ -86,7 +89,9 @@ public final class AlphaCloudSignInPlugin extends Plugin {
   volatile CountDownLatch authorizationDecision;
   volatile boolean authorized;
   String email, phone, emailVerifier, mfaType, mfaChallenge;
-  long expiresAt, resendAt;
+  long expiresAt, resendAt, requestedAt;
+  /** The live code attempt this one takes over from once its send is accepted. */
+  Attempt replaces;
   int failedVerifies;
   boolean busy;
   Attempt(CloudSignInFlow.Environment environment, boolean google) { this.environment = environment; this.google = google; }
@@ -100,10 +105,16 @@ public final class AlphaCloudSignInPlugin extends Plugin {
  private final ExecutorService worker = Executors.newSingleThreadExecutor();
  /** Readiness probes run apart from sign-in work, so a slow probe never delays a sign-in step. */
  private final ExecutorService prober = Executors.newSingleThreadExecutor();
+ /** The startup acknowledgement retries for minutes on a dead network, so it never shares the sign-in worker. */
+ private final ExecutorService resumer = Executors.newSingleThreadExecutor();
+ /** Read-modify-write of the replaced-key record, which a sign-in and the startup resume both change. */
+ private final Object records = new Object();
  private final Handler main = new Handler(Looper.getMainLooper());
  private final Map<CloudSignInFlow.Environment, CloudSignInReadiness.Result> readiness = new EnumMap<>(CloudSignInFlow.Environment.class);
  private final Map<CloudSignInFlow.Environment, List<PluginCall>> probing = new EnumMap<>(CloudSignInFlow.Environment.class);
  private Attempt attempt;
+ /** A code send in flight that will replace `attempt` if Cloud accepts it; `attempt` stays busy meanwhile. */
+ private Attempt replacement;
  /** Global code-send cooldown: one send a minute from this phone, whatever the address. */
  private long lastEmailSendAt;
  private volatile boolean destroyed;
@@ -115,7 +126,7 @@ public final class AlphaCloudSignInPlugin extends Plugin {
   // against the encrypted pending record. A plain start leaves that record alone: it expires on its
   // own, and a launcher restart must not discard a sign-in still in the browser.
   captureCallback(getActivity().getIntent());
-  run(this::resumeAcknowledgements);
+  try { resumer.execute(this::resumeAcknowledgements); resumer.shutdown(); } catch (java.util.concurrent.RejectedExecutionException closed) { /* Activity teardown. */ }
   // Warm the cached readiness answer so opening sign-in rarely waits for it.
   probe(CloudSignInFlow.Environment.PRODUCTION, null);
  }
@@ -140,9 +151,10 @@ public final class AlphaCloudSignInPlugin extends Plugin {
  }
  @Override protected void handleOnDestroy() {
   destroyed = true;
-  synchronized (lock) { if (attempt != null) attempt.cancel(); attempt = null; }
+  synchronized (lock) { if (attempt != null) attempt.cancel(); attempt = null; if (replacement != null) replacement.cancel(); replacement = null; }
   worker.shutdownNow();
   prober.shutdownNow();
+  resumer.shutdownNow();
   super.handleOnDestroy();
  }
  private void run(Runnable task) {
@@ -437,31 +449,69 @@ public final class AlphaCloudSignInPlugin extends Plugin {
   try { environment = CloudSignInFlow.environment(call.getString("environment"), testMocks()); }
   catch (Exception invalid) { call.reject("Unsupported Cloud environment", "invalid-request"); return; }
   if (!CloudSignInFlow.validEmail(email)) { call.reject("Enter a valid email address", "invalid-email"); return; }
-  final Attempt current;
-  synchronized (lock) {
-   long now = System.currentTimeMillis();
-   if (attempt != null && (attempt.google || attempt.busy)) { call.reject("Another sign-in is in progress", "login-active"); return; }
-   // One send a minute from this phone, whatever the address (Steward also limits sends server-side).
-   if (now < lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS) { call.reject("Wait before requesting another code", "cooldown"); return; }
-   if (attempt != null) attempt.cancel();
-   current = new Attempt(environment, false);
-   current.email = email; current.emailVerifier = CloudSignInFlow.newVerifier(); current.busy = true; attempt = current;
-   lastEmailSendAt = now;
-  }
+  final Attempt current = new Attempt(environment, false);
+  current.email = email; current.emailVerifier = CloudSignInFlow.newVerifier();
+  if (!admitSend(call, current)) return;
   run(() -> {
    try {
+    requireSendAllowed(current);
     Response sent = post(current, CloudEmailCode.SEND_PATH, CloudEmailCode.sendBody(current.environment, email, current.emailVerifier), null);
     if (sent.status != 200 && sent.status != 202) throw new SignInFailure(CloudSignInFlow.failureForStatus("send", sent.status));
     JSONObject data = sent.data.optJSONObject("data") != null ? sent.data.optJSONObject("data") : sent.data;
-    long now = System.currentTimeMillis(), expiresAt = CloudEmailCode.expiresAt(data.opt("expiresAt"), now);
-    synchronized (lock) {
-     if (attempt != current || current.cancelled) throw new SignInFailure("cancelled");
-     current.expiresAt = expiresAt; current.resendAt = lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS; current.busy = false;
-    }
-    call.resolve(new JSObject().put("attemptId", current.id).put("expiresAt", expiresAt).put("resendAt", current.resendAt));
-   } catch (SignInFailure failure) { release(current); refused(current.environment, failure.code); call.reject(failure.code, failure.code); }
-   catch (Exception unexpected) { release(current); call.reject("unavailable", "unavailable"); }
+    call.resolve(sendAccepted(current, CloudEmailCode.expiresAt(data.opt("expiresAt"), System.currentTimeMillis())));
+   } catch (SignInFailure failure) { sendFailed(current); refused(current.environment, failure.code); call.reject(failure.code, failure.code); }
+   catch (Exception unexpected) { sendFailed(current); call.reject("unavailable", "unavailable"); }
   });
+ }
+ /**
+  * Admits one code send. With no attempt, the new one is installed at once. A send that would replace
+  * a live code attempt (Resend, or another address) is held in `replacement` while the request runs:
+  * the live attempt stays, busy, and gives way only when Cloud accepts the send, so a send that fails
+  * leaves the code already delivered usable. The cooldown is not started here: only an accepted send
+  * starts it (sendAccepted), so a send that never left can be repeated as soon as the phone is online.
+  */
+ private boolean admitSend(PluginCall call, Attempt next) {
+  synchronized (lock) {
+   long now = System.currentTimeMillis();
+   if (attempt != null && (attempt.google || attempt.busy)) { call.reject("Another sign-in is in progress", "login-active"); return false; }
+   // One send a minute from this phone, whatever the address (Steward also limits sends server-side).
+   if (now < lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS) { call.reject("Wait before requesting another code", "cooldown"); return false; }
+   next.busy = true; next.requestedAt = now;
+   if (attempt == null) attempt = next;
+   else { attempt.busy = true; next.replaces = attempt; replacement = next; }
+  }
+  // A new attempt burns an unclaimed Google record, so a late browser return cannot complete beside it.
+  burnUnclaimedPending();
+  return true;
+ }
+ /** Lock held. The attempt is installed, or is the send waiting to replace the installed one. */
+ private boolean live(Attempt current) { return !current.cancelled && (attempt == current || replacement == current); }
+ /** Checked on the worker just before the request: an earlier send accepted meanwhile still imposes its cooldown. */
+ private void requireSendAllowed(Attempt current) throws SignInFailure {
+  synchronized (lock) {
+   if (!live(current)) throw new SignInFailure("cancelled");
+   if (System.currentTimeMillis() < lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS) throw new SignInFailure("cooldown");
+  }
+ }
+ /** Cloud accepted the send: the cooldown starts, and the new attempt replaces the one it was held beside. */
+ private JSObject sendAccepted(Attempt current, long expiresAt) throws SignInFailure {
+  synchronized (lock) {
+   lastEmailSendAt = Math.max(lastEmailSendAt, current.requestedAt);
+   if (!live(current)) throw new SignInFailure("cancelled");
+   if (replacement == current) { replacement = null; current.replaces.cancel(); attempt = current; }
+   current.replaces = null;
+   current.expiresAt = expiresAt; current.resendAt = lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS; current.busy = false;
+   return new JSObject().put("attemptId", current.id).put("expiresAt", expiresAt).put("resendAt", current.resendAt);
+  }
+ }
+ /** The send failed: the new attempt never held a code and is dropped; the attempt it would have replaced is usable again. */
+ private void sendFailed(Attempt current) {
+  synchronized (lock) {
+   current.busy = false;
+   if (replacement == current) replacement = null;
+   if (current.replaces != null) { current.replaces.busy = false; current.replaces = null; }
+   if (attempt == current) attempt = null;
+  }
  }
  @PluginMethod public void startPhone(PluginCall call) {
   final CloudSignInFlow.Environment environment;
@@ -469,31 +519,19 @@ public final class AlphaCloudSignInPlugin extends Plugin {
   try { environment = CloudSignInFlow.environment(call.getString("environment"), testMocks()); }
   catch (Exception invalid) { call.reject("Unsupported Cloud environment", "invalid-request"); return; }
   if (!CloudSmsCode.validPhone(phone)) { call.reject("Enter a phone number with country code", "invalid-phone"); return; }
-  final Attempt current;
-  synchronized (lock) {
-   long now = System.currentTimeMillis();
-   if (attempt != null && (attempt.google || attempt.busy)) { call.reject("Another sign-in is in progress", "login-active"); return; }
-   // One send a minute from this phone, whatever the address (Steward also limits sends server-side).
-   if (now < lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS) { call.reject("Wait before requesting another code", "cooldown"); return; }
-   if (attempt != null) attempt.cancel();
-   current = new Attempt(environment, false);
-   current.phone = phone; current.busy = true; attempt = current;
-   lastEmailSendAt = now;
-  }
+  final Attempt current = new Attempt(environment, false);
+  current.phone = phone;
+  if (!admitSend(call, current)) return;
   run(() -> {
    try {
+    requireSendAllowed(current);
     requirePhoneAvailable(current);
     Response sent = post(current, CloudSmsCode.SEND_PATH, CloudSmsCode.sendBody(current.environment, phone), null);
     if (sent.status != 200 && sent.status != 202) throw new SignInFailure(CloudSignInFlow.failureForStatus("send", sent.status));
     JSONObject data = sent.data.optJSONObject("data") != null ? sent.data.optJSONObject("data") : sent.data;
-    long now = System.currentTimeMillis(), expiresAt = CloudEmailCode.expiresAt(data.opt("expiresAt"), now);
-    synchronized (lock) {
-     if (attempt != current || current.cancelled) throw new SignInFailure("cancelled");
-     current.expiresAt = expiresAt; current.resendAt = lastEmailSendAt + CloudSignInFlow.RESEND_COOLDOWN_MS; current.busy = false;
-    }
-    call.resolve(new JSObject().put("attemptId", current.id).put("expiresAt", expiresAt).put("resendAt", current.resendAt));
-   } catch (SignInFailure failure) { release(current); refused(current.environment, failure.code); call.reject(failure.code, failure.code); }
-   catch (Exception unexpected) { release(current); call.reject("unavailable", "unavailable"); }
+    call.resolve(sendAccepted(current, CloudEmailCode.expiresAt(data.opt("expiresAt"), System.currentTimeMillis())));
+   } catch (SignInFailure failure) { sendFailed(current); refused(current.environment, failure.code); call.reject(failure.code, failure.code); }
+   catch (Exception unexpected) { sendFailed(current); call.reject("unavailable", "unavailable"); }
   });
  }
  /** Check registration and tenant SMS policy before sending a real code. No website alias or captcha bypass. */
@@ -511,7 +549,7 @@ public final class AlphaCloudSignInPlugin extends Plugin {
   if (required != null) for (int i = 0; i < required.length(); i++) requiredFor.add(required.optString(i));
   if (!CloudSmsCode.offered(providers.status, providers.data.opt("sms"), captcha == null ? null : captcha.opt("enabled"), requiredFor))
    throw new SignInFailure("unavailable");
-  synchronized (lock) { if (attempt != current || current.cancelled) throw new SignInFailure("cancelled"); }
+  synchronized (lock) { if (!live(current)) throw new SignInFailure("cancelled"); }
  }
  @PluginMethod public void verifyPhone(PluginCall call) { verify(call, false, true); }
  @PluginMethod public void verifyEmail(PluginCall call) { verify(call, false); }
@@ -533,21 +571,29 @@ public final class AlphaCloudSignInPlugin extends Plugin {
    current.busy = true; current.waiting = call;
   }
   run(() -> {
+   // Set once Cloud has answered the verification itself; later requests belong to the shared tail.
+   boolean answered = false;
    try {
     Response verified = mfa
      ? post(current, "/steward/auth/mfa/" + current.mfaType + "/complete", new JSONObject().put("challengeId", current.mfaChallenge).put("code", code), null)
      : phone ? post(current, CloudSmsCode.VERIFY_PATH, CloudSmsCode.verifyBody(current.environment, current.phone, code), null)
      : post(current, CloudEmailCode.VERIFY_PATH, CloudEmailCode.verifyBody(current.environment, current.email, code, current.emailVerifier), null);
+    answered = true;
     if (verified.status != 200) throw new SignInFailure(CloudSignInFlow.failureForStatus(mfa ? "mfa" : "verify", verified.status));
     JSONObject session = verified.data.optJSONObject("data") != null && !verified.data.has("token") ? verified.data.optJSONObject("data") : verified.data;
     complete(current, session);
    } catch (SignInFailure failure) {
-    if (!"invalid-code".equals(failure.code)) { end(current, failure.code, false); return; }
+    CloudSignInFlow.VerifyFailure outcome = CloudSignInFlow.afterVerifyFailure(failure.code, answered);
+    if (outcome == CloudSignInFlow.VerifyFailure.ENDED) { end(current, failure.code, false); return; }
     // A wrong code keeps the step for a retry, up to the per-attempt cap; then the attempt ends.
-    boolean exhausted;
-    synchronized (lock) { current.failedVerifies++; exhausted = current.failedVerifies >= CloudSignInFlow.MAX_VERIFY_ATTEMPTS; }
+    // A verification that never reached Cloud keeps the step too and is not counted: the code is unspent.
+    boolean exhausted = false;
+    if (outcome == CloudSignInFlow.VerifyFailure.COUNTED) synchronized (lock) { current.failedVerifies++; exhausted = current.failedVerifies >= CloudSignInFlow.MAX_VERIFY_ATTEMPTS; }
     if (exhausted) { end(current, "attempts-exhausted", false); return; }
-    release(current); synchronized (lock) { current.waiting = null; } call.reject(failure.code, failure.code);
+    release(current);
+    PluginCall waiting;
+    synchronized (lock) { waiting = current.waiting; current.waiting = null; }
+    if (waiting != null) waiting.reject(failure.code, failure.code);
    }
    catch (Exception unexpected) { end(current, "unavailable", false); }
   });
@@ -565,8 +611,10 @@ public final class AlphaCloudSignInPlugin extends Plugin {
  }
 
  @PluginMethod public void cancel(PluginCall call) {
-  Attempt current;
-  synchronized (lock) { current = attempt; attempt = null; }
+  Attempt current, sending;
+  synchronized (lock) { current = attempt; attempt = null; sending = replacement; replacement = null; }
+  // A send still in flight is abandoned with the attempt it would have replaced; its own call reports the cancel.
+  if (sending != null) sending.cancel();
   if (current != null) { current.cancel(); PluginCall waiting; synchronized (lock) { waiting = current.waiting; current.waiting = null; } if (waiting != null) waiting.reject("cancelled", "cancelled"); }
   // The explicit cancel burns a pending Google record.
   burnUnclaimedPending();
@@ -670,7 +718,12 @@ public final class AlphaCloudSignInPlugin extends Plugin {
    AlphaCredentialStore receipts = store();
    receipts.writeCredentialSlot(receiptSlot(environment), new JSONObject(proof.toString()).put("credentialId", credentialId).put("acknowledgeBy", acknowledgeBy).toString());
    // The key this sign-in replaces, if any, is revoked after the new one is active (as CloudProtocol.login does).
+   // It is recorded before the write that discards it, so an activation completed after a restart revokes it too.
    String previous = previousToken(receipts, environment, secret);
+   synchronized (records) {
+    String replaced = CloudSignInFlow.withReplacedKey(receipts.readCredentialSlot(replacedSlot(environment)), previous, secret);
+    if (replaced != null) receipts.writeCredentialSlot(replacedSlot(environment), replaced);
+   }
    long intent = AlphaLocalAgentPlugin.reserveCredentialIntent();
    AlphaCredentialStore credentials = new AlphaCredentialStore(getContext(), () -> { if (destroyed || current.cancelled) throw new IllegalStateException("Sign-in closed"); AlphaLocalAgentPlugin.requireCredentialIntent(intent); });
    JSONObject saved = new JSONObject().put("credentialId", UUID.randomUUID().toString()).put("token", secret).put("expiresAt", expiresAt).put("serverCredentialId", credentialId);
@@ -681,7 +734,8 @@ public final class AlphaCloudSignInPlugin extends Plugin {
    if (!acknowledged) throw new SignInFailure("activation-pending");
    JSObject outcome = new JSObject().put("status", "authenticated").put("environment", environment.name).put("expiresAt", expiresAt)
     .put("accountCreated", created instanceof Boolean ? created : JSONObject.NULL);
-   if (previous != null) outcome.put("previousSignIn", CloudKeyRevocation.revoke(environment.name, previous, testMocks()) ? "revoked" : "unconfirmed");
+   Set<String> revoked = revokeReplaced(receipts, environment, previous);
+   if (previous != null) outcome.put("previousSignIn", revoked.contains(previous) ? "revoked" : "unconfirmed");
    finish(current, outcome);
   } finally {
    // The Steward session is not needed past this point: revoke it, best effort, never stored.
@@ -696,6 +750,27 @@ public final class AlphaCloudSignInPlugin extends Plugin {
    String token = raw == null ? null : new JSONObject(raw).optString("token", null);
    return token == null || token.isEmpty() || token.equals(issued) ? null : token;
   } catch (Exception unreadable) { return null; }
+ }
+ /**
+  * Revokes the keys recorded as replaced in this environment (and `also`, the key a sign-in has just
+  * replaced), once each and best effort, then forgets them. The key this phone holds is never among
+  * them. Returns the keys whose revocation Cloud confirmed.
+  */
+ private Set<String> revokeReplaced(AlphaCredentialStore store, CloudSignInFlow.Environment environment, String also) {
+  Set<String> revoked = new HashSet<>();
+  List<String> keys = new ArrayList<>();
+  try { synchronized (records) { keys = CloudSignInFlow.revocableKeys(store.readCredentialSlot(replacedSlot(environment)), previousToken(store, environment, null)); } }
+  catch (Exception unreadable) { /* Only the key just replaced, if any. */ }
+  if (also != null && !keys.contains(also)) keys.add(also);
+  if (keys.isEmpty()) return revoked;
+  for (String key : keys) if (CloudKeyRevocation.revoke(environment.name, key, testMocks())) revoked.add(key);
+  try {
+   synchronized (records) {
+    String rest = CloudSignInFlow.withoutReplacedKeys(store.readCredentialSlot(replacedSlot(environment)), keys);
+    if (rest == null) store.removeCredentialSlot(replacedSlot(environment)); else store.writeCredentialSlot(replacedSlot(environment), rest);
+   }
+  } catch (Exception kept) { /* Tried again on the next start. */ }
+  return revoked;
  }
  /** Bounded retry: ack is idempotent and the key is re-revealed until acknowledgeBy. */
  private boolean acknowledge(Attempt current, JSONObject proof, String credentialId, String secret) throws Exception {
@@ -712,14 +787,19 @@ public final class AlphaCloudSignInPlugin extends Plugin {
   }
   return false;
  }
- /** A key stored before an interrupted ack is activated on the next start, while Cloud allows it. */
+ /**
+  * A key stored before an interrupted ack is activated on the next start, while Cloud allows it. Once
+  * activation is settled (acknowledged, or no longer possible), the keys that sign-in replaced are
+  * revoked. This runs beside the sign-in worker, so it removes only the receipt it read: a sign-in
+  * finishing meanwhile owns a newer receipt and settles its own replaced keys.
+  */
  private void resumeAcknowledgements() {
   for (CloudSignInFlow.Environment environment : CloudSignInFlow.Environment.values()) {
    if (environment == CloudSignInFlow.Environment.STAGING && !testMocks()) continue;
    try {
     AlphaCredentialStore store = store();
     String raw = store.readCredentialSlot(receiptSlot(environment));
-    if (raw == null) continue;
+    if (raw == null) { revokeReplaced(store, environment, null); continue; }
     JSONObject receipt = new JSONObject(raw), proof = new JSONObject();
     for (String key : new String[]{"clientId", "environment", "redirectUri", "code", "state", "codeVerifier"}) proof.put(key, receipt.getString(key));
     String credentialId = receipt.getString("credentialId"), saved = store.readCredentialSlot("cloud:" + environment.name);
@@ -727,7 +807,7 @@ public final class AlphaCloudSignInPlugin extends Plugin {
     boolean current = credential != null && credentialId.equals(credential.optString("serverCredentialId")) && environment.name.equals(proof.getString("environment"));
     boolean done = !current || receipt.getLong("acknowledgeBy") <= System.currentTimeMillis()
      || acknowledge(null, proof, credentialId, credential.getString("token"));
-    if (done) store.removeCredentialSlot(receiptSlot(environment));
+    if (done && store.compareExchangeCredentialSlot(receiptSlot(environment), raw, null)) revokeReplaced(store, environment, null);
    } catch (Exception unavailable) { /* Kept for the next start; a stale receipt expires with acknowledgeBy. */ }
   }
  }

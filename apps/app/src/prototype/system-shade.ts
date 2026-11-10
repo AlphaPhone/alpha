@@ -88,6 +88,20 @@ export function overflowPullDecision(eligible: boolean, dx: number, dy: number, 
   if (Math.abs(dx) < slop && Math.abs(dy) < slop) return 'wait';
   return dy > 0 && dy > Math.abs(dx) ? 'claim' : 'release';
 }
+
+/** Longest a pull waits for Android's answer before the fallback is shown. */
+export const SHADE_REQUEST_TIMEOUT = 5000;
+
+/**
+ * Android's answer to one request, or 'unsupported' when the request fails or has not answered in
+ * time. Only the wait is bounded: Android still owns the request, and a late answer is ignored.
+ */
+export function shadeOutcomeWithin(request: Promise<{ status?: string } | null | undefined>, ms = SHADE_REQUEST_TIMEOUT): Promise<unknown> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve('unsupported'), ms);
+    request.then(result => { clearTimeout(timer); resolve(result?.status); }, () => { clearTimeout(timer); resolve('unsupported'); });
+  });
+}
 // system-shade:end
 
 const EDITABLE = 'input,textarea,select,[contenteditable=""],[contenteditable="true"],[role="textbox"],[role="slider"]';
@@ -216,8 +230,8 @@ export function installSystemShade(Component: any, options: { native: boolean })
     if (this.alphaShadeAsking) return;
     this.alphaShadeAsking = true;
     let outcome: unknown = 'unsupported';
-    try { outcome = (await device.openNotificationShade())?.status; }
-    catch { outcome = 'unsupported'; }
+    // A request Android never answers must not leave every later pull ignored.
+    try { outcome = await shadeOutcomeWithin(Promise.resolve().then(() => device.openNotificationShade())); }
     finally { this.alphaShadeAsking = false; }
     const message = shadeFallback(outcome);
     if (message) this.toast(message);

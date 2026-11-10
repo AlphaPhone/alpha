@@ -130,11 +130,20 @@ export function broaderPageNotice(page: string, opened: unknown): string | null 
   if (page === 'dnd') return 'Opened Android priority settings. This phone has no separate Do Not Disturb page.';
   return 'Opened a related Android settings page. This phone has no separate page for that setting.';
 }
+/** One run per return to the app. Android reports a single return as visibilitychange, focus and
+ * appResumed together, so triggers inside the window after a run are ignored until the app is left. */
+export function returnGate(windowMs = 250, now: () => number = () => Date.now()) {
+  let last = -Infinity;
+  return {
+    returned(): boolean { const at = now(); if (at - last < windowMs) return false; last = at; return true; },
+    left() { last = -Infinity; },
+  };
+}
 // tile-facts:end
 /** Run each time the owner comes back to the app or its window regains focus (returning from an
  * Android page, or closing Android's own quick settings), so a changed switch is read again. */
 export function watchReturnToApp(run: () => void): () => void {
-  const check = () => { if (!document.hidden) run(); };
+  const gate = returnGate(), check = () => { if (document.hidden) gate.left(); else if (gate.returned()) run(); };
   document.addEventListener('visibilitychange', check); window.addEventListener('focus', check);
   const handle = DailyApps.addListener('appResumed', check).catch(() => null);
   return () => { document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); void handle.then(listener => listener?.remove()); };

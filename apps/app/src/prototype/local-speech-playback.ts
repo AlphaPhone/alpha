@@ -8,6 +8,7 @@ import { connectionController } from '../runtime/connection-ui';
 import { planLocalSpeech } from '../runtime/local-speech-text';
 import { createOnDeviceVoice } from '../runtime/local-voice';
 import { createCloudVoice, cloudVoiceFailure } from '../runtime/cloud-voice';
+import { speechCleanupNotice } from '../runtime/speech-cleanup';
 import { selectVoiceRoute, speakRepliesEnabled } from '../runtime/voice-selection';
 
 let cancelCurrent: (() => Promise<void>|void) | undefined;
@@ -173,7 +174,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
       if (!current()) return;
       state.controller = undefined;
       const recovery = cloud ? cloudVoiceFailure(error) : null;
-      state.message = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError') ? 'Reading stopped.' : recovery || (error instanceof Error ? error.message + ' The complete message may not have been read.' : 'Reading stopped before completion. The written message is still available.');
+      state.message = speechCleanupNotice(error) || (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError') ? 'Reading stopped.' : recovery || (error instanceof Error ? error.message + ' The complete message may not have been read.' : 'Reading stopped before completion. The written message is still available.'));
       refresh(shell);
     } finally {if(states.get(shell)===state&&!current()){stop(shell);refresh(shell);}}
   }

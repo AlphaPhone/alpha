@@ -108,8 +108,20 @@ export class LibraryCatalog {
   scope: LibraryScope = 'unavailable';
   loaded = false;
   private readonly ids = new Set<string>();
+  /** Row position by id for `items`. Built on first lookup and dropped whenever a row is
+   * added or removed, so a lookup never scans the catalog while its order is unchanged. */
+  private positions: Map<string, number> | undefined;
 
-  reset() { this.items = []; this.ids.clear(); this.next = ''; this.version = ''; this.generation = 0; this.loaded = false; }
+  reset() { this.items = []; this.ids.clear(); this.positions = undefined; this.next = ''; this.version = ''; this.generation = 0; this.loaded = false; }
+
+  /** Position of a loaded row, or -1. */
+  indexOf(id: string): number {
+    if (!this.positions) { this.positions = new Map(); for (let index = 0; index < this.items.length; index++) this.positions.set(this.items[index].id, index); }
+    return this.positions.get(id) ?? -1;
+  }
+
+  /** The loaded row with this id. */
+  find(id: string): LibraryItem | undefined { const index = this.indexOf(id); return index < 0 ? undefined : this.items[index]; }
 
   /** Returns true when the catalog had to be cleared. */
   observeScope(state: LibraryScopeState): boolean {
@@ -130,7 +142,7 @@ export class LibraryCatalog {
     for (const item of page.items) {
       if (this.ids.has(item.id)) continue;
       if (this.items.length >= LIBRARY_LIMITS.kept) { this.next = ''; break; }
-      this.ids.add(item.id); this.items.push(item);
+      this.ids.add(item.id); this.items.push(item); this.positions?.set(item.id, this.items.length - 1);
     }
     if (this.items.length < LIBRARY_LIMITS.kept) this.next = page.next;
     this.loaded = true;
@@ -147,9 +159,9 @@ export class LibraryCatalog {
   reconcile(results: LibraryValidation[]): { removed: string[]; changed: string[] } {
     const removed: string[] = [], changed: string[] = [];
     for (const result of results) {
-      const index = this.items.findIndex(item => item.id === result.id);
+      const index = this.indexOf(result.id);
       if (index < 0) continue;
-      if (result.status === 'missing') { this.items.splice(index, 1); this.ids.delete(result.id); removed.push(result.id); }
+      if (result.status === 'missing') { this.items.splice(index, 1); this.ids.delete(result.id); this.positions = undefined; removed.push(result.id); }
       else if (result.status === 'changed' && result.item) { this.items[index] = { ...result.item }; changed.push(result.id); }
     }
     return { removed, changed };
@@ -160,9 +172,9 @@ export class LibraryCatalog {
     const removed: string[] = [], changed: string[] = [];
     let added = 0;
     for (const row of rows) {
-      const index = this.items.findIndex(item => item.id === row.id);
+      const index = this.indexOf(row.id);
       if (index < 0) { if (!row.trashed) added++; continue; }
-      if (row.trashed) { this.items.splice(index, 1); this.ids.delete(row.id); removed.push(row.id); }
+      if (row.trashed) { this.items.splice(index, 1); this.ids.delete(row.id); this.positions = undefined; removed.push(row.id); }
       else if (this.items[index].revision !== row.revision) { const { trashed: _ignored, ...fresh } = row; this.items[index] = fresh; changed.push(row.id); }
     }
     this.generation = Math.max(this.generation, generation);
@@ -193,7 +205,7 @@ export class LibrarySelection {
   reconcile(catalog: LibraryCatalog): { dropped: number; changed: number } {
     let dropped = 0, changed = 0;
     for (const [id, revision] of [...this.chosen]) {
-      const item = catalog.items.find(row => row.id === id);
+      const item = catalog.find(id);
       if (!item) { this.chosen.delete(id); dropped++; }
       else if (item.revision !== revision) { this.chosen.delete(id); changed++; }
     }
@@ -237,7 +249,7 @@ export function prepareReview(action: LibraryAction, items: { id: string; revisi
 
 export function reviewCurrent(review: LibraryReview | undefined, catalog: LibraryCatalog, now = Date.now()): boolean {
   if (!review || now >= review.expiresAt) return false;
-  return review.items.every(reviewed => catalog.items.some(item => item.id === reviewed.id && item.revision === reviewed.revision));
+  return review.items.every(reviewed => catalog.find(reviewed.id)?.revision === reviewed.revision);
 }
 
 /** Session-local opaque revisions for model-facing identities. The native revision embeds the

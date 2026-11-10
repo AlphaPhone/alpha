@@ -96,3 +96,40 @@ test('a known denied native location grant goes to Settings and never re-asks wi
 test('explicit sign-in Ready preserves a completed legacy installation without forcing newly added grants',async t=>{
  const marker={version:1,status:'completed',step:4};const f=await fixture(t,{native:true,durable:marker});f.state.calendar=false;f.state.photos='denied';let homes=0;window.addEventListener('launcher-home',()=>homes++);await f.auth();assert.equal(f.heading(),'You’re all set');await f.click('Go to Alpha');assert.equal(f.heading(),undefined);assert.deepEqual(f.progress(),marker);assert.equal(f.calls.length,0);assert.equal(homes,1);
 });
+
+test('a resume check that a newer one replaced cannot move setup back to a granted permission',async t=>{
+ const f=await fixture(t,{native:true,durable:{version:3,status:'pending',step:2}});assert.equal(f.heading(),'Camera');
+ const status=globalThis.requiredPorts.AlphaNotifications.status;let release;
+ globalThis.requiredPorts.AlphaNotifications.status=()=>new Promise(resolve=>{release=resolve;});
+ await React.act(async()=>document.dispatchEvent(new f.dom.window.Event('visibilitychange')));
+ globalThis.requiredPorts.AlphaNotifications.status=status;
+ await React.act(async()=>document.dispatchEvent(new f.dom.window.Event('visibilitychange')));
+ assert.equal(f.heading(),'Camera');
+ await React.act(async()=>release({permissionGranted:true,appEnabled:true}));
+ assert.equal(f.heading(),'Camera');assert.equal(f.progress().step,2);assert.equal(f.calls.length,0);
+ f.state.notifications=false;await React.act(async()=>document.dispatchEvent(new f.dom.window.Event('visibilitychange')));
+ assert.equal(f.heading(),'Notifications');assert.equal(f.progress().step,0);
+});
+test('reviewing completed setup with access off can always be closed and keeps the completed marker',async t=>{
+ const marker={version:1,status:'completed',step:4};const f=await fixture(t,{durable:marker});let homes=0;window.addEventListener('launcher-home',()=>homes++);
+ f.state.camera=false;await f.open(undefined);assert.equal(f.heading(),'Notifications');assert.deepEqual(f.progress(),marker);f.button('Done');
+ await f.click('Continue');await f.click('Continue');assert.equal(f.heading(),'Camera');assert.deepEqual(f.progress(),marker);
+ await f.click('Check access');await f.cancel();await f.back();assert.equal(f.heading(),'Camera');assert.match(document.body.textContent,/Allow access in your browser/);
+ await f.click('Done');assert.equal(document.querySelector('dialog'),null);assert.deepEqual(f.progress(),marker);assert.equal(homes,0);assert.equal(f.calls.length,0);
+ await React.act(async()=>document.dispatchEvent(new f.dom.window.Event('visibilitychange')));assert.equal(document.querySelector('dialog'),null);assert.deepEqual(f.progress(),marker);
+ await f.open(undefined);assert.equal(f.heading(),'Notifications');await f.click('Done');await f.remount();assert.equal(document.querySelector('dialog'),null);assert.deepEqual(f.progress(),marker);
+});
+test('reopening unfinished setup stays required: no Done, and progress is still saved',async t=>{
+ const f=await fixture(t,{durable:{version:1,status:'pending',step:1}});assert.equal(f.heading(),'Microphone');await f.open(undefined);assert.equal(f.heading(),'Microphone');
+ assert(![...document.querySelectorAll('button')].some(x=>x.textContent==='Done'));await f.click('Continue');assert.deepEqual(f.progress(),{version:1,status:'pending',step:2});
+});
+test('a native prompt that never answers releases Checking at the limit without granting or asking again',async t=>{
+ const f=await fixture(t,{native:true,denied:true});let requests=0;globalThis.requiredPorts.DailyApps.requestPermissions=()=>{requests++;return new Promise(()=>{});};
+ assert.equal(f.heading(),'Notifications');t.mock.timers.enable({apis:['setTimeout']});
+ await f.click('Allow');assert.equal(f.button('Checking…').disabled,true);assert.equal(requests,1);
+ await React.act(async()=>t.mock.timers.tick(59999));assert.equal(f.button('Checking…').disabled,true);
+ await React.act(async()=>t.mock.timers.tick(1));
+ assert.equal(f.button('Open Android settings').disabled,false);assert.equal(f.heading(),'Notifications');assert.equal(f.progress().step,0);assert.match(document.body.textContent,/Access is off\./);
+ f.state.notifications=true;await React.act(async()=>document.dispatchEvent(new f.dom.window.Event('visibilitychange')));
+ assert.equal(f.button('Continue').disabled,false);assert.equal(requests,1);
+});

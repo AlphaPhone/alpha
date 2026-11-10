@@ -5,6 +5,13 @@ export interface NativeResidentPort {
  startLiveCapture(input:{captureId:string;echoCancel:boolean;nativeAsr:true;ownerId:string;roomId?:string}):Promise<{captureId?:unknown;sampleRate?:unknown;echoCancelled?:unknown;nativeAsr?:unknown}>;
  stopLiveCapture(input:{captureId:string;discard:boolean;cutoffMs:number}):Promise<{serverClosed?:unknown}>;
 }
+/** Turn ids kept to drop a repeated final. One capture spans a whole conversation, so the set is bounded by forgetting the oldest. */
+export const FINISHED_TURN_LIMIT=512;
+/** Records a delivered final's turn id, evicting the oldest (finals arrive in order) beyond `limit`. */
+export function rememberFinishedTurn(finished:Set<string>,turnId:string,limit=FINISHED_TURN_LIMIT):void{
+ finished.add(turnId);
+ while(finished.size>limit){const oldest=finished.values().next();if(oldest.done)break;finished.delete(oldest.value);}
+}
 /** Native PCM never enters these events. Only levels, VAD, transcript and close acknowledgement do. */
 export async function openNativeResidentCapture(port:NativeResidentPort,input:{
  signal:AbortSignal;echoCancel:boolean;ownerId:string;roomId?:string;
@@ -45,8 +52,8 @@ export async function openNativeResidentCapture(port:NativeResidentPort,input:{
    if(event?.captureId!==captureId||!admitted())return;
    if(event.error){if(event.error==='ASR_FAILED'){if(pending.length>=8){lose(Error('Native transcription session limit reached.'));return;}pending.push(null);drain();}else lose(Error('Native transcription unavailable.'));return;}
    const final=parseLiveFinal(event.final);if(!final||finished.has(final.turnId))return;
-   if(finished.size>=512||pending.length>=8){lose(Error('Native transcription session limit reached.'));return;}
-   finished.add(final.turnId);if(partialTurn===final.turnId){partialTurn='';partialSeq=0;}pending.push(final);drain();
+   if(pending.length>=8){lose(Error('Native transcription session limit reached.'));return;}
+   rememberFinishedTurn(finished,final.turnId);if(partialTurn===final.turnId){partialTurn='';partialSeq=0;}pending.push(final);drain();
   }));
   handles.push(await port.addListener('liveCaptureEnded',event=>{
    if(event?.captureId!==captureId||!admitted())return;
@@ -66,7 +73,9 @@ export async function openNativeResidentCapture(port:NativeResidentPort,input:{
   if(!active||!input.current()||result.captureId!==captureId||result.sampleRate!==16000||result.nativeAsr!==true)throw Error('Native voice binding changed.');
   startedAt=Date.now();
   return {startedAt,echoCancelled:input.echoCancel&&result.echoCancelled===true,speaking:()=>speaking,
-   async close(at=Date.now()){cutoff=Math.min(cutoff,at);end(at);await stop(false,at);if(!discarded)while(expected>0){expected--;input.onSegment(null);}return {durationMs:Math.max(0,at-startedAt)};},
+   // Every segment closed by this call gets its one result, also when the native stop fails or is
+   // not confirmed: the caller would otherwise wait for a final that can no longer arrive.
+   async close(at=Date.now()){cutoff=Math.min(cutoff,at);end(at);try{await stop(false,at);}finally{if(!discarded)while(expected>0){expected--;input.onSegment(null);}}return {durationMs:Math.max(0,at-startedAt)};},
    async cancel(){await stop(true);},
   };
  }catch(error){await stop(true).catch(()=>{});throw error;}

@@ -1,8 +1,8 @@
-import {browserDeletionClock,claimDeletion,deletionDeadline,deletionWindow,type PendingDeletion} from '../runtime/deletion-window';
+import {browserDeletionClock,claimDeletion,deletionDeadline,deletionWindow,type DeletionBlock,type PendingDeletion} from '../runtime/deletion-window';
 import {calendarRecord,deleteCalendarRecord,type CalendarRecord} from './calendar-records';
 import {revision} from './revision';
 export type CalendarDeletionTarget={sourceRevision:string;row:CalendarRecord;scope:'event'|'series'};
-export type CalendarDeletion=PendingDeletion<CalendarDeletionTarget>&{blocked?:string;journalBinding?:{scope:string;proposalId:string;operationHash:string}};
+export type CalendarDeletion=PendingDeletion<CalendarDeletionTarget>&{blocked?:DeletionBlock;journalBinding?:{scope:string;proposalId:string;operationHash:string}};
 export type CalendarDeletionState={sourceRevision:string;events:CalendarRecord[];deletions?:Record<string,CalendarDeletion>};
 const unresolved=(entry:CalendarDeletion)=>entry.phase==='queued'||entry.phase==='paused';
 export function calendarDeletionPending(data:CalendarDeletionState,id:string):boolean{
@@ -33,6 +33,8 @@ export function settleCalendarDeletions(data:CalendarDeletionState,ownerCurrent:
 }
 export function undoCalendarDeletion(data:CalendarDeletionState,id:string,ownerCurrent:(owner:string)=>boolean){
  const entry=data.deletions?.[id];if(!entry||!ownerCurrent(entry.owner))throw Error('Deletion owner changed.');
+ // Undo of an already undone deletion reports the same receipt, as the Android journal does.
+ if(entry.phase==='undone')return structuredClone(entry);
  if(!claimDeletion(entry,entry.owner,browserDeletionClock(),'undo'))throw Error('Undo window ended or deletion already settled.');return structuredClone(entry);
 }
 /** All document writers share this check, including editor and recurrence operations. */

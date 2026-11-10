@@ -205,10 +205,19 @@ export function createNativeLiveDictation(options: { roomId?: string; onInterim?
   const emit = (clip: Clip) => { for (const listener of [...listeners]) listener(clip); };
   const finish = (current: Recording, at?: number) => current.stopping ??= (async () => {
     if (current.timer) clearTimeout(current.timer);
-    const result = await current.capture!.close(at);
-    const clip = { recordingId: current.id, durationMs: result.durationMs };
-    current.clip = clip;
-    return clip;
+    try {
+      const result = await current.capture!.close(at);
+      const clip = { recordingId: current.id, durationMs: result.durationMs };
+      current.clip = clip;
+      return clip;
+    } catch (error) {
+      // A capture that did not stop cleanly is discarded and leaves nothing to transcribe;
+      // Transcribe can start again.
+      current.controller.abort();
+      current.texts.length = 0;
+      if (recording === current) recording = undefined;
+      throw error;
+    }
   })();
   return {
     live: true as const,

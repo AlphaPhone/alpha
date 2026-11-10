@@ -15,6 +15,8 @@ public final class AlphaAssistActivity extends MainActivity {
  private String invocation;
  private long invocationAt;
  private boolean invocationLocked;
+ /** The page of this instance has not loaded yet, so the renderer could not have read the invocation. */
+ private boolean awaitingFirstPage = true;
  /** Window event the renderer listens for: a new invocation reached the already open surface. */
  static final String INVOCATION_EVENT = "alpha:assist-invocation";
  @Override public void onCreate(Bundle state) {
@@ -22,8 +24,20 @@ public final class AlphaAssistActivity extends MainActivity {
   // launching package Android reports is still the original one, so it is ignored.
   setIntent(cleanIntent(state == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ? getLaunchedFromPackage() : null));
   super.onCreate(state);
+  if (getBridge() != null) getBridge().addWebViewListener(new com.getcapacitor.WebViewListener() {
+   @Override public void onPageLoaded(android.webkit.WebView view) { firstPageLoaded(); }
+  });
  }
- /** Android 15+ reports who sent each new intent to this single-task surface. */
+ /** The listener window of an invocation that arrived before the page existed starts now, once. */
+ private synchronized void firstPageLoaded() {
+  if (!awaitingFirstPage) return;
+  awaitingFirstPage = false;
+  invocationAt = AssistInvocation.windowStart(invocationAt, android.os.SystemClock.elapsedRealtime());
+ }
+ /**
+  * Android 15+ reports who sent each new intent to this single-task surface. Earlier releases call
+  * only the overload below, without a caller, so a wake that reaches the open surface is "assist".
+  */
  @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
  @Override public void onNewIntent(Intent intent, ComponentCaller caller) {
   newIntentCaller = caller == null ? null : caller.getPackage();

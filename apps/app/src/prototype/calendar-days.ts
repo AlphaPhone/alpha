@@ -62,6 +62,38 @@ export function calendarLoadRange(state: Bag, now: Date | number = Date.now()): 
   return { begin: Math.max(0, begin), end, key: `${begin}:${end}` };
 }
 
+/** The selected day after a save: Schedule always starts today; every other view shows the saved day. */
+export const calendarSavedDay = (view: unknown, day: number): number => calendarView(view) === 'schedule' ? 0 : day;
+
+/** Milliseconds until the next local midnight, when the day offsets of loaded rows stop being true. */
+export function msToLocalMidnight(now: Date | number = Date.now()): number {
+  const date = new Date(now);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime() - date.getTime();
+}
+
+/**
+ * Timed events grouped once by the local days they can touch (days counted from `now`). The
+ * returned lookup answers, in the events' own order, those that may overlap day `off`: a superset,
+ * so callers still compare exact instants. Events covering more than `span` days are offered for
+ * every day instead of being listed under each.
+ */
+export function calendarDayIndex<T>(events: readonly T[], interval: (event: T) => { begin: number; end: number }, now: Date | number, span = 62): (off: number) => T[] {
+  const today = new Date(now), base = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const dayOf = (instant: number) => { const date = new Date(instant); return Math.round((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - base) / 86_400_000); };
+  const days = new Map<number, number[]>(), long: number[] = [];
+  events.forEach((event, index) => {
+    const { begin, end } = interval(event);
+    if (!Number.isFinite(begin) || !Number.isFinite(end)) return;
+    const first = dayOf(begin), last = dayOf(end);
+    if (last - first > span) { long.push(index); return; }
+    for (let off = first; off <= last; off++) { const list = days.get(off); if (list) list.push(index); else days.set(off, [index]); }
+  });
+  return off => {
+    const listed = days.get(off) ?? [];
+    return (long.length ? [...listed, ...long].sort((a, b) => a - b) : listed).map(index => events[index]!);
+  };
+}
+
 export function calendarDayLabel(now: Date | number, off: number): string {
   const date = new Date(now); date.setDate(date.getDate() + off);
   return date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });

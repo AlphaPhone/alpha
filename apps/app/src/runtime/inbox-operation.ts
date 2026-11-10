@@ -26,11 +26,46 @@ export interface ComposerEmail { draftId: string; proposal: Bag }
  * `bound` same email, same content; `edited` same email, content changed; `other` another email
  * (or a review saved without its email's identity); `absent` no email is open in the composer. */
 export type ReviewBinding = 'bound' | 'edited' | 'other' | 'absent';
+const composerFields = ['mode','to','cc','bcc','subject','bodyText','attachments','forwardAttachments','replyMessageId'] as const;
+/** Structural equality of two JSON values. An absent key equals an undefined one, as in JSON text. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    const other: unknown[] = b;
+    return a.every((item, index) => sameJson(item ?? null, other[index] ?? null));
+  }
+  const left = a as Bag, right = b as Bag;
+  const keys = (value: Bag) => Object.keys(value).filter(key => value[key] !== undefined);
+  const names = keys(left);
+  return names.length === keys(right).length && names.every(key => right[key] !== undefined && sameJson(left[key], right[key]));
+}
+/** Whether two composer proposals hold the same reviewed content. It agrees with comparing
+ * composerContent() of each, without building either text: attachment bytes are compared in place,
+ * so the comparison can run on every render. */
+export function sameComposerContent(a: Bag, b: Bag): boolean {
+  return composerFields.every(field => sameJson(a[field] ?? null, b[field] ?? null));
+}
 export function reviewBinding(record: Pick<InboxOperationRecord, 'proposal' | 'composer'>, current: ComposerEmail | null): ReviewBinding {
   if (!current) return 'absent';
   if (!record.composer || !current.draftId || record.composer.draftId !== current.draftId) return 'other';
-  return composerContent(record.proposal) === composerContent(current.proposal) ? 'bound' : 'edited';
+  return sameComposerContent(record.proposal, current.proposal) ? 'bound' : 'edited';
 }
+/** The phase a saved operation takes when the provider answers with receipt state `state`. Once a
+ * dispatch was attempted (`dispatching`) or an outcome was recorded (`observed`), a `prepared` answer
+ * never returns the operation to a phase that can be confirmed: it is dispatched at most once. */
+export function nextOperationPhase(phase: InboxOperationRecord['phase'], state: string, reviewed: boolean): InboxOperationRecord['phase'] {
+  if (state !== 'prepared') return 'observed';
+  if (phase === 'dispatching' || phase === 'observed') return phase;
+  return reviewed ? 'review' : 'preparing';
+}
+/** Whether Confirm is offered for a saved operation: an undispatched exact review, still bound to
+ * the email in the composer (`none` for operations with no composer), under a grant that allows it now. */
+export function reviewConfirmable(record: Pick<InboxOperationRecord, 'phase' | 'receipt'> | null | undefined, binding: ReviewBinding | 'none', allowed: boolean): boolean {
+  return !!record && allowed && (binding === 'bound' || binding === 'none') && record.phase === 'review' && record.receipt?.state === 'prepared';
+}
+export const grantRefusal = 'Gmail does not allow this change for the selected account now, so nothing was sent or changed. Reconnect Gmail, then review it again, or cancel this review.';
 export const reviewBindingRefusal: Record<Exclude<ReviewBinding, 'bound'>, string> = {
   edited: 'This email was edited after this review, so the review was discarded. Nothing was sent. Review the current email before sending.',
   other: 'This review was made for a different email than the one now in the composer, so it was discarded. Nothing was sent. Review the current email before sending.',
@@ -38,6 +73,9 @@ export const reviewBindingRefusal: Record<Exclude<ReviewBinding, 'bound'>, strin
 };
 export interface InboxOperationDependencies {
   owner: string; grantId: string; active(): boolean;
+  /** Whether the selected account's current capabilities allow this kind of operation. When given,
+   * confirm() refuses a review whose grant no longer allows it, before anything is dispatched. */
+  allows?(kind: string): boolean;
   store: { read<T>(key: string): Promise<T | null>; compareExchange(key: string, expected: unknown, value: unknown): Promise<{status: string}> };
   client: {
     gmailPrepareOperation(grant: string, request: string, proposal: Bag, signal: AbortSignal): Promise<{receipt: GmailInboxReceipt; review: Bag}>;
@@ -69,7 +107,8 @@ export async function reviewOpaqueAttachment(file: { name: string; mimeType: str
     || typeof file.dataBase64 !== 'string' || file.dataBase64.length > 7 * 1024 * 1024) throw new AttachmentRefusedError('Invalid attachment name or encoding');
   let raw: string;
   try { raw = atob(file.dataBase64); } catch { throw new AttachmentRefusedError('Invalid attachment name or encoding'); }
-  if (btoa(raw) !== file.dataBase64 || raw.length > 5 * 1024 * 1024) throw new AttachmentRefusedError('Attachment exceeds 5 MiB');
+  if (btoa(raw) !== file.dataBase64) throw new AttachmentRefusedError('Invalid attachment name or encoding');
+  if (raw.length > 5 * 1024 * 1024) throw new AttachmentRefusedError('Attachment exceeds 5 MiB');
   const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
   const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
   const mimeType = typeof file.mimeType === 'string' && /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/i.test(file.mimeType) ? file.mimeType.toLowerCase() : 'application/octet-stream';
@@ -77,6 +116,10 @@ export async function reviewOpaqueAttachment(file: { name: string; mimeType: str
 }
 const digest = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('');
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+function freeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const item of Object.values(value)) freeze(item); }
+  return value;
+}
 /** A send the saved receipt says succeeded, with the local draft it came from: the state in which local
  * copies of that draft are removed. */
 const sentFromDraft = (record: InboxOperationRecord) => record.phase === 'observed' && record.proposal.kind === 'send' && record.receipt?.state === 'succeeded' && !!record.source;
@@ -91,8 +134,19 @@ export class InboxOperation {
    * session. Its source draft is left out of snapshots, so cleanup keeps every local copy. */
   private unconfirmedSource = false;
   private controller = new AbortController();
+  private shared: { record: InboxOperationRecord; unconfirmed: boolean; value: InboxOperationRecord } | null = null;
   constructor(private readonly deps: InboxOperationDependencies) {}
-  snapshot() { if (!this.record) return null; const value = copy(this.record); if (this.unconfirmedSource) delete value.source; return value; }
+  static readonly confirmable = reviewConfirmable;
+  static readonly grantRefusal = grantRefusal;
+  /** A read-only copy of the saved record. The same frozen object is returned until the record
+   * changes, so rendering copies a record (and its attachments) once per change, not once per read. */
+  snapshot(): InboxOperationRecord | null {
+    if (!this.record) { this.shared = null; return null; }
+    if (this.shared?.record === this.record && this.shared.unconfirmed === this.unconfirmedSource) return this.shared.value;
+    const value = copy(this.record); if (this.unconfirmedSource) delete value.source;
+    this.shared = { record: this.record, unconfirmed: this.unconfirmedSource, value: freeze(value) };
+    return value;
+  }
   stop() { this.controller.abort(); }
   private check() { if (!this.deps.active() || this.controller.signal.aborted) throw new DOMException('Inbox account changed','AbortError'); }
   private async key() { return InboxOperation.storeKey(this.deps.owner,this.deps.grantId); }
@@ -171,6 +225,7 @@ export class InboxOperation {
   async confirm(current?: ComposerEmail | null) { return this.exclusive(async()=>{
     const record=this.record;if(!record||record.phase!=='review'||!record.review||record.receipt?.state!=='prepared')throw new Error('A fresh exact review is required');
     if(current!==undefined&&composerKind(record.proposal.kind)){const binding=reviewBinding(record,current);if(binding!=='bound')throw new Error(reviewBindingRefusal[binding]);}
+    if(this.deps.allows&&!this.deps.allows(String(record.proposal.kind)))throw new Error(grantRefusal);
     // Durable before the single network attempt. A lost write reply cannot cause dispatch.
     await this.save({...record,phase:'dispatching'});this.check();
     const receipt=await this.deps.client.gmailDispatchOperation(record.grantId,record.requestId,record.receipt.reviewDigest,record.proposal,this.controller.signal);this.check();
@@ -179,7 +234,9 @@ export class InboxOperation {
   private async observe(receipt: GmailInboxReceipt) {
     const record=this.record!;if(receipt.requestId!==record.requestId||receipt.kind!==record.proposal.kind||(record.receipt&&receipt.reviewDigest!==record.receipt.reviewDigest))throw new Error('Gmail answered for a different request, so nothing was confirmed. Check the saved receipt before trying again; do not send this message again.');
     // A prepared response after an attempted dispatch remains uncertain locally; never re-enable Send.
-    await this.save({...record,receipt:copy(receipt),phase:receipt.state==='prepared'?(record.phase==='dispatching'?'dispatching':record.review?'review':'preparing'):'observed'});
+    // An observed outcome also keeps its saved receipt: a later `prepared` answer does not replace it.
+    const regressed=receipt.state==='prepared'&&record.phase==='observed'&&!!record.receipt;
+    await this.save({...record,receipt:regressed?record.receipt:copy(receipt),phase:nextOperationPhase(record.phase,receipt.state,!!record.review)});
   }
   async refresh() { return this.exclusive(async()=>{if(!this.record)throw new Error('No saved operation');
     const prior=this.record.receipt,receipt=await this.deps.client.gmailOperation(this.record.grantId,this.record.requestId,this.controller.signal);this.check();

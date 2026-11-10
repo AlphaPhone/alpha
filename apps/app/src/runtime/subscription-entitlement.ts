@@ -234,6 +234,17 @@ export function planAdmission(view: SubscriptionView | null | undefined): PlanAd
   if (view.kind === 'inactive') return 'needs-plan';
   return 'unknown';
 }
+/**
+ * The end of the plan window to show and to keep with the offline admission record: the billing
+ * snapshot's period end when Cloud reported one, otherwise the last known end. An end that is not
+ * ahead of `now` is never carried forward: after a renewal the old date would void the admission
+ * record and be shown as the plan's end. Credit-funded accounts have no window.
+ */
+export function planWindowEnd(view: SubscriptionView, lastKnown: number | null | undefined, now: number): number | null {
+  if (view.kind === 'credits') return null;
+  if (view.kind === 'active' && view.source === 'billing-limits' && view.expiresAt > now) return view.expiresAt;
+  return typeof lastKnown === 'number' && Number.isFinite(lastKnown) && lastKnown > now ? lastKnown : null;
+}
 export function describeSubscription(view: SubscriptionView | null | undefined, serviceName = 'Cloud'): { headline: string; detail: string; manage: boolean; manageLabel: string } {
   const manageLabel = `Manage plan in ${serviceName}`;
   if (!view || view.kind === 'checking') return { headline: 'Checking your plan…', detail: '', manage: false, manageLabel };

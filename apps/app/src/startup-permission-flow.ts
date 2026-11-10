@@ -58,14 +58,34 @@ export function reopenStartupPermissions(store: Store | null = defaultStore()) {
   try { globalThis.dispatchEvent?.(new Event(STARTUP_PERMISSIONS_REOPEN)); } catch { /* No window in tests. */ }
 }
 
+/** The step a finished access read sends the walkthrough back to, or -1 to stay. A null result
+ * belongs to a read that a newer one replaced; it says nothing about that permission, so only a
+ * permission actually read as not ready can move setup back. */
+export function startupPermissionRewind(results: readonly (StartupPermissionState | null)[], step: number, ready: boolean): number {
+  const missing = results.findIndex(value => value !== null && value !== 'ready');
+  return missing >= 0 && (missing < step || ready) ? missing : -1;
+}
+
+/** Longest setup waits on an Android prompt or settings hand-off before reading access back. */
+export const STARTUP_PERMISSION_ACTION_TIMEOUT = 60000;
+/** Waits for `action` no longer than `ms`. Only the wait is bounded: the platform still owns the
+ * prompt, and a completion after the limit is ignored. A failure inside the limit is kept. */
+export function settleWithin(action: Promise<unknown>, ms: number): Promise<'settled' | 'timeout'> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve('timeout'), ms);
+    action.then(() => { clearTimeout(timer); resolve('settled'); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+
 /** Requests occur only from an explicit tap; a denial never schedules another prompt, including
  * after a restart when `key` names the persisted attempt. */
 export function createStartupPermissionFlow(bridge: {
   status(): Promise<{granted: boolean; enabled: boolean; denied?: boolean; requestable?:boolean}>;
   request(): Promise<unknown>;
   openSettings(): Promise<unknown>;
-}, options: {key?: string; store?: Store | null} = {}) {
+}, options: {key?: string; store?: Store | null; /** Bounds the wait on a prompt or settings hand-off; access is read back either way. */ actionTimeout?: number} = {}) {
   const store = options.store === undefined ? defaultStore() : options.store;
+  const act = (action: Promise<unknown>) => options.actionTimeout ? settleWithin(action, options.actionTimeout) : action;
   let attempted = !!options.key && readStartupPermissionMemory(store).attempted[options.key] === true;
   let pending = false;
   let state: StartupPermissionState = 'checking';
@@ -97,9 +117,9 @@ export function createStartupPermissionFlow(bridge: {
         if (state === 'request') {
           attempted = true;
           if (options.key) writeStartupPermissionMemory({attempted: {[options.key]: true}}, store);
-          await bridge.request();
+          await act(bridge.request());
         }
-        else if (state === 'settings') await bridge.openSettings();
+        else if (state === 'settings') await act(bridge.openSettings());
         if (current !== generation) return null;
         return await check(current);
       } catch { return current === generation ? state = 'unavailable' : null; }

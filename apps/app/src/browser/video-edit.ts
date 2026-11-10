@@ -6,6 +6,19 @@ export function validateVideoEdit(edit:VideoEdit,duration:number){
  const rangeTolerance=Number.EPSILON*Math.max(1,duration);
  if(!Number.isFinite(duration)||duration<=0||duration>300||!Number.isFinite(edit.start)||!Number.isFinite(edit.end)||edit.start<0||edit.end>duration+.05||edit.end-edit.start<.1-rangeTolerance||![0,90,180,270].includes(edit.rotation)||typeof edit.crop!=='boolean')throw Error('Choose a valid video range of at least 0.1 seconds.');
 }
+/** Minutes and tenths of a second for the trim timeline. The value is rounded to tenths
+ * before it is split, so the seconds field never shows 60.0. */
+export function videoClock(value:number){
+ const tenths=Math.max(0,Math.round(value*10));
+ return `${Math.floor(tenths/600)}:${((tenths%600)/10).toFixed(1).padStart(4,'0')}`;
+}
+/** Duration recorded for an edited copy. `reached` is the source position where real-time
+ * encoding stopped; a source that ends before the chosen end yields the shorter copy it
+ * actually produced, never the requested range. */
+export function editedVideoDuration(edit:Pick<VideoEdit,'start'|'end'>,reached?:number){
+ const end=reached!==undefined&&Number.isFinite(reached)?Math.min(edit.end,Math.max(reached,edit.start)):edit.end;
+ return Math.max(.001,end-edit.start);
+}
 /** Local timestamp-based encoding with a real-time fallback; audio comes from the file. */
 export async function renderVideoEdit(source:{path:string;duration:number},edit:VideoEdit,signal:AbortSignal){
  validateVideoEdit(edit,source.duration);signal.throwIfAborted();
@@ -31,9 +44,10 @@ export async function renderVideoEdit(source:{path:string;duration:number},edit:
   if(timestamped){const path=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(timestamped);});signal.throwIfAborted();return {path,image,width:canvas.width,height:canvas.height,duration:edit.end-edit.start};}
   output=canvas.captureStream(30);audio=new AudioContext();const sourceNode=audio.createMediaElementSource(video),destination=audio.createMediaStreamDestination();sourceNode.connect(destination);output.addTrack(destination.stream.getAudioTracks()[0]);await new Promise<void>((resolve,reject)=>{const finish=(error?:unknown)=>{clearTimeout(timeout);signal.removeEventListener('abort',abort);error?reject(error):resolve();},abort=()=>finish(signal.reason),timeout=setTimeout(()=>finish(Error('Video audio startup timed out.')),15000);signal.addEventListener('abort',abort,{once:true});if(signal.aborted){abort();return;}void audio!.resume().then(()=>finish(),finish);});signal.throwIfAborted();
 
+  let reached:number|undefined;
   const blob=await new Promise<Blob>((resolve,reject)=>{
    const chunks:Blob[]=[];let bytes=0,settled=false;const finish=(error?:unknown)=>{if(settled)return;settled=true;clearTimeout(deadline);clearInterval(timer);signal.removeEventListener('abort',abort);video.pause();video.onended=null;video.onerror=null;if(recorder&&recorder.state!=='inactive')recorder.stop();error?reject(error):bytes?resolve(new Blob(chunks,{type:(recorder?.mimeType||chunks[0]?.type||'').split(';')[0]})):reject(Error('Edited video is empty.'));};
-   const abort=()=>finish(signal.reason),stop=()=>{video.pause();if(recorder!.state!=='inactive')recorder!.stop();};
+   const abort=()=>finish(signal.reason),stop=()=>{reached??=video.currentTime;video.pause();if(recorder!.state!=='inactive')recorder!.stop();};
    const deadline=setTimeout(()=>finish(Error('Video export timed out.')),(edit.end-edit.start)*1000+15000);signal.addEventListener('abort',abort,{once:true});
    const attach=()=>{recorder!.ondataavailable=e=>{if(settled)return;bytes+=e.data.size;if(bytes>100*1024*1024){finish(Error('Edited video exceeds 100 MB.'));return;}chunks.push(e.data);};recorder!.onstop=()=>finish();recorder!.onerror=()=>finish(Error('Video encoding interrupted.'));video.onerror=()=>finish(Error('Video decoding interrupted.'));video.onended=stop;};
    try{
@@ -43,7 +57,7 @@ export async function renderVideoEdit(source:{path:string;duration:number},edit:
     timer=setInterval(()=>{try{draw();if(video.currentTime>=edit.end)stop();}catch(error){finish(error);}},20);void video.play().catch(finish);
    }catch(error){finish(error);}
   });
-  signal.throwIfAborted();const path=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob);});signal.throwIfAborted();return {path,image,width:canvas.width,height:canvas.height,duration:edit.end-edit.start};
+  signal.throwIfAborted();const path=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob);});signal.throwIfAborted();return {path,image,width:canvas.width,height:canvas.height,duration:editedVideoDuration(edit,reached)};
  }finally{clearInterval(timer);if(recorder?.state==='recording')recorder.stop();output?.getTracks().forEach(t=>t.stop());await audio?.close().catch(()=>{});video.pause();video.removeAttribute('src');video.load();if(sourceUrl)URL.revokeObjectURL(sourceUrl);}
 }
 

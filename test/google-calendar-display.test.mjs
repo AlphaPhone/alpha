@@ -47,7 +47,8 @@ async function harness(events,{day=0,personal=true,days=1,calendars=[calendarSou
     async enqueue(change){this.enqueued.push(change);const id=`op${this.ops.length+1}`;this.ops.push({id,kind:change.kind,sourceId:change.row?.calendarId??change.sourceId,eventId:change.row?.providerEventId,scope:change.scope??'this',fields:change.fields??{},response:change.response,phase:'queued'});this.notify();return {status:'queued',id,...(change.kind==='delete'?{undoUntil:instant+10000}:{})};},
     async undo(id){this.calls.push(['undo',id]);this.ops=this.ops.filter(op=>op.id!==id);this.notify();return true;},
     async resolveConflict(id,choice){this.calls.push(['conflict',id,choice]);return true;},async resolveUncertain(id,choice){this.calls.push(['uncertain',id,choice]);return true;},
-    async resolvePaused(id,choice){this.calls.push(['paused',id,choice]);return true;},async dismiss(id){this.calls.push(['dismiss',id]);return true;}};
+    async resolvePaused(id,choice){this.calls.push(['paused',id,choice]);return true;},async dismiss(id){this.calls.push(['dismiss',id]);return true;},
+    permissions:[],async retryPermission(ids){this.permissions.push(ids);return 0;}};
   const accounts=()=>allowRead?[{connected:true,connectionId:'grant',label:'owner@example.test',grantedCapabilities:grants}]:[];
   const ctx=vm.createContext({calendarDayColumnsUnderTest:days,Date:FixedDate,console,AbortController,DOMException,Intl,Event,crypto,setTimeout:()=>0,
     IC:{},CAL_SEED:[],PEOPLE:[],DAYS:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],MONS:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],copy:()=>({}),
@@ -386,4 +387,37 @@ test('Search waits for its wider read instead of saying No results, and closing 
     h.state.search=null;out=h.render();
     assert.notEqual(out.emptyText,'Loading calendars…');assert.equal(out.events.length,1);
   }finally{h.close();}
+});
+test('a change to an event Google deleted offers one OK, which drops the change',async()=>{
+  const h=await harness([event()]);try{
+    h.render().events[0].open();h.render().ev.edit();h.state.form={...h.state.form,title:'Mine'};h.render().f.save();await h.settle();
+    h.outbox.ops[0].phase='conflict';h.outbox.ops[0].remote=null;h.outbox.calls=[];h.state.open=`${SOURCE}:event`;
+    const banner=h.render().ev.conflict;
+    assert.equal(banner.text,'Deleted in Google Calendar.');assert.equal(banner.mineLabel,'OK');assert.equal(banner.theirsLabel,'');assert.equal(banner.keepTheirs,undefined);
+    banner.keepMine();await h.settle();
+    assert.deepEqual(plain(h.outbox.calls),[['conflict','op1','google']]);
+  }finally{h.close();}
+});
+test('saving a Google event in Schedule keeps the list on today; other views go to the saved day',async()=>{
+  for(const [view,day] of [['schedule',0],['day',2]]){
+    const h=await harness([event()]);try{
+      h.render().events[0].open();h.render().ev.edit();
+      h.state.form={...h.state.form,off:2};h.state.view=view;h.render().f.save();await h.settle();
+      assert.equal(h.outbox.enqueued.length,1);assert.equal(h.state.form,null);
+      assert.equal(h.state.day,day,view);
+    }finally{h.close();}
+  }
+});
+test('after the Google accounts change, refused changes are queued again only for accounts that allow changes',async()=>{
+  const h=await harness([event()]);try{
+    assert.deepEqual(h.outbox.permissions,[],'an ordinary read retries nothing');
+    await h.startRefresh();await h.settle();
+    assert.deepEqual(plain(h.outbox.permissions),[['grant']]);
+    await h.returnToCalendar();
+    assert.equal(h.outbox.permissions.length,1,'once per change of accounts');
+  }finally{h.close();}
+  const readOnly=await harness([event()],{grants:['google.calendar.read']});try{
+    await readOnly.startRefresh();await readOnly.settle();
+    assert.deepEqual(readOnly.outbox.permissions,[]);
+  }finally{readOnly.close();}
 });

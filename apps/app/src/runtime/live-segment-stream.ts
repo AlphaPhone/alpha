@@ -25,8 +25,14 @@ export interface LiveSegmentHandlers {
   onInterim?(text: string): void;
 }
 
+/**
+ * Capture batches accepted while earlier ones are still being posted. Posts run one at a time, so a
+ * stalled agent route would otherwise queue audio without bound; past this the stream fails.
+ */
+export const LIVE_SEGMENT_BACKLOG_LIMIT = 256;
+
 export function createLiveSegmentStream(input: { transport: LiveVoiceTransport; roomId?: string; now?: () => number } & LiveSegmentHandlers) {
-  let open = false, cut: number | undefined, finished = false, discarded = false, expected = 0;
+  let open = false, cut: number | undefined, finished = false, discarded = false, expected = 0, backlog = 0;
   const session = createLiveVoiceSession({
     transport: input.transport,
     ...(input.roomId ? { roomId: input.roomId } : {}),
@@ -71,7 +77,21 @@ export function createLiveSegmentStream(input: { transport: LiveVoiceTransport; 
         } else if (closeSegment(edge.timestampMs)) edges.push(edge);
       }
       if (!kept.length && !edges.length) return Promise.resolve();
-      return session.push(kept, edges);
+      if (backlog >= LIVE_SEGMENT_BACKLOG_LIMIT) {
+        // The route stopped answering: every closed segment gets its one (null) result, queued audio
+        // is dropped and the stream ends as a transport failure.
+        const outstanding = expected;
+        discarded = true; finished = true; open = false; expected = 0;
+        session.dispose();
+        for (let index = 0; index < outstanding; index++) input.onSegment(null);
+        input.onFatal?.('TRANSPORT');
+        return Promise.resolve();
+      }
+      backlog++;
+      const settled = () => { backlog--; };
+      const sent = session.push(kept, edges);
+      void sent.then(settled, settled);
+      return sent;
     },
     /** The user stopped at `at` (epoch ms, the frames' clock). Later audio is never forwarded. */
     cutoff(at: number) { if (cut === undefined || at < cut) cut = at; },

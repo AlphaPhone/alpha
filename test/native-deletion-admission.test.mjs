@@ -28,9 +28,9 @@ test('owner network reads happen before the coordinator lock, never while holdin
 });
 
 test('a deterministic stage refusal never leaves a permanent agent claim',()=>{
- const deletions=java('AlphaDeletionsPlugin'),positive=body(deletions,'NativeDeletionCoordinator coordinator=NativeDeletionCoordinator.get(getContext());String operationId;','}).create();');
+ const deletions=java('AlphaDeletionsPlugin'),positive=body(deletions,'NativeDeletionCoordinator coordinator=NativeDeletionCoordinator.get(getContext());String operationId;',' private static void resolveOutcome(');
  assert.ok(positive.indexOf('coordinator.stageAdmissible(owner)')<positive.indexOf('NativeDeletionClaim.check('),'owner and selection are checked before the claim');
- assert.match(positive,/\}catch\(Exception failure\)\{outcome\[0\]=unstaged\(coordinator,operationId\);\}/);
+ assert.match(positive,/\}catch\(Exception failure\)\{return unstaged\(coordinator,operationId\);\}/);
  assert.match(deletions,/return staged==null\?new JSONObject\(\)\.put\("status","not-staged"\):new JSONObject\(\)\.put\("status","queued"\)/,'not-staged only without a receipt for the exact operation');
  assert.match(deletions,/if\(retired\|\|review!=null\|\|!foreground\(\)\)\{resolveStatus\(call,"unavailable"\);return;\}/);
  assert.match(deletions,/resolveStatus\(call,"stale"\);return;/);

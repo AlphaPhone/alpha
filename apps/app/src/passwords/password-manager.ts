@@ -56,7 +56,9 @@ function transferClient(): PasswordTransferClient | null {
 }
 
 function clearSecrets() { if (draft) draft.password = ''; draft = null; }
+/** Locking also retires any listing still being read, so it cannot repopulate a locked page. */
 function locked(message = '') {
+  ++generation;
   entries = null; clearSecrets(); if (status) status = { ...status, locked: true, unlockRemainingMs: 0 };
   if (expiry) clearTimeout(expiry); expiry = undefined; notice = message;
 }
@@ -70,18 +72,25 @@ async function refreshBrowserFill() {
   } catch { browserFill = null; }
 }
 
+/** Whether the password pages are open in the foreground; nothing is read or changed for them otherwise. */
+const shown = () => active && !document.hidden;
+
 async function refresh() {
+  // A task that finishes after the pages were left must not read the vault back into memory.
+  if (!active) return;
+  // An armed delete-everything confirmation belongs to the listing it was shown with.
+  confirmReset = false;
   void refreshBrowserFill().then(() => notify());
   const token = ++generation, vault = await resolveClient();
-  if (!vault || token !== generation) { notify(); return; }
+  if (!vault || token !== generation || !active) { notify(); return; }
   try {
     const next = await vault.status();
-    if (token !== generation) return;
+    if (token !== generation || !active) return;
     status = next;
     if (next.locked) locked(notice);
     else {
       const list = await vault.list();
-      if (token !== generation) return;
+      if (token !== generation || !active) return;
       entries = list;
       if (expiry) clearTimeout(expiry);
       // Reflect the native unlock window; native code enforces it independently.
@@ -98,10 +107,13 @@ async function refresh() {
 
 async function run(name: string, task: (vault: PasswordsClient) => Promise<void>) {
   const vault = await resolveClient();
-  if (!vault || busy) return;
+  if (!vault || busy || !active) return;
   busy = name; notice = ''; notify();
   try { await task(vault); }
   catch (error) {
+    confirmReset = false;
+    // Leaving already locked and forgot everything; a late failure has nothing to report.
+    if (!active) return;
     const failure = passwordsError(error);
     if (failure.code === 'locked') locked('Locked after inactivity.');
     else if (failure.code === 'key-invalidated') { damaged = true; locked(failure.message); }
@@ -184,7 +196,14 @@ export function passwordManagerGroups(helpers: Helpers): Bag[] {
     head.push(helpers.info('Vault', 'Cannot be decrypted on this phone'));
     head.push(nav(busy === 'reset' ? 'Deleting…' : confirmReset ? 'Tap again to delete all saved passwords' : 'Delete saved passwords and start over', () => {
       if (!confirmReset) { confirmReset = true; notify(); return; }
-      void run('reset', async v => { await v.unlock(); await v.reset(); damaged = false; confirmReset = false; notice = 'Saved passwords were deleted. You can add new ones.'; await refresh(); });
+      void run('reset', async v => {
+        await v.unlock();
+        // The confirmation was given on this page; it does not survive leaving or backgrounding during unlock.
+        if (!shown()) { confirmReset = false; await v.lock().catch(() => {}); return; }
+        await v.reset(); damaged = false; confirmReset = false;
+        if (!active) return;
+        notice = 'Saved passwords were deleted. You can add new ones.'; await refresh();
+      });
     }, { sub: 'Their key is gone, so they cannot be recovered' }));
   }
   else if (status.locked || !entries) {
@@ -277,7 +296,7 @@ export function passwordEntryPage(helpers: Helpers, back: () => void): Bag | nul
     const id = current.id;
     actions.push(button(current.confirmDelete ? 'Tap again to delete' : 'Delete password', () => {
       if (!current.confirmDelete) { set({ confirmDelete: true }); return; }
-      void run('remove', async v => { await v.remove(id); if (draft === current) draft = null; notice = 'Password deleted.'; helpers.set({ page: 'password-provider' }); await refresh(); });
+      void run('remove', async v => { await v.remove(id); if (draft === current) draft = null; if (!active) return; notice = 'Password deleted.'; helpers.set({ page: 'password-provider' }); await refresh(); });
     }));
   }
   groups.push(captioned(helpers, '', actions, true));

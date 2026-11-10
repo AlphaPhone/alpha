@@ -14,6 +14,7 @@ import { browserApps } from './browser/apps';
 import { installSmsAdapter } from './prototype/sms-adapter';
 import { installContactsAdapter } from './prototype/contacts-adapter';
 import { admitImageContacts } from './prototype/mvp-features';
+import { applyImageContacts } from './runtime/image-contacts';
 import {DeletionUndo} from './runtime/deletion-undo';
 import {bindBrowserSpeechConnection} from './browser/agent-speech';
 import { testMocksEnabled, devSurfacesEnabled } from './build-flags';
@@ -171,7 +172,8 @@ function installBrowserCapabilityTiles(Component:any){
   };
 }
 /** Android's bar insets arrive from the bridge after the first paint. The last ones are kept and
- * applied before it, so Home's grid and the dock start where they will stay (specs/quint/legacy/HomeLayout.qnt). */
+ * applied before it, so Home's grid and the dock start where they will stay (historical design
+ * model: specs/quint/legacy/HomeLayout.qnt). */
 const INSETS_KEY = 'alpha.surface-insets.v1';
 function rememberInsets(top: unknown, bottom: unknown) {
   if (!Number.isFinite(top) || !Number.isFinite(bottom)) return;
@@ -250,7 +252,8 @@ function Phone() {
       document.documentElement.style.setProperty('--phone-width', geometry.width);
       document.documentElement.style.setProperty('--phone-height', `${geometry.height}px`);
       // Home keeps its keyboard-free layout while text is edited: the keyboard covers its bottom
-      // instead of Home laying itself out again in the smaller canvas (specs/quint/legacy/HomeLayout.qnt).
+      // instead of Home laying itself out again in the smaller canvas (historical design model:
+      // specs/quint/legacy/HomeLayout.qnt).
       if (!input.editing) {
         document.documentElement.style.setProperty('--alpha-home-height', `${geometry.height}px`);
         document.documentElement.style.setProperty('--alpha-home-bottom-inset', document.documentElement.style.getPropertyValue('--native-bottom-inset') || '0px');
@@ -300,7 +303,7 @@ async function mountPhone() {
       DeviceApps.launchInfo().then(info => info.assistant === true).catch(() => false),
     ]);
     assistantSurface = surface || launch;
-    const refreshImage=async()=>{const image=await DeviceApps.platformCapabilities().catch(()=>({aospImage:false,contacts:false}));const admitted=image.aospImage===true&&image.contacts===true;admitImageContacts(admitted);const index=ORDER.indexOf('contacts');if(admitted&&index<0)ORDER.push('contacts');else if(!admitted&&index>=0)ORDER.splice(index,1);if(!admitted&&shell?.S().view==='contacts')shell.goHome();};
+    const refreshImage=async()=>{const image=await DeviceApps.platformCapabilities().catch(()=>({aospImage:false,contacts:false}));const admitted=image.aospImage===true&&image.contacts===true;applyImageContacts(admitted,ORDER,shell,admitImageContacts);};
     await refreshImage();
     await applyDeviceLocale();
     document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshImage().then(()=>applyDeviceLocale()).then(() => shell?.setState({ localeRevision: Date.now() })); });

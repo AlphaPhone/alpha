@@ -68,6 +68,21 @@ const preDispatchRefusals=new Set(['Finish the connection or history operation b
 // It also marks every failure that happened before it posted the message (`notDispatched`).
 function isPreDispatchError(error:unknown){return !!error&&typeof error==='object'&&((error as {notDispatched?:unknown}).notDispatched===true||error instanceof Error&&(preDispatchRefusals.has(error.message)||(error as {code?:unknown}).code==='session_expired'));}
 function dispatched(attempt:SendAttempt,error:unknown){return !(error instanceof NotDispatched)&&(attempt.streamed||attempt.transportCalled&&!attempt.preDispatch);}
+/**
+ * A send that takes its text from the composer is dropped when the composer no longer holds that
+ * text. A send given its text explicitly (a card answer, a reviewed message) never reads the composer.
+ */
+export function composerSendStale(argument:string|undefined,draft:unknown,text:string){return argument===undefined&&String(draft||'').trim()!==text;}
+/**
+ * Whether a send that has finished may clear the typing indicator. A newer composer send or a voice
+ * turn that started after this one was cut off owns the indicator and clears it itself.
+ */
+export function sendOwnsTyping(current:SendAttempt|null|undefined,attempt:SendAttempt,voiceTurnId:unknown){return (!current||current===attempt)&&voiceTurnId===undefined;}
+/**
+ * The composer is measured again only when its text or width changed since it was last sized, or
+ * when a render put back a height other than the one sizing set.
+ */
+export function composerNeedsSizing(sized:{value:string;width:number;height:string}|undefined,value:string,width:number,height:string){return !sized||sized.value!==value||sized.width!==width||sized.height!==height;}
 /** Mark the in-flight composer send as handed to the transport, and classify early refusals. */
 async function trackDispatch<T>(shell:Shell,run:()=>Promise<T>):Promise<T>{
   const attempt:SendAttempt|null=shell.sendAttempt??null;if(attempt)attempt.transportCalled=true;
@@ -117,7 +132,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   function updateBackAvailability(shell:Shell) {
     const s=shell.S();
-    document.documentElement.dataset.alphaCanGoBack = String(!!document.querySelector('dialog[open]') || connectionController.getSnapshot().open || !!s.view || s.shade || s.chat === 'sheet' || s.chat === 'full' || s.voice !== 'off');
+    document.documentElement.dataset.alphaCanGoBack = String(!!document.querySelector('dialog[open]') || connectionController.getSnapshot().open || !!s.view || !!s.drawer || s.shade || s.chat === 'sheet' || s.chat === 'full' || s.voice !== 'off');
   }
   const notesLeave=views.notes.onLeave;
   views.notes.onLeave=(...args:Shell[])=>{notesRecovery?.abort();return notesLeave?.(...args);};
@@ -132,9 +147,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   // Navigation resets transient view state, but must retain the actual storage receipt.
   views.notes.persist = [...new Set([...(views.notes.persist || []), 'storageStatus'])];
 
+  // Sizing writes a height and reads scrollHeight, which lays the page out twice. Every update of
+  // the shell runs this (each streamed reply chunk included), so an unchanged composer is skipped.
+  const sizedComposers=new WeakMap<HTMLTextAreaElement,{value:string;width:number;height:string}>();
   function sizeComposer(){
     for(const input of document.querySelectorAll<HTMLTextAreaElement>('textarea[data-alpha-composer]')){
+      const value=input.value,width=input.clientWidth;
+      if(!composerNeedsSizing(sizedComposers.get(input),value,width,input.style.height))continue;
       input.style.height='44px';input.style.height=`${Math.max(44,input.scrollHeight)}px`;
+      sizedComposers.set(input,{value,width,height:input.style.height});
     }
   }
   const notesDataset=(name:'notesStorageState'|'notesDraftState',value:string)=>{document.documentElement.dataset[name]=value;};
@@ -452,7 +473,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (history && history.sessionId === session && this.restoredHistory !== history) {
         if(!history.automatic){cancelMessageContext(this);this.reviewedSourceDraft=null;}
         this.restoredHistory = history;
-        alphaClient.disconnect();
+        // Same agent session: approvals already dispatched stay consumed across the reload.
+        alphaClient.disconnect({keepConsumed:true});
         if (this.live) this.setState({ msgs: history.messages.map(message => ({ ...message, messageBinding:{conversationId:history.conversationId,session:connectionController.getSnapshot().session}, card: null })), typing: false, ...(history.automatic?{}:{draft:'',chat:'full'}) });
       }
       syncStoppedReplyNotice(this,session!==undefined&&history?.sessionId===session?history:null);
@@ -1174,7 +1196,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // connectAgent() below waits for it. Only a different agent or conversation, or a new screen, is.
     const current=()=>{const selected=connectionController.getSnapshot();return this.live&&!document.hidden&&!selected.open&&!document.querySelector('[data-alpha-chat-recorder],[data-alpha-pill-voice]')&&(!sessionId||selected.session?.sessionId===sessionId)&&(!conversationId||selected.history?.conversationId===conversationId)&&alphaClient.getState().context.revision===revision;};
     // A stale send is dropped quietly: the composer still holds the person's text.
-    if(!current()||String(this.S().draft||'').trim()!==text)return;
+    if(!current()||composerSendStale(argument,this.S().draft,text))return;
     const reviewedSource=this.reviewedSourceDraft;this.reviewedSourceDraft=null;this.unsentNotice='';
     // Everything this send later shows belongs to the agent connection it was sent on.
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
@@ -1260,7 +1282,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
       }
     }
-    finally { if(this.sendAttempt===attempt)this.sendAttempt=null; if (this.live) this.setState({ typing: false }); }
+    finally {
+      // A session change or history reload cancels this send and lets the next one start while this
+      // one is still settling: the indicator then belongs to that newer send or voice turn.
+      const owner=sendOwnsTyping(this.sendAttempt,attempt,this.voiceSendTurnId);
+      if(this.sendAttempt===attempt)this.sendAttempt=null;
+      if (this.live&&owner) this.setState({ typing: false });
+    }
   };
   p.agentSay = function (text: string, card?: Shell, identity?:{id:string;messageBinding:{conversationId:string;session:unknown}},current?:()=>boolean) {
     this.setState((previous: Shell) => {

@@ -18,6 +18,7 @@ import { GOOGLE_CALENDAR_WRITE_CAPABILITIES, planGoogleCalendarWrite, sendGoogle
  * - `resolveConflict(id, 'mine'|'google')`: Google's copy changed first ("Keep mine" / "Keep Google's").
  * - `resolveUncertain(id, 'send'|'drop')`: a create whose answer was lost and no match was found.
  * - `dismiss(id)`: removes a failed change.
+ * - `retryPermission(connectionIds)`: queues again what Google refused for want of permission.
  * - `flush()`, `attach()`: sending triggers (online, visible again, end of an Undo window, a retry
  *   falling due). The detach `attach()` returns stops a running send when the last view leaves.
  * - `overlay(rows)` / `overlayGoogleCalendarRows(rows, ops)`: rows as the owner should see them.
@@ -47,6 +48,12 @@ export interface GoogleCalendarOutboxOp {
   /** Google's version after a change went through, or after a conflict was found (null: gone). */
   result?: { eventId: string; revision: string; begin: number; end: number };
   remote?: GoogleCalendarOutboxBase | null;
+  /** The conflict was raised because the event was not in the days read around it (moved further
+   * away, or deleted). Kept after "Keep mine", so the change is then sent and Google's answer decides. */
+  unseen?: boolean;
+  /** Events with a create's title and start that the reader already showed before it was sent;
+   * an unconfirmed create is never matched to one of these. */
+  existing?: string[];
   holder?: string;
   /** Wall time before which a change that failed for a passing reason (429, 5xx, network) is not sent again. */
   retryAt?: number;
@@ -79,6 +86,8 @@ export interface GoogleCalendarOutboxDeps {
   client: GoogleCalendarWriteClient;
   /** Reads one calendar (GoogleCalendarReader.readMany for that source) to check a change is still current. */
   read: (sourceId: string, range: GoogleCalendarRange, signal: AbortSignal) => Promise<GoogleCalendarRead>;
+  /** The reader's last rows, when a view has them: events a create must not be matched to later. */
+  rows?: () => readonly Pick<GoogleCalendarRecord, 'calendarId' | 'providerEventId' | 'title' | 'begin'>[];
   clock?: () => DeletionClock; now?: () => number; online?: () => boolean;
   capabilities?: GoogleCalendarWriteCapabilities; id?: () => string;
 }
@@ -87,6 +96,8 @@ export const GOOGLE_CALENDAR_OUTBOX_LIMIT = 200;
 const MAX_BYTES = 240 * 1024, DAY = 86_400_000, DONE_KEEP_MS = 10 * 60_000, DISPATCH_STALE_MS = 2 * 60_000;
 /** Wait before sending again after a passing failure: 5 s, doubling per attempt, at most 5 min. */
 const RETRY_BASE_MS = 5_000, RETRY_MAX_MS = 5 * 60_000;
+/** Wait before taking back a send of this run whose outcome could not be saved. */
+const ORPHAN_RETRY_MS = 30_000, EXISTING_LIMIT = 20;
 export const googleCalendarRetryDelay = (attempts: number) => Math.min(RETRY_BASE_MS * 2 ** Math.max(0, Math.min(attempts, 20) - 1), RETRY_MAX_MS);
 const PHASES: readonly string[] = ['queued', 'paused', 'dispatching', 'uncertain', 'conflict', 'failed', 'done'];
 const KINDS: readonly string[] = ['create', 'update', 'delete', 'rsvp'];
@@ -96,6 +107,45 @@ const open = (op: GoogleCalendarOutboxOp) => op.phase !== 'done';
 const sameEvent = (a: GoogleCalendarOutboxOp, b: { sourceId: string; eventId?: string; localId?: string }) =>
   a.sourceId === b.sourceId && (a.localId !== undefined && a.localId === b.localId || a.eventId !== undefined && a.eventId === b.eventId);
 type Document = { version: 1; owner: string; ops: GoogleCalendarOutboxOp[] };
+type OpResult = NonNullable<GoogleCalendarOutboxOp['result']>;
+const resultOf = (event: GoogleCalendarEvent): OpResult => ({ eventId: event.externalId, revision: googleCalendarRevision(event), begin: Date.parse(event.startAt), end: Date.parse(event.endAt) });
+/** A send whose answer never arrived: the change may or may not be in Google. */
+const UNKNOWN: GoogleCalendarOutboxError = { status: 'retryable', applied: 'unknown' };
+
+/** The stored operations that are kept, in their order: every unsent change, and the most recently
+ * finished ones still shown (DONE_KEEP_MS) while there is room under GOOGLE_CALENDAR_OUTBOX_LIMIT.
+ * An unsent change is never dropped to make room. */
+export function keptGoogleCalendarOps<T extends Pick<GoogleCalendarOutboxOp, 'phase' | 'updatedAt'>>(ops: readonly T[], now: number): T[] {
+  const room = Math.max(0, GOOGLE_CALENDAR_OUTBOX_LIMIT - ops.filter(op => op.phase !== 'done').length);
+  const done = new Set(ops.filter(op => op.phase === 'done' && now - op.updatedAt < DONE_KEEP_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, room));
+  return ops.filter(op => op.phase !== 'done' || done.has(op));
+}
+/** Google's copy already shows everything this change sets: it went through and only its answer was lost. */
+export function googleCalendarChangeApplied(op: Pick<GoogleCalendarOutboxOp, 'kind' | 'fields' | 'response'>, row: Pick<GoogleCalendarRecord, 'title' | 'body' | 'location' | 'begin' | 'end' | 'selfResponse'>): boolean {
+  if (op.kind === 'rsvp') return !!op.response && row.selfResponse === REPLY[op.response];
+  if (op.kind !== 'update') return false;
+  const f = op.fields, checks: boolean[] = [];
+  if (f.title !== undefined) checks.push(f.title.trim() === row.title.trim());
+  if (f.description !== undefined) checks.push(f.description === row.body);
+  if (f.location !== undefined) checks.push(f.location === row.location);
+  if (f.startAt !== undefined) checks.push(Date.parse(f.startAt) === row.begin);
+  if (f.endAt !== undefined) checks.push(Date.parse(f.endAt) === row.end);
+  return checks.length > 0 && checks.every(Boolean);
+}
+/** The feed event an unconfirmed create became: the one event in its calendar with the same title,
+ * start and end that was not there before the create was sent and is not another change's event.
+ * Undefined when none fits or more than one does (the owner then decides). */
+export function googleCalendarCreateMatch<R extends Pick<GoogleCalendarRecord, 'calendarId' | 'providerEventId' | 'title' | 'begin' | 'end'>>(op: GoogleCalendarOutboxOp, rows: readonly R[], ops: readonly GoogleCalendarOutboxOp[]): R | undefined {
+  const begin = Date.parse(op.fields.startAt ?? ''), end = Date.parse(op.fields.endAt ?? ''), title = (op.fields.title ?? '').trim();
+  const taken = new Set<string>(op.existing ?? []);
+  for (const other of ops) {
+    if (other.id === op.id || other.sourceId !== op.sourceId) continue;
+    if (other.eventId) taken.add(other.eventId);
+    if (other.result) taken.add(other.result.eventId);
+  }
+  const fits = rows.filter(row => row.calendarId === op.sourceId && row.title === title && row.begin === begin && row.end === end && !taken.has(row.providerEventId));
+  return fits.length === 1 ? fits[0] : undefined;
+}
 
 function validOp(value: unknown): value is GoogleCalendarOutboxOp {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -117,6 +167,9 @@ export class GoogleCalendarOutbox {
   /** Aborted when the last view detaches (the Cloud account switched): a running send stops. */
   private lifetime: AbortController | null = null;
   private sendingSignal: AbortSignal | null = null;
+  /** The change this instance is sending now; any other change it still holds was left by a send
+   * whose outcome could not be saved. */
+  private sendingId: string | null = null;
   private readonly holder: string;
   constructor(private readonly deps: GoogleCalendarOutboxDeps) { this.holder = this.newId(); }
 
@@ -138,7 +191,7 @@ export class GoogleCalendarOutbox {
     if (raw == null) return [];
     const doc = raw as Document;
     if (!doc || typeof doc !== 'object' || doc.version !== 1 || doc.owner !== this.deps.owner || !Array.isArray(doc.ops)) throw new Error('Calendar changes waiting to sync could not be read.');
-    return doc.ops.filter(validOp).slice(0, GOOGLE_CALENDAR_OUTBOX_LIMIT).map(op => structuredClone(op));
+    return keptGoogleCalendarOps(doc.ops.filter(validOp), this.now()).map(op => structuredClone(op));
   }
   private publish(ops: GoogleCalendarOutboxOp[]) {
     this.ops = ops;
@@ -174,12 +227,15 @@ export class GoogleCalendarOutbox {
     return this.loaded;
   }
   /** A send another holder (an earlier run of the app) left unfinished for DISPATCH_STALE_MS is
-   * taken back: a create may have reached Google (uncertain); anything else is checked again. */
+   * taken back, and so is a send of this instance that is no longer running (its outcome could not
+   * be saved): a create may have reached Google (uncertain); anything else is checked again. */
   private recoverStale(ops: GoogleCalendarOutboxOp[], now: number) {
     for (const op of ops) {
-      if (op.phase === 'dispatching' && op.holder !== this.holder && now - op.updatedAt >= DISPATCH_STALE_MS) {
-        op.phase = op.kind === 'create' ? 'uncertain' : 'queued'; op.updatedAt = now; delete op.holder;
-      }
+      if (op.phase !== 'dispatching') continue;
+      if (op.holder === this.holder ? op.id === this.sendingId : now - op.updatedAt < DISPATCH_STALE_MS) continue;
+      op.phase = op.kind === 'create' ? 'uncertain' : 'queued'; op.updatedAt = now; delete op.holder;
+      // The change may have reached Google: the next check finishes it when Google already shows it.
+      if (op.kind !== 'create') op.error = { ...UNKNOWN };
     }
   }
 
@@ -288,6 +344,7 @@ export class GoogleCalendarOutbox {
       const op = ops.find(item => item.id === id && item.phase === 'conflict');
       if (!op) return false;
       if (choice === 'google' || op.remote === null) { ops.splice(ops.indexOf(op), 1); return true; }
+      // An event that was not found keeps `unseen`: the change is sent and Google's answer decides.
       if (op.remote) op.base = { ...op.remote };
       op.phase = 'queued'; delete op.remote; delete op.error; delete op.retryAt; op.updatedAt = this.now();
       if (op.kind === 'delete') op.deadline = undefined;
@@ -317,6 +374,21 @@ export class GoogleCalendarOutbox {
       ops.splice(ops.indexOf(op), 1); return true;
     });
   }
+  /** Queues again the changes Google refused for want of permission on these connections, once the
+   * owner has allowed changes there. Answers how many were queued. */
+  async retryPermission(connectionIds: readonly string[]): Promise<number> {
+    await this.load();
+    const queued = await this.edit(ops => {
+      let count = 0;
+      for (const op of ops) {
+        if (op.phase !== 'failed' || op.error?.status !== 'needs-permission' || !connectionIds.includes(op.connectionId)) continue;
+        op.phase = 'queued'; delete op.error; delete op.retryAt; op.updatedAt = this.now(); count++;
+      }
+      return count;
+    });
+    if (queued) void this.flush().catch(() => {});
+    return queued;
+  }
 
   /** Milliseconds until the next Undo window closes, a retry is due, or a send another holder left
    * unfinished can be taken back; null when nothing is waiting on time. */
@@ -328,6 +400,7 @@ export class GoogleCalendarOutbox {
       // Only future times: an op already due either sends at the next flush or waits on another change.
       if (op.phase === 'queued' && typeof op.retryAt === 'number' && op.retryAt > now) at(op.retryAt - now);
       if (op.phase === 'dispatching' && op.holder !== this.holder && op.updatedAt + DISPATCH_STALE_MS > now) at(op.updatedAt + DISPATCH_STALE_MS - now);
+      if (op.phase === 'dispatching' && op.holder === this.holder && op.id !== this.sendingId) at(ORPHAN_RETRY_MS);
       if (op.kind !== 'delete' || op.phase !== 'queued' || !op.deadline || deletionWindow(op.deadline, clock) !== 'open') continue;
       at(Math.max(0, op.deadline.expiresElapsed - clock.elapsed));
     }
@@ -342,14 +415,16 @@ export class GoogleCalendarOutbox {
   /** Sends when the phone comes online, becomes visible again, when an Undo window ends and when a
    * retry is due. Detaching the last view stops a send in progress before its next change. */
   attach(target: Pick<Window, 'addEventListener' | 'removeEventListener'> | null = typeof window === 'undefined' ? null : window): () => void {
-    const flush = () => { void this.flush().catch(() => {}); };
-    const visible = () => { if (typeof document === 'undefined' || document.visibilityState !== 'hidden') flush(); };
-    if (this.attached++ <= 0 || !this.lifetime) this.lifetime = new AbortController();
+    if (this.attached++ <= 0) this.lifetime = null;
+    // Every send this view starts stops with the lifetime it attached under.
+    const lifetime = (this.lifetime ??= new AbortController()).signal;
     let detached = false;
+    const flush = () => { if (!detached) void this.flush(lifetime).catch(() => {}); };
+    const visible = () => { if (typeof document === 'undefined' || document.visibilityState !== 'hidden') flush(); };
     target?.addEventListener('online', flush);
     target?.addEventListener('focus', visible);
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visible);
-    void this.load().then(() => { this.schedule(); flush(); }, () => {});
+    void this.load().then(() => { if (detached) return; this.schedule(); flush(); }, () => {});
     return () => {
       if (detached) return;
       detached = true;
@@ -380,12 +455,14 @@ export class GoogleCalendarOutbox {
         if (!await this.sendOne(signal)) return;
       }
     })();
-    this.sending = run.finally(() => { this.sending = null; this.sendingSignal = null; });
+    // A send whose outcome could not be saved is taken back on a later wake.
+    this.sending = run.finally(() => { this.sending = null; this.sendingSignal = null; this.schedule(); });
     return this.sending;
   }
 
-  /** A create whose answer was lost is never sent again by itself: a feed event with the same title
-   * and start means it went through; otherwise it waits for the owner. */
+  /** A create whose answer was lost is never sent again by itself: one new feed event with the same
+   * title, start and end means it went through (googleCalendarCreateMatch); otherwise it waits for
+   * the owner. */
   private async matchUncertain(signal: AbortSignal) {
     for (const op of this.ops.filter(item => item.kind === 'create' && item.phase === 'uncertain')) {
       const begin = Date.parse(op.fields.startAt ?? ''), end = Date.parse(op.fields.endAt ?? '');
@@ -394,12 +471,13 @@ export class GoogleCalendarOutbox {
       try { read = await this.deps.read(op.sourceId, { timeMin: new Date(begin - DAY).toISOString(), timeMax: new Date(Math.max(end, begin + 1) + DAY).toISOString(), timeZone: 'UTC' }, signal); }
       catch { if (signal.aborted) return; continue; }
       if (read.status !== 'ready') continue;
-      const title = (op.fields.title ?? '').trim();
-      const match = read.events.find(row => row.title === title && row.begin === begin);
-      if (!match) continue;
+      if (!googleCalendarCreateMatch(op, read.events, this.ops)) continue;
+      const events = read.events;
       await this.edit(ops => {
         const current = ops.find(item => item.id === op.id && item.phase === 'uncertain');
-        if (!current) return;
+        // Checked again on the saved document: another create may have taken the event meanwhile.
+        const match = current && googleCalendarCreateMatch(current, events, ops);
+        if (!current || !match) return;
         current.phase = 'done'; current.updatedAt = this.now();
         current.result = { eventId: match.providerEventId, revision: match.revision, begin: match.begin, end: match.end };
         rebaseAfter(ops, current);
@@ -409,6 +487,10 @@ export class GoogleCalendarOutbox {
 
   /** Claims, checks and sends the first sendable change. False when nothing more can be sent now. */
   private async sendOne(signal: AbortSignal): Promise<boolean> {
+    try { return await this.sendClaimed(signal); }
+    finally { this.sendingId = null; }
+  }
+  private async sendClaimed(signal: AbortSignal): Promise<boolean> {
     const claimed = await this.edit(ops => this.claim(ops));
     if (!claimed) return false;
     const op = claimed;
@@ -424,18 +506,24 @@ export class GoogleCalendarOutbox {
       if (read.status !== 'ready') { await this.settle(op, { status: 'retryable', applied: 'no' }); return false; }
       const current = read.events.find(row => row.providerEventId === op.eventId);
       if (!current) {
-        // The occurrence is gone, but a whole-series delete still has a series to delete: it is sent,
-        // and Google answering "gone" finishes it.
-        if (op.kind === 'delete' && !(op.scope === 'all' && op.recurringEventId)) { await this.finish(op); return true; }
-        if (op.kind !== 'delete') { await this.conflict(op, null); return true; }
-      } else if (current.revision !== base.revision) { await this.conflict(op, { revision: current.revision, begin: current.begin, end: current.end }); return true; }
+        // Not in the days read around it: deleted, or moved further away than that. A delete is sent
+        // and Google answering "gone" finishes it. Any other change waits for the owner; after
+        // "Keep mine" it is sent and Google's answer decides.
+        if (op.kind !== 'delete' && !op.unseen) { await this.conflict(op, undefined, true); return true; }
+      } else if (current.revision !== base.revision) {
+        const remote = { revision: current.revision, begin: current.begin, end: current.end };
+        // The owner's own change, sent earlier with its answer lost, is not a conflict.
+        if (op.error?.status === 'retryable' && op.error.applied === 'unknown' && googleCalendarChangeApplied(op, current)) { await this.finish(op, { eventId: current.providerEventId, ...remote }); return true; }
+        await this.conflict(op, remote); return true;
+      }
     }
     // Stopped (detached) before sending: nothing reached Google.
     if (signal.aborted) { await this.settle(op, { status: 'retryable', applied: 'no' }, false); return false; }
     let result: GoogleCalendarWriteResult;
     try { result = await sendGoogleCalendarWrite(this.deps.client, writeOperation(op), signal, this.capabilities()); }
-    catch { await this.settle(op, op.kind === 'create' ? { status: 'retryable', applied: 'unknown' } : { status: 'retryable', applied: 'no' }, false); return false; }
-    if (result.status === 'done') { await this.finish(op, result.event); return true; }
+    // Stopped while the request was out: it may have reached Google.
+    catch { await this.settle(op, { ...UNKNOWN }, false); return false; }
+    if (result.status === 'done') { await this.finish(op, result.event ? resultOf(result.event) : undefined); return true; }
     if (result.status === 'gone') { if (op.kind === 'delete') await this.finish(op); else await this.conflict(op, null); return true; }
     if (result.status === 'conflict') { await this.conflict(op, undefined); return true; }
     await this.settle(op, result);
@@ -443,6 +531,7 @@ export class GoogleCalendarOutbox {
   }
   private claim(ops: GoogleCalendarOutboxOp[]): GoogleCalendarOutboxOp | null {
     const clock = this.clock(), now = this.now();
+    this.sendingId = null;
     // A send an earlier run left unfinished would otherwise hold its event until the next cold start.
     this.recoverStale(ops, now);
     // The sort is stable: changes made in the same millisecond keep the order they were queued in.
@@ -468,26 +557,34 @@ export class GoogleCalendarOutbox {
         op.eventId = create.result.eventId;
         op.base = { revision: create.result.revision, begin: create.result.begin, end: create.result.end };
       }
+      if (op.kind === 'create' && this.deps.rows) {
+        const begin = Date.parse(op.fields.startAt ?? ''), title = (op.fields.title ?? '').trim();
+        const twins = this.deps.rows().filter(row => row.calendarId === op.sourceId && row.title === title && row.begin === begin && row.providerEventId).map(row => row.providerEventId);
+        if (twins.length || op.existing) op.existing = [...new Set([...(op.existing ?? []), ...twins])].slice(0, EXISTING_LIMIT);
+      }
       op.phase = 'dispatching'; op.attempts++; op.holder = this.holder; op.updatedAt = now; delete op.retryAt;
+      this.sendingId = op.id;
       return structuredClone(op);
     }
     return null;
   }
-  private finish(op: GoogleCalendarOutboxOp, event?: GoogleCalendarEvent) {
+  private finish(op: GoogleCalendarOutboxOp, result?: OpResult) {
     return this.edit(ops => {
       const current = ops.find(item => item.id === op.id);
       if (!current) return;
-      current.phase = 'done'; delete current.error; delete current.holder; current.updatedAt = this.now();
-      if (event) current.result = { eventId: event.externalId, revision: googleCalendarRevision(event), begin: Date.parse(event.startAt), end: Date.parse(event.endAt) };
+      current.phase = 'done'; delete current.error; delete current.holder; delete current.unseen; current.updatedAt = this.now();
+      if (result) current.result = { ...result };
       rebaseAfter(ops, current);
     });
   }
-  private conflict(op: GoogleCalendarOutboxOp, remote: GoogleCalendarOutboxBase | null | undefined) {
+  /** `unseen`: the event was not in the days read around it, so what Google has is not known. */
+  private conflict(op: GoogleCalendarOutboxOp, remote: GoogleCalendarOutboxBase | null | undefined, unseen = false) {
     return this.edit(ops => {
       const current = ops.find(item => item.id === op.id);
       if (!current) return;
       current.phase = 'conflict'; current.error = { status: 'conflict' }; delete current.holder; current.updatedAt = this.now();
       if (remote !== undefined) current.remote = remote; else delete current.remote;
+      if (unseen) current.unseen = true; else delete current.unseen;
     });
   }
   /** `backoff` false: the send was stopped here (detached), not refused, so it may go again at once. */

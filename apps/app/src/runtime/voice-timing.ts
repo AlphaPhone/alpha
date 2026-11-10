@@ -28,6 +28,11 @@
  * capture turn by a random native turn id, which this record keeps as `nativeTurn` and the reply's
  * synthesis echoes. Only the stage name and that id cross the bridge: never text.
  *
+ * A mark is taken on the voice turn's own path, so it does no storage work: the active turn's
+ * record is held in memory, the clock is read first, and changed records are written together by
+ * one write in a later task, or when the turn finishes or is abandoned. Readers
+ * (`voiceTimingRecords`, export) write pending changes before reading.
+ *
  * Plain constants and function exports only: Node contract tests evaluate this source.
  */
 type VoiceTimingMark = 'recording-end' | 'transcript-ready' | 'send' | 'first-token' | 'final-reply' | 'first-audio';
@@ -78,7 +83,8 @@ const voiceTimingKey = 'alphaphone:voice-timing:v1';
 const voiceTimingLimit = 200;
 const voiceTimingOrder: VoiceTimingMark[] = ['recording-end', 'transcript-ready', 'send', 'first-token', 'final-reply', 'first-audio'];
 const voiceTimingRoutes = ['on-device', 'browser', 'local-agent', 'eliza-cloud', 'paired-agent', 'development-agent', 'manual'];
-let voiceTimingActive: { id: string; base: number; entry?: VoiceTimingEntry; native?: string } | undefined;
+type VoiceTimingActive = { id: string; base: number; entry?: VoiceTimingEntry; native?: string; row: VoiceTimingRecord };
+let voiceTimingActive: VoiceTimingActive | undefined;
 let voiceTimingClock: () => number = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 
 function voiceTimingStore(): Storage | undefined { try { return globalThis.localStorage; } catch { return undefined; } }
@@ -94,15 +100,38 @@ function voiceTimingValid(value: unknown): value is VoiceTimingRecord {
   if (row.nativeTurn !== undefined && (typeof row.nativeTurn !== 'string' || !nativeTurnPattern.test(row.nativeTurn))) return false;
   return Object.entries(row.marks as Record<string, unknown>).every(([key, at]) => voiceTimingOrder.includes(key as VoiceTimingMark) && typeof at === 'number' && Number.isFinite(at) && at >= 0 && at < 3_600_000);
 }
-/** Every stored record that passes validation, oldest first. */
-export function voiceTimingRecords(): VoiceTimingRecord[] {
+function voiceTimingStored(): VoiceTimingRecord[] {
   try { const raw = voiceTimingStore()?.getItem(voiceTimingKey); const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed.filter(voiceTimingValid) : []; }
   catch { return []; }
 }
+/** Every stored record that passes validation, oldest first. Pending changes are written first. */
+export function voiceTimingRecords(): VoiceTimingRecord[] {
+  flushVoiceTiming();
+  return voiceTimingStored();
+}
+/** Changed records waiting for the deferred write, by id, in the order they last changed. */
+const voiceTimingPending = new Map<string, VoiceTimingRecord>();
+/** The records of the latest turns, which late outcomes (heard, native turn id) still update. */
+const voiceTimingRecent = new Map<string, VoiceTimingRecord>();
+let voiceTimingWrite: ReturnType<typeof setTimeout> | undefined;
+/** Queue a record for the next write. No storage access happens here. */
 function voiceTimingSave(row: VoiceTimingRecord) {
+  voiceTimingPending.delete(row.id);
+  voiceTimingPending.set(row.id, row);
+  if (voiceTimingWrite !== undefined) return;
+  voiceTimingWrite = setTimeout(flushVoiceTiming, 0);
+  // Diagnostic write: it never keeps a Node process (contract tests) alive.
+  (voiceTimingWrite as unknown as { unref?: () => void }).unref?.();
+}
+/** Write every pending record now: one read and one write, whatever the number of changes. */
+export function flushVoiceTiming() {
+  if (voiceTimingWrite !== undefined) { clearTimeout(voiceTimingWrite); voiceTimingWrite = undefined; }
+  if (!voiceTimingPending.size) return;
+  const pending = [...voiceTimingPending.values()];
+  voiceTimingPending.clear();
   try {
-    const rows = voiceTimingRecords().filter(item => item.id !== row.id);
-    rows.push(row);
+    const rows = voiceTimingStored().filter(item => !pending.some(row => row.id === item.id));
+    rows.push(...pending);
     voiceTimingStore()?.setItem(voiceTimingKey, JSON.stringify(rows.slice(-voiceTimingLimit)));
   } catch { /* Timing is diagnostic; it never blocks a voice turn. */ }
 }
@@ -111,18 +140,23 @@ export function beginVoiceTurn(input: { route: string; cold: boolean; entry?: Vo
   abandonVoiceTurn();
   if (!voiceTimingRoutes.includes(input.route) || typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') return undefined;
   const id = crypto.randomUUID();
-  voiceTimingActive = { id, base: voiceTimingClock(), ...(input.entry === 'conversation' || input.entry === 'notes' ? { entry: input.entry } : {}) };
+  const base = voiceTimingClock();
   const source = { ...(input.entry === 'conversation' || input.entry === 'notes' ? { entry: input.entry } : {}), ...(input.policy === 'auto-send' || input.policy === 'review' ? { policy: input.policy } : {}) };
-  voiceTimingSave({ version: 1, id, recordedAt: Date.now(), route: input.route, cold: input.cold === true, ...source, marks: { 'recording-end': 0 } });
+  const row: VoiceTimingRecord = { version: 1, id, recordedAt: Date.now(), route: input.route, cold: input.cold === true, ...source, marks: { 'recording-end': 0 } };
+  voiceTimingActive = { id, base, ...(input.entry === 'conversation' || input.entry === 'notes' ? { entry: input.entry } : {}), row };
+  voiceTimingRecent.set(id, row);
+  if (voiceTimingRecent.size > 8) voiceTimingRecent.delete(voiceTimingRecent.keys().next().value!);
+  voiceTimingSave(row);
   return id;
 }
 /** Record one mark for the active turn (or the named turn while it is still active). */
 export function markVoiceTiming(mark: VoiceTimingMark, turn?: string): boolean {
-  const active = voiceTimingActive;
+  // The clock is read before anything else so the mark's own bookkeeping is not measured.
+  const now = voiceTimingClock(), active = voiceTimingActive;
   if (!active || (turn !== undefined && turn !== active.id) || !voiceTimingOrder.includes(mark)) return false;
-  const row = voiceTimingRecords().find(item => item.id === active.id);
-  if (!row || row.outcome || row.marks[mark] !== undefined) return false;
-  const at = Math.max(0, Math.round(voiceTimingClock() - active.base));
+  const row = active.row;
+  if (row.outcome || row.marks[mark] !== undefined) return false;
+  const at = Math.max(0, Math.round(now - active.base));
   const index = voiceTimingOrder.indexOf(mark);
   // Reply and audio marks measure from send; send measures from a ready transcript.
   if (index >= 3 && row.marks.send === undefined) return false;
@@ -138,7 +172,7 @@ export function markVoiceTiming(mark: VoiceTimingMark, turn?: string): boolean {
  * dictation is not a voice-assistant latency turn. Diagnostic: a failing sink never affects a turn.
  */
 export function setNativeVoiceStageSink(sink: NativeVoiceStageSink | undefined) { nativeVoiceStageSink = sink; }
-function forwardNativeStage(mark: VoiceTimingMark, turn: { id: string; entry?: VoiceTimingEntry; native?: string }) {
+function forwardNativeStage(mark: VoiceTimingMark, turn: VoiceTimingActive) {
   const stage = nativeVoiceStages[mark], sink = nativeVoiceStageSink;
   if (!stage || !sink || turn.entry !== 'conversation') return;
   let pending: Promise<string | undefined>;
@@ -146,8 +180,8 @@ function forwardNativeStage(mark: VoiceTimingMark, turn: { id: string; entry?: V
   void pending.then(id => {
     if (typeof id !== 'string' || !nativeTurnPattern.test(id) || turn.native !== undefined && turn.native !== id) return;
     turn.native = id;
-    const row = voiceTimingRecords().find(item => item.id === turn.id);
-    if (row && row.nativeTurn === undefined) { row.nativeTurn = id; voiceTimingSave(row); }
+    const row = turn.row;
+    if (row.nativeTurn === undefined) { row.nativeTurn = id; voiceTimingSave(row); }
   }).catch(() => { /* Diagnostic only. */ });
 }
 /** The native latency turn the active conversation turn is linked to, for its reply's synthesis. */
@@ -156,8 +190,8 @@ export function nativeVoiceTurnId(): string | undefined { return voiceTimingActi
 export function recordLiveVoiceTiming(live: unknown, turn?: string): boolean {
   const active = voiceTimingActive, numbers = voiceTimingLive(live);
   if (!active || !numbers || (turn !== undefined && turn !== active.id)) return false;
-  const row = voiceTimingRecords().find(item => item.id === active.id);
-  if (!row || row.outcome || row.live) return false;
+  const row = active.row;
+  if (row.outcome || row.live) return false;
   row.live = numbers; voiceTimingSave(row);
   return true;
 }
@@ -165,8 +199,8 @@ export function recordLiveVoiceTiming(live: unknown, turn?: string): boolean {
 export function recordEndpointVoiceTiming(endpoint: unknown, turn?: string): boolean {
   const active = voiceTimingActive, value = voiceTimingEndpoint(endpoint);
   if (!active || !value || (turn !== undefined && turn !== active.id)) return false;
-  const row = voiceTimingRecords().find(item => item.id === active.id);
-  if (!row || row.outcome || row.endpoint) return false;
+  const row = active.row;
+  if (row.outcome || row.endpoint) return false;
   row.endpoint = value; voiceTimingSave(row);
   return true;
 }
@@ -176,7 +210,9 @@ export function recordEndpointVoiceTiming(endpoint: unknown, turn?: string): boo
  */
 export function recordHeardVoiceTiming(turn: string | undefined, heard: unknown): boolean {
   if (typeof turn !== 'string' || !voiceTimingHeard.includes(heard as string)) return false;
-  const row = voiceTimingRecords().find(item => item.id === turn);
+  // A recent turn keeps its one in-memory record, so a late native turn id and this outcome never
+  // overwrite each other; an older turn is read from storage.
+  const row = voiceTimingRecent.get(turn) ?? voiceTimingRecords().find(item => item.id === turn);
   if (!row || row.heard) return false;
   row.heard = heard as VoiceTimingHeard; voiceTimingSave(row);
   return true;
@@ -184,11 +220,12 @@ export function recordHeardVoiceTiming(turn: string | undefined, heard: unknown)
 /** The turn ended without a reply (cancelled, discarded, typed instead). Kept as abandoned. */
 export function abandonVoiceTurn() {
   const active = voiceTimingActive; voiceTimingActive = undefined; if (!active) return;
-  const row = voiceTimingRecords().find(item => item.id === active.id);
-  if (row && row.marks['final-reply'] === undefined) voiceTimingSave({ ...row, outcome: 'abandoned' });
+  const row = active.row;
+  if (row.marks['final-reply'] === undefined) { row.outcome = 'abandoned'; voiceTimingSave(row); }
+  flushVoiceTiming();
 }
 /** Finish the active turn after its final reply when no audio will follow. */
-export function finishVoiceTurn(turn?: string) { if (voiceTimingActive && (turn === undefined || turn === voiceTimingActive.id)) voiceTimingActive = undefined; }
+export function finishVoiceTurn(turn?: string) { if (voiceTimingActive && (turn === undefined || turn === voiceTimingActive.id)) { voiceTimingActive = undefined; flushVoiceTiming(); } }
 export function activeVoiceTurn() { return voiceTimingActive?.id; }
 /**
  * The send boundary of one voice entry turn whose transcript is ready. 'auto-send' sends the
@@ -214,6 +251,6 @@ async function voiceEntrySend<T>(input: { policy: VoiceTimingPolicy; transcript:
 export function exportVoiceTiming(): string {
   return JSON.stringify({ format: 'alpha-voice-timing-v1', exportedAt: new Date().toISOString(), marks: voiceTimingOrder, records: voiceTimingRecords() }, null, 2);
 }
-export function clearVoiceTiming() { voiceTimingActive = undefined; try { voiceTimingStore()?.removeItem(voiceTimingKey); } catch { /* Nothing stored. */ } }
+export function clearVoiceTiming() { voiceTimingActive = undefined; voiceTimingPending.clear(); voiceTimingRecent.clear(); if (voiceTimingWrite !== undefined) { clearTimeout(voiceTimingWrite); voiceTimingWrite = undefined; } try { voiceTimingStore()?.removeItem(voiceTimingKey); } catch { /* Nothing stored. */ } }
 /** Test hook: a deterministic clock. */
 export function setVoiceTimingClock(clock: () => number) { voiceTimingClock = clock; }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { SignInView } from './connection-ui';
-import { SIGN_IN_WAITING } from './cloud-sign-in';
+import { SIGN_IN_WAITING, signInMethodsRecheck } from './cloud-sign-in';
 
 /**
  * Alpha's own Eliza Cloud sign-in screens: Google (a Custom Tab that returns to Alpha), or an email
@@ -13,8 +13,10 @@ export interface CloudSignInActions {
   back?(): void;
 }
 const ADDRESS_ERROR_ID = 'alpha-sign-in-address-error';
-export function CloudSignInPanel({ view, busy, google, phone, emailEnabled = true, message, error, actions, extra, canGoBack = true, methodsUnconfirmed = false, pending }: {
+export function CloudSignInPanel({ view, busy, google, phone, emailEnabled = true, message, error, actions, extra, canGoBack = true, methodsUnconfirmed = false, pending, connectionError }: {
   view: SignInView; busy: boolean; google: boolean; phone?: boolean; emailEnabled?: boolean; message: string; error: string; actions: CloudSignInActions;
+  /** The shown error only means Cloud could not be reached. Absent: only the waiting notice counts. */
+  connectionError?: boolean;
   /** Optional hosted sign-in entry supplied by the caller's build gate. */
   extra?: ReactNode;
   canGoBack?: boolean;
@@ -41,7 +43,8 @@ export function CloudSignInPanel({ view, busy, google, phone, emailEnabled = tru
   }, [view.step, busy, emailEnabled, phone]);
   // Unconfirmed or unavailable methods and a connection error are re-checked automatically: when
   // the network returns, when Alpha comes back to the front, and every 15 seconds. No Retry button.
-  const recheck = view.step === 'choose' && (methodsUnconfirmed || !!error || !!pending || (!google && !phone && !emailEnabled));
+  // Any other error (a cooldown, a rate limit, a refused address) is Cloud's answer and is not polled.
+  const recheck = signInMethodsRecheck({ step: view.step, methodsUnconfirmed, connectionError: connectionError ?? error === SIGN_IN_WAITING, pending: !!pending, anyMethod: google || !!phone || emailEnabled });
   useEffect(() => {
     if (!recheck) return;
     const run = () => { if (!document.hidden) actions.retry(); };

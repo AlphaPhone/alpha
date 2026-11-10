@@ -55,6 +55,9 @@ export function nextReminderOccurrence(rule: Recurrence, now: number) {
   for (let count = 0; count < 40_000; count++) {
     day += (rule.rule === 'weekly' ? 7 : 1) * DAY;
     if (rule.rule === 'weekdays') while ([0, 6].includes(new Date(day).getUTCDay())) day += DAY;
+    // No zone is a day behind UTC, so a wall time more than a day old has passed whatever its
+    // instant is: it is counted without resolving it.
+    if (day + DAY - rule.leadMinutes * MINUTE <= now) { skippedDates++; continue; }
     const dueAt = resolveWall(day, local, true), at = dueAt - rule.leadMinutes * MINUTE;
     if (at > now) return { dueAt, at, date: new Date(day).toISOString().slice(0, 10), skippedDates };
     skippedDates++;

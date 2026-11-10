@@ -40,6 +40,12 @@ export const deviceLibraryAvailable = () => Capacitor.isNativePlatform() && Capa
 const PAGE = LIBRARY_LIMITS.thumbnailRows - 6;
 const background = (item: LibraryItem) => item.image ? `url("${item.image}") center / cover no-repeat` : 'var(--s2)';
 const duration = (seconds: number) => seconds ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` : '';
+/** Date labels for library rows, formatted once per row object with one shared formatter.
+ * A changed row is a new object, so its label is formatted again; dropped rows are collected. */
+export function createLibraryDateLabels(format: (takenAt: number) => string = (() => { const formatter = new Intl.DateTimeFormat(); return (takenAt: number) => formatter.format(new Date(takenAt)); })()) {
+  const labels = new WeakMap<object, string>();
+  return (item: Pick<LibraryItem, 'takenAt'>) => { let label = labels.get(item); if (label === undefined) { try { label = format(item.takenAt); } catch { label = 'Invalid Date'; } labels.set(item, label); } return label; };
+}
 const revisionSession = () => { try { return Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(36).padStart(2, '0')).join('').slice(0, 12); } catch { return Date.now().toString(36).slice(-8); } };
 
 /** A refusal the agent executor reports as a failed action with this owner-facing text. */
@@ -56,20 +62,21 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
   /** Set when the next visit must start from a fresh first page: Photos was left, or Android access changed. */
   let reloadOnOpen = false, watching = false;
   let api: Bag | undefined;
+  const dateLabel = createLibraryDateLabels();
   const listeners: Promise<PluginListenerHandle>[] = [];
   const visible = () => !!api && api.isActive?.() !== false && api.get?.('photos')?.album === 'device';
   const refresh = () => { if (api && !disposed) api.set({ nativeLibraryRevision: Date.now(), nativeLibrarySelection: focused() }); };
   /** Exactly one selected item becomes the assistant's selected object: identity only. */
   const focused = () => {
     if (selection.size !== 1 || !visible()) return null;
-    const [chosen] = selection.items(), item = catalog.items.find(row => row.id === chosen.id);
+    const [chosen] = selection.items(), item = catalog.find(chosen.id);
     return item ? revisions({ kind: item.kind, id: item.id, revision: item.revision }) : null;
   };
 
   async function readScope(): Promise<LibraryScopeState | undefined> {
     const token = epoch;
     if (!available()) { scope = undefined; return undefined; }
-    try { const fresh = parseScope(await port.scope()); if (token !== epoch || disposed) return undefined; scope = fresh; if (catalog.observeScope(scope)) selection.clear(); }
+    try { const fresh = parseScope(await port.scope()); if (token !== epoch || disposed) return undefined; scope = fresh; if (catalog.observeScope(scope)) { selection.clear(); review = undefined; } }
     catch { if (token !== epoch || disposed) return undefined; error = 'Library access could not be read.'; }
     return scope;
   }
@@ -80,7 +87,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     try {
       const current = await readScope();
       if (token !== epoch) return;
-      if (!current || current.scope === 'denied' || current.locked) { catalog.reset(); selection.clear(); return; }
+      if (!current || current.scope === 'denied' || current.locked) { catalog.reset(); selection.clear(); review = undefined; return; }
       const page = parsePage(await port.page({ before: more ? catalog.next : '', limit: PAGE, thumbnails: true, thumbnailSize: 240 }));
       if (token !== epoch) return;
       scope = page.scope; catalog.apply(page, !more); if (!more) reloadOnOpen = false;
@@ -89,12 +96,20 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     } catch (failure) {
       if (token !== epoch) return;
       error = (failure as { code?: string })?.code === 'LIBRARY_DENIED' ? '' : 'The device library could not be loaded. Try again.';
-      if ((failure as { code?: string })?.code === 'LIBRARY_DENIED') { catalog.reset(); selection.clear(); await readScope(); }
+      if ((failure as { code?: string })?.code === 'LIBRARY_DENIED') { catalog.reset(); selection.clear(); review = undefined; await readScope(); }
     } finally { if (token === epoch) { busy = false; refresh(); } }
   }
 
-  /** External edits, deletes, reboots and grant changes: revalidate what is loaded. */
-  async function revalidate() {
+  /** External edits, deletes, reboots and grant changes: revalidate what is loaded. One pass
+   * runs at a time; a request that arrives during a pass is answered by one further pass
+   * after it, so a burst of change events reads the library at most twice. */
+  let revalidation: Promise<void> | undefined, revalidateAgain = false;
+  function revalidate(): Promise<void> {
+    if (revalidation) { revalidateAgain = true; return revalidation; }
+    const run = (async () => { do { revalidateAgain = false; await revalidateOnce(); } while (revalidateAgain && !disposed); })().finally(() => { revalidation = undefined; });
+    return revalidation = run;
+  }
+  async function revalidateOnce() {
     if (busy || disposed || !available() || !catalog.loaded) return;
     const token = epoch;
     try {
@@ -137,7 +152,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       refresh(); return;
     }
     acting = true; refresh();
-    try { await port.requestAccess(); scope = parseScope(await port.scope()); if (catalog.observeScope(scope)) selection.clear(); }
+    try { await port.requestAccess(); scope = parseScope(await port.scope()); if (catalog.observeScope(scope)) { selection.clear(); review = undefined; } }
     catch { error = 'Android did not open the access dialog.'; }
     finally { acting = false; }
     await load();
@@ -183,8 +198,11 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     void port.watch({ active }).catch(() => { watching = false; });
   }
 
+  /** A review is confirmed only by the owner who is looking at it: hiding the app ends it. */
+  const hidden = () => { if (document.hidden && review) { review = undefined; status = 'Review cancelled. Nothing changed.'; refresh(); } };
   function attach() {
     if (!available() || listeners.length) return;
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', hidden);
     listeners.push(port.addListener('libraryChanged', () => { if (visible()) void revalidate(); }));
     listeners.push(port.addListener('scopeChanged', value => {
       // Retire reads begun under the previous grant before clearing or loading the catalog.
@@ -224,7 +242,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         if (acting || review) throw new LibraryAgentRefusal('Finish the open library review first.');
         selection.clear();
         let selected = 0;
-        for (const id of operation.ids) { const item = catalog.items.find(row => row.id === id); if (item) { selection.toggle(item); selected++; } }
+        for (const id of operation.ids) { const item = catalog.find(id); if (item) { selection.toggle(item); selected++; } }
         status = selected ? `The assistant selected ${selected} ${selected === 1 ? 'item' : 'items'}. Nothing was changed or shared.` : '';
         refresh();
         return { kind: operation.type, selected, missing: operation.ids.length - selected };
@@ -278,7 +296,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         items: catalog.items.map(item => ({
           nativeMediaId: item.id, bg: background(item), tf: '', flt: '', vid: item.kind === 'video', dur: duration(item.duration), dim: acting ? 'opacity:.35;pointer-events:none' : '',
           selecting: true, on: selection.has(item.id), selCss: selection.has(item.id) ? 'background:var(--acc);box-shadow:0 0 0 2px #ffffff' : 'background:rgba(0,0,0,.7);box-shadow:inset 0 0 0 2px #ffffff',
-          alt: `${selection.has(item.id) ? 'Unselect' : 'Select'} ${item.kind === 'video' ? 'video' : 'photo'} from ${new Date(item.takenAt).toLocaleDateString()}`,
+          alt: `${selection.has(item.id) ? 'Unselect' : 'Select'} ${item.kind === 'video' ? 'video' : 'photo'} from ${dateLabel(item)}`,
           tap: () => { if (acting || review) return; try { selection.toggle(item); status = ''; } catch (failure) { status = (failure as Error).message; } refresh(); },
           pd: () => {}, pu: () => {},
         })),
@@ -287,6 +305,6 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     selected: focused,
     agent,
     leave() { selection.clear(); review = undefined; status = ''; error = ''; epoch++; busy = false; scopeRequested = false; loadRequested = false; reloadOnOpen = true; watch(false); },
-    dispose() { disposed = true; epoch++; watch(false); if (mountedAgent === agent) mountedAgent = undefined; for (const handle of listeners.splice(0)) void handle.then(value => value.remove()).catch(() => {}); },
+    dispose() { disposed = true; epoch++; watch(false); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', hidden); if (mountedAgent === agent) mountedAgent = undefined; for (const handle of listeners.splice(0)) void handle.then(value => value.remove()).catch(() => {}); },
   };
 }

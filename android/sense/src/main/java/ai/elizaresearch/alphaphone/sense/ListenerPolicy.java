@@ -149,6 +149,32 @@ public final class ListenerPolicy {
   }
  }
 
+ /** What a policy refresh asks of the microphone service. */
+ public enum ServiceCommand{
+  /** Start it, or deliver a new start to it; it then converges on policy. */
+  START,
+  /** It is running and policy no longer wants it: it converges and stops itself. */
+  CONVERGE,
+  /** It is not running yet but a start is on its way: that start converges it. */
+  DEFER,
+  /** Nothing is running or on its way. */
+  STOP
+ }
+
+ /**
+  * Android requires every {@code startForegroundService} to be answered by {@code startForeground}
+  * before the service stops, and ends the process otherwise. So a refresh never stops the service
+  * from outside while a start is undelivered or while the service can stop itself in order.
+  */
+ public static ServiceCommand serviceCommand(boolean foreground,boolean serviceRunning,boolean startOutstanding){
+  if(foreground)return ServiceCommand.START;
+  if(serviceRunning)return ServiceCommand.CONVERGE;
+  return startOutstanding?ServiceCommand.DEFER:ServiceCommand.STOP;
+ }
+
+ /** The service stops itself only once every start has been delivered and so answered. */
+ public static boolean serviceMayStop(int outstandingStarts){return outstandingStarts<=0;}
+
  /** States the user should be told about although nothing is captured. */
  public static boolean needsAttention(State state){
   return state==State.PERMISSION_REQUIRED||state==State.NOTIFICATIONS_REQUIRED||state==State.STOPPED_AFTER_ERRORS||state==State.WAITING_FOR_UNLOCK||state==State.SPEECH_UNAVAILABLE

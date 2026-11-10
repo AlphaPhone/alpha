@@ -27,9 +27,11 @@ let systemPickers=0;
 export function systemPickerActive(){return systemPickers>0;}
 export async function duringSystemPicker<T>(task:()=>Promise<T>):Promise<T>{systemPickers++;try{return await task();}finally{systemPickers--;}}
 export function scanPdfRetryable(status:string){return ['cancelled','failed','unavailable','too-large'].includes(status);}
-export async function exportScanPdf(image:Blob|Blob[],signal:AbortSignal,title:string,textLayers?:ScanTextLine[][]){
+/** `onRequest` runs immediately before the provider call. Until then nothing has left
+ * the renderer, so a caller that stops earlier knows no document was written. */
+export async function exportScanPdf(image:Blob|Blob[],signal:AbortSignal,title:string,textLayers?:ScanTextLine[][],onRequest?:()=>void){
  const bytes=await createScanPdf(image,signal,textLayers);let raw='';for(let index=0;index<bytes.length;index+=16384)raw+=String.fromCharCode(...bytes.subarray(index,index+16384));
- signal.throwIfAborted();let result:{status:string;message:string};try{result=await duringSystemPicker(()=>documents.exportPdf({title,dataBase64:btoa(raw)}));}catch(error){throw new ScanPdfExportError('PDF export unconfirmed.',{cause:error});}
+ signal.throwIfAborted();let result:{status:string;message:string};onRequest?.();try{result=await duringSystemPicker(()=>documents.exportPdf({title,dataBase64:btoa(raw)}));}catch(error){throw new ScanPdfExportError('PDF export unconfirmed.',{cause:error});}
  if(['exported','requested'].includes(result.status))filesIndex.record({kind:'scan-pdf',name:title.slice(0,200)+'.pdf',mimeType:'application/pdf'});
  return result;
 }

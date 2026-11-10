@@ -130,3 +130,28 @@ export async function setGmailReadState(client: ReadStateClient, grantId: string
   if (!result || result.messageId !== input.messageId || result.unread !== input.unread) return null;
   return { unread: input.unread, historyId: typeof result.historyId === 'string' ? result.historyId : null };
 }
+
+const measured = new WeakMap<object, number>();
+/** UTF-8 size of a cached value as JSON, measured once per object. Cached values are replaced, never
+ * edited in place, so the first measurement stays true. */
+export function cachedJsonBytes(value: object): number {
+  let bytes = measured.get(value);
+  if (bytes === undefined) { bytes = new TextEncoder().encode(JSON.stringify(value)).length; measured.set(value, bytes); }
+  return bytes;
+}
+/** Evicts the oldest rows (insertion order) until at most `maximumRows` rows and `maximumBytes` of
+ * bodies remain. An insert measures only the new body; the rows already cached are not encoded again. */
+export function trimMailBodies<K>(rows: Map<K, { body: object }>, maximumRows: number, maximumBytes: number): void {
+  let bytes = 0;
+  for (const row of rows.values()) bytes += cachedJsonBytes(row.body);
+  for (const [key, row] of rows) {
+    if (rows.size <= maximumRows && bytes <= maximumBytes) break;
+    bytes -= cachedJsonBytes(row.body); rows.delete(key);
+  }
+}
+/** The newest rows whose bodies fit `maximumBytes` together, in their original order. */
+export function newestMailBodies<T extends { body: object }>(rows: readonly T[], maximumBytes: number): T[] {
+  let bytes = 0, from = rows.length;
+  while (from > 0 && (bytes += cachedJsonBytes(rows[from - 1].body)) <= maximumBytes) from--;
+  return rows.slice(from);
+}

@@ -1,7 +1,7 @@
 import {mediaToolIcon} from './media-review-controls';
 import './scan-dialog.css';
 import type {VideoEdit} from '../browser/video-edit';
-import {validateVideoEdit,drawEditedVideo} from '../browser/video-edit';
+import {validateVideoEdit,drawEditedVideo,videoClock} from '../browser/video-edit';
 /** A media workspace: preview first, direct trim handles, one copy-save action.
  * Alpha's existing media colors and published icons; no unsupported tools. */
 export function openVideoEditReview(source:{path:string;duration:number;stream?:boolean},save:(edit:VideoEdit,signal:AbortSignal)=>Promise<boolean>,onClose:()=>void=()=>{}){
@@ -15,7 +15,7 @@ export function openVideoEditReview(source:{path:string;duration:number;stream?:
  let busy=false,closed=false,loaded=false,sourceUrl:string|undefined,previewFrame:number|undefined,lastPreviewTime=-1,lastPaintAt=0;
  const controls:HTMLButtonElement[]=[];
  const button=(name:string,action:()=>void)=>{const b=document.createElement('button');b.textContent=name;b.type='button';b.onclick=action;controls.push(b);return b;};
- const clock=(value:number)=>`${Math.floor(value/60)}:${(value%60).toFixed(1).padStart(4,'0')}`;
+ const clock=videoClock;
  const timeline=document.createElement('div');timeline.className='video-editor-timeline';timeline.setAttribute('aria-label','Trim video');
  const track=document.createElement('div');track.className='video-editor-track';track.setAttribute('aria-hidden','true');
  const selected=document.createElement('div');selected.className='video-editor-selection';

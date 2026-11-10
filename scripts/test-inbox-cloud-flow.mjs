@@ -184,12 +184,13 @@ sandbox.serviceReadCache=async()=>({get:async key=>key==='gmail:mailbox'?{value:
 const priorSnapshot=controller.getSnapshot;controller.getSnapshot=()=>({...priorSnapshot(),cloudAccount:{...priorSnapshot().cloudAccount,organizationId:'fixture-org'}});
 class ReloadShell {constructor(){this.st={q:null,compose:null};}renderVals(){return {};}componentDidMount(){}componentWillUnmount(){}vset(_,patch){Object.assign(this.st,patch);}}
 const reloadViews={inbox:{state:{}}};sandbox.installInboxCloudAdapter(ReloadShell,reloadViews);const reloaded=new ReloadShell();reloaded.componentDidMount();
-const reloadApi={...api,get:()=>reloaded.st,set:patch=>reloaded.vset('inbox',patch)};const searchesBeforeRestore=searches.length;
+const reloadApi={...api,get:()=>reloaded.st,set:patch=>reloaded.vset('inbox',patch)};const searchesBeforeRestore=searches.length,accountReadsBeforeRestore=accountReads;
 reloadViews.inbox.render(reloaded.st,reloadApi);await tick();
 assert.equal(reloadViews.inbox.render(reloaded.st,reloadApi).rows.length,1,'cached Inbox renders after reload');
 assert.equal(reloaded.renderVals().homeInboxCount,'1 unread','Home rebuilds the same cached unread count after reload');
 assert.deepEqual(local(reloaded.renderVals().homeInboxRows),[{subject:'Fixture retained-unread',from:'Sender'}]);
 assert.equal(reloaded.renderVals().homeInboxStatus,`Fixture account · Updated ${cachedReadLabel}`,'restore keeps the original read time');
 assert.equal(searches.length,searchesBeforeRestore,'fresh retained snapshot needs no provider read to populate Home');
+assert.ok(accountReads>accountReadsBeforeRestore,'a saved mailbox, however recent, is shown only until the account grants are read again');
 reloaded.componentWillUnmount();
 console.log('PASS: Reloaded Inbox cache also restores Home subjects/count/time without a provider read.');

@@ -11,12 +11,28 @@ import {albumDocument} from '../browser/preference-documents';
 type Row={id:string;kind:'image'|'video';path?:string;duration?:number;operationId?:string;image:string;width:number;height:number;date:number;revision:string;mutationRevision:string;favorite:boolean;trashed:boolean};
 const finder='[aria-label="Viewfinder. Tap to focus, hold to ask Alpha, swipe to change mode"]';
 const revision=()=>crypto.randomUUID();
+/** Video bytes are kept apart from their media row, keyed by the same id. Listing, counting
+ * and album reads walk the rows only, so they never deserialise a recording; read() and an
+ * explicit share, save or edit join the bytes back for the one item they need. */
+const VIDEO_DATA='video-data';
+type VideoData={id:string;path:string};
+const videoData=(store:IDBObjectStore)=>store.transaction.objectStore(VIDEO_DATA);
+/** Separates a video row from its bytes. Rows without bytes are returned as they are. */
+export function splitVideoRow<T extends {id:string;path?:string}>(value:T):{row:Omit<T,'path'>;data?:VideoData}{
+ const {path,...row}=value;return typeof path==='string'&&path?{row,data:{id:value.id,path}}:{row};
+}
 let database:Promise<IDBDatabase>|undefined;
 function db(){return database??=new Promise<IDBDatabase>((resolve,reject)=>{
- const request=indexedDB.open('alpha.browser.photos.v1',2);
+ const request=indexedDB.open('alpha.browser.photos.v1',3);
  request.onupgradeneeded=()=>{
   const store=request.result.objectStoreNames.contains('photos')?request.transaction!.objectStore('photos'):request.result.createObjectStore('photos',{keyPath:'id'});
   if(!store.indexNames.contains('chronological'))store.createIndex('chronological',['date','id']);
+  if(!request.result.objectStoreNames.contains(VIDEO_DATA)){
+   // Earlier versions stored each recording inside its row. Both writes belong to the upgrade
+   // transaction, so a row and its bytes move together or the upgrade does not happen.
+   const payloads=request.result.createObjectStore(VIDEO_DATA,{keyPath:'id'}),moving=store.openCursor();
+   moving.onsuccess=()=>{const cursor=moving.result;if(!cursor)return;const value=cursor.value as Row;if(value?.kind==='video'){const {row,data}=splitVideoRow(value);if(data){payloads.put(data);cursor.update(row);}}cursor.continue();};
+  }
  };
  request.onsuccess=()=>{request.result.onversionchange=()=>{request.result.close();database=undefined;};resolve(request.result);};
  request.onerror=()=>{database=undefined;reject(request.error);};
@@ -24,7 +40,7 @@ function db(){return database??=new Promise<IDBDatabase>((resolve,reject)=>{
 });}
 async function transaction<T>(mode:IDBTransactionMode,action:(store:IDBObjectStore,set:(value:T)=>void,fail:(error:Error)=>void)=>void):Promise<T>{
  const connection=await db();
- return new Promise((resolve,reject)=>{const tx=connection.transaction('photos',mode);let value:T,error:Error|undefined;
+ return new Promise((resolve,reject)=>{const tx=connection.transaction(['photos',VIDEO_DATA],mode);let value:T,error:Error|undefined;
   tx.oncomplete=()=>resolve(value);tx.onerror=()=>reject(error??tx.error);tx.onabort=()=>reject(error??tx.error??Error('Photo storage interrupted.'));
   try{action(tx.objectStore('photos'),v=>{value=v;},e=>{error=e;tx.abort();});}catch(e){error=e as Error;tx.abort();}
  });
@@ -46,7 +62,11 @@ async function rows(options:{before?:string;trashed?:boolean;album?:string}={},m
   };
  });
 }
-async function read(id:string){return transaction<Row>('readonly',(store,set,fail)=>{const r=store.get(id);r.onsuccess=()=>['image','video'].includes(r.result?.kind)?set(r.result):fail(Error('Photo no longer available.'));});}
+async function read(id:string){return transaction<Row>('readonly',(store,set,fail)=>{const r=store.get(id);r.onsuccess=()=>{
+ const row=r.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)){fail(Error('Photo no longer available.'));return;}
+ if(row.kind!=='video'){set(row);return;}
+ const data=videoData(store).get(id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path??row.path;set(path?{...row,path}:row);};
+};});}
 async function change(input:{id:string;revision:string},patch:Partial<Pick<Row,'favorite'|'trashed'>>){
  return transaction<Row>('readwrite',(store,set,fail)=>{const r=store.get(input.id);r.onsuccess=()=>{const row=r.result as Row|undefined;
   if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==input.revision){fail(Error('Photo changed in another tab. Reopen it and try again.'));return;}
@@ -55,7 +75,21 @@ async function change(input:{id:string;revision:string},patch:Partial<Pick<Row,'
 }
 type EditParameters={rotation:number;crop:boolean;filter:string};
 type EditSession={id:string;source:Row;active:boolean;expiresAt:number};
-type EditRecord={id:string;kind:'edit-receipt';operationId:string;sourceId:string;sourceRevision:string;copyId:string;status:'prepared'|'saving'|'saved'|'failed'|'cancelled'|'unchanged';parameters?:string;attempt?:string};
+type EditRecord={id:string;kind:'edit-receipt';operationId:string;sourceId:string;sourceRevision:string;copyId:string;status:'prepared'|'saving'|'saved'|'failed'|'cancelled'|'unchanged';parameters?:string;attempt?:string;at?:number};
+/** An editor session lasts 15 minutes; a receipt still 'prepared' a day later belongs to an
+ * editor that was closed without saving or cancelling. */
+const PREPARED_RECEIPT_TTL=24*60*60*1000;
+/** Whether a receipt can be removed without losing an outcome. Only a receipt that no save
+ * ever claimed qualifies by age: reading it reports 'not-started', exactly as its absence does.
+ * A claimed receipt is the only record of its outcome and stays until that outcome is acknowledged. */
+export function editReceiptAbandoned(record:{status:string;at?:number},now:number){return record.status==='prepared'&&now-(record.at??0)>PREPARED_RECEIPT_TTL;}
+/** Whether an acknowledged receipt can be removed. A receipt still 'prepared' or 'saving' may yet
+ * commit a copy, so it is kept. */
+export function editReceiptSettled(record:{status:string}){return ['saved','failed','cancelled','unchanged'].includes(record.status);}
+function sweepAbandonedReceipts(store:IDBObjectStore){
+ const request=store.openCursor(IDBKeyRange.bound('edit:','edit:\uffff'));
+ request.onsuccess=()=>{const cursor=request.result;if(!cursor)return;const record=cursor.value as EditRecord;if(record?.kind==='edit-receipt'&&editReceiptAbandoned(record,Date.now()))cursor.delete();cursor.continue();};
+}
 type EditResult={status:string;operationId:string;id?:string};
 const edits=new Map<string,EditSession>();
 const filters:Record<string,string>={none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'};
@@ -86,8 +120,8 @@ async function beginPhotoEdit(input:{id:string;revision:string}){
  const id=revision(),value:EditSession={id,source,active:true,expiresAt:Date.now()+15*60*1000};edits.set(id,value);
  try{
   const preview=await renderEdit(value,{rotation:0,crop:false,filter:'none'});
-  const record:EditRecord={id:editKey(id),kind:'edit-receipt',operationId:id,sourceId:source.id,sourceRevision:source.mutationRevision,copyId:photoId(),status:'prepared'};
-  await transaction<void>('readwrite',(store,set)=>{store.add(record);set(undefined);});return preview;
+  const record:EditRecord={id:editKey(id),kind:'edit-receipt',operationId:id,sourceId:source.id,sourceRevision:source.mutationRevision,copyId:photoId(),status:'prepared',at:Date.now()};
+  await transaction<void>('readwrite',(store,set)=>{sweepAbandonedReceipts(store);store.add(record);set(undefined);});return preview;
  }catch(error){edits.delete(id);value.active=false;throw error;}
 }
 async function previewPhotoEdit(input:EditParameters&{sessionId:string}){return renderEdit(session(input.sessionId),input);}
@@ -101,7 +135,18 @@ async function resultPhotoEdit(input:{operationId:string}):Promise<EditResult>{
   set(outcome(record));
  };});
 }
-async function cancelPhotoEdit(input:{sessionId:string}){const value=edits.get(input.sessionId);if(value)value.active=false;edits.delete(input.sessionId);await resultPhotoEdit({operationId:input.sessionId});}
+/** Closing an editor removes a receipt no save ever claimed. A claimed one is retired, like an
+ * outcome read, and kept so the save's owner still learns that no copy was made. */
+async function cancelPhotoEdit(input:{sessionId:string}){
+ const value=edits.get(input.sessionId);if(value)value.active=false;edits.delete(input.sessionId);const key=editKey(input.sessionId);
+ await transaction<void>('readwrite',(store,set)=>{const request=store.get(key);request.onsuccess=()=>{const record=request.result as EditRecord|undefined;if(record?.status==='prepared')store.delete(key);else if(record?.status==='saving'){record.status='cancelled';store.put(record);}set(undefined);};});
+}
+/** Removes a receipt once its outcome was acknowledged by the owner of the save. Nothing reads
+ * an acknowledged outcome again, and each editor uses its operation once. */
+async function forgetEdit(input:{operationId:string}){
+ const key=editKey(input.operationId);
+ await transaction<void>('readwrite',(store,set)=>{const request=store.get(key);request.onsuccess=()=>{const record=request.result as EditRecord|undefined;if(record?.kind==='edit-receipt'&&editReceiptSettled(record))store.delete(key);set(undefined);};});
+}
 async function savePhotoEdit(input:EditParameters&{sessionId:string}):Promise<EditResult>{
  input={sessionId:input.sessionId,rotation:input.rotation,crop:input.crop,filter:input.filter};
  const encodedParameters=parameters(input),key=editKey(input.sessionId),attempt=revision();
@@ -117,7 +162,8 @@ async function savePhotoEdit(input:EditParameters&{sessionId:string}):Promise<Ed
  try{
   const value=session(input.sessionId),rendered=await renderEdit(value,input);session(input.sessionId);
   return await transaction<EditResult>('readwrite',(store,set)=>{const request=store.get(key);request.onsuccess=()=>{
-   const record=request.result as EditRecord;
+   const record=request.result as EditRecord|undefined;
+   if(!record){set({status:'not-started',operationId:input.sessionId});return;}
    if(record.status!=='saving'||record.attempt!==attempt){set(outcome(record));return;}
    const original=store.get(record.sourceId);original.onsuccess=()=>{
     const source=original.result as Row|undefined;
@@ -140,11 +186,13 @@ function selectedMedia(items:SelectedMedia[]){
  if(!Array.isArray(items)||items.length<1||items.length>20||items.some(item=>!item||typeof item.id!=='string'||!item.id||typeof item.revision!=='string'||!item.revision)||new Set(items.map(item=>item.id)).size!==items.length)throw Error('Select between 1 and 20 distinct items again.');
  return items.map(item=>({id:item.id,revision:item.revision}));
 }
-async function selectedMediaRows(items:SelectedMedia[]){
- return transaction<Row[]>('readonly',(store,set,fail)=>{const result:Row[]=[];set(result);for(const item of items){const request=store.get(item.id);request.onsuccess=()=>{const row=request.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==item.revision||row.trashed){fail(Error('Selection changed. Reselect the items.'));return;}result.push(row);};}});
+/** The selected rows in selection order. `bytes` joins each video's recording for a handoff;
+ * a revision check alone leaves the recordings unread. */
+async function selectedMediaRows(items:SelectedMedia[],bytes=false){
+ return transaction<Row[]>('readonly',(store,set,fail)=>{const result:Row[]=new Array(items.length);set(result);items.forEach((item,index)=>{const request=store.get(item.id);request.onsuccess=()=>{const row=request.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==item.revision||row.trashed){fail(Error('Selection changed. Reselect the items.'));return;}result[index]=row;if(!bytes||row.kind!=='video')return;const data=videoData(store).get(item.id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path??row.path;if(path)result[index]={...row,path};};};});});
 }
 async function selectedMediaFiles(items:SelectedMedia[]){
-  const selected=await selectedMediaRows(items);
+  const selected=await selectedMediaRows(items,true);
   // Validate the entire selection before preparing a handoff or explicit save.
   return Promise.all(selected.map(async(row,index)=>{
    const source=row.path||row.image;
@@ -167,17 +215,17 @@ async function saveVideoCopy(input:{id:string;revision:string;operationId:string
  const key=editKey(input.operationId),edit={...input.edit},source=await read(input.id);signal.throwIfAborted();
  if(source.kind!=='video'||!source.path||!source.duration)throw Error('Select a saved video.');validateVideoEdit(edit,source.duration);
  const encoded=JSON.stringify([edit.start,edit.end,edit.rotation,edit.crop]);
- const claimed=await transaction<EditRecord>('readwrite',(store,set,fail)=>{signal.throwIfAborted();const request=store.get(key);request.onsuccess=()=>{const old=request.result as EditRecord|undefined;if(old){if(old.sourceId!==input.id||old.sourceRevision!==input.revision||old.parameters!==encoded){fail(Error('This operation belongs to another edit.'));return;}if(old.status==='saving'){fail(Error('Video save is in progress.'));return;}set(old);return;}const record:EditRecord={id:key,kind:'edit-receipt',operationId:input.operationId,sourceId:input.id,sourceRevision:input.revision,copyId:'v:'+photoId(),parameters:encoded,status:'saving'};store.add(record);set(record);};});
+ const claimed=await transaction<EditRecord>('readwrite',(store,set,fail)=>{signal.throwIfAborted();const request=store.get(key);request.onsuccess=()=>{const old=request.result as EditRecord|undefined;if(old){if(old.sourceId!==input.id||old.sourceRevision!==input.revision||old.parameters!==encoded){fail(Error('This operation belongs to another edit.'));return;}if(old.status==='saving'){fail(Error('Video save is in progress.'));return;}set(old);return;}const record:EditRecord={id:key,kind:'edit-receipt',operationId:input.operationId,sourceId:input.id,sourceRevision:input.revision,copyId:'v:'+photoId(),parameters:encoded,status:'saving',at:Date.now()};sweepAbandonedReceipts(store);store.add(record);set(record);};});
  if(claimed.status!=='saving')return outcome(claimed);
  try{
   if(source.trashed||source.mutationRevision!==input.revision)throw Error('Video changed. Reopen it before editing.');
   const rendered=await renderVideoEdit({path:source.path,duration:source.duration},edit,signal);signal.throwIfAborted();
-  return await transaction<EditResult>('readwrite',(store,set,fail)=>{const request=store.get(key);request.onsuccess=()=>{const record=request.result as EditRecord;if(record.status!=='saving'){set(outcome(record));return;}const original=store.get(input.id);original.onsuccess=()=>{const row=original.result as Row|undefined;if(signal.aborted||!row||row.trashed||row.mutationRevision!==input.revision){record.status='failed';store.put(record);set(outcome(record));return;}try{store.add({id:record.copyId,kind:'video',...rendered,date:Date.now(),revision:revision(),mutationRevision:revision(),favorite:false,trashed:false});record.status='saved';store.put(record);set(outcome(record));}catch(error){fail(error instanceof Error?error:Error('Video copy could not be saved.'));}};};});
- }catch(error){await transaction<void>('readwrite',(store,set)=>{const request=store.get(key);request.onsuccess=()=>{const record=request.result as EditRecord;if(record.status==='saving'){record.status='failed';store.put(record);}set(undefined);};});throw error;}
+  return await transaction<EditResult>('readwrite',(store,set,fail)=>{const request=store.get(key);request.onsuccess=()=>{const record=request.result as EditRecord|undefined;if(!record){set({status:'not-started',operationId:input.operationId});return;}if(record.status!=='saving'){set(outcome(record));return;}const original=store.get(input.id);original.onsuccess=()=>{const row=original.result as Row|undefined;if(signal.aborted||!row||row.trashed||row.mutationRevision!==input.revision){record.status='failed';store.put(record);set(outcome(record));return;}try{const copy=splitVideoRow({id:record.copyId,kind:'video',...rendered,date:Date.now(),revision:revision(),mutationRevision:revision(),favorite:false,trashed:false});store.add(copy.row);if(copy.data)videoData(store).add(copy.data);record.status='saved';store.put(record);set(outcome(record));}catch(error){fail(error instanceof Error?error:Error('Video copy could not be saved.'));}};};});
+ }catch(error){await transaction<void>('readwrite',(store,set)=>{const request=store.get(key);request.onsuccess=()=>{const record=request.result as EditRecord|undefined;if(record?.status==='saving'){record.status='failed';store.put(record);}set(undefined);};});throw error;}
 }
 export const browserPhotoLibrary={
  saveVideoCopy,
- beginEdit:beginPhotoEdit,previewEdit:previewPhotoEdit,saveEdit:savePhotoEdit,editResult:resultPhotoEdit,cancelEdit:cancelPhotoEdit,
+ beginEdit:beginPhotoEdit,previewEdit:previewPhotoEdit,saveEdit:savePhotoEdit,editResult:resultPhotoEdit,cancelEdit:cancelPhotoEdit,forgetEdit,
  async list(options:{before?:string;trashed?:boolean;album?:string}={}){const result=await rows(options);return {items:result.slice(0,40),next:result.length>40?pageCursor(result[39]):''};},
  async read(input:{id:string}){return read(input.id);},
  async summary(){const all=await rows({},true);return {favorites:all.filter(r=>!r.trashed&&r.favorite).length,videos:all.filter(r=>!r.trashed&&r.kind==='video').length,trash:all.filter(r=>r.trashed).length,canFavorite:true};},
@@ -229,7 +277,7 @@ export const browserPhotoLibrary={
  async prepareDeleteTrash(input?:{items:SelectedMedia[]}){const wanted=input?selectedMedia(input.items):null;const all=(await rows({},true)).filter(r=>r.trashed);if(wanted&&wanted.some(item=>!all.some(row=>row.id===item.id&&row.mutationRevision===item.revision)))throw Error('Selected deleted items changed. Select them again.');const selected=wanted||all.map(r=>({id:r.id,revision:r.mutationRevision}));const confirmation=revision();prepared.clear();prepared.set(confirmation,selected);return {confirmation,count:selected.length};},
  async cancelDeleteTrash(input:{confirmation:string}){prepared.delete(input.confirmation);},
  async deletePreparedTrash(input:{confirmation:string}){const selected=prepared.get(input.confirmation);if(!selected)throw Error('Review the trash again.');prepared.delete(input.confirmation);
-  return transaction<{status:string;deletedIds:string[];skippedIds:string[];failedIds:string[]}>('readwrite',(store,set)=>{const result={status:'complete',deletedIds:[] as string[],skippedIds:[] as string[],failedIds:[] as string[]};set(result);for(const item of selected){const r=store.get(item.id);r.onsuccess=()=>{const row=r.result as Row|undefined;if(row?.trashed&&row.mutationRevision===item.revision){store.delete(item.id);result.deletedIds.push(item.id);}else result.skippedIds.push(item.id);};}});
+  return transaction<{status:string;deletedIds:string[];skippedIds:string[];failedIds:string[]}>('readwrite',(store,set)=>{const result={status:'complete',deletedIds:[] as string[],skippedIds:[] as string[],failedIds:[] as string[]};set(result);for(const item of selected){const r=store.get(item.id);r.onsuccess=()=>{const row=r.result as Row|undefined;if(row?.trashed&&row.mutationRevision===item.revision){store.delete(item.id);videoData(store).delete(item.id);result.deletedIds.push(item.id);}else result.skippedIds.push(item.id);};}});
  },
 };
 export async function importBrowserPhoto(image:ImportedCameraImage,signal:AbortSignal){
@@ -242,6 +290,10 @@ const videoCapture=new BrowserVideoCapture();
 let videoSession=0;
 let videoSave:Promise<{path:string;duration:number;width:number;height:number;fileSize:number}>|undefined;
 let preview:HTMLVideoElement|null=null,stream:MediaStream|null=null,generation=0;
+let previewEnded:(()=>void)|undefined;
+/** Called when the current preview's camera track ends on its own (device unplugged, access
+ * revoked, taken by another page). One listener: the mounted Camera view. */
+export function onBrowserPreviewEnded(listener:(()=>void)|undefined){previewEnded=listener;}
 let starting:AbortController|undefined;
 let zoom=1,mirror=false;
 const cameraFocus=new BrowserCameraFocus();
@@ -272,13 +324,15 @@ export const browserCamera={
     if(controller.signal.aborted){abort();return;}ownVideo!.play().then(()=>finish(),finish);
    });
    controller.signal.throwIfAborted();
-   ownStream.getVideoTracks()[0].addEventListener('ended',()=>{if(token===generation){clearScreenLight();cameraFocus.clear();}},{once:true});
+   ownStream.getVideoTracks()[0].addEventListener('ended',()=>{if(token===generation){clearScreenLight();cameraFocus.clear();previewEnded?.();}},{once:true});
    const settings=ownStream.getVideoTracks()[0].getSettings();return {width:ownVideo.videoWidth,height:ownVideo.videoHeight,deviceId:settings.deviceId??''};
   }catch(error){release(ownVideo,ownStream);if(preview===ownVideo){preview=null;stream=null;}throw error;}
   finally{if(starting===controller)starting=undefined;}
  },
  async stopPreview(){cameraFocus.clear();clearScreenLight();++generation;++videoSession;videoCapture.cancel();starting?.abort();starting=undefined;release(preview,stream);preview=null;stream=null;},
- async capturePhoto(options?:{saveToGallery?:boolean}){const token=generation,video=preview;if(!video||!stream||video.readyState<2)throw Error('Camera is not ready.');
+ async capturePhoto(options?:{saveToGallery?:boolean}){const token=generation,video=preview;
+  // An ended track can leave its last frame on the element: only a live camera is photographed.
+  if(!video||!stream||video.readyState<2||stream.getVideoTracks()[0]?.readyState!=='live')throw Error('Camera is not ready.');
   const width=video.videoWidth,height=video.videoHeight;if(width<=0||height<=0||width*height>32_000_000)throw Error('Unsupported photo dimensions.');
   const canvas=drawCameraFrame(video,{zoom,mirror});
   const image=canvas.toDataURL('image/jpeg',0.85);if(!image.startsWith('data:image/jpeg;base64,'))throw Error('Photo encoding failed.');
@@ -311,8 +365,8 @@ export const browserCamera={
   videoSave=(async()=>{
    const clip=await videoCapture.stop(),id=mediaId();
    const path=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(clip.blob);});
-   const row:Row={id:'v:'+id,kind:'video',path,duration:clip.duration,image:clip.image,width:clip.width,height:clip.height,date:Date.now(),revision:revision(),mutationRevision:revision(),favorite:false,trashed:false};
-   await transaction<void>('readwrite',(store,set)=>{if(token!==generation||session!==videoSession)throw new DOMException('Video save cancelled.','AbortError');store.add(row);set(undefined);});
+   const {row,data}=splitVideoRow<Row>({id:'v:'+id,kind:'video',path,duration:clip.duration,image:clip.image,width:clip.width,height:clip.height,date:Date.now(),revision:revision(),mutationRevision:revision(),favorite:false,trashed:false});
+   await transaction<void>('readwrite',(store,set)=>{if(token!==generation||session!==videoSession)throw new DOMException('Video save cancelled.','AbortError');store.add(row);if(data)videoData(store).add(data);set(undefined);});
    return {path:'browser-video:///'+id,duration:clip.duration,width:clip.width,height:clip.height,fileSize:clip.blob.size};
   })();return videoSave;
  },

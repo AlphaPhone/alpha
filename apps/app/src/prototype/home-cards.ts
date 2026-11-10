@@ -198,6 +198,61 @@ export function presentHomeCalendar(input: {state: CalendarCardState; agenda: Ho
   }
   return empty('Connect your calendar', 'Calendar');
 }
+/** One candidate for the Home calendar card: a calendar event, a reminder or an overdue reminder. */
+export interface HomeAgendaItem { event: Record<string, any>; begin: number; end: number }
+/** Order of Home calendar candidates: overdue reminders first (they stay until handled, even when an
+ * event already in progress began before one was due), then by start time. */
+export function compareHomeAgenda(a: HomeAgendaItem, b: HomeAgendaItem) {
+  return Number(!!b.event.overdue) - Number(!!a.event.overdue) || a.begin - b.begin;
+}
+/** Whether a candidate is still shown at `now`: an all-day event until its end, any other through
+ * its end; an overdue reminder has no end. */
+export function homeAgendaLive(item: HomeAgendaItem, now: number) {
+  return item.event.nativeEvent?.allDay ? item.end > now : item.end >= now;
+}
+/** Every candidate in card order, whatever the time. Completed reminders are left out, and so are
+ * app-calendar events while `calendarShown` is false (the calendar is not read, or is hidden in
+ * Calendar's display settings). All-day events are placed at local midnight of their UTC date. */
+export function homeAgendaCandidates(events: readonly Record<string, any>[], overdue: readonly Record<string, any>[], calendarShown: boolean): HomeAgendaItem[] {
+  return events
+    .filter(event => event.reminderStatus !== 'completed')
+    .filter(event => !event.alphaCalendarId || calendarShown)
+    .map(event => {
+      const instant = (value: number) => { const date = new Date(value); return event.nativeEvent?.allDay ? new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()).getTime() : Number(value); };
+      return {event, begin: instant(event.nativeEvent?.begin ?? event.reminderAt), end: instant(event.nativeEvent?.end ?? event.reminderAt)};
+    })
+    .concat(overdue.map(row => ({event: {id: row.id, title: row.title, off: row.off, overdue: true}, begin: Number(row.at), end: Infinity})))
+    .filter(item => Number.isFinite(item.begin) && (Number.isFinite(item.end) || !!item.event.overdue))
+    .sort(compareHomeAgenda);
+}
+/** The Home calendar card's item and, under an overdue reminder, the next item that is not overdue.
+ * The shell renders many times a second (clock, voice and call ticks), so the ordered candidates
+ * are rebuilt only when the event list (by identity), the overdue reminders or `calendarShown`
+ * change; each call then only finds the first candidates still live at `now`. */
+export function createHomeAgenda() {
+  let events: unknown, shown = false, overdueKey = '', ordered: HomeAgendaItem[] = [];
+  return (input: {events: readonly Record<string, any>[]; overdue: readonly Record<string, any>[]; calendarShown: boolean; now: number}) => {
+    const key = input.overdue.map(row => `${row.id}\u0000${row.at}\u0000${row.off}\u0000${row.title}`).join('\u0001');
+    if (input.events !== events || input.calendarShown !== shown || key !== overdueKey) {
+      ordered = homeAgendaCandidates(input.events, input.overdue, input.calendarShown);
+      events = input.events; shown = input.calendarShown; overdueKey = key;
+    }
+    const agenda = ordered.find(item => homeAgendaLive(item, input.now));
+    const following = agenda?.event.overdue ? ordered.find(item => !item.event.overdue && homeAgendaLive(item, input.now)) : undefined;
+    return {agenda, following, ordered};
+  };
+}
+/** Whether saving works in this browser. `probe` throws when it does not. The shell asks on every
+ * render, and the answer changes only when the owner changes the browser's storage settings, so the
+ * probe (a synchronous storage read) runs at most once per `ttl` milliseconds. */
+export function createStorageAccessCheck(probe: () => void, ttl = 5000, clock: () => number = Date.now) {
+  let at = -Infinity, available = true;
+  return () => {
+    const now = clock();
+    if (now - at >= ttl || now < at) { at = now; try { probe(); available = true; } catch { available = false; } }
+    return available;
+  };
+}
 /** At most three attendee initials, with a "+N" overflow, derived only from event attendee names. */
 export function attendeeInitials(names: unknown[]): string[] {
   const initials = names.filter((name): name is string => typeof name === 'string' && !!name.trim()).map(name => {

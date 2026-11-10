@@ -30,13 +30,15 @@ export class AssistantDraftController {
     catch(error){if(this.active!==b)return;if(attempt===2)throw error;await new Promise(resolve=>setTimeout(resolve,attempt===0?150:600));if(this.active!==b)return;}
    }
    if(this.active!==b)return;
+   // The in-flight message's text stays saved until dispatch settles; never offer it again meanwhile,
+   // neither as a restored draft nor as the saved side of a conflict.
+   const sending=this.held?.binding?.key===key&&b.record?.text===this.held.text;
    if(this.text()!==initial||initial!==''){
     b.ready=true;
-    if(b.record&&b.record.text!==this.text()){b.failed=true;this.publish({opening:false,conflict:true,savedText:b.record.text,message:'A saved draft is available. Review both copies.'});return;}
-    b.last=b.record?.text??'';this.publish({opening:false,message:''});this.edit(this.text());
+    if(!sending&&b.record&&b.record.text!==this.text()){b.failed=true;this.publish({opening:false,conflict:true,savedText:b.record.text,message:'A saved draft is available. Review both copies.'});return;}
+    if(sending)this.held!.peer=b;
+    b.last=sending?'':b.record?.text??'';this.publish({opening:false,message:''});this.edit(this.text());
    }else{
-    // The in-flight message's text stays saved until dispatch settles; never offer it again meanwhile.
-    const sending=this.held?.binding?.key===key&&b.record?.text===this.held.text;
     const restored=sending?'':b.record?.text??'';b.last=restored;if(sending)this.held!.peer=b;
     // The UI may queue its state update. Keep writes paused until that commit;
     // check the original visible text and binding again inside the UI updater.

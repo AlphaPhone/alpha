@@ -40,3 +40,22 @@ test('graceful close reconciles a start frame flushed after the Stop tap',async(
  f.state.onStop=()=>{f.emit('liveCaptureFrames',{vad:[{type:'speech-start',timestampMs:1}]});f.emit('liveCaptureEnded',{});f.emit('liveCaptureTranscript',{final:{turnId:'flushed',text:'captured before stop',mode:'stream'}});};
  await capture.close(2);assert.deepEqual(f.results,['captured before stop']);assert.deepEqual(f.edges,[['start',1],['end',2]]);
 });
+
+test('a failed or unconfirmed graceful close still delivers one result for the segment it closed',async()=>{
+ const unconfirmed=fixture(),first=await unconfirmed.open();unconfirmed.emit('liveCaptureFrames',{vad:[{type:'speech-start',timestampMs:1}]});unconfirmed.state.ack=false;
+ await assert.rejects(first.close(2),/not confirmed/);assert.deepEqual(unconfirmed.edges,[['start',1],['end',2]]);assert.deepEqual(unconfirmed.results,[null],'the closed segment is not left waiting for a final');
+ const rejected=fixture(),second=await rejected.open();rejected.emit('liveCaptureFrames',{vad:[{type:'speech-start',timestampMs:1}]});rejected.state.onStop=()=>{throw Error('native stop failed');};
+ await assert.rejects(second.close(2),/native stop failed/);assert.deepEqual(rejected.results,[null]);
+ const discarded=fixture(),third=await discarded.open();discarded.emit('liveCaptureFrames',{vad:[{type:'speech-start',timestampMs:1}]});discarded.state.delayStop=true;
+ const closing=third.close(2);await flush();discarded.state.delayStop=false;discarded.controller.abort();discarded.state.ack=false;discarded.finishStop();await assert.rejects(closing);assert.deepEqual(discarded.results,[],'a discarded capture delivers nothing');
+});
+test('a long conversation keeps delivering finals past the duplicate-final memory',async()=>{
+ const {rememberFinishedTurn,FINISHED_TURN_LIMIT}=await import('../apps/app/src/runtime/native-resident-capture.ts');
+ const seen=new Set();for(let i=0;i<5;i++)rememberFinishedTurn(seen,`t${i}`,3);assert.deepEqual([...seen],['t2','t3','t4'],'the oldest ids are forgotten first');
+ rememberFinishedTurn(seen,'t3',3);assert.deepEqual([...seen],['t2','t3','t4']);
+ const f=fixture(),capture=await f.open(),total=FINISHED_TURN_LIMIT+40;
+ for(let i=0;i<total;i++){f.emit('liveCaptureFrames',{vad:[{type:'speech-start',timestampMs:i*2+1},{type:'speech-end',timestampMs:i*2+2}]});f.emit('liveCaptureTranscript',{final:{turnId:`turn-${i}`,text:`segment ${i}`,mode:'stream'}});}
+ assert.deepEqual(f.errors,[],'the capture is not lost at the memory bound');assert.equal(f.results.length,total);assert.equal(f.results.at(-1),`segment ${total-1}`);
+ f.emit('liveCaptureTranscript',{final:{turnId:`turn-${total-1}`,text:'duplicate'}});assert.equal(f.results.length,total,'a recent final is still delivered once');
+ await capture.cancel();
+});

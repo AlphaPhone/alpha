@@ -49,7 +49,7 @@ final class NativeDeletionCoordinator {
   JSONObject time=clock();JSONArray result=new JSONArray(),events=calendar.list(time.getString("continuity"),time.getLong("elapsed"));
   for(int i=0;i<events.length();i++){JSONObject row=events.getJSONObject(i);if(pendingPhase(row)&&!acknowledged.contains("calendar:"+row.getString("id"))&&visible(row.getJSONObject("owner")))result.put(row.put("kind","calendar"));}
   JSONArray reminders=AlphaReminders.engine(context).pendingDeletions();for(int i=0;i<reminders.length();i++){JSONObject row=reminders.getJSONObject(i);if(!pendingPhase(row)||acknowledged.contains("reminder:"+row.getString("id"))||!visible(new JSONObject(row.getString("owner"))))continue;
-   if("queued".equals(row.getString("phase"))){String state=!time.getString("continuity").equals(row.getString("continuity"))||time.getLong("elapsed")<row.getLong("createdElapsed")?"clock-changed":time.getLong("elapsed")<row.getLong("expiresElapsed")?"open":"expired";row.put("window",state);}
+   if("queued".equals(row.getString("phase"))){row.put("window",DeletionDeadline.window(DeletionDeadline.state(row.getString("continuity"),row.getLong("createdElapsed"),row.getLong("expiresElapsed"),time.getString("continuity"),time.getLong("elapsed"))));}
    result.put(row.put("kind","reminder"));}
   return result;
  }
@@ -144,8 +144,9 @@ final class NativeDeletionCoordinator {
       if(owned)AlphaReminders.engine(context).settleDeletion(row.getString("id"),row.getString("owner"),time,"undone".equals(phase));
       continue;
      }
-     if(!continuity.equals(row.getString("continuity"))||elapsed<row.getLong("createdElapsed"))continue;
-     if(elapsed<row.getLong("expiresElapsed")){next[0]=Math.min(next[0],row.getLong("expiresElapsed")-elapsed);continue;}
+     DeletionDeadline.State window=DeletionDeadline.state(row.getString("continuity"),row.getLong("createdElapsed"),row.getLong("expiresElapsed"),continuity,elapsed);
+     if(window==DeletionDeadline.State.CLOCK_CHANGED)continue;
+     if(window==DeletionDeadline.State.OPEN){next[0]=Math.min(next[0],row.getLong("expiresElapsed")-elapsed);continue;}
      boolean owned;try{owned=admitted(new JSONObject(row.getString("owner")),agent);}catch(Exception unavailable){owned=false;}
      if(owned)AlphaReminders.engine(context).settleDeletion(row.getString("id"),row.getString("owner"),time,false);else AlphaReminders.engine(context).pauseDeletion(row.getString("id"),row.getString("owner"),"owner-unavailable");
     }catch(Exception rowFailed){failed=true;}}

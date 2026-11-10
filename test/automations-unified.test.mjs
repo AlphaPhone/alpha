@@ -54,9 +54,84 @@ test('actual Alpha adapter unifies five kinds, filters, delegates workflow/devic
 test('unknown mutation stays locked in the existing owner request journal after adapter recreation',async()=>{let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}return read(call);});const storage={};let app=adapterFixture(f.request,storage);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();assert.equal(writes,0);app.render().automation.confirm();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}});
 test('retiring an owner while a detail read waits cannot open an editor or dispatch a late mutation',async()=>{let release;const paused=new Promise(resolve=>release=resolve);let detailStarted=false;const f=await fixture(async call=>{if(call.path==='/api/triggers/prompt'){detailStarted=true;await paused;}return read(call);});const app=adapterFixture(f.request);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Edit prompt').run();await wait(()=>detailStarted);app.retire();assert.equal(app.home().homeWorkflowHasRows,undefined);release();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(app.render().automation.editing,false);assert.equal(f.calls.filter(call=>call.method!=='GET').length,0);}finally{release();app.close();await f.close();}});
 
-for(const status of [408,409,425,429])test(`a mutation followed by HTTP ${status} remains unknown after recreation`,async()=>{
+const ready=async app=>wait(()=>app.render().cards.length===5&&!app.render().automation.loading&&!app.render().automation.busy);
+const enablePrompt=async app=>{app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();app.render().automation.confirm();};
+for(const status of [408,409,425,429])test(`a mutation followed by HTTP ${status} stays unknown after recreation while the listing does not show it applied`,async()=>{
+ let writes=0;const f=await fixture(call=>{if(call.method!=='GET'){writes++;return {status,body:{code:'REPLY_UNCONFIRMED'}};}return read(call);});const storage={};let app=adapterFixture(f.request,storage);
+ try{app.render();await ready(app);await enablePrompt(app);await wait(()=>writes===1&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await ready(app);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}
+});
+for(const status of [408,409,425,429])test(`a mutation followed by HTTP ${status} is released once the refreshed listing shows the asked-for state`,async()=>{
  let writes=0,enabled=false;const f=await fixture(call=>{if(call.method!=='GET'){writes++;enabled=true;return {status,body:{code:'REPLY_UNCONFIRMED'}};}if(call.path==='/api/automations')return {automations:[workflow,{...prompt,enabled,status:enabled?'active':'paused'}]};return read(call);});const storage={};let app=adapterFixture(f.request,storage);
- try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();app.render().automation.confirm();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.actions.find(action=>action.label==='Pause').disabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}
+ try{app.render();await ready(app);await enablePrompt(app);await wait(()=>writes===1&&Object.keys(storage).length===0&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(app.render().automation.locked,false);assert.match(app.render().automation.message,/now confirmed on this agent/);assert.equal(app.render().automation.actions.find(action=>action.label==='Pause').disabled,false);app.close();app=adapterFixture(f.request,storage);app.render();await ready(app);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.actions.find(action=>action.label==='Pause').disabled,false);assert.equal(writes,1);}finally{app.close();await f.close();}
+});
+test('a request retained across a restart is released by a later refresh that shows it applied',async()=>{
+ let writes=0,enabled=false;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}if(call.path==='/api/automations')return {automations:[workflow,{...prompt,enabled,status:enabled?'active':'paused'}]};return read(call);});const storage={};let app=adapterFixture(f.request,storage);
+ try{app.render();await ready(app);await enablePrompt(app);await wait(()=>writes===1&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(app.render().automation.locked,true);app.close();
+  // The agent applied the change after the reply was lost. A new adapter reads the journal and the listing.
+  enabled=true;app=adapterFixture(f.request,storage);app.render();await wait(()=>Object.keys(storage).length===0);await ready(app);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.locked,false);assert.equal(app.render().automation.actions.some(action=>action.label==='Clear unconfirmed request'),false);assert.equal(writes,1);
+ }finally{app.close();await f.close();}
+});
+test('an unconfirmed change that never applied stays locked until its owner clears it, and clearing sends nothing',async()=>{
+ let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}return read(call);});const storage={};let app=adapterFixture(f.request,storage);
+ try{app.render();await ready(app);await enablePrompt(app);await wait(()=>writes===1&&!app.render().automation.busy&&!app.render().automation.loading);app.close();
+  app=adapterFixture(f.request,storage);app.render();await ready(app);app.render().cards.find(card=>card.name==='Owner prompt').open();
+  const clear=()=>app.render().automation.actions.find(action=>/^(Clear unconfirmed request|Confirm clear)$/.test(action.label));
+  assert.equal(app.render().automation.locked,true);assert.equal(clear().label,'Clear unconfirmed request');assert.equal(clear().disabled,false);
+  clear().run();assert.equal(Object.keys(storage).length,1);assert.equal(clear().label,'Confirm clear');assert.match(app.render().automation.message,/may already have taken effect/);
+  clear().run();await wait(()=>Object.keys(storage).length===0&&!app.render().automation.busy&&!app.render().automation.loading);
+  assert.match(app.render().automation.message,/Nothing was sent/);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.locked,false);assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,false);assert.equal(writes,1);
+ }finally{app.close();await f.close();}
+});
+const fill=(app,values)=>{for(const [name,value] of Object.entries(values))app.render().automation.fields.find(field=>field.name===name).change({target:{value}});};
+test('an unconfirmed new prompt does not block another new prompt and is offered for clearing',async()=>{
+ let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;if(writes===1){res.destroy();return;}return {trigger:{id:'created',...call.body}};}return read(call);});const storage={},app=adapterFixture(f.request,storage);
+ try{app.render();await ready(app);
+  app.render().automation.createPrompt();fill(app,{title:'First',instructions:'Read the supplied note'});app.render().automation.save();await wait(()=>writes===1&&!app.render().automation.busy);assert.match(app.render().automation.message,/Outcome unknown/);
+  // The same draft cannot be saved twice while its first save is unconfirmed.
+  app.render().automation.save();assert.match(app.render().automation.message,/this draft is not confirmed/);assert.equal(writes,1);
+  app.render().automation.close();app.render().automation.createPrompt();fill(app,{title:'Second',instructions:'Read another note'});app.render().automation.save();
+  await wait(()=>writes===2&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(f.calls.filter(call=>call.method==='POST')[1].body.displayName,'Second');assert.equal(Object.keys(storage).length,1);
+  const card=()=>app.render().automation.managementCards.find(item=>/^Unconfirmed new prompt “First”$/.test(item.name));
+  await wait(()=>!!card());card().open();assert.match(card().short,/Tap again/);assert.equal(Object.keys(storage).length,1);
+  card().open();await wait(()=>Object.keys(storage).length===0&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(card(),undefined);assert.equal(writes,2);
+ }finally{app.close();await f.close();}
+});
+test('an unconfirmed new reminder is sent again only unchanged and under the same idempotency key',async()=>{
+ let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;if(writes===1){res.destroy();return;}return {definition:{id:'created',...call.body}};}return read(call);});const storage={},app=adapterFixture(f.request,storage);
+ try{app.render();await ready(app);
+  app.render().automation.createReminder();fill(app,{message:'Call the clinic'});app.render().automation.save();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(Object.keys(storage).length,1);
+  fill(app,{message:'Call the dentist'});app.render().automation.save();await wait(()=>!app.render().automation.busy&&/edited since/.test(app.render().automation.message));assert.equal(writes,1);assert.equal(Object.keys(storage).length,1);
+  fill(app,{message:'Call the clinic'});app.render().automation.save();await wait(()=>writes===2&&Object.keys(storage).length===0&&!app.render().automation.busy);
+  const posts=f.calls.filter(call=>call.method==='POST');assert.equal(posts[0].body.idempotencyKey,posts[1].body.idempotencyKey);assert.deepEqual(posts[0].body,posts[1].body);
+ }finally{app.close();await f.close();}
+});
+test('only a listing that shows the asked-for state confirms a retained request',()=>{
+ const rows=[{key:'trigger:prompt',id:'trigger:prompt',kind:'prompt',title:'Owner prompt',enabled:true,triggerId:'prompt',record:{}},{key:'reminder:definition',id:'definition',kind:'reminder',title:'Check',enabled:true,status:'active',record:{definition:{id:'definition',title:'Check',description:'',status:'active',idempotencyKey:'key-1',cadence:{kind:'once',dueAt:'2030-01-01T00:00:00.000Z'}}}}];
+ const applied=(intent,issues=[])=>protocol.automationIntentApplied({kind:'automation',...intent},rows,issues);
+ assert.equal(applied({path:'/api/triggers/prompt',method:'PUT',body:{enabled:true}}),true);
+ assert.equal(applied({path:'/api/triggers/prompt',method:'PUT',body:{enabled:false}}),false);
+ assert.equal(applied({path:'/api/triggers/prompt',method:'PUT',body:{enabled:true}},[{source:'automations',unavailable:false,message:''}]),false);
+ assert.equal(applied({path:'/api/triggers/prompt',method:'PUT',body:{displayName:'Owner prompt',instructions:'x',triggerType:'cron'}}),false);
+ assert.equal(applied({path:'/api/triggers/gone',method:'DELETE'}),true);
+ assert.equal(applied({path:'/api/triggers/prompt',method:'DELETE'}),false);
+ assert.equal(applied({path:'/api/triggers/gone',method:'DELETE'},[{source:'automations',unavailable:true,message:''}]),false);
+ assert.equal(applied({path:'/api/triggers/gone',method:'PUT',body:{enabled:true}}),false);
+ for(const path of ['/api/triggers/prompt/execute','/api/lifeops/scheduled-tasks/task/fire','/api/lifeops/scheduled-tasks/task/complete','/api/lifeops/occurrences/occurrence/snooze','/api/triggers'])assert.equal(applied({path,method:'POST',body:{}}),false,path);
+ assert.equal(applied({path:'/api/lifeops/definitions/definition',method:'PUT',body:{title:'Check'}}),true);
+ assert.equal(applied({path:'/api/lifeops/definitions/definition',method:'PUT',body:{title:'Other'}}),false);
+ assert.equal(applied({path:'/api/lifeops/definitions/definition',method:'PUT',body:{title:'Check',cadence:{kind:'once',dueAt:'2031-01-01T00:00:00.000Z'}}}),false);
+ assert.equal(applied({path:'/api/lifeops/definitions/definition',method:'PUT',body:{title:'Check',cadence:{kind:'once',dueAt:'2030-01-01T00:00:00.000Z'}}}),true);
+ assert.equal(applied({path:'/api/lifeops/definitions/definition',method:'PUT',body:{status:'archived'}}),false);
+ assert.equal(applied({path:'/api/lifeops/definitions/removed',method:'PUT',body:{status:'archived'}}),true);
+ assert.equal(applied({path:'/api/lifeops/definitions/removed',method:'PUT',body:{status:'archived'}},[{source:'reminders',unavailable:false,message:''}]),false);
+ assert.equal(applied({path:'/api/lifeops/definitions/definition',method:'PUT',body:{unexpected:1}}),false);
+ assert.equal(applied({path:'/api/lifeops/definitions',method:'POST',body:{idempotencyKey:'key-1',title:'Check'}}),true);
+ assert.equal(applied({path:'/api/lifeops/definitions',method:'POST',body:{idempotencyKey:'key-2',title:'Check'}}),false);
+ assert.equal(protocol.automationIntentApplied(null,rows,[]),false);
+ assert.equal(protocol.automationIntentApplied({kind:'other',path:'/api/triggers/gone',method:'DELETE'},rows,[]),false);
+ assert.equal(protocol.automationIntentLabel({method:'POST',path:'/api/triggers',body:{displayName:' Morning '}}),'new prompt “Morning”');
+ assert.equal(protocol.automationIntentLabel({method:'POST',path:'/api/lifeops/definitions',body:{title:'Call'}}),'new reminder “Call”');
+ assert.equal(protocol.automationIntentLabel('x'),'automation request');
 });
 test('a structured unknown outcome is retained even when its HTTP status normally rejects input',async()=>{
  const f=await fixture(call=>call.method==='GET'?read(call):{status:400,body:{code:'AUTOMATION_OUTCOME_UNKNOWN'}}),app=adapterFixture(f.request);

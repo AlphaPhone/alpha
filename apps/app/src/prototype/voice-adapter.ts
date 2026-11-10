@@ -22,6 +22,7 @@ import { createOnDeviceVoice } from '../runtime/local-voice';
 import { voiceFailure, transcriptProvenance, deniedSettingsChoice, DENIED_SETTINGS_LABEL, type VoiceFailure, type TranscriptProvenance } from '../runtime/voice-states';
 import { createPairedVoice } from '../runtime/paired-voice';
 import { createCloudVoice, cloudVoiceFailure } from '../runtime/cloud-voice';
+import { SPEECH_CLEANUP_NOTICE, speechCleanupNotice } from '../runtime/speech-cleanup';
 import { speakCloudSpeechChunks } from '../runtime/cloud-speech-chunks';
 import { selectVoiceRoute, voiceSendPolicy } from '../runtime/voice-selection';
 import { beginVoiceTurn, markVoiceTiming, abandonVoiceTurn, finishVoiceTurn, sendVoiceEntry, recordLiveVoiceTiming, recordEndpointVoiceTiming, recordHeardVoiceTiming, activeVoiceTurn } from '../runtime/voice-timing';
@@ -389,7 +390,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     playback = controller; playing = true; error = ''; refresh();
     const pending=notesSpeech=onDeviceReady&&onDeviceVoice?onDeviceVoice.speak(draft,controller.signal,undefined,true):speaker.speak(draft, controller.signal);
     try { await pending; }
-    catch (failure) { if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}if (token === generation && !controller.signal.aborted) error = (cloudMode && cloudVoiceFailure(failure)) || 'Audio could not be played by the selected voice service. Your transcript is still available.'; }
+    catch (failure) { if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}if (token === generation && !controller.signal.aborted) error = speechCleanupNotice(failure) || (cloudMode && cloudVoiceFailure(failure)) || 'Audio could not be played by the selected voice service. Your transcript is still available.'; }
     finally { if(notesSpeech===pending)notesSpeech=undefined;if (token === generation) { playback = undefined; playing = false; refresh(); } }
   }
   const composerBinding = () => JSON.stringify([
@@ -527,7 +528,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         if(result.complete){markVoiceTiming('first-token');markVoiceTiming('final-reply');}
         conversationLastTranscript=sent.text;conversationLastReply=result.text;conversationReviewRequired=result.reviewRequired===true&&!result.awaitingUserInput;return result;
       };
-      const voiceStopped=(value:BatchVoiceState)=>cloudVoiceFailure(value.error)||((value.error as {reason?:unknown})?.reason==='call-active'?'Voice paused for a phone call. Start the voice conversation again after the call, or switch to the keyboard.':null)||((value.error as {code?:unknown})?.code==='no-speech'?(cloudDriver?`${voiceServiceName()} heard no speech, so nothing was sent. Start the voice conversation again, or switch to the keyboard.`:'No speech was heard, so nothing was sent. Start the voice conversation again, or switch to the keyboard.'):(value.error as {code?:unknown})?.code==='live-asr'?'On-device transcription stopped. Start the voice conversation again, or switch to the keyboard.':(value.error as {code?:unknown})?.code==='capture'?'The microphone stopped. Start the voice conversation again, or switch to the keyboard.':'Voice stopped. Check your connection and conversation history before trying again.');
+      const voiceStopped=(value:BatchVoiceState)=>speechCleanupNotice(value.error)||cloudVoiceFailure(value.error)||((value.error as {reason?:unknown})?.reason==='call-active'?'Voice paused for a phone call. Start the voice conversation again after the call, or switch to the keyboard.':null)||((value.error as {code?:unknown})?.code==='no-speech'?(cloudDriver?`${voiceServiceName()} heard no speech, so nothing was sent. Start the voice conversation again, or switch to the keyboard.`:'No speech was heard, so nothing was sent. Start the voice conversation again, or switch to the keyboard.'):(value.error as {code?:unknown})?.code==='live-asr'?'On-device transcription stopped. Start the voice conversation again, or switch to the keyboard.':(value.error as {code?:unknown})?.code==='capture'?'The microphone stopped. Start the voice conversation again, or switch to the keyboard.':'Voice stopped. Check your connection and conversation history before trying again.');
       // Voice assistant (#423): one echo-cancelled native capture for the whole conversation, VAD
       // endpointing, barge-in and heard-content accounting, when the native VAD capture and the
       // agent's streaming route are both ready. Otherwise the half-duplex recorded-clip loop below.
@@ -565,6 +566,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
             if(token!==generation||chatDestination!==chat)return;
             if(!heard.interrupted)return;
             const timing=timingTurns.get(heard.turnId);timingTurns.delete(heard.turnId);
+            // Cut before the reply was confirmed: there is no agent message to trim yet. The view keeps
+            // what was played; the unconfirmed streamed bubble is already marked interrupted by the send.
+            if(!heard.replyId){conversationLastReply=heard.heard;return;}
             void heardReporter.report({conversationId:binding.conversationId,replyId:heard.replyId,heard:heard.heard,unheard:heard.unheard,interrupted:true}).then(outcome=>{recordHeardVoiceTiming(timing,outcome);});
             conversationLastReply=heard.heard;
             const note=heard.heard?'(Interrupted. The rest of this reply was not played.)':'(Interrupted before this reply was played.)';
@@ -634,7 +638,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   Component.prototype.startTranscription = function(){
     if(this.live===false||document.hidden||connectionController.getSnapshot().open||chatDestination?.shell===this)return;
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before transcribing.');return;}
-    if(retirement||mediaUnconfirmed||stage!=='closed'){this.toast('Finish or discard the current recording before transcribing.');return;}
+    if(retirement||mediaUnconfirmed){this.toast(SPEECH_CLEANUP_NOTICE);return;}
+    if(stage!=='closed'){this.toast('Finish or discard the current recording before transcribing.');return;}
     const state=this.S(),chat:ChatDestination={mode:'dictation',shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();enter(undefined,undefined,'device',chat);
     stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
@@ -643,7 +648,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   Component.prototype.startVoice = async function () {
     if(this.live===false||document.hidden||connectionController.getSnapshot().open||chatDestination?.shell===this)return;
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before starting voice.');return;}
-    if(retirement||mediaUnconfirmed){this.toast('Voice media has not finished stopping. Close the app if this continues.');return;}
+    if(retirement||mediaUnconfirmed){this.toast(SPEECH_CLEANUP_NOTICE);return;}
     if(stage!=='closed'){this.toast('Finish or discard the Notes recording before starting a voice conversation.');return;}
     const state=this.S();
     const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};

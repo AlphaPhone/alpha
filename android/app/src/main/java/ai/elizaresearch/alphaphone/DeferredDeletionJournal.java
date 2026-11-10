@@ -18,9 +18,8 @@ final class DeferredDeletionJournal {
   return java.util.Objects.equals(a,b);
  }
  private static String window(JSONObject row,String continuity,long elapsed)throws Exception{
-  JSONObject d=row.getJSONObject("deadline");long start=d.getLong("createdElapsed"),expiry=d.getLong("expiresElapsed");
-  if(!d.getString("continuity").equals(continuity)||elapsed<start)return "clock-changed";
-  return elapsed<expiry?"open":"expired";
+  JSONObject d=row.getJSONObject("deadline");
+  return DeletionDeadline.window(DeletionDeadline.state(d.getString("continuity"),d.getLong("createdElapsed"),d.getLong("expiresElapsed"),continuity,elapsed));
  }
  // Acknowledgement hides the notice only; its unknown receipt and no-replay state remain intact.
  synchronized java.util.Set<String> acknowledgements()throws Exception{

@@ -64,6 +64,7 @@
     "quint:simulate": "node scripts/check-quint.mjs simulate",
     "quint:verify": "node scripts/check-quint.mjs verify",
     "quint:coverage": "node scripts/check-quint.mjs coverage",
+    "quint:ledger": "node scripts/quint-ledger.mjs",
     "quint:temporal": "node scripts/check-quint.mjs temporal",
     "quint:compare": "node scripts/check-quint.mjs compare",
     "quint:conformance": "node --test test/quint-conformance.test.mjs test/quint-native-conformance.test.mjs test/quint-scan-conformance.test.mjs test/quint-recovery-vad-conformance.test.mjs"

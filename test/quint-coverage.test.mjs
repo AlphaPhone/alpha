@@ -71,7 +71,7 @@ test('every authored application source and every Quint module has a current cov
   const models = loadModels();
   const inventory = readJson(join(repositoryRoot, 'specs/quint/coverage.json'));
   assert.deepEqual(checkCoverage(models, inventory), []);
-  assert.ok(models.length >= 34);
+  assert.ok(models.length >= 58);
   for (const model of models) {
     const source = readFileSync(join(repositoryRoot, model.path), 'utf8');
     assert.match(source, /\baction\s+step\b/);

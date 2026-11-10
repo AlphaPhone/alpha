@@ -121,29 +121,31 @@ test('all 240 voice-deletion recovery evidence combinations agree with the real 
   }
 });
 
-test('held draft release matches the real controller with newer typing', async () => {
-  const expected = modelTrace('DraftDispatch', 'unsentTextRestoredTest').at(-1);
-  const actualText = value => value === 'A+B' ? 'A\nB' : value;
+test('draft consume with typing during the clear matches the real controller', async () => {
+  const expected = modelTrace('DraftDispatch', 'staleReceiptUndoTest').at(-1);
   const { AssistantDraftController } = await sourceModule('apps/app/src/prototype/assistant-draft-controller.ts');
   let text = '';
   let record = { version: 1, binding: 'one', revision: '0', text: 'A' };
+  let typeDuringSave = false;
+  let controller;
   const store = {
     async read() { return record; },
     async save(previous, value) {
       assert.deepEqual(previous, record);
       record = { ...record, revision: String(Number(record.revision) + 1), text: value };
+      // The person types while the clear is being written.
+      if (typeDuringSave) { typeDuringSave = false; text = 'B'; controller.edit(text); }
       return record;
     },
   };
-  const controller = new AssistantDraftController(async () => store, () => text, value => { text = value; }, () => {});
+  controller = new AssistantDraftController(async () => store, () => text, value => { text = value; }, () => {});
   await controller.open('one');
-  assert.equal(await controller.hold('A'), true);
-  text = '';
-  controller.edit(text);
-  text = 'B';
-  controller.edit(text);
-  controller.release();
-  for (let tick = 0; tick < 10 && record.text !== actualText(expected.savedOne); tick++) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(text, actualText(expected.draft));
-  assert.equal(record.text, actualText(expected.savedOne));
+  assert.equal(text, 'A');
+  typeDuringSave = true;
+  await assert.rejects(controller.consume('A'), /Nothing was sent/);
+  assert.equal(expected.handoffs, 0);
+  assert.equal(text, expected.composer);
+  assert.equal(record.text, expected.textOne);
+  assert.equal(controller.state.conflict, expected.conflict);
+  assert.equal(controller.state.consuming, expected.consuming);
 });

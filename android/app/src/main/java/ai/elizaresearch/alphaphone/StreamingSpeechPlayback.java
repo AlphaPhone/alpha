@@ -36,6 +36,11 @@ final class StreamingSpeechPlayback {
   void abort();
   void stop();
   void release();
+  /**
+   * Frames the platform buffers before a started stream becomes audible (an AudioTrack's start
+   * threshold); 0 for an output that plays whatever it is given.
+   */
+  default int startFrames(){return 0;}
  }
  interface OutputFactory { Output open()throws Exception; }
  interface Listener {
@@ -53,6 +58,15 @@ final class StreamingSpeechPlayback {
  static final long OFFER_TIMEOUT_MS=30_000;
  /** How long the writer waits for the next chunk before the synthesis counts as stalled. */
  static final long STALL_NS=30_000_000_000L;
+ /** Audio that must be buffered before the platform starts a stream, where the platform lets it be set. */
+ static final int START_MS=20;
+ /** The start threshold to ask for: {@link #START_MS} of audio, at least one frame, never above the buffer. */
+ static int startThreshold(int sampleRate,int capacityFrames){return Math.max(1,Math.min(capacityFrames,sampleRate*START_MS/1000));}
+ /**
+  * Silence to append to a finished stream so it reaches the output's start threshold. An utterance
+  * shorter than the threshold would otherwise sit in the buffer unplayed until the drain times out.
+  */
+ static int silencePadding(long writtenFrames,int startFrames){return writtenFrames>0&&writtenFrames<startFrames?(int)(startFrames-writtenFrames):0;}
 
  private final SpeechPcmQueue queue;
  private final int sampleRate;
@@ -151,6 +165,17 @@ final class StreamingSpeechPlayback {
     if(!first){first=true;listener.firstFrame(lastChunkAt);}
     written+=chunk.length;
     audible=checkAudible(out,audibleReported,headNs);audibleReported=audible[0]==1;headNs=audible[1];
+   }
+   int padding=silencePadding(written,out.startFrames());
+   if(padding>0){
+    float[] silence=new float[padding];int offset=0;
+    while(offset<padding){
+     if(stopped)throw new CancellationException();
+     int count=out.write(silence,offset,padding-offset);
+     if(count<0)throw new IllegalStateException("output-write");
+     if(count==0)Thread.sleep(POLL_MS);
+     offset+=count;
+    }
    }
    // Every frame is queued: wait until the platform has played them, bounded by their duration.
    long played=out.playedFrames();

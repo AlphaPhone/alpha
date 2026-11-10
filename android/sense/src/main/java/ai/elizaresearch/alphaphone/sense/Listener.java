@@ -67,19 +67,21 @@ final class Listener {
   return value;
  }
 
+ private static final Object LEASE_LOCK=new Object();
  /** Whether the lease permits capture now; latches {@link #indicatorLost} when it fails while capturing. */
  static boolean observeIndicatorLease(Context context,long now){
-  boolean held=microphoneHeld;
-  long since=unsilencedSince;
-  IndicatorLease.Loss loss=lease.verdict(now,leaseBoot(context),IndicatorLease.requiresAttribution(held&&since>=0,since,now),screenInteractive);
-  boolean valid=loss==IndicatorLease.Loss.NONE;
-  // An unexplained loss while capturing, or during an explained pause, latches; an explained one pauses.
-  boolean paused=indicatorPause!=ListenerPolicy.IndicatorPause.NONE;
-  // A lease lapsing while the phone sleeps through a display-off pause is not a loss (see sleepLapse).
-  boolean asleep=IndicatorLease.sleepLapse(held,indicatorPause,loss);
-  if(!asleep&&ListenerPolicy.latchesIndicatorLoss(held||paused,valid,loss.pause()))indicatorLost=true;
-  indicatorPause=asleep&&!screenInteractive?ListenerPolicy.IndicatorPause.DISPLAY_OFF:IndicatorLease.pauseFor(loss);
-  return valid;
+  long leaseBoot=leaseBoot(context);
+  // The capture, recognition, main and binder threads all observe. One observation at a time: an
+  // interleaved one could write back a stale pause and make the next unexplained loss miss its latch.
+  synchronized(LEASE_LOCK){
+   boolean held=microphoneHeld;
+   long since=unsilencedSince;
+   IndicatorLease.Loss loss=lease.verdict(now,leaseBoot,IndicatorLease.requiresAttribution(held&&since>=0,since,now),screenInteractive);
+   IndicatorLease.Observation seen=IndicatorLease.observe(held,indicatorPause,loss,screenInteractive);
+   if(seen.latches)indicatorLost=true;
+   indicatorPause=seen.pause;
+   return seen.valid;
+  }
  }
 
  /** The listener's user (the primary user) is the one using the phone. Unknown counts as not. */
@@ -92,14 +94,26 @@ final class Listener {
 
  static final ListeningEpoch epoch=new ListeningEpoch();
 
+ /** startForegroundService calls whose onStartCommand has not run yet; see {@link ListenerPolicy#serviceCommand}. */
+ static final java.util.concurrent.atomic.AtomicInteger outstandingStarts=new java.util.concurrent.atomic.AtomicInteger();
+ static void startDelivered(){outstandingStarts.updateAndGet(count->count>0?count-1:0);}
+
  static synchronized void refresh(Context context){
   // Invalidate synchronously with the control, before Android delivers service lifecycle events.
   epoch.invalidate();
   Context app=context.getApplicationContext();
   ListenerPolicy.State state=state(app);
   Intent service=new Intent(app,ListeningService.class);
-  if(ListenerPolicy.foreground(state))app.startForegroundService(service);
-  else app.stopService(service);
+  switch(ListenerPolicy.serviceCommand(ListenerPolicy.foreground(state),ListeningService.running(),outstandingStarts.get()>0)){
+   case START:
+    // Counted before the request, so the service never sees it delivered while it reads as answered.
+    outstandingStarts.incrementAndGet();
+    try{app.startForegroundService(service);}catch(RuntimeException refused){startDelivered();throw refused;}
+    break;
+   case CONVERGE:ListeningService.converge();break;
+   case STOP:app.stopService(service);break;
+   default:break;
+  }
   ListenerNotifications.showStatus(app,state);
   try{TileService.requestListeningState(app,new ComponentName(app,ListenerTileService.class));}catch(RuntimeException unavailable){}
  }

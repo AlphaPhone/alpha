@@ -76,7 +76,7 @@ export function installFilesTreeAdapter(views:Bag,accept:(module:string,result:N
    finally{busy=false;repaint();}
   })();}});
  }
- const apply=(value:Listing)=>{if(value.status==='ready'){listing=value;resetSelection();status=value.cursor||value.truncated||value.message.includes('250')?value.message:'';folderContext();}else{status=value.message;if(value.status==='revoked'||value.status==='unavailable'){listing=undefined;selected=undefined;selectedCapability=undefined;folderContext();clearSelected();api?.set({open:null});if(value.status==='revoked')filesIndex.revokeTree();}}repaint();};
+ const apply=(value:Listing)=>{if(value.status==='ready'){listing=value;resetSelection();status=value.cursor||value.truncated||value.message.includes('250')?value.message:'';folderContext();}else{status=value.message;if(value.status==='revoked'||value.status==='unavailable'){listing=undefined;resetSelection();selected=undefined;selectedCapability=undefined;folderContext();clearSelected();api?.set({open:null});if(value.status==='revoked')filesIndex.revokeTree();}}repaint();};
  async function loadMore(){
   const current=listing;if(busy||!current?.cursor||!current.folder)return;busy=true;repaint();
   try{const value=await tree.list({id:current.folder.id,cursor:current.cursor});
@@ -86,7 +86,9 @@ export function installFilesTreeAdapter(views:Bag,accept:(module:string,result:N
   }catch{status='More entries could not load. Refresh the folder.';}
   finally{busy=false;repaint();}
  }
- async function load(id?:string){if(busy)return;busy=true;status='Loading folder…';repaint();try{apply(await tree.list({id}));}catch{status='Folder provider unavailable. Choose the folder again.';}finally{busy=false;repaint();}}
+ // A listing that arrives after Files was left (epoch) or while its owner is inactive is dropped:
+ // it must not replace the folder, publish folder context or close a preview in another view.
+ async function load(id?:string){if(busy)return;busy=true;status='Loading folder…';repaint();const ticket=selectionEpoch;try{const value=await tree.list({id});if(ticket!==selectionEpoch||api?.isActive?.()===false){status='';return;}apply(value);}catch{status='Folder provider unavailable. Choose the folder again.';}finally{busy=false;repaint();}}
  async function choose(importFolder=false){if(busy)return;busy=true;try{const value=await (importFolder ? tree.importFolder() : tree.choose());if(value.status==='ready'){clearSelected();selected=undefined;selectedCapability=undefined;apply(value);api?.set({folder:'__native_tree',open:null,menu:false});}else if(value.status!=='cancelled')api?.toast(value.message);}catch{api?.toast('Folder selection unavailable.');}finally{busy=false;repaint();}}
  async function openEntry(entry:Entry){if(busy)return;if(entry.directory){void load(entry.id);return;}busy=true;try{const value=await tree.select({id:entry.id});if(value.status==='selected'){if(!api?.isActive()){if(value.selectionId)await DailyApps.forgetSelected({selectionId:value.selectionId});return;}selected=entry;selectedCapability=value.selectionId;await accept('files',value,api!,{kind:'tree',treeId:entry.id});}else api?.toast(value.message||'File unavailable. Refresh this folder.');}catch{api?.toast('This file could not open. Refresh the folder.');}finally{busy=false;repaint();}}
  // The picker itself hides the page, so only a view switch (epoch) or inactive owner fences its result, never document.hidden.
@@ -127,7 +129,9 @@ export function installFilesTreeAdapter(views:Bag,accept:(module:string,result:N
    if(value.status==='revoked'){dialog=undefined;api?.toast(value.message);apply(value);return;}
    if(!['created','renamed','deleted','moved'].includes(value.status)){request.error=value.message;api?.toast(value.message);return;}
    dialog=undefined;if(value.status==='deleted'||value.status==='moved')api?.toast(value.message);
-   const wasPreview=selected?.id===entry?.id;
+   // Only a change to the file that is open as the preview closes it; creating a folder or
+   // changing other rows leaves the current selection, which Photos shares, alone.
+   const wasPreview=!!selected&&(entry?selected.id===entry.id:!!request.entries?.some(e=>e.id===selected!.id));
    if(wasPreview){clearSelected();selected=undefined;api?.set({open:null});}
    let target=folder.id;
    if(request.kind==='delete'&&entry?.id===folder.id)target=folder.parentId!;

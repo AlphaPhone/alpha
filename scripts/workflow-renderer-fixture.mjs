@@ -18,6 +18,6 @@ export function workflowRendererFixture(context) {
   // Exercise the actual installed-slot adapter here; IndexedDB concurrency is
   // qualified by the owning browser suite, not this bounded HTTP fixture.
   const intents=readFileSync(new URL('../apps/app/src/runtime/workflow-intents.ts',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');
-  vm.runInNewContext('{'+stripTypeScriptTypes(intents,{mode:'strip'})+'\nglobalThis.WorkflowIntentStore=WorkflowIntentStore;globalThis.workflowIntentKey=workflowIntentKey;}',scope);
+  vm.runInNewContext('{'+stripTypeScriptTypes(intents,{mode:'strip'})+'\nglobalThis.WorkflowIntentStore=WorkflowIntentStore;globalThis.workflowIntentKey=workflowIntentKey;globalThis.runIntentReconcilable=runIntentReconcilable;}',scope);
   return scope;
 }

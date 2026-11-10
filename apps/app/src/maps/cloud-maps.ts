@@ -1,4 +1,4 @@
-import { createCloudMaps } from './cloud-provider';
+import { cloudMapsHealthy, createCloudMaps } from './cloud-provider';
 import { captureMapsSession } from './cloud-session';
 import { configureMapsProvider } from './runtime';
 import { connectionController } from '../runtime/connection-ui';
@@ -15,13 +15,13 @@ let retry: ReturnType<typeof setTimeout> | undefined, retries = 0;
 /** Maps connects when Alpha has a Cloud sign-in, not when the Maps screen first opens, so the
  * agent can search and route at once. It reconnects by itself after a failure: on account change,
  * when the network returns, when Alpha comes back to the front (at most once a minute), and on a
- * timer while Cloud Maps is temporarily unavailable. */
+ * timer while Cloud Maps is temporarily unavailable. A working connection is only replaced by an
+ * account change: the network returning leaves it, and any guidance on its routes, in place. */
 function connectNow(force = false) {
  // A forced connect (a new account, the network back) replaces one still in flight: the older
  // attempt is superseded and never reports its result.
  if (!connectionController.getCloudClient() || (pending && !force)) return;
- const state = maps.cloudMapsDiagnostics();
- if (!force && state.configured && !state.error) return;
+ if (!force && cloudMapsHealthy(maps.cloudMapsDiagnostics())) return;
  if (!force && Date.now() - lastAttempt < 60000) return;
  lastAttempt = Date.now();
  if (retry !== undefined) { clearTimeout(retry); retry = undefined; }
@@ -37,7 +37,8 @@ function scheduleRetry() {
  const { error } = maps.cloudMapsDiagnostics();
  if (!error) { retries = 0; return; }
  if (!TRANSIENT.has(error) || retry !== undefined || typeof document === 'undefined' || document.hidden || !connectionController.getCloudClient()) return;
- retry = setTimeout(() => { retry = undefined; connectNow(true); }, RETRY_MS[Math.min(retries++, RETRY_MS.length - 1)]);
+ // A retry that comes due behind another app waits for the return to the front.
+ retry = setTimeout(() => { retry = undefined; if (!document.hidden) connectNow(true); }, RETRY_MS[Math.min(retries++, RETRY_MS.length - 1)]);
 }
 connectionController.subscribe(() => {
  const next = connectionController.getCloudClient();
@@ -50,7 +51,10 @@ connectionController.subscribe(() => {
  }
 });
 if (typeof window !== 'undefined') {
- window.addEventListener('online', () => { retries = 0; connectNow(true); });
- document.addEventListener('visibilitychange', () => { if (!document.hidden) connectNow(); });
+ // An attempt still in flight has no provider installed yet and may have started offline; it is replaced.
+ window.addEventListener('online', () => { retries = 0; connectNow(!!pending || !cloudMapsHealthy(maps.cloudMapsDiagnostics())); });
+ // Back in front: connect now, or, when the last attempt was under a minute ago, put the
+ // retry timer back so a failure that settled while hidden is still retried.
+ document.addEventListener('visibilitychange', () => { if (document.hidden) return; connectNow(); if (!pending) scheduleRetry(); });
  queueMicrotask(() => connectNow(true));
 }

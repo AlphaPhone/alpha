@@ -586,7 +586,7 @@ test('sources: no Web Speech, storage or logging in the assistant path; the adap
   assert.match(adapter, /new VoiceAssistantSession\(\{/);
   const native = fs.readFileSync(new URL('../apps/app/src/runtime/native-live-voice.ts', import.meta.url), 'utf8');
   assert.match(native, /nativeAssistantListener[\s\S]{0,300}echoCancel: true/);
-  assert.match(native, /createNativeLiveDictation[\s\S]{0,1500}echoCancel: false/);
+  assert.match(native, /createNativeLiveDictation[\s\S]{0,2000}echoCancel: false/);
   const template = fs.readFileSync(new URL('../apps/app/src/prototype/template.html', import.meta.url), 'utf8');
   assert.doesNotMatch(template, /aria-label="Transcribe" title="Transcribe into draft"/);
   assert.match(template, /title="Voice assistant" aria-label="Talk" onPointerDown="\{\{chatControlPointer\}\}" onClick="\{\{startVoice\}\}"/);

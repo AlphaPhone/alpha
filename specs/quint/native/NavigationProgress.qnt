@@ -6,6 +6,7 @@ module NavigationProgress {
     requestGeneration: int, requestSession: int, requestRoute: int,
     fixReady: bool, accuracy: int, navDistance: int, routeDistance: int,
     lastStep: int, nearSteps: Set[int], projectedStep: int, displayedStep: int,
+    cleared: int, lastCleared: int, lastBeyond: bool,
     retryTimer: bool, retryAttempts: int, retryDelay: int, failedReroute: bool,
     locationWatch: bool, foreground: bool, backgroundPending: bool,
     backgroundRunning: bool, bridgeRegistered: bool, nativeSession: int, nativeOwner: int,
@@ -17,6 +18,15 @@ module NavigationProgress {
     if (index == 0 and near.contains(0))
       (if (near.contains(1)) 2 else 1)
     else if (index == 1 and near.contains(1)) 2 else index
+  // A maneuver never approached is given up once two fixes in a row are on the route and
+  // clear beyond it; reaching a maneuver or any other fix starts the count again.
+  pure def stepped(index: int, cleared: int, near: Set[int], beyond: bool): {index: int, cleared: int} = {
+    val reached = advanced(index, near)
+    val count = if (reached != index) 0 else cleared
+    if (reached < 2 and beyond)
+      (if (count >= 1) {index: reached + 1, cleared: 0} else {index: reached, cleared: count + 1})
+    else {index: reached, cleared: 0}
+  }
   pure def usable(accuracy: int, precise: bool, age: int): bool =
     precise and accuracy >= 0 and accuracy <= 50 and age <= 30000 and age >= -5000
   pure def retryDelay(attempts: int): int =
@@ -43,6 +53,7 @@ module NavigationProgress {
     requestGeneration: 0, requestSession: 0, requestRoute: 0,
     fixReady: false, accuracy: 0, navDistance: 100, routeDistance: 0,
     lastStep: 0, nearSteps: Set(), projectedStep: 0, displayedStep: 0,
+    cleared: 0, lastCleared: 0, lastBeyond: false,
     retryTimer: false, retryAttempts: 0, retryDelay: 0, failedReroute: false,
     locationWatch: false, foreground: true, backgroundPending: false,
     backgroundRunning: false, bridgeRegistered: false, nativeSession: 0, nativeOwner: 0,
@@ -52,6 +63,7 @@ module NavigationProgress {
     not(s.navigating), s.foreground, s.navSession < 3, route.in(Set(1, 2)),
     s' = {navigating: true, navSession: s.navSession + 1, route: route,
       navStep: 0, displayedStep: 0, lastStep: 0, nearSteps: Set(), follow: true,
+      cleared: 0, lastCleared: 0, lastBeyond: false,
       arrived: false, offRoute: false, rerouting: false, rerouteCleared: false,
       fixReady: false, retryTimer: false, retryAttempts: 0, failedReroute: false,
       locationWatch: true, backgroundPending: true, backgroundRunning: false, bridgeRegistered: false, ...s}
@@ -72,7 +84,13 @@ module NavigationProgress {
       destination: int, routeDistance: int, first: int, second: int, third: int, projected: int): bool =
     onFix(session, accuracy, precise, age, destination, routeDistance, nearby(first, second, third), projected)
   action onFix(session: int, accuracy: int, precise: bool, age: int,
-               destination: int, routeDistance: int, near: Set[int], projected: int): bool = all {
+               destination: int, routeDistance: int, near: Set[int], projected: int): bool =
+    locationFix(session, accuracy, precise, age, destination, routeDistance, near, projected, false)
+  // A fresh precise fix near no maneuver whose progress lies clear beyond the current one.
+  action onClearFix(session: int, accuracy: int, routeDistance: int): bool =
+    locationFix(session, accuracy, true, 0, 100, routeDistance, Set(), 2, true)
+  action locationFix(session: int, accuracy: int, precise: bool, age: int, destination: int,
+               routeDistance: int, near: Set[int], projected: int, beyond: bool): bool = all {
     accuracy.in(Set(0, 30, 31, 50, 51)), age.in(Set(-5001, -5000, 0, 30000, 30001)),
     destination.in(Set(24, 25, 100)), routeDistance.in(Set(0, 75, 76, 100, 101)),
     near.subseteq(Set(0, 1, 2)), projected.in(0.to(2)),
@@ -88,11 +106,16 @@ module NavigationProgress {
         stoppedNativeSessions: if (s.nativeSession == 0) s.stoppedNativeSessions
           else s.stoppedNativeSessions.union(Set(s.nativeSession)),
         nativeStops: if (s.nativeSession == 0) s.nativeStops else s.nativeStops + 1, ...s}
-    else s' = {
-      fixReady: true, accuracy: accuracy, navDistance: destination, routeDistance: routeDistance,
-      arrived: false, offRoute: routeDistance > (if (accuracy * 2 > 75) accuracy * 2 else 75),
-      lastStep: s.navStep, nearSteps: near, projectedStep: projected,
-      navStep: advanced(s.navStep, near), displayedStep: advanced(s.navStep, near), ...s}
+    else {
+      val off = routeDistance > (if (accuracy * 2 > 75) accuracy * 2 else 75)
+      val hold = stepped(s.navStep, s.cleared, near, beyond and not(off))
+      s' = {
+        fixReady: true, accuracy: accuracy, navDistance: destination, routeDistance: routeDistance,
+        arrived: false, offRoute: off,
+        lastStep: s.navStep, nearSteps: near, projectedStep: projected,
+        lastCleared: s.cleared, lastBeyond: beyond and not(off),
+        navStep: hold.index, displayedStep: hold.index, cleared: hold.cleared, ...s}
+    }
   }
   // Freshness is rechecked at reroute time even without a newer location event.
   action ageFix = s' = s.with("fixReady", false)
@@ -112,7 +135,7 @@ module NavigationProgress {
     if (s.navigating and s.rerouting and s.rerouteCleared and
         session == s.navSession and generation == s.requestGeneration)
       s' = {route: route, navStep: 0, displayedStep: 0, lastStep: 0, nearSteps: Set(),
-        rerouting: false, retryTimer: false, retryAttempts: 0, failedReroute: false, ...s}
+        cleared: 0, lastCleared: 0, lastBeyond: false, rerouting: false, retryTimer: false, retryAttempts: 0, failedReroute: false, ...s}
     else s' = s
   }
   action controllerFailed(session: int, generation: int): bool =
@@ -168,13 +191,20 @@ module NavigationProgress {
     nondet second = Set(39, 40, 100).oneOf()
     nondet reason = Set("notification", "refused", "destroyed", "task-removed").oneOf()
     any {start(route), bridgeRegisters, backgroundResult(session, flag),
-      measuredFix(session, accuracy, flag, age, destination, distance, first, second, 100, projected), ageFix,
+      measuredFix(session, accuracy, flag, age, destination, distance, first, second, 100, projected),
+      onClearFix(session, accuracy, distance), ageFix,
       beginReroute, controllerLoading(session, generation), controllerReady(session, generation, route),
       controllerFailed(session, generation), retryFires, recenter, stop,
       nativeStop(session, reason), removeTask(flag, flag), hide, show, s' = s}
   }
   val CursorRange = s.navStep.in(0.to(2)) and s.displayedStep == s.navStep
-  val ManeuverRequiresProximity = s.navStep == advanced(s.lastStep, s.nearSteps)
+  val ManeuverPassedByProximityOrTwoClearFixes =
+    s.navStep == stepped(s.lastStep, s.lastCleared, s.nearSteps, s.lastBeyond).index
+  // One fix beyond a maneuver that was never approached does not skip its instruction.
+  val SingleFixNeverSkipsManeuver = s.navStep > advanced(s.lastStep, s.nearSteps) implies
+    s.lastBeyond and s.lastCleared == 1 and s.nearSteps.intersect(Set(s.lastStep)) == Set() and
+    s.navStep == s.lastStep + 1
+  val ClearedCountBounded = s.cleared.in(0.to(1)) and (s.cleared == 1 implies s.navStep < 2 and not(s.offRoute))
   val ArrivalRequiresAccurateFix = s.arrived implies s.navDistance < 25 and s.accuracy <= 30
   val ArrivalStopsResources = s.arrived implies not(s.locationWatch) and not(s.backgroundRunning) and not(s.retryTimer)
   val RerouteKeepsRoute = s.rerouting implies s.navigating and s.route == s.requestRoute
@@ -183,10 +213,24 @@ module NavigationProgress {
     (s.retryTimer implies s.retryDelay.in(Set(10000, 20000, 40000, 60000)))
   val NativeSessionOwned = s.backgroundRunning implies s.navigating and s.bridgeRegistered and s.nativeSession == s.navSession and s.nativeOwner == 1
   val NativeStopOnce = s.nativeStops == s.stoppedNativeSessions.size()
-  val safety = CursorRange and ManeuverRequiresProximity and ArrivalRequiresAccurateFix and
+  val safety = CursorRange and ManeuverPassedByProximityOrTwoClearFixes and SingleFixNeverSkipsManeuver and
+    ClearedCountBounded and ArrivalRequiresAccurateFix and
     ArrivalStopsResources and RerouteKeepsRoute and FailedRerouteKeepsRoute and
     BoundedBackoff and NativeSessionOwned and NativeStopOnce
 
+  val ClearedOnceWitness = s.navigating and s.cleared == 1
+  val GivenUpManeuverWitness = s.navStep > advanced(s.lastStep, s.nearSteps)
+  val ArrivedWitness = s.arrived
+  val ReroutingWitness = s.rerouting
+  val ConfirmedBackgroundWitness = s.backgroundRunning and not(s.foreground)
+
+  run unapproachedManeuverGivenUpAfterTwoClearFixesTest = init.then(start(1))
+    .then(onClearFix(1, 30, 0)).then(check(s.navStep == 0 and s.cleared == 1))
+    .then(onFix(1, 30, true, 0, 100, 0, Set(), 2)).then(check(s.navStep == 0 and s.cleared == 0))
+    .then(onClearFix(1, 30, 0)).then(onClearFix(1, 30, 101)).then(check(s.navStep == 0 and s.cleared == 0 and s.offRoute))
+    .then(onClearFix(1, 30, 0)).then(onClearFix(1, 30, 0)).then(check(s.navStep == 1 and s.cleared == 0))
+    .then(onClearFix(1, 30, 0)).then(onClearFix(1, 30, 0)).then(check(s.navStep == 2))
+    .then(onClearFix(1, 30, 0)).then(onClearFix(1, 30, 0)).then(check(safety and s.navStep == 2 and s.cleared == 0))
   run inaccurateArrivalRejectedTest = init.then(start(1))
     .then(onFix(1, 31, true, 0, 24, 0, Set(), 2)).then(check(not(s.arrived)))
     .then(onFix(1, 30, true, 0, 25, 0, Set(), 2)).then(check(not(s.arrived)))

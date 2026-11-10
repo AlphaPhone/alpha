@@ -37,10 +37,11 @@ export function appKey(app: LaunchTarget): string {
 }
 
 const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
+// One collator for every sort: constructing it resolves locale data.
+const collator = new Intl.Collator(undefined, {sensitivity: 'base', numeric: true});
 /** Label (then package) match, ignoring case and accents; prefix matches sort first. */
 export function filterLauncherApps(apps: InstalledApp[], query: string): InstalledApp[] {
   const needle = fold(query.trim());
-  const collator = new Intl.Collator(undefined, {sensitivity: 'base', numeric: true});
   const sorted = [...apps].sort((a, b) => collator.compare(a.label, b.label) || a.packageName.localeCompare(b.packageName) || appKey(a).localeCompare(appKey(b)));
   if (!needle) return sorted;
   const score = (app: InstalledApp) => { const label = fold(app.label); return label.startsWith(needle) ? 0 : label.includes(needle) ? 1 : fold(app.packageName).includes(needle) ? 2 : -1; };
@@ -86,6 +87,23 @@ export function describeLauncherApps(apps: InstalledApp[]): Map<string, string[]
     }
   }
   return details;
+}
+
+/** Row text and search results for one inventory. Each is computed once per app list (by
+ * identity) and query, so a shell render that changed neither reuses the same objects. */
+export function createLauncherListCache() {
+  let describedFor: InstalledApp[] | null = null, described = new Map<string, string[]>();
+  let matchedFor: InstalledApp[] | null = null, matchedQuery = '', matched: InstalledApp[] = [];
+  return {
+    details(apps: InstalledApp[]): Map<string, string[]> {
+      if (apps !== describedFor) { described = describeLauncherApps(apps); describedFor = apps; }
+      return described;
+    },
+    matching(apps: InstalledApp[], query: string): InstalledApp[] {
+      if (apps !== matchedFor || query !== matchedQuery) { matched = filterLauncherApps(apps, query); matchedFor = apps; matchedQuery = query; }
+      return matched;
+    },
+  };
 }
 
 const valid = (value: unknown): value is InstalledApp => !!value && typeof value === 'object'
@@ -187,8 +205,10 @@ export function createLauncher(bridge: LauncherBridge, changed: () => void, opti
     /** Product apps already passed the shell's capability policy. Never dispatch these to Android. */
     setBuiltins(apps: InstalledApp[]) {
       const old = new Set(builtins.map(appKey));
+      // The shell passes its product apps on every render; an unchanged set keeps the same list.
+      const same = apps.length === builtins.length && apps.every((app, index) => appKey(app) === appKey(builtins[index]) && app.label === builtins[index].label && app.icon === builtins[index].icon);
       builtins = apps;
-      state = {...state, apps: [...builtins, ...state.apps.filter(app => !old.has(appKey(app))) ]};
+      if (!same) state = {...state, apps: [...builtins, ...state.apps.filter(app => !old.has(appKey(app))) ]};
       if (defaultsPending) state = {...state, favorites: (builtins.length ? builtins : state.apps).map(appKey)};
       else if (migrationPending) state = {...state, favorites: cleanKeys([...state.favorites, ...builtins.map(appKey)])};
     },
@@ -260,6 +280,7 @@ export function installHomeLauncher(Component: any, bridge: LauncherBridge, opti
   const p = Component.prototype, mount = p.componentDidMount, unmount = p.componentWillUnmount, render = p.renderVals;
   let owner: any = null;
   const builtinRows = new Map<string, Bag>();
+  const lists = createLauncherListCache();
   const launcherBridge: LauncherBridge = {...bridge,
     list: options => bridge.list(options),
     launch: target => { const app = builtinRows.get(appKey(target)); if (app) { app.open(); return Promise.resolve(); } return bridge.launch(target); },
@@ -304,7 +325,7 @@ export function installHomeLauncher(Component: any, bridge: LauncherBridge, opti
     });
     launcher.setBuiltins(builtins);
     const snap = launcher.snapshot(), query = String(S.drawerQ || '');
-    const details = describeLauncherApps(snap.apps);
+    const details = lists.details(snap.apps);
     const row = (app: InstalledApp) => {
       const key = appKey(app), parts = details.get(key) || [], name = parts.length ? `${app.label} (${parts.join(', ')})` : app.label, favorite = snap.favorites.includes(key);
       return {
@@ -315,7 +336,8 @@ export function installHomeLauncher(Component: any, bridge: LauncherBridge, opti
         toggleFavorite: () => launcher.toggleFavorite(app),
       };
     };
-    const matching = filterLauncherApps(snap.apps, query);
+    // The inventory is sorted and searched only while the drawer that shows it is open.
+    const matching = S.drawer ? lists.matching(snap.apps, query) : [];
     const pinned = query.trim() ? [] : launcher.favoriteApps();
     const pinnedKeys = new Set(pinned.map(appKey));
     // Favorites already appear above the inventory. Search returns all matches;

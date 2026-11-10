@@ -10,7 +10,7 @@ test('pending reset retries, shows bounded recovery instead of a launcher restar
  const put=(name,body)=>{const path=join(dir,name);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,body);sources.push(path);};
  const bin=name=>process.env.JAVA_HOME?join(process.env.JAVA_HOME,'bin',name):name;
  try{
-  put('ai/elizaresearch/alphaphone/ResetCloudRevocation.java',`package ai.elizaresearch.alphaphone; final class ResetCloudRevocation {static final long PENDING_DEADLINE_MS=4000;static void revoke(android.content.Context c,long ms){if(!AlphaDataReset.pending(c))throw new AssertionError("Revocation must follow durable reset authorization");}}`);
+  put('ai/elizaresearch/alphaphone/ResetCloudRevocation.java',`package ai.elizaresearch.alphaphone; final class ResetCloudRevocation {static final long PENDING_DEADLINE_MS=4000;static int calls;static void revoke(android.content.Context c,long ms){calls++;if(!AlphaDataReset.pending(c))throw new AssertionError("Revocation must follow durable reset authorization");}}`);
   put('android/content/Context.java',`package android.content; public class Context { public static java.io.File data; public static android.app.ActivityManager manager=new android.app.ActivityManager(); public Context createDeviceProtectedStorageContext(){return this;} public java.io.File getNoBackupFilesDir(){data.mkdirs();return data;} public <T>T getSystemService(Class<T> type){return type.cast(manager);} public String getPackageName(){return "fixture.alpha";} public static int recoveries; public void startActivity(Intent intent){if(!"ai.elizaresearch.alphaphone.ResetRecoveryActivity".equals(intent.target.getName())||intent.flags!=(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK))throw new AssertionError("unexpected start");recoveries++;} }`);
   put('android/content/Intent.java',`package android.content; public class Intent {public static final int FLAG_ACTIVITY_NEW_TASK=0x10000000,FLAG_ACTIVITY_CLEAR_TASK=0x8000;public final Class<?> target;public int flags;public Intent(Context c,Class<?> t){target=t;}public Intent addFlags(int f){flags|=f;return this;} }`);
   put('android/app/Application.java',`package android.app; public class Application extends android.content.Context {protected void attachBaseContext(android.content.Context base){} public void onCreate(){} public static String process="fixture.alpha"; public static String getProcessName(){return process;} }`);
@@ -53,8 +53,10 @@ public class ResetStartupTest {
   // time the process stops. Every launch must stop without clearing or initializing, must show the
   // recovery surface, and automatic listener attempts must be bounded rather than repeated forever.
   java.io.File failures=new java.io.File(android.content.Context.data,"reset-alpha.failures");check(failures.delete()||true);
-  android.content.Context.recoveries=0;AlphaListenerPlugin.calls=0;int clears=android.app.ActivityManager.calls;
+  android.content.Context.recoveries=0;AlphaListenerPlugin.calls=0;int clears=android.app.ActivityManager.calls;ResetCloudRevocation.calls=0;
   for(int relaunch=0;relaunch<25;relaunch++){try{new AlphaApplication().attachBaseContext(app);throw new AssertionError("Unacknowledged reset resumed on relaunch "+relaunch);}catch(android.os.Process.Exit stopped){}}
+  // Key revocation waits on the network, so it runs only on the starts that also attempt the reset.
+  check(ResetCloudRevocation.calls==AlphaDataReset.AUTOMATIC_ATTEMPTS);
   check(android.content.Context.recoveries==25);check(AlphaListenerPlugin.calls==AlphaDataReset.AUTOMATIC_ATTEMPTS);
   check(android.app.ActivityManager.calls==clears);check(AlphaDataReset.pending(app));check(NativeSourceHost.started==0);
   // The recovery process neither stops itself nor starts Alpha's runtime.

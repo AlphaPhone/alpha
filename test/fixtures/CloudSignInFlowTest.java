@@ -170,6 +170,37 @@ public final class CloudSignInFlowTest {
   check(CloudSignInReadiness.Result.parse("v2|true|true|1800000001000") == null, "old cache must re-probe SMS policy");
   check(CloudSignInReadiness.Result.parse("v3|true|true|yes|true|1800000001000") == null, "malformed method flag refused");
   check(!new CloudSignInReadiness.Result(true, true, t + 365L * 86400000L).fresh(t), "a cache entry from the future is not trusted");
+  // A failed verification: only an unanswered verification request keeps the attempt uncounted.
+  for (String transport : new String[]{"offline", "dns", "timeout", "secure-connection"}) {
+   check(CloudSignInFlow.transportFailure(transport), transport + " is a transport failure");
+   check(CloudSignInFlow.afterVerifyFailure(transport, false) == CloudSignInFlow.VerifyFailure.RETRY, transport + " before Cloud answered keeps the attempt");
+   check(CloudSignInFlow.afterVerifyFailure(transport, true) == CloudSignInFlow.VerifyFailure.ENDED, transport + " after the code was accepted ends the attempt");
+   check(transport.equals(CloudSignInFlow.failureForTransport(transport.equals("dns") ? new java.net.UnknownHostException() : transport.equals("timeout") ? new java.net.SocketTimeoutException()
+    : transport.equals("offline") ? new java.net.ConnectException() : new javax.net.ssl.SSLException("x"), false)), transport + " is what the transport reports");
+  }
+  for (String ending : new String[]{"unavailable", "rate-limited", "expired", "account-check", "rejected", "cancelled", "activation-pending", "storage", "", null}) {
+   check(!CloudSignInFlow.transportFailure(ending), ending + " is not a transport failure");
+   for (boolean answered : new boolean[]{false, true}) check(CloudSignInFlow.afterVerifyFailure(ending, answered) == CloudSignInFlow.VerifyFailure.ENDED, ending + " ends the attempt");
+  }
+  for (boolean answered : new boolean[]{false, true}) check(CloudSignInFlow.afterVerifyFailure("invalid-code", answered) == CloudSignInFlow.VerifyFailure.COUNTED, "a wrong code is counted");
+  check("cancelled".equals(CloudSignInFlow.failureForTransport(new java.net.ConnectException(), true)) && CloudSignInFlow.afterVerifyFailure("cancelled", false) == CloudSignInFlow.VerifyFailure.ENDED, "a cancelled request is never retried");
+
+  // Replaced keys: recorded before the key write, never the issued or held key, bounded, forgotten once tried.
+  String keyA = "eliza_mobile_" + "a".repeat(40), keyB = "eliza_mobile_" + "b".repeat(40), keyC = "eliza_mobile_" + "c".repeat(40);
+  check(CloudSignInFlow.withReplacedKey(null, null, keyA) == null && CloudSignInFlow.replacedKeys(null).isEmpty(), "a first sign-in records nothing");
+  String recorded = CloudSignInFlow.withReplacedKey(null, keyA, keyB);
+  check(keyA.equals(recorded) && CloudSignInFlow.replacedKeys(recorded).equals(java.util.List.of(keyA)), "the replaced key is recorded");
+  String twice = CloudSignInFlow.withReplacedKey(recorded, keyB, keyC);
+  check(CloudSignInFlow.replacedKeys(twice).equals(java.util.List.of(keyA, keyB)), "a key replaced before activation is kept beside the earlier one");
+  check(CloudSignInFlow.replacedKeys(CloudSignInFlow.withReplacedKey(twice, keyB, keyC)).equals(java.util.List.of(keyA, keyB)), "never recorded twice");
+  check(recorded.equals(CloudSignInFlow.withReplacedKey(twice, null, keyB)), "the issued key is never on the list");
+  check(CloudSignInFlow.revocableKeys(twice, keyB).equals(java.util.List.of(keyA)) && CloudSignInFlow.revocableKeys(twice, null).size() == 2, "the held key is never revoked");
+  check(keyB.equals(CloudSignInFlow.withoutReplacedKeys(twice, java.util.List.of(keyA))) && CloudSignInFlow.withoutReplacedKeys(twice, java.util.List.of(keyA, keyB)) == null, "tried keys are forgotten");
+  check(CloudSignInFlow.replacedKeys("short\n" + keyA + "\nwith space " + keyB + "\n\n" + keyA + "\né" + keyC).equals(java.util.List.of(keyA)), "only printable tokens, once each");
+  String many = null;
+  for (int i = 0; i < CloudSignInFlow.REPLACED_KEYS_LIMIT + 3; i++) many = CloudSignInFlow.withReplacedKey(many, "eliza_mobile_" + String.valueOf((char) ('a' + i)).repeat(30), keyC);
+  java.util.List<String> bounded = CloudSignInFlow.replacedKeys(many);
+  check(bounded.size() == CloudSignInFlow.REPLACED_KEYS_LIMIT && bounded.get(bounded.size() - 1).endsWith(String.valueOf((char) ('a' + CloudSignInFlow.REPLACED_KEYS_LIMIT + 2))), "bounded, most recent kept");
   check(MessageDigest.isEqual("a".getBytes(StandardCharsets.US_ASCII), "a".getBytes(StandardCharsets.US_ASCII)), "jdk");
   System.out.println("PASS cloud sign-in flow (" + checks + " checks)");
  }

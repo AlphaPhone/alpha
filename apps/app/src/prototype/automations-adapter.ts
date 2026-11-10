@@ -1,13 +1,14 @@
 import {FEED_FILTERS,passesFilter,type FeedFilter} from '../../../../.eliza/client-features/packages/ui/src/utils/automation-feed-filter';
-import {AutomationsProtocol,AutomationOutcomeError,automationIssue,automationLocalDateInput,mergeAutomationRows,type AutomationRow,type AutomationIssue,type PromptDraft,type ReminderDraft,type AutomationRequest,type ScheduledVerb} from '../runtime/automations-protocol';
+import {AutomationsProtocol,AutomationOutcomeError,automationIssue,automationLocalDateInput,automationIntentApplied,automationIntentLabel,mergeAutomationRows,type AutomationRow,type AutomationIssue,type PromptDraft,type ReminderDraft,type AutomationRequest,type ScheduledVerb} from '../runtime/automations-protocol';
 import {connectionController,agentPendingText,agentAvailabilityNotice} from '../runtime/connection-ui';
 import {DailyApps,type Reminder} from '../daily';
-import {WorkflowIntentStore,workflowIntentKey} from '../runtime/workflow-intents';
+import {WorkflowIntentStore,workflowIntentKey,workflowIntentId} from '../runtime/workflow-intents';
 import {presentHomeWorkflowFreshness} from './home-cards';
 import './automations.css';
 type Bag=Record<string,any>;
 type Binding={sessionId:string;request:AutomationRequest};
-type Editor={kind:'prompt';draft:PromptDraft;row?:AutomationRow}|{kind:'reminder';draft:ReminderDraft;row?:AutomationRow};
+// `id` names one new draft, so an unconfirmed save of it never blocks a different new prompt or reminder.
+type Editor={kind:'prompt';id:string;draft:PromptDraft;row?:AutomationRow}|{kind:'reminder';id:string;draft:ReminderDraft;row?:AutomationRow};
 const dateInput=automationLocalDateInput;
 const future=()=>dateInput(Date.now()+3600000);
 const timeZone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -27,13 +28,15 @@ export function installAutomationsAdapter(Component:any,views:Bag){
  let detail:AutomationRow|null=null,editor:Editor|null=null,creating=false,review:{label:string;key:string;run:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>}|null=null;
  let state:'idle'|'loading'|'ready'|'failed'='idle',message='',controller:AbortController|null=null,epoch=0,session:string|null=null,loadedSession:string|null=null,history:string[]=[];
  const uncertain=new Set<string>();
+ // Retained requests with no listed row (a creation, or a row that is gone), and the request armed for clearing.
+ let orphans:Array<{key:string;raw:string;label:string}>=[],clearing:string|null=null;
  let intentStore:WorkflowIntentStore|null=null,suspended=document.hidden;
  let homeCache:{sessionId:string;rows:Array<{name:string;status:string}>;total:number;partial:boolean;stale:boolean;error:boolean;loadedAt:number}|null=null;
  const binding=():Binding|null=>(connectionController as typeof connectionController & {getAutomationsClient():Binding|null}).getAutomationsClient();
  const reminderBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh agent reminders before creating or changing one.':issues.find(issue=>issue.source==='reminders')?.message||'';
  const automationBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh agent automations before creating one.':issues.find(issue=>issue.source==='automations'&&issue.unavailable)?.message||'';
  const publish=()=>{if(owner?.live&&!suspended&&!document.hidden)owner.vset('workflows',{automationTick:Date.now()});};
- const retire=(clear=false)=>{epoch++;controller?.abort();controller=null;detail=null;editor=null;creating=false;review=null;message='';if(clear){rows=[];issues=[];intentStore=null;state='idle';loadedSession=null;}publish();};
+ const retire=(clear=false)=>{epoch++;controller?.abort();controller=null;detail=null;editor=null;creating=false;review=null;clearing=null;message='';if(clear){rows=[];issues=[];orphans=[];intentStore=null;state='idle';loadedSession=null;}publish();};
  const requestKey=(id:string)=>{const owner=connectionController.getSnapshot().session;return owner?workflowIntentKey(owner,'automation:'+id):'offline:'+id;};
  const key=(row:AutomationRow)=>requestKey(row.key);
  const locked=(row:AutomationRow)=>uncertain.has(key(row))||(!!binding()&&(intentStore?.locked(key(row))??true));
@@ -49,8 +52,19 @@ export function installAutomationsAdapter(Component:any,views:Bag){
    const next:AutomationRow[]=[],failures:AutomationIssue[]=[];
    if(remote.status==='fulfilled'){next.push(...remote.value.rows);failures.push(...remote.value.issues);}else failures.push(automationIssue('automations',remote.reason));
    if(local.status==='fulfilled')next.push(...local.value.reminders.map(deviceRow));else failures.push(automationIssue('device',local.reason));
-   intentStore=store;if(pending.status==='rejected')failures.push({source:'automations',unavailable:false,message:'Pending requests could not be checked. Changes stay blocked until this agent’s request history is available.'});
-   rows=mergeAutomationRows(next);issues=failures;state='ready';loadedSession=selected?.sessionId||'offline';
+   if(pending.status==='rejected')failures.push({source:'automations',unavailable:false,message:'Pending requests could not be checked. Changes stay blocked until this agent’s request history is available.'});
+   // This listing was read after every retained request ended. A request whose asked-for state it shows is confirmed
+   // and released; the rest stay retained, and those without a listed row are offered for explicit clearing.
+   const merged=mergeAutomationRows(next),unlisted:typeof orphans=[];let confirmed=0;
+   if(store&&pending.status==='fulfilled'&&remote.status==='fulfilled')for(const [entryKey,raw] of Object.entries(pending.value??{})){
+    if(!workflowIntentId(entryKey)?.startsWith('automation:'))continue;
+    let intent:unknown=null;try{intent=JSON.parse(raw);}catch{/* An unreadable request is never confirmed. */}
+    if(automationIntentApplied(intent,merged,failures)){try{await store.acknowledge(entryKey,raw,abort.signal);uncertain.delete(entryKey);confirmed++;continue;}catch{/* It stays retained and is checked again on the next refresh. */}}
+    if(!merged.some(row=>key(row)===entryKey))unlisted.push({key:entryKey,raw,label:automationIntentLabel(intent)});
+   }
+   if(!valid())return;
+   intentStore=store;orphans=unlisted;if(confirmed)message='An earlier unconfirmed change is now confirmed on this agent. The records below are current.';
+   rows=merged;issues=failures;state='ready';loadedSession=selected?.sessionId||'offline';
    const enabled=rows.filter(row=>row.enabled);
    // Home shows only enabled automations; with none its card is hidden.
    homeCache={sessionId:loadedSession,rows:enabled.map(row=>({name:row.title,status:''})),total:enabled.length,partial:failures.some(issue=>!issue.unavailable||issue.source==='device'),stale:false,error:false,loadedAt:Date.now()};
@@ -59,19 +73,43 @@ export function installAutomationsAdapter(Component:any,views:Bag){
   }catch{if(valid()){state='failed';if(homeCache)homeCache.error=true;message='Automations could not refresh. Retry to check their current state.';}}
   finally{if(ticket===epoch){controller=null;publish();}}
  }
- async function work(task:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>,rowKey?:string){
+ async function work(task:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>,rowKey?:string,resend=false){
   if(controller)return;const selected=binding();if(!selected){connectionController.open();return;}
   const ownerContext=connectionController.getSnapshot().session;if(!ownerContext)return;
   const intents=new WorkflowIntentStore(ownerContext),ticket=++epoch,abort=controller=new AbortController();let dispatched=false,retained:string|undefined;message='';publish();
   const valid=()=>ticket===epoch&&!abort.signal.aborted&&visible()&&selected.sessionId===binding()?.sessionId;
-  const client=new AutomationsProtocol(async(path,method,body,signal)=>{if(!valid())throw Error('Automation connection changed.');if(method!=='GET'){const blocked=path.startsWith('/api/lifeops/definitions')||path.startsWith('/api/lifeops/occurrences/')?reminderBlock():path.startsWith('/api/triggers')?automationBlock():'';if(blocked)throw new AutomationOutcomeError(blocked);if(!rowKey)throw Error('Missing automation request identity.');retained=await intents.admit(rowKey,{kind:'automation',path,method,body},signal);if(!valid())throw Error('Automation connection changed.');dispatched=true;uncertain.add(rowKey);}return selected.request(path,method,body,signal);});
+  const client=new AutomationsProtocol(async(path,method,body,signal)=>{if(!valid())throw Error('Automation connection changed.');if(method!=='GET'){const blocked=path.startsWith('/api/lifeops/definitions')||path.startsWith('/api/lifeops/occurrences/')?reminderBlock():path.startsWith('/api/triggers')?automationBlock():'';if(blocked)throw new AutomationOutcomeError(blocked);if(!rowKey)throw Error('Missing automation request identity.');
+   // A resend repeats one retained creation under its own idempotency key, and only with the same content.
+   const held=resend?await intents.read(rowKey,signal):null;
+   if(held!==null){let same=false;try{const earlier=JSON.parse(held);same=earlier.path===path&&earlier.method===method&&JSON.stringify(earlier.body)===JSON.stringify(body);}catch{/* An unreadable request is never repeated. */}if(!same)throw Error('The earlier save of this reminder is not confirmed and the reminder was edited since. Check this agent before saving again.');retained=held;}
+   else{
+    const admitted=await intents.admit(rowKey,{kind:'automation',path,method,body},signal);
+    // A request retired before it was sent is known not to have run. Only that exact unsent request is removed.
+    if(!valid()){await intents.acknowledge(rowKey,admitted).catch(()=>{});throw Error('Automation connection changed.');}
+    retained=admitted;
+   }
+   if(!valid())throw Error('Automation connection changed.');dispatched=true;uncertain.add(rowKey);}return selected.request(path,method,body,signal);});
   try{await intents.load(abort.signal);await task(client,abort.signal);if(!valid())return;if(rowKey&&retained)await intents.acknowledge(rowKey,retained,abort.signal);if(!valid())return;if(rowKey)uncertain.delete(rowKey);if(dispatched){editor=null;review=null;creating=false;message='Saved on this agent.';}}
   catch(error){const status=error&&typeof error==='object'&&'status' in error?Number(error.status):0,code=error&&typeof error==='object'&&'code' in error&&typeof error.code==='string'?error.code:'',known=error instanceof AutomationOutcomeError,rejected=[400,401,403,404,405,410,413,414,415,422].includes(status)&&!/unknown|unconfirmed|ambiguous/i.test(code);if(rowKey&&(rejected||known)&&retained&&valid()){try{await intents.acknowledge(rowKey,retained,abort.signal);uncertain.delete(rowKey);}catch{/* Keep unconfirmed requests in the existing journal. */}}if(valid())message=dispatched&&!rejected&&!known?'Outcome unknown. Check the current record and history before repeating this action.':error instanceof Error?error.message:'Automation request failed.';}
   finally{if(ticket===epoch){intentStore=intents;controller=null;publish();}}
   if(valid()&&!editor&&!review)await refresh(true);
  }
+ /** Explicit removal of one retained request after its owner checked the record. Nothing is sent to the agent. */
+ async function forget(entryKey:string,raw:string){
+  const store=intentStore;if(controller||!store||!visible())return;
+  const ticket=++epoch,abort=controller=new AbortController();clearing=null;publish();
+  try{await store.acknowledge(entryKey,raw,abort.signal);uncertain.delete(entryKey);if(ticket===epoch)message='Request cleared. Nothing was sent to the agent.';}
+  catch{if(ticket===epoch)message='This request changed. Refresh before clearing it.';}
+  finally{if(ticket===epoch){controller=null;publish();}}
+  if(ticket===epoch)await refresh(true);
+ }
+ function askForget(entryKey:string,raw:string){
+  if(controller)return;
+  if(clearing!==entryKey){clearing=entryKey;review=null;message='This request may already have taken effect. Check the record and its history on this agent first. Tap again to clear the request. Clearing sends nothing to the agent.';publish();return;}
+  void forget(entryKey,raw);
+ }
  function show(row:AutomationRow){
-  if(controller)return;creating=false;editor=null;review=null;message='';history=[];
+  if(controller)return;creating=false;editor=null;review=null;clearing=null;message='';history=[];
   if(row.kind==='workflow'&&row.workflowId){detail=null;const out=render(owner.vget('workflows'),owner.api('workflows'));out.openWorkflow(row.workflowId);return;}
   if(row.kind==='device-reminder'){owner.openView('calendar');void owner.refreshReminders(row.id,row.record.occurrenceId);return;}
   detail=row;publish();
@@ -79,17 +117,20 @@ export function installAutomationsAdapter(Component:any,views:Bag){
  function ask(label:string,row:AutomationRow,run:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>){if(controller||locked(row))return;review={label,key:key(row),run};message='';publish();}
  async function editPrompt(row:AutomationRow){
   if(!row.triggerId||locked(row))return;
-  await work(async(client,signal)=>{const trigger=await client.prompt(row.triggerId!,signal);editor={kind:'prompt',row,draft:{title:trigger.displayName||row.title,instructions:trigger.instructions||row.description,triggerType:trigger.triggerType==='event'?'event':trigger.triggerType==='cron'?'cron':'once',scheduledAt:dateInput(trigger.scheduledAtIso||Date.now()+3600000),cron:trigger.cronExpression||'',eventKind:trigger.eventKind||'',timezone:trigger.timezone||timeZone(),originalScheduledAt:trigger.scheduledAtIso,originalEnabled:trigger.enabled}};});
+  await work(async(client,signal)=>{const trigger=await client.prompt(row.triggerId!,signal);editor={kind:'prompt',id:row.key,row,draft:{title:trigger.displayName||row.title,instructions:trigger.instructions||row.description,triggerType:trigger.triggerType==='event'?'event':trigger.triggerType==='cron'?'cron':'once',scheduledAt:dateInput(trigger.scheduledAtIso||Date.now()+3600000),cron:trigger.cronExpression||'',eventKind:trigger.eventKind||'',timezone:trigger.timezone||timeZone(),originalScheduledAt:trigger.scheduledAtIso,originalEnabled:trigger.enabled}};});
  }
- function editReminder(row:AutomationRow){const d=row.record.definition;editor={kind:'reminder',row,draft:{message:d.cadence?.kind==='once'&&d.metadata?.ownerSurface==='OWNER_REMINDERS'&&d.description?.trim()?d.description:d.title,due:dateInput(d.cadence?.dueAt||''),timezone:d.timezone||timeZone(),idempotencyKey:''}};publish();}
- function create(kind:'prompt'|'reminder'){if(controller)return;const blocked=kind==='reminder'?reminderBlock():automationBlock();if(blocked){message=blocked;publish();return;}creating=false;detail=null;review=null;message='';editor=kind==='prompt'?{kind,draft:{title:'',instructions:'',triggerType:'once',scheduledAt:future(),cron:'',eventKind:'',timezone:timeZone()}}:{kind,draft:{message:'',due:future(),timezone:timeZone(),idempotencyKey:crypto.randomUUID()}};publish();}
+ function editReminder(row:AutomationRow){const d=row.record.definition;editor={kind:'reminder',id:row.key,row,draft:{message:d.cadence?.kind==='once'&&d.metadata?.ownerSurface==='OWNER_REMINDERS'&&d.description?.trim()?d.description:d.title,due:dateInput(d.cadence?.dueAt||''),timezone:d.timezone||timeZone(),idempotencyKey:''}};publish();}
+ function create(kind:'prompt'|'reminder'){if(controller)return;const blocked=kind==='reminder'?reminderBlock():automationBlock();if(blocked){message=blocked;publish();return;}creating=false;detail=null;review=null;message='';const draftId=crypto.randomUUID();editor=kind==='prompt'?{kind,id:draftId,draft:{title:'',instructions:'',triggerType:'once',scheduledAt:future(),cron:'',eventKind:'',timezone:timeZone()}}:{kind,id:draftId,draft:{message:'',due:future(),timezone:timeZone(),idempotencyKey:draftId}};publish();}
  function save(){
-  if(!editor||controller)return;const selected=editor,id=selected.row?key(selected.row):requestKey('new:'+selected.kind);
+  if(!editor||controller)return;const selected=editor,id=selected.row?key(selected.row):requestKey('new:'+selected.kind+':'+selected.id);
   const blocked=selected.kind==='reminder'?reminderBlock():automationBlock();if(blocked){message=blocked;publish();return;}
-  if(uncertain.has(id)||intentStore?.locked(id)){message='The earlier save is not confirmed. Check this agent before creating another.';publish();return;}
-  void work((client,signal)=>selected.kind==='prompt'?client.savePrompt(selected.draft,signal,selected.row?.triggerId):selected.row?client.editReminder(selected.row,selected.draft.message,selected.draft.due,signal):client.createReminder(selected.draft,signal),id);
+  // A new reminder carries an idempotency key, so the same unconfirmed save may be sent again: the agent keeps one
+  // reminder per key. Every other unconfirmed save stays blocked until it is confirmed or cleared.
+  const pending=uncertain.has(id)||!!intentStore?.locked(id),resend=pending&&selected.kind==='reminder'&&!selected.row&&!!intentStore?.retained(id);
+  if(pending&&!resend){message=selected.row?'The earlier save is not confirmed. Check this agent before saving again.':'The earlier save of this draft is not confirmed. Check this agent before saving it again.';publish();return;}
+  void work((client,signal)=>selected.kind==='prompt'?client.savePrompt(selected.draft,signal,selected.row?.triggerId):selected.row?client.editReminder(selected.row,selected.draft.message,selected.draft.due,signal):client.createReminder(selected.draft,signal),id,resend);
  }
- const close=()=>{if(controller)return;editor=null;detail=null;creating=false;review=null;message='';publish();};
+ const close=()=>{if(controller)return;editor=null;detail=null;creating=false;review=null;clearing=null;message='';publish();};
  const newDeviceReminder=()=>{close();owner.openView('calendar');owner.newDeviceReminderDraft();};
  view.back=()=>{if(editor||detail||creating||review){close();return true;}return back?.();};
  view.onLeave=()=>{retire(true);leave?.();};
@@ -107,11 +148,14 @@ export function installAutomationsAdapter(Component:any,views:Bag){
   const action=(label:string,fn:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>)=>{if(detail)actions.push({label,run:()=>ask(label,detail!,fn),disabled:!!controller||selectedLocked});};
   if(detail?.kind==='prompt'&&detail.triggerId){const row=detail,id=row.triggerId!;if(!row.record.system)actions.push({label:'Edit prompt',run:()=>void editPrompt(row),disabled:!!controller||selectedLocked});actions.push({label:'Refresh execution history',run:()=>void work(async(client,signal)=>{history=(await client.promptRuns(id,signal)).map(value=>{const run=value as Bag;return [run.startedAtIso||run.startedAt,run.status,run.error].filter(Boolean).join(' · ');});publish();}),disabled:!!controller});if(!row.record.system){action(row.enabled?'Pause':'Enable',(client,signal)=>client.setPromptEnabled(id,!row.enabled,signal));action('Run now',(client,signal)=>client.runPrompt(id,signal));action('Delete prompt',(client,signal)=>client.deletePrompt(id,signal));}}
   if(detail?.kind==='schedule'){const row=detail;for(const [label,verb] of [['Run now','fire'],['Acknowledge','acknowledge'],['Snooze 1 hour','snooze'],['Complete','complete'],['Dismiss','dismiss'],['Reopen','reopen']] as Array<[string,ScheduledVerb]>)action(label,(client,signal)=>client.scheduledVerb(row.id,verb,signal));}
+  // A locked row whose request is retained can be released by its owner after checking the record.
+  const held=detail&&selectedLocked?intentStore?.retained(key(detail))??null:null;
+  if(detail&&held!==null){const entryKey=key(detail);actions.push({label:clearing===entryKey?'Confirm clear':'Clear unconfirmed request',run:()=>askForget(entryKey,held),disabled:!!controller});}
   if(detail?.kind==='reminder'){const row=detail;actions.push({label:'Edit reminder',run:()=>editReminder(row),disabled:!!controller||selectedLocked});if(row.occurrenceId)action('Snooze 10 minutes',(client,signal)=>client.snoozeReminder(row.occurrenceId!,signal));action('Cancel reminder',(client,signal)=>client.cancelReminder(row.id,signal));}
   const field=(name:string,label:string,fieldValue:string,type='text')=>({name,label,value:fieldValue,type,multiline:name==='instructions'||name==='message',singleLine:name!=='instructions'&&name!=='message',change:(event:Bag)=>{if(editor&&!controller){(editor.draft as unknown as Bag)[name]=String(event.target.value);publish();}}});
   const fields:Bag[]=[];if(editor?.kind==='prompt'){fields.push(field('title','Name',editor.draft.title),field('instructions','Instructions',editor.draft.instructions));if(editor.draft.triggerType==='once')fields.push(field('scheduledAt',`Run time · ${timeZone()}`,editor.draft.scheduledAt,'datetime-local'));if(editor.draft.triggerType==='cron')fields.push(field('cron',`Cron schedule · ${editor.draft.timezone}`,editor.draft.cron));if(editor.draft.triggerType==='event')fields.push(field('eventKind','Event name',editor.draft.eventKind));}else if(editor){fields.push(field('message','Reminder',editor.draft.message));if(!editor.row||editor.row.record.definition.cadence?.kind==='once')fields.push(field('due',`Due · ${timeZone()}`,editor.draft.due,'datetime-local'));}
   return {...workflow,cards,newFlow:()=>{creating=true;detail=null;editor=null;publish();},listToggles:false,automation:{
-   filters:filters.map(name=>({name:filterNames[name],selected:filter===name,pick:()=>{filter=name;publish();}})),loading:state==='loading',stale:loadedSession!==null&&loadedSession!==currentSession,empty,emptyLabel:filter==='all'?'No automations yet':`No ${filterNames[filter].toLowerCase()} here`,message,issues,refresh:()=>void refresh(),busy:!!controller,managementCards:workflow.managementCards||[],history,
+   filters:filters.map(name=>({name:filterNames[name],selected:filter===name,pick:()=>{filter=name;publish();}})),loading:state==='loading',stale:loadedSession!==null&&loadedSession!==currentSession,empty,emptyLabel:filter==='all'?'No automations yet':`No ${filterNames[filter].toLowerCase()} here`,message,issues,refresh:()=>void refresh(),busy:!!controller,managementCards:[...(workflow.managementCards||[]),...orphans.map(item=>({name:'Unconfirmed '+item.label,short:clearing===item.key?'Tap again to clear this request. Nothing is sent':'Check this agent for it, then tap to clear the request',open:()=>askForget(item.key,item.raw),toggle:()=>{}}))],history,
    detail:!!(detail||editor||creating),title:creating?'New automation':editor?(editor.row?'Edit ':'New ')+editor.kind:detail?.title||'',close,creating,agentUnavailable:!!controller||!!automationBlock(),workflowDescription:automationBlock()||'Build reviewed steps on this agent. Runs only when you start it',promptDescription:automationBlock()||'Save paused, then review its schedule',agentReminderUnavailable:!!controller||!!reminderBlock(),agentReminderDescription:reminderBlock()||'A one-time in-app reminder on this agent',saveDisabled:!!controller||!!editor&&!!(editor.kind==='reminder'?reminderBlock():automationBlock()),createWorkflow:()=>{if(controller)return;const blocked=automationBlock();if(blocked){message=blocked;publish();return;}creating=false;render(value,current).newFlow();publish();},createPrompt:()=>create('prompt'),createReminder:()=>create('reminder'),createDeviceReminder:newDeviceReminder,
    editing:!!editor,fields,save,saveLabel:editor?.kind==='prompt'&&!editor.row?'Save paused':'Save',prompt:editor?.kind==='prompt',scheduleKinds:['once','cron','event'].map(kind=>({label:kind==='once'?'Once':kind==='cron'?'Recurring':'On event',selected:editor?.kind==='prompt'&&editor.draft.triggerType===kind,pick:()=>{if(editor?.kind==='prompt'&&!controller){editor.draft.triggerType=kind as PromptDraft['triggerType'];publish();}}})),
    description:detail?.description||'',source:detail?.source||'',schedule:detail?.schedule||'',status:detail?.status||'',actions,locked:selectedLocked,

@@ -13,8 +13,9 @@ import android.content.pm.PackageManager;
  * The image starts this persistent, direct-boot-aware process at boot and restarts it after a
  * crash. Each start counts an unclean exit when a capture session was left open in this boot by
  * this install (the crash-loop breaker; shutdowns, reboots and package updates do not count), then
- * converges on policy: off without consent, waiting before first unlock, and
- * listening only after unlock with consent and permission.
+ * converges on policy. Consent is per process ({@link ListenerStore}): a new process is always off
+ * until the user opts in again on the consent screen, whatever was stored, and that opt-in also
+ * clears the breaker. So a restart never resumes listening by itself.
  */
 public final class SenseApplication extends Application {
  @Override public void onCreate(){

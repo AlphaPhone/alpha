@@ -13,7 +13,7 @@ test('three immediate recoveries per 60 s, then a 5 s backoff, or the escape vie
 test('MainActivity routes every renderer loss through the budget and offers stock Settings only',()=>{
  const source=readFileSync(nativeSource('MainActivity.java'),'utf8');
  const gone=source.slice(source.indexOf('public boolean onRenderProcessGone('),source.indexOf('/*\n  * One live MainActivity'));
- assert.match(gone,/recoveryBudget\.onLoss\(SystemClock\.elapsedRealtime\(\), showsHome\(\)\)/);
+ assert.match(gone,/recoveryBudget\.onLoss\(SystemClock\.elapsedRealtime\(\), showsHome\(\), rendererDeathsAtCreate\)/);
  assert.match(gone,/if \(action == RendererRecoveryBudget\.Action\.SHOW_ESCAPE\) \{ showRendererEscape\(\); return true; \}/);
  assert.match(gone,/RendererRecoveryBudget\.delay\(action\)/);
  assert.doesNotMatch(source,/rendererRecoveryDelay|RECOVERY_BUDGET/,'the old in-activity budget is gone');

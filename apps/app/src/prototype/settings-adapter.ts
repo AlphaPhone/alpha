@@ -168,7 +168,32 @@ export function resolveAppearance(choice: AppearanceChoice): 'light' | 'dark' {
   return choice === 'system' ? (systemScheme()?.matches ? 'dark' : 'light') : choice;
 }
 
+// settings-reads:begin (dependency-free; exercised by test/comms-settings.test.mjs)
+/** Orders listener status reads against Pause and Turn off. No read starts while an action runs, a read
+ * already in flight is dropped once an action starts, and the action's own result is always applied. */
+export function listenerReadGate() {
+  let busy = false, sequence = 0;
+  return {
+    busy: () => busy,
+    beginAction(): boolean { if (busy) return false; busy = true; sequence++; return true; },
+    endAction() { busy = false; },
+    beginRead(): number | null { return busy ? null : ++sequence; },
+    readApplies(token: number): boolean { return !busy && token === sequence; },
+  };
+}
+/** What a return to the app does to Settings: read the device now when Settings is in front, otherwise
+ * remember that its facts are stale so they are read when Settings is next shown. */
+export function settingsResumeRead(view: unknown): 'now' | 'on-show' { return view === 'settings' ? 'now' : 'on-show'; }
+// settings-reads:end
 /** Keep the reference settings components; never present fixture device facts. */
+/** Device facts after a read. A read that overlapped a text-size change may predate it, so the
+ * text size already shown is kept; every other fact comes from the read. */
+export function mergeDeviceFacts(read: Record<string, any>, shown: Record<string, any>, textScaleChanged: boolean): Record<string, any> {
+  if (!textScaleChanged) return read;
+  const next = { ...read };
+  for (const key of ['textScalePercent', 'effectiveTextZoom']) if (key in shown) next[key] = shown[key];
+  return next;
+}
 export function installSettingsAdapter(Component: any, views: Bag) {
   const definition = views.settings, render = definition.render, p = Component.prototype;
   const mount = p.componentDidMount, unmount = p.componentWillUnmount, openView = p.openView, update = p.componentDidUpdate;
@@ -183,18 +208,21 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   let crashLog: CrashLog | null = null, crashBusy = false, diagnosticsBusy = false;
   // The AOSP image's always-on listener (#424): status, Pause and Turn off only. Turning listening on
   // or resuming happens in the listener's own consent screen, never here.
-  let listener: ListenerStatus = { available: false }, listenerBusy = false, listenerSequence = 0;
+  let listener: ListenerStatus = { available: false };
+  const listenerReads = listenerReadGate();
+  // Set when the app resumed behind another view; Settings reads the device when it is next shown.
+  let resumedUnread = false;
   async function listenerAction(api: Bag, action: 'pause' | 'turnOff') {
-    if (listenerBusy) return;
-    listenerBusy = true; changed();
-    const instance = owner, sequence = ++listenerSequence;
+    if (!listenerReads.beginAction()) return;
+    changed();
+    const instance = owner;
     try {
       const next = await (action === 'pause' ? pauseListener() : turnOffListener());
-      if (owner !== instance || sequence !== listenerSequence) return;
+      if (owner !== instance) return;
       listener = next;
       if (!next.available) api.toast('The listener did not respond. Use its notification or Quick Settings tile to stop listening.');
       else if (next.listening) api.toast('Listening has not stopped. Use the listener notification to stop it.');
-    } finally { listenerBusy = false; if (owner === instance) changed(); }
+    } finally { listenerReads.endAction(); if (owner === instance) changed(); }
   }
   const changed = () => owner?.vset('settings', { capabilityReadAt: Date.now() });
   /** Only the existing authenticated local status; no provider/capability refresh. */
@@ -218,9 +246,11 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     try {
       await Promise.allSettled([
         (async () => {
-          // A status read older than a Pause or Turn off never replaces that action's result.
-          const sequence = ++listenerSequence, status = await listenerStatus();
-          if (owner === instance && capabilityAbort === abort && sequence === listenerSequence) listener = status;
+          // A status read never replaces a Pause or Turn off result: none starts during the action, and an older one is dropped.
+          const read = listenerReads.beginRead();
+          if (read === null) return;
+          const status = await listenerStatus();
+          if (owner === instance && capabilityAbort === abort && listenerReads.readApplies(read)) listener = status;
         })(),
         (async () => {
           if (!cloud) { gmailAccounts = []; return; }
@@ -299,8 +329,9 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     finally { crashBusy = false; if (owner === instance) changed(); }
   }
   async function refresh() {
-    const instance = owner, token = ++generation;
+    const instance = owner, token = ++generation, scaleToken = scaleGeneration;
     if (!instance) return;
+    resumedUnread = false;
     const native = Capacitor.isNativePlatform();
     const [state, settings, noticeState, crossState, metadata, roleState, build, problems, photos] = await Promise.allSettled([device.snapshot(), system.getDeviceSettings(), notifications.status(), notifications.crossAppStatus(), history===null?Promise.resolve(null):notifications.notificationHistory(),
       // Browsers have no Android roles: the web plugin rejects, so nothing is shown there.
@@ -310,7 +341,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if (build.status === 'fulfilled' && build.value) launcher = build.value.launcher === true;
     crashLog = problems.status === 'fulfilled' ? problems.value : null;
     photoAccess = photos.status === 'fulfilled' ? photos.value : null;
-    facts = state.status === 'fulfilled' ? state.value : {};
+    facts = mergeDeviceFacts(state.status === 'fulfilled' ? state.value : {}, facts, scaleGeneration !== scaleToken);
     controls = settings.status === 'fulfilled' ? settings.value : {};
     delivery = noticeState.status === 'fulfilled' ? noticeState.value : {};
     cross = crossState.status === 'fulfilled' ? crossState.value : {};
@@ -349,12 +380,18 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     });
     this.googleAccountsChanged=()=>void refreshCapabilities();
     window.addEventListener(GOOGLE_ACCOUNTS_CHANGED,this.googleAccountsChanged);
-    this.deviceResume = DailyApps.addListener('appResumed', () => { void refresh(); void refreshCapabilities(); }).catch(() => null);
+    this.deviceResume = DailyApps.addListener('appResumed', () => {
+      if (settingsResumeRead(this.S?.().view) === 'now') { void refresh(); void refreshCapabilities(); return; }
+      // Behind another view only the provider status is read; the device facts wait until Settings is shown.
+      resumedUnread = true;
+      if (Capacitor.isNativePlatform()) void connectionController.refreshProviderStatus();
+    }).catch(() => null);
   };
   p.componentDidUpdate = function (previousProps: Bag, previousState: Bag) {
     update?.call(this, previousProps, previousState);
     // Switching away from Settings (Home, another view) locks and forgets the password manager.
     if (typeof this.S === 'function' && this.S().view !== 'settings') leavePasswordManager();
+    else if (resumedUnread && owner === this) { void refresh(); void refreshCapabilities(); }
     const theme = this.state?.theme;
     // The marker travels with React state, so queued external reads cannot echo an older theme.
     const external=this.state?.appearanceStorageRead;
@@ -376,6 +413,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     void this.deviceResume?.then((listener: any) => listener?.remove()); unmount.call(this);
   };
   p.openView = function (key: string, ...args: any[]) {
+    if (key === 'settings') resumedUnread = false;
     const result = openView.call(this, key, ...args);
     if (key === 'settings') { void refresh(); void refreshCapabilities(true); }
     return result;
@@ -430,7 +468,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const agentStatus = connection.session ? 'Running' : connection.residentRecoveryReason ? 'Needs review' : connection.busy || connection.kind !== 'recovering' ? 'Starting…' : 'Not running';
     const agentRow = row('Agent', native && !testMocksEnabled ? go('agent-connection') : () => connectionController.open(), native && !testMocksEnabled ? agentStatus : connection.session ? connection.name : 'Not connected');
     const digestsRow = row('Scheduled digests', () => window.dispatchEvent(new Event('alpha:hosted-digests')));
-    const listeningRow = listener.available ? row('Listening', go('listening'), listenerBusy ? 'Updating…' : listener.label) : null;
+    const listeningRow = listener.available ? row('Listening', go('listening'), listenerReads.busy() ? 'Updating…' : listener.label) : null;
 
     // ---- Apps
     const photoScope = photoAccess?.scope === 'full' ? 'All' : photoAccess?.scope === 'selected' || photoAccess?.scope === 'partial' ? 'Selected' : photoAccess?.scope === 'denied' ? 'Not allowed' : '';
@@ -465,7 +503,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const scale = facts.textScalePercent;
     const textRow: Bag | null = native && Number.isInteger(scale) ? { kSlider: true, noAB: true, label: 'Text size', valueLabel: `${scale}%`, v: scale <= 100 ? (scale - 75) * 2 : scale - 50, set: (event: Event) => {
       const value = Number((event.target as HTMLInputElement).value), requested = Math.round(value <= 50 ? 75 + value / 2 : value + 50), token = ++scaleGeneration, instance = owner;
-      ++generation; void device.setTextScale({ percent: requested }).then(result => { if (owner === instance && token === scaleGeneration) { facts = { ...facts, ...result }; instance?.vset('settings', { nativeReadAt: Date.now() }); } }).catch(() => { if (owner === instance && token === scaleGeneration) api.toast('Text size could not be saved.'); });
+      void device.setTextScale({ percent: requested }).then(result => { if (owner === instance && token === scaleGeneration) { facts = { ...facts, ...result }; instance?.vset('settings', { nativeReadAt: Date.now() }); } }).catch(() => { if (owner === instance && token === scaleGeneration) api.toast('Text size could not be saved.'); });
     } } : null;
 
     // ---- Notifications
@@ -545,7 +583,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     }
     if (current === 'listening' && listener.available) {
       const status = listener;
-      stack.push(subpage('Listening', [group([info(listenerBusy ? 'Updating…' : status.label, '')]), group(present([
+      stack.push(subpage('Listening', [group([info(listenerReads.busy() ? 'Updating…' : status.label, '')]), group(present([
         status.listening || status.microphoneOpen ? row('Pause', () => void listenerAction(api, 'pause')) : null,
         status.consented && status.state !== 'OFF' ? row('Turn off', () => void listenerAction(api, 'turnOff')) : null,
         row('Listener settings', () => void openListenerSettings().then(opened => { if (!opened) api.toast('Listener settings are unavailable.'); })),

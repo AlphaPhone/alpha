@@ -297,34 +297,78 @@ final class BrowserDownloads {
   android.widget.ScrollView scroll=new android.widget.ScrollView(context);scroll.addView(rows);
   listing=new AlertDialog.Builder(context).setTitle("Downloads").setView(scroll).setPositiveButton("Close",null).create();
   AlertDialog list=listing;
-  Runnable poll=new Runnable(){public void run(){if(listing!=list)return;render(rows);handler.removeCallbacks(this);handler.postDelayed(this,1000);}};
-  list.setOnDismissListener(dialog->{handler.removeCallbacks(poll);if(listing==list){update=null;listing=null;}});
-  update=poll;list.show();poll.run();
+  // Each entry's state is one provider query. The queries run on the io worker; the main thread
+  // only draws the snapshot it posts back, and the next poll is scheduled after that.
+  Runnable poll=new Runnable(){public void run(){
+   if(listing!=list)return;handler.removeCallbacks(this);
+   List<Probe> probes=probes();long turn=++pollTurn;Runnable next=this;
+   work(io,()->{Map<Long,Status> snapshot=statuses(probes);handler.post(()->{
+    if(listing!=list||turn!=pollTurn)return;
+    statuses=snapshot;render(rows);handler.removeCallbacks(next);handler.postDelayed(next,1000);
+   });},()->{});
+  }};
+  list.setOnDismissListener(dialog->{handler.removeCallbacks(poll);if(listing==list){update=null;listing=null;pollTurn++;}});
+  // A change to the list itself is drawn at once from the last snapshot, then read again.
+  update=()->{if(listing!=list)return;render(rows);poll.run();};list.show();update.run();
  }
- private String localLabel(long id,JSONObject item){
+ /** What the io worker needs to read one entry's state; taken on the main thread. */
+ private static final class Probe{final long id;final String uri;Probe(long id,String uri){this.id=id;this.uri=uri;}}
+ /** One entry's provider state as last read. For an OS transfer the DownloadManager row; for a saved
+  * file status is 1 with its size in bytes, 0 when the row is gone and -1 when it could not be read. */
+ private static final class Status{final int status,reason;final long bytes,total;Status(int status,int reason,long bytes,long total){this.status=status;this.reason=reason;this.bytes=bytes;this.total=total;}}
+ private Map<Long,Status> statuses=Collections.emptyMap();
+ private long pollTurn;
+ /** Entries whose state lives in a provider. A fetch still running in the app is reported from memory. */
+ private List<Probe> probes(){
+  List<Probe> probes=new ArrayList<>();
+  for(Map.Entry<Long,JSONObject> entry:owned.entrySet()){
+   long id=entry.getKey();JSONObject item=entry.getValue();
+   if(id<0&&(item.optBoolean("running",false)||item.optBoolean("failed",false)))continue;
+   probes.add(new Probe(id,id<0?item.optString("uri"):null));
+  }
+  return probes;
+ }
+ /** Worker thread: the provider reads behind the Downloads list. */
+ private Map<Long,Status> statuses(List<Probe> probes){
+  Map<Long,Status> found=new HashMap<>();
+  for(Probe probe:probes){
+   if(probe.id<0){
+    try(Cursor cursor=context.getContentResolver().query(Uri.parse(probe.uri),new String[]{MediaStore.MediaColumns.SIZE},null,null,null)){
+     found.put(probe.id,cursor!=null&&cursor.moveToFirst()?new Status(1,0,cursor.getLong(0),-1):new Status(0,0,0,-1));
+    }catch(Exception unavailable){found.put(probe.id,new Status(-1,0,0,-1));}
+    continue;
+   }
+   try(Cursor cursor=manager.query(new DownloadManager.Query().setFilterById(probe.id))){
+    if(cursor!=null&&cursor.moveToFirst())found.put(probe.id,new Status(cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
+     cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))));
+    else found.put(probe.id,new Status(0,0,0,-1));
+   }catch(Exception unavailable){found.put(probe.id,new Status(-1,0,0,-1));}
+  }
+  return found;
+ }
+ private static final String CHECKING="Checking status…";
+ private String localLabel(long id,JSONObject item,Status read){
   if(item.optBoolean("running",false))return "Downloading · "+size(received.getOrDefault(id,0L));
   if(item.optBoolean("failed",false))return "Failed";
-  try(Cursor cursor=context.getContentResolver().query(Uri.parse(item.optString("uri")),new String[]{MediaStore.MediaColumns.SIZE},null,null,null)){
-   if(cursor!=null&&cursor.moveToFirst())return "Saved to Downloads · "+size(cursor.getLong(0));
-  }catch(Exception unavailable){return "Status unavailable";}
-  return "Removed from Android downloads";
+  if(read==null)return CHECKING;
+  if(read.status==1)return "Saved to Downloads · "+size(read.bytes);
+  return read.status<0?"Status unavailable":"Removed from Android downloads";
  }
+ /** Main thread: draws the list from the last snapshot. Never reads a provider. */
  private void render(LinearLayout rows){
   rows.removeAllViews();
   if(owned.isEmpty()){TextView empty=new TextView(context);empty.setText("No downloads yet.");rows.addView(empty);return;}
   for(Map.Entry<Long,JSONObject> entry:new ArrayList<>(owned.entrySet())){
-   long id=entry.getKey();JSONObject item=entry.getValue();int status=0,reason=0;long bytes=0,total=-1;String label;
-   if(id<0)label=localLabel(id,item);
+   long id=entry.getKey();JSONObject item=entry.getValue();Status read=statuses.get(id);int status=read==null?0:read.status,reason=read==null?0:read.reason;long bytes=read==null?0:read.bytes,total=read==null?-1:read.total;String label;
+   if(id<0)label=localLabel(id,item,read);
+   else if(read==null)label=CHECKING;
    else{
-    try(Cursor cursor=manager.query(new DownloadManager.Query().setFilterById(id))){if(cursor!=null&&cursor.moveToFirst()){
-     status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));reason=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
-     bytes=cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));total=cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-    }}catch(Exception unavailable){status=-1;}
     switch(status){case DownloadManager.STATUS_SUCCESSFUL:label="Complete · "+size(bytes);break;case DownloadManager.STATUS_FAILED:label="Failed · Android reason "+reason;break;case DownloadManager.STATUS_PAUSED:label="Waiting · Android reason "+reason;break;case DownloadManager.STATUS_RUNNING:label="Downloading · "+size(bytes)+" / "+size(total);break;case DownloadManager.STATUS_PENDING:label="Queued";break;case -1:label="Status unavailable";break;default:label="Removed from Android downloads";}
    }
    if(item.optBoolean("private",false))label+=" · Private tab";
    TextView text=new TextView(context);text.setText(item.optString("name")+"\n"+item.optString("origin")+"\n"+label);text.setPadding(0,12,0,8);rows.addView(text);
-   boolean active=(id<0&&item.optBoolean("running",false))||(id>0&&(status==DownloadManager.STATUS_PENDING||status==DownloadManager.STATUS_RUNNING||status==DownloadManager.STATUS_PAUSED));
+   // An OS transfer whose state has not been read yet is treated as active, so its button cancels it.
+   boolean active=(id<0&&item.optBoolean("running",false))||(id>0&&(read==null||status==DownloadManager.STATUS_PENDING||status==DownloadManager.STATUS_RUNNING||status==DownloadManager.STATUS_PAUSED));
    Button control=new Button(context);control.setText(active?"Cancel download":"Remove entry");control.setContentDescription((active?"Cancel download ":"Remove download entry ")+item.optString("name"));
    control.setOnClickListener(view->{try{if(active){if(id>0)manager.remove(id);else cancelled.add(id);}owned.remove(id);persist();render(rows);}catch(Exception error){message("Android could not cancel this download. Try again.");}});rows.addView(control);
   }

@@ -65,8 +65,9 @@ final class AlphaSpeechAudioFocus {
  }
  /** The utterance ended or was stopped. Main thread. */
  void release(){
-  boolean held=policy.held();policy.released();
-  if(held&&audio!=null)try{audio.abandonAudioFocusRequest(request);}catch(RuntimeException ignored){/* Nothing held. */}
+  // Abandons whenever a granted request is outstanding, also after a loss already ended the utterance.
+  boolean abandon=policy.released();
+  if(abandon&&audio!=null)try{audio.abandonAudioFocusRequest(request);}catch(RuntimeException ignored){/* Nothing held. */}
  }
  /**
   * Android 12+: calls a hook when the audio mode moves into a call, so assistant capture and speech

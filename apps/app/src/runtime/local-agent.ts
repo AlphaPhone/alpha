@@ -33,7 +33,11 @@ export interface LocalAgentBridge {
 const native = registerPlugin<Omit<LocalAgentBridge, 'subscribeVoiceEvents'> & NativeStreamPort & NativeVoiceEventPort>('Agent');
 // Capacitor proxies synthesize functions for unknown methods. Do not use that
 // proxy to feature-detect streaming before the native IPC adapter implements it.
-const nativeBridge:LocalAgentBridge={subscribeVoiceEvents:(ownerId,listener)=>subscribeNativeVoiceEvents(native,ownerId,listener),start:()=>native.start(),request:input=>native.request(input),stream:(input,signal,onText,onReplyReady)=>streamNativeAgent(native,input,signal,onText,onReplyReady)};
+// A start carries its request id so native can tell which launch a later cancelStart owns.
+export function nativeAgentBridge(port:Omit<LocalAgentBridge,'subscribeVoiceEvents'>&NativeStreamPort&NativeVoiceEventPort):LocalAgentBridge{
+  return {subscribeVoiceEvents:(ownerId,listener)=>subscribeNativeVoiceEvents(port,ownerId,listener),start:input=>port.start(input),cancelStart:input=>port.cancelStart!(input),request:input=>port.request(input),stream:(input,signal,onText,onReplyReady)=>streamNativeAgent(port,input,signal,onText,onReplyReady)};
+}
+const nativeBridge:LocalAgentBridge=nativeAgentBridge(native);
 // The host bridge at /__alpha-local-agent exists only on the development server
 // with test mocks or the explicit real Cloud resident mode. This
 // module is also imported by Node contract tests, where import.meta.env is absent.
@@ -77,6 +81,10 @@ function record(value:unknown):Record<string,any> {
 // ordinary stop → bind → start path, so a listening but unusable runtime is still restarted by a
 // retry. Cleared by the next verified connection.
 let attachDistrusted=false;
+/** Marks an HTTP refusal answered by the on-device agent itself. Its status says nothing about the
+ * Eliza Cloud sign-in: a 401 here is the agent's own owner session, never an expired Cloud key. */
+export const LOCAL_AGENT_ERROR_SOURCE='local-agent';
+export const localAgentRefusal=(error:unknown):boolean=>!!error&&typeof error==='object'&&(error as {source?:unknown}).source===LOCAL_AGENT_ERROR_SOURCE;
 function identifier(value:unknown):string {
   if (typeof value !== 'string' || !value || value.length>512) throw new Error('Invalid local agent identity.');
   return value;
@@ -113,7 +121,7 @@ export class LocalAgentProtocol {
       ...(body===undefined?{}:{body:JSON.stringify(body)}),timeoutMs:120000},signal),cancelled]); } finally { signal.removeEventListener('abort',cancel); }
     signal.throwIfAborted();
     if(generation!==this.generation)throw new Error('Local agent connection changed.');
-    if(response.status<200||response.status>=300)throw Object.assign(new Error(`Local agent request failed (HTTP ${response.status}).`),{status:response.status,data:(()=>{try{return JSON.parse(response.body||'{}');}catch{return {};}})()});
+    if(response.status<200||response.status>=300)throw Object.assign(new Error(`Local agent request failed (HTTP ${response.status}).`),{status:response.status,source:LOCAL_AGENT_ERROR_SOURCE,data:(()=>{try{return JSON.parse(response.body||'{}');}catch{return {};}})()});
     return JSON.parse(response.body || '{}');
   }
   async connect(signal:AbortSignal) {
@@ -222,7 +230,7 @@ export class LocalAgentProtocol {
       return new Blob([bytes],{type:'audio/wav'});
     }finally{this.streams.delete(controller);}
   }
-  async disconnect() { for(const close of this.voiceSubscriptions)close();this.voiceSubscriptions.clear();this.generation++; this.session=null; for(const controller of this.streams)controller.abort();this.streams.clear(); }
+  async disconnect() { for(const close of this.voiceSubscriptions)close();this.voiceSubscriptions.clear();this.generation++; this.session=null; this.rooms.clear(); for(const controller of this.streams)controller.abort();this.streams.clear(); }
   private async json(path:string,body:unknown|undefined,signal?:AbortSignal) {
     if(!this.session)throw new Error('Start the local agent first.');
     return record(await this.request(path,body,signal||new AbortController().signal));
@@ -276,13 +284,20 @@ export class LocalAgentProtocol {
     if(typeof value.text!=='string'||typeof value.agentName!=='string')throw new Error('Invalid local agent reply.');
     return value as RemoteChatReply;
   }
+  /** Conversation → room, as the agent's conversation list reported it. A conversation keeps its
+   * room, so Stop reads the list once per conversation on this connection, not on every call. */
+  private rooms=new Map<string,string>();
   /** Explicit Stop through upstream's `POST /api/turns/:roomId/abort`. The room comes from the
    * agent's conversation list. Any refusal reports `unsupported`; it is never retried. */
   async abortTurn(conversationId:string,signal:AbortSignal=new AbortController().signal):Promise<TurnAbortOutcome>{
     if(!this.session)return 'unsupported';
     const generation=this.generation;
     try{
-      const room=conversationRoomId(await this.listConversations(signal),conversationId);
+      let room=this.rooms.get(conversationId);
+      if(!room){
+        room=conversationRoomId(await this.listConversations(signal),conversationId)??undefined;
+        if(room&&generation===this.generation)this.rooms.set(conversationId,room);
+      }
       if(!room)return 'unsupported';
       const outcome=turnAbortOutcome(await this.request(turnAbortPath(room),{reason:'client-stop'},signal));
       if(generation!==this.generation)throw Error('Local agent connection changed.');
@@ -387,11 +402,21 @@ export async function configureLocalCloudProvider(credentialId:string) {
 export async function stopLocalAgent() {
   if(!Capacitor.isNativePlatform()||!native.stop)throw Error('Stop browser development with Ctrl-C in its terminal.');
   await native.stop();
-  const deadline=performance.now()+30000;
-  while(performance.now()<deadline){
-    const status=await native.getStatus?.();
+  await awaitLocalAgentStopped(()=>native.getStatus!());
+}
+/** Waits until native confirms the service and its socket are gone. One failed status read says
+ * nothing about the shutdown, so it is read again. Reads start 200 ms apart and back off to one
+ * second: a slow shutdown costs a bounded number of bridge calls. */
+export async function awaitLocalAgentStopped(getStatus:()=>Promise<{state?:string;serviceActive?:boolean;socketListening?:boolean}|undefined>,
+  clock:{now():number;sleep(ms:number):Promise<void>}={now:()=>performance.now(),sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms))},timeoutMs=30000):Promise<void> {
+  const deadline=clock.now()+timeoutMs;
+  let delay=200;
+  while(clock.now()<deadline){
+    let status:Awaited<ReturnType<typeof getStatus>>;
+    try{status=await getStatus();}catch{status=undefined;}
     if(status?.state==='stopped'&&status.serviceActive===false&&status.socketListening===false)return;
-    await new Promise(resolve=>setTimeout(resolve,200));
+    await clock.sleep(delay);
+    delay=Math.min(delay*2,1000);
   }
   throw Error('Shutdown is still pending. Check local agent status before starting again.');
 }

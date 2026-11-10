@@ -4,7 +4,7 @@ import {registerPlugin} from './platform-plugins';
 import {connectionController} from './runtime/connection-ui';
 import {cloudServiceName} from './runtime/cloud-protocol';
 import {googleConnectionController} from './runtime/google-connection-ui';
-import {readStartupPermissionMemory,writeStartupPermissionMemory,startupPhotoAccess,startupLocationAccess,startupPlanNotice,STARTUP_PERMISSIONS_REOPEN} from './startup-permission-flow';
+import {readStartupPermissionMemory,writeStartupPermissionMemory,startupPhotoAccess,startupLocationAccess,startupPlanNotice,startupPermissionRewind,STARTUP_PERMISSIONS_REOPEN,STARTUP_PERMISSION_ACTION_TIMEOUT} from './startup-permission-flow';
 import {iconStyle} from './icon-style';
 import {browserStartupPermission} from './startup-browser-permissions';
 import {createStartupPermissionFlow, startupPermissionKeys, nativeStartupPermissionKeys, type NativeStartupPermissionKey as PermissionKey, type StartupPermissionState} from './startup-permission-flow';
@@ -73,11 +73,15 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       calendar: {status: async () => permissionAccess((await calendar.checkPermissions()).calendar), request: () => calendar.requestAccess(), openSettings: () => device.openSettings({page: 'privacy'})},
       location: {status: async () => {const raw=await location.checkPermissions();const access=startupLocationAccess(raw);locationDescription.current=access.limited?access.description:'';return {...access,requestable:raw.location!=='denied'};}, request: () => location.requestPermissions(), openSettings: () => device.openSettings({page: 'privacy'})},
     } as const;
-    return Object.fromEntries(keys.map(key => [key, createStartupPermissionFlow(native ? nativeBridges[key] : browserStartupPermission(key as typeof startupPermissionKeys[number], {permissions: navigator.permissions, media: navigator.mediaDevices, geolocation: navigator.geolocation, notifications: typeof Notification === 'undefined' ? undefined : Notification}), {key: native ? key : 'browser'+key})])) as Record<PermissionKey, ReturnType<typeof createStartupPermissionFlow>>;
+    return Object.fromEntries(keys.map(key => [key, createStartupPermissionFlow(native ? nativeBridges[key] : browserStartupPermission(key as typeof startupPermissionKeys[number], {permissions: navigator.permissions, media: navigator.mediaDevices, geolocation: navigator.geolocation, notifications: typeof Notification === 'undefined' ? undefined : Notification}), native ? {key, actionTimeout: STARTUP_PERMISSION_ACTION_TIMEOUT} : {key: 'browser'+key})])) as Record<PermissionKey, ReturnType<typeof createStartupPermissionFlow>>;
   });
   const [progress, setProgress] = useState(() => savedProgress(native));
   const [active, setActive] = useState(() => !!savedProgress(native));
   const [target, setTarget] = useState<PermissionKey | null>(null);
+  // A walkthrough reopened over completed setup is a review: its place is kept in memory only, the
+  // completed marker stays, and every step can be closed.
+  const [review, setReview] = useState(false);
+  const reviewRef = useRef(false);
   const progressRef = useRef(progress), targetRef = useRef<PermissionKey | null>(null);
   const [states, setStates] = useState<Record<PermissionKey, StartupPermissionState>>({notifications: 'checking', microphone: 'checking', camera: 'checking', location: 'checking', calendar: 'checking', photos: 'checking'});
   const [busy, setBusy] = useState(false);
@@ -88,7 +92,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const state = states[key];
   const visible = (active || ready) && (enabled || reopened) && !connection.open && !googleOpen;
   const writeProgress = (value: Progress | null) => {
-    try {
+    if (!reviewRef.current) try {
       writeStartupPermissionProgress(localStorage, {version: native ? 3 : 1, status: value ? 'pending' : 'completed', step: value?.step ?? keys.length}, native);
     } catch { setProgressError(true); return false; }
     setProgressError(false); progressRef.current = value; setProgress(value);
@@ -100,7 +104,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   useEffect(() => { if (!enabled) ++sequence.current; }, [enabled, connection.cloudAccount?.credentialId]);
   useEffect(() => {
     if (!connection.setupRevision) return;
-    ++sequence.current;setReopened(false);setTarget(null);targetRef.current=null;
+    ++sequence.current;setReopened(false);setTarget(null);targetRef.current=null;reviewRef.current=false;setReview(false);
     const resume=savedProgress(native);completedReady.current=!resume;setReady(!resume);setActive(!!resume);if(resume)writeProgress(resume);
   }, [connection.setupRevision]);
   useEffect(() => {
@@ -108,8 +112,8 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     const refresh = async () => {
       const results = await Promise.all(keys.map(async key => {const value = await flows[key].refresh(); if (!disposed && value !== null) setStates(previous => ({...previous, [key]: value})); return value;}));
       if (!disposed && results.some(value => value !== null)) {
-        const current = progressRef.current, missing = results.findIndex(value => value !== 'ready');
-        if (!targetRef.current && current && missing >= 0 && (missing < current.step || readyRef.current)) {setReady(false);setActive(true);writeProgress({version: 3, step: missing, choices: current.choices.slice(0, missing)});}
+        const current = progressRef.current, missing = current ? startupPermissionRewind(results, current.step, readyRef.current) : -1;
+        if (!targetRef.current && current && missing >= 0) {setReady(false);setActive(true);writeProgress({version: 3, step: missing, choices: current.choices.slice(0, missing)});}
         changed();
       }
     };
@@ -127,7 +131,8 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       ++sequence.current;completedReady.current=false;
       targetRef.current = typeof selected === 'string' && keys.includes(selected as PermissionKey) ? selected as PermissionKey : null;
       setTarget(targetRef.current);
-      if (!selected) {const resume=savedProgress(native)??{version:3 as const,step:0,choices:[]};if(!writeProgress(resume))return;}
+      if (!selected) {const resume=savedProgress(native);reviewRef.current=!resume;setReview(!resume);if(!writeProgress(resume??{version:3 as const,step:0,choices:[]}))return;}
+      else if (reviewRef.current) {reviewRef.current=false;setReview(false);progressRef.current=null;setProgress(null);}
       setReopened(true);setReady(false);
       setActive(true);
       void Promise.all(keys.map(async key => {const value = await flows[key].refresh(); if (alive.current && value !== null) setStates(previous => ({...previous, [key]: value}));}));
@@ -149,10 +154,14 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     return () => window.removeEventListener('alpha-back', back, true);
   }, [visible]);
 
-  useEffect(() => {if (visible && !target && progress) {try {writeStartupPermissionProgress(localStorage, {version: native ? 3 : 1, status: 'pending', step: progress.step}, native); setProgressError(false);} catch {setProgressError(true);}}}, [visible, target, progress]);
+  useEffect(() => {if (visible && !target && !review && progress) {try {writeStartupPermissionProgress(localStorage, {version: native ? 3 : 1, status: 'pending', step: progress.step}, native); setProgressError(false);} catch {setProgressError(true);}}}, [visible, target, review, progress]);
 
   useEffect(() => {if (visible) dialog.current?.querySelector<HTMLHeadingElement>('h2')?.focus({preventScroll: true});}, [key, visible, ready]);
 
+  function closeReview() {
+    reviewRef.current=false;setReview(false);progressRef.current=null;setProgress(null);
+    writeStartupPermissionMemory({dismissed:true});setActive(false);setReady(false);
+  }
   function advance(choice: Progress['choices'][number]) {
     if (target) {setActive(false); return;}
     const current = progress ?? {version: 3 as const, step: 0, choices: []};
@@ -192,6 +201,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       setStates(previous=>({...previous,...Object.fromEntries(keys.map((key,index)=>[key,results[index]??'unavailable']))}));
       const missing=results.findIndex(value=>value!=='ready');
       if(missing>=0){setReady(false);setActive(true);writeProgress({version:3,step:missing,choices:Array(missing).fill('continued')});return;}
+      if(reviewRef.current){closeReview();return;}
       if(!writeProgress(null))return;
       writeStartupPermissionMemory({dismissed:true});setActive(false);setReady(false);
       try{sessionStorage.setItem(dismissedKey,'1');}catch{}
@@ -219,7 +229,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       {state === 'unavailable' && <p className="alpha-permission-status" role="status">Couldn’t check access.</p>}
       {progressError && <p className="alpha-permission-status" role="alert">Setup progress could not be saved. Try again.</p>}
       {/* Nubs removed Skip from full onboarding; the previous optional flow remains in Git. */}
-      <div className="alpha-permission-actions"><button className="alpha-permission-primary" type="button" disabled={busy || state === 'checking'} onClick={() => void allow()}>{state === 'checking' ? 'Checking…' : primary}</button>{target && !( !native && state === 'ready') && <button className="alpha-permission-skip" type="button" disabled={busy} onClick={() => advance('continued')}>Done</button>}</div>
+      <div className="alpha-permission-actions"><button className="alpha-permission-primary" type="button" disabled={busy || state === 'checking'} onClick={() => void allow()}>{state === 'checking' ? 'Checking…' : primary}</button>{(review || target && !( !native && state === 'ready')) && <button className="alpha-permission-skip" type="button" disabled={busy} onClick={() => review ? closeReview() : advance('continued')}>Done</button>}</div>
     </div>
   </dialog>;
 }

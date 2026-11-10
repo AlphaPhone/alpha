@@ -28,6 +28,9 @@ public class MainActivity extends BridgeActivity {
  // Renderer recovery is process-wide so a crash loop backs off instead of spinning (RendererRecoveryBudget).
  private static final RendererRecoveryBudget recoveryBudget = new RendererRecoveryBudget();
  private boolean recoveringRenderer = false;
+ // Deaths the budget had counted when this activity's WebView was created; a later count means the
+ // shared renderer's death was already reported by another activity.
+ private long rendererDeathsAtCreate;
  /** Alpha is the home activity here: a renderer crash loop must not leave a blank, inescapable HOME. */
  private boolean showsHome() { return BuildConfig.IS_LAUNCHER && !isAssistantSurface() && startedAsHome; }
  /**
@@ -82,7 +85,7 @@ public class MainActivity extends BridgeActivity {
    recoveringRenderer = true;
    if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
    view.destroy();
-   RendererRecoveryBudget.Action action = recoveryBudget.onLoss(SystemClock.elapsedRealtime(), showsHome());
+   RendererRecoveryBudget.Action action = recoveryBudget.onLoss(SystemClock.elapsedRealtime(), showsHome(), rendererDeathsAtCreate);
    if (action == RendererRecoveryBudget.Action.SHOW_ESCAPE) { showRendererEscape(); return true; }
    getWindow().getDecorView().postDelayed(() -> { if (!isFinishing() && !isDestroyed()) recreate(); }, RendererRecoveryBudget.delay(action));
    return true;
@@ -282,6 +285,7 @@ public class MainActivity extends BridgeActivity {
    try { registerPlugin(Class.forName("ai.elizaresearch.alphaphone.DevelopmentAgentPlugin").asSubclass(com.getcapacitor.Plugin.class)); }
    catch (ClassNotFoundException ignored) { /* Test-mocks overlay not attached to this build. */ }
   }
+  rendererDeathsAtCreate = recoveryBudget.deaths();
   super.onCreate(state);
   // Capacitor displays its no-WebView fallback without creating a bridge when
   // the system provider cannot initialize. Preserve that screen and lifecycle.

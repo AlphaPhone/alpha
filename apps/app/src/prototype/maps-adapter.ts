@@ -1,6 +1,6 @@
-import { usableNavigationFix } from '../maps/navigation-fix';
+import { usableNavigationFix, watchNavigationFixes } from '../maps/navigation-fix';
 import {distanceToRoute,routeProgress} from '../maps/route-distance';
-import {atStep,guidanceView} from '../maps/guidance';
+import {advanceStep,atStep,guidanceView} from '../maps/guidance';
 import {BackgroundNavigation,type NavigationBridge} from '../maps/background-navigation';
 import {registerPlugin} from '../platform-plugins';
 import {DailyApps} from '../daily';
@@ -63,7 +63,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   // Origin picking reuses the results sheet; navigation state is per explicit Start.
   // The starting point the user typed or chose; a late GPS fix never replaces it.
   let chosenOrigin: {coordinate: Coordinate; label?: string} | undefined;
-  let originMode=false, navStep=0, navFix: Position | undefined, navRouteId='', follow=true, offRoute=false, rerouting=false, navSession=0, backgroundRunning=false, rerouteCleared=false;
+  let originMode=false, navStep=0, navCleared=0, navFix: Position | undefined, navRouteId='', follow=true, offRoute=false, rerouting=false, navSession=0, backgroundRunning=false, rerouteCleared=false;
   // The route being followed. The shared controller clears its route while a reroute is planned
   // and keeps an error when one fails; guidance follows this one until a new route replaces it.
   let navRoute: Route | undefined, rerouteTimer: ReturnType<typeof setTimeout> | undefined, rerouteAttempts=0;
@@ -161,7 +161,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         // An explicit reroute keeps the session; the new route replaces the old one.
         // Only a route planned after the reroute request replaced the old one is accepted.
         if(next.route.phase!=='ready'&&next.route.phase!=='error')rerouteCleared=true;
-        else if(next.route.phase==='ready'&&next.route.value&&rerouteCleared){rerouting=false;navStep=0;navRoute=next.route.value;navRouteId=navRoute.id;clearRerouteRetry();rerouteAttempts=0;navigationVoice.pause();message='New route ready.';}
+        else if(next.route.phase==='ready'&&next.route.value&&rerouteCleared){rerouting=false;navStep=0;navCleared=0;navRoute=next.route.value;navRouteId=navRoute.id;clearRerouteRetry();rerouteAttempts=0;navigationVoice.pause();message='New route ready.';}
         // A failed reroute keeps the route being followed and tries again shortly.
         else if(next.route.phase==='error'&&rerouteCleared){rerouting=false;message=REROUTE_KEPT;scheduleRerouteRetry();}
       }
@@ -239,9 +239,10 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     if(arrived){navigationVoice.pause();clearRerouteRetry();message='Destination reached.';offRoute=false;void navigationLocation.stop();void background.stop();backgroundRunning=false;}
     else{
       const nearest=distanceToRoute(fix.coordinate,current.geometry);offRoute=nearest>Math.max(75,fix.accuracyMeters*2);
-      // As before, a maneuver is passed once a fix comes within 40 m of it.
-      while(navStep<current.steps.length-1&&distance(fix.coordinate,current.steps[navStep].coordinate)<40)navStep++;
-      const reading=atStep(routeProgress(fix.coordinate,current),current.steps,navStep),view=guidanceView(reading,undefined,current.traffic),next=reading.next;
+      // A maneuver is passed once a fix comes near it, or once two fixes in a row lie clear beyond it.
+      const progress=routeProgress(fix.coordinate,current);
+      ({index:navStep,cleared:navCleared}=advanceStep({index:navStep,cleared:navCleared},current,progress,fix,!offRoute));
+      const reading=atStep(progress,current.steps,navStep),view=guidanceView(reading,undefined,current.traffic),next=reading.next;
       // A retry after a failed reroute keeps its notice until the next attempt.
       message=offRoute?(rerouteTimer!==undefined?REROUTE_KEPT:OFF_ROUTE):'';
       if(offRoute){navigationVoice.pause();background.update('Off route','Open Maps to reroute from here or stop.');}
@@ -253,7 +254,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   function startGuidance():boolean{
     const route=state?.route.phase==='ready'?state.route.value:null,target=selected;
     if(navigating||!directions||!route||!target)return false;
-    navigationVoice.pause();arrived=false;navigating=true;follow=true;navStep=0;offRoute=false;rerouting=false;navFix=undefined;navRoute=route;navRouteId=route.id;backgroundRunning=false;clearRerouteRetry();rerouteAttempts=0;
+    navigationVoice.pause();arrived=false;navigating=true;follow=true;navStep=0;navCleared=0;offRoute=false;rerouting=false;navFix=undefined;navRoute=route;navRouteId=route.id;backgroundRunning=false;clearRerouteRetry();rerouteAttempts=0;
     const session=++navSession;message='Finding your location…';
     // Screen-off continuation only where the native session is available; the
     // notification's Stop ends this exact session once.
@@ -262,7 +263,8 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       // service drops back to foreground-only guidance, which a hidden page then releases.
       if(reason==='notification'){message='Navigation stopped from the notification.';endGuidance();return;}
       backgroundRunning=false;message='Keep the screen on for guidance.';if(document.hidden)release();else invalidate();}).then(running=>{if(session!==navSession||!navigating){if(running)void background.stop();return;}backgroundRunning=running;invalidate();});
-    void navigationLocation.start(false,onNavFix,error=>{if(session!==navSession)return;message=failure(error).message;void stopGuidance().catch(()=>{});invalidate();});invalidate();
+    // A watch that could not start ends this session with its reason, as a failing watch does.
+    watchNavigationFixes(navigationLocation,onNavFix,error=>{if(session!==navSession)return;message=failure(error).message;void stopGuidance().catch(()=>{});invalidate();});invalidate();
     return true;
   }
   let pinTap: (id: string) => void = () => {};

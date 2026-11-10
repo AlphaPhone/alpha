@@ -35,6 +35,13 @@ import java.util.regex.Pattern;
  * filter is refused and never sent again. The filter has no false negatives; a false positive only
  * refuses one fresh ID (the caller starts a new review with a new ID), so storage stays bounded and
  * sending is never permanently locked out.
+ *
+ * Storage: the records change with every sent and delivery callback; the retired state (watermark,
+ * filter and tombstones) changes only when the bound drops a record. Given a second storage, the
+ * journal keeps the retired state there and rewrites it only when it changed, always before the
+ * record storage that no longer holds the dropped records, so an interrupted save can leave an ID
+ * in both places but never in neither. The record storage then names the retired generation it
+ * relies on, and a missing or older retired state is an error, never an empty one.
  */
 final class SmsSendJournal {
  static final int MAX_RECIPIENTS = 5, MAX_BODY = 1600, MAX_PARTS_PER_RECIPIENT = 10, MAX_RECORDS = 200, MAX_TOMBSTONES = 1000;
@@ -107,6 +114,12 @@ final class SmsSendJournal {
 
  interface Storage { String read() throws IOException; void write(String value) throws IOException; }
  private final Storage storage;
+ /** Holds the retired state apart from the records, or null when one storage holds both. */
+ private final Storage retiredStorage;
+ /** Generation of the retired state last written to its own storage; 0 before the first write. */
+ private long retiredGeneration;
+ /** The retired state in memory differs from its own storage. */
+ private boolean retiredDirty;
  private final Map<String, Record> records = new LinkedHashMap<>();
  /** Operation ID to binding hash of records dropped by the bound, oldest first. */
  private final Map<String, String> tombstones = new LinkedHashMap<>();
@@ -118,7 +131,8 @@ final class SmsSendJournal {
   * keep no address metadata, so provider-row attribution near or after this time is ambiguous.
   */
  private long prunedThrough = Long.MIN_VALUE;
- SmsSendJournal(Storage storage) throws IOException { this.storage = storage; load(); }
+ SmsSendJournal(Storage storage) throws IOException { this(storage, null); }
+ SmsSendJournal(Storage storage, Storage retiredStorage) throws IOException { this.storage = storage; this.retiredStorage = retiredStorage; load(); }
  /** File adapter is used only by the JVM tests; Android supplies encrypted credential storage. */
  SmsSendJournal(File file) throws IOException { this(new Storage() {
   public String read() throws IOException { return file.exists() ? new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8) : null; }
@@ -330,6 +344,7 @@ final class SmsSendJournal {
     each.remove();
     tombstones.remove(record.operationId);
     tombstones.put(record.operationId, record.bindingHash);
+    retiredDirty = true;
     // Only dispatched records can own provider rows; cancelled or denied ones never reached Android.
     if (record.decision == null) prunedThrough = Math.max(prunedThrough, record.createdAt);
    }
@@ -352,6 +367,7 @@ final class SmsSendJournal {
   if (retired == null) retired = new byte[FILTER_BITS / 8];
   for (int bit : probes(operationId)) retired[bit >>> 3] |= (byte) (1 << (bit & 7));
   retiredCount++;
+  retiredDirty = true;
  }
  /** True when the ID was compacted (or, rarely, collides with compacted IDs). Either way it is refused. */
  synchronized boolean isRetired(String operationId) {
@@ -422,44 +438,96 @@ final class SmsSendJournal {
  }
  private void load() throws IOException {
   String saved = storage.read();
-  if (saved == null) return;
-  boolean watermark = false;
+  boolean[] watermark = { false };
+  long relied = 0;
+  boolean inline = false;
   // A damaged journal is an error, never an empty one: an empty journal would allow a resend.
-  for (String line : saved.split("\n")) {
+  if (saved != null) for (String line : saved.split("\n")) {
    if (line.isEmpty()) continue;
-   if (line.startsWith("w1|")) {
+   if (line.startsWith("x1|")) {
     String[] f = line.split("\\|", -1);
-    if (f.length != 2 || watermark) throw new IllegalArgumentException("record");
-    prunedThrough = Long.parseLong(f[1]); watermark = true;
+    if (f.length != 2 || relied != 0) throw new IllegalArgumentException("record");
+    relied = Long.parseLong(f[1]);
+    if (relied < 1) throw new IllegalArgumentException("record");
     continue;
    }
-   if (line.startsWith("r1|")) {
-    String[] f = line.split("\\|", -1);
-    if (f.length != 3 || retired != null) throw new IllegalArgumentException("record");
-    byte[] filter = java.util.Base64.getDecoder().decode(f[2]);
-    long count = Long.parseLong(f[1]);
-    if (filter.length != FILTER_BITS / 8 || count < 1) throw new IllegalArgumentException("record");
-    retired = filter; retiredCount = count;
-    continue;
-   }
-   if (line.startsWith("t1|")) {
-    String[] f = line.split("\\|", -1);
-    if (f.length != 3 || !OPERATION.matcher(f[1]).matches() || !f[2].matches("[0-9a-f]{64}")) throw new IllegalArgumentException("record");
-    tombstones.put(f[1], f[2]);
-    continue;
-   }
+   if (loadRetired(line, watermark)) { inline = true; continue; }
    Record record = decode(line);
    records.put(record.operationId, record);
   }
+  if (retiredStorage == null) { if (relied != 0) throw new IllegalArgumentException("record"); }
+  else {
+   String part = retiredStorage.read();
+   if (part != null) {
+    // Retired state written by an earlier build beside the records is merged, then moved on the next save.
+    byte[] earlier = retired; long earlierCount = retiredCount; retired = null; retiredCount = 0;
+    for (String line : part.split("\n")) {
+     if (line.isEmpty()) continue;
+     if (line.startsWith("g1|")) {
+      String[] f = line.split("\\|", -1);
+      if (f.length != 2 || retiredGeneration != 0) throw new IllegalArgumentException("record");
+      retiredGeneration = Long.parseLong(f[1]);
+      if (retiredGeneration < 1) throw new IllegalArgumentException("record");
+      continue;
+     }
+     if (!loadRetired(line, watermark)) throw new IllegalArgumentException("record");
+    }
+    if (retiredGeneration == 0) throw new IllegalArgumentException("record");
+    if (earlier != null) {
+     if (retired == null) retired = earlier; else for (int i = 0; i < retired.length; i++) retired[i] |= earlier[i];
+     retiredCount = Math.max(retiredCount, earlierCount);
+    }
+   }
+   // The records rely on retired state that is gone or older than they last saw: IDs may be missing.
+   if (relied > retiredGeneration) throw new IllegalArgumentException("record");
+   retiredDirty = inline;
+  }
   // A journal written before the watermark existed has pruned records of unknown time: attribution
   // stays off for it rather than guessing.
-  if (!watermark && (!tombstones.isEmpty() || retired != null)) prunedThrough = Long.MAX_VALUE;
+  if (!watermark[0] && (!tombstones.isEmpty() || retired != null)) prunedThrough = Long.MAX_VALUE;
  }
- private void save() throws IOException {
-  StringBuilder out = new StringBuilder();
+ /** Reads one retired-state line (watermark, filter or tombstone); false for any other line. */
+ private boolean loadRetired(String line, boolean[] watermark) {
+  if (line.startsWith("w1|")) {
+   String[] f = line.split("\\|", -1);
+   if (f.length != 2) throw new IllegalArgumentException("record");
+   prunedThrough = watermark[0] ? Math.max(prunedThrough, Long.parseLong(f[1])) : Long.parseLong(f[1]); watermark[0] = true;
+   return true;
+  }
+  if (line.startsWith("r1|")) {
+   String[] f = line.split("\\|", -1);
+   if (f.length != 3 || retired != null) throw new IllegalArgumentException("record");
+   byte[] filter = java.util.Base64.getDecoder().decode(f[2]);
+   long count = Long.parseLong(f[1]);
+   if (filter.length != FILTER_BITS / 8 || count < 1) throw new IllegalArgumentException("record");
+   retired = filter; retiredCount = count;
+   return true;
+  }
+  if (line.startsWith("t1|")) {
+   String[] f = line.split("\\|", -1);
+   if (f.length != 3 || !OPERATION.matcher(f[1]).matches() || !f[2].matches("[0-9a-f]{64}")) throw new IllegalArgumentException("record");
+   tombstones.put(f[1], f[2]);
+   return true;
+  }
+  return false;
+ }
+ private void appendRetired(StringBuilder out) {
   if (prunedThrough != Long.MIN_VALUE) out.append("w1|").append(prunedThrough).append('\n');
   if (retired != null) out.append("r1|").append(retiredCount).append('|').append(java.util.Base64.getEncoder().encodeToString(retired)).append('\n');
   for (Map.Entry<String, String> dropped : tombstones.entrySet()) out.append("t1|").append(dropped.getKey()).append('|').append(dropped.getValue()).append('\n');
+ }
+ private void save() throws IOException {
+  StringBuilder out = new StringBuilder();
+  if (retiredStorage == null) appendRetired(out);
+  else {
+   if (retiredDirty) {
+    StringBuilder part = new StringBuilder("g1|").append(retiredGeneration + 1).append('\n');
+    appendRetired(part);
+    retiredStorage.write(part.toString());
+    retiredGeneration++; retiredDirty = false;
+   }
+   if (retiredGeneration > 0) out.append("x1|").append(retiredGeneration).append('\n');
+  }
   for (Record record : records.values()) out.append(encode(record)).append('\n');
   storage.write(out.toString());
  }

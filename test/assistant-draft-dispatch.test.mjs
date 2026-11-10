@@ -91,3 +91,13 @@ test('queued draft restore preserves both saved text and newer typing for review
  const f=queuedRestoreFixture('Previously saved draft'),opening=f.c.open('one');await tick();f.type('New unsent words');f.commit();await opening;await tick();
  assert.equal(f.get(),'New unsent words');assert.equal(f.saved().text,'Previously saved draft');assert.equal(f.c.state.conflict,true);assert.equal(f.c.state.savedText,'Previously saved draft');
 });
+test('reopening a held conversation with text already in the composer never offers the in-flight text as a conflict',async()=>{
+ const f=fixture();f.external('In flight');await f.c.open('one');await f.c.hold('In flight');f.set('');await tick();
+ f.c.retire();f.set('Typed while sending');await f.c.open('one');await tick();
+ assert.equal(f.c.state.conflict,false,'the message being sent is not a competing saved draft');assert.equal(f.c.state.savedText,'');
+ assert.equal(f.get(),'Typed while sending');assert.equal(f.saved().text,'Typed while sending');
+ await f.c.commit();await tick();assert.equal(f.get(),'Typed while sending');assert.equal(f.saved().text,'Typed while sending');assert.equal(f.c.state.error,false);
+ const other=fixture();other.external('Someone else saved this');await other.c.open('one');await other.c.hold('Someone else saved this');other.set('');await tick();
+ other.c.retire();other.external('A different saved draft');other.set('Typed');await other.c.open('one');
+ assert.equal(other.c.state.conflict,true,'a saved draft that is not the in-flight text is still reviewed');assert.equal(other.c.state.savedText,'A different saved draft');
+});

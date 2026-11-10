@@ -26,16 +26,18 @@ public final class AlphaSmsSendReceiver extends BroadcastReceiver {
   final PendingResult pending = goAsync();
   try {
    AlphaSms.WORK.execute(() -> {
+    // The broadcast stays pending until its evidence is recorded and, for the callback that queues
+    // the reconcile, until that reconcile has run, so the process is not stopped in between.
+    boolean held = false;
     try {
      SmsSendJournal journal = AlphaSms.journal(app);
      boolean changed = sent ? journal.sentResult(operation, index, ok) : journal.deliveryReported(operation, index);
-     java.util.Set<String> reconciled = AlphaSms.reconcile(app);
-     if (changed || reconciled.contains(operation)) AlphaSms.updated(operation);
-     for (String other : reconciled) if (!other.equals(operation)) AlphaSms.updated(other);
+     if (changed) AlphaSms.updated(operation);
+     held = AlphaSms.reconcileSoon(app, pending::finish);
     } catch (Exception unrecorded) {
      // The journal keeps its last durable evidence; the send stays unconfirmed rather than guessed.
     } finally {
-     pending.finish();
+     if (!held) pending.finish();
     }
    });
   } catch (java.util.concurrent.RejectedExecutionException closed) { pending.finish(); }

@@ -30,6 +30,8 @@ final class AudioTrackSpeechOutput implements StreamingSpeechPlayback.Output {
    .setBufferSizeInBytes(bytes)
    .build();
   if(track.getState()!=AudioTrack.STATE_INITIALIZED){track.release();throw new IllegalStateException("Speech output unavailable");}
+  // The default start threshold is the whole buffer, which a short utterance never fills.
+  if(android.os.Build.VERSION.SDK_INT>=android.os.Build.VERSION_CODES.S)try{track.setStartThresholdInFrames(StreamingSpeechPlayback.startThreshold(rate,track.getBufferCapacityInFrames()));}catch(RuntimeException unsupported){/* The platform default stays; startFrames() reports it. */}
   return new AudioTrackSpeechOutput(track,rate);
  }
  public void play(){track.play();}
@@ -50,4 +52,11 @@ final class AudioTrackSpeechOutput implements StreamingSpeechPlayback.Output {
  public void abort(){try{track.pause();track.flush();}catch(RuntimeException ignored){/* Already stopped or released. */}}
  public void stop(){try{track.stop();}catch(RuntimeException ignored){/* Already stopped. */}}
  public void release(){track.release();}
+ /** Android 12+ reports the threshold set at open; earlier releases start a stream once its buffer is full. */
+ public int startFrames(){
+  try{
+   if(android.os.Build.VERSION.SDK_INT>=android.os.Build.VERSION_CODES.S)return track.getStartThresholdInFrames();
+   return track.getBufferCapacityInFrames();
+  }catch(RuntimeException released){return 0;}
+ }
 }

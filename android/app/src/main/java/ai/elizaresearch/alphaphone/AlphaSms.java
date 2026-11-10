@@ -44,11 +44,13 @@ final class AlphaSms {
  private static final int MMS_FROM = 137;
  static final ExecutorService WORK = Executors.newSingleThreadExecutor();
 
- interface Listener { void sendUpdated(String operationId); }
- private static volatile Listener listener;
- static void listen(Listener value) { listener = value; }
- static void stopListening(Listener value) { if (listener == value) listener = null; }
- static void updated(String operationId) { Listener current = listener; if (current != null) current.sendUpdated(operationId); }
+ interface Listener extends SmsSendListeners.Listener { }
+ // One per live plugin instance: the launcher surface and the assistant surface each load their own
+ // bridge in this process, and closing one must not silence the other.
+ private static final SmsSendListeners LISTENERS = new SmsSendListeners();
+ static void listen(Listener value) { LISTENERS.add(value); }
+ static void stopListening(Listener value) { LISTENERS.remove(value); }
+ static void updated(String operationId) { LISTENERS.updated(operationId); }
 
  private static SmsSendJournal journal;
  /** The process's journal; an interrupted dispatch from an earlier process is reconciled to unknown on first load. */
@@ -56,7 +58,7 @@ final class AlphaSms {
   if (journal == null) {
    AlphaCredentialStore store = new AlphaCredentialStore(context);
    File legacy = new File(context.getNoBackupFilesDir(), "alpha-sms-sends.journal");
-   final String slot = "sms-send-ledger:v1:device";
+   final String slot = "sms-send-ledger:v1:device", retiredSlot = "sms-send-retired:v1:device";
    SmsSendJournal loaded = new SmsSendJournal(new SmsSendJournal.Storage() {
     public String read() throws IOException {
      try {
@@ -76,6 +78,17 @@ final class AlphaSms {
      } catch (Exception failure) { throw new IOException("SMS journal unavailable", failure); }
      // After a durable encrypted write, failing to delete the old copy must not read as an unrecorded send.
      removeLegacy(legacy);
+    }
+   }, new SmsSendJournal.Storage() {
+    // Tombstones and the retired-ID filter: rewritten only when the journal drops a record, so a
+    // sent or delivery callback re-encrypts the records alone.
+    public String read() throws IOException {
+     try { String encrypted = store.readCredentialSlot(retiredSlot); return encrypted == null ? null : new JSONObject(encrypted).getString("retired"); }
+     catch (Exception failure) { throw new IOException("SMS journal unavailable", failure); }
+    }
+    public void write(String value) throws IOException {
+     try { store.writeCredentialSlot(retiredSlot, new JSONObject().put("retired", value).toString()); }
+     catch (Exception failure) { throw new IOException("SMS journal unavailable", failure); }
     }
    });
    loaded.reconcile(boot(context), false);
@@ -327,6 +340,24 @@ final class AlphaSms {
  }
  private static String state(char value) { return value == SmsSendJournal.SUCCESS ? "success" : value == SmsSendJournal.FAILED ? "failed" : "unknown"; }
 
+ private static final SmsReconcileBatch RECONCILES = new SmsReconcileBatch();
+ /**
+  * Queues one provider reconciliation behind the callbacks already waiting on {@link #WORK} and
+  * returns true, or returns false while one is queued: it will see this caller's evidence too. A
+  * multipart send to several recipients reports each part twice, so one reconcile serves the burst.
+  * `done` runs after the reconcile and its notices, on WORK.
+  */
+ static boolean reconcileSoon(Context app, Runnable done) {
+  if (!RECONCILES.request()) return false;
+  try {
+   WORK.execute(() -> {
+    RECONCILES.begin();
+    try { for (String id : reconcile(app)) updated(id); }
+    finally { done.run(); }
+   });
+   return true;
+  } catch (java.util.concurrent.RejectedExecutionException closed) { RECONCILES.begin(); return false; }
+ }
  /**
   * Matches each sent recipient to the provider row the platform wrote (address, time window and body
   * hash; READ_SMS required) and applies that row's delivery status to parts whose delivery report

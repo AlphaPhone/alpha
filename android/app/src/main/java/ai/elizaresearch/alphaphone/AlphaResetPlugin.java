@@ -38,7 +38,11 @@ public final class AlphaResetPlugin extends Plugin {
   if(call==null||call!=authenticationCall||destroyed||!authorization.authenticate(authenticationToken,response.getResultCode()==Activity.RESULT_OK)){if(call!=null)result(call,"cancelled","Reset cancelled. Nothing reset.");return;}
   authenticationCall=null;
   try{AlphaDataReset.record(getContext());}
-  catch(Exception failure){result(call,"unavailable","Reset could not be prepared. Close and reopen Alpha before trying again.");if(AlphaDataReset.pending(getContext()))AlphaDataReset.dispatchAndExit(getContext());return;}
+  catch(Exception failure){
+   // The marker can be in place although recording threw (its directory could not be synced). The
+   // reset is then confirmed and pending, so it continues below exactly as a clean record does.
+   if(!AlphaDataReset.pending(getContext())){result(call,"unavailable","Reset could not be prepared. Close and reopen Alpha before trying again.");return;}
+  }
   // The reset is recorded first, so it completes on the next launch whatever happens below; that
   // launch revokes the Cloud key the same way (AlphaApplication) before anything is wiped.
   // Keep the reset visible while its bounded, best-effort revocation runs.

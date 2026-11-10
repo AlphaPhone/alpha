@@ -33,10 +33,16 @@ final class SpeechAudioFocusPolicy {
  static String admission(Mode mode){return callActive(mode)?CALL_ACTIVE:null;}
 
  /** The platform answered the focus request. */
- synchronized boolean granted(boolean granted){state=granted?State.HELD:State.IDLE;return granted;}
+ synchronized boolean granted(boolean granted){state=granted?State.HELD:State.IDLE;requested=granted;return granted;}
  synchronized boolean held(){return state!=State.IDLE;}
- /** Speech ended or was stopped: focus is abandoned. */
- synchronized void released(){state=State.IDLE;}
+ /**
+  * A granted request stays in the platform's focus stack until it is abandoned, also after a loss
+  * ended this utterance: left there, a transient loss would hand focus back to speech that no
+  * longer plays and keep the audio beneath it ducked.
+  */
+ private boolean requested;
+ /** Speech ended or was stopped. True when a granted request must now be abandoned. */
+ synchronized boolean released(){boolean abandon=requested;state=State.IDLE;requested=false;return abandon;}
  /** A focus change while speech holds focus. */
  synchronized Action changed(Event event){
   if(state==State.IDLE)return Action.NONE;

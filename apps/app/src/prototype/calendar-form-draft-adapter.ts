@@ -5,6 +5,11 @@ import {encodeCalendarForm,decodeCalendarForm,snapshotCalendarForm} from '../run
 import {openDomainRecovery} from '../browser/domain-recovery';
 import {browserDevProfile} from '../browser/dev-profile';
 type Bag=Record<string,any>;
+/** Whole days a form's day offset moves when the date changes from `anchor`'s to `today`'s: a form
+ * opened yesterday for "tomorrow" (off 1) is for today (off 0). */
+export const calendarFormDayShift=(anchor:Date,today:Date):number=>{const civil=(date:Date)=>Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());return (civil(anchor)-civil(today))/86400000;};
+/** Forms a retained draft keeps on their date: a creation draft (here) or an edit draft (calendar-edit-draft-adapter). */
+export const calendarFormRetained=(form:Bag|null|undefined):boolean=>!!form&&(form.id?!!(form.alphaCalendarId||form.alphaReminderId||form.googleEventId):!form.alphaCalendarId&&!form.alphaReminderId&&!!form.creationId);
 /** Retained creation forms use the existing transactional text-draft primitive. */
 export function installCalendarFormDraftAdapter(Component:any,views:Bag){
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount,render=views.calendar.render;
@@ -19,7 +24,16 @@ export function installCalendarFormDraftAdapter(Component:any,views:Bag){
  };
  p.componentDidUpdate=function(previous:Bag){
   update.call(this,previous);const form=this.vget('calendar').form;
-  if(!form||form.id||form.alphaCalendarId||form.alphaReminderId||!form.creationId)return;
+  // A form no draft retains (a new reminder, an edit of an unsent Google create) is not saved
+  // here, but its day still counts from today, so it follows the date like the retained ones.
+  if(!calendarFormRetained(form)){
+   if(!form){this.calendarPlainFormAnchor=undefined;return;}
+   const today=new Date(),shift=calendarFormDayShift(this.calendarPlainFormAnchor??=today,today);
+   if(shift&&Number.isFinite(form.off)){this.calendarPlainFormAnchor=today;this.vset('calendar',{form:{...form,off:form.off+shift}});}
+   return;
+  }
+  this.calendarPlainFormAnchor=undefined;
+  if(form.id)return;
   if(this.calendarDraftIdentity!==form.creationId){this.calendarDraftIdentity=form.creationId;this.calendarDraftAnchor=new Date();}
   const today=new Date(),anchor=this.calendarDraftAnchor as Date;
   const civil=(date:Date)=>Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());

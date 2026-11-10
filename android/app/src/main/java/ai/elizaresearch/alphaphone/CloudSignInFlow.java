@@ -194,6 +194,52 @@ final class CloudSignInFlow {
   return "unavailable";
  }
 
+ /** The connection itself failed: Cloud gave no answer, so nothing it holds was decided or consumed. */
+ static boolean transportFailure(String code) {
+  return "offline".equals(code) || "dns".equals(code) || "timeout".equals(code) || "secure-connection".equals(code);
+ }
+ /** What a failed code or MFA verification does to its attempt. */
+ enum VerifyFailure { RETRY, COUNTED, ENDED }
+ /**
+  * A wrong code is counted against the attempt's cap and may be retried. A verification request
+  * Cloud never answered leaves the attempt as it was, so the same code can be entered again. Every
+  * other failure ends the attempt, including a connection lost after Cloud accepted the code: that
+  * code is spent.
+  */
+ static VerifyFailure afterVerifyFailure(String code, boolean answered) {
+  if ("invalid-code".equals(code)) return VerifyFailure.COUNTED;
+  if (!answered && transportFailure(code)) return VerifyFailure.RETRY;
+  return VerifyFailure.ENDED;
+ }
+
+ /** Replaced Cloud keys kept until they are revoked: at most this many, the most recent last. */
+ static final int REPLACED_KEYS_LIMIT = 4;
+ /** The stored list of replaced keys, one printable ASCII token per line; anything else is dropped. */
+ static java.util.List<String> replacedKeys(String stored) {
+  java.util.List<String> keys = new java.util.ArrayList<>();
+  if (stored != null) for (String key : stored.split("\n", -1)) if (key.matches("[\\x21-\\x7e]{8,16384}") && !keys.contains(key)) keys.add(key);
+  return keys.size() <= REPLACED_KEYS_LIMIT ? keys : new java.util.ArrayList<>(keys.subList(keys.size() - REPLACED_KEYS_LIMIT, keys.size()));
+ }
+ private static String replacedKeysValue(java.util.List<String> keys) { return keys.isEmpty() ? null : String.join("\n", keys); }
+ /** The list after `issued` replaces `replaced`: the replaced key is added and the issued key is never on it. Null when empty. */
+ static String withReplacedKey(String stored, String replaced, String issued) {
+  java.util.List<String> keys = replacedKeys((stored == null ? "" : stored + "\n") + (replaced == null ? "" : replaced));
+  keys.remove(issued);
+  return replacedKeysValue(keys);
+ }
+ /** The list without the keys whose revocation was attempted. Null when empty. */
+ static String withoutReplacedKeys(String stored, java.util.Collection<String> attempted) {
+  java.util.List<String> keys = replacedKeys(stored);
+  keys.removeAll(attempted);
+  return replacedKeysValue(keys);
+ }
+ /** The replaced keys that may be revoked now: never the key this phone currently holds. */
+ static java.util.List<String> revocableKeys(String stored, String held) {
+  java.util.List<String> keys = replacedKeys(stored);
+  keys.remove(held);
+  return keys;
+ }
+
  /** Stable, non-secret failure codes shown to the renderer. Never derived from a response body. */
  static String failureForStatus(String stage, int status) {
   if (status == 429) return "rate-limited";

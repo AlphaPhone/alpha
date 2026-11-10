@@ -30,6 +30,30 @@ type Policy={maximumOutgoing:number;maximumTotalBytes:number};
 const forwardValid=(f:any)=>f===undefined||(!!f&&typeof f.messageId==='string'&&typeof f.historyId==='string'&&Array.isArray(f.parts)&&f.parts.length<=outgoingAttachmentLimits.maximumFiles&&f.parts.every((p:any)=>p&&typeof p.partId==='string'&&typeof p.name==='string'&&typeof p.mimeType==='string'&&typeof p.size==='number'));
 const address=(v:string)=>v.length<=254&&/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(v);
 const valid=(v:any,owner:string):v is Draft=>!!v&&v.version===1&&v.owner===owner&&typeof v.id==='string'&&typeof v.revision==='string'&&Array.isArray(v.to)&&v.to.length<=20&&v.to.every((a:any)=>typeof a==='string'&&address(a))&&[v.cc||[],v.bcc||[]].every((list:any)=>Array.isArray(list)&&list.length<=20&&list.every((a:any)=>typeof a==='string'&&address(a)))&&typeof v.subject==='string'&&v.subject.length<=998&&!/[\r\n]/.test(v.subject)&&typeof v.body==='string'&&v.body.length<=64000&&(!v.reply||(typeof v.reply.messageId==='string'&&typeof v.reply.threadId==='string'))&&(v.attachments===undefined||(Array.isArray(v.attachments)&&v.attachments.length<=outgoingAttachmentLimits.maximumFiles))&&forwardValid(v.forward)&&(v.earlierThanSent===undefined||v.earlierThanSent===true);
+/** Why a draft cannot be saved locally, naming the field at fault; '' when its fields are valid. */
+export function draftRefusal(v:any,owner:string):string{
+ if(valid(v,owner))return '';
+ const lists=[v?.to,v?.cc||[],v?.bcc||[]];
+ if(lists.every(list=>Array.isArray(list))){
+  if(lists.some(list=>list.length>20))return 'Use at most 20 addresses in each of To, Cc and Bcc.';
+  const bad=lists.flat().find((a:unknown)=>typeof a!=='string'||!address(a));
+  if(bad!==undefined)return `"${String(bad).slice(0,60)}" is not a valid email address. Correct To, Cc or Bcc before saving.`;
+ }
+ if(typeof v?.subject==='string'&&(v.subject.length>998||/[\r\n]/.test(v.subject)))return 'The subject is too long or contains a line break.';
+ if(typeof v?.body==='string'&&v.body.length>64000)return 'The message text is too long to save.';
+ if(Array.isArray(v?.attachments)&&v.attachments.length>outgoingAttachmentLimits.maximumFiles)return `Attach at most ${outgoingAttachmentLimits.maximumFiles} files.`;
+ return 'This draft cannot be saved in its current form.';
+}
+/** What opening a provider draft for editing does with the saved local draft, whose slot the opened
+ * copy takes. `replace`: there is none, it is the open email's own saved copy, or it already holds
+ * exactly this provider draft's content. `set-aside`: another saved draft is kept in Drafts first.
+ * `refuse`: another saved draft exists while an email is open; nothing is opened or overwritten. */
+export function savedDraftOnProviderEdit(saved:Bag|null,open:{id:string}|null,proposal:Bag,reference:{draftId:string}):'replace'|'set-aside'|'refuse'{
+ if(!saved||saved.id===open?.id)return 'replace';
+ if(open)return 'refuse';
+ const same=(a:unknown,b:unknown)=>JSON.stringify(a||[])===JSON.stringify(b||[]);
+ return saved.provider?.draftId===reference.draftId&&saved.subject===proposal.subject&&saved.body===proposal.bodyText&&same(saved.to,proposal.to)&&same(saved.cc,proposal.cc)&&same(saved.bcc,proposal.bcc)&&same(saved.attachments,proposal.attachments)&&!saved.forward?'replace':'set-aside';
+}
 /** Local encrypted drafts remain separate from explicitly reviewed provider operations. */
 export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider?:{prepare(proposal:Bag,source?:{draftId:string;savedRevision?:string}):Promise<void>;capabilities():{send:boolean;providerDrafts:boolean;from?:string;forwardAttachments?:boolean;attachmentPolicy?:Policy}|null}) {
  /** Servers without the multi-attachment policy accept one file. */
@@ -69,13 +93,18 @@ export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider
   if(!await setAside()||token!==epoch||!current())return false;
   return begin(undefined,undefined,'',target);
  }
- async function openShelved(id:string){const row=shelf?.items.find(item=>item.draft.id===id);if(!row||!ready||busy)return;if(row.draft.earlierThanSent&&!window.confirm('This is an earlier version of a sent email. Open it for editing? Sending it creates another message.'))return;const token=epoch;if(!await setAside()||token!==epoch)return;draft=structuredClone(row.draft);toQ=row.toQ;baseRevision=null;staleBase=false;open=true;confirm=false;status='Draft on this device';persist();publish();}
+ async function openShelved(id:string){const row=shelf?.items.find(item=>item.draft.id===id);if(!row||!ready||busy)return;if(row.draft.earlierThanSent&&!window.confirm('This is an earlier version of a sent email. Open it for editing? Sending it creates another message.'))return;const token=epoch;if(!await setAside()||token!==epoch)return;
+  // The earlier-version mark belongs to the stored copy. The editable copy does not carry it: the
+  // recovery record does not admit it, and text saved from here is new content, not an earlier version.
+  const {earlierThanSent:_earlier,...copy}=structuredClone(row.draft);draft=copy as Draft;toQ=row.toQ;baseRevision=null;staleBase=false;open=true;confirm=false;status=row.draft.earlierThanSent?'Earlier version of a sent email. Sending it creates another message; nothing has been sent.':'Draft on this device';persist();publish();}
 
  const pendingEdits=new Map<string,{draft:Draft;toQ:string;baseRevision:string|null;persist?:boolean}>();
  let retained:ReturnType<typeof inboxUnsaved>|null=null,baseRevision:string|null=null,staleBase=false;
  // The retained recovery record (runtime/inbox-unsaved-record.ts) does not yet admit forwarded source
  // attachments, so its copy omits them; the explicitly saved local draft keeps them.
- function persist(){reviewRevision++;if(draft){const {forward:_forward,...copy}=structuredClone(draft);retained?.edit({version:1,owner,baseRevision,draft:copy,toQ});}}
+ // The copy is shallow: it is serialised when the recovery record is written, so an edit does not
+ // duplicate the draft's attachments.
+ function persist(){reviewRevision++;if(draft){const {forward:_forward,...copy}=draft;retained?.edit({version:1,owner,baseRevision,draft:copy,toQ});}}
  function restoreRetained(value:any){draft=structuredClone(value.draft);toQ=value.toQ;baseRevision=value.baseRevision;staleBase=baseRevision!==(saved?.revision||null);open=true;confirm=false;status=staleBase?'The saved local draft changed. Review the latest saved copy before saving these edits.':draft?.mode==='forward'?'Retained forward edits restored without any original attachments; forward the message again to include them. Review before provider actions.':'Retained email edits restored. Review before provider actions.';publish();}
  let loading=false,ready=false,busy=false,open=false,confirm=false,toQ='',label='',status='',recipientDetails=false;
  let fromSwitch:{count():number;cycle():void}|null=null;
@@ -189,7 +218,8 @@ export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider
   if(staleBase){toast('The saved local draft changed. Review the latest saved copy before saving these edits.');return;}
   if(!remove&&toQ.trim()){add();if(toQ.trim())return;}
   const value=remove?null:{...draft,revision:crypto.randomUUID(),to:[...draft.to]};
-  if(value&&(!valid(value,owner)||new TextEncoder().encode(JSON.stringify(value)).length>8*1024*1024)){toast('Draft is too large or contains an invalid subject.');return;}
+  const refusal=value?draftRefusal(value,owner)||(new TextEncoder().encode(JSON.stringify(value)).length>8*1024*1024?'Draft is too large to save on this device. Remove an attachment or shorten it.':''):'';
+  if(refusal){toast(refusal);return;}
   const token=epoch,key=slot(),expected=saved;busy=true;publish();
   try{const receipt=await inboxLocalStore.compareExchange(key,expected,value);if(token!==epoch)return;
    if(receipt.status!=='saved'){status='Draft changed in another window. Close this composer and reload before replacing it.';ready=false;toast(status);return;}
@@ -258,7 +288,13 @@ export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider
    return begin(undefined,'reply','',{to:[],subject:'',body,status:'Agent suggestion placed in a local draft. Review and edit before sending; nothing has been sent.'});
   },suggestionTarget,
 setFromSwitch(value:typeof fromSwitch){fromSwitch=value;},get ready(){return ready&&!busy;},get hasDraft(){return !!draft;},
-  async editProvider(proposal:Bag,reference:{draftId:string;providerDigest:string}){if(retained?.available&&!draft){toast('Resume retained email edits before editing another provider draft.');return false;}if(!ready||busy){toast('Local draft storage unavailable');return false;}if(draft&&(draft.body!==proposal.bodyText||draft.subject!==proposal.subject||JSON.stringify(draft.to)!==JSON.stringify(proposal.to)||JSON.stringify(draft.cc||[])!==JSON.stringify(proposal.cc||[])||JSON.stringify(draft.bcc||[])!==JSON.stringify(proposal.bcc||[])||JSON.stringify(draft.attachments||[])!==JSON.stringify(proposal.attachments||[])))return false;draft={version:1,id:crypto.randomUUID(),revision:crypto.randomUUID(),owner,to:[...proposal.to],cc:[...(proposal.cc||[])],bcc:[...(proposal.bcc||[])],subject:proposal.subject,body:proposal.bodyText,mode:proposal.mode,attachments:proposal.attachments||[],provider:reference,...(proposal.replyMessageId?{reply:{messageId:proposal.replyMessageId,threadId:''}}:{})};baseRevision=saved?.revision||null;staleBase=false;open=true;confirm=false;status='Editing provider draft. Save locally to preserve edits. Gmail replacement is not atomic.';publish();await update();return saved?.provider?.draftId===reference.draftId&&saved?.provider?.providerDigest===reference.providerDigest;},
+  async editProvider(proposal:Bag,reference:{draftId:string;providerDigest:string}){if(retained?.available&&!draft){toast('Resume retained email edits before editing another provider draft.');return false;}if(!ready||busy){toast('Local draft storage unavailable');return false;}if(draft&&(draft.body!==proposal.bodyText||draft.subject!==proposal.subject||JSON.stringify(draft.to)!==JSON.stringify(proposal.to)||JSON.stringify(draft.cc||[])!==JSON.stringify(proposal.cc||[])||JSON.stringify(draft.bcc||[])!==JSON.stringify(proposal.bcc||[])||JSON.stringify(draft.attachments||[])!==JSON.stringify(proposal.attachments||[])))return false;
+   // Opening the provider draft writes it to the saved local draft slot. A saved draft that is another
+   // email is never overwritten by that: it is set aside in Drafts, or the open is refused.
+   const disposition=savedDraftOnProviderEdit(saved,draft,proposal,reference);
+   if(disposition==='refuse'){toast('Another saved local draft is on this device. Save or discard the open email first; the Gmail draft was not opened.');return false;}
+   if(disposition==='set-aside'){const token=epoch;if(!await setAside()||token!==epoch)return false;}
+   draft={version:1,id:crypto.randomUUID(),revision:crypto.randomUUID(),owner,to:[...proposal.to],cc:[...(proposal.cc||[])],bcc:[...(proposal.bcc||[])],subject:proposal.subject,body:proposal.bodyText,mode:proposal.mode,attachments:proposal.attachments||[],provider:reference,...(proposal.replyMessageId?{reply:{messageId:proposal.replyMessageId,threadId:''}}:{})};baseRevision=saved?.revision||null;staleBase=false;open=true;confirm=false;status='Editing provider draft. Save locally to preserve edits. Gmail replacement is not atomic.';publish();await update();return saved?.provider?.draftId===reference.draftId&&saved?.provider?.providerDigest===reference.providerDigest;},
   close(){if(!open)return false;if(busy){toast('Wait for the local draft update.');return true;}open=false;confirm=false;if(status==='Unsaved local draft')toast(retained?.status||'Edits remain in this session.');publish();return true;},
   /** The email now in the composer, in the shape Send reviews. A review of anything else is stale. */
   proposal():Bag|null{return draft?{mode:draft.mode||(draft.reply?'reply':'compose'),to:[...draft.to],cc:[...(draft.cc||[])],bcc:[...(draft.bcc||[])],subject:draft.subject,bodyText:draft.body,attachments:[...(draft.attachments||[])],...forwardProposal(draft),...(draft.reply?{replyMessageId:draft.reply.messageId}:{})}:null;},

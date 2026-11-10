@@ -21,12 +21,28 @@ final class RendererRecoveryBudget {
  private boolean started;
  private long windowStart;
  private int lossesInWindow;
+ private long deaths;
+ /** Renderer deaths counted so far. An activity reads this when it creates its WebView. */
+ synchronized long deaths(){return deaths;}
+ /**
+  * One loss as seen by a WebView created when {@link #deaths()} read createdAt. The app's WebViews
+  * share one renderer process, so its death reaches every live activity (the launcher surface and
+  * the assistant surface). The first report counts it; a WebView that predates a counted death is
+  * reporting that same death and gets the decision for the current count without spending again.
+  */
+ synchronized Action onLoss(long now,boolean home,long createdAt){
+  if(createdAt==deaths)return onLoss(now,home);
+  return decision(home);
+ }
+ private Action decision(boolean home){
+  if(lossesInWindow<=BUDGET)return Action.RECREATE_NOW;
+  return home?Action.SHOW_ESCAPE:Action.RECREATE_AFTER_BACKOFF;
+ }
  /** Counts one renderer loss at elapsed-realtime now and says how the activity recovers. */
  synchronized Action onLoss(long now,boolean home){
   if(!started||now-windowStart>WINDOW_MS||now<windowStart){started=true;windowStart=now;lossesInWindow=0;}
-  lossesInWindow++;
-  if(lossesInWindow<=BUDGET)return Action.RECREATE_NOW;
-  return home?Action.SHOW_ESCAPE:Action.RECREATE_AFTER_BACKOFF;
+  lossesInWindow++;deaths++;
+  return decision(home);
  }
  static long delay(Action action){return action==Action.RECREATE_AFTER_BACKOFF?BACKOFF_MS:0L;}
  /** The first candidate a stock activity handles, or null. */

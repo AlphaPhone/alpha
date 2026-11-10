@@ -74,6 +74,37 @@ export function mergeAutomationRows(rows:AutomationRow[]):AutomationRow[] {
  const records=new Map<string,AutomationRow>();for(const row of rows)if(!records.has(row.key))records.set(row.key,row);
  return [...records.values()].sort((a,b)=>Number(b.enabled)-Number(a.enabled)||a.title.localeCompare(b.title));
 }
+/** True only when a listing read after a retained request proves the state that request asked for now holds.
+ * Requests whose effect a listing cannot show (runs, schedule verbs, creations without a listed key, prompt edits)
+ * are never proven here; they stay retained until their owner clears them. A source with a listing issue proves nothing. */
+export function automationIntentApplied(intent:unknown,rows:AutomationRow[],issues:AutomationIssue[]):boolean {
+ if(!intent||typeof intent!=='object')return false;
+ const {kind,path,method,body}=intent as ObjectValue;if(kind!=='automation'||typeof path!=='string'||typeof method!=='string')return false;
+ const clean=(source:AutomationIssue['source'])=>!issues.some(issue=>issue.source===source),fields=body&&typeof body==='object'&&!Array.isArray(body)?body as ObjectValue:{},names=Object.keys(fields);
+ const trigger=/^\/api\/triggers\/([^/?#]+)$/.exec(path);
+ if(trigger){
+  if(!clean('automations'))return false;const row=rows.find(item=>item.kind==='prompt'&&item.triggerId===trigger[1]);
+  if(method==='DELETE')return !row;
+  return method==='PUT'&&names.length===1&&typeof fields.enabled==='boolean'&&!!row&&row.enabled===fields.enabled;
+ }
+ const definition=/^\/api\/lifeops\/definitions\/([^/?#]+)$/.exec(path);
+ if(definition&&method==='PUT'){
+  if(!clean('reminders')||!names.length||names.some(name=>!['title','description','status','cadence'].includes(name)))return false;
+  const row=rows.find(item=>item.kind==='reminder'&&item.id===definition[1]),saved=row?.record?.definition as ObjectValue|undefined;
+  if(names.length===1&&fields.status==='archived')return !row||saved?.status==='archived';
+  return !!saved&&names.every(name=>name==='cadence'?!!fields.cadence&&saved.cadence?.dueAt===fields.cadence.dueAt:saved[name]===fields[name]);
+ }
+ if(path==='/api/lifeops/definitions'&&method==='POST'&&typeof fields.idempotencyKey==='string'&&fields.idempotencyKey)return clean('reminders')&&rows.some(item=>item.kind==='reminder'&&item.record?.definition?.idempotencyKey===fields.idempotencyKey);
+ return false;
+}
+/** A short owner-facing name for a retained request that has no listed row. */
+export function automationIntentLabel(intent:unknown):string {
+ const value=intent&&typeof intent==='object'?intent as ObjectValue:{},fields=value.body&&typeof value.body==='object'?value.body as ObjectValue:{};
+ const name=(label:string,title:unknown)=>text(title).trim()?`${label} “${text(title).trim().slice(0,80)}”`:label;
+ if(value.method==='POST'&&value.path==='/api/triggers')return name('new prompt',fields.displayName);
+ if(value.method==='POST'&&value.path==='/api/lifeops/definitions')return name('new reminder',fields.title);
+ return 'automation request';
+}
 export class AutomationsProtocol {
  constructor(private request:AutomationRequest){}
  async list(signal:AbortSignal):Promise<AutomationSnapshot>{

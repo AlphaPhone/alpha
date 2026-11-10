@@ -448,26 +448,38 @@ public class AlphaTelephonyPlugin extends Plugin {
   */
  @PluginMethod public void sendSms(PluginCall call) {
   if (refused(call)) return;
-  main.post(() -> reviewSmsOnMain(call));
- }
- private void reviewSmsOnMain(PluginCall call) {
-  if (refused(call)) return;
-  String operationId = call.getString("operationId"), body = call.getString("body");
-  String[] recipients = numbers(call.getArray("recipients"));
+  final String operationId = call.getString("operationId"), body = call.getString("body");
+  final String[] recipients = numbers(call.getArray("recipients"));
   Object rawSubscription = call.getData().opt("subscriptionId");
-  int subscriptionId = rawSubscription instanceof Integer ? (Integer) rawSubscription : -1;
+  final int subscriptionId = rawSubscription instanceof Integer ? (Integer) rawSubscription : -1;
   try { SmsSendJournal.validate(operationId, recipients, body, subscriptionId); }
   catch (IllegalArgumentException invalid) { call.reject("Invalid reviewed message", "invalid"); return; }
-  final SmsSendJournal journal;
-  final SmsSendJournal.Record existing;
-  try {
-   journal = AlphaSms.journal(getContext());
-   existing = journal.existing(operationId, SmsSendJournal.sha256(SmsSendJournal.bindingText(recipients, body, subscriptionId)));
-  } catch (SmsSendJournal.Expired expired) { call.reject("This request is too old to read back. Nothing was sent again.", "expired"); return; }
-  catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
-  catch (Exception unreadable) { call.reject("The send record could not be read. Nothing was sent.", "unavailable"); return; }
-  if (existing != null) { call.resolve(AlphaSms.result(existing)); return; }
-  if (review != null) { call.reject("Another message is waiting for review", "busy"); return; }
+  // The journal is an encrypted slot: it is loaded, and every record written, on the SMS worker.
+  // The main thread only shows the review and takes the owner's decision.
+  journalWork(call, () -> {
+   final SmsSendJournal journal;
+   final SmsSendJournal.Record existing;
+   try {
+    journal = AlphaSms.journal(getContext());
+    existing = journal.existing(operationId, SmsSendJournal.sha256(SmsSendJournal.bindingText(recipients, body, subscriptionId)));
+   } catch (SmsSendJournal.Expired expired) { call.reject("This request is too old to read back. Nothing was sent again.", "expired"); return; }
+   catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
+   catch (Exception unreadable) { call.reject("The send record could not be read. Nothing was sent.", "unavailable"); return; }
+   if (existing != null) { call.resolve(AlphaSms.result(existing)); return; }
+   main.post(() -> reviewSmsOnMain(call, journal, operationId, recipients, body, subscriptionId));
+  });
+ }
+ /** Runs journal reads, writes and the platform send calls off the main thread, in the order queued. */
+ private void journalWork(PluginCall call, Runnable task) {
+  try { AlphaSms.WORK.execute(task); }
+  catch (java.util.concurrent.RejectedExecutionException stopped) { call.reject(LateLaunch.CLOSED); }
+ }
+ /** Operation IDs whose decision or dispatch is queued on the worker and not yet journaled. Main thread only. */
+ private final java.util.Set<String> recording = new java.util.HashSet<>();
+ private void reviewSmsOnMain(PluginCall call, SmsSendJournal journal, String operationId, String[] recipients, String body, int subscriptionId) {
+  if (refused(call)) return;
+  // Until the worker has journaled it, the ID has no record to read back: a second review of it must not open.
+  if (review != null || recording.contains(operationId)) { call.reject("Another message is waiting for review", "busy"); return; }
   final long now = System.currentTimeMillis(), boot = AlphaSms.boot(getContext());
   String blocked = sendBlocker(subscriptionId);
   if (blocked != null) { decide(call, journal, operationId, recipients, body, subscriptionId, "denied", now, boot); return; }
@@ -497,17 +509,21 @@ public class AlphaTelephonyPlugin extends Plugin {
      review = null; reviewCall = null; reviewCancelled = null;
      // Recheck everything at the moment of the owner's decision.
      if (!AlphaImageCapability.verified(getContext()) || !unlockedForeground() || sendBlocker(sub) != null) { decide(call, journal, operationId, to, body, sub, "denied", now, boot); return; }
-     try { call.resolve(AlphaSms.result(AlphaSms.dispatch(getContext(), journal, operationId, to, body, sub, parts, () -> {
-      SubscriptionInfo current = activeSubscription(sub);
-      if (!AlphaImageCapability.verified(getContext()) || !unlockedForeground() || sendBlocker(sub) != null || current == null || current.getSimSlotIndex() != reviewedSlot || current.getCarrierId() != reviewedCarrier) throw new IllegalStateException("Reviewed SIM or access changed");
-     }))); }
-     catch (Exception unrecorded) {
-      SmsSendJournal.Record record = journal.get(operationId);
-      if (record != null) call.resolve(AlphaSms.result(record));
-      // Nothing reached Android (access or the reviewed SIM changed, or the journal refused it):
-      // close the ID as denied so it is never sent later; decide() rejects if even that cannot be recorded.
-      else decide(call, journal, operationId, to, body, sub, "denied", now, boot);
-     }
+     // The journal write and the platform calls run on the worker. The guard repeats the access
+     // and SIM checks there before the record is written and before each recipient.
+     record(call, operationId, () -> {
+      try { call.resolve(AlphaSms.result(AlphaSms.dispatch(getContext(), journal, operationId, to, body, sub, parts, () -> {
+       SubscriptionInfo current = activeSubscription(sub);
+       if (!AlphaImageCapability.verified(getContext()) || !unlockedForeground() || sendBlocker(sub) != null || current == null || current.getSimSlotIndex() != reviewedSlot || current.getCarrierId() != reviewedCarrier) throw new IllegalStateException("Reviewed SIM or access changed");
+      }))); }
+      catch (Exception unrecorded) {
+       SmsSendJournal.Record record = journal.get(operationId);
+       if (record != null) call.resolve(AlphaSms.result(record));
+       // Nothing reached Android (access or the reviewed SIM changed, or the journal refused it):
+       // close the ID as denied so it is never sent later; this rejects if even that cannot be recorded.
+       else decideNow(call, journal, operationId, to, body, sub, "denied", now, boot);
+      }
+     });
     })
     .create();
    review.setOnDismissListener(dialog -> { if (reviewCall == call) cancelReview(); });
@@ -518,7 +534,17 @@ public class AlphaTelephonyPlugin extends Plugin {
    if (send != null) send.setFilterTouchesWhenObscured(true);
   } catch (RuntimeException closed) { review = null; reviewCall = null; reviewCancelled = null; call.reject(LateLaunch.CLOSED); }
  }
+ /** Main thread: queues one journal write for this operation and keeps its ID out of review until it is recorded. */
+ private void record(PluginCall call, String operationId, Runnable write) {
+  recording.add(operationId);
+  journalWork(call, () -> { try { write.run(); } finally { main.post(() -> recording.remove(operationId)); } });
+ }
+ /** Main thread: journals an outcome reached without any platform call, on the worker. */
  private void decide(PluginCall call, SmsSendJournal journal, String operationId, String[] recipients, String body, int subscriptionId, String decision, long now, long boot) {
+  record(call, operationId, () -> decideNow(call, journal, operationId, recipients, body, subscriptionId, decision, now, boot));
+ }
+ /** Worker thread. */
+ private static void decideNow(PluginCall call, SmsSendJournal journal, String operationId, String[] recipients, String body, int subscriptionId, String decision, long now, long boot) {
   try { call.resolve(AlphaSms.result(journal.decide(operationId, recipients, body, subscriptionId, decision, now, boot))); }
   catch (Exception unrecorded) { call.reject("Nothing was sent.", "unavailable"); }
  }

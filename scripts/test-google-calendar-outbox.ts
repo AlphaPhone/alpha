@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CloudProtocolError, type GoogleCalendarEvent, type GoogleCalendarEventInput, type GoogleCalendarEventPatch } from '../apps/app/src/runtime/cloud-protocol.ts';
 import { DELETE_UNDO_MS, type DeletionClock } from '../apps/app/src/runtime/deletion-window.ts';
 import { googleCalendarRevision, type GoogleCalendarRead, type GoogleCalendarRecord } from '../apps/app/src/runtime/google-calendar.ts';
-import { GoogleCalendarOutbox, GOOGLE_CALENDAR_OUTBOX_LIMIT, googleCalendarRetryDelay, overlayGoogleCalendarRows, type GoogleCalendarOutboxOp, type GoogleCalendarOutboxStore } from '../apps/app/src/runtime/google-calendar-outbox.ts';
+import { GoogleCalendarOutbox, GOOGLE_CALENDAR_OUTBOX_LIMIT, googleCalendarChangeApplied, googleCalendarCreateMatch, googleCalendarRetryDelay, keptGoogleCalendarOps, overlayGoogleCalendarRows, type GoogleCalendarOutboxOp, type GoogleCalendarOutboxStore } from '../apps/app/src/runtime/google-calendar-outbox.ts';
 import type { GoogleCalendarWriteClient } from '../apps/app/src/runtime/google-calendar-writer.ts';
 
 const grant = '72475cd0-e135-4c42-a9e2-fb5fe0820ada', calendarId = 'owner@example.test', sourceId = `google:${grant}:owner%40example.test`;
@@ -17,8 +17,8 @@ const row = (event: GoogleCalendarEvent, extra: Partial<GoogleCalendarRecord> = 
 function world(options: { online?: boolean } = {}) {
   let doc: unknown = null;
   const state = { google: new Map<string, GoogleCalendarEvent>(), calls: [] as Array<{ method: string; args: unknown[] }>, reads: 0, online: options.online ?? true,
-    fail: null as null | ((method: string) => Error | null), readFail: null as GoogleCalendarRead | null, elapsed: 1000, wall: Date.parse('2026-11-06T16:00:00Z'), continuity: 'boot-1', counter: 0 };
-  const store: GoogleCalendarOutboxStore = { read: async () => structuredClone(doc), exchange: async (before, value) => { if (JSON.stringify(before) !== JSON.stringify(doc)) return 'conflict'; doc = structuredClone(value); return 'saved'; } };
+    fail: null as null | ((method: string) => Error | null), readFail: null as GoogleCalendarRead | null, exchangeFail: null as null | (() => boolean), shown: null as null | GoogleCalendarRecord[], elapsed: 1000, wall: Date.parse('2026-11-06T16:00:00Z'), continuity: 'boot-1', counter: 0 };
+  const store: GoogleCalendarOutboxStore = { read: async () => structuredClone(doc), exchange: async (before, value) => { if (state.exchangeFail?.()) throw new Error('storage unavailable'); if (JSON.stringify(before) !== JSON.stringify(doc)) return 'conflict'; doc = structuredClone(value); return 'saved'; } };
   const client: GoogleCalendarWriteClient = {
     async googleCalendarCreateEvent(g, c, input: GoogleCalendarEventInput) { state.calls.push({ method: 'create', args: [g, c, input] }); const e = state.fail?.('create'); if (e) throw e; const made = wire('made_' + (++state.counter), { title: input.title, startAt: new Date(input.startAt).toISOString(), endAt: new Date(input.endAt).toISOString() }); state.google.set(made.externalId, made); return made; },
     async googleCalendarUpdateEvent(g, c, id, patch: GoogleCalendarEventPatch) { state.calls.push({ method: 'update', args: [g, c, id, patch] }); const e = state.fail?.('update'); if (e) throw e; const was = state.google.get(id); if (!was) throw new CloudProtocolError('http', 404); const next = { ...was, ...(patch.title !== undefined ? { title: patch.title } : {}), ...(patch.location !== undefined ? { location: patch.location } : {}), ...(patch.startAt ? { startAt: new Date(patch.startAt).toISOString() } : {}), ...(patch.endAt ? { endAt: new Date(patch.endAt).toISOString() } : {}) }; state.google.set(id, next); return next; },
@@ -31,8 +31,8 @@ function world(options: { online?: boolean } = {}) {
   };
   const clock = (): DeletionClock => ({ continuity: state.continuity, elapsed: state.elapsed, wall: state.wall + state.elapsed });
   let ids = 0;
-  const make = () => new GoogleCalendarOutbox({ owner: 'owner-key', store, client, read, clock, now: () => state.wall + state.elapsed, online: () => state.online, id: () => 'id' + (++ids) });
-  return { state, make, doc: () => doc as { ops: GoogleCalendarOutboxOp[] } | null, rows: () => [...state.google.values()].map(event => row(event)) };
+  const make = () => new GoogleCalendarOutbox({ owner: 'owner-key', store, client, read, clock, rows: () => state.shown ?? [], now: () => state.wall + state.elapsed, online: () => state.online, id: () => 'id' + (++ids) });
+  return { state, make, doc: () => doc as { ops: GoogleCalendarOutboxOp[] } | null, put: (value: unknown) => { doc = structuredClone(value); }, rows: () => [...state.google.values()].map(event => row(event)) };
 }
 const sends = (w: ReturnType<typeof world>) => w.state.calls.map(call => call.method);
 let passed = 0;
@@ -140,18 +140,160 @@ await check('a change Google beat is a conflict: nothing is sent; Keep mine re-s
   if (q2.status === 'queued') assert.equal(await outbox.resolveConflict(q2.id, 'google'), true);
   assert.equal(outbox.operations.filter(op => op.phase !== 'done').length, 0);
 });
-await check('an event that is gone: a delete is done, an edit is a conflict', async () => {
+await check('an event missing from the check read: a delete is still sent and Google decides; an edit waits for the owner', async () => {
   const w = world(), outbox = w.make();
   w.state.google.set('e1', wire('e1')); w.state.google.set('e2', wire('e2'));
   const [a, b] = w.rows();
-  await outbox.enqueue({ kind: 'update', row: a, scope: 'this', fields: { title: 'x' } });
+  const u = await outbox.enqueue({ kind: 'update', row: a, scope: 'this', fields: { title: 'x' } });
   const d = await outbox.enqueue({ kind: 'delete', row: b, scope: 'this' });
   w.state.google.clear(); w.state.elapsed += DELETE_UNDO_MS;
+  w.state.fail = method => method === 'delete' ? new CloudProtocolError('http', 404) : null;
   await outbox.flush();
-  assert.equal(w.state.calls.length, 0);
+  assert.deepEqual(w.state.calls.map(c => [c.method, c.args[2]]), [['delete', 'e2']], 'the delete was sent; the edit was not');
   assert.deepEqual(outbox.operations.map(op => [op.kind, op.phase]), [['update', 'conflict'], ['delete', 'done']]);
-  assert.equal(outbox.operations[0].remote, null);
+  assert.equal(outbox.operations[0].remote, undefined, 'absence from a few days is not proof the event is gone');
+  assert.equal(outbox.operations[0].unseen, true);
   if (d.status === 'queued') assert.equal(d.id, outbox.operations[1].id);
+  // Keep mine sends it; Google no longer having the event is then known.
+  if (u.status === 'queued') assert.equal(await outbox.resolveConflict(u.id, 'mine'), true);
+  await outbox.flush();
+  assert.deepEqual(sends(w), ['delete', 'update']);
+  assert.equal(outbox.operations[0].phase, 'conflict'); assert.equal(outbox.operations[0].remote, null); assert.equal(outbox.operations[0].unseen, undefined);
+});
+await check('an event moved outside the days read around it: its delete reaches Google instead of being marked done unsent', async () => {
+  const w = world(), outbox = w.make();
+  w.state.google.set('e1', wire('e1'));
+  const shown = w.rows()[0];
+  await outbox.enqueue({ kind: 'delete', row: shown, scope: 'this' });
+  // Moved a week later in Google: the check read (a day either side) does not return it.
+  w.state.readFail = { status: 'ready', calendar: {} as never, events: [], syncedAt: '', truncated: false };
+  w.state.elapsed += DELETE_UNDO_MS;
+  await outbox.flush();
+  assert.deepEqual(w.state.calls.map(c => [c.method, c.args[2]]), [['delete', 'e1']]);
+  assert.equal(w.state.google.has('e1'), false); assert.equal(outbox.operations[0].phase, 'done');
+});
+await check('an edit whose answer was lost is finished when Google already shows it, not raised as a conflict with itself', async () => {
+  const w = world(), outbox = w.make();
+  w.state.google.set('e1', wire('e1'));
+  // The change reaches Google, then the answer is lost.
+  w.state.fail = method => { if (method !== 'update') return null; w.state.google.set('e1', wire('e1', { title: 'Mine', location: 'Room 2' })); return new CloudProtocolError('http', 503); };
+  await outbox.enqueue({ kind: 'update', row: w.rows()[0], scope: 'this', fields: { title: 'Mine', location: 'Room 2' } });
+  await outbox.flush();
+  assert.equal(outbox.operations[0].phase, 'queued'); assert.deepEqual(outbox.operations[0].error, { status: 'retryable', applied: 'unknown' });
+  w.state.fail = null; w.state.elapsed += googleCalendarRetryDelay(1);
+  await outbox.flush();
+  assert.equal(outbox.operations[0].phase, 'done', 'no conflict against the owner\'s own change');
+  assert.equal(sends(w).length, 1, 'not sent a second time');
+  assert.equal(outbox.operations[0].result?.revision, w.rows()[0].revision);
+  // Someone else's change in the meantime is still a conflict.
+  const v = world(), other = v.make();
+  v.state.google.set('e1', wire('e1'));
+  v.state.fail = method => { if (method !== 'update') return null; v.state.google.set('e1', wire('e1', { title: 'Theirs' })); return new CloudProtocolError('http', 503); };
+  await other.enqueue({ kind: 'update', row: v.rows()[0], scope: 'this', fields: { title: 'Mine' } });
+  await other.flush(); v.state.fail = null; v.state.elapsed += googleCalendarRetryDelay(1); await other.flush();
+  assert.equal(other.operations[0].phase, 'conflict');
+  const applied = (fields: GoogleCalendarOutboxOp['fields'], patch: Partial<GoogleCalendarRecord> = {}) => googleCalendarChangeApplied({ kind: 'update', fields }, { ...row(wire('e1')), ...patch });
+  assert.equal(applied({ title: 'Standup' }), true); assert.equal(applied({ title: 'Standup', location: 'x' }), false); assert.equal(applied({}), false, 'nothing to compare proves nothing');
+  assert.equal(applied({ startAt: '2026-11-06T17:00:00Z', endAt: '2026-11-06T17:30:00Z' }), true); assert.equal(applied({ startAt: '2026-11-06T18:00:00Z' }), false);
+  assert.equal(googleCalendarChangeApplied({ kind: 'rsvp', fields: {}, response: 'maybe' }, { ...row(wire('e1')), selfResponse: 'tentative' }), true);
+  assert.equal(googleCalendarChangeApplied({ kind: 'delete', fields: {} }, row(wire('e1'))), false);
+});
+await check('an unconfirmed create is matched only to one new event with the same title, start and end', async () => {
+  const fields = { title: 'Dentist', startAt: '2026-11-07T17:00:00Z', endAt: '2026-11-07T18:00:00Z', timeZone: 'UTC' };
+  const same = { title: 'Dentist', startAt: '2026-11-07T17:00:00.000Z', endAt: '2026-11-07T18:00:00.000Z' };
+  // An event the owner already had with that title and start is never adopted.
+  const w = world(), outbox = w.make();
+  w.state.google.set('old', wire('old', same)); w.state.shown = w.rows();
+  w.state.fail = method => method === 'create' ? new Error('connection reset') : null;
+  await outbox.enqueue({ kind: 'create', sourceId, connectionId: grant, calendarId, fields });
+  await outbox.flush(); w.state.fail = null; await outbox.flush();
+  assert.equal(outbox.operations[0].phase, 'uncertain', 'the earlier event is not the create');
+  assert.deepEqual(outbox.operations[0].existing, ['old']);
+  w.state.google.set('new', wire('new', same)); await outbox.flush();
+  assert.equal(outbox.operations[0].phase, 'done'); assert.equal(outbox.operations[0].result?.eventId, 'new');
+  // Same title and start but another end is a different event.
+  const v = world(), second = v.make();
+  v.state.fail = method => method === 'create' ? new Error('connection reset') : null;
+  await second.enqueue({ kind: 'create', sourceId, connectionId: grant, calendarId, fields });
+  await second.flush(); v.state.fail = null;
+  v.state.google.set('longer', wire('longer', { ...same, endAt: '2026-11-07T19:00:00.000Z' })); await second.flush();
+  assert.equal(second.operations[0].phase, 'uncertain');
+  // Two identical unconfirmed creates never share one event, and two candidates are left to the owner.
+  const op = (id: string, patch: Partial<GoogleCalendarOutboxOp> = {}): GoogleCalendarOutboxOp => ({ id, kind: 'create', sourceId, connectionId: grant, calendarId, scope: 'this', fields, base: null, localId: 'l' + id, phase: 'uncertain', attempts: 1, createdAt: 1, updatedAt: 1, ...patch });
+  const found = row(wire('x', same)), twin = row(wire('y', same));
+  assert.equal(googleCalendarCreateMatch(op('a'), [found], [op('a'), op('b')])?.providerEventId, 'x');
+  assert.equal(googleCalendarCreateMatch(op('b'), [found], [op('a', { phase: 'done', result: { eventId: 'x', revision: found.revision, begin: found.begin, end: found.end } }), op('b')]), undefined);
+  assert.equal(googleCalendarCreateMatch(op('a'), [found, twin], [op('a')]), undefined);
+  assert.equal(googleCalendarCreateMatch(op('a'), [found], [op('a'), op('u', { kind: 'update', eventId: 'x', phase: 'queued' })]), undefined, 'an event another change targets existed before');
+});
+await check('a send whose outcome could not be saved is taken back by the same run, without a restart', async () => {
+  const w = world(), outbox = w.make();
+  w.state.google.set('e1', wire('e1'));
+  const q = await outbox.enqueue({ kind: 'update', row: w.rows()[0], scope: 'this', fields: { title: 'Saved late' } });
+  // The claim is saved; saving the result fails.
+  let exchanges = 0; w.state.exchangeFail = () => ++exchanges > 1;
+  await assert.rejects(outbox.flush());
+  assert.equal(w.doc()!.ops[0].phase, 'dispatching', 'left held by this run');
+  assert.equal(sends(w).length, 1);
+  if (q.status === 'queued') assert.equal(await outbox.undo(q.id).catch(() => false), false);
+  assert.ok(outbox.nextWake() !== null, 'a wake is due to take it back');
+  w.state.exchangeFail = null;
+  await outbox.flush();
+  assert.equal(outbox.operations[0].phase, 'done', 'taken back, checked against Google and finished');
+  assert.equal(sends(w).length, 1, 'the change Google already has is not sent again');
+  assert.equal(outbox.nextWake(), null);
+  // A create left the same way may have reached Google: it waits for a match or the owner.
+  const v = world(), other = v.make();
+  await other.enqueue({ kind: 'create', sourceId, connectionId: grant, calendarId, fields: { title: 'Held', startAt: '2026-11-07T17:00:00Z', endAt: '2026-11-07T18:00:00Z', timeZone: 'UTC' } });
+  let saves = 0; v.state.exchangeFail = () => ++saves > 1;
+  await assert.rejects(other.flush()); v.state.exchangeFail = null; v.state.google.clear();
+  await other.flush();
+  assert.equal(other.operations[0].phase, 'uncertain'); assert.deepEqual(sends(v), ['create'], 'never sent twice by itself');
+});
+await check('stored changes beyond the limit drop the oldest finished ones, never an unsent change', async () => {
+  const now = Date.parse('2026-11-06T16:00:00Z') + 1000;
+  const op = (id: string, phase: GoogleCalendarOutboxOp['phase'], updatedAt: number): GoogleCalendarOutboxOp => ({ id, kind: 'update', sourceId, connectionId: grant, calendarId, eventId: id, scope: 'this', fields: { title: id }, base: { revision: 'r', begin: 1, end: 2 }, phase, attempts: 0, createdAt: updatedAt, updatedAt });
+  const done = Array.from({ length: GOOGLE_CALENDAR_OUTBOX_LIMIT - 10 }, (_, i) => op('done' + i, 'done', now - 60_000 + i));
+  const queued = Array.from({ length: 30 }, (_, i) => op('open' + i, 'queued', now));
+  const expired = op('expired', 'done', now - 11 * 60_000);
+  const kept = keptGoogleCalendarOps([expired, ...done, ...queued], now);
+  assert.equal(kept.length, GOOGLE_CALENDAR_OUTBOX_LIMIT);
+  assert.equal(kept.filter(item => item.phase === 'queued').length, 30, 'every unsent change is kept');
+  assert.equal(kept.includes(expired), false); assert.equal(kept.includes(done[0]), false, 'the oldest finished change made room'); assert.equal(kept.includes(done.at(-1)!), true);
+  assert.deepEqual(kept.map(item => item.id), [...done.slice(20), ...queued].map(item => item.id), 'order is kept');
+  // Through the store: the newest change survives a load and the next save.
+  const w = world({ online: false }), outbox = w.make();
+  w.put({ version: 1, owner: 'owner-key', ops: [...done, ...queued] });
+  await outbox.load();
+  assert.equal(outbox.operations.filter(item => item.phase === 'queued').length, 30);
+  assert.equal(await outbox.undo('open0'), true);
+  assert.equal(w.doc()!.ops.some(item => item.id === 'open29'), true, 'the newest unsent change is still stored');
+});
+await check('a view that detaches before the outbox has loaded sends nothing', async () => {
+  const w = world(), first = w.make();
+  for (const title of ['One', 'Two']) await first.enqueue({ kind: 'create', sourceId, connectionId: grant, calendarId, fields: { title, startAt: '2026-11-07T17:00:00Z', endAt: '2026-11-07T18:00:00Z', timeZone: 'UTC' } });
+  const outbox = w.make();
+  outbox.attach({ addEventListener() {}, removeEventListener() {} })();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(sends(w), [], 'the account switched while the document was being read');
+  assert.deepEqual(w.doc()!.ops.map(op => op.phase), ['queued', 'queued']);
+});
+await check('changes Google refused for want of permission are queued again once the owner allowed changes', async () => {
+  const w = world(), outbox = w.make();
+  w.state.google.set('e1', wire('e1')); w.state.google.set('e2', wire('e2', { startAt: '2026-11-06T19:00:00.000Z', endAt: '2026-11-06T19:30:00.000Z' }));
+  const [a, b] = w.rows();
+  w.state.fail = () => new CloudProtocolError('http', 403);
+  await outbox.enqueue({ kind: 'update', row: a, scope: 'this', fields: { title: 'Allowed later' } });
+  await outbox.enqueue({ kind: 'update', row: b, scope: 'this', fields: { title: '' } });
+  await outbox.flush();
+  assert.deepEqual(outbox.operations.map(op => [op.phase, op.error?.status]), [['failed', 'needs-permission'], ['failed', 'needs-permission']]);
+  assert.equal(await outbox.retryPermission(['another-grant']), 0, 'only the connection that was allowed');
+  w.state.fail = method => method === 'update' && w.state.calls.at(-1)?.args[2] === 'e2' ? new CloudProtocolError('http', 400) : null;
+  assert.equal(await outbox.retryPermission([grant]), 2);
+  await outbox.flush();
+  assert.deepEqual(outbox.operations.map(op => [op.phase, op.error?.status]), [['done', undefined], ['failed', 'invalid']], 'a change refused for another reason stays failed');
+  assert.equal(w.state.google.get('e1')!.title, 'Allowed later');
+  assert.equal(await outbox.retryPermission([grant]), 0);
 });
 await check('a create whose answer was lost is never sent again by itself; a matching feed event settles it', async () => {
   const w = world(), outbox = w.make();

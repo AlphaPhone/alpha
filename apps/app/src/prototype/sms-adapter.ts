@@ -1,6 +1,6 @@
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
-import {createSmsSession,receiptLabel} from '../runtime/image-sms';
+import {createSmsSession,receiptLabel,smsNothingDispatched} from '../runtime/image-sms';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin,type SmsSendResult} from '../runtime/aosp-telephony';
 import {watchReturnToApp} from './native-adapter';
@@ -13,10 +13,12 @@ export function installSmsAdapter(Component:any,views:Bag){
  const changed=()=>owner?.setState({smsNativeRevision:Date.now()});
  const session=createSmsSession(client,true,changed,id=>{if(id===operationId)void reconcile();});
  const sync=()=>{const next=!!owner&&owner.S().view==='messages'&&!document.hidden;if(next===active)return;active=next;lifecycle++;session.setActive(next);if(!next){busy=false;draftRevision++;recipients='';body='';sim='';operationId='';notice='';receipt=null;}};
- async function reconcile(){if(!active||!operationId)return;const token=lifecycle,draft=draftRevision,id=operationId;try{const value=await client.smsSendResult({recipients:recipients.split(',').map(v=>v.trim()),body,subscriptionId:Number(sim)},id);if(active&&token===lifecycle&&draft===draftRevision){receipt=value;notice=receiptLabel(value.status);changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
+ async function reconcile(){if(!active||!operationId)return;const token=lifecycle,draft=draftRevision,id=operationId;try{const value=await client.smsSendResult({recipients:recipients.split(',').map(v=>v.trim()),body,subscriptionId:Number(sim)},id);if(active&&token===lifecycle&&draft===draftRevision){receipt=value;notice=receiptLabel(value.status);if(!busy&&smsNothingDispatched(value.status))operationId='';changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
  async function send(){if(!active||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
   const numbers=recipients.split(',').map(v=>v.trim());if(numbers.length<1||numbers.length>5||numbers.some(v=>!/^\+?[0-9]{2,20}$/.test(v))||new Set(numbers).size!==numbers.length||!body.trim()||body.length>1600||!/^\d+$/.test(sim))throw Error('Enter up to five phone numbers, a message and an active SIM.');
-  if(!operationId)operationId=crypto.randomUUID();const result=await client.sendSms({recipients:numbers,body,subscriptionId:Number(sim)},operationId);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);await session.refresh();
+  if(!operationId)operationId=crypto.randomUUID();const result=await client.sendSms({recipients:numbers,body,subscriptionId:Number(sim)},operationId);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);
+  // A cancelled or denied record is closed without a dispatch; keeping its ID would return that record again.
+  if(smsNothingDispatched(result.status))operationId='';await session.refresh();
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=operationId?'SMS outcome is unknown. The native send record prevents repeating this request. Check your messaging app before starting a new review.':error instanceof Error?error.message:'SMS review could not open.';}finally{if(token===lifecycle){busy=false;changed();}}}
  async function handoff(){if(!active||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{const result=await client.composeSms({recipients:recipients.split(',').map(v=>v.trim()),body,subscriptionId:null});if(active&&token===lifecycle&&draft===draftRevision)notice=result.message;}catch{if(active&&token===lifecycle)notice='Enter recipients and text, then review them in your messaging app. Alpha has not sent anything.';}finally{if(token===lifecycle){busy=false;changed();}}}
  const edit=(setter:(value:string)=>void)=>(event:Event)=>{if(busy)return;setter((event.target as HTMLInputElement).value);draftRevision++;operationId='';notice='';receipt=null;changed();};

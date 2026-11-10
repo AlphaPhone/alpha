@@ -5,6 +5,11 @@ type Archive={entries:Record<string,string>};
 const empty=():Archive=>({entries:{}});
 const prefix='alpha.workflow.pending.v1:';
 export const workflowIntentKey=(owner:WorkflowIntentOwner,id:string)=>prefix+JSON.stringify([owner.origin,owner.ownerId,owner.agentId,id]);
+/** The identity a key was made for, or null when the key has another shape. */
+export const workflowIntentId=(key:string):string|null=>{if(!key.startsWith(prefix))return null;try{const parts:unknown=JSON.parse(key.slice(prefix.length));return Array.isArray(parts)&&parts.length===4&&typeof parts[3]==='string'?parts[3]:null;}catch{return null;}};
+/** A retained run request can be matched to a receipt only when the agent keeps submission identities and the request
+ * names one for this workflow and version. Any other retained request can never be matched, so only its owner can clear it. */
+export const runIntentReconcilable=(intent:unknown,workflowId:string,supported:boolean):boolean=>{const value=intent as {workflowId?:unknown;submissionId?:unknown;versionId?:unknown}|null;return supported&&!!value&&typeof value==='object'&&value.workflowId===workflowId&&typeof value.submissionId==='string'&&typeof value.versionId==='string';};
 /** Nonsecret pending requests, scoped to the captured agent account. */
 export class WorkflowIntentStore {
  readonly documentKey:string;
@@ -36,6 +41,8 @@ export class WorkflowIntentStore {
  /** True while no committed snapshot is held, when every key reads as locked. */
  get stale(){return this.cached===null;}
  locked(key:string){this.check(key);return this.cached===null||Object.hasOwn(this.cached,key);}
+ /** The retained request under a key in the loaded snapshot, or null when none is held or no snapshot is loaded. */
+ retained(key:string){this.check(key);return this.cached?.[key]??null;}
  pendingLifecycle(){return Object.keys(this.cached??{}).filter(key=>key.endsWith(':lifecycle')).flatMap(key=>{try{const parts=JSON.parse(key.slice(prefix.length,-':lifecycle'.length));return Array.isArray(parts)&&parts.length===4&&typeof parts[3]==='string'?[parts[3]]:[];}catch{return [];}});}
  async load(signal?:AbortSignal){
   const epoch=++this.epoch;signal?.throwIfAborted();const value=Capacitor.getPlatform()==='android'?this.legacy():await (await this.recoveryDocument()).read(empty,signal);

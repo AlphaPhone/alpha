@@ -24,6 +24,12 @@ export function insideCloudCoverage(coverage: Pick<CloudMapsCoverage, 'regions'>
  return coverage.regions.some(({ bounds: [west, south, east, north] }) => point.longitude >= west && point.longitude <= east && point.latitude >= south && point.latitude <= north);
 }
 
+/** Whether Cloud Maps is connected and working. A reconnect replaces the installed provider, which
+ * ends any guidance that follows one of its routes, so a healthy connection is never reconnected. */
+export function cloudMapsHealthy(state: Readonly<{ configured: boolean; error: string }>): boolean {
+ return state.configured && !state.error;
+}
+
 /** Typed device failure for a Cloud refusal. Cloud never sends guessed data, so no fallback is tried. */
 export function cloudMapsFailure(error: unknown, signal?: AbortSignal): MapsFailure {
  if (error instanceof MapsFailure) return error;

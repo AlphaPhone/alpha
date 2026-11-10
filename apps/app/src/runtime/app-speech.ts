@@ -4,6 +4,10 @@ import {speakCloudText} from './cloud-voice';
 import {connectionController} from './connection-ui';
 import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../../../../.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts';
 let retirement:Promise<void>=Promise.resolve();
+// One message for every speech path refused because an earlier playback or capture could not be
+// confirmed stopped (the same text as SPEECH_CLEANUP_NOTICE in speech-cleanup.ts; this module is
+// evaluated without its imports by contract tests, so the text is repeated here).
+const cleanupUnconfirmed=(error:unknown)=>(error as {code?:unknown}|null)?.code==='speech-cleanup-unconfirmed'&&(error as Error).message!=='Voice media has not finished stopping. Close the app if this continues.'?Object.assign(new Error('Voice media has not finished stopping. Close the app if this continues.',{cause:error}),{code:'speech-cleanup-unconfirmed'}):error;
 /** Reviewed app/workflow text uses the selected production runtime profile. */
 export async function speakAppText(text:string,signal:AbortSignal,onStarted?:()=>void,queue=false,assertCurrent?:()=>void){
  if(cloudRuntimeEnabled||testMocksEnabled)return speakCloudText(text,signal,onStarted,queue,assertCurrent);
@@ -20,5 +24,6 @@ export async function speakAppText(text:string,signal:AbortSignal,onStarted?:()=
   finally{if(marked)markTtsPlaybackEnded();}
  })();
  retirement=pending.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});void retirement.catch(()=>{});
- try{await Promise.race([pending,interrupted]);}finally{signal.removeEventListener('abort',cancel);window.removeEventListener('alpha:device-state',retire);window.removeEventListener('pagehide',retire);}
+ // The caller shows this failure's message; the retirement chain above keeps the original.
+ try{await Promise.race([pending,interrupted]);}catch(error){throw cleanupUnconfirmed(error);}finally{signal.removeEventListener('abort',cancel);window.removeEventListener('alpha:device-state',retire);window.removeEventListener('pagehide',retire);}
 }

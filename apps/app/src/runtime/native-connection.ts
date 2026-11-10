@@ -46,10 +46,11 @@ export interface BrowserSecretBackend {
   /** Atomic within this origin: replaces only when the current value equals expected. */
   compareExchange(slot:string,expected:string|null|undefined,value:string|null):Promise<boolean>;
 }
-/** Web slots are limited to agent connection credentials. Other renderer stores keep their own
- * browser documents and must not silently start writing secrets here. */
+/** Web slots are limited to agent connection credentials, including a pending Cloud read
+ * authorization (`cloud-delegation:`). Other renderer stores keep their own browser documents and
+ * must not silently start writing secrets here. */
 export const browserConnectionSlot=(slot:unknown):string=>{
-  if(typeof slot!=='string'||!slot||slot.length>1024||!/^(remote|cloud|device|cloud-runtime):[^\s]+$/.test(slot))throw new Error('This secure slot is unavailable in the browser.');
+  if(typeof slot!=='string'||!slot||slot.length>1024||!/^(remote|cloud|device|cloud-runtime|cloud-delegation):[^\s]+$/.test(slot))throw new Error('This secure slot is unavailable in the browser.');
   return slot;
 };
 export function memorySecretBackend():BrowserSecretBackend{
@@ -114,13 +115,23 @@ export function indexedDbSecretBackend(factory:IDBFactory=indexedDB,subtle:Subtl
     });},
   };
 }
+/** Private windows can refuse IndexedDB: a durable store that has never answered is replaced by
+ * `fallback` for this page, without claiming persistence. Once the durable store has answered, a
+ * later failure is reported instead: moving to the fallback then would leave the stored secret in
+ * place while a removal (sign-out) or a replacement appeared to succeed, and it would return after
+ * a reload. */
+export function durableSecretsWithFallback(durable:BrowserSecretBackend,fallback:BrowserSecretBackend,slotName:(slot:string)=>string=slot=>slot):BrowserSecretBackend{
+  let degraded=false,answered=false;
+  const use=async<T>(work:(backend:BrowserSecretBackend)=>Promise<T>)=>{
+    if(degraded)return work(fallback);
+    try{const result=await work(durable);answered=true;return result;}
+    catch(error){if(!answered&&error instanceof DOMException&&['InvalidStateError','UnknownError','SecurityError','NotSupportedError'].includes(error.name)){degraded=true;return work(fallback);}throw error;}
+  };
+  return {read:slot=>use(backend=>backend.read(slotName(slot))),compareExchange:(slot,expected,value)=>use(backend=>backend.compareExchange(slotName(slot),expected,value))};
+}
 function webSecrets():BrowserSecretBackend{
   if(typeof indexedDB==='undefined'||typeof crypto==='undefined'||!crypto.subtle)return memorySecretBackend();
-  const durable=indexedDbSecretBackend(),fallback=memorySecretBackend();
-  let degraded=false;
-  // Private windows can refuse IndexedDB. Keep this page usable without claiming persistence.
-  const use=async<T>(work:(backend:BrowserSecretBackend)=>Promise<T>)=>{if(degraded)return work(fallback);try{return await work(durable);}catch(error){if(error instanceof DOMException&&['InvalidStateError','UnknownError','SecurityError','NotSupportedError'].includes(error.name)){degraded=true;return work(fallback);}throw error;}};
-  return {read:slot=>use(backend=>backend.read(cloudStorageSlot(slot))),compareExchange:(slot,expected,value)=>use(backend=>backend.compareExchange(cloudStorageSlot(slot),expected,value))};
+  return durableSecretsWithFallback(indexedDbSecretBackend(),memorySecretBackend(),cloudStorageSlot);
 }
 /** Plain-HTTP loopback agents are a test-mocks surface; flag-off bundles accept HTTPS only. */
 const webDevelopmentHttp:boolean=import.meta.env!==undefined&&import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1';
@@ -239,8 +250,7 @@ export const nativeCloudRequest:CloudNativeRequest=async input=>{
   const interrupted=new Promise<never>((_,reject)=>{rejectAbort=reject;});
   const cancel=()=>{void native.cancel({requestId}).catch(()=>{});rejectAbort(input.signal.reason||new DOMException('Cancelled','AbortError'));};
   input.signal.addEventListener('abort',cancel,{once:true});
-  const timerMs=input.expiresAt===undefined?input.timeoutMs:Math.max(1,Math.min(input.expiresAt-Date.now(),2_147_483_647));
-  const timer=setTimeout(()=>{void native.cancel({requestId}).catch(()=>{});rejectAbort(new Error('Connection timed out'));},timerMs);
+  const timer=setTimeout(()=>{void native.cancel({requestId}).catch(()=>{});rejectAbort(new Error('Connection timed out'));},cloudRequestTimerMs(input.timeoutMs,input.expiresAt,Date.now()));
   try {
     // Issue first, then check again: native cancel targets an already-dispatched ID.
     const response=native.request({requestId,url:input.url,method:input.method,headers:input.headers,...(input.credentialReference?{credentialReference:input.credentialReference}:{}),...(input.expiresAt===undefined?{}:{expiresAt:input.expiresAt}),...(input.body===undefined?{}:{body:JSON.stringify(input.body)})});
@@ -248,6 +258,12 @@ export const nativeCloudRequest:CloudNativeRequest=async input=>{
     return await Promise.race([response,interrupted]);
   }finally{clearTimeout(timer);input.signal.removeEventListener('abort',cancel);}
 };
+/** How long one Cloud request may run: its own timeout, cut short by an absolute deadline when the
+ * caller gave one. A deadline never extends the timeout. At least 1 ms, within the timer range. */
+export function cloudRequestTimerMs(timeoutMs:number,expiresAt:number|undefined,now:number):number{
+  const bound=Number.isFinite(timeoutMs)&&timeoutMs>0?timeoutMs:2_147_483_647;
+  return Math.max(1,Math.min(bound,expiresAt===undefined?bound:expiresAt-now,2_147_483_647));
+}
 export const nativeRemoteRequest:RemoteRequester=async input=>{
   const response=await nativeCloudRequest({url:input.url,method:input.method,headers:input.headers,
     body:input.body===undefined?undefined:JSON.parse(input.body),signal:input.signal||new AbortController().signal,timeoutMs:120000,redirect:'error'});

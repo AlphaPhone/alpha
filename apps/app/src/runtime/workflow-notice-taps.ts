@@ -37,3 +37,10 @@ export async function resolveWorkflowTap(native:WorkflowTapNative,binding:Workfl
  if(latest.retained!==true)return {kind:'unavailable' as const};
  return {kind:'ready' as const,token:tap.token,run,workflow,question:tap.question===true,notice:tap.notice};
 }
+/** What to do with a tap that resolved as ready. A tap whose run was already opened is only consumed again, so a
+ * failed consume cannot reopen the same run on every later check. */
+export const readyTapStep=(token:string,opened:string|null):'consume-only'|'open'=>token===opened?'consume-only':'open';
+/** Why a tap check ended without handling the tap, and when to repeat it. A running workflow operation, or one that
+ * started while the tap was being read, defers the check until that operation ends; a view reset with no operation
+ * repeats it at once. Any other reason waits for the next resume, connection or tap event. */
+export const tapRecheck=(state:{operationRunning:boolean;generationChanged:boolean}):'after-operation'|'now'|'none'=>state.operationRunning?'after-operation':state.generationChanged?'now':'none';

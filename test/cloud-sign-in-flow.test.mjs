@@ -102,15 +102,15 @@ test('the native sign-in client owns every secret, compares state before burning
  const tail=between(plugin,'private void complete(Attempt current, JSONObject session)','/** The saved key for this environment');
  const key=tail.indexOf('credentials.writeCredentialSlot("cloud:" + environment.name'),ack=tail.indexOf('acknowledge(current, proof');
  assert.ok(tail.indexOf('receipts.writeCredentialSlot(receiptSlot(environment)')<key&&key<ack,'receipt, then key, then ack');
- assert.ok(tail.indexOf('previousToken(')<key&&tail.indexOf('CloudKeyRevocation.revoke(')>ack,'a replaced key is read before the write and revoked after activation');
+ assert.ok(tail.indexOf('previousToken(')<key&&tail.indexOf('revokeReplaced(receipts, environment, previous)')>ack,'a replaced key is read before the write and revoked after activation');
  assert.match(tail,/AlphaLocalAgentPlugin\.reserveCredentialIntent\(\)/,'the key write follows the credential-intent rule');
  assert.match(tail,/"\/steward\/auth\/logout"/);
  assert.doesNotMatch(tail,/writeCredentialSlot\([^)]*(refresh|token\b)/,'the Steward session is never stored');
  assert.match(plugin,/for \(int round = 0; round < CloudSignInFlow\.ACK_ATTEMPTS; round\+\+\)/);
- assert.match(plugin,/@Override public void load\(\) \{[\s\S]*?run\(this::resumeAcknowledgements\);/,'an interrupted ack resumes on the next start');
+ assert.match(plugin,/@Override public void load\(\) \{[\s\S]*?resumer\.execute\(this::resumeAcknowledgements\);/,'an interrupted ack resumes on the next start');
  // Email: the code adapter, a per-attempt verify cap and a global send cooldown.
  const email=between(plugin,'@PluginMethod public void startEmail(','@PluginMethod public void verifyEmail(');
- assert.match(email,/if \(now < lastEmailSendAt \+ CloudSignInFlow\.RESEND_COOLDOWN_MS\) \{ call\.reject\("Wait before requesting another code", "cooldown"\); return; \}/);
+ assert.match(email,/if \(now < lastEmailSendAt \+ CloudSignInFlow\.RESEND_COOLDOWN_MS\) \{ call\.reject\("Wait before requesting another code", "cooldown"\); return false; \}/);
  assert.match(email,/CloudEmailCode\.SEND_PATH, CloudEmailCode\.sendBody\(/);assert.doesNotMatch(plugin,/"\/steward\/auth\/email\/send"/,'no magic-link send');
  const verify=between(plugin,'private void verify(PluginCall call, boolean mfa)','private void release(');
  assert.match(verify,/CloudEmailCode\.VERIFY_PATH, CloudEmailCode\.verifyBody\(/);
@@ -177,4 +177,73 @@ test('the native session exchange requires Android authorization before requesti
  assert.match(gate,/new AlertDialog.Builder/);assert.match(gate,/decision.await/);
  assert.match(gate,/!current.authorized/);assert.match(gate,/current.expiresAt/);
  assert.doesNotMatch(gate,/PluginCall|call.getBoolean|writeCredentialSlot/);
+});
+
+// Source checks of the Android wiring around the pure decisions CloudSignInFlowTest runs
+// (afterVerifyFailure, the replaced-key list). Nothing here runs on Android or reaches Cloud.
+test('a code attempt survives a failed resend and an unanswered verification; the cooldown starts only with an accepted send',()=>{
+ const plugin=read(native+'AlphaCloudSignInPlugin.java');
+ const email=between(plugin,'@PluginMethod public void startEmail(','/**\n  * Admits one code send.');
+ const phone=between(plugin,'@PluginMethod public void startPhone(','/** Check registration and tenant SMS policy');
+ const admit=between(plugin,'private boolean admitSend(PluginCall call, Attempt next)','/** Lock held.');
+ const accepted=between(plugin,'private JSObject sendAccepted(Attempt current, long expiresAt)','/** The send failed');
+ const failed=between(plugin,'private void sendFailed(Attempt current)','@PluginMethod public void startPhone(');
+ for(const [name,start] of [['email',email],['phone',phone]]){
+  assert.match(start,/if \(!admitSend\(call, current\)\) return;/,name);
+  assert.ok(start.indexOf('requireSendAllowed(current);')>0&&start.indexOf('requireSendAllowed(current);')<start.indexOf('post(current,'),`${name}: cooldown rechecked before the request`);
+  assert.match(start,/call\.resolve\(sendAccepted\(current, /,name);
+  assert.equal((start.match(/sendFailed\(current\);/g)||[]).length,2,`${name}: every failure restores the earlier attempt`);
+  // Neither start touches the live attempt or the cooldown itself.
+  assert.doesNotMatch(start,/lastEmailSendAt|attempt\.cancel\(\)|\battempt = /,name);
+ }
+ // Admission: the live attempt is kept (busy) beside the send that may replace it, and is not cancelled.
+ assert.doesNotMatch(admit,/\.cancel\(\)/,'the live attempt is not cancelled before the send is accepted');
+ assert.match(admit,/if \(attempt == null\) attempt = next;\n\s*else \{ attempt\.busy = true; next\.replaces = attempt; replacement = next; \}/);
+ assert.doesNotMatch(admit,/lastEmailSendAt = /,'admission does not start the cooldown');
+ assert.match(admit,/burnUnclaimedPending\(\);/,'a new code attempt burns an unclaimed Google record');
+ assert.equal((plugin.match(/lastEmailSendAt = /g)||[]).length,1,'one place starts the cooldown');
+ // Acceptance: cooldown, then the swap that ends the replaced attempt.
+ assert.match(accepted,/lastEmailSendAt = Math\.max\(lastEmailSendAt, current\.requestedAt\);/);
+ assert.match(accepted,/if \(replacement == current\) \{ replacement = null; current\.replaces\.cancel\(\); attempt = current; \}/);
+ assert.ok(accepted.indexOf('lastEmailSendAt = ')<accepted.indexOf('if (!live(current))'),'a send Cloud accepted counts even when the step was cancelled meanwhile');
+ // Failure: the earlier attempt is usable again and only an attempt without a code is dropped.
+ assert.match(failed,/if \(current\.replaces != null\) \{ current\.replaces\.busy = false; current\.replaces = null; \}/);
+ assert.match(failed,/if \(replacement == current\) replacement = null;/);assert.match(failed,/if \(attempt == current\) attempt = null;/);
+ assert.doesNotMatch(failed,/lastEmailSendAt|\.cancel\(\)/);
+ // Cancel and teardown also abandon a send in flight.
+ assert.match(between(plugin,'@PluginMethod public void cancel(','/** Post-authentication consent'),/sending = replacement; replacement = null;[\s\S]*if \(sending != null\) sending\.cancel\(\);/);
+ assert.match(between(plugin,'@Override protected void handleOnDestroy()','private void run(Runnable task)'),/if \(replacement != null\) replacement\.cancel\(\); replacement = null;/);
+ // Verification: the decision is the pure one, keyed on whether Cloud answered the verification itself.
+ const verify=between(plugin,'private void verify(PluginCall call, boolean mfa, boolean phone)','private void release(');
+ const answered=verify.indexOf('answered = true;');
+ assert.ok(answered>verify.indexOf('CloudEmailCode.VERIFY_PATH')&&answered<verify.indexOf('complete(current, session);'),'answered is set between the verification request and the shared tail');
+ assert.match(verify,/CloudSignInFlow\.VerifyFailure outcome = CloudSignInFlow\.afterVerifyFailure\(failure\.code, answered\);\n\s*if \(outcome == CloudSignInFlow\.VerifyFailure\.ENDED\) \{ end\(current, failure\.code, false\); return; \}/);
+ assert.match(verify,/if \(outcome == CloudSignInFlow\.VerifyFailure\.COUNTED\) synchronized \(lock\) \{ current\.failedVerifies\+\+;/,'only a wrong code is counted');
+ assert.doesNotMatch(verify,/"invalid-code"\.equals\(failure\.code\)/);
+});
+
+test('a replaced key is recorded before the key write and revoked when activation settles, on a thread apart from sign-in',()=>{
+ const plugin=read(native+'AlphaCloudSignInPlugin.java');
+ assert.match(plugin,/static String replacedSlot\(CloudSignInFlow\.Environment environment\) \{ return "cloud-signin:v1:replaced:" \+ environment\.name; \}/,'in the native-only namespace');
+ const tail=between(plugin,'private void complete(Attempt current, JSONObject session)','/** The saved key for this environment');
+ const record=tail.indexOf('receipts.writeCredentialSlot(replacedSlot(environment), replaced)'),key=tail.indexOf('credentials.writeCredentialSlot("cloud:" + environment.name'),pending=tail.indexOf('throw new SignInFailure("activation-pending")');
+ assert.ok(record>0&&record<key,'recorded before the write that discards it');
+ assert.match(tail,/CloudSignInFlow\.withReplacedKey\(receipts\.readCredentialSlot\(replacedSlot\(environment\)\), previous, secret\)/);
+ assert.ok(pending>key&&pending<tail.indexOf('revokeReplaced(receipts, environment, previous)'),'a failed activation leaves the record for the next start');
+ assert.match(tail,/outcome\.put\("previousSignIn", revoked\.contains\(previous\) \? "revoked" : "unconfirmed"\)/);
+ const revoke=between(plugin,'private Set<String> revokeReplaced(','/** Bounded retry');
+ assert.match(revoke,/CloudSignInFlow\.revocableKeys\(store\.readCredentialSlot\(replacedSlot\(environment\)\), previousToken\(store, environment, null\)\)/,'never the key this phone holds');
+ assert.match(revoke,/CloudKeyRevocation\.revoke\(environment\.name, key, testMocks\(\)\)/);
+ assert.ok(revoke.indexOf('CloudKeyRevocation.revoke(')<revoke.indexOf('CloudSignInFlow.withoutReplacedKeys('),'forgotten only after the attempt');
+ assert.equal((plugin.match(/CloudKeyRevocation\.revoke\(/g)||[]).length,1);
+ const resume=between(plugin,'private void resumeAcknowledgements()','// ── Outcomes and transport');
+ assert.match(resume,/if \(raw == null\) \{ revokeReplaced\(store, environment, null\); continue; \}/,'an activation that finished before the revoke is settled on the next start');
+ assert.match(resume,/if \(done && store\.compareExchangeCredentialSlot\(receiptSlot\(environment\), raw, null\)\) revokeReplaced\(store, environment, null\);/,'only the receipt that was read is removed');
+ assert.doesNotMatch(resume,/removeCredentialSlot\(receiptSlot/);
+ // The startup resume never occupies the sign-in worker or the readiness prober.
+ assert.match(plugin,/private final ExecutorService resumer = Executors\.newSingleThreadExecutor\(\);/);
+ const load=between(plugin,'@Override public void load()','@Override protected void handleOnNewIntent');
+ assert.match(load,/resumer\.execute\(this::resumeAcknowledgements\); resumer\.shutdown\(\);/);
+ assert.doesNotMatch(plugin,/(?:run|worker\.execute|prober\.execute)\(this::resumeAcknowledgements\)/);
+ assert.match(between(plugin,'@Override protected void handleOnDestroy()','private void run(Runnable task)'),/resumer\.shutdownNow\(\);/);
 });

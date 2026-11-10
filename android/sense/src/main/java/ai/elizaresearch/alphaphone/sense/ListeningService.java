@@ -59,6 +59,20 @@ public final class ListeningService extends Service {
  private volatile ai.eliza.voice.NativeAsr engine;
  private AudioManager audio;
  private final Runnable reapply=this::apply;
+ /** The created service of this process, so a refresh can ask it to converge instead of stopping it from outside. */
+ private static volatile ListeningService instance;
+ static boolean running(){return instance!=null;}
+ /** Posts a policy re-evaluation to the running service. False when none is running. */
+ static boolean converge(){
+  ListeningService service=instance;
+  if(service==null)return false;
+  service.main.post(service.reapply);
+  return true;
+ }
+ /** A startForegroundService was delivered and not yet answered by startForeground. Main thread. */
+ private boolean startDelivered;
+ /** This instance stopped itself; starts counted after that belong to the next instance. Main thread. */
+ private boolean stoppedSelf;
  /**
   * Android reports neither a channel lowered to silent/hidden nor the lock-screen notification
   * setting changing, so while the microphone is held the indicator is re-checked on a short timer;
@@ -127,6 +141,7 @@ public final class ListeningService extends Service {
 
  @Override public void onCreate(){
   super.onCreate();
+  instance=this;
   audio=getSystemService(AudioManager.class);
   ListenerNotifications.channels(this);
   audio.addOnModeChangedListener(getMainExecutor(),modes);
@@ -139,12 +154,20 @@ public final class ListeningService extends Service {
   catch(RuntimeException unavailable){/* the periodic indicator check still applies */}
  }
 
- @Override public int onStartCommand(Intent intent,int flags,int startId){apply();return START_STICKY;}
+ @Override public int onStartCommand(Intent intent,int flags,int startId){
+  // A sticky restart redelivers no intent and is not a startForegroundService to answer.
+  if(intent!=null){Listener.startDelivered();startDelivered=true;}
+  apply();
+  return START_STICKY;
+ }
 
  @Override public IBinder onBind(Intent intent){return null;}
 
  @Override public void onDestroy(){
   destroyed=true;
+  if(instance==this)instance=null;
+  // Stopped from outside: starts this instance never received are not owed by the next one.
+  if(!stoppedSelf)Listener.outstandingStarts.set(0);
   main.removeCallbacks(reapply);
   main.removeCallbacks(indicatorCheck);
   main.removeCallbacks(leaseCheck);
@@ -172,10 +195,19 @@ public final class ListeningService extends Service {
   leaseStopPosted.set(false);
   // Evaluated while any open AudioRecord is still marked held, so a lost lease latches before capture stops.
   ListenerPolicy.State state=Listener.state(this);
+  boolean answerStart=startDelivered;
+  startDelivered=false;
   if(!ListenerPolicy.foreground(state)){
    stopCapture();
+   // Android requires the delivered start to be answered by startForeground before the service stops.
+   if(answerStart)try{
+    startForeground(ListenerNotifications.ACTIVE_ID,ListenerNotifications.active(this,state),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+   }catch(RuntimeException refused){
+    Log.w(TAG,"Foreground microphone service refused: "+refused.getClass().getSimpleName());
+   }
    stopForeground(STOP_FOREGROUND_REMOVE);
-   stopSelf();
+   // A start still on its way is answered the same way when it arrives, and stops the service then.
+   if(ListenerPolicy.serviceMayStop(Listener.outstandingStarts.get())){stoppedSelf=true;stopSelf();}
    ListenerNotifications.showStatus(this,state);
    return;
   }
@@ -184,7 +216,7 @@ public final class ListeningService extends Service {
   }catch(RuntimeException refused){
    // Android refused the microphone service (no while-in-use exemption or permission). Never capture without it.
    Log.w(TAG,"Foreground microphone service refused: "+refused.getClass().getSimpleName());
-   stopCapture();stopSelf();return;
+   stopCapture();stoppedSelf=true;stopSelf();return;
   }
   ListenerNotifications.showStatus(this,state);
   analyse=ListenerPolicy.processesAudio(state);

@@ -156,6 +156,10 @@ final class AlphaLiveVoiceCapture {
  private volatile String interruption;
  /** Stops capture because the platform took the microphone path (a phone call, issue #397); the end event reports {@code reason}. Off the UI thread. */
  void interrupt(String reason){interruption=reason;requestStop();}
+ /** As {@link #interrupt} without touching the source: the worker ends at its next read. Safe on any thread. */
+ void interruptPending(String reason){interruption=reason;cancelPending();}
+ /** The reason this capture was interrupted, or null. */
+ String interruption(){return interruption;}
 
  /** Stops capture; returns the capture duration. The renderer closes an open segment itself. */
  long stop(){

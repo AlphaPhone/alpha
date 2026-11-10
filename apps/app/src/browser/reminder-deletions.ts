@@ -1,8 +1,8 @@
 import type {Reminder} from '../daily';
-import {browserDeletionClock,claimDeletion,deletionDeadline,deletionWindow,type PendingDeletion} from '../runtime/deletion-window';
+import {browserDeletionClock,claimDeletion,deletionDeadline,deletionWindow,type DeletionBlock,type PendingDeletion} from '../runtime/deletion-window';
 import {revision} from './revision';
 export type DeletableReminder=Reminder&{revision:string;pendingDeletion?:string};
-export type ReminderDeletion=PendingDeletion<{sourceRevision:string;row:DeletableReminder}>&{blocked?:string;binding?:string;journalBinding?:{scope:string;proposalId:string;operationHash:string}};
+export type ReminderDeletion=PendingDeletion<{sourceRevision:string;row:DeletableReminder}>&{blocked?:DeletionBlock;binding?:string;journalBinding?:{scope:string;proposalId:string;operationHash:string}};
 export type ReminderDeletionState={sourceRevision:string;reminders:DeletableReminder[];deletions?:Record<string,ReminderDeletion>};
 export function stageReminderDeletion(data:ReminderDeletionState,row:DeletableReminder,owner:string,id:string=crypto.randomUUID(),binding?:string){
  if(row.pendingDeletion||row.status==='cancelled'||data.deletions?.[id])throw Error('Reminder deletion already pending or settled.');
@@ -25,6 +25,8 @@ export function settleReminderDeletions(data:ReminderDeletionState,ownerCurrent:
 }
 export function undoReminderDeletion(data:ReminderDeletionState,id:string,ownerCurrent:(owner:string)=>boolean){
  const entry=data.deletions?.[id];if(!entry||!ownerCurrent(entry.owner))throw Error('Deletion owner changed.');
+ // Undo of an already undone deletion reports the same receipt, as the Android journal does.
+ if(entry.phase==='undone')return structuredClone(entry);
  const row=data.reminders.find(r=>r.id===entry.target.row.id),copy=row?{...row}:undefined;if(copy)delete copy.pendingDeletion;
  if(data.sourceRevision!==entry.target.sourceRevision||row?.pendingDeletion!==id||JSON.stringify(copy)!==JSON.stringify(entry.target.row))throw Error('Reminder changed. Review it again.');
  if(!claimDeletion(entry,entry.owner,browserDeletionClock(),'undo'))throw Error('Undo window ended or deletion already settled.');

@@ -86,6 +86,7 @@ export interface EndpointRecord {
 }
 export interface AssistantHeard {
   turnId: string;
+  /** The confirmed reply's message id; '' when the reply was interrupted before it was confirmed. */
   replyId: string;
   /** Sentences whose playback completed, in order. */
   heard: string;
@@ -208,12 +209,29 @@ type Response = {
   turnId: string;
   controller: AbortController;
   replyId?: string;
+  /** Every sentence queued for playback, in order, including ones streamed before the reply was confirmed. */
   sentences: string[];
+  /** Leading sentences that belong to an earlier message of the turn (spoken before an owner-input pause). */
+  base: number;
   played: number;
   started: boolean;
 };
 /** Every sentence of the reply that has started playing: the echo the microphone may hear. */
-const audible = (response: Response) => response.started ? response.sentences.slice(0, response.played + 1).join(' ') : '';
+export const audible = (response: Pick<Response, 'sentences' | 'played' | 'started'>) => response.started ? response.sentences.slice(0, response.played + 1).join(' ') : '';
+/** The heard/unheard split of the reply's own sentences: only sentences whose playback completed are heard. */
+export function heardSplit(response: Pick<Response, 'sentences' | 'played' | 'base'>): { heard: string; unheard: string } {
+  const from = Math.min(Math.max(0, response.base), response.sentences.length);
+  const cut = Math.min(Math.max(from, response.played), response.sentences.length);
+  return { heard: response.sentences.slice(from, cut).join(' '), unheard: response.sentences.slice(cut).join(' ') };
+}
+/**
+ * The sentences still to queue once a reply is confirmed. A streamed prefix is not repeated, and a
+ * stream the confirmed text contradicts keeps its count. A reply resumed after an owner-input pause
+ * is another message: it is spoken in full after whatever was streamed before the pause.
+ */
+export function remainingSentences(queued: readonly string[], final: readonly string[], resumed: boolean): string[] {
+  return resumed ? [...final] : final.slice(queued.length);
+}
 
 /** One voice assistant conversation. Owned by the chat shell; stopped on any binding change. */
 export class VoiceAssistantSession {
@@ -238,7 +256,7 @@ export class VoiceAssistantSession {
   private inflight: Promise<unknown> = Promise.resolve();
   private speech = new Set<Promise<unknown>>();
   private lastSpoken = { text: '', at: Number.NEGATIVE_INFINITY };
-  private awaiting?: { pause: AssistantAwaitingInput; resolve: (reply: AssistantReply) => void; resolved: boolean };
+  private awaiting?: { pause: AssistantAwaitingInput; response: Response; resolve: (reply: AssistantReply) => void; resolved: boolean };
   private state: AssistantState = { phase: 'idle' };
   private mutedValue = false;
 
@@ -376,8 +394,23 @@ export class VoiceAssistantSession {
   private closingCaptures = new Set<AssistantCapture>();
   private closeCapture(capture: AssistantCapture) {
     this.closingCaptures.add(capture);
-    const closed = Promise.resolve().then(() => capture.close()).catch(() => {}).finally(() => this.closingCaptures.delete(capture));
+    const session = this.session;
+    // A capture that failed to close delivers no further results: its unfinished segments end
+    // without a transcript so the utterance is not left waiting for them.
+    const closed = Promise.resolve().then(() => capture.close()).catch(() => { if (this.current(session)) this.settleSegments(); }).finally(() => this.closingCaptures.delete(capture));
     this.closing = Promise.all([this.closing, closed]).then(() => {});
+  }
+  /** Ends every segment that is still open or waiting for its result, with no transcript. */
+  private settleSegments() {
+    let changed = false;
+    for (const segment of this.segments) {
+      if (segment.closed && segment.done) continue;
+      segment.closed = true; segment.done = true; changed = true;
+      if (segment.tentative) { delete segment.tentative; segment.ignored = true; }
+    }
+    if (!changed) return;
+    this.republish();
+    this.schedule();
   }
 
   private async open(session: number) {
@@ -390,7 +423,8 @@ export class VoiceAssistantSession {
     const signal = this.controller!.signal;
     const pending = this.ports.listen({
       signal,
-      onSpeechStart: at => { if (this.current(session) && !this.mutedValue) this.speechStarted(at); },
+      // Speech during an owner-review pause is never a turn or a barge-in, whichever capture reports it.
+      onSpeechStart: at => { if (this.current(session) && !this.mutedValue && !(this.awaiting && !this.awaiting.resolved)) this.speechStarted(at); },
       onSpeechEnd: at => { if (this.current(session)) this.speechEnded(at); },
       onSegment: text => { if (this.current(session)) this.segmentResult(text); },
       onEnd: error => { if (this.current(session)) void this.captureEnded(session, error); },
@@ -551,7 +585,7 @@ export class VoiceAssistantSession {
     ++this.utteranceEpoch;
     if (!text) return;
     const turn = ++this.turn;
-    const response: Response = { turnId: crypto.randomUUID(), controller: new AbortController(), sentences: [], played: 0, started: false };
+    const response: Response = { turnId: crypto.randomUUID(), controller: new AbortController(), sentences: [], base: 0, played: 0, started: false };
     this.response = response;
     this.publish({ phase: 'thinking', transcript: text });
     this.ports.onTurn?.('submitted', response.turnId, { endpoint });
@@ -585,13 +619,17 @@ export class VoiceAssistantSession {
 
   private async respond(session: number, turn: number, response: Response, text: string, previous: Promise<unknown>) {
     const guard = () => { if (!this.owned(session, turn, response)) throw stopped(); this.ports.assertCurrent(); };
+    let paused = false;
     try {
       // One request at a time: an interrupted request settles before the next turn is sent.
       await previous;
       guard();
       // Speak each sentence as soon as the streamed reply completes it, one at a time, so the first
       // sentence plays while the rest is still being generated.
-      const queued: string[] = [];
+      // Queued sentences are the response's sentences from the moment they are queued, so the echo
+      // gate and the heard accounting cover speech that plays before the reply is confirmed.
+      const queued = response.sentences;
+      let resumed = false;
       let chain: Promise<void> = Promise.resolve();
       let failure: unknown;
       const speakable = (value: string) => this.ports.speakable ? this.ports.speakable(value) : value;
@@ -618,40 +656,56 @@ export class VoiceAssistantSession {
           throw new VoiceAssistantError('reply', 'The owner-input pause was not confirmed for this turn.');
         const pausedReply = reply.assistantMessageId;
         const pause: AssistantAwaitingInput = { proposalId, digest, requestId: response.turnId, conversationId: this.ports.conversationId, userMessageId: reply.userMessageId, assistantMessageId: pausedReply };
-        // The microphone is off while the owner reviews; nothing heard meanwhile is sent.
-        const capture = this.capture; this.capture = undefined;
-        await Promise.resolve(capture?.cancel()).catch(() => {});
-        this.segments = [];
-        guard();
-        reply = await new Promise<AssistantReply>((resolve, reject) => {
-          this.awaiting = { pause, resolve, resolved: false };
+        // The microphone is off while the owner reviews; nothing heard meanwhile is sent. The pause
+        // is in force before the first await, so an unmute racing it cannot open the microphone, and
+        // a capture still opening is cancelled by open() when it arrives.
+        let settle!: (reply: AssistantReply) => void;
+        const delivered = new Promise<AssistantReply>((resolve, reject) => {
+          settle = resolve;
           response.controller.signal.addEventListener('abort', () => reject(stopped()), { once: true });
-          this.publish({ phase: 'awaiting-user-input', transcript: text, replyId: pausedReply, awaitingUserInput: { ...pause } });
         });
-        this.awaiting = undefined;
+        void delivered.catch(() => {});
+        const held = { pause, response, resolve: settle, resolved: false };
+        this.awaiting = held;
+        paused = true;
+        const capture = this.capture; this.capture = undefined; this.opening = undefined;
+        try {
+          await Promise.resolve(capture?.cancel()).catch(() => {});
+          this.segments = [];
+          guard();
+          this.publish({ phase: 'awaiting-user-input', transcript: text, replyId: pausedReply, awaitingUserInput: { ...pause } });
+          reply = await delivered;
+        } finally { if (this.awaiting === held) this.awaiting = undefined; }
+        paused = false;
         guard();
         if (!this.mutedValue) await this.open(session);
         guard();
+        // The resumed result is another message: sentences streamed before the pause stay with the paused one.
+        resumed = true;
+        response.base = queued.length;
       }
       // Proposals need explicit review in the conversation: voice never approves them.
       if (reply.complete !== true) throw new VoiceAssistantError('reply', 'The voice reply was not confirmed for this turn.');
       response.replyId = reply.assistantMessageId;
       const final = splitSpokenSentences(speakable(reply.text));
       // Streamed sentences already queued stay; the confirmed reply supplies the rest.
-      const prefix = queued.length <= final.length && queued.every((part, index) => part === final[index]);
-      response.sentences = prefix ? final : [...queued, ...final.slice(queued.length)];
-      for (const sentence of response.sentences.slice(queued.length)) enqueue(sentence);
+      for (const sentence of remainingSentences(queued, final, resumed)) enqueue(sentence);
       await chain;
       if (failure) throw failure;
       guard();
       if (!response.sentences.length) { this.finishResponse(response); return; }
       this.lastSpoken = { text: response.sentences.join(' '), at: this.clock.now() };
-      this.ports.onHeard?.({ turnId: response.turnId, replyId: reply.assistantMessageId, heard: response.sentences.join(' '), unheard: '', interrupted: false });
+      this.ports.onHeard?.({ turnId: response.turnId, replyId: reply.assistantMessageId, heard: response.sentences.slice(response.base).join(' '), unheard: '', interrupted: false });
       this.finishResponse(response);
     } catch (error) {
-      if (!this.owned(session, turn, response)) return; // Interrupted or stopped: already accounted.
+      if (!this.owned(session, turn, response)) {
+        // Interrupted or stopped: already accounted. A pause cut short by Stop speaking had the
+        // microphone off, so listening resumes with a new capture.
+        if (paused && this.current(session) && !this.mutedValue) void this.open(session).catch(failure => this.fail(session, failure));
+        return;
+      }
       if ((error as { name?: unknown })?.name === 'AbortError') return;
-      if (response.replyId) this.reportInterrupted(response);
+      this.reportInterrupted(response);
       this.response = undefined;
       await this.fail(session, error);
     }
@@ -673,6 +727,7 @@ export class VoiceAssistantSession {
     if (!response) return;
     ++this.turn;
     this.response = undefined;
+    if (this.awaiting?.response === response) this.awaiting = undefined;
     for (const segment of this.segments) if (segment.tentative === response) delete segment.tentative;
     response.controller.abort(new DOMException('Voice reply interrupted', 'AbortError'));
     if (response.started) this.lastSpoken = { text: audible(response), at: this.clock.now() };
@@ -680,11 +735,13 @@ export class VoiceAssistantSession {
     this.ports.onTurn?.('interrupted', response.turnId);
   }
 
+  /**
+   * A reply cut before it was confirmed has no message id yet: what was played of it is reported
+   * under its turn id with an empty `replyId`. Nothing is reported when nothing was audible.
+   */
   private reportInterrupted(response: Response) {
-    if (!response.replyId) return;
-    const heard = response.sentences.slice(0, response.played).join(' ');
-    const unheard = response.sentences.slice(response.played).join(' ');
-    this.ports.onHeard?.({ turnId: response.turnId, replyId: response.replyId, heard, unheard, interrupted: true });
+    if (!response.replyId && !response.started) return;
+    this.ports.onHeard?.({ turnId: response.turnId, replyId: response.replyId ?? '', ...heardSplit(response), interrupted: true });
   }
 
   private async drainSpeech() {

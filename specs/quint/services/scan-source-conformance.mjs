@@ -1,4 +1,5 @@
-/** Reproduce the documented scan draft discrepancy through the real UI entry point. */
+/** Check scan draft ownership through the real UI entry point: a draft the user saved
+ * explicitly survives a confirmed export. */
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
@@ -98,9 +99,11 @@ try {
   await tickUntil(() => saves === 2 && !button('Save document PDF').disabled);
   assert.equal(stored.revision, 'revision-2', 'the explicit user save completed');
   button('Save document PDF').click();
-  await tickUntil(() => exports === 1 && deletes === 1);
-  assert.equal(stored, undefined, 'current source clears the explicitly saved auto-draft');
-  console.log('EXPECTED DISCREPANCY reproduced through openScanDocument: autosave -> explicit Save draft -> confirmed export -> saved draft deleted');
+  await tickUntil(() => exports === 1 && button('Save document PDF').disabled && !button('Save document draft').disabled);
+  for (let attempt = 0; attempt < 10; attempt++) await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(deletes, 0, 'a confirmed export never deletes an explicitly saved draft');
+  assert.equal(stored?.revision, 'revision-2', 'the explicitly saved draft is still stored');
+  console.log('CONFORMS through openScanDocument: autosave -> explicit Save draft -> confirmed export -> saved draft kept');
 } finally {
   close();
   dom.window.close();

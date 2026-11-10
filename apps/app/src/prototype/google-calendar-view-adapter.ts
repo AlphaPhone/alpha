@@ -11,7 +11,7 @@ import {googleConnect,googleConnectNote} from '../runtime/google-connect-flow';
 import {openGoogleCalendarOutbox,overlayGoogleCalendarRows,type GoogleCalendarChange,type GoogleCalendarEnqueueResult,type GoogleCalendarOutbox,type GoogleCalendarOutboxOp,type GoogleCalendarOverlayRow} from '../runtime/google-calendar-outbox';
 import {GOOGLE_CALENDAR_WRITE_CAPABILITIES,type GoogleCalendarRsvp,type GoogleCalendarScope,type GoogleCalendarWriteClient,type GoogleCalendarWriteFields} from '../runtime/google-calendar-writer';
 import {DELETE_UNDO_MS} from '../runtime/deletion-window';
-import {calendarLoadRange} from './calendar-days';
+import {calendarLoadRange,calendarSavedDay} from './calendar-days';
 import {calendarOptionEvent} from './calendar-adapter';
 type Bag=Record<string,any>;
 /** A Google row as read, or as the outbox overlay shows it (pending changes applied). */
@@ -37,6 +37,35 @@ export function googleCalendarChangeProblem(result:GoogleCalendarEnqueueResult):
  if(result.status==='full')return 'Too many changes are waiting to sync. Try again later.';
  if(result.status==='busy')return 'This event is still syncing. Try again in a moment.';
  return 'Google Calendar can’t take this change.';
+}
+/** What the banner for a change that needs the owner says, and what each pill does. A change to an
+ * event Google no longer has offers one OK: there is nothing left to keep. */
+export function googleCalendarAttention(op:Pick<GoogleCalendarOutboxOp,'phase'|'kind'|'remote'|'unseen'|'error'>):{text:string;mineLabel:string;theirsLabel:string;mine:'keep-mine'|'keep-google'|'add-again'|'retry'|'dismiss';theirs:'keep-google'|'drop'|'dismiss'|null}|null{
+ if(op.phase==='conflict'){
+  if(op.remote===null&&op.kind!=='delete')return {text:'Deleted in Google Calendar.',mineLabel:'OK',theirsLabel:'',mine:'keep-google',theirs:null};
+  return {text:op.kind==='delete'?'Changed in Google Calendar after you deleted it.':op.unseen?'Moved or deleted in Google Calendar.':'Changed in Google Calendar.',mineLabel:'Keep mine',theirsLabel:'Keep Google’s',mine:'keep-mine',theirs:'keep-google'};
+ }
+ if(op.phase==='uncertain')return {text:'Google didn’t confirm this event was added.',mineLabel:'Add again',theirsLabel:'Discard',mine:'add-again',theirs:'drop'};
+ if(op.phase==='failed'){
+  const status=op.error?.status??'',text=FAILED[status]||'This change didn’t sync.';
+  if(status==='gone')return {text,mineLabel:'OK',theirsLabel:'',mine:'dismiss',theirs:null};
+  return {text,mineLabel:status==='needs-permission'?'Allow':'Try again',theirsLabel:'Discard',mine:'retry',theirs:'dismiss'};
+ }
+ return null;
+}
+/** What Calendar closes when the signed-in Cloud account changes: an open Google event, its delete
+ * sheet and a Google edit form belong to the account that left. Null when none of them is open. */
+export function googleCalendarAccountLeftPatch(state:Bag):Bag|null{
+ const google=(id:unknown)=>typeof id==='string'&&id.startsWith('google:'),patch:Bag={};
+ if(google(state.open)){patch.open=null;patch.openDay=null;}
+ if(google(state.deleteAsk?.id))patch.deleteAsk=null;
+ if(state.form&&(state.form.googleEventId||state.form.googleLocalId))patch.form=null;
+ return Object.keys(patch).length?patch:null;
+}
+/** A value computed at most once between `begin` and `end` (one render); outside them every `get` computes. */
+export function oncePerPass<T>(compute:()=>T){
+ let active=false,held:{value:T}|null=null;
+ return {get:():T=>{if(!active)return compute();held??={value:compute()};return held.value;},begin(){active=true;held=null;},end(){active=false;held=null;}};
 }
 const FAILED:Record<string,string>={'needs-permission':'Google didn’t allow this change.',gone:'This event is no longer in Google Calendar.',invalid:'Google Calendar didn’t accept this change.',unsupported:'Make this change in Google Calendar.'};
 const validRow=(e:any)=>e?.source==='google'&&typeof e.id==='string'&&typeof e.calendarId==='string'&&typeof e.providerEventId==='string'&&typeof e.writable==='boolean'&&typeof e.revision==='string'&&Array.isArray(e.attendees)&&Number.isFinite(e.begin)&&Number.isFinite(e.end);
@@ -65,6 +94,9 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
  const busy=new Set<string>(),pausedOffered=new Set<string>();
  /** The calendar the + button starts in, while its form is being created. */
  let defaultCal='';
+ /** Set when the Google accounts changed (the owner connected or allowed more): changes Google
+  * refused for want of permission are queued again once the next read shows which accounts allow them. */
+ let permissionRetry=false;
  const deviceZone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone;
  const cacheOwnerKey=()=>{const account=connectionController.getSnapshot().cloudAccount,cloud=connectionController.getCloudClient();return account&&cloud?JSON.stringify([account.environment,account.userId,account.organizationId,cloud.credentialId]):null;};
  const prefs=()=>{const key=googleCalendarAccountKey();return key?readGoogleCalendarPrefs(key):{};};
@@ -95,7 +127,7 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
   outboxRelease?.();outboxRelease=null;outbox=null;outboxKey=key;outboxProblem='';pausedOffered.clear();
   const token=++outboxOpen;
   if(!account?.organizationId)return;
-  void openGoogleCalendarOutbox({environment:account.environment,userId:account.userId,organizationId:account.organizationId},{client:writeClient,read:readOne}).then(box=>{
+  void openGoogleCalendarOutbox({environment:account.environment,userId:account.userId,organizationId:account.organizationId},{client:writeClient,read:readOne,rows:()=>rows}).then(box=>{
    // Only the latest open attaches (an unmount and remount while one is pending starts another).
    if(token!==outboxOpen||outboxKey!==key||!owner)return;
    outboxRelease?.();outbox=box;outboxProblem='';const unsubscribe=box.subscribe(()=>{offerPaused();changed();}),detach=box.attach();
@@ -131,7 +163,7 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
   const unlinked=async(list:GoogleCalendarRecord[])=>{let linked=new Set<string>();try{linked=await calendarSyncHost.linkedProviderEvents();}catch{/* Keep both readable copies when link metadata cannot be verified. */}return list.filter(event=>!linked.has(event.providerEventId));};
   try{
    const account=connectionController.getSnapshot().cloudAccount;
-   const cache=account?.organizationId?await serviceReadCache({environment:account.environment,userId:account.userId,organizationId:account.organizationId,credentialId:cloud.credentialId}).catch(()=>null):null;
+   const cache=account?.organizationId?await serviceReadCache({environment:account.environment,userId:account.userId,organizationId:account.organizationId,credentialId:cloud.credentialId},'google-calendar').catch(()=>null):null;
    if(!current())return;calendarCache=cache;
    // One saved read per account and range (the cache itself is per account).
    const cacheKey=JSON.stringify(['google-calendars',dates.key]);
@@ -147,6 +179,7 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
    if(!current())return;
    if(!accounts.length){void cache?.clear().catch(()=>{});connectOffered=true;sources=[];rows=[];loaded=loadKey;shell.googleCalendarRows=[];cachedRead=false;lastReadAt=Date.now();changed();return;}
    connectOffered=false;
+   if(permissionRetry&&outbox){permissionRetry=false;const allowed=accounts.filter(row=>row.grantedCapabilities.includes('google.calendar.write')).map(row=>row.connectionId!);if(allowed.length)void outbox.retryPermission(allowed).catch(()=>{});}
    const nextSources:GoogleCalendarSource[]=[],nextRows:GoogleCalendarRecord[]=[],read:string[]=[],failed:string[]=[],noWrite=new Set<string>();
    let accountFailure:{status:string;message:string}|null=null,answered=0;
    for(const google of accounts){
@@ -184,10 +217,12 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
  }
 
  /** Rows as the owner should see them. A delete Google changed first stays visible so it can be resolved. */
- const overlayRows=():Row[]=>{
+ const overlay=oncePerPass(():Row[]=>{
   const ops=outbox?.operations??[];
   return ops.length?overlayGoogleCalendarRows(rows,ops.filter(op=>!(op.kind==='delete'&&op.phase==='conflict'))):rows.map(row=>({...row,pending:false}));
- };
+ });
+ /** One overlay per render, however many parts of it ask. */
+ const overlayRows=():Row[]=>overlay.get();
  const rawFor=(event:Row):Row=>event.localId?event:rows.find(row=>row.id===event.id)??event;
  const opFor=(event:Row):GoogleCalendarOutboxOp|undefined=>{
   const ops=outbox?.operations??[];
@@ -226,16 +261,11 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
  /** The banner for a change that needs the owner: Google changed first, a create went unconfirmed, or it failed.
   * Each pill says what it does; a change Google no longer has offers one OK. */
  function conflictFor(op:GoogleCalendarOutboxOp|undefined,event:Row,api:Bag){
-  const box=outbox;if(!op||!box)return null;
-  const dismiss=()=>resolved(box.dismiss(op.id),api);
-  if(op.phase==='conflict')return {text:op.kind==='delete'?'Changed in Google Calendar after you deleted it.':op.remote===null?'Deleted in Google Calendar.':'Changed in Google Calendar.',mineLabel:'Keep mine',theirsLabel:'Keep Google’s',keepMine:()=>resolved(box.resolveConflict(op.id,'mine'),api),keepTheirs:()=>resolved(box.resolveConflict(op.id,'google'),api)};
-  if(op.phase==='uncertain')return {text:'Google didn’t confirm this event was added.',mineLabel:'Add again',theirsLabel:'Discard',keepMine:()=>resolved(box.resolveUncertain(op.id,'send'),api),keepTheirs:()=>resolved(box.resolveUncertain(op.id,'drop'),api)};
-  if(op.phase==='failed'){
-   const status=op.error?.status??'',text=FAILED[status]||'This change didn’t sync.';
-   if(status==='gone')return {text,mineLabel:'OK',theirsLabel:'',keepMine:dismiss,keepTheirs:undefined};
-   return {text,mineLabel:status==='needs-permission'?'Allow':'Try again',theirsLabel:'Discard',keepMine:()=>void retry(op,event,api),keepTheirs:dismiss};
-  }
-  return null;
+  const box=outbox,shown=op&&googleCalendarAttention(op);if(!op||!box||!shown)return null;
+  const act={'keep-mine':()=>resolved(box.resolveConflict(op.id,'mine'),api),'keep-google':()=>resolved(box.resolveConflict(op.id,'google'),api),
+   'add-again':()=>resolved(box.resolveUncertain(op.id,'send'),api),drop:()=>resolved(box.resolveUncertain(op.id,'drop'),api),
+   retry:()=>void retry(op,event,api),dismiss:()=>resolved(box.dismiss(op.id),api)};
+  return {text:shown.text,mineLabel:shown.mineLabel,theirsLabel:shown.theirsLabel,keepMine:act[shown.mine],keepTheirs:shown.theirs?act[shown.theirs]:undefined};
  }
  function edit(event:Row,api:Bag){
   if(owner?.calendarEditDraftText&&!window.confirm('Replace the retained unsaved edits with a fresh editor?'))return;
@@ -270,7 +300,7 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
   const result=await queue({kind:'update',row:rawFor(target),scope:form.googleScope==='all'?'all':'this',fields},api,target.id);
   if(result?.status!=='queued')return;
   committed(form);
-  if(api.get('calendar').form===form)api.set({form:null,day:form.off,openDay:form.off});
+  if(api.get('calendar').form===form)api.set({form:null,day:calendarSavedDay(api.get('calendar').view,form.off),openDay:form.off});
  }
  async function saveCreate(form:Bag,api:Bag){
   const source=sources.find(item=>item.id===form.cal&&item.writable);
@@ -284,14 +314,16 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
    fields:{title,startAt:iso(when.begin),endAt:iso(when.end),timeZone:when.timeZone,...(form.notes?{description:form.notes}:{}),...(form.where?{location:form.where}:{}),...(attendees.length?{attendees}:{})},...(form.allDay?{allDay:true}:{})},api,`create:${form.creationId||''}`);
   if(result?.status!=='queued')return;
   committed(form);
-  if(api.get('calendar').form===form)api.set({form:null,open:null,day:form.off,month:null});
+  if(api.get('calendar').form===form)api.set({form:null,open:null,day:calendarSavedDay(api.get('calendar').view,form.off),month:null});
  }
 
  p.componentDidMount=function(){
   mount.call(this);owner=this;this.googleConnectUnsubscribe=googleConnect.subscribe(changed);this.calendarSyncDispose=startCalendarSyncHost();ensureOutbox();
-  let previous=identityKey(),previousOwner=cacheOwnerKey();
-  const accountChanged=(event:Event)=>{previous=identityKey();reset();const account=connectionController.getSnapshot().cloudAccount,cloud=connectionController.getCloudClient();if(event.type===GOOGLE_ACCOUNTS_CHANGED&&account?.organizationId&&cloud)void serviceReadCache({environment:account.environment,userId:account.userId,organizationId:account.organizationId,credentialId:cloud.credentialId}).then(cache=>cache.clear()).catch(()=>{}).finally(()=>void refresh(true));else void refresh(true);};
-  this.googleCalendarUnsubscribe=connectionController.subscribe(()=>{ensureOutbox();const nextOwner=cacheOwnerKey();if(previousOwner&&nextOwner!==previousOwner)void calendarCache?.clear().catch(()=>{});previousOwner=nextOwner;const next=identityKey();if(next!==previous){previous=next;reset();void refresh();}});
+  let previous=identityKey(),previousOwner=cacheOwnerKey(),previousAccount=JSON.stringify(googleCalendarAccountKey());
+  const accountChanged=(event:Event)=>{if(event.type===GOOGLE_ACCOUNTS_CHANGED)permissionRetry=true;previous=identityKey();reset();const account=connectionController.getSnapshot().cloudAccount,cloud=connectionController.getCloudClient();if(event.type===GOOGLE_ACCOUNTS_CHANGED&&account?.organizationId&&cloud)void serviceReadCache({environment:account.environment,userId:account.userId,organizationId:account.organizationId,credentialId:cloud.credentialId},'google-calendar').then(cache=>cache.clear()).catch(()=>{}).finally(()=>void refresh(true));else void refresh(true);};
+  // Another Cloud account (not a renewed session of the same one) closes what belonged to the last.
+  const accountLeft=()=>{const account=JSON.stringify(googleCalendarAccountKey());if(account===previousAccount)return;previousAccount=account;const patch=googleCalendarAccountLeftPatch(this.vget('calendar'));if(patch)this.vset('calendar',patch);};
+  this.googleCalendarUnsubscribe=connectionController.subscribe(()=>{accountLeft();ensureOutbox();const nextOwner=cacheOwnerKey();if(previousOwner&&nextOwner!==previousOwner)void calendarCache?.clear().catch(()=>{});previousOwner=nextOwner;const next=identityKey();if(next!==previous){previous=next;reset();void refresh();}});
   this.googleCalendarResume=()=>{if(!document.hidden&&!reading&&lastReadAt>0&&Date.now()-lastReadAt>=300000)void refresh(true);};document.addEventListener('visibilitychange',this.googleCalendarResume);
   this.googleCalendarChanged=accountChanged;window.addEventListener(GOOGLE_ACCOUNTS_CHANGED,accountChanged);
   // Showing or hiding a calendar reads what is newly shown; rows already loaded stay.
@@ -300,7 +332,8 @@ export function installGoogleCalendarViewAdapter(Component:any,views:Bag){
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);const entered=this.S().view==='calendar'&&this.calendarSyncPreviousView!=='calendar';this.calendarSyncPreviousView=this.S().view;if(entered){void calendarSyncHost.resume();ensureOutbox();void outbox?.flush().catch(()=>{});offerPaused();void refresh(lastReadAt>0&&Date.now()-lastReadAt>=300000);}else void refresh();};
  p.componentWillUnmount=function(){this.googleConnectUnsubscribe?.();document.removeEventListener('visibilitychange',this.googleCalendarResume);this.calendarSyncDispose?.();this.googleCalendarUnsubscribe?.();window.removeEventListener(GOOGLE_ACCOUNTS_CHANGED,this.googleCalendarChanged);window.removeEventListener(GOOGLE_CALENDAR_PREFS_CHANGED,this.googleCalendarPrefsChanged);if(owner===this){const previous=owner;outboxRelease?.();outboxRelease=null;outbox=null;outboxKey='';owner=null;reset();previous.googleCalendarRows=[];}unmount.call(this);};
 
- views.calendar.render=(state:Bag,api:Bag)=>{
+ views.calendar.render=(state:Bag,api:Bag)=>{overlay.begin();try{return draw(state,api);}finally{overlay.end();}};
+ const draw=(state:Bag,api:Bag)=>{
   const ready=loaded===loadKeyFor(state),saved=prefs(),accountKey=googleCalendarAccountKey();
   const shown=new Set(sources.filter(source=>googleCalendarVisible(saved,source)).map(source=>source.id));
   // A row that cannot be drawn is skipped; it never hides the others.

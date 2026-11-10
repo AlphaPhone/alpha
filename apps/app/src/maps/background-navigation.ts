@@ -10,7 +10,7 @@ export type NavigationBridge = {
   stopNavigation(input: { sessionId: string }): Promise<{ stopped: boolean }>;
   addListener(name: 'navigationStopped', listener: (event: { sessionId: string; reason: string }) => void): Promise<PluginListenerHandle>;
 };
-type Session = { id: string; title: string; text: string; listener?: Promise<PluginListenerHandle>; stopped: boolean; onStopped: (reason: string) => void };
+type Session = { id: string; title: string; text: string; started: boolean; listener?: Promise<PluginListenerHandle>; stopped: boolean; onStopped: (reason: string) => void };
 
 export class BackgroundNavigation {
   private session?: Session;
@@ -23,7 +23,7 @@ export class BackgroundNavigation {
   async start(title: string, text: string, onStopped: (reason: string) => void): Promise<boolean> {
     await this.stop();
     if (!this.native()) return false;
-    const session: Session = { id: crypto.randomUUID().replaceAll('-', ''), title, text, stopped: false, onStopped };
+    const session: Session = { id: crypto.randomUUID().replaceAll('-', ''), title, text, started: false, stopped: false, onStopped };
     this.session = session;
     try {
       if (!(await this.bridge.navigationAvailability()).background) throw new Error('unavailable');
@@ -38,18 +38,26 @@ export class BackgroundNavigation {
       await session.listener;
       if (this.session !== session) return false;
       await this.bridge.startNavigation({ sessionId: session.id, title, text });
-      return this.session === session && !session.stopped;
+      if (this.session !== session || session.stopped) return false;
+      session.started = true;
+      if (session.title !== title || session.text !== text) this.send(session);
+      return true;
     } catch {
       if (this.session === session) await this.stop();
       return false;
     }
   }
-  /** Mirror the current instruction; unchanged text is not resent. */
+  /** Mirror the current instruction; unchanged text is not resent. The native service knows a
+   * session only once its start has settled, so an instruction that arrives earlier is kept
+   * and sent once then. */
   update(title: string, text: string) {
     const session = this.session;
     if (!session || session.stopped || (session.title === title && session.text === text)) return;
     session.title = title; session.text = text;
-    void this.bridge.updateNavigation({ sessionId: session.id, title, text }).then(result => {
+    if (session.started) this.send(session);
+  }
+  private send(session: Session) {
+    void this.bridge.updateNavigation({ sessionId: session.id, title: session.title, text: session.text }).then(result => {
       if (result?.active !== true) this.lost(session);
     }, () => this.lost(session));
   }

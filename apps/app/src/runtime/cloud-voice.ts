@@ -85,8 +85,12 @@ export function createCloudVoice(readAloudRoute:'cloud'|'direct'='cloud') {
 // Maps steps and workflow speech share the same speaker. A replacement waits for
 // the preceding owned cleanup, including a failure to confirm that cleanup.
 let appSpeechRetirement:Promise<void>=Promise.resolve();
+// One message for every speech path refused because an earlier playback or capture could not be
+// confirmed stopped (the same text as SPEECH_CLEANUP_NOTICE in speech-cleanup.ts; this module is
+// evaluated without its imports by contract tests, so the text is repeated here).
+const cleanupUnconfirmed=(error:unknown)=>(error as {code?:unknown}|null)?.code==='speech-cleanup-unconfirmed'&&(error as Error).message!=='Voice media has not finished stopping. Close the app if this continues.'?Object.assign(new Error('Voice media has not finished stopping. Close the app if this continues.',{cause:error}),{code:'speech-cleanup-unconfirmed'}):error;
 export async function speakCloudText(text:string,signal:AbortSignal,onStarted?:()=>void,queue=false,assertCurrent?:()=>void){
-  if(developmentCloudVoiceEnabled){const previous=appSpeechRetirement;const pending=(async()=>{await previous;signal.throwIfAborted();assertCurrent?.();await createCloudVoice().speak(text,signal,onStarted,queue,assertCurrent);})();appSpeechRetirement=pending.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});void appSpeechRetirement.catch(()=>{});await pending;return;}
+  if(developmentCloudVoiceEnabled){const previous=appSpeechRetirement;const pending=(async()=>{await previous;signal.throwIfAborted();assertCurrent?.();await createCloudVoice().speak(text,signal,onStarted,queue,assertCurrent);})();appSpeechRetirement=pending.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});void appSpeechRetirement.catch(()=>{});try{await pending;}catch(error){throw cleanupUnconfirmed(error);}return;}
 
   const environment=connectionController.getCloudEnvironment(),binding=connectionController.getCloudClient(),sessionId=binding?.sessionId,credentialId=binding?.credentialId;
   const owned=new AbortController(),cancel=()=>owned.abort(signal.reason),retire=()=>owned.abort(new DOMException('Voice review changed','AbortError'));
@@ -101,5 +105,6 @@ export async function speakCloudText(text:string,signal:AbortSignal,onStarted?:(
   document.addEventListener('visibilitychange',changed);signal.addEventListener('abort',cancel,{once:true});window.addEventListener('alpha:device-state',retire);window.addEventListener('pagehide',retire);if(signal.aborted)cancel();changed();
   const pending=(async()=>{await previous;current();admitted=true;let marked=false;try{await voice.speak(text,owned.signal,()=>{current();marked=true;markTtsPlaybackStarted();onStarted?.();},queue,current);current();}catch(error){const recovery=cloudVoiceFailure(error);if(recovery)throw Object.assign(new Error(recovery,{cause:error}),{code:(error as {code?:string}).code});throw error;}finally{if(marked)markTtsPlaybackEnded();}})();
   appSpeechRetirement=pending.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});void appSpeechRetirement.catch(()=>{});
-  try{await Promise.race([pending,interrupted]);}finally{unsubscribe();document.removeEventListener('visibilitychange',changed);signal.removeEventListener('abort',cancel);window.removeEventListener('alpha:device-state',retire);window.removeEventListener('pagehide',retire);}
+  // The caller shows this failure's message; the retirement chain above keeps the original.
+  try{await Promise.race([pending,interrupted]);}catch(error){throw cleanupUnconfirmed(error);}finally{unsubscribe();document.removeEventListener('visibilitychange',changed);signal.removeEventListener('abort',cancel);window.removeEventListener('alpha:device-state',retire);window.removeEventListener('pagehide',retire);}
 }

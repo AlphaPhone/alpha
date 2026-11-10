@@ -6,7 +6,9 @@ module NativeCredentialMutation {
     capturedProvider: int, providerPresent: bool, matchingEnvironment: bool,
     admission: bool, oldSize: int, newSize: int, requiresStop: bool,
     running: bool, requestedStop: int, acknowledgedStop: int, stopped: bool,
-    committed: bool, admissionInvalidated: bool, previousCredential: int
+    committed: bool, admissionInvalidated: bool, previousCredential: int,
+    // The Cloud slot written is production's, and the Cloud-change observer ran for this mutation.
+    productionSlot: bool, observerNotified: bool
   }
   var s: Mutation
   action init = s' = {
@@ -15,7 +17,8 @@ module NativeCredentialMutation {
     capturedProvider: 1, providerPresent: true, matchingEnvironment: true,
     admission: true, oldSize: 3, newSize: 1, requiresStop: false,
     running: true, requestedStop: 0, acknowledgedStop: 0, stopped: false,
-    committed: false, admissionInvalidated: false, previousCredential: 1 }
+    committed: false, admissionInvalidated: false, previousCredential: 1,
+    productionSlot: true, observerNotified: false }
   action begin(operation: str, replacement: int, bytes: int): bool = all {
     s.phase.in(Set("idle", "done", "conflict", "full", "failed")),
     operation.in(Set("cloud", "provider", "ordinary", "rollback")),
@@ -26,6 +29,7 @@ module NativeCredentialMutation {
       before: s.credential, previousCredential: s.credential, replacement: replacement,
       capturedProvider: s.providerRevision, capturedEpoch: s.ownerEpoch, newSize: bytes,
       requiresStop: needsStop and bytes <= 3, committed: false, admissionInvalidated: false,
+      observerNotified: false,
       requestedStop: 0, acknowledgedStop: 0, stopped: not(s.running) }
   }
   action retire = all {
@@ -54,7 +58,9 @@ module NativeCredentialMutation {
     s.capturedProvider == s.providerRevision,
     s' = { ...s, phase: "done", credential: if (s.operation.in(Set("ordinary", "cloud"))) s.replacement else s.credential,
       providerRevision: if (s.operation.in(Set("provider", "rollback"))) s.providerRevision + 1 else s.providerRevision,
-      oldSize: s.newSize, committed: true }
+      oldSize: s.newSize, committed: true,
+      observerNotified: s.operation.in(Set("provider", "rollback")) or
+        s.operation == "cloud" and s.productionSlot and s.replacement != s.before }
   }
   /// A retained legacy value may shrink; over-cap growth is refused before slot bytes change.
   action capacityFailure = all {
@@ -78,19 +84,32 @@ module NativeCredentialMutation {
   action ordinarySize = all { s.phase == "idle", s' = { ...s, oldSize: 1 } }
   action otherEnvironment = all { s.phase == "idle", s' = { ...s, matchingEnvironment: false } }
   action unbound = all { s.phase == "idle", s' = { ...s, providerPresent: false, admission: false } }
+  /// The staging Cloud slot exists only with test mocks. Its writes do not reach the observer.
+  action stagingSlot = all { s.phase == "idle", s' = { ...s, productionSlot: false } }
   action step = any {
     begin("cloud", 1, 1), begin("cloud", 2, 1), begin("cloud", 2, 3), begin("cloud", 2, 4),
     begin("provider", 2, 1), begin("ordinary", 2, 1), begin("rollback", 1, 1),
     retire, observeStop(true, true), observeStop(false, true), observeStop(true, false),
     prepareCommit, write, capacityFailure, stale, shutdownTimeout, ownerChanged,
-    concurrentProvider, ordinarySize, otherEnvironment, unbound, s' = s
+    concurrentProvider, ordinarySize, otherEnvironment, unbound, stagingSlot, s' = s
   }
   val ShutdownBeforeCriticalWrite = s.committed and s.requiresStop implies s.stopped and s.requestedStop == s.acknowledgedStop
   val AdmissionInvalidated = s.admissionInvalidated implies not(s.admission)
   val CurrentMutation = s.committed implies s.capturedEpoch == s.ownerEpoch
   val RejectedWriteRetainsBytes = s.phase == "full" implies s.credential == s.previousCredential
+  /// A committed change of the production Cloud credential or of the provider reaches the observer
+  /// that withdraws Cloud-backed delivery; an unchanged or ordinary write never does.
+  val CloudChangeObserved = s.committed and s.phase == "done" and
+    (s.operation.in(Set("provider", "rollback")) or
+      s.operation == "cloud" and s.productionSlot and s.replacement != s.before) implies s.observerNotified
+  val ObserverOnlyAfterCommit = s.observerNotified implies
+    s.operation != "ordinary" and (s.operation != "cloud" or s.productionSlot and s.replacement != s.before)
   val Bounded = s.ownerEpoch.in(0.to(2)) and s.oldSize.in(1.to(3)) and s.providerRevision <= 4
-  val safety = ShutdownBeforeCriticalWrite and AdmissionInvalidated and CurrentMutation and RejectedWriteRetainsBytes and Bounded
+  val safety = ShutdownBeforeCriticalWrite and AdmissionInvalidated and CurrentMutation and RejectedWriteRetainsBytes and CloudChangeObserved and ObserverOnlyAfterCommit and Bounded
+  val ObserverNotifiedWitness = s.observerNotified and s.operation == "cloud"
+  val StagingWriteUnobservedWitness = s.committed and s.operation == "cloud" and not(s.productionSlot) and
+    s.replacement != s.before and not(s.observerNotified)
+  val ShutdownCommittedWitness = s.committed and s.requiresStop
   run shutdownAckTest = init.then(begin("cloud", 2, 1)).then(retire).then(observeStop(false, true))
     .expect(s.phase == "stopping" and not(s.committed)).then(observeStop(true, true))
     .then(prepareCommit).then(write).expect(s.credential == 2 and safety)
@@ -109,4 +128,10 @@ module NativeCredentialMutation {
     .then(prepareCommit).then(write).expect(s.running and s.admission and safety)
   run unboundSignInTest = init.then(unbound).then(begin("cloud", 2, 1))
     .then(prepareCommit).then(write).expect(s.running and s.committed and safety)
+  run cloudChangeObservedTest = init.then(begin("cloud", 2, 1)).then(retire).then(observeStop(true, true))
+    .then(prepareCommit).then(write).expect(s.credential == 2 and s.observerNotified and safety)
+    .then(begin("cloud", 2, 1)).then(prepareCommit).then(write)
+    .expect(s.committed and not(s.observerNotified) and safety)
+  run stagingSlotUnobservedTest = init.then(stagingSlot).then(otherEnvironment).then(begin("cloud", 2, 1))
+    .then(prepareCommit).then(write).expect(StagingWriteUnobservedWitness and safety)
 }

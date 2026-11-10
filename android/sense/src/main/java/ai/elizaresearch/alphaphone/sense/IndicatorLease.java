@@ -70,7 +70,34 @@ public final class IndicatorLease {
   * waits for a fresh acknowledgement of a visible surface, but nothing latches.
   */
  public static boolean sleepLapse(boolean microphoneHeld,ListenerPolicy.IndicatorPause pause,Loss loss){
-  return !microphoneHeld&&pause==ListenerPolicy.IndicatorPause.DISPLAY_OFF&&(loss==Loss.EXPIRED||loss==Loss.PENDING||loss==Loss.REPLACED);
+  // A replacing generation reads PENDING: a verdict never reports REPLACED.
+  return !microphoneHeld&&pause==ListenerPolicy.IndicatorPause.DISPLAY_OFF&&(loss==Loss.EXPIRED||loss==Loss.PENDING);
+ }
+
+ /** What one lease verdict means for the listener. */
+ public static final class Observation{
+  /** The lease permits capture now. */
+  public final boolean valid;
+  /** The loss latches {@link ListenerPolicy.State#STOPPED_INDICATOR_LOST}. */
+  public final boolean latches;
+  /** The explained pause that applies from now on (NONE for capture or an unexplained loss). */
+  public final ListenerPolicy.IndicatorPause pause;
+  Observation(boolean valid,boolean latches,ListenerPolicy.IndicatorPause pause){this.valid=valid;this.latches=latches;this.pause=pause;}
+ }
+
+ /**
+  * The listener's step on a lease verdict, given whether the microphone was held and which explained
+  * pause applied before it ({@code null} counts as NONE). An unexplained loss while capturing, or
+  * during an explained pause, latches; an explained one pauses; a {@link #sleepLapse} does neither
+  * and keeps the display-off pause while the listener itself still sees the screen off.
+  */
+ public static Observation observe(boolean microphoneHeld,ListenerPolicy.IndicatorPause pause,Loss loss,boolean screenInteractive){
+  ListenerPolicy.IndicatorPause before=pause==null?ListenerPolicy.IndicatorPause.NONE:pause;
+  boolean valid=loss==Loss.NONE;
+  boolean paused=before!=ListenerPolicy.IndicatorPause.NONE;
+  boolean asleep=sleepLapse(microphoneHeld,before,loss);
+  boolean latches=!asleep&&ListenerPolicy.latchesIndicatorLoss(microphoneHeld||paused,valid,loss.pause());
+  return new Observation(valid,latches,asleep&&!screenInteractive?ListenerPolicy.IndicatorPause.DISPLAY_OFF:pauseFor(loss));
  }
 
  private long generation;

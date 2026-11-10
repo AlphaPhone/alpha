@@ -3,7 +3,7 @@ import {createGoogleAccounts,notifyGoogleAccountsChanged} from './google-account
 import {googleConnectReturnUrl,onGoogleConnectReturn,openConnectionBrowser} from './native-connection';
 
 /**
- * Connecting Google for Inbox and Calendar (docs/flow-redesign-2026-11, specs/quint/legacy/GoogleConnect.qnt).
+ * Connecting Google for Inbox and Calendar (docs/flow-redesign-2026-11, specs/quint/services/GoogleAccounts.qnt).
  *
  * One consent asks for everything Alpha uses: Gmail read, send, drafts and mailbox changes, and
  * Calendar read and write. Google opens in a Custom Tab; when this phone verifies the App Link,
@@ -15,6 +15,22 @@ export type GoogleConnectStatus = 'idle' | 'waiting' | 'denied' | 'failed';
 let status: GoogleConnectStatus = 'idle', active: AbortController | null = null;
 const listeners = new Set<() => void>();
 function set(next: GoogleConnectStatus) { status = next; for (const listener of listeners) listener(); }
+/** Longest wait for the owner to come back from Google. A page that never goes to the background
+ * (a desktop window beside the consent, multi-window) would otherwise wait for ever. */
+export const GOOGLE_CONNECT_WAIT_MS = 10 * 60_000;
+/** An attempt and its note belong to the Cloud session that started it; neither outlives that session. */
+export function googleConnectOwnerChanged(startedBy: string | undefined, current: string | undefined): boolean { return startedBy !== current; }
+let owner: string | undefined, watching = false;
+function retire() { active?.abort(); active = null; if (status !== 'idle') set('idle'); }
+function watchOwner() {
+  if (watching) return;
+  watching = true;
+  connectionController.subscribe(() => {
+    const current = connectionController.getCloudClient()?.sessionId;
+    if (!googleConnectOwnerChanged(owner, current)) return;
+    owner = current; retire();
+  });
+}
 
 /** The result of the last attempt, for a one-line note under the Connect button. */
 export function googleConnectNote(value: GoogleConnectStatus = status): string {
@@ -44,11 +60,13 @@ export const googleConnect = {
   async start(): Promise<void> {
     const cloud = connectionController.getCloudClient();
     if (!cloud) { connectionController.openCloudAccount(); return; }
+    watchOwner();
+    if (googleConnectOwnerChanged(owner, cloud.sessionId)) { owner = cloud.sessionId; retire(); }
     if (status === 'waiting') return;
     active?.abort();
     const abort = active = new AbortController();
     set('waiting');
-    let unsubscribe = () => {};
+    let unsubscribe = () => {}, timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const state = stateToken();
       const returnUrl = await googleConnectReturnUrl();
@@ -59,16 +77,24 @@ export const googleConnect = {
         .connect(abort.signal, 'write', 'modify', returnUrl ? `${returnUrl}?state=${state}` : undefined);
       await openConnectionBrowser(url, abort.signal);
       // Back in Alpha, by App Link or by closing the tab. A delivered App Link may trail the resume.
-      await Promise.race([appLink, backInFront(abort.signal)]);
+      const expired = new Promise<void>(resolve => { timer = setTimeout(resolve, GOOGLE_CONNECT_WAIT_MS); });
+      await Promise.race([appLink, backInFront(abort.signal), expired]);
       if (!result && returnUrl) await Promise.race([appLink, new Promise(resolve => setTimeout(resolve, 400))]);
       abort.signal.throwIfAborted();
+      // A return for a session that is no longer signed in is dropped; that session's readers are gone.
+      if (googleConnectOwnerChanged(cloud.sessionId, connectionController.getCloudClient()?.sessionId)) { if (active === abort) set('idle'); return; }
       notifyGoogleAccountsChanged();
       set(result === 'denied' ? 'denied' : result === 'failed' ? 'failed' : 'idle');
     } catch (error) {
       if (abort.signal.aborted) { if (active === abort) set('idle'); return; }
       connectionController.rejectCloudSession(cloud.sessionId, error);
-      set('failed');
-    } finally { unsubscribe(); if (active === abort) active = null; }
+      // The failure note is for the session that asked; a session that ended meanwhile shows none.
+      if (active === abort) set('failed');
+    } finally {
+      clearTimeout(timer); unsubscribe(); if (active === abort) active = null;
+      // Releases the back-in-front listeners when the App Link or the time limit ended the wait.
+      abort.abort();
+    }
   },
   cancel() { active?.abort(); },
 };

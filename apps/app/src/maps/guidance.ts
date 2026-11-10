@@ -1,5 +1,5 @@
-import type { Maneuver, Route, RouteStep } from './contracts';
-import type { RouteProgress } from './route-distance';
+import type { Coordinate, Maneuver, Route, RouteStep } from './contracts';
+import { distanceToRoute, type RouteProgress } from './route-distance.ts';
 
 /** 24px stroke icons (prototype `.i` style) for each provider-neutral maneuver. */
 export const MANEUVER_ICONS: Record<Maneuver, string> = {
@@ -39,6 +39,39 @@ export function atStep(progress: RouteProgress, steps: readonly RouteStep[], ind
  const then = index + 1 < steps.length ? { index: index + 1, step: steps[index + 1] } : undefined;
  const { next: _next, then: _then, ...rest } = progress;
  return { ...rest, ...(next ? { next } : {}), ...(then ? { then } : {}) };
+}
+/** A maneuver is reached once a fix comes within this distance of it. */
+export const STEP_REACHED_METERS = 40;
+/** The upcoming maneuver, and how many fixes in a row have lain clear beyond it. */
+export type StepHold = Readonly<{ index: number; cleared: number }>;
+/** How far a fix has left the maneuver at `index` behind: its distance from every part of the line
+ * up to that maneuver, or 0 while its route position is not past it. Where the route doubles back
+ * along itself the fix stays close to the earlier line, so the maneuver is not left behind there. */
+export function clearedMeters(point: Coordinate, route: Pick<Route, 'geometry' | 'steps'>, progress: Pick<RouteProgress, 'alongMeters' | 'maneuverAlongMeters'>, index: number): number {
+ const at = progress.maneuverAlongMeters[index], step = route.steps[index];
+ if (at === undefined || !step || !(progress.alongMeters > at)) return 0;
+ const before: Coordinate[] = [];
+ for (let i = 0, travelled = 0; i < route.geometry.length && travelled <= at; i++) {
+  before.push(route.geometry[i]);
+  if (i + 1 < route.geometry.length) travelled += distanceToRoute(route.geometry[i], [route.geometry[i + 1]]);
+ }
+ return distanceToRoute(point, [...before, step.coordinate]);
+}
+/** The upcoming maneuver after one usable fix. A maneuver is passed when the fix comes near it. One
+ * that was never approached (fixes lost through the turn, a start partway along the route) is
+ * given up once two fixes in a row are on the route and clear beyond it, by more than 60 m and
+ * twice the fix accuracy; a single jumping fix never skips an instruction. The last step stays. */
+export function advanceStep(hold: StepHold, route: Pick<Route, 'geometry' | 'steps'>, progress: Pick<RouteProgress, 'alongMeters' | 'maneuverAlongMeters'>,
+ fix: Readonly<{ coordinate: Coordinate; accuracyMeters: number }>, onRoute: boolean): StepHold {
+ const last = route.steps.length - 1;
+ let index = Math.max(0, hold.index), cleared = hold.cleared;
+ const held = index;
+ while (index < last && distanceToRoute(fix.coordinate, [route.steps[index].coordinate]) < STEP_REACHED_METERS) index++;
+ if (index !== held) cleared = 0;
+ if (index < last && onRoute && clearedMeters(fix.coordinate, route, progress, index) > Math.max(60, fix.accuracyMeters * 2)) {
+  if (++cleared >= 2) { index++; cleared = 0; }
+ } else cleared = 0;
+ return { index, cleared };
 }
 /** Presentation of one progress reading for the navigation sheet, voice and notification.
  * The arrival time says whether it includes live traffic, as the route was planned. */

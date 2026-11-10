@@ -198,8 +198,8 @@ test("native boundary: image-only plugin methods, immutable explicit callbacks, 
   assert.match(plugin, /send\.setFilterTouchesWhenObscured\(true\)/);
   assert.match(plugin, /catch \(SmsSendJournal\.Expired expired\) \{ call\.reject\(/);
   assert.match(receiver, /getResultCode\(\) == Activity\.RESULT_OK/, "sent only from a successful sent callback");
-  assert.match(plugin, /main.post\(\(\) -> reviewSmsOnMain\(call\)\);/, "review is marshalled from Capacitor's plugin thread to main");
-  assert.match(plugin, /private void reviewSmsOnMain\(PluginCall call\) \{\n  if \(refused\(call\)\) return;/, "admission is rechecked on main before review");
+  assert.match(plugin, /main\.post\(\(\) -> reviewSmsOnMain\(call, journal, operationId, recipients, body, subscriptionId\)\);/, "review is marshalled from the journal worker to main");
+  assert.match(plugin, /private void reviewSmsOnMain\(PluginCall call, SmsSendJournal journal, String operationId, String\[\] recipients, String body, int subscriptionId\) \{\n  if \(refused\(call\)\) return;/, "admission is rechecked on main before review");
   for (const method of ["listThreads", "listMessages", "observeMessages", "smsSendHistory", "smsSendResult"])
     assert.match(plugin, new RegExp(`@PluginMethod public void ${method}\\(PluginCall call\\) \\{\\n  if \\(refused\\(call\\)\\) return;`), `${method} re-checks the image capability first`);
 });

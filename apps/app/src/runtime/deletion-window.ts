@@ -2,7 +2,9 @@
 export const DELETE_UNDO_MS=10_000;
 export type DeletionClock={continuity:string;elapsed:number;wall:number};
 export type DeletionDeadline={continuity:string;createdElapsed:number;expiresElapsed:number;expiresAt:number};
-export type DeletePhase='queued'|'paused'|'dispatching'|'undone'|'deleted'|'conflict'|'permission-required'|'owner-changed'|'unknown';
+export type DeletePhase='queued'|'paused'|'dispatching'|'undone'|'deleted'|'conflict'|'unknown';
+/** Why a deletion is paused. A blocked deletion keeps phase 'paused'; these are never phases. */
+export type DeletionBlock='owner-changed'|'permission-required';
 export type PendingDeletion<T>={version:1;id:string;owner:string;target:T;deadline:DeletionDeadline;phase:DeletePhase;acknowledged?:boolean};
 function clockValid(clock:DeletionClock){return !!clock&&typeof clock.continuity==='string'&&clock.continuity.length>0&&clock.continuity.length<=200&&Number.isFinite(clock.elapsed)&&clock.elapsed>=0&&Number.isSafeInteger(clock.wall)&&clock.wall>=0;}
 export function deletionDeadline(clock:DeletionClock):DeletionDeadline{

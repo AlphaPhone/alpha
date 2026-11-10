@@ -3,7 +3,8 @@ module ResidentScheduling {
   type State = {
     unlocked: bool, packaged: bool, enabled: bool, lifecycle: str,
     running: bool, epoch: int, starts: int, lastDecision: str,
-    lastStartAdmitted: bool, replayedOccurrences: int
+    // deferred: a start was admitted and the service refused it; nothing is running.
+    deferred: bool, failedStarts: int
   }
   var s: State
   action check(condition: bool): bool = all {assert(condition), s' = s}
@@ -17,18 +18,26 @@ module ResidentScheduling {
   action init = s' = {
     unlocked: true, packaged: true, enabled: true, lifecycle: "idle",
     running: false, epoch: 0, starts: 0, lastDecision: "IGNORE",
-    lastStartAdmitted: false, replayedOccurrences: 0
+    deferred: false, failedStarts: 0
   }
   // The decision and start share one critical section. No delayed start token exists.
-  action broadcast(event: str): bool = all {
+  // The service may refuse an admitted start (a background-start restriction or a retiring
+  // provider): the receiver logs it, nothing runs, and a later broadcast or launch starts it.
+  action broadcastOutcome(event: str, works: bool): bool = all {
     event.in(Set("boot", "update", "time", "zone", "other")),
     s.starts < 3 or s.running or decision(event, s) != "START",
+    works or (decision(event, s) == "START" and not(s.running) and s.failedStarts < 2),
     s' = {lastDecision: decision(event, s),
-      running: s.running or decision(event, s) == "START",
-      starts: if (decision(event, s) == "START" and not(s.running)) s.starts + 1 else s.starts,
-      lastStartAdmitted: if (decision(event, s) == "START")
-        s.unlocked and s.packaged and s.enabled and s.lifecycle == "idle"
-        else s.lastStartAdmitted, ...s}
+      running: s.running or (decision(event, s) == "START" and works),
+      starts: if (decision(event, s) == "START" and not(s.running) and works) s.starts + 1 else s.starts,
+      deferred: if (decision(event, s) != "START") s.deferred else not(works),
+      failedStarts: if (works) s.failedStarts else s.failedStarts + 1, ...s}
+  }
+  action broadcast(event: str): bool = broadcastOutcome(event, true)
+  // The next foreground launch starts an admissible resident, deferred or not.
+  action foregroundLaunch = all {
+    s.unlocked, s.packaged, s.enabled, s.lifecycle == "idle", not(s.running), s.starts < 3,
+    s' = {running: true, starts: s.starts + 1, deferred: false, ...s}
   }
   action beginLifecycle(operation: str): bool = all {
     s.lifecycle == "idle", operation.in(Set("stopping", "provider-change")), s.epoch < 3,
@@ -49,14 +58,29 @@ module ResidentScheduling {
     nondet event = Set("boot", "update", "time", "zone", "other").oneOf()
     nondet operation = Set("stopping", "provider-change").oneOf()
     nondet flag = Set(false, true).oneOf()
-    any {broadcast(event), beginLifecycle(operation), finishLifecycle,
-      ownerEnabled(flag), packagePresent(flag), boot, unlock, processDeath, s' = s}
+    any {broadcastOutcome(event, flag), beginLifecycle(operation), finishLifecycle,
+      ownerEnabled(flag), packagePresent(flag), boot, unlock, processDeath, foregroundLaunch, s' = s}
   }
   val NoStartDuringLifecycle = s.running implies s.lifecycle == "idle"
-  val ActiveResidentAdmitted = s.running implies s.unlocked and s.enabled and s.packaged and s.lastStartAdmitted
-  val NoOccurrenceReplay = s.replayedOccurrences == 0
-  val BoundedStarts = s.starts.in(0.to(3)) and s.epoch.in(0.to(3))
-  val safety = NoStartDuringLifecycle and ActiveResidentAdmitted and NoOccurrenceReplay and BoundedStarts
+  val ActiveResidentAdmitted = s.running implies s.unlocked and s.enabled and s.packaged
+  // A refused start leaves nothing running and is not counted as a start.
+  val RefusedStartNotRunning = s.deferred implies not(s.running) and s.failedStarts > 0
+  val RunningWasStarted = s.running implies s.starts > 0
+  val BoundedStarts = s.starts.in(0.to(3)) and s.epoch.in(0.to(3)) and s.failedStarts.in(0.to(2))
+  val safety = NoStartDuringLifecycle and ActiveResidentAdmitted and RefusedStartNotRunning
+    and RunningWasStarted and BoundedStarts
+
+  val DeferredStartWitness = s.deferred
+  val RunningResidentWitness = s.running and s.starts == 2
+  val BusyLifecycleWitness = s.lifecycle != "idle" and s.lastDecision == "LIFECYCLE_BUSY"
+
+  // An admitted start the service refuses is deferred; a later broadcast or launch starts it.
+  run refusedStartDeferredTest = init.then(broadcastOutcome("boot", false))
+    .then(check(safety and s.lastDecision == "START" and not(s.running) and s.starts == 0 and s.deferred))
+    .then(broadcast("time")).then(check(safety and s.running and s.starts == 1 and not(s.deferred)))
+  run refusedStartThenLaunchTest = init.then(broadcastOutcome("update", false))
+    .then(foregroundLaunch).then(check(safety and s.running and s.starts == 1 and not(s.deferred)))
+  run refusalNeedsAdmissionTest = init.then(boot).then(broadcastOutcome("boot", false).fail())
 
   run allRearmBroadcastsTest = init.then(broadcast("boot")).then(broadcast("update"))
     .then(broadcast("time")).then(broadcast("zone"))

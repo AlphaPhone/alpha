@@ -1,9 +1,9 @@
 import {connectionController} from '../runtime/connection-ui';
-import {mapsChatText} from '../runtime/maps-chat-markup';
+import {createMapsChatParses,type MapsChatParse} from '../runtime/maps-chat-markup';
 import {mapsAgentResultsPort} from '../maps/agent-navigation';
 import type {AgentMapsResult} from '../maps/device-navigation';
 type Shell=Record<string,any>;
-type Spec=ReturnType<typeof mapsChatText>['specs'][number];
+type Spec=MapsChatParse['specs'][number];
 /** A card Maps can open: a place, search results or a route. Locate and hand-off cards cannot. */
 const result=(spec:Spec):AgentMapsResult|null=>spec.kind==='place'?{kind:'place',place:spec.place}:spec.kind==='places'?{kind:'places',query:spec.query,places:spec.places}:spec.kind==='route'?{kind:'route',destination:spec.destination,travelMode:spec.travelMode}:null;
 /** Messages seen per shell. Only a reply appended while the conversation is open is new; a
@@ -45,11 +45,15 @@ export function installMapsChatAdapter(Component:Shell){
    if(opened===null&&explicit&&shell.live)shell.openView('maps',{keepState:true});
   }catch(error){if(explicit&&shell.live)shell.toast(error instanceof Error?error.message:'Maps couldn’t open this.');}
  }
+ // Each shell keeps the parse of every message on screen; a render parses only new or edited text.
+ const parses=new WeakMap<object,ReturnType<typeof createMapsChatParses>>();
  p.renderVals=function(){
   const out=render.call(this),msgs=out.msgs||[],done=answers(this),appended=fresh(this,msgs);
+  let cache=parses.get(this);if(!cache){cache=createMapsChatParses();parses.set(this,cache);}
+  const parse=cache;parse.retain(msgs.map((message:Shell)=>String(message.id)));
   out.msgs=msgs.map((message:Shell,index:number)=>{
    if(!message.isAgent)return message;
-   const parsed=mapsChatText(String(message.displayText??message.text??''));
+   const parsed=parse.parse(String(message.id),String(message.displayText??message.text??''));
    if(!parsed.cards.length&&!parsed.choice)return message;
    const results=parsed.specs.map(result);
    // The newest result of a reply that just arrived opens once, outside render.
