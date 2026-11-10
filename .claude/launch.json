@@ -80,6 +80,21 @@
         "."
       ],
       "port": 8790
+    },
+    {
+      "name": "home-spacing-dev-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "/home/shaw/Work/alphaphone/.claude/worktrees/home-spacing",
+        "run",
+        "dev:ui",
+        "--",
+        "--port",
+        "5421",
+        "--strictPort"
+      ],
+      "port": 5421
     }
   ]
 }
