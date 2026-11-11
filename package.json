@@ -58,6 +58,7 @@
     "predev:maps": "npm run upstream:prepare-client",
     "prebuild:test-mocks": "npm run upstream:prepare-client",
     "dev:cloud": "node scripts/dev-cloud.ts",
+    "cloud:local": "node scripts/local-cloud.ts",
     "quint:prepare-history": "node scripts/prepare-quint-history.ts",
     "quint:check": "node scripts/check-quint.ts check",
     "quint:typecheck": "node scripts/check-quint.ts typecheck",
