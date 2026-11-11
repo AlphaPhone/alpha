@@ -1448,6 +1448,7 @@
       "tests": [
         "permissionDuringCallTest",
         "callDuringNativeOpenTest",
+        "unconfirmedReleaseBlocksReplacementTest",
         "cancelledOpenReleasedTest",
         "replacementRejectsOldPermissionTest",
         "explicitStopKeepsTailTest",
@@ -1466,7 +1467,8 @@
         "DiscardIsCancelled",
         "PausedMicrophoneStopped",
         "ResumeIsOnlyPermissionReservation",
-        "Bounded"
+        "Bounded",
+        "UnconfirmedReleaseKeepsOwner"
       ],
       "abstractions": [
         "Two capture identities/reservations and source instances, with three host epochs. Native open and release are controlled ports.",
