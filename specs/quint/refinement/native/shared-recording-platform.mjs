@@ -80,6 +80,9 @@ public class LiveCaptureController {
  public void pause(java.util.Collection<LiveCaptureAdmission.Ticket> waiting){if(!waiting.isEmpty())throw new AssertionError("Unexercised live permission reservation");}
  public void shutdown(){}
  public void interrupt(String reason){}
+ /** The pinned bridge starts a draft recording through the live controller's drain. No live capture exists in this
+  * projection, so the drain has nothing to release and continues at once; its worker and release wait are unexercised. */
+ public void interruptAndDrain(String reason,Runnable drained,Runnable refused){drained.run();}
  public void onWorker(Runnable work,Runnable refused){throw new AssertionError("Unexercised live capture");}
  public LiveCaptureAdmission.Ticket reserve(String id,long epoch){throw new AssertionError("Unexercised live admission");}
  public boolean current(LiveCaptureAdmission.Ticket ticket){throw new AssertionError("Unexercised live admission");}

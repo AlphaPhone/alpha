@@ -41,7 +41,7 @@ export async function checkSharedRecording(extraSources=[]){
   return await checkTraces({model:'SharedRecordingAdmission',sources,driverHashes,generatedSources:platform.paths,traces,scope:'bounded-orchestration',assumptions:[
    'The complete staged LocalSpeechBridgePlugin executes public draft recording methods, private permission callback, host lifecycle callbacks and cancellation worker barrier. SpeechRequestGate, LocalVoiceRecording and the serial ThreadPoolExecutor execute their actual implementation.',
    'Two recording requests, two cancellation waiters and two successful starts bound the campaign. Exact permission epochs and waiter ownership are observed. Record and cancel main-queue tasks execute through their actual captured closures.',
-   'Audio mode and permission state are primitive platform inputs. Live capture, physical audio output, inference and latency environment are explicitly unexercised ports.',
+   'Audio mode and permission state are primitive platform inputs. Live capture, physical audio output, inference and latency environment are explicitly unexercised ports. The live controller drain that precedes a draft start is a pass-through here: with no live capture it releases nothing, and its serial worker and refusal path are not exercised.',
    'Protected-screen state is fixed inactive in this projection; production protected-surface guards remain present.',
    'A held real worker, rejected full queue and MediaRecorder release failure control interruption and cleanup schedules. An interrupted draft is unavailable while release is unresolved; the cancellation barrier can retry that release. Installed Android permission/call delivery and physical microphone state remain platform obligations.'
   ]});
