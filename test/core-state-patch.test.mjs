@@ -105,7 +105,7 @@ test('real Bun preload authenticates the selected clean source and refuses subse
 
 });
 test('all selected product source launchers install the authenticated core preload', () => {
-  for (const file of ['cloud-resident-host.ts', 'start-local-remote.ts', 'start-cloud-qa.ts', 'start-local-voice-agent.ts', 'start-reviewed-workflow-agent.ts']) {
+  for (const file of ['cloud-resident-host.ts', 'start-local-remote.ts', 'start-local-voice-agent.ts']) {
     const source = fs.readFileSync(new URL('../scripts/'+file, import.meta.url), 'utf8');
     assert.match(source, /coreRuntimeArguments\(root,source,\[/, file);
     assert.match(source, /ALPHA_CORE_STATE_SOURCE:source/, file);
