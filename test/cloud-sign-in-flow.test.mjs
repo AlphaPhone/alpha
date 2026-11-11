@@ -148,7 +148,7 @@ test('browser resident sign-in has no browser hand-off entry; only test mocks ke
 test('native sign-in errors survive resident startup without hiding genuine startup failures', async () => {
  const source=between(read('apps/app/src/runtime/connection-ui.tsx'),'async function ensureResident()','/** P-43: a startup path');
  const compiled=transformSync(source,{loader:'ts'}).code;
- const run=new Function('state','update','startResident','residentStartFailure',`const residentAlwaysPresent=true,active=null,operation=null;${compiled};return ensureResident();`);
+ const run=new Function('state','update','startResident','residentStartFailure',`const residentAlwaysPresent=true,active=null,operation=null,signedOutBoot=null;${compiled};return ensureResident();`);
  for(const row of [{error:'Google sign-in failed',startup:'Agent unavailable',previous:'Earlier failure',expected:'Google sign-in failed'},{error:'Earlier failure',startup:'New startup failure',previous:'Earlier failure',expected:'New startup failure'}]){
   const state={error:row.error,message:'',open:true,session:null};
   await run(state,change=>Object.assign(state,change),async()=>Object.assign(state,{error:row.startup}),row.previous);
