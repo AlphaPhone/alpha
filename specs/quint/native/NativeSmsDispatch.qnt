@@ -8,7 +8,7 @@ module NativeSmsDispatch {
   type Review = {binding: int, sim: int}
   type State = {
     recipients: int, parts: int, reply: str, replyBinding: int, memory: Record, disk: Record, tombstoneBinding: int,
-    attempts: int, accepted: int, reviews: int -> Review, foreground: Set[int], closed: Set[int], listener: int, events: int,
+    attempts: int, accepted: int, reviews: int -> Review, foreground: Set[int], closed: Set[int], listener: Set[int], events: int,
     image: bool, send: bool, phone: bool, read: bool, locked: bool, role: bool, sim: int,
     process: int, boot: int, old: bool, candidate: str, providerStatus: str, refuseOutbox: bool,
     outbox: Set[int], sentRows: Set[int], failedRows: Set[int]
@@ -22,7 +22,7 @@ module NativeSmsDispatch {
   action initWith(recipients: int, parts: int, role: bool): bool = all {
     recipients.in(1.to(2)), parts.in(1.to(2)),
     s' = {recipients:recipients,parts:parts,reply:"none",replyBinding:0,memory:noRecord,disk:noRecord,tombstoneBinding:0,attempts:0,accepted:0,
-      reviews:actors.mapBy(_actor=>noReview),foreground:actors,closed:Set(),listener:2,events:0,
+      reviews:actors.mapBy(_actor=>noReview),foreground:actors,closed:Set(),listener:actors,events:0,
       image:true,send:true,phone:true,read:true,locked:false,role:role,sim:1,process:1,boot:1,old:false,
       candidate:"none",providerStatus:"none",refuseOutbox:false,outbox:Set(),sentRows:Set(),failedRows:Set()}
   }
@@ -97,7 +97,7 @@ module NativeSmsDispatch {
     val stopped=retireReview(s,actor)
     s' = if (mode=="pause") { ...stopped,foreground:stopped.foreground.exclude(Set(actor)) }
       else if (mode=="resume") { ...stopped,foreground:stopped.foreground.union(Set(actor)) }
-      else if (mode=="destroy") { ...stopped,closed:stopped.closed.union(Set(actor)),listener:if (s.listener==actor) 0 else s.listener }
+      else if (mode=="destroy") { ...stopped,closed:stopped.closed.union(Set(actor)),listener:s.listener.exclude(Set(actor)) }
       else stopped
   }
 
@@ -178,7 +178,8 @@ module NativeSmsDispatch {
   }
 
   pure def announce(state: State, changed: bool): State =
-    if (changed and state.listener!=0 and current(state,state.listener)) { ...state,events:state.events+1 } else state
+    // Each bridge keeps its own listener: every current bridge publishes the update.
+    if (changed) { ...state,events:state.events+state.listener.filter(actor=>current(state,actor)).size() } else state
   pure def deliveryChanged(before: Record, after: Record): bool =
     before.delivered!=after.delivered or before.deliveryFailed!=after.deliveryFailed
 
@@ -217,7 +218,7 @@ module NativeSmsDispatch {
       (stored.binding!=0 and stored.decision=="none" and stored.boot!=boot and stored.sent.union(stored.failed).size()<s.recipients*s.parts)
     val loaded=if (interrupted) project({ ...stored,dispatching:false,unknown:true },s.recipients*s.parts) else stored
     val current={ ...s,process:s.process+1,boot:boot,reviews:actors.mapBy(_actor=>noReview),foreground:actors,closed:Set(),
-      listener:2,events:0,reply:"none",replyBinding:0,memory:loaded,disk:loaded }
+      listener:actors,events:0,reply:"none",replyBinding:0,memory:loaded,disk:loaded }
     val recovered=reconciled(current)
     s' = announce(recovered,deliveryChanged(current.memory,recovered.memory))
   }

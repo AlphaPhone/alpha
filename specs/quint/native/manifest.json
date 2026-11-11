@@ -2531,7 +2531,7 @@
         "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java"
       ],
       "stateMapping": {
-        "reviews/foreground/closed/listener/events": "Exact review calls, saved SIM/tuple, Activity lifecycle and latest native callback publisher",
+        "reviews/foreground/closed/listener/events": "Exact review calls, saved SIM/tuple, Activity lifecycle and the callback publisher of each bridge",
         "recipients/parts/attempts/accepted": "Synthetic exact reviewed radio handoff prefix and per-part PendingIntent identity",
         "memory/disk/tombstoneBinding/boot/process": "Real live and durable SmsSendJournal records, pruned binding tombstone and reconstruction after process or boot boundaries",
         "role/outbox/sentRows/failedRows/candidate/providerStatus": "Actual outgoing provider inserts/updates and controlled unique provider readback",
@@ -2598,7 +2598,7 @@
         "reply/replyKind/replyBinding/positiveBinding": "Wire status, typed SMS/MMS result and exact retained and approved binding classes",
         "memory/disk/tombstoneBinding/boot/process": "Actual shared live/durable journal, capacity tombstone and process or boot reconstruction",
         "smsAttempts/mmsAttempts/mmsAccepted/files": "Controlled radio boundary and actual temporary PDU retention",
-        "mmsBox/deletedMms/events": "Outgoing MMS provider state, partial-row rollback and newest bridge callback publication",
+        "mmsBox/deletedMms/events": "Outgoing MMS provider state, partial-row rollback and callback publication to each of the two bridges",
         "role/carrier/size/sim/provider/locked": "Controlled device admission and failure classes"
       },
       "abstractions": [

@@ -36,7 +36,9 @@ public final class MmsDispatchTraces {
   if(failure!=null&&!failure.equals("pass"))throw new IOException("Synthetic journal refusal "+failure);
  }
  static void check(boolean value,String reason){if(!value)throw new AssertionError(reason);}
- static void drain()throws Exception{SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);}
+ /** The pinned review reads the journal on the worker, posts the dialog step to main and settles on the worker
+  * again, so one marker task can finish before the work it queued. Three markers cover that chain. */
+ static void drain()throws Exception{for(int round=0;round<3;round++)SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);}
  static String digest(byte[] bytes)throws Exception{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}
  static boolean group(int binding){return binding==1||binding==2;}
 

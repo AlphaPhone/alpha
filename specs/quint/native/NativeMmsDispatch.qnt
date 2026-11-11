@@ -118,8 +118,9 @@ module NativeMmsDispatch {
         val disk=if (finalAlready or mode=="before") s.disk else record
         val box=if (not(mode.in(Set("before","after"))) and s.role and s.mmsBox==4)
           (if (status=="sent") 2 else 5) else s.mmsBox
+        // Each of the two bridges keeps its own listener and publishes the update.
         { ...s,memory:record,disk:disk,files:0,mmsBox:box,
-          events:if (not(finalAlready) and not(s.locked) and not(mode.in(Set("before","after")))) s.events+1 else s.events }
+          events:if (not(finalAlready) and not(s.locked) and not(mode.in(Set("before","after")))) s.events+2 else s.events }
       }
     }
   }

@@ -88,7 +88,7 @@ export async function checkNativeSmsDispatch(extraSources = []) {
       'multipart-provider-cannot-prove-delivery','expired-provider-attribution','default-role-outbox','provider-insert-refused','retired-role-outbox',
     ],inputs);
     for(const trace of traces)for(const {expect} of [trace,...trace.steps]){
-      for(const field of ['foreground','closed','outbox','sentRows','failedRows'])expect['s.'+field]=qset(expect['s.'+field]);
+      for(const field of ['foreground','closed','listener','outbox','sentRows','failedRows'])expect['s.'+field]=qset(expect['s.'+field]);
       expect['s.reviews']=qmap(expect['s.reviews']);
       for(const view of ['memory','disk'])for(const field of ['sent','failed','reported','delivered','deliveryFailed','rows'])
         expect['s.'+view][field]=qset(expect['s.'+view][field]);

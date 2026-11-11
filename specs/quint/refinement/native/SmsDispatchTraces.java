@@ -39,7 +39,9 @@ public final class SmsDispatchTraces {
 
  static void check(boolean condition,String reason){if(!condition)throw new AssertionError(reason);}
  static String wire(SmsSendJournal.Record record){return record==null?"none":record.status();}
- static void drain()throws Exception{SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);}
+ /** The pinned review reads the journal on the worker, posts the dialog step to main and settles on the worker
+  * again, so one marker task can finish before the work it queued. Three markers cover that chain. */
+ static void drain()throws Exception{for(int round=0;round<3;round++)SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);}
 
  static final class Fixture {
   final Context context=new Context();
@@ -224,14 +226,15 @@ public final class SmsDispatchTraces {
   JSONObject observe()throws Exception{
    JSONArray reviews=new JSONArray(),foreground=new JSONArray(),closed=new JSONArray(),outbox=new JSONArray(),
     sentRows=new JSONArray(),failedRows=new JSONArray();
-   int listener=0,events=0;
+   // The bridges whose listener is registered: both at the pin, the latest one in the historical source.
+   JSONArray listener=new JSONArray();int events=0;
    for(int bridge=1;bridge<=2;bridge++){
     var plugin=plugins[bridge];boolean held=Trace.read(plugin,"reviewCall")!=null;
     reviews.put(new JSONArray().put(bridge).put(new JSONObject()
      .put("binding",held?reviewedBinding[bridge]:0).put("sim",held?reviewedSim[bridge]:0)));
     if((boolean)Trace.read(plugin,"foreground"))foreground.put(bridge);
     if((boolean)Trace.read(plugin,"closed"))closed.put(bridge);
-    if(listening(Trace.read(plugin,"sendListener")))listener=bridge;
+    if(listening(Trace.read(plugin,"sendListener")))listener.put(bridge);
     events+=plugin.notices.size();
    }
    for(var entry:context.provider.rows.entrySet()){
@@ -266,7 +269,9 @@ public final class SmsDispatchTraces {
 
   void lifecycle(int bridge,String mode)throws Exception{
    var plugin=plugins[bridge];
-   PluginCall pending=(PluginCall)Trace.read(plugin,"reviewCall");
+   // The pinned review holds a wrapper that settles the bridge call it was made from; the reply is read there.
+   PluginCall held=(PluginCall)Trace.read(plugin,"reviewCall");
+   PluginCall pending=held==null||held.getClass()==PluginCall.class?held:(PluginCall)Trace.read(held,"original");
    var off=(android.content.BroadcastReceiver)Trace.read(plugin,"screenOff");
    Looper.runMain(()->{
     switch(mode){
