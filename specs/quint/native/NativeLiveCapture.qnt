@@ -11,11 +11,17 @@ module NativeLiveCapture {
   var s: State
   val slots = Set(1, 2)
   val emptySource = {allocated: false, running: false, released: false, stopped: false}
+  /// A source whose physical release failed after its start was refused. It stays the controller's
+  /// owner: a failed release is never a receipt that permits another microphone owner.
+  pure def unconfirmed(value: State, ticket: int): bool = ticket != 0 and value.opening != ticket and {
+    val source = value.sources.get(ticket)
+    source.allocated and source.stopped and not(source.running) and not(source.released)
+  }
   pure def retire(value: State, ticket: int): State = if (ticket == 0) value else {
     val source = value.sources.get(ticket)
     {...value, cancelled: value.cancelled.union(Set(ticket)), attached: value.attached.exclude(Set(ticket)), discarded: value.discarded.union(Set(ticket)),
       sources: value.sources.set(ticket, {...source, stopped: source.allocated, running: false,
-        released: source.released or (source.allocated and value.opening != ticket)})}
+        released: source.released or (source.allocated and value.opening != ticket and not(unconfirmed(value, ticket)))})}
   }
   action init = s' = {epoch: 0, foreground: true, destroyed: false, inCall: false, permission: true,
     active: 0, ticketEpoch: slots.mapBy(_ => -1), ids: slots.mapBy(_ => 0), cancelled: Set(), discarded: Set(),
@@ -46,21 +52,28 @@ module NativeLiveCapture {
   }
   action beginOpen(ticket: int): bool = all {
     ticket.in(s.queued), s.opening == 0,
-    val allowed = s.foreground and not(s.destroyed or s.inCall) and ticket == s.active and not(ticket.in(s.cancelled)) and s.ticketEpoch.get(ticket) == s.epoch
+    val current = s.foreground and not(s.destroyed or s.inCall) and ticket == s.active and not(ticket.in(s.cancelled)) and s.ticketEpoch.get(ticket) == s.epoch
+    // An earlier owner whose release is unconfirmed refuses the start before anything is acquired.
+    val blocked = current and unconfirmed(s, s.live)
+    val allowed = current and not(blocked)
     val previous = if (allowed and s.live != 0) s.sources.set(s.live, {...s.sources.get(s.live), running: false, stopped: true, released: true}) else s.sources
     s' = {...s, queued: s.queued.exclude(Set(ticket)),
       opening: if (allowed) ticket else 0, attached: if (allowed) s.attached.union(Set(ticket)) else s.attached,
       sources: if (allowed) previous.set(ticket, {allocated: true, running: false, released: false, stopped: false}) else previous,
       live: if (allowed) 0 else s.live, current: if (allowed) 0 else s.current,
-      interrupted: "none", outcomes: s.outcomes.set(ticket, if (allowed) "pending" else "cancelled")}
+      interrupted: "none",
+      outcomes: s.outcomes.set(ticket, if (allowed) "pending" else if (blocked) "capture" else "cancelled")}
   }
   action finishOpen(opens: bool, releases: bool): bool = all {
     s.opening != 0,
     val ticket = s.opening
     val current = s.foreground and not(s.destroyed or s.inCall) and ticket == s.active and not(ticket.in(s.cancelled)) and s.ticketEpoch.get(ticket) == s.epoch
     val allowed = opens and current
-    val result = if (allowed) "recording" else if (current) "capture" else if (s.reasons.get(ticket) == "call") "call" else "cancelled"
-    s' = {...s, opening: 0, live: if (allowed) ticket else s.live, current: if (allowed) ticket else s.current,
+    // A refused start whose release is unconfirmed is reported as a capture failure, and its
+    // source stays the owner.
+    val kept = not(allowed) and not(releases)
+    val result = if (allowed) "recording" else if (current or kept) "capture" else if (s.reasons.get(ticket) == "call") "call" else "cancelled"
+    s' = {...s, opening: 0, live: if (allowed or kept) ticket else s.live, current: if (allowed or kept) ticket else s.current,
       sources: s.sources.set(ticket, {allocated: true, running: allowed,
         released: not(allowed) and releases, stopped: not(allowed)}),
       startsDuringCall: s.startsDuringCall + (if (opens and s.inCall) 1 else 0),
@@ -75,12 +88,12 @@ module NativeLiveCapture {
     s' = {...s, attached: if (matches) s.attached.exclude(Set(ticket)) else s.attached, cancelled: if (matches) s.cancelled.union(Set(ticket)) else s.cancelled,
       discarded: if (matches and discard) s.discarded.union(Set(ticket)) else s.discarded,
       sources: if (matches and ticket.in(s.attached)) s.sources.set(ticket, {...source, running: false, stopped: true,
-        released: source.allocated and s.opening != ticket}) else s.sources,
+        released: source.allocated and s.opening != ticket and not(unconfirmed(s, ticket))}) else s.sources,
       stopQueued: s.stopQueued.union(Set(id))}
   }
   action finishStop(id: int): bool = all {
     id.in(s.stopQueued), s.opening == 0,
-    val matches = s.live != 0 and s.ids.get(s.live) == id
+    val matches = s.live != 0 and s.ids.get(s.live) == id and not(unconfirmed(s, s.live))
     s' = {...s, stopQueued: s.stopQueued.exclude(Set(id)), live: if (matches) 0 else s.live, current: if (matches) 0 else s.current}
   }
   action pauseHost = all {
@@ -110,13 +123,14 @@ module NativeLiveCapture {
     s' = {...retired, epoch: s.epoch + 1, destroyed: true, permissions: Set(), interrupted: "cancelled", cleanup: true, resumed: 0,
       outcomes: if (s.resumed == 0) retired.outcomes else retired.outcomes.set(s.resumed, "cancelled")}
   }
-  action cleanup = all {s.cleanup, s.opening == 0, s' = {...s, live: 0, current: 0, cleanup: false}}
+  action cleanup = all {s.cleanup, s.opening == 0,
+    s' = if (unconfirmed(s, s.live)) {...s, cleanup: false} else {...s, live: 0, current: 0, cleanup: false}}
   action interruptForCall = {
     val ticket = s.current
     val pending = s.active != 0 and s.active != ticket and not(s.active.in(s.cancelled))
     val retired = if (pending) retire(s, s.active) else s
     s' = {...retired, interrupted: "call", reasons: if (pending) s.reasons.set(s.active, "call") else s.reasons,
-      sources: if (ticket == 0) retired.sources else retired.sources.set(ticket,
+      sources: if (ticket == 0 or unconfirmed(s, ticket)) retired.sources else retired.sources.set(ticket,
       {...s.sources.get(ticket), running: false, stopped: true, released: true})}
   }
   action emitFrames(ticket: int): bool = all {
@@ -146,11 +160,18 @@ module NativeLiveCapture {
   val PausedMicrophoneStopped = not(s.foreground) implies slots.forall(ticket => not(s.sources.get(ticket).running))
   val ResumeIsOnlyPermissionReservation = s.resumed != 0 implies not(s.foreground) and s.outcomes.get(s.resumed) == "pending" and not(s.sources.get(s.resumed).running)
   val Bounded = s.epoch.in(0.to(3)) and s.startsDuringCall.in(0.to(2))
-  val safety = CurrentStartupGate and ReleasedIsStopped and PointerOwnership and DiscardIsCancelled and PausedMicrophoneStopped and ResumeIsOnlyPermissionReservation and Bounded
+  val UnconfirmedReleaseKeepsOwner = slots.forall(ticket => unconfirmed(s, ticket) implies
+    s.live == ticket and slots.exclude(Set(ticket)).forall(other => not(s.sources.get(other).running)))
+  val safety = CurrentStartupGate and ReleasedIsStopped and PointerOwnership and DiscardIsCancelled and PausedMicrophoneStopped and ResumeIsOnlyPermissionReservation and Bounded and UnconfirmedReleaseKeepsOwner
   run permissionDuringCallTest = init.then(setPermission(false)).then(request(1, 1)).then(setCall(true))
     .then(permissionReply(1, true)).then(beginOpen(1)).expect(safety and s.outcomes.get(1) == "cancelled")
   run callDuringNativeOpenTest = init.then(request(1, 1)).then(beginOpen(1)).then(setCall(true)).then(interruptForCall)
     .then(finishOpen(true, true)).expect(safety and s.current == 0 and s.startsDuringCall == 1)
+  run unconfirmedReleaseBlocksReplacementTest = init.then(request(1, 1)).then(beginOpen(1)).then(setCall(true)).then(interruptForCall)
+    .then(finishOpen(true, false)).expect(safety and s.outcomes.get(1) == "capture" and s.live == 1 and s.current == 1 and not(s.sources.get(1).released))
+    .then(setCall(false)).then(request(2, 2)).then(beginOpen(2))
+    .expect(safety and s.outcomes.get(2) == "capture" and s.opening == 0 and s.live == 1 and not(s.sources.get(2).allocated))
+    .then(pauseHost).then(cleanup).expect(safety and s.live == 1 and not(s.sources.get(1).released))
   run cancelledOpenReleasedTest = init.then(request(1, 1)).then(beginOpen(1)).then(stop(1, true)).then(finishOpen(true, true))
     .then(finishStop(1)).expect(safety and s.sources.get(1).released and s.current == 0)
   run replacementRejectsOldPermissionTest = init.then(setPermission(false)).then(request(1, 1)).then(request(2, 2))
