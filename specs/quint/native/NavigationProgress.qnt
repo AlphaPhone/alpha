@@ -1,9 +1,12 @@
 /// Current shared Maps screen guidance, explicit rerouting and owned screen-off sessions.
 module NavigationProgress {
+  /// The upcoming maneuver, and how many consecutive fixes were clear beyond it without coming near it.
+  type StepHold = {index: int, cleared: int}
+  pure val noHold = {index: 0, cleared: 0}
   type Navigation = {
     foreground: bool, permission: bool, releases: int, selected: bool,
     routePhase: str, route: int, previousRoute: int, routeRequests: int, pendingRoutes: Set[int], abortedRequests: Set[int],
-    navigating: bool, navSession: int, navRoute: int, navStep: int, follow: bool,
+    navigating: bool, navSession: int, navRoute: int, navStep: StepHold, follow: bool,
     arrived: bool, offRoute: bool, rerouting: bool, rerouteCleared: bool,
     fixPresent: bool, fixUsable: bool, accuracy: int, displayedStep: int, canReroute: bool,
     watch: int, watchStops: int, bridgeGeneration: int, bridgeOwner: int, bridgeStage: str,
@@ -19,7 +22,7 @@ module NavigationProgress {
     precise and accuracy >= 0 and accuracy <= 50 and age >= -5000 and age <= 30000
   pure def projection(state: Navigation): Navigation = {...state,
     displayedStep: if (state.navigating and state.fixPresent and state.routePhase == "ready"
-      and not(state.arrived or state.rerouting)) state.navStep else -1,
+      and not(state.arrived or state.rerouting)) state.navStep.index else -1,
     canReroute: state.navigating and state.offRoute and state.fixUsable and not(state.rerouting)}
   pure def clearBridge(state: Navigation): Navigation = {...state,
     bridgeOwner: 0, bridgeStage: "none", backgroundRunning: false, bridgeDirty: false,
@@ -49,7 +52,7 @@ module NavigationProgress {
   // Init is after one verified provider route is selected and before the user's Start.
   action init = s' = {foreground: true, permission: false, releases: 0, selected: true,
     routePhase: "ready", route: 1, previousRoute: 1, routeRequests: 1, pendingRoutes: Set(), abortedRequests: Set(),
-    navigating: false, navSession: 0, navRoute: 0, navStep: 0, follow: true, arrived: false,
+    navigating: false, navSession: 0, navRoute: 0, navStep: noHold, follow: true, arrived: false,
     offRoute: false, rerouting: false, rerouteCleared: false, fixPresent: false, fixUsable: false,
     accuracy: -1, displayedStep: -1, canReroute: false, watch: 0, watchStops: 0,
     bridgeGeneration: 0, bridgeOwner: 0, bridgeStage: "none", pendingAvailability: Set(),
@@ -58,7 +61,7 @@ module NavigationProgress {
   action start(nativeEnabled: bool): bool = all {
     s.selected, s.routePhase == "ready", s.foreground, not(s.navigating), s.navSession < 5,
     val sessionId = s.navSession + 1
-    val starting = stopBridge({...s, navigating: true, navSession: sessionId, navRoute: s.route, navStep: 0,
+    val starting = stopBridge({...s, navigating: true, navSession: sessionId, navRoute: s.route, navStep: noHold,
       follow: true, arrived: false, offRoute: false, rerouting: false,
       fixPresent: false, fixUsable: false, accuracy: -1, watch: sessionId})
     s' = projection(if (nativeEnabled) {...starting, bridgeStage: "availability", bridgeOwner: sessionId,
@@ -93,9 +96,25 @@ module NavigationProgress {
     val answered = {...s, pendingUpdates: s.pendingUpdates.set(id, s.pendingUpdates.get(id) - 1)}
     s' = if (not(active) and id == s.bridgeOwner) bridgeLost(stopBridge(answered), "unavailable") else answered
   }
-  pure def advanceStep(index: int, point: str): int =
-    if (index == 0 and point == "near-first") 1
-    else if (index == 1 and point == "near-second") 2 else index
+  /// A fix within 40 m of the upcoming maneuver passes it.
+  pure def near(index: int, point: str): bool =
+    (index == 0 and point == "near-first") or (index == 1 and point == "near-second")
+  /// The fix is beyond the upcoming maneuver by more than 60 m and twice its accuracy. Every
+  /// position here that is beyond a maneuver is beyond it by more than 100 m, the largest
+  /// threshold of a usable fix (accuracy 50).
+  pure def clearBeyond(index: int, point: str): bool =
+    if (index == 0) not(point.in(Set("near-first", "away-first")))
+    else if (index == 1) not(point.in(Set("near-first", "away-first", "near-second")))
+    else false
+  /// A maneuver no fix came near is passed after two consecutive on-route fixes clear beyond it.
+  /// One jumping fix does not skip an instruction, and the last step is never passed.
+  pure def advanceStep(hold: StepHold, point: str, onRoute: bool): StepHold = {
+    val index = if (near(hold.index, point)) hold.index + 1 else hold.index
+    val held = if (index == hold.index) hold.cleared else 0
+    if (index < 2 and onRoute and clearBeyond(index, point))
+      (if (held == 1) {index: index + 1, cleared: 0} else {index: index, cleared: 1})
+    else {index: index, cleared: 0}
+  }
   pure def distance(point: str): int =
     if (point == "off-76") 76 else if (point == "off-99") 99 else if (point == "off-101") 101 else 0
   action fix(id: int, accuracy: int, precise: bool, age: int, point: str, description: str): bool = all {
@@ -110,7 +129,7 @@ module NavigationProgress {
       else if (point == "near-arrival" and accuracy <= 30)
         projection(stopWatch(stopBridge({...current, arrived: true, offRoute: false})))
       else {
-        val nextFix = projection({...current, navStep: advanceStep(s.navStep, point), offRoute: nearest > limit,
+        val nextFix = projection({...current, navStep: advanceStep(s.navStep, point, nearest <= limit), offRoute: nearest > limit,
           bridgeDirty: if (s.bridgeStage == "starting" and description != "unchanged") description == "changed" else s.bridgeDirty})
         if (s.bridgeStage == "running" and description != "unchanged") requestUpdate(nextFix) else nextFix
       }
@@ -134,7 +153,7 @@ module NavigationProgress {
       else if (not(s.navigating)) projection(result)
       else if (route == 0) projection({...result, rerouting: false})
       else if (s.rerouting and s.rerouteCleared)
-        projection({...result, rerouting: false, navStep: 0, navRoute: route})
+        projection({...result, rerouting: false, navStep: noHold, navRoute: route})
       else endGuidance(result)
   }
   action end = all {s.navigating, s' = endGuidance(s)}
@@ -164,7 +183,7 @@ module NavigationProgress {
     fix(s.navSession, 31, true, 0, "near-arrival", "changed"), fix(s.navSession, 30, false, 0, "past", "changed"),
     s' = s
   }
-  val CursorRange = s.navStep.in(0.to(2)) and s.displayedStep.in(Set(-1, 0, 1, 2))
+  val CursorRange = s.navStep.index.in(0.to(2)) and s.navStep.cleared.in(0.to(1)) and s.displayedStep.in(Set(-1, 0, 1, 2))
   val ArrivalAccuracy = s.arrived and s.navigating implies s.fixPresent and s.accuracy <= 30
   val ArrivalStopsResources = s.arrived implies s.watch == 0 and s.bridgeOwner == 0 and not(s.backgroundRunning)
   val RerouteOwnsGuidance = s.rerouting implies s.navigating and s.rerouteCleared and s.routePhase == "loading"
@@ -180,10 +199,19 @@ module NavigationProgress {
     RunningHasExactNativeStart and ReleasedHasNoGuidance and HiddenWatchHasPermissionOrBridge and StoppedCommandsCannotTargetOwner
 
   run sparseProjectionDoesNotSkipManeuverTest = init.then(start(false))
-    .then(fix(1, 30, true, 0, "past", "changed")).expect(safety and s.navStep == 0 and s.displayedStep == 0)
+    .then(fix(1, 30, true, 0, "past", "changed")).expect(safety and s.navStep == {index: 0, cleared: 1} and s.displayedStep == 0)
+    .then(fix(1, 30, true, 0, "away-first", "changed")).expect(safety and s.navStep == noHold)
+    .then(fix(1, 30, true, 0, "past", "changed")).then(fix(1, 30, true, 0, "off-76", "changed"))
+    .expect(safety and s.navStep == noHold and s.offRoute)
+  run twoClearFixesPassUnseenManeuverTest = init.then(start(false))
+    .then(fix(1, 30, true, 0, "past", "changed")).then(fix(1, 30, true, 0, "past", "changed"))
+    .expect(safety and s.navStep == {index: 1, cleared: 0} and s.displayedStep == 1)
+    .then(fix(1, 30, true, 0, "past", "changed")).then(fix(1, 30, true, 0, "past", "changed"))
+    .expect(safety and s.navStep == {index: 2, cleared: 0})
+    .then(fix(1, 30, true, 0, "past", "changed")).expect(safety and s.navStep == {index: 2, cleared: 0})
   run exactManeuverAndArrivalClassesTest = init.then(start(false))
-    .then(fix(1, 30, true, 0, "away-first", "changed")).expect(s.navStep == 0)
-    .then(fix(1, 30, true, 0, "near-first", "changed")).expect(s.navStep == 1)
+    .then(fix(1, 30, true, 0, "away-first", "changed")).expect(s.navStep == noHold)
+    .then(fix(1, 30, true, 0, "near-first", "changed")).expect(s.navStep == {index: 1, cleared: 0})
     .then(fix(1, 31, true, 0, "near-arrival", "changed")).expect(not(s.arrived))
     .then(fix(1, 30, true, 0, "away-arrival", "changed")).expect(not(s.arrived))
     .then(fix(1, 30, true, 0, "near-arrival", "changed")).expect(safety and s.arrived)
