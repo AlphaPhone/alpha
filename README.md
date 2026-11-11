@@ -307,13 +307,14 @@ and [applied-candidate recovery #891](https://github.com/eliza-research/alphapho
 before enrollment. [#400](https://github.com/eliza-research/alphaphone/issues/400)
 tracks the overall release gate. A successful host test or model does not close
 these release and device gates. Alpha consumes the reviewed rejected-download
-retry repair [eliza#39235](https://github.com/elizaOS/eliza/pull/39235) and the
+retry repair [eliza#39235](https://github.com/elizaOS/eliza/pull/39235), the
 reviewed Maps and speech changes through [eliza#39255](https://github.com/elizaOS/eliza/pull/39255)
-at `8876e369ca00d82f334e604aba3763a3998a854e`. This pin adds only the reviewed
-OS descriptor admission changes from [eliza#39291](https://github.com/elizaOS/eliza/pull/39291)
-to `06e268c7ecdc1a6451bfa1a0ad9665461a7f7d2b`; the core, runtime, mobile builder,
-Bun lock and recorded native producer inputs are unchanged. The exact pin is
-reachable from upstream develop through [eliza#39298](https://github.com/elizaOS/eliza/pull/39298).
+and the OS descriptor admission changes from [eliza#39291](https://github.com/elizaOS/eliza/pull/39291)
+at `a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e`, the upstream develop head when the
+pin was recorded (236 commits after `8876e369ca00d82f334e604aba3763a3998a854e`).
+This pin changes the Bun lock and the SDK version (2.0.5); the gated core
+sources, mobile builder, speech engine revision and native JNI inputs are
+unchanged, and the recorded native libraries were not rebuilt at this pin.
 Earlier APK, voice and device evidence does not qualify this pin; rebuild and
 qualify the exact product inputs before OS enrollment.
 
