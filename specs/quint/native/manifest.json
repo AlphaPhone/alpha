@@ -650,6 +650,7 @@
       ],
       "tests": [
         "sparseProjectionDoesNotSkipManeuverTest",
+        "twoClearFixesPassUnseenManeuverTest",
         "exactManeuverAndArrivalClassesTest",
         "agedFixIsRetainedButCannotRerouteTest",
         "rerouteFailureKeepsGuidanceTest",
