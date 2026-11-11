@@ -23,8 +23,11 @@ module CoreApprovalServiceCurrent {
   def settle(result: str): str = if (state.result == "none") result else state.result
   action fire = all {state.timer == "armed", not(state.stopped), move({...state,
     timer: "fired", tHas: state.inMap, inMap: false, tpc: if (state.inMap) "getTask" else "done"})}
-  action timeoutTask = all {state.tpc == "getTask", move({...state,
-    tpc: if (state.taskExists) "onTimeout" else "resolve", toRuns: state.toRuns + (if (state.taskExists) 1 else 0)})}
+  /// A timeout whose task no longer exists does not time the request out: the request is rejected,
+  /// with no callback and no delete.
+  action timeoutTask = all {state.tpc == "getTask",
+    if (state.taskExists) move({...state, tpc: "onTimeout", toRuns: state.toRuns + 1})
+    else move({...state, tpc: "done", result: settle("rejected")})}
   action timeoutCallbackDone = all {state.tpc == "onTimeout", move({...state, tpc: "resolve"})}
   action timeoutCallbackFails = all {state.tpc == "onTimeout", move({...state,
     tpc: "done", inMap: false, result: settle("rejected")})}
@@ -111,6 +114,9 @@ module CoreApprovalServiceCurrent {
     .then(selectionTask(1)).then(selectionDelete(1)).then(finishStop).expect(state.result == "cancelled" and safety)
   run stoppedDeliveryHasNoEffectsTest = init.then(stop).then(finishStop).then(deliver(2))
     .expect(state.blocked == Set(2) and StoppedAdmissionHasNoEffect and safety)
+  run expiredTaskRejectsTimeoutTest = init.then(fire).then(cancel).then(cancelDelete).then(timeoutTask)
+    .expect(state.result == "rejected" and state.tpc == "done" and state.toRuns == 0 and not(state.taskExists) and safety)
+    .then(timeoutDelete.fail())
   run cancelBeforeReadTest = init.then(deliver(1)).then(cancel).then(cancelDelete).then(selectionTask(1)).then(selectionDelete(1))
     .expect(state.result == "cancelled" and state.selRuns == 0 and safety)
 }
