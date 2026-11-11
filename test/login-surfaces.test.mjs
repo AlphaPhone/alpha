@@ -208,7 +208,7 @@ test('Alpha-owned native credential fields declare hints and report a website or
   assert.ok(inventory.rules.alphaOwnedAppIdentity);
 });
 
-test('External authorization uses the browser and Google sign-in uses the native account picker', () => {
+test('External authorization and Google sign-in use the owner\'s browser, never Alpha\'s own', () => {
   for (const id of ['eliza-cloud-sign-in', 'google-account-authorization']) {
     const surface = inventory.surfaces.find(s => s.id === id);
     assert.equal(surface?.kind, 'external-browser', id);

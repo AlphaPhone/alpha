@@ -136,9 +136,10 @@
         /alphaphone/auth/callback is the in-app Eliza Cloud sign-in return (AlphaCloudSignInPlugin) and
         /alphaphone/gmail/callback the Google Workspace consent return (GoogleWorkspaceReturn). Publish
         scripts/render-assetlinks.ts output (release signer, never a debug or placeholder fingerprint)
-        at /.well-known/assetlinks.json on that host. The in-app sign-in is offered only once its Cloud
-        readiness probe sees this phone's App Link verified for the sign-in return host; until then the
-        Cloud sign-in hand-off stays the product path. Cloud delegation returns only through the custom
+        at /.well-known/assetlinks.json on that host. In-app sign-in is the only product sign-in path.
+        Google is offered only once the Cloud readiness probe sees this phone's App Link verified for
+        the sign-in return host; email and phone codes need no App Link. The Cloud sign-in hand-off is
+        test-mocks only. Cloud delegation returns only through the custom
         scheme above: no https cloud-delegation filter exists, since no handler accepts one. -->
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/auth/callback"/></intent-filter>
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/gmail/callback"/></intent-filter>
