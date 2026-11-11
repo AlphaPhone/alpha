@@ -54,6 +54,7 @@ function create() {
     residentRecoveryReason: () => null, expired: () => false, cloud: {environment: 'production'}, detachService() {},
     residentCloudFlow: () => true, residentEnvironment: () => 'production', scheduleResidentAutoRetry() {},
     retire() { box.epoch++; },
+    signedOutBootSettled: async () => {}, signedOutBoot: null,
     connectResident() { rebinds++; return box.hold('rebind'); },
     anyAbortSignal: signals => AbortSignal.any(signals),
     revealLocalProviderKey: () => box.hold('key-manager').then(() => ({key: 'text', revision: 'fixture', shown: true, hidesAfterMs: 30000})),
