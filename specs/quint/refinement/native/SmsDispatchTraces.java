@@ -101,6 +101,16 @@ public final class SmsDispatchTraces {
    var field=SmsTelephony.class.getDeclaredField(name);field.setAccessible(true);return field;
   }
 
+  /** The pinned source keeps a set of bridge listeners; the historical source kept one. */
+  static boolean listening(Object bridgeListener)throws Exception{
+   try{return ((Set<?>)staticField("LISTENERS").get(null)).contains(bridgeListener);}
+   catch(NoSuchFieldException historical){return bridgeListener==staticField("listener").get(null);}
+  }
+  static void forgetListeners()throws Exception{
+   try{((Set<?>)staticField("LISTENERS").get(null)).clear();((Map<?,?>)staticField("CALLBACKS").get(null)).clear();}
+   catch(NoSuchFieldException historical){staticField("listener").set(null,null);}
+  }
+
   int binding(SmsSendJournal.Record record){
    if(record==null)return 0;
    Integer id=bindings.get(record.bindingHash);
@@ -221,7 +231,7 @@ public final class SmsDispatchTraces {
      .put("binding",held?reviewedBinding[bridge]:0).put("sim",held?reviewedSim[bridge]:0)));
     if((boolean)Trace.read(plugin,"foreground"))foreground.put(bridge);
     if((boolean)Trace.read(plugin,"closed"))closed.put(bridge);
-    if(Trace.read(plugin,"sendListener")==staticField("listener").get(null))listener=bridge;
+    if(listening(Trace.read(plugin,"sendListener")))listener=bridge;
     events+=plugin.notices.size();
    }
    for(var entry:context.provider.rows.entrySet()){
@@ -298,7 +308,7 @@ public final class SmsDispatchTraces {
     executor.shutdownNow();reviewCalls[bridge]=null;reviewedBinding[bridge]=0;reviewedSim[bridge]=0;
    }
    context.dynamicReceivers.clear();
-   ((Map<?,?>)staticField("JOURNALS").get(null)).clear();staticField("listener").set(null,null);
+   ((Map<?,?>)staticField("JOURNALS").get(null)).clear();forgetListeners();
    if(reboot)context.boot++;
    for(int bridge=1;bridge<=2;bridge++){plugins[bridge]=new AlphaTelephonyPlugin();plugins[bridge].attach(context);plugins[bridge].load();drain();}
    process++;reply="none";replyBinding=0;

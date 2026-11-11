@@ -96,6 +96,16 @@ public final class MmsDispatchTraces {
    var field=SmsTelephony.class.getDeclaredField(name);field.setAccessible(true);return field;
   }
 
+  /** The pinned source keeps a set of bridge listeners; the historical source kept one. */
+  static boolean listening(Object bridgeListener)throws Exception{
+   try{return ((Set<?>)sharedField("LISTENERS").get(null)).contains(bridgeListener);}
+   catch(NoSuchFieldException historical){return bridgeListener==sharedField("listener").get(null);}
+  }
+  static void forgetListeners()throws Exception{
+   try{((Set<?>)sharedField("LISTENERS").get(null)).clear();((Map<?,?>)sharedField("CALLBACKS").get(null)).clear();}
+   catch(NoSuchFieldException historical){sharedField("listener").set(null,null);}
+  }
+
   SmsSendJournal.Record readMemory()throws Exception{
    SmsSendJournal journal=(SmsSendJournal)((Map<?,?>)sharedField("JOURNALS").get(null)).get(config.journalKey());
    return journal==null?null:journal.get(OP);
@@ -273,7 +283,7 @@ public final class MmsDispatchTraces {
     ((java.util.concurrent.ExecutorService)Trace.read(plugins[actor],"reader")).shutdownNow();
     reviewCalls[actor]=null;
    }
-   ((Map<?,?>)sharedField("JOURNALS").get(null)).clear();sharedField("listener").set(null,null);
+   ((Map<?,?>)sharedField("JOURNALS").get(null)).clear();forgetListeners();
    context.dynamicReceivers.clear();if(reboot)context.boot++;
    load();process++;reply="none";replyKind="none";replyBinding=0;positiveBinding=0;
    point("restart",reboot);

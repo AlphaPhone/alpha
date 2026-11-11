@@ -387,9 +387,14 @@ public abstract class Plugin {
   'com/getcapacitor/JSObject.java': `package com.getcapacitor;public class JSObject extends org.json.JSONObject {}`,
   'com/getcapacitor/JSArray.java': `package com.getcapacitor;public class JSArray extends org.json.JSONArray {}`,
   'com/getcapacitor/PluginCall.java': `package com.getcapacitor;
-public final class PluginCall {
+public class PluginCall {
  private final JSObject data;public JSObject result;public String rejection;public boolean answered;
  public PluginCall(JSObject data){this.data=data;}
+ /** The bridge constructor the pinned review wrapper (TelephonyPlugin.ReviewCall) forwards through. */
+ public PluginCall(Object handler,String pluginId,String callbackId,String methodName,JSObject data){this.data=data;}
+ public String getPluginId(){return "Telephony";}
+ public String getCallbackId(){return "callback";}
+ public String getMethodName(){return "method";}
  public JSObject getData(){return data;}
  public String getString(String key){return data.optString(key,null);}
  public String getString(String key,String fallback){return data.optString(key,fallback);}
@@ -398,7 +403,8 @@ public final class PluginCall {
  public void resolve(){resolve(new JSObject());}
  public void resolve(JSObject value){answer();result=value;}
  public void reject(String text){reject(text,"closed");}
- public void reject(String text,String code){answer();rejection=code;}
+ public void reject(String text,String code){reject(text,code,null,null);}
+ public void reject(String text,String code,Exception cause,JSObject data){answer();rejection=code;}
  private void answer(){if(answered)throw new AssertionError("Duplicate plugin answer");answered=true;}
 }`,
   'com/getcapacitor/annotation/Permission.java': `package com.getcapacitor.annotation;
