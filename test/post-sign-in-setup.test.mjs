@@ -23,6 +23,8 @@ function harness({admission={binding:'cloud'},admitted=true,refusedAccount=false
   const box={DOMException,ownProviderSelected:()=>false,state,events,active:null,residentAlwaysPresent:true,cloud:{environment:'production'},residentCloudFlow:()=>true,prepareSignInReplacement:()=>events.push('replace'),
     update:patch=>{Object.assign(state,patch);events.push({update:patch,snapshot:{...state}});},
     retire:()=>{events.push('retire');state.kind='starting';},
+    // No agent start is running beside the sign-in page in these cases.
+    signedOutBootSettled:async()=>{},
     residentEnvironment:()=>'production',cloudServiceName:()=>'Eliza Cloud',
     cloudCredentialStore:{read:async()=>stored,clear:async()=>{events.push('clear key');stored=null;}},
     readCloudCredential:async(_environment,signal)=>{signal.throwIfAborted();return stored;},

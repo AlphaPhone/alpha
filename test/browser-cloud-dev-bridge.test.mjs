@@ -955,7 +955,7 @@ async function wholeGoogleStackFixture(options={}){
  const serviceSlot=source.match(/const CLOUD_SERVICE = ('[^']+');/);assert.ok(serviceSlot);
  const harness=new Function('client','methods','signed','verify','admission','residentOn','admissionEntered','releaseAdmission','store','crypto','CLOUD_SERVICE','residentAdmissionOutcome',`
  let operation=null,cloud=client,active=true,entitlementRefresher=null;
- let googleSignInGeneration=0,googleSignInPrior=null,signInReadinessOwner=null;
+ let googleSignInGeneration=0,googleSignInPrior=null,signInReadinessOwner=null;const signedOutBootSettled=async()=>{};
  const trace=[];
  const state={signIn:{step:'choose',environment:'production'},open:true,purpose:'cloud-account'};
  const listeners=new Set();let service=null,membershipRead=null,pendingBillingReview=null;

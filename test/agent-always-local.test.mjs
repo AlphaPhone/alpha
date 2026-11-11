@@ -66,7 +66,7 @@ test('plan state never stops or withholds the on-device agent', () => {
   assert.equal((beforeStart.match(/return;/g) || []).length, 1, 'only the QA lane returns before the start');
   assert.match(beforeStart, /if\(testMocksEnabled&&!residentBindable\(\)\)\{[^\n]*return;\}/);
   // Startup always starts the agent, signed in or not, and stores no local-only choice.
-  assert.match(between(ui, 'async function startResidentGate(', 'function conversationKey('), /try\{save\(\{kind:'resident'\}\);\}catch\{[^}]*\}\n\s+await startResident\(\);/);
+  assert.match(between(ui, 'async function startResidentGate(', 'function conversationKey('), /try\{save\(\{kind:'resident'\}\);\}catch\{[^}]*\}\n(?:\s+\/\/[^\n]*\n)?\s+if\(await startResidentBesideSignIn\(\)\)return;\n\s+await startResident\(\);/);
   assert.match(ui, /if \(residentCloudFlow\(\)\) \{ await startResidentGate\(\); return; \}/);
   // Product phones refuse disconnecting the resident or removing its provider; there is no Stop, only Restart.
   for (const method of ['async removeProvider()', 'async disconnect()'])

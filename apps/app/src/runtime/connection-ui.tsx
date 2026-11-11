@@ -744,6 +744,8 @@ async function residentSignedIn(signal: AbortSignal, unconfirmed: boolean, expec
   const providerSelection=state.providerSignInSelection;
   networkLostUnder=null;
   const assertExpected=async()=>{if(!expected)return;const current=await readCloudCredential(residentEnvironment(),signal);if(current?.credentialId!==expected.credentialId||current?.credentialReference!==expected.credentialReference)throw new CloudProtocolError('account-changed');};
+  // The key binds once the agent that started beside the sign-in page is ready (or has failed).
+  await signedOutBootSettled(signal, 'Signing in…');
   await assertExpected();
   const issued = (await readCloudCredential(residentEnvironment(),signal))?.credentialId;
   signal.throwIfAborted(); retire();
@@ -979,9 +981,60 @@ function scheduleResidentAutoRetry() {
     void ensureResident();
   }, RESIDENT_AUTO_RETRY_MS[residentAutoRetries]);
 }
+/**
+ * The first agent start of a phone with no sign-in runs beside the sign-in page, outside the
+ * operation slot: the owner can enter an email, a phone number or Google while the agent boots.
+ * Null once that start has settled. Agent work that follows (a sign-in binding its key, own keys,
+ * a rebind) waits for it through signedOutBootSettled; nothing else starts the agent meanwhile.
+ */
+let signedOutBoot: Promise<void> | null = null;
+async function signedOutBootSettled(signal: AbortSignal, message?: string) {
+  const boot = signedOutBoot;
+  if (!boot) return;
+  if (message) update({ message });
+  let stop = () => {};
+  try { await Promise.race([boot, new Promise<never>((_, reject) => { stop = () => reject(signal.reason); signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop(); })]); }
+  finally { signal.removeEventListener('abort', stop); }
+  signal.throwIfAborted();
+}
+/**
+ * Starts the agent beside the sign-in page when this phone certainly holds no Cloud sign-in and
+ * uses no keys of its own, where sign-in is the required first page (production Android). Startup
+ * is then resolved at once, so the page shows without waiting for the agent. A saved sign-in, own
+ * keys or anything unreadable takes the ordinary start, which never shows the sign-in page first.
+ */
+async function startResidentBesideSignIn(): Promise<boolean> {
+  if (!isAndroid || testMocksEnabled || !residentBindable() || active || operation || signedOutBoot || state.residentRecoveryReason) return false;
+  let providerStatus: LocalProviderStatus;
+  try {
+    const [saved, status] = await Promise.all([cloudCredentialStore.read(residentEnvironment()), localProviderStatus()]);
+    if (saved?.credentialId || ownProviderSelected({ providerStatus: status })) return false;
+    providerStatus = status;
+  } catch { return false; }
+  if (active || operation || signedOutBoot) return false;
+  const controller = new AbortController();
+  update({ providerStatus, residentSavedCredential: false, startupResolved: true, automaticRestore: false, kind: 'starting', name: RESIDENT_NAME });
+  const boot = (async () => {
+    try { await connectResident(controller.signal, undefined, true); }
+    catch (error) {
+      const recovery = residentRecoveryReason(error); if (recovery && !active) update({ residentRecoveryReason: recovery });
+      if (!active) update({ kind: 'recovering' });
+      // Reported as a background start reports it. A step the owner is in keeps its own error.
+      if (!operation && (!state.signIn || state.signIn.step === 'choose') && !state.error) update({ error: errorMessage(error), errorKind: errorKindOf(error) });
+    }
+  })().finally(() => {
+    if (signedOutBoot === boot) signedOutBoot = null;
+    // A key stored while the agent was starting (a sign-in cancelled after its commit) is admitted now.
+    if (state.residentSavedCredential === true && !state.cloudAccount && !operation) { if (active) queueResidentRebind(); else void ensureResident(); }
+    runQueuedResidentRebind(); runQueuedSignInReturn(); scheduleResidentAutoRetry();
+  });
+  signedOutBoot = boot;
+  return true;
+}
 /** Start (or restart) the resident. A failure leaves the `recovering` state with a Retry, never "no agent". */
 async function startResident(message = RESIDENT_STARTING, background = true) {
   await work(message, async signal => {
+    await signedOutBootSettled(signal); if (active) return;
     update({ residentStarting: true, ...(active ? {} : { kind: 'starting' as const, name: RESIDENT_NAME }) });
     try { await connectResident(signal); }
     catch (error) { if (residentAlwaysPresent && !active) update({ kind: 'recovering' }); throw error; }
@@ -997,7 +1050,8 @@ let residentStartFailure = '';
  * start it again in the background. That operation's outcome (message, error, open dialog) stays
  * visible; a failed restart shows its own error and leaves the resident recovering with Retry. */
 async function ensureResident() {
-  if (!residentAlwaysPresent || active || operation) return;
+  // A start beside the sign-in page is already under way; its end admits a key stored meanwhile.
+  if (!residentAlwaysPresent || active || operation || signedOutBoot) return;
   const { message, error, open, errorKind, previousSignInUnconfirmed } = state;
   const startFailed = !!error && error === residentStartFailure;
   await startResident('Restarting', true);
@@ -1009,7 +1063,7 @@ async function ensureResident() {
  * saved), its reason is shown back in that dialog: an agent sheet never opens on its own in
  * production. */
 async function restartAfterProviderChange(signal: AbortSignal, fromSettings: boolean) {
-  try { await retire(); await connectResident(signal); }
+  try { await signedOutBootSettled(signal); await retire(); await connectResident(signal); }
   catch (error) { if (residentAlwaysPresent && !active) update({ kind: 'recovering' }); if (fromSettings && !signal.aborted) update({ purpose: 'provider' }); throw error; }
 }
 /** Key-manager requests share the connection operation slot; revealed values
@@ -1048,7 +1102,7 @@ async function manageProviderKey(action:'edit'|'remove'|'reveal',key:LocalProvid
  * "starting" with nothing starting. With the resident selected it starts now; otherwise the
  * state is `recovering`, whose Retry starts the resident. */
 async function settleResidentAfterStartup() {
-  if (!residentAlwaysPresent || active || operation || state.kind !== 'starting') return;
+  if (!residentAlwaysPresent || active || operation || signedOutBoot || state.kind !== 'starting') return;
   // Mock mode (test mocks only) runs no agent connection at all.
   if (testMocksEnabled && new URLSearchParams(location.search).get('mode') === 'mock') return;
   const saved = selection();
@@ -1089,7 +1143,8 @@ function activate(next: Active, session: VerifiedSession, name: string) {
  * left stopped because of plan state. At most one rebind runs; one more is queued behind it.
  */
 function queueResidentRebind(interruptReply=false) {
-  if (!residentCloudFlow()||state.residentRecoveryReason) return;
+  // A start beside the sign-in page has no account to rebind; its end admits a key stored meanwhile.
+  if (!residentCloudFlow()||state.residentRecoveryReason||signedOutBoot) return;
   void residentRebinds().request(rebindResident, interruptReply ? () => !!operation : residentRebindBlocked).catch(() => {});
 }
 function rebindResident() {
@@ -1098,6 +1153,7 @@ function rebindResident() {
   const shown = state.open ? { message: state.message, error: state.error, errorKind: state.errorKind ?? null, startFailed: !!state.error && state.error === residentStartFailure } : null;
   const signIn = state.signIn;
   return work('Updating', async signal => {
+    await signedOutBootSettled(signal);
     retire();
     try { await connectResident(signal); }
     catch (error) { if (residentAlwaysPresent && !active) update({ kind: 'recovering' }); throw error; }
@@ -1442,8 +1498,10 @@ async function restoreOwnProviderCloudServices():Promise<void>{
   }finally{clearTimeout(timer);appRequests.delete(controller);if(ownCloudServiceRestore===controller){ownCloudServiceRestore=null;update({cloudServiceRestoring:false});}}
 }
 /** `admitted`: the admission a sign-in just made for this start (residentSignedIn); otherwise it is read here. */
-async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission) {
+async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission, besideSignIn = false) {
   residentAutoRetryEpoch = undefined;
+  // Started beside the sign-in page: a step the owner is in keeps its own message and error.
+  const ownerStep = () => besideSignIn && (!!operation || (!!state.signIn && state.signIn.step !== 'choose') || !!state.error);
   // A new admission retires a network return still waiting from an earlier one; a sign-in's own
   // start keeps one lost during that sign-in (residentSignedIn retired the earlier one) while the
   // provider read below keeps the provider class.
@@ -1513,7 +1571,9 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
     deviceRequest=request;
   } catch(error) {signal.throwIfAborted();reportEnrollmentFailure(error);reason='Chat only';}
   save({kind:'resident'});
+  const ownerShown = ownerStep() ? { message: state.message, error: state.error, errorKind: state.errorKind ?? null } : null;
   activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol,request:deviceRequest,...(userTextFormatVersion?{userTextFormatVersion}:{})},session,name);
+  if (ownerShown) update(ownerShown);
   if(reason)update({phoneCapabilityReason:reason});
   if(ownProvider){update({residentInference:'direct',residentPlanNotice:null});void restoreOwnProviderCloudServices();}
   // Restore only the saved choice for this verified agent and owner; opening history never replays actions.
@@ -1524,7 +1584,7 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
     // dialog; everything else is a notice beside the running agent, never a gate.
     // Both a refused sign-in and an unconfirmed unbind are shown; neither hides the other.
     const notice=admission.notice,error=[notice?.error,bound.error].filter(Boolean).join(' ')||undefined;
-    if(notice?.open||error)update({open:true,purpose:state.purpose==='plan'||state.purpose==='cloud-account'?state.purpose:'agent',message:'',error:error??'',errorKind:notice?.error?notice.errorKind??null:null});
+    if(notice?.open||error)update({open:true,purpose:state.purpose==='plan'||state.purpose==='cloud-account'?state.purpose:'agent',...(ownerStep()?{}:{message:'',error:error??'',errorKind:notice?.error?notice.errorKind??null:null})});
     await restoreSavedHistory(signal);await refreshActionReview(signal);
   }else if(browserLocalAgentEnabled||ownProvider)await restoreSavedHistory(signal);
 }
@@ -1646,6 +1706,8 @@ function migrateLegacyHostedSelection(): boolean {
 async function startResidentGate(){
   // P-43: the resident always starts, signed in or not; a stored local-only choice reads as the resident.
   try{save({kind:'resident'});}catch{/* The resident starts either way. */}
+  // A phone with no sign-in shows the sign-in page now; its agent starts beside it.
+  if(await startResidentBesideSignIn())return;
   await startResident();
 }
 function conversationKey(session: VerifiedSession) { return JSON.stringify([session.origin, session.ownerId, session.agentId]); }
@@ -2710,7 +2772,7 @@ export const connectionController = {
     if(operation){update({error:OWN_KEY_BUSY});return;}
     if(sending)return;
     const generation=++providerStatusGeneration;let cancelled=false;
-    try { await work(OWN_KEY_CHECKING,async signal=>{signal.addEventListener('abort',()=>{cancelled=true;},{once:true});try{await configureLocalProvider(apiKey,model,cartesiaKey,signal);signal.throwIfAborted();const providerStatus=await localProviderStatus();signal.throwIfAborted();update({providerStatus,providerStatusError:false,signIn:null,residentPlanNotice:null});
+    try { await work(OWN_KEY_CHECKING,async signal=>{signal.addEventListener('abort',()=>{cancelled=true;},{once:true});try{await signedOutBootSettled(signal);await configureLocalProvider(apiKey,model,cartesiaKey,signal);signal.throwIfAborted();const providerStatus=await localProviderStatus();signal.throwIfAborted();update({providerStatus,providerStatusError:false,signIn:null,residentPlanNotice:null});
       // First-run setup opens at once; the agent restarts behind it, shown as starting (as after Cloud sign-in).
       if(onboarding){update({residentStarting:true});showPostSignInSetup();}else{update({open:false,purpose:'agent'});connectionToast('Saved');}
       await restartAfterProviderChange(signal,!onboarding);update({message:''});}
@@ -2840,6 +2902,7 @@ export const connectionController = {
       if(state.residentRecoveryReason){update({open:true,purpose:'agent',error:residentRecoveryMessage(state.residentRecoveryReason)});return;}
       // Keep the same owned operation through normal admission. Releasing busy/operation
       // between the native commit and this start lets automatic chooser readiness steal it.
+      await signedOutBootSettled(signal);
       retire();
       await connectResident(signal);
     });
@@ -3181,7 +3244,8 @@ export const connectionController = {
     // services read already running answers it; other work (a reply, an edit, a connection step or
     // recovery) leaves it for the next return.
     if(!state.inferenceOffline&&(networkLostUnder!==planCheckScope()||ownCloudServiceRestore||planRecheck))networkLostUnder=null;
-    if(!residentCloudFlow()||operation||planRecheck||sending||state.busy||state.residentRecoveryReason)return;
+    // Startup admits the account itself: a return seen before it resolves would take the slot from the first start.
+    if(!residentCloudFlow()||operation||planRecheck||sending||state.busy||state.residentRecoveryReason||state.startupResolved===false)return;
     const now=Date.now();
     if(!planManagementReturn&&(state.inferenceOffline||networkLostUnder===null)&&now-lastPlanRecheck<PLAN_RECHECK_INTERVAL_MS)return;
     planManagementReturn=false;lastPlanRecheck=now;

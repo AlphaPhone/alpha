@@ -53,6 +53,8 @@ export interface ResidentStubOptions {
   emptyKeystore?: boolean;
   /** Reject resident starts independently of account sign-in. */
   rejectStart?: boolean;
+  /** The first agent start of each page load stays pending until `window.residentStub.releaseStart()`. */
+  holdFirstStart?: boolean;
   /** Eliza Cloud accounts, answered by bearer token. The first is the harness's saved key unless emptyKeystore. */
   accounts?: StubAccount[];
   /** Device capabilities the resident agent offers at registration (the harness offers none). */
@@ -88,6 +90,8 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       // Per page load: conversation reads (the recent window, not older pages), list reads and turn
       // aborts. holdReads holds both reads until heldRead() / heldList().
       reads: 0, lists: 0, aborts: 0, holdReads: false, heldRead: null as null | (() => void), heldList: null as null | (() => void),
+      // Per page load: a first boot that takes as long as the test needs (about 27 s on a phone).
+      startHeld: !!options.holdFirstStart, startWaiting: false, releaseStart: () => { s.startHeld = false; },
       // Cloud's answer to the next code redemption: 'ok' grants Plus; 'invalid' is Cloud's one answer
       // for unknown, expired, disabled and used-up codes (400 invalid_subscription_code).
       redeem: 'ok' as 'ok' | 'invalid', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
@@ -160,6 +164,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       // Removing a stored provider stops the process launched with it (AlphaCredentialStore requiresShutdown).
       if (plugin === 'Agent' && method === 'clearProvider' && f.slots['native:local-agent-provider']) { s.order.push('Agent.stop'); persist(); }
       if (plugin === 'Agent' && ['start', 'stop', 'configureCloudProvider'].includes(method)) { s.order.push(method === 'configureCloudProvider' ? 'configureCloudProvider ' + input.credentialId : 'Agent.' + method); persist(); }
+      if (plugin === 'Agent' && method === 'start' && s.startHeld) { s.startWaiting = true; await new Promise<void>(resolve => { s.releaseStart = () => { s.startHeld = false; s.startWaiting = false; resolve(); }; }); }
       if (plugin === 'Agent' && method === 'start' && (s.start === 'reject' || s.start === 'reject-once')) { if (s.start === 'reject-once') { s.start = 'ok'; persist(); } f.calls.push('Agent.start'); throw Error('Local agent failed to start.'); }
       if (plugin === 'Agent' && method === 'request' && input.path === '/api/agents' && s.start === 'starting') { f.calls.push('Agent.request'); return { status: 200, body: JSON.stringify({ agents: [{ id: '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11', name: 'Alpha', status: 'starting' }] }) }; }
       // The harness still registers the device (it answers the committed-enrollment read from that
