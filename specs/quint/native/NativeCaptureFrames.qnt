@@ -47,7 +47,8 @@ module NativeCaptureFrames {
   action stop(sourceOk: bool, detectorOk: bool, call: bool): bool = all {
     s.started,
     s' = if (s.ended) {...s, running: false}
-      else {...s, running: false, ended: true, attached: false, sourceClosed: sourceOk, detectorClosed: detectorOk,
+      // A failed physical close keeps the source attached: it is never a receipt permitting a replacement.
+      else {...s, running: false, ended: true, attached: not(sourceOk), sourceClosed: sourceOk, detectorClosed: detectorOk,
         buffersZeroed: true, flush: true, packets: predicted(s.history, true),
         error: if (not(sourceOk and detectorOk)) "capture" else if (call) "call" else "none"}
   }
@@ -63,7 +64,7 @@ module NativeCaptureFrames {
     any {start, accept(input, pieces), stop(flag, true, false), stop(true, flag, false), stop(true, true, true), readFailure, s' = s}
   }
   val PacketAgreement = s.packets == predicted(s.history, s.flush)
-  val TerminalBuffersCleared = s.ended implies s.buffersZeroed and not(s.attached)
+  val TerminalBuffersCleared = s.ended implies s.buffersZeroed and (s.attached == not(s.sourceClosed))
   val Bounded = s.history.length() <= 40 and s.reads <= 160 and s.negativeReads <= 1
   val safety = PacketAgreement and TerminalBuffersCleared and Bounded
   run tenWindowPrerollTest = init.then(start).then(12.reps(_ => accept(0, 1))).then(accept(500, 1)).then(accept(500, 1))
@@ -73,5 +74,5 @@ module NativeCaptureFrames {
   run readFailureDropsUnpublishedTailTest = init.then(start).then(3.reps(_ => accept(500, 1))).then(readFailure)
     .expect(safety and s.running and s.packets.length() == 1).then(stop(true, true, false)).expect(safety and not(s.running))
   run closeFailureStillClearsBuffersTest = init.then(start).then(accept(500, 4)).then(stop(false, true, false))
-    .expect(safety and s.error == "capture" and s.buffersZeroed)
+    .expect(safety and s.error == "capture" and s.buffersZeroed and s.attached and not(s.sourceClosed))
 }
