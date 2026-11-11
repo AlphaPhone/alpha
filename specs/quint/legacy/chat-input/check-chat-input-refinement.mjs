@@ -197,7 +197,9 @@ async function collect(scenario) {
     await expect(composer).toHaveValue(draft);
     assert.equal((await t.point('first tap lowers focus and retains Home', action('TapOutside'))).view, 'home');
     await expect(page.locator(scrim)).toHaveCSS('pointer-events', 'none');
-    await page.touchscreen.tap(icon.x, icon.y);
+    // Home's cards can load between the two taps and move the grid: the deliberate tap is on the icon where it is now.
+    const settled = await position(settings);
+    await page.touchscreen.tap(settled.x, settled.y);
     await page.waitForFunction(() => window.quintLegacyChat.S().view === 'settings');
     assert.equal((await t.point('second deliberate tap opens Settings', action('TapOutside'))).draft, draft);
   });
