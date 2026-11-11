@@ -13,7 +13,9 @@ const driver=fileURLToPath(import.meta.url);
 const action=(name,...args)=>({name,args});
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
-async function wait(ready){for(let i=0;i<100;i++){if(ready())return;await tick();}throw Error('Actual workflow source did not reach the selected boundary');}
+// The source reaches a boundary through real asynchronous work (digests, storage). A fixed count of
+// immediates ended before it in the long-lived service campaign process; the bound is now time.
+async function wait(ready){const deadline=Date.now()+5000;for(let i=0;i<100||Date.now()<deadline;i++){if(ready())return;await tick();}throw Error('Actual workflow source did not reach the selected boundary');}
 const common=['upstream.lock.json','.eliza/client-features/.source.json','scripts/prepare-client-features.ts','test/support/strip-types.mjs',driver];
 
 async function prepared(extraSources,entry,implementation,transform){
