@@ -28,7 +28,6 @@ npm run quint:tests
 npm run quint:typecheck
 npm run quint:test
 npm run quint:simulate -- --samples=1000 --steps=60 --seed=123
-npm run quint:conformance
 ```
 
 The default gate parses/typechecks every model and runs every manifest scenario
