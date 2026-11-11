@@ -120,7 +120,9 @@ module IdentitySession {
     val current = s.key and s.attemptOwner == s.activation.owner
     val updated = { ...s.activation, phase: phase, acknowledged: success, receipt: not(success) or retained,
       ackTries: s.activation.ackTries + 1,
-      running: s.activation.steward or phase == "acknowledging" or phase == "revoking-previous" }
+      // The replaced key is revoked after the acknowledgement was tried, confirmed or not.
+      running: s.activation.steward or phase == "acknowledging" or phase == "revoking-previous"
+        or (phase == "activation-pending" and s.activation.oldKey) }
     s' = { ...s, activation: updated,
       phase: if (current) phase else s.phase,
       acknowledged: if (current) updated.acknowledged else s.acknowledged,
@@ -148,13 +150,16 @@ module IdentitySession {
       acknowledged: recovered.acknowledged, ackTries: 0, oldKey: false, revoked: false,
       steward: false, callbackAccepted: false }
   }
+  /// The saved slot no longer holds the replaced key, so it is revoked whether the acknowledgement
+  /// was confirmed (then the sign-in is authenticated) or not (activation stays pending).
   action revokePrevious(success: bool): bool = all {
-    s.activation.phase == "revoking-previous", s.activation.oldKey,
+    s.activation.phase.in(Set("revoking-previous", "activation-pending")), s.activation.oldKey,
     val current = s.key and s.attemptOwner == s.activation.owner
+    val phase = if (s.activation.phase == "revoking-previous") "authenticated" else "activation-pending"
     s' = { ...s,
-      activation: { ...s.activation, phase: "authenticated", oldKey: false, revoked: success,
+      activation: { ...s.activation, phase: phase, oldKey: false, revoked: success,
         running: s.activation.steward },
-      phase: if (current) "authenticated" else s.phase,
+      phase: if (current) phase else s.phase,
       oldKey: if (current) false else s.oldKey,
       revoked: if (current) success else s.revoked }
   }
@@ -224,10 +229,14 @@ module IdentitySession {
   run failedCancelBurnTest = init.then(begin("google")).then(cancelBurnFailed)
     .expect(s.pending and s.cancelRequested and safety).then(restorePending)
     .then(callback(1)).expect(s.pending and not(s.liveIntent or s.callbackAccepted) and safety)
-  run recoveredAckLosesPreviousRevocationTest = init.then(begin("google")).then(callback(1))
+  run unconfirmedAckStillRevokesPreviousTest = init.then(begin("google")).then(callback(1))
     .then(exchanged).then(writeReceipt).then(writeKey).then(ack(true)).then(releaseSteward)
     .then(begin("google")).then(callback(2)).then(exchanged).then(writeReceipt).then(writeKey)
-    .then(ack(false)).then(ack(false)).then(ack(false)).then(restart).then(ack(true))
+    .then(ack(false)).then(ack(false)).then(ack(false))
+    .expect(s.phase == "activation-pending" and s.oldKey and s.activation.running and safety)
+    .then(revokePrevious(true))
+    .expect(s.phase == "activation-pending" and s.revoked and not(s.oldKey) and s.receipt and safety)
+    .then(releaseSteward).then(restart).then(ack(true))
     .expect(s.phase == "authenticated" and not(s.oldKey or s.revoked) and safety)
   run googleReturnTest = init.then(begin("google")).then(callback(0))
     .expect(s.pending).then(callback(1)).expect(not(s.pending))

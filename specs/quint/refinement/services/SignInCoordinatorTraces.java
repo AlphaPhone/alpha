@@ -806,14 +806,20 @@ public final class SignInCoordinatorTraces {
             SignInTestPorts.events.add(next);
           }
         }
-        SignInTestPorts.Event logout = SignInTestPorts.next("http:/steward/auth/logout");
+        // The pin revokes the replaced key after the acknowledgement was tried, confirmed or not.
+        SignInTestPorts.Event revoked = SignInTestPorts.next("http:/api/v1/api-keys/current");
         trace.step("ack", observed(2).put("s.ackTries", 3), false);
+        release(revoked);
+        SignInTestPorts.Event logout = SignInTestPorts.next("http:/steward/auth/logout");
+        trace.step("revokePrevious", observed(2).put("s.revoked", SignInTestPorts.revocations == 1).put("s.phase", "activation-pending"), true);
         release(logout);
         drain(second);
         trace.step("releaseSteward", observed(2));
         second.handleOnDestroy();
         second = plugin();
         second.load();
+        // The resumed acknowledgement revokes nothing more: the count is of this process only.
+        final int revokedBeforeRestart = SignInTestPorts.revocations;
         SignInTestPorts.Event resumed = SignInTestPorts.next("http:/api/v1/app-auth/mobile/ack");
         trace.step("restart", observed(2));
         release(resumed);
@@ -825,7 +831,7 @@ public final class SignInCoordinatorTraces {
                             && !SignInTestPorts.values.containsKey(SignInTestPorts.ACK)
                         ? "authenticated"
                         : "activation-pending")
-                .put("s.revoked", SignInTestPorts.revocations > 0),
+                .put("s.revoked", SignInTestPorts.revocations > revokedBeforeRestart),
             true);
         release(removed);
         drain(second);
