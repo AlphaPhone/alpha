@@ -31,7 +31,7 @@ export function listenerServicePlatform(){
   'android/app/Service.java':`package android.app;public class Service extends android.content.Context {
    public static final int START_STICKY=1,STOP_FOREGROUND_REMOVE=1;public boolean created,foreground,selfStopped,superDestroyed;
    public void onCreate(){created=true;}public int onStartCommand(android.content.Intent intent,int flags,int id){return 0;}public android.os.IBinder onBind(android.content.Intent intent){return null;}
-   public void onDestroy(){superDestroyed=true;}public void stopSelf(){selfStopped=true;}public void stopForeground(int flags){foreground=false;}
+   public void onDestroy(){superDestroyed=true;}public void stopSelf(){selfStopped=true;}public void stopSelf(int id){selfStopped=true;}public void stopForeground(int flags){foreground=false;}
    public void startForeground(int id,Object notification,int type){if(ai.eliza.sense.ServicePorts.foregroundFails)throw new IllegalStateException("foreground refused");foreground=true;}
   }`,
   'android/app/KeyguardManager.java':'package android.app;public class KeyguardManager {public boolean isKeyguardLocked(){return ai.eliza.sense.ServicePorts.locked;}}',
