@@ -416,7 +416,7 @@ export class CloudProtocol {
     if (credential.expiresAt !== undefined && credential.expiresAt <= Date.now()) throw new CloudProtocolError("expired");
     return outcome;
   }
-  /** Google through the native account picker: request native MFA, or finish after the key is stored. */
+  /** Google in the owner's browser (native mode "browser"), returning by App Link: request native MFA, or finish after the key is stored. */
   async signInWithGoogle(signal: AbortSignal): Promise<CloudSignInGoogleOutcome & {committedCredential?:{credentialId:string;credentialReference?:string;userId?:string;organizationId?:string}}> {
     this.googleSignInCommitted=false;
     const outcome=await this.signInStep(signal,port=>port.startGoogle({environment:this.environment}),value=>googleOutcome(value,this.environment),()=>{});
