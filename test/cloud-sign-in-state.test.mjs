@@ -128,7 +128,7 @@ test('resend starts at thirty seconds and cannot be clicked during the countdown
 
 function controllerFixture({isAndroid=false,browserCloudResidentEnabled=false}={}){
   const source=`
-    const ownProviderSelected=()=>false;let planRecheck=null;let operation=null,residentStartInBackground=false,active=null,signInReadinessOwner=null,googleSignInGeneration=0,googleSignInPrior=null,providerStatusGeneration=0;
+    const ownProviderSelected=()=>false;let planRecheck=null;let operation=null,residentStartInBackground=false,active=null,signInReadinessOwner=null,googleSignInGeneration=0,googleSignInPrior=null,codeSignInPrior=null,providerStatusGeneration=0;
     const state={signIn:{step:'code',environment:'production',attemptId:'old',email:'person@example.invalid'},open:true,busy:false,message:'',error:''};
     const events=[],update=values=>{Object.assign(state,values);events.push({...values});};
     const cloud={cancelLogin(){events.push({cancel:true});}};
@@ -138,7 +138,7 @@ function controllerFixture({isAndroid=false,browserCloudResidentEnabled=false}={
     const SIGN_IN_BROWSER='In browser';const testMocksEnabled=false,isAndroid=${isAndroid},browserCloudResidentEnabled=${browserCloudResidentEnabled},expired=()=>false,residentCloudFlow=()=>true;
     let required=false;const productionCloudSignInRequired=()=>required,residentSignInRequired=()=>required;let pendingBillingReview=null;const clearPersonalSetup=()=>{};
     ${ui.includes('export function explicitSignedOutCloudEntry(')?part('export function explicitSignedOutCloudEntry(', 'export function connectionChooserVisible(').replace('export ',''):'function explicitSignedOutCloudEntry(){return false;}'}
-    const validSignInEmail=()=>true,validSignInPhone=()=>true,cloudSignInPhone=true,inAppPhone=true,normalizeSignInCode=value=>/^\\d{6}$/.test(value)?value:null;
+    const validSignInEmail=()=>true,validSignInPhone=()=>true,normalizeSignInPhone=value=>value.trim(),cloudSignInPhone=true,inAppPhone=true,normalizeSignInCode=value=>/^\\d{6}$/.test(value)?value:null;
     class CloudSignInError extends Error {constructor(code,data={}){super(code);this.code=code;this.attemptKept=data.attemptKept===true;this.resendAt=data.resendAt;}}
     class CodeExpiredError extends Error {constructor(){super('code-expired');}}
     const signInFailureMessage=code=>code,signInFailed=(environment,keep=false)=>{if(!keep)update({signIn:{step:'choose',environment}});};
