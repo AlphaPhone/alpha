@@ -289,7 +289,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
             const entry = { path: 'Documents/' + doc.name, name: doc.name, directory: false, mimeType: doc.mimeType, size: bytes.length, modified: 1_790_000_000_000 };
             if (method === 'storageState' || method === 'storageRequestAccess') return { status: 'ready', access: 'granted', volumes: [{ id: 'primary', name: 'Internal storage', primary: true, free: 8e9, total: 64e9 }] };
             if (method === 'storageCategory') return { status: 'ready', entries: input.category === 'documents' ? [entry] : [] };
-            if (method === 'storageQuery') return { status: 'ready', entries: [entry] };
+            if (method === 'storageQuery') return { status: 'ready', entries: [entry], truncated: false };
             if (method === 'storageList') return { status: 'ready', entries: input.path === 'Documents' ? [entry] : input.path ? [] : [{ path: 'Documents', name: 'Documents', directory: true, mimeType: '', size: 0, modified: entry.modified, children: 1 }] };
             if (method === 'storageTrashList') return { status: 'ready', items: [] };
             if (method === 'storageSelect') { d.picks.push({ action: 'files', path: input.path }); return input.path === entry.path ? selected : { status: 'missing', message: 'This item is no longer there.' }; }

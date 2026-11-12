@@ -137,7 +137,8 @@ async function fixture(compiled) {
       assert.ok(request, 'Actual pending storageQuery call');
       request.task.settled = true;
       if (disposition === 'rejected') request.task.reject(Error('Injected query rejection'));
-      else request.task.resolve({status: disposition, entries: rows.map(row => files[row - 1])});
+      // As Alpha's native port answers a file query under its row bound: every match, explicitly complete.
+      else request.task.resolve({status: disposition, entries: rows.map(row => files[row - 1]), truncated: false});
     },
     clear(method) {
       if (method === 'back') assert.equal(view.back(local, api), true);
