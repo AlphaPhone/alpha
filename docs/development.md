@@ -572,8 +572,11 @@ It also includes the [selected-tab permission](https://github.com/elizaOS/eliza/
 [held update offer](https://github.com/elizaOS/eliza/pull/39440) and [updater scratch storage](https://github.com/elizaOS/eliza/pull/39446) changes
 and [bounded secure-store allocations](https://github.com/elizaOS/eliza/pull/39461)
 at `c9247e6966b572612b51e6b5e6a1f15af2843af8` on upstream develop. The native engine
-gitlink and recorded embedding producer inputs match the previous pin. Rebuild
-and qualify the exact product inputs before OS enrollment.
+gitlink and six native build inputs retain their previous hashes. Two of the
+14 embedding producer inputs changed, the root and app package manifests.
+The ARM64 embedding record retains its reviewed SDK revision. Distribution
+requires an authenticated build receipt and reviewed output hashes for the new
+producer inputs. Rebuild and qualify the exact product inputs before OS enrollment.
 
 The protected [preserving OS OTA signing workflow](../.github/workflows/release-os-ota-signing.yml)
 signs only an admitted OTA package with the existing release key. Its committed
