@@ -1,8 +1,9 @@
 import test from 'node:test';
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import assert from 'node:assert/strict';
 import {checkAddressInput, corpus, describe} from '../specs/quint/refinement/application/address-input.mjs';
 
-test('the address bar decides every corpus text and model submission as AddressInput does', {timeout: 240000}, async () => {
+test('the address bar decides every corpus text and model submission as AddressInput does', {timeout: scaledTimeout(240000)}, async () => {
   const receipt = await checkAddressInput();
   assert.equal(receipt.corpusChecks, corpus.length * 2);
   assert.ok(receipt.classes >= 15, `property classes ${receipt.classes}`);
