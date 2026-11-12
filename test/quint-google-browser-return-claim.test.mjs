@@ -8,6 +8,6 @@ test('the exact native Google browser result owns its claim across both grace ti
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 23);
-  assert.equal(receipt.checkpoints, 121);
+  assert.equal(receipt.traces, 25);
+  assert.equal(receipt.checkpoints, 132);
 });

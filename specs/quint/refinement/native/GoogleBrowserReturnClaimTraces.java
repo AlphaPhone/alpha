@@ -15,10 +15,12 @@ public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
  private final Attempt owner;
  private final PluginCall waiter;
  private final long capturedIntent;
+ private final boolean hostTask;
  private boolean exchanged;
  private String lastCapture = "none";
 
- GoogleBrowserReturnClaimTraces(boolean live, boolean expired) {
+ GoogleBrowserReturnClaimTraces(boolean live, boolean expired, boolean hostTask) {
+  this.hostTask = hostTask;
   slots.clear(); events.clear(); notifications.clear(); revoked.clear();
   defer = true;
   original = CloudSignInFlow.Pending.create(TestRegistration.PRODUCTION,
@@ -29,6 +31,7 @@ public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
   waiter = live ? new PluginCall() : null;
   if (live) {
    owner.google = owner.browserLaunched = true;
+   owner.browserInHostTask = hostTask;
    owner.browserState = original.state;
    owner.pendingRecord = original.serialize();
    owner.credentialGuard = reserveCredentialCommit();
@@ -95,7 +98,7 @@ public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
    check(label != null, "every actual grace timer is labeled");
    grace.put(label);
   }
-  return Trace.fields("live", owner != null && attempt == owner, "paused", owner != null && owner.browserPaused,
+  return Trace.fields("live", owner != null && attempt == owner, "hostTask", hostTask, "paused", owner != null && owner.browserPaused,
    "hint", owner != null && owner.returnHint, "hintElapsed", owner != null && owner.returnHintElapsed,
    "claimed", owner != null && owner.returnClaimed, "received", owner != null && owner.callbackReceived,
    "cancelled", owner != null && owner.cancelled, "pending", pendingClass,
@@ -125,8 +128,9 @@ public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
  }
 
  private Trace schedule(String name, boolean live, boolean expired, String... steps) {
+  check(main.queue.isEmpty() || graceLabels.keySet().containsAll(main.queue), "only labelled grace timers are queued");
   Trace trace = new Trace(name, observe());
-  trace.value.put("init", Trace.action("initWith", live, expired));
+  trace.value.put("init", Trace.action("initWith", live, expired, hostTask));
   for (String step : steps) {
    String[] words = step.split(" ", 2);
    String action = words[0], arg = words.length > 1 ? words[1] : null;
@@ -160,8 +164,9 @@ public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
   return trace;
  }
 
- private static void add(JSONArray out, String name, boolean live, boolean expired, String... steps) {
-  out.put(new GoogleBrowserReturnClaimTraces(live, expired).schedule(name, live, expired, steps).value);
+ private static void add(JSONArray out, String name, boolean live, boolean expired, String... steps) { add(out, name, live, expired, true, steps); }
+ private static void add(JSONArray out, String name, boolean live, boolean expired, boolean hostTask, String... steps) {
+  out.put(new GoogleBrowserReturnClaimTraces(live, expired, hostTask).schedule(name, live, expired, steps).value);
  }
 
  public static void main(String[] args) {
@@ -186,6 +191,9 @@ public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
   add(out, "expired-result-burns-without-exchange", true, true, "receive success", "runWorker");
   add(out, "expired-hint-does-not-schedule", true, true, "receive hint", "runWorker");
   add(out, "retired-credential-intent-cannot-consume", true, false, "receive success", "supersedeCredential", "runWorker", "receive success", "runWorker");
+  // Alpha is the Home app: the page is in the browser's own task and a resume arms no grace.
+  add(out, "home-host-resume-keeps-attempt", true, false, false, "pause", "resume", "receive success", "runWorker");
+  add(out, "home-host-resume-then-hint", true, false, false, "pause", "resume", "receive hint", "runWorker", "runGrace");
   for (String error : new String[]{"error", "mfa-error", "link-error"})
    add(out, "classified-provider-result-" + error, true, false, "receive " + error, "runWorker");
   System.out.println(out);

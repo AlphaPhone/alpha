@@ -1,7 +1,7 @@
 // One prepared Google browser attempt and its native callback admission.
 module GoogleBrowserReturnClaim {
   type Work = {kind: str, claim: bool}
-  type State = {live: bool, paused: bool, hint: bool, hintElapsed: bool,
+  type State = {live: bool, hostTask: bool, paused: bool, hint: bool, hintElapsed: bool,
     claimed: bool, received: bool, cancelled: bool, pending: str,
     credentialCurrent: bool, retirementFence: bool, outcome: str, exchanged: bool,
     retainedNotice: bool, lastCapture: str, work: List[Work], grace: List[str]}
@@ -15,16 +15,19 @@ module GoogleBrowserReturnClaim {
   pure def addWork(value: State, kind: str, claim: bool): State =
     {...value, work: value.work.append({kind: kind, claim: claim})}
 
-  action initWith(live: bool, expired: bool): bool = s' = {
-    live: live, paused: false, hint: false, hintElapsed: false, claimed: false,
+  // hostTask: the browser page is in the host's own task (a host that is not the Home app).
+  // On a Home host the page is in the browser's task and a resume never ends the attempt.
+  action initWith(live: bool, expired: bool, hostTask: bool): bool = s' = {
+    live: live, hostTask: hostTask, paused: false, hint: false, hintElapsed: false, claimed: false,
     received: false, cancelled: false, pending: if (expired) "expired" else "matching",
     credentialCurrent: true, retirementFence: false, outcome: if (live) "waiting" else "none",
     exchanged: false, retainedNotice: false, lastCapture: "none", work: List(), grace: List()}
   action init = {
-    nondet live = Bool.oneOf(); nondet expired = Bool.oneOf(); initWith(live, expired)
+    nondet live = Bool.oneOf(); nondet expired = Bool.oneOf(); nondet hostTask = Bool.oneOf()
+    initWith(live, expired, hostTask)
   }
 
-  action pause = s' = {...s, paused: s.paused or s.live}
+  action pause = s' = {...s, paused: s.paused or (s.live and s.hostTask)}
   action resume = all {s.grace.length() < 4,
     s' = if (s.live and s.paused) {...s, grace: s.grace.append("resume")} else s}
   action receive(kind: str): bool = all {
@@ -110,21 +113,26 @@ module GoogleBrowserReturnClaim {
   val GraceAndRetirement = (s.hintElapsed implies s.hint)
     and (s.retirementFence implies not(s.live))
     and (s.live iff s.outcome == "waiting")
+  val HomeHostNeverPauses = s.paused implies s.hostTask
   val safety = TypeOK and ClaimHasWorker and ExchangeUsesConsumedRecord and ClaimedResultSurvivesGrace and GraceAndRetirement
+    and HomeHostNeverPauses
 
-  run ownResultSurvivesResumeGraceTest = initWith(true, false).then(pause).then(resume).then(receive("success"))
+  run ownResultSurvivesResumeGraceTest = initWith(true, false, true).then(pause).then(resume).then(receive("success"))
     .then(runGrace).expect(s.live and s.claimed).then(runWorker).expect(s.exchanged and safety)
-  run foreignResultLeavesResumeGraceTest = initWith(true, false).then(pause).then(resume).then(receive("foreign"))
+  run foreignResultLeavesResumeGraceTest = initWith(true, false, true).then(pause).then(resume).then(receive("foreign"))
     .then(runGrace).then(runWorker).then(runWorker).expect(s.outcome == "browser-closed" and not(s.exchanged) and safety)
-  run matchingResultSurvivesHintGraceTest = initWith(true, false).then(receive("hint")).then(runWorker).then(receive("success"))
+  run matchingResultSurvivesHintGraceTest = initWith(true, false, true).then(receive("hint")).then(runWorker).then(receive("success"))
     .then(runGrace).expect(s.live and s.hintElapsed and s.claimed).then(runWorker).expect(s.exchanged and safety)
-  run unconsumableResultReleasesElapsedHintTest = initWith(true, false).then(receive("hint")).then(runWorker)
+  run unconsumableResultReleasesElapsedHintTest = initWith(true, false, true).then(receive("hint")).then(runWorker)
     .then(receive("success")).then(changePending("unreadable")).then(runGrace).then(runWorker)
     .expect(s.outcome == "app-link-unverified" and not(s.claimed) and s.pending == "unreadable" and safety)
-  run cancelFencesQueuedResultTest = initWith(true, false).then(receive("success")).then(cancelScope(true))
+  run cancelFencesQueuedResultTest = initWith(true, false, true).then(receive("success")).then(cancelScope(true))
     .then(runWorker).then(runWorker).expect(s.outcome == "cancelled" and s.pending == "missing" and not(s.exchanged) and safety)
-  run coldReturnHasNoCredentialAuthorityTest = initWith(false, false).then(receive("success")).then(runWorker)
+  run coldReturnHasNoCredentialAuthorityTest = initWith(false, false, true).then(receive("success")).then(runWorker)
     .expect(s.retainedNotice and not(s.exchanged) and s.pending == "matching" and safety)
-  run staleCredentialCannotConsumeTest = initWith(true, false).then(receive("success")).then(supersedeCredential).then(runWorker)
+  run homeHostResumeKeepsAttemptTest = initWith(true, false, false).then(pause).then(resume)
+    .expect(s.live and not(s.paused) and s.grace.length() == 0 and s.outcome == "waiting")
+    .then(receive("success")).then(runWorker).expect(s.exchanged and safety)
+  run staleCredentialCannotConsumeTest = initWith(true, false, true).then(receive("success")).then(supersedeCredential).then(runWorker)
     .expect(s.outcome == "storage" and s.retirementFence and s.pending == "matching" and not(s.exchanged) and safety)
 }

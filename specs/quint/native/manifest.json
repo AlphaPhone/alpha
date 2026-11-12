@@ -1940,6 +1940,7 @@
         "unconsumableResultReleasesElapsedHintTest",
         "cancelFencesQueuedResultTest",
         "coldReturnHasNoCredentialAuthorityTest",
+        "homeHostResumeKeepsAttemptTest",
         "staleCredentialCannotConsumeTest"
       ],
       "invariants": [
@@ -1947,7 +1948,8 @@
         "ClaimHasWorker",
         "ExchangeUsesConsumedRecord",
         "ClaimedResultSurvivesGrace",
-        "GraceAndRetirement"
+        "GraceAndRetirement",
+        "HomeHostNeverPauses"
       ],
       "abstractions": [
         "One prepared Google browser attempt or a pending record after process loss, a fixed production environment, four FIFO worker entries and four main grace timers.",
