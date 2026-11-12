@@ -7,7 +7,14 @@ class BrowserPluginBase { protected void handleOnPause() {} protected void handl
 public class CloudSignInBrowserTest extends BrowserPluginBase {
  static final long BROWSER_RETURN_GRACE_MS = 1500;
  final Handler main = new Handler();
- static class Handler { final ArrayDeque<Runnable> queue=new ArrayDeque<>(); void postDelayed(Runnable task,long delay){check(delay==1500,"bounded browser return grace");queue.add(task);}void drain(){while(!queue.isEmpty())queue.remove().run();} }
+ /** Delayed main-thread work: the return grace (drain) and the attempt's own expiry (expire). */
+ static class Handler { final ArrayDeque<Runnable> queue=new ArrayDeque<>(),expiry=new ArrayDeque<>(); void postDelayed(Runnable task,long delay){check(delay==1500||delay==CloudSignInFlow.PENDING_TTL_MS,"bounded browser return grace or the pending record's own expiry");(delay==1500?queue:expiry).add(task);}void drain(){while(!queue.isEmpty())queue.remove().run();}void expire(){while(!expiry.isEmpty())expiry.remove().run();} }
+ /** Alpha is the Home app; the shared fixture default is a host that is not. */
+ boolean hostIsHomeApp; long statusAskedAt; final List<Integer> launchFlags = new ArrayList<>();
+ String credentialGeneration(){return null;}
+ int resumeProbes;
+ void probe(CloudSignInEnvironment environment,Object call,boolean fresh,boolean quiet){check(call==null&&!fresh&&quiet,"a resume measures quietly, for no caller");resumeProbes++;}
+ void renewSaved(){}
  final Object lock = new Object(); boolean destroyed, pendingRetirementUnconfirmed, browserAvailable = true, verified = true, associated = true, acceptsHttps = true;
  final List<String> httpsHandlers = new ArrayList<>(List.of("example.browser")); String defaultHandler = "example.browser"; final List<String> via = new ArrayList<>();
  long intent; Attempt attempt; final ArrayDeque<Runnable> workers = new ArrayDeque<>(), ui = new ArrayDeque<>();
@@ -15,7 +22,7 @@ public class CloudSignInBrowserTest extends BrowserPluginBase {
  static class SignInFailure extends Exception { final String code; SignInFailure(String code) { this.code=code; } }
  static class Attempt {
   final CloudSignInEnvironment environment=TestRegistration.PRODUCTION; final Runnable credentialGuard;
-  boolean cancelled, browserLaunched, browserPaused, callbackReceived, returnHint, returnClaimed, busy; String browserState,pendingRecord; long expiresAt;
+  boolean cancelled, browserLaunched, browserInHostTask, browserPaused, callbackReceived, returnHint, returnClaimed, busy; String browserState,pendingRecord; long expiresAt;
   Attempt(Runnable guard) { credentialGuard=guard; }
  }
  static class Uri { static Uri parse(String value) { return new Uri(value); } final String value; Uri(String value) { this.value=value; } }
@@ -26,7 +33,7 @@ public class CloudSignInBrowserTest extends BrowserPluginBase {
   void launchUrl(Activity activity, Uri uri) {
    check("example.browser".equals(intent.selected),"external Custom Tabs package is explicit");
    check(activity.host.slots.containsKey(activity.host.config().pendingSlot),"encrypted pending record exists before launch");
-   activity.host.launched.add(uri.value);activity.host.via.add("tab:"+intent.selected);
+   activity.host.launched.add(uri.value);activity.host.via.add("tab:"+intent.selected);activity.host.launchFlags.add(intent.flags);
   }
  }
  static class Activity { final CloudSignInBrowserTest host; Activity(CloudSignInBrowserTest host){this.host=host;} void runOnUiThread(Runnable work){host.ui.add(work);}
@@ -34,14 +41,14 @@ public class CloudSignInBrowserTest extends BrowserPluginBase {
    check(Intent.ACTION_VIEW.equals(view.action)&&Intent.CATEGORY_BROWSABLE.equals(view.category)&&view.uri.value.startsWith("https://api.eliza.app/steward/auth/oauth/google/authorize?"),"plain browsable VIEW of the same authorize URL");
    check(view.selected!=null&&!view.selected.equals(host.getContext().getPackageName()),"external browser, never the host");
    check(host.slots.containsKey(host.config().pendingSlot),"encrypted pending record exists before launch");
-   host.launched.add(view.uri.value);host.via.add("view:"+view.selected);
+   host.launched.add(view.uri.value);host.via.add("view:"+view.selected);host.launchFlags.add(view.flags);
   }
  }
  Activity getActivity(){return new Activity(this);}
  CloudSignInConfig config(){return TestRegistration.base().googleSignInMode("browser").environment(TestRegistration.PRODUCTION).build();}
  Context getContext(){return new Context(this);}
  static class Context { final CloudSignInBrowserTest host; Context(CloudSignInBrowserTest host){this.host=host;} String getPackageName(){return "ai.example.signin";} PackageManager getPackageManager(){return new PackageManager(host);} }
- static class Intent { static final String ACTION_VIEW="VIEW",CATEGORY_BROWSABLE="BROWSABLE";String action,selected,category;Uri uri;Intent(String action){this.action=action;}Intent(String action,Uri uri){this.action=action;this.uri=uri;}Intent addCategory(String category){check(CATEGORY_BROWSABLE.equals(category),"browser page is browsable");this.category=category;return this;}Intent setPackage(String name){selected=name;return this;} }
+ static class Intent { static final String ACTION_VIEW="VIEW",CATEGORY_BROWSABLE="BROWSABLE",ACTION_MAIN="MAIN",CATEGORY_HOME="HOME";static final int FLAG_ACTIVITY_NEW_TASK=0x10000000;String action,selected,category;Uri uri;int flags;Intent(String action){this.action=action;}Intent(String action,Uri uri){this.action=action;this.uri=uri;}Intent addCategory(String category){check(ACTION_MAIN.equals(action)?CATEGORY_HOME.equals(category):CATEGORY_BROWSABLE.equals(category),"a browser page is browsable; only the Home query asks for Home");this.category=category;return this;}Intent setPackage(String name){selected=name;return this;}Intent addFlags(int more){flags|=more;return this;} }
  static class ServiceInfo { String packageName;boolean exported=true;ServiceInfo(String name){packageName=name;} }
  static class ActivityInfo { String packageName;ActivityInfo(String name){packageName=name;} }
  static class ResolveInfo { ServiceInfo serviceInfo;ActivityInfo activityInfo;ResolveInfo(String name){serviceInfo=new ServiceInfo(name);activityInfo=new ActivityInfo(name);} }
@@ -51,7 +58,9 @@ public class CloudSignInBrowserTest extends BrowserPluginBase {
   List<ResolveInfo> queryIntentActivities(Intent page,int flags){check(page.action.equals(Intent.ACTION_VIEW)&&page.uri.value.startsWith("https://")&&Intent.CATEGORY_BROWSABLE.equals(page.category)&&flags==MATCH_DEFAULT_ONLY,"require normal HTTPS default-category handler");
    if(page.selected==null){List<ResolveInfo> all=new ArrayList<>();for(String name:host.httpsHandlers)all.add(new ResolveInfo(name));return all;}
    return host.acceptsHttps?List.of(new ResolveInfo(page.selected)):List.of();}
-  ResolveInfo resolveActivity(Intent page,int flags){check(page.action.equals(Intent.ACTION_VIEW)&&page.uri.value.startsWith("https://")&&Intent.CATEGORY_BROWSABLE.equals(page.category)&&page.selected==null&&flags==MATCH_DEFAULT_ONLY,"resolve the user's default HTTPS browser");return host.defaultHandler==null?null:new ResolveInfo(host.defaultHandler);}
+  ResolveInfo resolveActivity(Intent page,int flags){
+   if(Intent.ACTION_MAIN.equals(page.action)){check(Intent.CATEGORY_HOME.equals(page.category)&&page.selected==null&&flags==MATCH_DEFAULT_ONLY,"resolve this device's Home app");return new ResolveInfo(host.hostIsHomeApp?"ai.example.signin":"example.launcher");}
+   check(page.action.equals(Intent.ACTION_VIEW)&&page.uri.value.startsWith("https://")&&Intent.CATEGORY_BROWSABLE.equals(page.category)&&page.selected==null&&flags==MATCH_DEFAULT_ONLY,"resolve the user's default HTTPS browser");return host.defaultHandler==null?null:new ResolveInfo(host.defaultHandler);}
  }
  static class CustomTabsClient {
   static String preferred="example.resolver";
@@ -118,10 +127,22 @@ public class CloudSignInBrowserTest extends BrowserPluginBase {
   check(afterWrite.launched.isEmpty(),"cancel between persistence and UI never launches browser");
   good.handleOnPause();good.handleOnResume();owner.callbackReceived=true;good.main.drain();
   check(good.failure==null&&!owner.cancelled,"callback during resume grace keeps live attempt");
-  CloudSignInBrowserTest closed=new CloudSignInBrowserTest();Attempt closing=closed.owner();closing.browserLaunched=true;closed.handleOnPause();closed.handleOnResume();closed.main.drain();
+  CloudSignInBrowserTest closed=new CloudSignInBrowserTest();Attempt closing=closed.owner();closing.browserLaunched=true;closing.browserInHostTask=true;closed.handleOnPause();closed.handleOnResume();closed.main.drain();
   check(closing.cancelled&&"browser-closed".equals(closed.failure),"manual browser return ends waiting state");
-  CloudSignInBrowserTest newer=new CloudSignInBrowserTest();Attempt retired=newer.owner();retired.browserLaunched=true;newer.handleOnPause();newer.handleOnResume();Attempt successor=newer.owner();newer.main.drain();
+  CloudSignInBrowserTest newer=new CloudSignInBrowserTest();Attempt retired=newer.owner();retired.browserLaunched=true;retired.browserInHostTask=true;newer.handleOnPause();newer.handleOnResume();Attempt successor=newer.owner();newer.main.drain();
   check(newer.attempt==successor&&!successor.cancelled&&newer.failure==null,"old resume timer cannot cancel new attempt");
+  check(good.launchFlags.equals(List.of(0))&&owner.browserInHostTask&&aosp.launchFlags.equals(List.of(0)),"a host that is not Home keeps the page in its own task");
+  // Alpha is the Home app: the page opens in the browser's own task, and coming back to Home never ends the attempt.
+  for(boolean tabs:List.of(true,false)){
+   CloudSignInBrowserTest home=new CloudSignInBrowserTest();home.hostIsHomeApp=true;
+   if(!tabs){home.browserAvailable=false;home.httpsHandlers.clear();home.httpsHandlers.add("org.chromium.webview_shell");home.defaultHandler="org.chromium.webview_shell";}
+   Attempt launcher=home.owner();home.startGoogleBrowser(launcher);home.drainWorkers();home.drainUi();
+   check(home.launched.size()==1&&launcher.browserLaunched&&!launcher.browserInHostTask&&home.launchFlags.equals(List.of(Intent.FLAG_ACTIVITY_NEW_TASK)),"on a Home host the page opens in the browser's own task: "+tabs);
+   home.handleOnPause();home.handleOnResume();home.main.drain();
+   check(!launcher.browserPaused&&home.main.queue.isEmpty()&&home.attempt==launcher&&!launcher.cancelled&&home.failure==null&&home.slots.containsKey(home.config().pendingSlot),"coming back to Home without a return keeps the attempt and its pending record: "+tabs);
+   home.main.expire();
+   check(launcher.cancelled&&"expired".equals(home.failure)&&home.attempt==null,"with no return and no cancel the Home attempt ends at its own expiry: "+tabs);
+  }
   System.out.println("PASS browser Google start: native custody, readiness, cancellation and replacement");
  }
 }
