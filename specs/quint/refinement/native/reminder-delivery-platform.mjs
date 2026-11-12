@@ -168,6 +168,9 @@ public final class AlarmManager {
   if(refuse)throw new IllegalStateException("Synthetic AlarmManager refusal");
   live.put(intent,when);
  }
+ /** Alpha's manifest requests no exact-alarm capability, so the platform reports none and the inexact alarm is used. */
+ public boolean canScheduleExactAlarms(){return false;}
+ public void setExactAndAllowWhileIdle(int type,long when,PendingIntent intent){throw new AssertionError("Exact alarm without the capability");}
  public void cancel(PendingIntent intent){live.remove(intent);}
 }`,
   'android/app/NotificationChannel.java': `package android.app;

@@ -20,9 +20,10 @@ async function compile(extraSources) {
     bundle: true, platform: 'node', format: 'cjs', write: false, metafile: true,
     plugins: [{name: 'files-coordinator-observer', setup(builder) {
       builder.onLoad({filter: /\/files-browser-adapter\.ts$/}, args => {
+        // The model's `busy` is the folder read in flight: the source's `loading` (its `busy` now counts opens, shares and changes).
         const text = readFileSync(args.path, 'utf8'), marker = '  const repaint = () =>';
         assert.equal(text.split(marker).length, 2, 'One Files closure observation seam');
-        return {loader: 'ts', contents: text.replace(marker, `  __ports.inspect=()=>({bound:!!api,active,place,generation,stateGeneration,access,volumes,entries,loaded,busy,error});\n${marker}`)};
+        return {loader: 'ts', contents: text.replace(marker, `  __ports.inspect=()=>({bound:!!api,active,place,generation,stateGeneration,access,volumes,entries,loaded,busy:loading,error});\n${marker}`)};
       });
     }}]});
   const sources = [...Object.keys(compiled.metafile.inputs).filter(path => !path.startsWith('<')),
