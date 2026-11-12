@@ -122,7 +122,10 @@ public class AlphaFilesPlugin extends Plugin {
   JSObject out=new JSObject();
   // MediaStore has no folder rows to query, so the folder kind walks the tree.
   if(Boolean.TRUE.equals(call.getBoolean("folders",false))){JSArray rows=new JSArray();for(StorageBrowser.Row r:primaryBrowser().folders(call.getString("folder",""),call.getString("text"),since,until,StorageCatalog.QUERY_MAX,StorageBrowser.WALK_MAX))rows.put(row(r));out.put("entries",rows);return out;}
-  out.put("entries",StorageCatalog.query(resolver(),call.getString("text"),call.getString("mimePrefix"),Boolean.TRUE.equals(call.getBoolean("documents",false)),call.getString("folder"),since,until));return out;
+  // The catalog stops at QUERY_MAX rows. Fewer rows are every match; a full page may have more, so it is
+  // reported as incomplete. The folder walk above reports nothing: its visit bound is not observable here.
+  JSArray found=StorageCatalog.query(resolver(),call.getString("text"),call.getString("mimePrefix"),Boolean.TRUE.equals(call.getBoolean("documents",false)),call.getString("folder"),since,until);
+  out.put("entries",found);out.put("truncated",found.length()>=StorageCatalog.QUERY_MAX);return out;
  });}
  private boolean filesReviewVisible(){Activity activity=getActivity();return activity!=null&&activity.hasWindowFocus();}
  @PluginMethod public void storageReviewedIdentities(PluginCall call){storage(call,b->{
