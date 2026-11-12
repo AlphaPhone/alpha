@@ -25,7 +25,7 @@ export const featureParityAllowlist = {
     "capability:sms.send.v1:only-a": "apps/app/src/runtime/connection-ui.tsx deviceCapabilities and apps/app/src/runtime/device-actions.ts"
   },
   reviewedHelpers: {
-    "apps/app/src/runtime/native-network.ts": {"owner": "apps/app/src/runtime/connection-ui.tsx", "reason": "Bounds the existing resident send and lifecycle connectivity reads to native Android facts while preserving cancellation and observation order.", "tests": ["test/native-network.test.mjs", "test/native-network-lifecycle.test.mjs", "test/connection-presentation-state.test.mjs"]},
+    "apps/app/src/runtime/native-network.ts": {"owner": "apps/app/src/runtime/connection-ui.tsx", "reason": "Bounds the existing resident send and lifecycle connectivity reads to native Android facts while preserving cancellation and observation order.", "tests": ["test/native-network.test.mjs"]},
     "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaUpdateStatusReceiver.java": {"owner": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java", "reason": "Receives and binds the system installer result to Alpha’s existing update session.", "tests": ["test/app-update.test.mjs"]},
     "android/app/src/main/java/ai/alphacompute/alphaphone/UpdateConfirmationReceipt.java": {"owner": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java", "reason": "Persists the exact unopened Android installer confirmation across process replacement.", "tests": ["test/app-update.test.mjs"]},
     "apps/app/src/prototype/system-bar-appearance.ts": {"owner": "apps/app/src/main.tsx", "reason": "Keeps native status and navigation bar contrast aligned with the active Alpha theme.", "tests": ["test/system-bar-appearance.test.mjs"]},

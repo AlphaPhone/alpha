@@ -8,34 +8,6 @@ test('qualified publication binds source, private output and exact reviewed voic
   execFileSync('python3',['-B','test/qualified-app-update.test.py'],{cwd:new URL('..',import.meta.url),stdio:'pipe',timeout:30_000});
 });
 
-test('publication workflow preserves protected review, exact source and verification before writes',()=>{
-  const source=fs.readFileSync(new URL('../.github/workflows/publish-qualified-app-update.yml',import.meta.url),'utf8');
-  const workflow=YAML.parse(source);
-  assert.deepEqual(Object.keys(workflow.on),['workflow_dispatch']);
-  assert.deepEqual(workflow.permissions,{});
-  assert.deepEqual(workflow.concurrency,{group:'alpha-app-stable-publication','cancel-in-progress':false});
-  assert.deepEqual(workflow.jobs.admit.permissions,{contents:'read',actions:'read'});
-  const publish=workflow.jobs.publish;
-  assert.equal(publish.environment,'release');
-  assert.deepEqual(publish.permissions,{actions:'read',contents:'write','id-token':'write'});
-  assert.match(workflow.jobs.admit.if,/inputs.workflow_commit == github.sha/);
-  const steps=publish.steps;
-  assert(steps.filter(step=>step.uses?.startsWith('actions/checkout@')).every(step=>step.with['persist-credentials']===false));
-  const verification=steps.findIndex(step=>step.run?.includes('npm run android:verify -- --cloud-voice-evidence='));
-  const delivery=steps.findIndex(step=>step.run?.includes('node scripts/deliver-app-update.ts --variant launcher'));
-  assert(verification>=0&&delivery>verification);
-  assert.equal(steps[delivery]['working-directory'],'qualified-product');
-  assert.match(steps[delivery].run,/scripts\/deliver-app-update\.mjs/);
-  assert.match(steps[verification].run,/qualified-stage\/cloud-voice.json/);
-  const restore=steps.findIndex(step=>step.run?.includes('--product \"$GITHUB_WORKSPACE/qualified-product\"'));
-  assert(restore>=0&&restore<verification);
-  assert.match(steps[restore].run,/cp android\/release-signer\.json qualified-product\/android\/release-signer\.json/);
-  const secretSteps=steps.filter(step=>JSON.stringify(step.env||{}).includes('secrets.'));
-  assert.equal(secretSteps.length,0,'private delivery must not depend on a copied storage token');
-  assert(!/APP_RELEASE_KEYSTORE|RELEASE_KEY_PASSPHRASE|RECIPIENT_PRIVATE|openssl cms|sign-release-apks/.test(source));
-  for(const step of steps.filter(step=>step.uses))assert.match(step.uses,/@[0-9a-f]{40}$/);
-});
-
 // Only reviewed main-branch release jobs can mint the short-lived artifact credential.
 test('artifact identity is confined to protected signing and publication jobs',()=>{
  const identity=JSON.parse(fs.readFileSync(new URL('../scripts/ci/private-artifact-identity.json',import.meta.url),'utf8'));

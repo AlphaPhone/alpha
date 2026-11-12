@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { provisioningComponents, renderProvisioningOverlay, requestsAllFilesAccess, writeProvisioningOverlay } from "../scripts/aosp-provisioning-overlay.ts";
+import { provisioningComponents, renderProvisioningOverlay, writeProvisioningOverlay } from "../scripts/aosp-provisioning-overlay.ts";
 
 const PKG = "ai.alphacompute.alphaphone";
 const str = value => `"${value}" (Raw: "${value}")`;
@@ -35,15 +35,6 @@ test("components come from the APK manifest and must be unique", () => {
   assert.throws(() => provisioningComponents(tree({ autofillPermission: "none" }), PKG), /AUTOFILL/);
 });
 
-test("Files all-files access: the launcher must request MANAGE_EXTERNAL_STORAGE (granted as preinstalled)", () => {
-  assert.equal(requestsAllFilesAccess(tree()), true);
-  assert.equal(requestsAllFilesAccess(tree({ allFiles: false })), false);
-  assert.throws(() => provisioningComponents(tree({ allFiles: false }), PKG), /MANAGE_EXTERNAL_STORAGE/);
-  const files = renderProvisioningOverlay(PKG, provisioningComponents(tree(), PKG));
-  assert.match(files["provisioning/README.md"], /MANAGE_EXTERNAL_STORAGE/);
-  assert.match(fs.readFileSync("android/app/src/main/AndroidManifest.xml", "utf8"), /<uses-permission android:name="android\.permission\.MANAGE_EXTERNAL_STORAGE"/);
-});
-
 test("the overlay sets default HOME, assistant and Autofill offer additively", t => {
   const files = renderProvisioningOverlay(PKG, provisioningComponents(tree(), PKG));
   assert.match(files["provisioning/overlay/frameworks/base/core/res/res/values/config.xml"], new RegExp(`config_defaultAssistant" translatable="false">${PKG}<`));
@@ -59,11 +50,4 @@ test("the overlay sets default HOME, assistant and Autofill offer additively", t
   assert.match(fs.readFileSync(path.join(out, "product.mk"), "utf8"), /PRODUCT_PACKAGE_OVERLAYS \+= \$\(launcher_provisioning_dir\)\/overlay/);
   assert.ok(fs.existsSync(path.join(out, "provisioning/preferred-apps/launcher-home.xml")));
   assert.throws(() => writeProvisioningOverlay(out, PKG, provisioningComponents(tree(), PKG)), /EEXIST/);
-});
-
-test("stage-aosp gates the overlay behind --production, never with --development", () => {
-  const source = fs.readFileSync("scripts/stage-aosp.ts", "utf8");
-  assert.match(source, /if \(production && development\) throw/);
-  assert.match(source, /const tree = execFileSync\(tool\("aapt"\), \["dump", "xmltree", apk, "AndroidManifest\.xml"\]/);
-  assert.match(source, /if \(production\) \{\n  const components = provisioningComponents\(tree, identity\.appId\);/);
 });

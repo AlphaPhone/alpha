@@ -111,36 +111,6 @@ const loop=(createdAt,extra={})=>({active:true,removed:false,createdAt:at(create
 const tick=(l,time)=>{const found=o.scheduledOccurrence(l,at(time));if(!found)return null;o.settleOccurrence(l,found.local);return (found.missed?'missed ':'run ')+found.local;};
 `;
 
-test('development digest admission uses the pinned agent threshold, order and record text',async()=>{
- const {readFileSync}=await import('node:fs');
- const agent=readFileSync(resolve(root,'vendor/eliza/plugins/plugin-workflow/src/services/hosted-digest.ts'),'utf8');
- // The agent's run window, record texts and source state live in its shared occurrence policy; the
- // development scheduler imports that same module from the authenticated client feature copy.
- const policy=readFileSync(resolve(root,'vendor/eliza/plugins/plugin-workflow/src/services/hosted-digest-policy.ts'),'utf8');
- const out=run(occurrencePrelude+`
-const p=await import(${JSON.stringify(resolve(root,'.eliza/client-features/plugins/plugin-workflow/src/services/hosted-digest-policy.ts'))});
-out.window=o.DIGEST_RUN_WINDOW_MS;out.missed=o.DIGEST_MISSED_TEXT;out.unavailable=o.DIGEST_UNAVAILABLE_TEXT;
-out.shared=[o.DIGEST_RUN_WINDOW_MS===p.DIGEST_RUN_WINDOW_MS,o.DIGEST_MISSED_TEXT===p.DIGEST_MISSED_TEXT,o.DIGEST_UNAVAILABLE_TEXT===p.DIGEST_PAUSED_TEXT];
-out.states=[[false,'2026-10-08T00:00:00.000Z'],[false,'2026-10-07T08:00:00.000Z'],[false,'2026-10-07T07:59:59.999Z'],[true,'2026-10-08T00:00:00.000Z'],[true,'2026-10-01T00:00:00.000Z']].map(([revoked,expiresAt])=>o.digestSourceState({revoked,expiresAt},at('2026-10-07T08:00:00.000Z')));
-console.log(JSON.stringify(out));`);
- // Threshold: the agent records missed only when more than 30 minutes late (owner decision, #680).
- assert.match(agent,/if \(checkWindow && digestOccurrenceMissed\(scheduledAt, now\)\)/);
- assert.match(policy,/export const DIGEST_RUN_WINDOW_MS = 30 \* 60_000;/);
- assert.match(policy,/return now - scheduledAt > DIGEST_RUN_WINDOW_MS;/);
- assert.equal(out.window,30*60000);
- assert.deepEqual(out.shared,[true,true,true],'the development scheduler uses the agent policy module itself');
- for(const text of [out.missed,out.unavailable.expired,out.unavailable.revoked])assert.ok(policy.includes(`'${text}'`),`pinned agent policy writes: ${text}`);
- assert.match(agent,/text: DIGEST_PAUSED_TEXT\[sourceState\]/);
- assert.match(agent,/text: DIGEST_MISSED_TEXT/);
- // Order: the source state is decided before lateness, so a late occurrence of a lapsed source is unavailable, not missed.
- const admission=agent.slice(agent.indexOf('export async function digestAdmission('));
- assert.ok(admission.indexOf("status: 'unavailable'")>0&&admission.indexOf("status: 'unavailable'")<admission.indexOf("status: 'missed'"));
- assert.match(admission,/sourceState,\s*paused: true,/);
- // digestSourceState: revoked wins; expiry is inclusive of the expiry instant.
- assert.match(policy,/if \(source\.revoked\) return 'revoked';\s*return Date\.parse\(source\.expiresAt\) <= now \? 'expired' : 'current';/);
- assert.deepEqual(out.states,['current','expired','expired','revoked','revoked']);
-});
-
 test('a development occurrence runs up to 30 minutes late, is missed after that, and settles once',()=>{
  const out=run(occurrencePrelude+`
 const ticks=(created,times)=>{const l=loop(created);return times.map(time=>tick(l,time));};

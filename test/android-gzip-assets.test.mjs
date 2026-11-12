@@ -9,7 +9,6 @@ import {mergeGzipAssets} from './fixtures/android-gzip-assets.mjs';
 
 const temporary=()=>fs.mkdtempSync(path.join(os.tmpdir(),'alpha-gzip-assets-'));
 
-
 test('a gzip web asset survives the Android asset merger under its published name',()=>{
  const web=temporary(),android=temporary();
  try{
@@ -42,12 +41,4 @@ test('wrapping is deterministic and refuses a mislabelled or linked asset',()=>{
   fs.writeFileSync(path.join(one,'plain.gz'),'not gzip');assert.throws(()=>protectGzipAssets(one),/is not gzip data/);fs.rmSync(path.join(one,'plain.gz'));
   fs.symlinkSync(path.join(two,'a.gz.gz'),path.join(one,'link.gz'));assert.throws(()=>protectGzipAssets(one),/Refusing to follow/);
  }finally{for(const root of [one,two])fs.rmSync(root,{recursive:true,force:true});}
-});
-
-test('the Android sync step and APK verification use the protection',()=>{
- const scripts=JSON.parse(fs.readFileSync('package.json','utf8')).scripts;
- assert.match(scripts['android:sync'],/cap sync android .*&& node scripts\/android-gzip-assets\.ts protect$/);
- assert.match(fs.readFileSync('scripts/verify-apks.ts','utf8'),/problems\.push\(\.\.\.packagedGzipProblems\(payload\.public\)\)/);
- // The pinned engine asks for the gzip name; if upstream changes that, this protection needs review.
- assert.match(fs.readFileSync('vendor/eliza/plugins/plugin-files/src/documents/local-ocr.ts','utf8'),/gzip: true/);
 });

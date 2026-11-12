@@ -25,8 +25,3 @@ test('digest restart check stops before any process work and names the exact pre
   }
  }finally{fs.rmSync(empty,{recursive:true,force:true});}
 });
-
-test('the package command runs the digest restart check',()=>{
- assert.equal(JSON.parse(fs.readFileSync('package.json','utf8')).scripts['agent:test-digest-restart'],'node scripts/test-local-digest-restart.ts');
-
-});

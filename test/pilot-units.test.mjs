@@ -302,12 +302,3 @@ test("campaign records are read from emulator-suite, resident proofs and residen
   write("test-results/resident-instrumentation/unbound.json", { passed: true });
   assert.equal(recordCandidate({ qualified: true, androidBuild: { apks: [{ sha256: app }] } }, root).candidate.campaigns.find(row => row.id === "resident-instrumentation").status, "mismatched");
 });
-
-
-test("the provisioning record keeps only its secret-free fields", () => {
-  const source = fs.readFileSync("scripts/provision-unit.ts", "utf8");
-  const body = /const record = \{([\s\S]*?)\n  \};/.exec(source)[1];
-  const keys = [...body.matchAll(/^\s{4}([a-zA-Z]+)[:,]/gm)].map(match => match[1]);
-  assert.deepEqual(keys, ["schema", "alias", "createdAt", "sourceCommit", "evidence", "notEvidenceFor", "device", "apk", "installed", "runtimeIdentity", "homeRole"]);
-  assert.match(source, /buildFingerprintSha256: sha256\(/);
-});

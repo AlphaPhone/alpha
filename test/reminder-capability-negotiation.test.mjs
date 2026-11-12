@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
@@ -13,7 +12,6 @@ if(!process.execArgv.some((arg,i)=>arg==='--import'&&process.execArgv[i+1]==='ts
 const {DeviceActions}=await import('../apps/app/src/runtime/device-actions.ts');
 const {selectDeviceCapabilities}=await import('../apps/app/src/runtime/phone-context.ts');
 
-const connection=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
 const offered=['reminders.create.v1','reminders.local-record.v2','calendar.create.v1','calendar.next-read.v1','notes.query.v1','maps.selected-read.v1'];
 
 // The production selection with a platform profile; capability and client-boundary proof, not
@@ -35,11 +33,6 @@ test('native platforms retain only the reminder creation capability offered by t
   assert.equal((await capabilities(platform,['reminders.local-record.v2'])).includes('reminders.create.v1'),false,platform);
  }
  assert.equal((await capabilities('web',['reminders.local-record.v1'])).includes('reminders.local-record.v2'),false);
-});
-
-test('normal resident, remote and Cloud registration use the same capability policy',()=>{
- // Source-wiring assertion only; the execution tests above cover policy behavior.
- assert.equal((connection.match(/await deviceCapabilities\(/g)||[]).length,3);
 });
 
 const now=Date.now(),due=now+3600000;

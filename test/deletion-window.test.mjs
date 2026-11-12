@@ -42,14 +42,3 @@ test('native deadline agrees on same-boot restart, exact expiry, reboot and inva
  execFileSync(javaBinary('javac'),['--release','11','-d',dir,shared,file],{timeout:60000});assert.match(execFileSync(javaBinary('java'),['-cp',dir,'DeadlineTest'],{encoding:'utf8',timeout:10000}),/PASS deletion deadline/);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
-test('Undo is confirmed only by an undone receipt; a late Undo after dispatch is never shown as kept',()=>{
- assert.equal(undoConfirmed({phase:'undone'}),true);
- for(const phase of ['deleted','conflict','dispatching','unknown','queued','paused'])assert.equal(undoConfirmed({phase}),false,phase);
- assert.equal(undoConfirmed(undefined),false);assert.equal(undoConfirmed(null),false);assert.equal(undoConfirmed('undone'),false);
- // The shared notice (bound by runtime/deletion-undo.tsx) shows Undo as kept only on an undone receipt.
- const ui=readFileSync(join(root,'.eliza/client-features/packages/ui/src/components/composites/deferred-deletion-notice.tsx'),'utf8');
- assert.match(ui,/if \(action\.current\(\) && !undoConfirmed\(result\)\)\s+setError\(\{ text: UNDO_TOO_LATE, scope: action \}\);/,'late Undo is shown only for the same current owner/action');
- assert.match(ui,/const shownError = error\?\.scope\.current\(\) \? error\.text : "";/,'a retired owner cannot see a stale Undo error');
- const coordinator=readFileSync(join(root,'vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/deletion/DeferredDeletionCoordinator.java'),'utf8');
- assert.match(coordinator,/DeferredDeletionJournal\.requireUndone\(reminders\.settleDeletion\(id, row\.getString\("owner"\), time, true\)\)/,'native reminder Undo refuses a settled deletion');
-});

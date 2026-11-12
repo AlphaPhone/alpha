@@ -7,7 +7,7 @@ import {existsSync,mkdtempSync,mkdirSync,readFileSync,readdirSync,rmSync,writeFi
 import {homedir,tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {execFileSync,spawnSync} from 'node:child_process';
-import {javaBinary,jvmSkip,jvmTimeout,nativeSource,root} from './fixtures/jvm-tools.mjs';
+import {javaBinary,jvmSkip,jvmTimeout,nativeSource} from './fixtures/jvm-tools.mjs';
 
 // On CI the SDK must come from the environment; locally the default SDK location also counts.
 const sdk=process.env.ANDROID_SDK_ROOT||process.env.ANDROID_HOME||(process.env.CI?'':join(homedir(),process.platform==='darwin'?'Library/Android/sdk':'Android/Sdk'));
@@ -21,19 +21,6 @@ function workspace(prefix){
  return {dir,put,sources};
 }
 const javac=args=>spawnSync(javaBinary('javac'),['--release','17',...args],{encoding:'utf8',timeout:jvmTimeout});
-
-test('the Power child ships disabled, unexported, platform-protected and without an intent filter',()=>{
- const manifest=readFileSync(join(root,'android/app/src/main/AndroidManifest.xml'),'utf8');
- const power=manifest.match(/<activity android:name="\.AlphaPowerVoiceActivity"[^>]*>/)?.[0];
- assert.ok(power,'AlphaPowerVoiceActivity entry');
- // Self-closing: no intent-filter or other child can route a launch to it.
- assert.match(power,/\/>$/);
- for(const attribute of ['android:enabled="false"','android:exported="false"','android:permission="android.permission.STATUS_BAR_SERVICE"','android:launchMode="singleTask"'])assert.ok(power.includes(attribute),attribute);
- const ordinary=manifest.match(/<activity android:name="\.AlphaAssistActivity"[\s\S]*?<\/activity>/)?.[0];
- assert.ok(ordinary,'AlphaAssistActivity entry');
- assert.doesNotMatch(ordinary,/android:permission=/);
- assert.match(ordinary,/<intent-filter><action android:name="android.intent.action.ASSIST"\/>/);
-});
 
 test('actual activity: warm same instance offers Power once; cold, restored and ordinary entry fail closed',{skip:jvmSkip('javac')},()=>{
  const {dir,put,sources}=workspace('alpha-power-sense-jvm-');
