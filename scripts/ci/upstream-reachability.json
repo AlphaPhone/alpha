@@ -2,14 +2,14 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e",
-  "head": "a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e",
-  "recordedAt": "2026-11-11",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e",
+  "baseCommit": "11040b3555c9a7db51ac2104ee68dd66cdd51046",
+  "head": "11040b3555c9a7db51ac2104ee68dd66cdd51046",
+  "recordedAt": "2026-11-12",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...11040b3555c9a7db51ac2104ee68dd66cdd51046",
   "status": "identical",
   "aheadBy": 0,
   "behindBy": 0,
-  "mergeBase": "a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e",
+  "mergeBase": "11040b3555c9a7db51ac2104ee68dd66cdd51046",
   "pinOnlyCommits": [],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
@@ -21,6 +21,10 @@
     "https://github.com/elizaOS/eliza/pull/39268",
     "https://github.com/elizaOS/eliza/pull/39287",
     "https://github.com/elizaOS/eliza/pull/39291",
-    "https://github.com/elizaOS/eliza/pull/39298"
+    "https://github.com/elizaOS/eliza/pull/39298",
+    "https://github.com/elizaOS/eliza/pull/39445",
+    "https://github.com/elizaOS/eliza/pull/39436",
+    "https://github.com/elizaOS/eliza/pull/39437",
+    "https://github.com/elizaOS/eliza/pull/39428"
   ]
 }

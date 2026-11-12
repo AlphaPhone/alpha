@@ -332,12 +332,19 @@ before enrollment. [#400](https://github.com/eliza-research/alphaphone/issues/40
 tracks the overall release gate. A successful host test or model does not close
 these release and device gates. Alpha consumes the reviewed rejected-download
 retry repair [eliza#39235](https://github.com/elizaOS/eliza/pull/39235), the
-reviewed Maps and speech changes through [eliza#39255](https://github.com/elizaOS/eliza/pull/39255)
-and the OS descriptor admission changes from [eliza#39291](https://github.com/elizaOS/eliza/pull/39291)
-at `a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e`, the upstream develop head when the
-pin was recorded (236 commits after `8876e369ca00d82f334e604aba3763a3998a854e`).
-This pin changes the Bun lock and the SDK version (2.0.5); the gated core
-sources, mobile builder, speech engine revision and native JNI inputs are
+reviewed Maps and speech changes through [eliza#39255](https://github.com/elizaOS/eliza/pull/39255),
+the OS descriptor admission changes from [eliza#39291](https://github.com/elizaOS/eliza/pull/39291)
+and the Android sign-in, mobile checkout and key renewal, inference admission
+and native-agent billing route changes from
+[eliza#39445](https://github.com/elizaOS/eliza/pull/39445),
+[eliza#39436](https://github.com/elizaOS/eliza/pull/39436),
+[eliza#39437](https://github.com/elizaOS/eliza/pull/39437) and
+[eliza#39428](https://github.com/elizaOS/eliza/pull/39428)
+at `11040b3555c9a7db51ac2104ee68dd66cdd51046`, the upstream develop head when the
+pin was recorded (194 commits after `a24e5aa6c5d5fccddc6875202a4ba9ff95fed07e`).
+This pin changes four gated Notes sources (opt-in Trash retention and the
+uncertain encrypted commit fence); the Bun lock, SDK version (2.0.5), other gated
+core sources, mobile builder, speech engine revision and native JNI inputs are
 unchanged, and the recorded native libraries were not rebuilt at this pin.
 Earlier APK, voice and device evidence does not qualify this pin; rebuild and
 qualify the exact product inputs before OS enrollment.
