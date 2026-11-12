@@ -8,7 +8,10 @@ An admitted result can settle after either grace timer. An unusable result
 releases the elapsed hint to its original fallback and preserves the record.
 
 The source campaign runs the same authenticated Java method bodies as the
-packaged sign-in regression. It compares 121 checkpoints in 23 schedules.
+packaged sign-in regression. It compares 132 checkpoints in 25 schedules.
+Two schedules run on a Home host (Alpha's case), where the page is in the
+browser's own task and a resume arms no grace; the others keep the page in
+the host's own task, where coming back without a return closes the attempt.
 Read-only wrappers tag the actual queued worker and timer objects. The
 observations include both queues, claim and retirement flags, pending
 record identity classes, bridge outcomes and whether exchange began.
