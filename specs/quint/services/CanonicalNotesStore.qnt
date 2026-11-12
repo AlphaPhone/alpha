@@ -5,7 +5,7 @@ module CanonicalNotesStore {
   type Reply = {outcome: str, id: int, document: Document, raw: bool}
   type State = {phase: str, cache: Document, durable: Document, pending: Document,
     before: Document, stage: str, kind: str, target: int, raw: bool, stopRequested: bool,
-    reply: Reply, delayed: Reply, delayHeld: bool}
+    reply: Reply, delayed: Reply, delayHeld: bool, fenced: bool}
   var s: State
   pure val ids = Set(1, 2)
   pure val empty = {revision: 0, notes: [], trash: Set(), trashPresent: false, body: Map(1 -> 0, 2 -> 0),
@@ -13,7 +13,7 @@ module CanonicalNotesStore {
   pure val noReply = {outcome: "none", id: 0, document: empty, raw: false}
   pure val initial = {phase: "ready", cache: empty, durable: empty, pending: empty,
     before: empty, stage: "idle", kind: "none", target: 0, raw: false,
-    stopRequested: false, reply: noReply, delayed: noReply, delayHeld: false}
+    stopRequested: false, reply: noReply, delayed: noReply, delayHeld: false, fenced: false}
   action init = s' = initial
   pure def legacy(first: int, second: int): Document = {...empty, revision: 2, notes: [2, 1], trashPresent: true,
     body: Map(1 -> 1, 2 -> 1), clock: Map(1 -> first, 2 -> second), seen: ids}
@@ -89,8 +89,13 @@ module CanonicalNotesStore {
   action refused = all {
     s.stage == "prepared", s' = {...s, stage: "idle", reply: {...noReply, outcome: "error"}}
   }
+  // The port may have committed before its acknowledgement or readback failed. The old cache is
+  // then unknown: every shared view is fenced (phase "error") until all handles close and reopen.
   action lostAcknowledgement = all {
-    s.stage == "written", s' = {...s, stage: "idle", reply: {...noReply, outcome: "error"}}
+    s.stage == "written", s' = {...s, stage: "idle", phase: "error", fenced: true, reply: {...noReply, outcome: "error"}}
+  }
+  action refusedWhileFenced = all {
+    s.fenced, s.stage == "idle", s' = {...s, reply: {...noReply, outcome: "error"}}
   }
   action confirmed = all {
     s.stage == "written", s' = {...s, cache: s.pending, stage: "published",
@@ -114,7 +119,7 @@ module CanonicalNotesStore {
   action requestStop = s' = {...s, stopRequested: true}
   action stopped = all {
     s.stopRequested, s.stage == "idle", not(s.delayHeld),
-    s' = {...s, phase: "stopped", cache: empty}
+    s' = {...s, phase: "stopped", cache: empty, fenced: false}
   }
   action restart = all {
     s.phase == "stopped", s' = {...initial, cache: {...s.durable, trashPresent: true}, durable: s.durable}
@@ -132,9 +137,10 @@ module CanonicalNotesStore {
   }
   val CacheNotes = members(s.cache.notes)
   val DurableNotes = members(s.durable.notes)
-  val VisibleNotes = visible(s.cache)
+  // A fenced store keeps its old cache but offers no snapshot of it.
+  val VisibleNotes = if (s.fenced) Set() else visible(s.cache)
   val ReplyNotes = if (s.reply.raw) members(s.reply.document.notes) else visible(s.reply.document)
-  val CacheRevision = if (s.phase == "ready") s.cache.revision else -1
+  val CacheRevision = if (s.phase == "ready" or s.fenced) s.cache.revision else -1
   val DurableRevision = s.durable.revision
   val ReplyRevision = s.reply.document.revision
   val ReplyId = s.reply.id
@@ -152,13 +158,15 @@ module CanonicalNotesStore {
     members(s.cache.notes).contains(id) and members(s.cache.notes).contains(other) and
     s.cache.body.get(id) == s.cache.body.get(other) and s.cache.order.get(id) > s.cache.order.get(other)
       implies not(VisibleNotes.contains(other))))
+  val FencedUntilReopened = s.fenced implies s.phase == "error" and s.stage == "idle"
   val safety = TypeOK and RawMembershipDisjoint and VisibleContentUnique and ReplyIdentityPresent and ConfirmedRevisionBounded and NewerOrderWins
+    and FencedUntilReopened
   action commit = write.then(confirmed).then(delivered)
   action step = any {
     create(1, 1, 0, true), create(2, 2, 0, true), create(2, 1, 0, true), create(1, 1, 0, false), create(2, 2, 0, false),
     edit(1, 1, 0, s.cache.revision), edit(1, 2, 0, s.cache.revision), edit(2, 1, 2, s.cache.revision),
     remove(1), remove(2), restore(1, s.cache.revision), restore(2, s.cache.revision), clear(s.cache.revision),
-    rejectRevision(-1), rejectProjection, write, conflict, refused, lostAcknowledgement, confirmed, delivered,
+    rejectRevision(-1), rejectProjection, write, conflict, refused, lostAcknowledgement, refusedWhileFenced, confirmed, delivered,
     holdReply, deliverHeldReply, rivalCreate(1, 1, 1), rivalCreate(2, 2, 2), requestStop, stopped, restart, failedRestart, s' = s
   }
   run canonicalReplayTest = init.then(create(1, 1, 0, true)).then(commit).then(create(2, 2, 0, true)).then(commit)
@@ -173,8 +181,11 @@ module CanonicalNotesStore {
   run rawRestoreMembershipTest = init.then(create(1, 1, 0, true)).then(commit).then(create(2, 1, 0, true)).then(commit)
     .then(remove(1)).then(commit).then(restore(2, 3)).then(commit).then(restore(1, 4)).then(commit)
     .expect(ReplyNotes == ids and VisibleNotes == Set(2) and s.reply.id == 1 and safety)
-  run lostAckPreservesStaleCacheTest = init.then(create(1, 1, 0, true)).then(write).then(lostAcknowledgement)
-    .expect(CacheRevision == 0 and DurableRevision == 1 and s.reply.outcome == "error" and safety)
+  run lostAckFencesStaleCacheTest = init.then(create(1, 1, 0, true)).then(write).then(lostAcknowledgement)
+    .expect(CacheRevision == 0 and DurableRevision == 1 and s.reply.outcome == "error" and s.phase == "error" and safety)
+    .then(refusedWhileFenced).expect(s.reply.outcome == "error" and DurableRevision == 1 and safety)
+  run fencedStoreCannotAdmitTest = init.then(create(1, 1, 0, true)).then(write).then(lostAcknowledgement)
+    .then(create(2, 2, 0, true)).fail()
   run staleWriterRejectedTest = init.then(rivalCreate(1, 1, 0)).then(create(2, 2, 0, true)).then(conflict)
     .expect(CacheRevision == 0 and DurableNotes == Set(1) and safety)
   run restartLoadsUnknownCommitTest = init.then(create(1, 1, 0, true)).then(write).then(lostAcknowledgement)

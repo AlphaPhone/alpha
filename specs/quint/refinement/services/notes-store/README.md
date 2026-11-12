@@ -26,8 +26,10 @@ implementing cryptography.
   order returns the exact restored record and raw membership. Normal reads
   select one visible representative. Restore preserves original timestamps
   and ordering metadata.
-- An encrypted write may persist before readback fails. Its cache remains old,
-  a later stale write conflicts, and reopening loads the committed document.
+- An encrypted write may persist before readback fails. Its cache remains old
+  and the store is fenced: every later read or write fails with the same
+  store error until the last handle closes, and reopening loads the committed
+  document.
   An explicit persistedSnapshot read does not update the cache.
 - A delayed broadcast retains its own exact committed response even after a
   second transaction commits. A projection error persists nothing.

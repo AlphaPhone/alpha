@@ -1725,7 +1725,8 @@
         "legacyTieUsesRawOrderTest",
         "mixedLegacyEditTest",
         "rawRestoreMembershipTest",
-        "lostAckPreservesStaleCacheTest",
+        "lostAckFencesStaleCacheTest",
+        "fencedStoreCannotAdmitTest",
         "staleWriterRejectedTest",
         "restartLoadsUnknownCommitTest",
         "staleRevisionRejectedTest",
@@ -1741,7 +1742,8 @@
         "VisibleContentUnique",
         "ReplyIdentityPresent",
         "ConfirmedRevisionBounded",
-        "NewerOrderWins"
+        "NewerOrderWins",
+        "FencedUntilReopened"
       ],
       "abstractions": [
         "Two plain physical notes and two content classes; collection revisions zero through eight; wall-clock values zero through two.",

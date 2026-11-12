@@ -36,7 +36,7 @@ export async function runCanonicalNotesRefinement(extraSources = []) {
       const state = {'s.phase': service.status().phase,
         CacheRevision: service.status().revision ?? -1, DurableRevision: durable.revision,
         CacheNotes: members(cache?.notes ?? []), DurableNotes: members(durable.notes),
-        VisibleNotes: members(cache ? service.snapshot().notes : []),
+        VisibleNotes: members(cache && service.status().phase !== 'error' ? service.snapshot().notes : []),
         's.cache.trashPresent': !!cache && Object.hasOwn(cache, 'trash'), 's.durable.trashPresent': Object.hasOwn(durable, 'trash'),
         's.cache.notes': (cache?.notes ?? []).map(identity), 's.cache.trash': members((cache?.trash ?? []).map(entry => entry.note)),
         's.durable.notes': durable.notes.map(identity), 's.durable.trash': members((durable.trash ?? []).map(entry => entry.note))};
@@ -97,8 +97,9 @@ export async function runCanonicalNotesRefinement(extraSources = []) {
   await scenario('failed CAS readback preserves unknown commit until restart', async ({f, record, invoke}) => {
     f.backend.nextRead = 'fail'; const result = await invoke('create-note', {content: 'Alpha', forceNew: true}); assert.ok(result.error);
     await record('write persisted but readback failed', [action('create', 1, 1, 0, true), action('write'), action('lostAcknowledgement')]);
-    const conflict = await invoke('create-note', {content: 'Beta', forceNew: true}); assert.equal(conflict.error.code, 'NOTES_EDIT_CONFLICT');
-    await record('stale cache cannot overwrite unknown commit', [action('create', 2, 2, 0, true), action('conflict')]);
+    assert.equal(result.error.code, 'NOTES_STORE_WRITE_FAILED'); assert.equal(f.selected.status().error.code, 'NOTES_STORE_WRITE_FAILED');
+    const fenced = await invoke('create-note', {content: 'Beta', forceNew: true}); assert.equal(fenced.error.code, 'NOTES_STORE_WRITE_FAILED');
+    await record('fenced store refuses the next write', action('refusedWhileFenced'));
     await f.selected.stop(); await record('last store releases cache', [action('requestStop'), action('stopped')]);
     await f.open(); await record('restart loads durable unknown commit', action('restart'), false);
   });
