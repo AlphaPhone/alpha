@@ -30,10 +30,12 @@ public final class AlphaConnectionPlugin extends Plugin {
  static final String DELEGATION_SCHEME="alphaphone",DELEGATION_HOST="cloud-delegation";
  private volatile Uri delegationCallback;
  private volatile String workspaceCallback;
+ /** The checkout return waiting for the renderer (BillingReturn), handed over once. */
+ private volatile String billingReturn;
  private final Object foregroundLock=new Object();
  private boolean foreground;
- @Override public void load() { super.load(); synchronized(foregroundLock){foreground=getActivity().getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)||getActivity().hasWindowFocus();}captureDelegationCallback(getActivity().getIntent());captureWorkspaceCallback(getActivity().getIntent()); }
- @Override protected void handleOnNewIntent(Intent intent) { super.handleOnNewIntent(intent); captureDelegationCallback(intent);captureWorkspaceCallback(intent); }
+ @Override public void load() { super.load(); synchronized(foregroundLock){foreground=getActivity().getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)||getActivity().hasWindowFocus();}captureDelegationCallback(getActivity().getIntent());captureWorkspaceCallback(getActivity().getIntent());captureBillingReturn(getActivity().getIntent()); }
+ @Override protected void handleOnNewIntent(Intent intent) { super.handleOnNewIntent(intent); captureDelegationCallback(intent);captureWorkspaceCallback(intent);captureBillingReturn(intent); }
  private void captureDelegationCallback(Intent intent) {
   Uri uri = intent == null ? null : intent.getData();
   if(uri==null || !DELEGATION_SCHEME.equals(uri.getScheme()) || !DELEGATION_HOST.equals(uri.getHost()))return;
@@ -107,6 +109,21 @@ public final class AlphaConnectionPlugin extends Plugin {
    if(destroyed||workspaceAppLinkAssociation()==null||!workspaceFlow().captureAllowed(url,System.currentTimeMillis()))return;
    workspaceCallback=url;notifyListeners("googleWorkspaceReturn",new JSObject(),true);
   }catch(Exception ignored){/* Invalid or retired returns are not authority. */}},()->{});
+ }
+ /** The subscription checkout's return on the verified App Link host: kept until the renderer takes it. It carries no
+  * authority; the renderer confirms the session with Cloud and only for a checkout it recorded. */
+ private void captureBillingReturn(Intent intent){
+  String url=intent==null||intent.getData()==null?null:intent.getData().toString();
+  if(BillingReturn.parse(BuildConfig.ELIZAOS_APP_LINK_HOST,url)==null)return;
+  billingReturn=url;notifyListeners("billingReturn",new JSObject(),true);
+ }
+ @PluginMethod public void consumeBillingReturn(PluginCall call){
+  final String url=billingReturn;
+  BillingReturn.Result result=BillingReturn.parse(BuildConfig.ELIZAOS_APP_LINK_HOST,url);
+  if(result==null){call.resolve(new JSObject().put("result","none"));return;}
+  if(java.util.Objects.equals(billingReturn,url))billingReturn=null;
+  getActivity().runOnUiThread(()->{Intent current=getActivity().getIntent();if(current!=null&&current.getData()!=null&&url.equals(current.getData().toString()))current.setData(null);});
+  JSObject out=new JSObject().put("result",result.result);if(result.sessionId!=null)out.put("sessionId",result.sessionId);call.resolve(out);
  }
  @PluginMethod public void consumeGoogleWorkspaceReturn(PluginCall call){
   submitStorage(call,()->{try{

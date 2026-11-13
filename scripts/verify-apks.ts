@@ -130,7 +130,8 @@ if(cloudEvidenceArgs.length){
 
 const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
 const callbackHost = new URL(CLOUD_DEPLOYMENT.production.web).hostname;
-// The only web VIEW filters any APK may carry: the main manifest's two returns on the production web
+// The only web VIEW filters any APK may carry: the main manifest's three returns (sign-in, Google
+// Workspace consent, subscription checkout) on the production web
 // host (android/app/product.gradle supplies appLinkHost), plus the staging sign-in return in the
 // test-mocks overlay, which is attached to debug variants only.
 // Add a new app link here deliberately.
@@ -138,6 +139,7 @@ const mainActivity = `${identity.appId}.MainActivity`;
 const webViewFiltersAllowed = (mode: ApkMode) => [
   `${mainActivity} https://${callbackHost}/alphaphone/auth/callback`,
   `${mainActivity} https://${callbackHost}/alphaphone/gmail/callback`,
+  `${mainActivity} https://${callbackHost}/alphaphone/billing/return`,
   ...(testMocks && mode === "debug" ? [`${mainActivity} https://${new URL(CLOUD_DEPLOYMENT.staging.web).hostname}/alphaphone/auth/callback`] : []),
 ];
 const buildRecordFile = path.join(directory, "build-config.json");

@@ -32,8 +32,10 @@ export const cloudSignIn:CloudSignInPort|undefined=nativeSignInHeader?new Proxy(
 export interface ConnectionPort {
   prepareGoogleWorkspaceReturn?(binding:GoogleWorkspaceBinding):ReturnType<GoogleWorkspaceReturnPort['prepare']>;
   consumeGoogleWorkspaceReturn?(binding:GoogleWorkspaceBinding):ReturnType<GoogleWorkspaceReturnPort['consume']>;
+  /** The payment page's return on the verified app link, once; `none` when no return is waiting. */
+  consumeBillingReturn?():Promise<{result:'none'}|{result:'cancel'}|{result:'success';sessionId:string}>;
   cancelGoogleWorkspaceReturn?(input:{state:string}):Promise<void>;
-  addListener?(name:'googleWorkspaceReturn',listener:()=>void):Promise<{remove():void|Promise<void>}>;
+  addListener?(name:'googleWorkspaceReturn'|'billingReturn',listener:()=>void):Promise<{remove():void|Promise<void>}>;
 
   /** `retryAfter` is the Retry-After header of an error response (seconds or an HTTP date), when present. */
   request(input: { requestId: string; url: string; method: string; headers: Record<string,string>; body?: string; credentialReference?:string; expiresAt?: number }): Promise<{status:number;data:unknown;retryAfter?:string}>;
@@ -220,6 +222,20 @@ export const googleWorkspaceReturnPort:GoogleWorkspaceReturnPort|undefined=Capac
  async cancel(state){await native.cancelGoogleWorkspaceReturn?.({state});},
  async subscribe(listener){return native.addListener?native.addListener('googleWorkspaceReturn',listener):{remove(){}};},
 }:undefined;
+
+/**
+ * The subscription checkout's return to the app (the verified `/alphaphone/billing/return` link).
+ * Native admits only that exact link and hands each return over once. Absent on the web build and
+ * on a native host without the method: the owner then confirms from the plan step itself.
+ */
+export const billingReturnPort:{consume():Promise<{result:'none'}|{result:'cancel'}|{result:'success';sessionId:string}>;subscribe(listener:()=>void):Promise<{remove():unknown}>}|undefined=
+ Capacitor.getPlatform()==='android'&&nativeMethodsAvailable((Capacitor as typeof Capacitor&{PluginHeaders?:unknown}).PluginHeaders,['consumeBillingReturn'])?{
+ async consume(){return native.consumeBillingReturn?native.consumeBillingReturn():{result:'none'};},
+ async subscribe(listener){return native.addListener?native.addListener('billingReturn',listener):{remove(){}};},
+}:undefined;
+function nativeMethodsAvailable(headers:unknown,names:string[]):boolean {
+ return Array.isArray(headers)&&headers.some(header=>header&&typeof header==='object'&&header.name==='AlphaConnection'&&Array.isArray(header.methods)&&names.every(name=>header.methods.some((method:unknown)=>!!method&&typeof method==='object'&&(method as {name?:unknown}).name===name)));
+}
 
 export const secureConnectionStore = {
   async readRaw(slot:string):Promise<string|null> { return (await native.secureRead({slot})).value; },

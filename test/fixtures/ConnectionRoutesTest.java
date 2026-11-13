@@ -119,6 +119,21 @@ public final class ConnectionRoutesTest {
   check(!ConnectionRoutes.managedService("/api/v1/subscription/redeem","code=x","POST",true,false),"redemption never carries a query");
   check(!ConnectionRoutes.managedService("/api/v1/subscription/redeem",null,"GET",false,false),"redemption is POST only");
   check(!ConnectionRoutes.managedService("/api/v1/subscription/redeem/",null,"POST",true,false)&&!ConnectionRoutes.managedService("/api/v1/subscription/redeem/x",null,"POST",true,false),"neighbouring redemption paths refused");
+  // In-app subscription checkout: the catalogue is a bare read; checkout and confirm are body-only POSTs; the
+  // payment page opens only on the provider's checkout host.
+  check(ConnectionRoutes.managedService("/api/v1/subscriptions/plans",null,"GET",false,false),"plan catalogue read allowed");
+  check(!ConnectionRoutes.managedService("/api/v1/subscriptions/plans","x=1","GET",false,false)&&!ConnectionRoutes.managedService("/api/v1/subscriptions/plans",null,"POST",true,false),"catalogue is a bare GET");
+  for(String path:new String[]{"/api/v1/subscriptions/checkout","/api/v1/subscriptions/checkout/confirm"}){
+   check(ConnectionRoutes.managedService(path,null,"POST",true,false),"checkout POST allowed "+path);
+   check(!ConnectionRoutes.managedService(path,null,"POST",false,false),"checkout needs a body "+path);
+   check(!ConnectionRoutes.managedService(path,"session_id=x","POST",true,false),"checkout never carries a query "+path);
+   check(!ConnectionRoutes.managedService(path,null,"GET",false,false),"checkout is POST only "+path);
+  }
+  for(String path:new String[]{"/api/v1/subscriptions/portal","/api/v1/subscriptions/cancel","/api/v1/subscriptions/upgrade/review","/api/v1/subscriptions/checkout/payer","/api/v1/subscriptions/checkout/","/api/v1/app-auth/mobile/renew"})
+   check(!ConnectionRoutes.managedService(path,null,"POST",true,false),"unreviewed billing or sign-in route refused "+path);
+  check(ConnectionRoutes.externalHost("https","checkout.stripe.com",-1,false),"the checkout payment page opens");
+  for(String host:new String[]{"billing.stripe.com","stripe.com","checkout.stripe.com.evil.example","checkout.stripe.com.","js.stripe.com"})check(!ConnectionRoutes.externalHost("https",host,-1,true),"other payment hosts refused "+host);
+  check(!ConnectionRoutes.externalHost("http","checkout.stripe.com",-1,false)&&!ConnectionRoutes.externalHost("https","checkout.stripe.com",8443,false),"the payment page is HTTPS on the default port");
   check(ConnectionRoutes.managedService("/api/v1/billing/limits",null,"GET",false,false),"billing snapshot read allowed");
   check(!ConnectionRoutes.managedService("/api/v1/billing/limits",null,"POST",true,false),"billing snapshot write refused");
   check(!ConnectionRoutes.managedService("/api/v1/credits/balance",null,"GET",false,false),"credit balance retired");

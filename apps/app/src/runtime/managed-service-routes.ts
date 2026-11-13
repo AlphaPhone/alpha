@@ -23,6 +23,10 @@ export function managedServiceRequest(url:string,method:string,hasBody=false):bo
  if(method==='POST'&&MAPS_POST.test(path))return !parsed.search&&hasBody;
  if(path==='/api/v1/maps/capabilities')return method==='GET'&&!parsed.search&&!hasBody;
  if(mapsTilePath(path))return method==='GET'&&!parsed.search&&!hasBody;
+ // Paid plans with the phone's own sign-in key (CloudConnectionPolicy): the catalogue is a bare read;
+ // opening a checkout and confirming its return each carry one JSON body and no query.
+ if(path==='/api/v1/subscriptions/plans')return method==='GET'&&!parsed.search&&!hasBody;
+ if(path==='/api/v1/subscriptions/checkout'||path==='/api/v1/subscriptions/checkout/confirm')return method==='POST'&&!parsed.search&&hasBody;
  if(method==='POST')return !parsed.search&&(path==='/api/v1/subscription/redeem'&&hasBody||path==='/api/v1/eliza/google/connect/initiate'||path==='/api/v1/eliza/google/disconnect'||path==='/api/v1/eliza/google/gmail/inbox-v1/operations'||/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations\/[A-Za-z0-9_-]{1,160}\/dispatch$/.test(path));
  if(method!=='GET'||hasBody)return false;
  return ['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/eliza/google/accounts','/api/v1/eliza/google/status','/api/v1/eliza/google/calendar/calendars','/api/v1/eliza/google/calendar/feed','/api/v1/eliza/google/gmail/search','/api/v1/eliza/google/gmail/read'].includes(path)||/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/(capabilities|thread|attachment|drafts|draft)$/.test(path)||/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations\/[A-Za-z0-9_-]{1,160}$/.test(path);

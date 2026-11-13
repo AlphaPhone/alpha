@@ -4,8 +4,8 @@ import ai.eliza.plugins.agent.connection.CloudConnectionPolicy;
 
 /**
  * Alpha's renderer transport route policy: the shared plugin-native-agent CloudConnectionPolicy with Alpha's
- * Eliza Cloud deployment hosts (CloudDeployment, generated from scripts/cloud-deployment-policy.ts) and Google consent as
- * the one external provider. A flag-off build contacts only https://api.eliza.app; a dedicated Cloud agent runtime
+ * Eliza Cloud deployment hosts (CloudDeployment, generated from scripts/cloud-deployment-policy.ts) and two external
+ * providers: Google consent and the hosted payment page a subscription checkout answers (checkout.stripe.com). A flag-off build contacts only https://api.eliza.app; a dedicated Cloud agent runtime
  * and a paired remote agent are refused from the URL alone (P-22/P-31, #406). Native Eliza Cloud sign-in sends its
  * fixed routes only through the shared sign-in client (ai.eliza.auth.cloud.CloudSignInRoutes, registered by
  * AlphaCloudSignInPlugin); this transport admits none of them. The Cloud sign-in hand-off is a test-mocks diagnostic route only.
@@ -14,7 +14,7 @@ final class ConnectionRoutes {
  private ConnectionRoutes() {}
  static final CloudConnectionPolicy POLICY=new CloudConnectionPolicy(new CloudConnectionPolicy.Hosts(
   CloudDeployment.PRODUCTION_API_HOST,CloudDeployment.STAGING_API_HOST,CloudDeployment.PRODUCTION_WEB_HOST,CloudDeployment.STAGING_WEB_HOST,
-  CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,java.util.Collections.singleton("accounts.google.com")));
+  CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,java.util.Collections.unmodifiableSet(new java.util.HashSet<>(java.util.Arrays.asList("accounts.google.com",CloudConnectionPolicy.SUBSCRIPTION_CHECKOUT_HOST)))));
  static boolean retiredPairing(String decodedPath,boolean testMocks){return POLICY.retiredPairing(decodedPath,testMocks);}
  static boolean admittedOrigin(String scheme,String host,int port,boolean testMocks){return POLICY.admittedOrigin(scheme,host,port,testMocks);}
  /**

@@ -14,6 +14,14 @@ test('managed service admission preserves owned service APIs and refuses agent h
  // Subscription code redemption (#410): exactly one POST route with a JSON body; nothing else under it.
  assert.equal(allowed('https://api.eliza.app/api/v1/subscription/redeem','POST',true),true);
  for(const [url,method,body] of [['https://api.eliza.app/api/v1/subscription/redeem','POST',false],['https://api.eliza.app/api/v1/subscription/redeem','GET',false],['https://api.eliza.app/api/v1/subscription/redeem?code=x','POST',true],['https://api.eliza.app/api/v1/subscription/redeem/','POST',true],['https://api.eliza.app/api/v1/subscription/redeem','DELETE',false],['https://api-staging.eliza.app/api/v1/subscription/redeem','POST',true],['https://api.eliza.app/api/v1/billing/limits','POST',true],['https://api.eliza.app/api/v1/billing/limits?x=1','POST',true]])assert.equal(allowed(url,method,body),false,`${method} ${url}`);
+ // In-app subscription checkout: a bare catalogue read and two body-only POSTs; no portal, cancel or plan change.
+ assert.equal(allowed('https://api.eliza.app/api/v1/subscriptions/plans','GET'),true);
+ for(const path of ['/api/v1/subscriptions/checkout','/api/v1/subscriptions/checkout/confirm']){
+  assert.equal(allowed('https://api.eliza.app'+path,'POST',true),true,path);
+  for(const [suffix,method,body] of [['','POST',false],['','GET',false],['?session_id=x','POST',true],['/','POST',true]])assert.equal(allowed('https://api.eliza.app'+path+suffix,method,body),false,path+suffix+' '+method);
+ }
+ for(const [path,method,body] of [['/api/v1/subscriptions/plans','POST',true],['/api/v1/subscriptions/plans?x=1','GET',false],['/api/v1/subscriptions/portal','POST',true],['/api/v1/subscriptions/cancel','POST',true],['/api/v1/subscriptions/checkout/payer','GET',false],['/api/v1/app-auth/mobile/renew','POST',true]])assert.equal(allowed('https://api.eliza.app'+path,method,body),false,path);
+ assert.equal(allowed('https://api-staging.eliza.app/api/v1/subscriptions/checkout','POST',true),false);
  // The credit balance check is retired with the subscription plan gate.
  assert.equal(allowed('https://api.eliza.app/api/v1/credits/balance','GET'),false);
  // The Cloud sign-in hand-off is not a product route (product sign-in is the native in-app host).

@@ -8,6 +8,8 @@ export const FUNDING_NEEDED='Plan needed';
 /** Cloud declined a turn for this account's billing: the chat's one answer, beside this sheet. */
 export function fundingRefusedReply(serviceName:string):string {void serviceName;return 'Billing declined';}
 import {alphaSubscriptionCopy,type ServiceLimit,type SubscriptionView} from './subscription-entitlement';
+import {chooserShown,type CheckoutView} from './subscription-checkout';
+import {SubscriptionChooser} from './subscription-chooser-ui';
 import {useCloudSubscriptionSummary} from '../../../../.eliza/client-features/packages/ui/src/components/settings/cloud-subscription-summary.tsx';
 function endLabel(endsAt:number):string {
  const date=new Date(endsAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
@@ -25,7 +27,7 @@ function endLabel(endsAt:number):string {
  * `refused`: Cloud declined this account's last AI request for billing, so the sheet says so.
  *
  */
-export function CloudMembershipControls({balance,busy,error,connectionError,notice,email,plan,endsAt,lastLimit,refused=false,serviceName='Cloud',codeEntry=false,credits,onRedeem,onManagePlan,onRefresh}:{balance:MembershipBalance;credits?:{usd:string;observedAt:number}|null;busy:boolean;error?:string;connectionError?:string;notice?:string;email?:string;plan?:SubscriptionView|null;endsAt?:number|null;lastLimit?:(ServiceLimit&{observedAt:number})|null;refused?:boolean;serviceName?:string;codeEntry?:boolean;onRedeem:(code:string)=>Promise<boolean>;onManagePlan:()=>void;onRefresh:()=>void}){
+export function CloudMembershipControls({balance,busy,error,connectionError,notice,email,plan,endsAt,lastLimit,refused=false,serviceName='Cloud',codeEntry=false,credits,checkout,onRedeem,onManagePlan,onChoosePlan,onLoadPlans,onSubscribe,onCheckPayment,onBackToPlans,onRefresh}:{checkout?:CheckoutView|null;onChoosePlan?:()=>void;onLoadPlans?:()=>void;onSubscribe?:(planKey:string)=>void;onCheckPayment?:()=>void;onBackToPlans?:()=>void;balance:MembershipBalance;credits?:{usd:string;observedAt:number}|null;busy:boolean;error?:string;connectionError?:string;notice?:string;email?:string;plan?:SubscriptionView|null;endsAt?:number|null;lastLimit?:(ServiceLimit&{observedAt:number})|null;refused?:boolean;serviceName?:string;codeEntry?:boolean;onRedeem:(code:string)=>Promise<boolean>;onManagePlan:()=>void;onRefresh:()=>void}){
  const code=useRef<HTMLInputElement>(null),pending=useRef(false),codeEntryId=useId(),errorId=useId();
  // A retained redemption error must keep its associated input exposed.
  const [codeVisible,setCodeVisible]=useState(Boolean(error)),[submitting,setSubmitting]=useState(false),[submissionError,setSubmissionError]=useState(''),[codeValue,setCodeValue]=useState('');
@@ -35,6 +37,10 @@ export function CloudMembershipControls({balance,busy,error,connectionError,noti
  const summary=useCloudSubscriptionSummary(plan,{planEndsAt:endsAt??null,lastLimit:lastLimit??null,copy:alphaSubscriptionCopy(serviceName)});
  const noPlan=plan?.kind==='inactive'||plan?.kind==='credits';
  const checking=plan?.kind==='checking'||(!plan&&balance==='checking');
+ // First-run plan step: an account without a plan chooses one of Cloud's published plans here. The
+ // catalogue is read when this sheet shows such an account; without one the hosted plan page stays.
+ const chooser=noPlan&&onSubscribe&&chooserShown(checkout)?checkout:null;
+ useEffect(()=>{if(noPlan)onLoadPlans?.();},[noPlan,onLoadPlans]);
  const planName=active?plan.planName:plan?.kind==='expired'?plan.planName:noPlan?<StatusDot tone="off">No plan</StatusDot>:checking?<Busy label="Checking"/>:<StatusDot tone="warn">Unconfirmed</StatusDot>;
  // Used share of a published allowance, for the usage bar; never estimated.
  const allowance=active?plan.allowance:null;
@@ -64,11 +70,11 @@ export function CloudMembershipControls({balance,busy,error,connectionError,noti
     {summary.limit&&<div className="alpha-membership-limit-fact"><dt>Limit</dt><dd role="status">{summary.limit}</dd></div>}
    </dl>
    <p className="alpha-membership-support" role="status">{refused?<StatusDot tone="err">Billing declined</StatusDot>:checking?'':noPlan?'':!active?'Couldn’t refresh':plan.status==='past_due'?'Update payment':plan.refreshFailed?'Couldn’t refresh':''}</p>
-   <div className="alpha-membership-main-actions"><button type="button" className="alpha-membership-primary" aria-label={noPlan?'Choose a plan':'Manage plan'} disabled={disabled} onClick={onManagePlan}><span className="alpha-account-button-icon alpha-account-plan-icon" aria-hidden="true"/>{noPlan?'Choose plan':'Plan'}</button><div className="alpha-membership-secondary-actions"><button type="button" className="alpha-membership-secondary" disabled={disabled} onClick={onManagePlan}><span className="alpha-account-button-icon alpha-account-balance-icon" aria-hidden="true"/>Add funds</button>{!showCode&&<button type="button" className="alpha-membership-secondary" aria-expanded={false} aria-controls={codeEntryId} aria-label="Use code" disabled={disabled} onClick={()=>setCodeVisible(true)}><span className="alpha-account-button-icon alpha-account-code-icon" aria-hidden="true"/>Code</button>}</div></div>
+   <div className="alpha-membership-main-actions">{chooser?<SubscriptionChooser view={chooser} disabled={disabled} busy={busy} onSubscribe={onSubscribe!} onCheckPayment={()=>onCheckPayment?.()} onBackToPlans={()=>onBackToPlans?.()}/>:<button type="button" className="alpha-membership-primary" aria-label={noPlan?'Choose a plan':'Manage plan'} disabled={disabled} onClick={noPlan&&onChoosePlan?onChoosePlan:onManagePlan}><span className="alpha-account-button-icon alpha-account-plan-icon" aria-hidden="true"/>{noPlan?'Choose plan':'Plan'}</button>}<div className="alpha-membership-secondary-actions"><button type="button" className="alpha-membership-secondary" disabled={disabled} onClick={onManagePlan}><span className="alpha-account-button-icon alpha-account-balance-icon" aria-hidden="true"/>Add funds</button>{!showCode&&<button type="button" className="alpha-membership-secondary" aria-expanded={false} aria-controls={codeEntryId} aria-label={chooser?'I have a code':'Use code'} disabled={disabled} onClick={()=>setCodeVisible(true)}><span className="alpha-account-button-icon alpha-account-code-icon" aria-hidden="true"/>{chooser?'I have a code':'Code'}</button>}</div></div>
    {showCode&&<div id={codeEntryId} className="alpha-membership-code-entry"><form aria-label="Redeem a membership code" onSubmit={event=>void redeem(event)}>
      <label><span className="alpha-sr">Membership code</span><input ref={code} name="membership-code" value={codeValue} onChange={event=>setCodeValue(event.target.value)} placeholder="Enter code" autoComplete="one-time-code" autoCapitalize="characters" autoCorrect="off" spellCheck={false} data-autofill-ignore="true" maxLength={64} disabled={disabled} required aria-invalid={!!error||!!submissionError||undefined} aria-describedby={error||submissionError?errorId:undefined}/></label>
      <button type="submit" disabled={disabled||!codeValue.trim()}>{submitting?<Busy label="Redeeming"/>:'Redeem'}</button>
    </form></div>}
-   {[...new Set([error||submissionError,connectionError].filter((value):value is string=>!!value))].map((value,index)=><p key={value} id={index===0?errorId:undefined} role="alert">{value}</p>)}{notice&&<p role="status">{notice}</p>}
+   {[...new Set([error||submissionError,connectionError].filter((value):value is string=>!!value))].map((value,index)=><p key={value} id={index===0?errorId:undefined} role="alert">{value}</p>)}{(notice||checkout?.notice)&&<p role="status">{notice||checkout?.notice}</p>}
  </section>;
 }

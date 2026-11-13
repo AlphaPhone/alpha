@@ -13,6 +13,7 @@ import {mapsTilePath} from './managed-service-routes.ts';
 import { authenticated as signInAuthenticated, googleOutcome, type CloudSignInGoogleOutcome, CloudSignInError, emailStarted, verified as signInVerified, type CloudSignInAuthenticated, type CloudSignInEmailStarted, type CloudSignInMfaRequired, type CloudSignInPort } from './cloud-sign-in.ts';
 import type { EntitlementSource, FallbackPlan, OrganizationCreditBalance, RedeemResult } from './subscription-entitlement.ts';
 import { parseManagedGoogleCalendars, parseManagedGoogleCalendarFeed } from "../../../../.eliza/client-features/packages/app/src/runtime/managed-google-agent/managed-google-calendar-read.ts";
+import { checkoutFromResponse, checkoutPageUrl, confirmationFromResponse, plansFromResponse, SUBSCRIPTION_CHECKOUT_CONFIRM_PATH, SUBSCRIPTION_CHECKOUT_PATH, SUBSCRIPTION_PLANS_PATH, type CheckoutConfirmation, type CheckoutPlan, type CheckoutStart } from './subscription-checkout.ts';
 import { CloudAccountBillingClient, CloudBillingError, type CloudBillingRequest, type CloudBillingResponse } from '../../../../.eliza/client-features/packages/cloud/sdk/src/cloud-account-billing.ts';
 /** Narrow Alpha adapter for Eliza Cloud managed services: sign-in, identity, subscription plan and
  * the connected Google services. Sign-in is in-app (cloud-sign-in.ts) once the native host reports
@@ -266,6 +267,47 @@ export class CloudProtocol {
   async openSubscriptionManagement(signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
     await this.openExternal(planManagementUrl(this.environment), signal);
+    signal.throwIfAborted();
+  }
+  /** One checkout request, answered whatever its status; a refusal keeps its status, body and Retry-After. */
+  private async checkoutRequest(path: string, signal: AbortSignal, options: { body?: unknown; credentialId?: string; authenticated?: boolean }): Promise<{ status: number; data: unknown }> {
+    const answer = await this.requestData(path, signal, { anyStatus: true, ...options }) as { status: number; data: unknown; retryAfter?: string };
+    if (answer.status >= 200 && answer.status < 300) return answer;
+    throw new CloudProtocolError("http", answer.status, answer.data, answer.retryAfter);
+  }
+  /**
+   * Cloud's published plan catalogue: a public read, names and prices exactly as Cloud serves them.
+   * `null` when the deployed Cloud has no catalogue route (404/405/501); the hosted plan page is
+   * then the way to choose a plan.
+   */
+  async subscriptionPlans(signal: AbortSignal): Promise<CheckoutPlan[] | null> {
+    const answer = await this.requestData(SUBSCRIPTION_PLANS_PATH, signal, { anyStatus: true }) as { status: number; data: unknown; retryAfter?: string };
+    if (answer.status === 404 || answer.status === 405 || answer.status === 501) return null;
+    if (answer.status < 200 || answer.status >= 300) throw new CloudProtocolError("http", answer.status, answer.data, answer.retryAfter);
+    return plansFromResponse(answer.data);
+  }
+  /**
+   * Starts or continues the checkout of one plan for the signed-in account with this phone's own
+   * sign-in key (`presentation: "mobile"`). `idempotencyKey` names the purchase intent: the caller
+   * records it before this request and reuses it for every retry of the same plan. `credentialId`
+   * is the sign-in the owner was shown; a different saved sign-in is refused before anything is sent.
+   * Nothing is charged here: the answer is a hosted payment page, or the state of the intent.
+   */
+  async startSubscriptionCheckout(planKey: string, idempotencyKey: string, credentialId: string, signal: AbortSignal): Promise<CheckoutStart> {
+    const answer = await this.checkoutRequest(SUBSCRIPTION_CHECKOUT_PATH, signal, { authenticated: true, credentialId, body: { planKey, idempotencyKey, presentation: "mobile" } });
+    return checkoutFromResponse(answer.data);
+  }
+  /** Asks Cloud to settle a checkout session from the provider's payment record. Safe to repeat. */
+  async confirmSubscriptionCheckout(sessionId: string, credentialId: string, signal: AbortSignal): Promise<CheckoutConfirmation> {
+    const answer = await this.checkoutRequest(SUBSCRIPTION_CHECKOUT_CONFIRM_PATH, signal, { authenticated: true, credentialId, body: { sessionId } });
+    return confirmationFromResponse(answer.data);
+  }
+  /** Opens a checkout's hosted payment page in the system browser: the provider's checkout host only. */
+  async openSubscriptionCheckout(url: string, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const page = checkoutPageUrl(url);
+    if (!page) throw new CloudProtocolError("invalid-response");
+    await this.openExternal(page, signal);
     signal.throwIfAborted();
   }
   /** Whether this build can sign in here. The production web build has no sign-in host. */
