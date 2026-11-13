@@ -108,8 +108,9 @@ export interface ConnectionSnapshot {
   membershipBalance?: MembershipBalance;
   membershipCredits?: {usd:string;observedAt:number}|null;
   membershipPlan?: SubscriptionView|null;
-  /** First-run plan step: Cloud's plan catalogue and the checkout in progress, for the signed-in account. */
-  checkout?: CheckoutView|null;
+  /** First-run plan step: Cloud's plan catalogue and the checkout in progress, for the account `account` names
+   * (environment, user and organization); it is shown to that account only. */
+  checkout?: (CheckoutView&{account:string})|null;
   /** The latest Cloud limit a turn reported (rate limit, period allowance, no plan), with when it was seen; shown with its retry time in the account panel. */
   lastServiceLimit?: (ServiceLimit&{observedAt:number})|null;
   membershipDismissed?: boolean;
@@ -533,7 +534,7 @@ const residentRebindBlocked = () => !!operation || !!sending;
 /** Every Cloud detach ends background plan refresh, so no request goes out under a stale admission. */
 function stopEntitlementRefresh(){entitlementRefresher?.stop();entitlementRefresher=null;}
 // Entitlement keys are public and per issuer (refetched on an unknown kid): only a detach drops them.
-function detachService() { stopEntitlementRefresh();redeemedPlanEnd=null; clearEntitlementKeyCache(); retireReadReplies();for(const request of appRequests)request.abort(new DOMException('Cloud account changed','AbortError')); clearPersonalSetup(); membershipRead?.abort();membershipRead=null;checkoutPlansRead?.abort();checkoutPlansRead=null;checkoutPlansLoad=null;checkoutPlansFor=null;service = null; update({ checkout:null,cloudAccount: null,membershipBalance:undefined,membershipCredits:null,membershipPlan:null,lastServiceLimit:null,planEndsAt:null,membershipDismissed:false,fundingRefused:false }); }
+function detachService() { stopEntitlementRefresh();redeemedPlanEnd=null; clearEntitlementKeyCache(); retireReadReplies();for(const request of appRequests)request.abort(new DOMException('Cloud account changed','AbortError')); clearPersonalSetup(); membershipRead?.abort();membershipRead=null;service = null; update({ cloudAccount: null,membershipBalance:undefined,membershipCredits:null,membershipPlan:null,lastServiceLimit:null,planEndsAt:null,membershipDismissed:false,fundingRefused:false }); }
 async function verifyService(client: CloudProtocol, signal: AbortSignal, expected?:{credentialId:string;credentialReference?:string;userId?:string;organizationId?:string}) {
   const credential = await cloudCredentialStore.read(client.environment); signal.throwIfAborted();
   if(expected&&(credential?.credentialId!==expected.credentialId||(expected.credentialReference!==undefined&&credential?.credentialReference!==expected.credentialReference)))throw new CloudProtocolError('account-changed');
@@ -1435,7 +1436,10 @@ function subscriptionCheckout(account: NonNullable<typeof service>): Subscriptio
     uuid: () => crypto.randomUUID(), now: () => Date.now(),
   });
 }
-function setCheckout(patch: Partial<CheckoutView>) { update({ checkout: { ...(state.checkout ?? CHECKOUT_BLANK), ...patch } }); }
+function checkoutAccountKey(account: NonNullable<typeof service>): string { return `${account.identity.environment}:${account.identity.userId}:${account.identity.organizationId ?? ''}`; }
+/** The plan step's view for the signed-in account; another account's (a sign-out, then another sign-in) is never shown. */
+function checkoutView(): CheckoutView | null { return service && state.checkout?.account === checkoutAccountKey(service) ? state.checkout : null; }
+function setCheckout(patch: Partial<CheckoutView>) { if (service) update({ checkout: { ...(checkoutView() ?? CHECKOUT_BLANK), ...patch, account: checkoutAccountKey(service) } }); }
 /** Whether the signed-in account has no plan as far as this phone knows: the only state that offers the plan step. */
 function accountWithoutPlan(): boolean {
   const view = state.membershipPlan ?? state.residentSubscription;
@@ -1449,12 +1453,12 @@ function accountWithoutPlan(): boolean {
 function loadCheckoutPlans(force = false): Promise<CheckoutView['catalogue'] | null> {
   const account = service;
   if (!account) return Promise.resolve(null);
-  const key = `${account.identity.environment}:${account.identity.userId}:${account.identity.organizationId ?? ''}`;
+  const key = checkoutAccountKey(account), shown = checkoutView();
   if (checkoutPlansFor === key && checkoutPlansLoad) return checkoutPlansLoad;
-  if (!force && checkoutPlansFor === key && state.checkout && state.checkout.catalogue !== 'loading') return Promise.resolve(state.checkout.catalogue);
+  if (!force && shown && shown.catalogue !== 'loading') return Promise.resolve(shown.catalogue);
   checkoutPlansRead?.abort();
   const controller = new AbortController(); checkoutPlansRead = controller; checkoutPlansFor = key;
-  setCheckout({ catalogue: state.checkout?.plans.length ? state.checkout.catalogue : 'loading' });
+  setCheckout({ catalogue: shown?.plans.length ? shown.catalogue : 'loading' });
   const load = (async () => {
     let catalogue: CheckoutView['catalogue'] = 'unavailable', plans: CheckoutView['plans'] = [];
     try {
@@ -1462,9 +1466,11 @@ function loadCheckoutPlans(force = false): Promise<CheckoutView['catalogue'] | n
       catalogue = published === null || !published.length ? 'absent' : 'ready'; plans = published ?? [];
     } catch { /* 'unavailable': the hosted plan page stays the way to choose, and the next open reads again. */ }
     if (checkoutPlansRead === controller) { checkoutPlansRead = null; checkoutPlansLoad = null; }
-    if (controller.signal.aborted || service !== account) return null;
-    const pending = catalogue === 'ready' ? subscriptionCheckout(account).pending(checkoutOwner(account)) : null;
-    const resumed = !!pending?.sessionId && state.checkout?.step !== 'awaiting';
+    // The same account may have been verified again meanwhile (a restart of its connection): its answer still applies.
+    const current = service;
+    if (controller.signal.aborted || !current || checkoutAccountKey(current) !== key) return null;
+    const pending = catalogue === 'ready' ? subscriptionCheckout(current).pending(checkoutOwner(current)) : null;
+    const resumed = !!pending?.sessionId && checkoutView()?.step !== 'awaiting';
     setCheckout({ catalogue, plans, ...(resumed ? { step: 'awaiting' as const, planKey: pending!.planKey } : {}) });
     if (resumed) { billingReturnDue ??= 'resume'; settleBillingReturn(); }
     return catalogue;
@@ -1507,7 +1513,7 @@ function settleBillingReturn() {
   billingReturnDue = null;
   if (due !== 'resume' && due.result === 'cancel') {
     // Back from the payment page without paying: the chooser again, with the same purchase intent kept.
-    if (!state.checkout || state.checkout.step !== 'awaiting' && !subscriptionCheckout(service).pending(checkoutOwner(service))) return;
+    if (checkoutView()?.step !== 'awaiting' && !subscriptionCheckout(service).pending(checkoutOwner(service))) return;
     setCheckout({ step: 'choose', planKey: null, error: '', notice: 'Checkout cancelled' });
     update({ open: true, purpose: 'plan', membershipDismissed: false, message: '' });
     return;
@@ -3332,8 +3338,8 @@ export const connectionController = {
     if(operation)return;
     if(!service){update({open:true,error:'Sign in first'});return;}
     if(!accountWithoutPlan()){await connectionController.residentManagePlan();return;}
-    const catalogue=await loadCheckoutPlans(state.checkout?.catalogue==='unavailable');
-    if(catalogue!=='ready'&&state.checkout?.step!=='awaiting'){if(service&&!operation)await connectionController.residentManagePlan();return;}
+    const catalogue=await loadCheckoutPlans(checkoutView()?.catalogue==='unavailable');
+    if(catalogue!=='ready'&&checkoutView()?.step!=='awaiting'){if(service&&!operation)await connectionController.residentManagePlan();return;}
     update({open:true,automaticRestore:false,purpose:'plan',membershipDismissed:false,membershipCodeEntry:false,message:'',error:''});
   },
   /**
@@ -3356,7 +3362,7 @@ export const connectionController = {
       }
       if(service!==account)throw Error(ACCOUNT_CHANGED);
       if(outcome==='opened'){planManagementReturn=true;setCheckout({step:'awaiting',planKey,error:'',notice:''});update({message:''});return;}
-      const name=state.checkout?.plans.find(plan=>plan.key===planKey)?.name;
+      const name=checkoutView()?.plans.find(plan=>plan.key===planKey)?.name;
       await bindAfterCheckout(account,name?`${name} active`:'Plan active',signal);
     });
   },
@@ -3373,7 +3379,7 @@ export const connectionController = {
     // Nothing recorded for this account (already settled, cleared storage, or a link nobody asked
     // for): no confirmation is sent; the plan is simply read again.
     if(!subscriptionCheckout(account).pending(checkoutOwner(account))){
-      if(state.checkout?.step==='awaiting')setCheckout({step:'choose',planKey:null,error:''});
+      if(checkoutView()?.step==='awaiting')setCheckout({step:'choose',planKey:null,error:''});
       connectionController.recheckPlanNow();return;
     }
     setCheckout({error:'',notice:''});
@@ -3390,7 +3396,7 @@ export const connectionController = {
     });
   },
   /** Leaves the waiting state for the plan list. The purchase intent is kept: Subscribe continues it. */
-  backToPlans() { if(state.checkout)setCheckout({step:'choose',planKey:null,error:'',notice:''}); },
+  backToPlans() { if(checkoutView())setCheckout({step:'choose',planKey:null,error:'',notice:''}); },
   /** The payment page returned to the app (native handed over the verified link's result). */
   billingReturned(returned:BillingReturn) { billingReturnDue=returned;settleBillingReturn(); },
   /** A step ended or the account was verified: run a billing return that was waiting for it. */
@@ -4228,7 +4234,7 @@ export function ConnectionChooser() {
   // is no longer offered for retry.
   const savedSignInRejected=snapshot.errorKind==='sign-in-rejected';
   const savedSignInOffered=residentCloudFlow()&&!snapshot.cloudAccount&&snapshot.residentSavedCredential===true&&!savedSignInRejected;
-  const membershipControls=snapshot.cloudAccount&&<CloudMembershipControls key={`${snapshot.cloudAccount.environment}:${snapshot.cloudAccount.userId}:${snapshot.cloudAccount.organizationId}:${snapshot.cloudAccount.credentialId}`} email={snapshot.cloudAccount.email} credits={snapshot.membershipCredits} plan={snapshot.membershipPlan} endsAt={snapshot.planEndsAt} lastLimit={snapshot.fundingRefused&&snapshot.lastServiceLimit?.kind==='billing-refused'?null:snapshot.lastServiceLimit} refused={!!snapshot.fundingRefused} serviceName={serviceName} codeEntry={snapshot.membershipCodeEntry} balance={snapshot.membershipBalance??'unavailable'} busy={snapshot.busy} error={snapshot.redeemError} connectionError={snapshot.error} notice={snapshot.redeemNotice} checkout={snapshot.checkout} onChoosePlan={chooseCheckoutPlan} onLoadPlans={connectionController.loadPlans} onSubscribe={subscribeToPlan} onCheckPayment={checkCheckoutPayment} onBackToPlans={connectionController.backToPlans} onRedeem={code=>connectionController.residentRedeem(code)} onManagePlan={()=>void connectionController.residentManagePlan()} onRefresh={()=>void connectionController.refreshAccount()}/>;
+  const membershipControls=snapshot.cloudAccount&&<CloudMembershipControls key={`${snapshot.cloudAccount.environment}:${snapshot.cloudAccount.userId}:${snapshot.cloudAccount.organizationId}:${snapshot.cloudAccount.credentialId}`} email={snapshot.cloudAccount.email} credits={snapshot.membershipCredits} plan={snapshot.membershipPlan} endsAt={snapshot.planEndsAt} lastLimit={snapshot.fundingRefused&&snapshot.lastServiceLimit?.kind==='billing-refused'?null:snapshot.lastServiceLimit} refused={!!snapshot.fundingRefused} serviceName={serviceName} codeEntry={snapshot.membershipCodeEntry} balance={snapshot.membershipBalance??'unavailable'} busy={snapshot.busy} error={snapshot.redeemError} connectionError={snapshot.error} notice={snapshot.redeemNotice} checkout={snapshot.checkout?.account===`${snapshot.cloudAccount.environment}:${snapshot.cloudAccount.userId}:${snapshot.cloudAccount.organizationId??''}`?snapshot.checkout:null} onChoosePlan={chooseCheckoutPlan} onLoadPlans={connectionController.loadPlans} onSubscribe={subscribeToPlan} onCheckPayment={checkCheckoutPayment} onBackToPlans={connectionController.backToPlans} onRedeem={code=>connectionController.residentRedeem(code)} onManagePlan={()=>void connectionController.residentManagePlan()} onRefresh={()=>void connectionController.refreshAccount()}/>;
   const fundingRequired=!ownProviderSelected()&&!!snapshot.cloudAccount&&(snapshot.membershipBalance==='zero'||!!snapshot.fundingRefused);
   const accountSheet=fundingRequired||snapshot.purpose==='plan'||snapshot.purpose==='cloud-account';
   if(accountSheet)return <div className="alpha-connection-scrim" data-alpha-billing-overlay="true" data-alpha-membership-sheet="true"><div className="alpha-connection alpha-account-sheet" role="dialog" aria-modal="true" aria-labelledby="alpha-membership-title" tabIndex={-1} ref={panel} data-alpha-membership-panel="true">
