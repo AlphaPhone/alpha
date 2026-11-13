@@ -3356,7 +3356,8 @@ export const connectionController = {
       }
       if(service!==account)throw Error(ACCOUNT_CHANGED);
       if(outcome==='opened'){planManagementReturn=true;setCheckout({step:'awaiting',planKey,error:'',notice:''});update({message:''});return;}
-      await bindAfterCheckout(account,'Plan active',signal);
+      const name=state.checkout?.plans.find(plan=>plan.key===planKey)?.name;
+      await bindAfterCheckout(account,name?`${name} active`:'Plan active',signal);
     });
   },
   /**

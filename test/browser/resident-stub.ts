@@ -64,7 +64,21 @@ export interface ResidentStubOptions {
   /** Conversations carry a room, so Stop reaches upstream's turn abort route; the agent answers
    * that no turn was running (`aborted: false`), so the reply may still finish. */
   abortRoute?: boolean;
+  /**
+   * Cloud publishes a plan catalogue and answers mobile subscription checkout, and native offers
+   * the billing return (AlphaConnection.consumeBillingReturn). Absent: the catalogue route is not
+   * found, as on a Cloud without in-app checkout. Synthetic: no payment page is loaded, no payment
+   * is made and no provider is contacted.
+   */
+  checkout?: boolean;
 }
+/** A synthetic checkout session id in the provider's shape; it names nothing real. */
+export const STUB_CHECKOUT_SESSION = 'cs_test_SyntheticSession0001';
+export const STUB_CHECKOUT_PAGE = 'https://checkout.stripe.com/c/pay/' + STUB_CHECKOUT_SESSION;
+/** The owner comes back from the payment page through the app link: native hands the return over once. */
+export const billingReturn = (page: Page, returned: { result: 'success'; sessionId: string } | { result: 'cancel' }) => page.evaluate(returned => {
+  const w = window as any; w.residentStub.checkout.returned = returned; w.residentStub.persist(); w.flagOff.emit('AlphaConnection', 'billingReturn');
+}, returned);
 
 export async function residentStub(page: Page, options: ResidentStubOptions = {}) {
   await page.addInitScript(({ options }) => {
@@ -82,6 +96,11 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       order: [] as string[], cloud: [] as Array<{ method: string; path: string; auth?: string }>, bodies: [] as any[], opened: [] as string[],
       accounts: structuredClone(options.accounts ?? []) as any[], login: 'authenticated' as 'authenticated' | 'expired' | 'hold', nextToken: '', polls: 0,
       start: (options.rejectStart ? 'reject' : 'ok') as 'ok' | 'reject' | 'reject-once' | 'starting', held: null as null | { conversation: string; reply: string },
+      // In-app checkout (options.checkout). `start` / `confirm`: Cloud's answer to the next request, a
+      // named outcome or a refusal {status, code}. `unpaid` is Cloud's answer while the provider has no
+      // payment (503 service_unavailable). `returned` is the billing return native holds, handed over once.
+      checkout: { start: 'open' as 'open' | 'completed' | 'expired' | 'lost' | { status: number; code: string }, confirm: 'ok' as 'ok' | 'replayed' | 'unpaid' | { status: number; code: string },
+        started: [] as Array<{ planKey: string; idempotencyKey: string; presentation: string; auth?: string }>, confirmed: [] as string[], returned: null as null | { result: string; sessionId?: string } },
       ...kept,
       // Per page load: the stream mode and a held reply do not survive a restart.
       stream: null as any, release: null as null | (() => void), recoveries: [] as string[], capabilities: '',
@@ -94,10 +113,11 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       startHeld: !!options.holdFirstStart, startWaiting: false, releaseStart: () => { s.startHeld = false; },
       // Cloud's answer to the next code redemption: 'ok' grants Plus; 'invalid' is Cloud's one answer
       // for unknown, expired, disabled and used-up codes (400 invalid_subscription_code).
-      redeem: 'ok' as 'ok' | 'invalid', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
+      // 'used': this account already redeemed the code's grant (409 subscription_grant_already_redeemed).
+      redeem: 'ok' as 'ok' | 'invalid' | 'used', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
       maps: { requests: [] as Array<{ route: string; body: any; requestId: string }>, cancelled: [] as string[], hold: false, limit: null as null | string },
     };
-    const persist = () => sessionStorage.setItem('resident-stub', JSON.stringify({ order: s.order, cloud: s.cloud, bodies: s.bodies, opened: s.opened, accounts: s.accounts, login: s.login, nextToken: s.nextToken, polls: s.polls, start: s.start, held: s.held }));
+    const persist = () => sessionStorage.setItem('resident-stub', JSON.stringify({ order: s.order, cloud: s.cloud, bodies: s.bodies, opened: s.opened, accounts: s.accounts, login: s.login, nextToken: s.nextToken, polls: s.polls, start: s.start, held: s.held, checkout: s.checkout }));
     s.persist = persist; persist();
     s.holdNextChunk = () => { s.chunkHeld = true; };
     // Emits the held chunk even after the owner pressed Stop, as a late chunk from the agent.
@@ -136,6 +156,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     const pauseOnly = !w.Capacitor.PluginHeaders.some((row: any) => row.name === 'AlphaHostedResults');
     if (pauseOnly) w.Capacitor.PluginHeaders.push({ name: 'AlphaHostedResults', methods: [{ name: 'disableBackground', rtype: 'promise' }] });
     let rejectSignIn: null | ((error: Error) => void) = null;
+    if (options.checkout) w.Capacitor.PluginHeaders.find((row: any) => row.name === 'AlphaConnection')?.methods.push({ name: 'consumeBillingReturn', rtype: 'promise' });
     if(options.nativeSignIn)w.Capacitor.PluginHeaders.push({name:'AlphaCloudSignIn',methods:['status','startEmail','verifyEmail','cancel','addListener','removeListener'].map(name=>({name,rtype:'promise'}))});
     w.Capacitor.nativePromise = async (plugin: string, method: string, input: any) => {
       if(options.nativeSignIn && plugin==='AlphaCloudSignIn'){
@@ -179,6 +200,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       if (plugin === 'AlphaConnection' && method === 'secureWrite' && input.slot === 'cloud:production') { s.order.push('store ' + JSON.parse(input.value).token); persist(); }
       if (plugin === 'AlphaConnection' && method === 'secureRemove' && input.slot === 'cloud:production') { s.order.push('remove cloud key'); persist(); }
       if (options.maps && plugin === 'AlphaConnection' && method === 'cancel') { s.maps.cancelled.push(input.requestId); return {}; }
+      if (options.checkout && plugin === 'AlphaConnection' && method === 'consumeBillingReturn') { const returned = s.checkout.returned ?? { result: 'none' }; s.checkout.returned = null; persist(); return returned; }
       if (plugin === 'AlphaConnection' && method === 'openExternal') { f.calls.push('AlphaConnection.openExternal'); s.opened.push(input.url); s.order.push('openExternal ' + new URL(input.url).origin); persist(); return {}; }
       if (plugin === 'AlphaConnection' && method === 'request') {
         const url = new URL(input.url), path = url.pathname, auth = input.headers?.Authorization;
@@ -217,8 +239,36 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           f.unexpected.push('maps ' + route); return { status: 404, data: {} };
         }
         if (path === '/api/v1/api-keys/current' && input.method === 'DELETE') { s.order.push('revoke ' + auth); persist(); return { status: 200, data: { success: true, status: 'revoked', credentialId: null, revokedAt: new Date().toISOString() } }; }
+        // The plan catalogue is public: names and prices are synthetic, in Cloud's SubscriptionPlansDto shape.
+        if (options.checkout && path === '/api/v1/subscriptions/plans' && input.method === 'GET') {
+          const plan = (key: string, name: string, amountCents: number, amountUsd: string) => ({ key, name, catalogVersion: 'v1', active: true, interval: 'month', intervalCount: 1, currency: 'usd', amountCents, allowance: { amountUsd, fundingClass: 'allowance_eligible', rollover: false, expiresAt: 'billing_period_end' }, fundingClasses: ['allowance_eligible', 'cash_only'] });
+          return { status: 200, data: { success: true, data: { catalogVersion: 'v1', plans: [plan('plus_monthly', 'Plus', 2000, '20.00'), plan('pro_monthly', 'Pro', 10000, '100.00')] } } };
+        }
         if (s.accounts.length) {
           const owner = account(auth);
+          if (options.checkout && path.startsWith('/api/v1/subscriptions/checkout') && input.method === 'POST') {
+            const body = JSON.parse(input.body), refusal = (r: { status: number; code: string }) => ({ status: r.status, data: { success: false, error: 'Synthetic refusal', code: r.code } });
+            if (path === '/api/v1/subscriptions/checkout') {
+              s.checkout.started.push({ planKey: body.planKey, idempotencyKey: body.idempotencyKey, presentation: body.presentation, auth }); s.order.push('checkout ' + body.planKey); persist();
+              const mode = s.checkout.start;
+              if (!owner) return { status: 401, data: { success: false, code: 'authentication_required' } };
+              if (typeof mode === 'object') return refusal(mode);
+              // The request arrived but its answer is lost: the phone sees a transport failure.
+              if (mode === 'lost') throw Error('Connection request failed');
+              if (mode !== 'open') return { status: 200, data: { success: true, data: { status: mode, commandId: 'synthetic-command', checkoutUrl: null } } };
+              return { status: 200, data: { success: true, data: { status: 'open', presentation: 'mobile', commandId: 'synthetic-command', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_SyntheticSession0001', sessionId: 'cs_test_SyntheticSession0001', expiresAt: new Date(Date.now() + 3_600_000).toISOString() } } };
+            }
+            if (path === '/api/v1/subscriptions/checkout/confirm') {
+              s.checkout.confirmed.push(body.sessionId); s.order.push('confirm checkout'); persist();
+              const mode = s.checkout.confirm;
+              if (!owner) return { status: 401, data: { success: false, code: 'authentication_required' } };
+              if (typeof mode === 'object') return refusal(mode);
+              if (mode === 'unpaid') return refusal({ status: 503, code: 'service_unavailable' });
+              // Cloud settled the subscription from the provider's record: the account now has Plus.
+              owner.plan = undefined; persist();
+              return { status: 200, data: { success: true, data: { subscriptionId: 'sub_synthetic', replayed: mode === 'replayed' }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'subscription', effectiveUntil: '2099-01-01T00:00:00.000Z' } } };
+            }
+          }
           if (!owner) return { status: 401, data: {} };
           if (path === '/api/v1/user') { if (owner.userStatus && owner.userStatus !== 200) return { status: owner.userStatus, data: {} }; return { status: 200, data: { success: true, data: { id: owner.userId, email: owner.email } } }; }
           // The billing snapshot answers the plan while the entitlement route is absent (404, from the base
@@ -226,6 +276,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           if (path === '/api/v1/subscription/redeem' && input.method === 'POST') {
             const body = JSON.parse(input.body); s.redeemed.push({ code: body.code, idempotencyKey: body.idempotencyKey }); s.order.push('redeem ' + owner.email); persist();
             if (s.redeem === 'invalid') return { status: 400, data: { success: false, error: 'This subscription code cannot be redeemed.', code: 'invalid_subscription_code' } };
+            if (s.redeem === 'used') return { status: 409, data: { success: false, error: 'This account has already redeemed this subscription grant.', code: 'subscription_grant_already_redeemed' } };
             owner.plan = undefined; persist();
             return { status: 200, data: { success: true, replayed: false, grant: { id: 'synthetic-grant', planKey: 'plus_monthly', startsAt: '2026-10-30T00:00:00.000Z', endsAt: '2027-04-30T00:00:00.000Z', revoked: false, paidPlanTakesPrecedence: false }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'grant', effectiveUntil: '2027-04-30T00:00:00.000Z' } } };
           }
