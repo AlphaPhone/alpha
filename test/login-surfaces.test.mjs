@@ -217,17 +217,19 @@ test('External authorization uses the browser and Google sign-in uses the native
   const connection = read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaConnectionPlugin.java');
   const open = connection.slice(connection.indexOf('public void openExternal('), connection.indexOf('public void openExternal(') + 900);
   like(open, /Intent intent = new Intent\(Intent\.ACTION_VIEW, Uri\.parse\(url\.toASCIIString\(\)\)\); intent\.addCategory\(Intent\.CATEGORY_BROWSABLE\);/);
-  // Exact production hosts (eliza.app, cloud.eliza.app, accounts.google.com); staging only with test mocks.
+  // Exact production hosts (eliza.app, cloud.eliza.app, accounts.google.com, checkout.stripe.com); staging only with test mocks.
   like(open, /if \(!ConnectionRoutes\.externalHost\(url\.getScheme\(\), url\.getHost\(\), url\.getPort\(\), BuildConfig\.ELIZA_DEV_ALLOW_TEST_MOCKS\)\) throw new IllegalArgumentException\(\);/);
   const routes = read('android/app/src/main/java/ai/alphacompute/alphaphone/ConnectionRoutes.java');
-  // Alpha supplies its hosts and Google consent to the shared policy, which opens exactly those (plugin-native-agent).
-  like(routes, /CloudDeployment\.PRODUCTION_WEB_HOST,CloudDeployment\.STAGING_WEB_HOST,\s*CloudDeployment\.PRODUCTION_SERVICES_HOST,CloudDeployment\.STAGING_SERVICES_HOST,java\.util\.Collections\.singleton\("accounts\.google\.com"\)\)\)/);
+  // Alpha supplies its hosts and two external providers to the shared policy, which opens exactly those
+  // (plugin-native-agent): Google consent and the hosted payment page of a subscription checkout.
+  like(routes, /CloudDeployment\.PRODUCTION_WEB_HOST,CloudDeployment\.STAGING_WEB_HOST,\s*CloudDeployment\.PRODUCTION_SERVICES_HOST,CloudDeployment\.STAGING_SERVICES_HOST,java\.util\.Collections\.unmodifiableSet\(new java\.util\.HashSet<>\(java\.util\.Arrays\.asList\("accounts\.google\.com",CloudConnectionPolicy\.SUBSCRIPTION_CHECKOUT_HOST\)\)\)\)\)/);
   const policy = read('vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/connection/CloudConnectionPolicy.java');
   like(policy, /if \(hosts\.productionWeb\.equals\(value\) \|\| hosts\.productionServices\.equals\(value\) \|\| hosts\.externalProviders\.contains\(value\)\)\s+return true;/);
   assert.doesNotMatch(open, /setPackage\(getContext\(\)\.getPackageName\(\)\)|AlphaBrowserPlugin/, 'never opened in Alpha\'s own browser');
   // Alpha registers no general web handler, so a sign-in page cannot resolve back into Alpha. The
-  // exceptions are the verified returns: the in-app sign-in and the Workspace consent, each one exact path.
-  const callback = /^<intent-filter android:autoVerify="true"><action android:name="android\.intent\.action\.VIEW"\/><category android:name="android\.intent\.category\.DEFAULT"\/><category android:name="android\.intent\.category\.BROWSABLE"\/><data android:scheme="https" android:host="(\$\{appLinkHost\}|\$\{stagingCloudWebHost\})" android:path="\/alphaphone\/(auth|gmail)\/callback"\/><\/intent-filter>$/;
+  // exceptions are the verified returns: the in-app sign-in, the Workspace consent and the subscription
+  // checkout, each one exact path.
+  const callback = /^<intent-filter android:autoVerify="true"><action android:name="android\.intent\.action\.VIEW"\/><category android:name="android\.intent\.category\.DEFAULT"\/><category android:name="android\.intent\.category\.BROWSABLE"\/><data android:scheme="https" android:host="(\$\{appLinkHost\}|\$\{stagingCloudWebHost\})" android:path="\/alphaphone\/(auth\/callback|gmail\/callback|billing\/return)"\/><\/intent-filter>$/;
   // scripts/verify-apks.ts pins the exact set of web VIEW filters in the merged manifest.
   const returns = [];
   for (const manifest of walk('android', file => file.endsWith('AndroidManifest.xml') && !/[\\/](test|androidTest|build)[\\/]/.test(file))) {
@@ -239,7 +241,7 @@ test('External authorization uses the browser and Google sign-in uses the native
       returns.push(`${manifest.split(path.sep).join('/')}:${match[1]}:${match[2]}`);
     }
   }
-  assert.deepEqual(returns.sort(), ['android/app/src/main/AndroidManifest.xml:${appLinkHost}:auth', 'android/app/src/main/AndroidManifest.xml:${appLinkHost}:gmail', 'android/app/src/testMocks/AndroidManifest.xml:${stagingCloudWebHost}:auth'], 'the production returns use the configured host placeholder (android/app/product.gradle); the staging return exists only in the test-mocks overlay');
+  assert.deepEqual(returns.sort(), ['android/app/src/main/AndroidManifest.xml:${appLinkHost}:auth/callback', 'android/app/src/main/AndroidManifest.xml:${appLinkHost}:billing/return', 'android/app/src/main/AndroidManifest.xml:${appLinkHost}:gmail/callback', 'android/app/src/testMocks/AndroidManifest.xml:${stagingCloudWebHost}:auth/callback'], 'the production returns use the configured host placeholder (android/app/product.gradle); the staging return exists only in the test-mocks overlay');
   // Inspect the exact shared source that the Android build packages.
   const staged=preparePatchedNative({root:process.cwd()});
   const signIn = read(path.join(staged.root,'packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudSignInPlugin.java'));
