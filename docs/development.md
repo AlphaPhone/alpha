@@ -523,6 +523,8 @@ also consumes the reviewed [Bun and ABI cleanup](https://github.com/elizaOS/eliz
 [Calendar provider timestamps](https://github.com/elizaOS/eliza/pull/39467),
 [owner-clock scheduling](https://github.com/elizaOS/eliza/pull/39470) and
 [model-generated morning summaries](https://github.com/elizaOS/eliza/pull/39471).
+The current pin also includes reviewed [browser URL parser](https://github.com/elizaOS/eliza/pull/39351)
+and [browser automation dependency](https://github.com/elizaOS/eliza/pull/39354) updates.
 The [portable fixture and evidence paths](https://github.com/elizaOS/eliza/pull/39478)
 remove personal home directories from the pinned source. The native engine
 gitlink is unchanged. Historical native measurements retain their original
