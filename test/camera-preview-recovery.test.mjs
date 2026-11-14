@@ -36,7 +36,7 @@ function fixture({permission=false,failing=true,navigateAfterPhoto=false,receipt
  };
  const rows={camera:[]};const library={list:async options=>{calls.list.push(options);return {items:options.album==='camera'?rows.camera:[]};},read:async({id})=>({id,image:'',width:1,height:1,date:0,revision:'r'})};
  let view={chat:'hidden',active:true};
- context=vm.createContext({window:env.window,document:env.window.document,console,camera,library,Date:{now:()=>clock.now},Uint8Array,atob,Blob:env.window.Blob,
+ context=vm.createContext({connectionController:{getSnapshot:()=>({session:null}),getSelectedConversationId:()=>null},window:env.window,document:env.window.document,console,camera,library,Date:{now:()=>clock.now},Uint8Array,atob,Blob:env.window.Blob,
   mask:enable=>calls.masked=enable,Capacitor:{isPluginAvailable:()=>true},validateCameraCaptureResult:value=>value,systemPickerActive:()=>false,device:{openSettings:async()=>({status:'opened'})},
   openScanReview:()=>{calls.scans++;return ()=>{};},reviewContentQuestion:input=>{calls.questions.push(input);return ()=>{};},createScanCapture:()=>({keep:async()=>undefined,close(){}}),ScanKeepError:Error,importBrowserPhoto:async()=>({}),browserCamera:{flashAvailable:()=>false},view:()=>view,calls,navigateAfterPhoto});
  const prelude=`let accessPanel,disposed=false,direction='back',flash=false,duration=0,loaded=true,captures=[],closeQuestion,closeScan,scanRequest,frameQuestion;
