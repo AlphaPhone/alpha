@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "314238e41c0959d185b3a185001d498a46cd3e11",
-  "head": "98518de8c7737cfce9db88c028c5129829e0b9f8",
+  "baseCommit": "f86b5038f897094df686da9d5a8d901f60b1e20e",
+  "head": "0f79d23142ada138b8a12be6d3378b808c4102b3",
   "recordedAt": "2026-11-14",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...98518de8c7737cfce9db88c028c5129829e0b9f8",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...0f79d23142ada138b8a12be6d3378b808c4102b3",
   "status": "diverged",
-  "aheadBy": 98,
-  "behindBy": 1240,
+  "aheadBy": 100,
+  "behindBy": 1295,
   "mergeBase": "0c8d6868ae05a6100a3ed0246a5d078e783cc802",
   "pinOnlyCommits": [
     {
@@ -398,6 +398,14 @@
     {
       "sha": "98518de8c7737cfce9db88c028c5129829e0b9f8",
       "subject": "Reuse the speech bootstrap connection for the WebSocket upgrade"
+    },
+    {
+      "sha": "39f75c8c41906a4b48e4bf5a57d681851838b773",
+      "subject": "Backport validated native photo crop support"
+    },
+    {
+      "sha": "0f79d23142ada138b8a12be6d3378b808c4102b3",
+      "subject": "Include existing native crop conformance driver"
     }
   ],
   "pullRequests": []

@@ -293,6 +293,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     }catch(error){if(edit===current){current.busy=false;owner.toast(error instanceof Error?error.message:'Crop preview unavailable. Original unchanged.');}}
     finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
   }
+  function cropSelection(left:number,top:number,right:number,bottom:number):PhotoCropRect{
+    const x=+left.toFixed(6),y=+top.toFixed(6),endX=Math.min(1,+right.toFixed(6)),endY=Math.min(1,+bottom.toFixed(6));
+    return {x,y,width:endX-x,height:endY-y};
+  }
   let cropDrag:{pointer:number;x:number;y:number;rect:PhotoCropRect;mode:string;bounds:DOMRect}|undefined;
   function cropPointer(owner:Bag,event:PointerEvent,phase:'down'|'move'|'up',expected:typeof edit){
     const current=edit;if(current!==expected||!current?.cropDraft||current.busy)return;
@@ -309,7 +313,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     let left=r.x,top=r.y,right=r.x+r.width,bottom=r.y+r.height;
     if(drag.mode==='move'){left=clamp(r.x+dx,0,1-r.width);top=clamp(r.y+dy,0,1-r.height);right=left+r.width;bottom=top+r.height;}
     else{if(drag.mode.includes('w'))left=clamp(r.x+dx,0,right-min);if(drag.mode.includes('e'))right=clamp(r.x+r.width+dx,left+min,1);if(drag.mode.includes('n'))top=clamp(r.y+dy,0,bottom-min);if(drag.mode.includes('s'))bottom=clamp(r.y+r.height+dy,top+min,1);}
-    current.cropDraft={x:+left.toFixed(6),y:+top.toFixed(6),width:+(right-left).toFixed(6),height:+(bottom-top).toFixed(6)};owner.set({nativeEditRevision:Date.now()});
+    current.cropDraft=cropSelection(left,top,right,bottom);owner.set({nativeEditRevision:Date.now()});
   }
   function cropKey(owner:Bag,event:KeyboardEvent,expected:typeof edit){
     if(edit!==expected||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)||!edit?.cropDraft||edit.busy)return;
@@ -318,7 +322,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     let left=r.x,top=r.y,right=r.x+r.width,bottom=r.y+r.height;
     if(mode==='move'){left=clamp(left+dx,0,1-r.width);top=clamp(top+dy,0,1-r.height);right=left+r.width;bottom=top+r.height;}
     else{if(mode.includes('w'))left=clamp(left+dx,0,right-.05);if(mode.includes('e'))right=clamp(right+dx,left+.05,1);if(mode.includes('n'))top=clamp(top+dy,0,bottom-.05);if(mode.includes('s'))bottom=clamp(bottom+dy,top+.05,1);}
-    edit.cropDraft={x:+left.toFixed(6),y:+top.toFixed(6),width:+(right-left).toFixed(6),height:+(bottom-top).toFixed(6)};owner.set({nativeEditRevision:Date.now()});
+    edit.cropDraft=cropSelection(left,top,right,bottom);owner.set({nativeEditRevision:Date.now()});
   }
   type EditCompletion={token:string;epoch:number;source:string|undefined;intent?:MediaCopyIntent;replace?:boolean};
   const completionCurrent=(ticket:EditCompletion,owner:Bag)=>!disposed&&!document.hidden&&owner.isActive()&&editEpoch===ticket.epoch&&owner.get('photos').open===ticket.source&&(!edit||edit.operationId===ticket.token);

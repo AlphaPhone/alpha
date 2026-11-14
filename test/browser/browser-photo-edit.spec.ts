@@ -180,8 +180,16 @@ test('selected crop keeps its captured rectangle and canonical retry identity',a
   const pending=l.saveEdit(input);rect.x=0;const first=await pending;
   const retry=await l.saveEdit({...input,cropRect:{height:1,width:.5,y:0,x:.5}});const copy=await l.read({id:first.id!});
   const full=await l.beginEdit({id:'1000',revision:'original-metadata'});const unchanged=await l.saveEdit({sessionId:full.sessionId,rotation:0,crop:true,filter:'none',cropRect:{x:0,y:0,width:1,height:1}});
-  let invalid=0;for(const cropRect of [false,[],{x:NaN,y:0,width:1,height:1},{x:1,y:0,width:.1,height:1}]){try{await l.previewEdit({sessionId:full.sessionId,rotation:0,crop:false,filter:'none',cropRect} as any);}catch{invalid++;}}
+  let invalid=0;for(const cropRect of [null,false,[],{x:NaN,y:0,width:1,height:1},{x:1,y:0,width:.1,height:1}]){try{await l.previewEdit({sessionId:full.sessionId,rotation:0,crop:false,filter:'none',cropRect} as any);}catch{invalid++;}}
   return {same:first.id===retry.id,width:copy.width,height:copy.height,count:(await l.list()).items.length,unchanged:unchanged.status,invalid};
  });
- expect(result).toEqual({same:true,width:120,height:120,count:2,unchanged:'unchanged',invalid:4});
+ expect(result).toEqual({same:true,width:120,height:120,count:2,unchanged:'unchanged',invalid:5});
+});
+
+test('a one-pixel inset at a fractional image edge remains an applicable crop',async({page})=>{
+ await seed(page,128,64);await openEditor(page);await page.getByRole('button',{name:'Crop',exact:true}).click();
+ const handle=page.getByRole('button',{name:'Resize crop top left',exact:true});await expect(handle).toBeVisible();const frame=await page.locator('[data-alpha-crop-image]').boundingBox(),corner=await handle.boundingBox();
+ await page.mouse.move(corner!.x+22,corner!.y+22);await page.mouse.down();await page.mouse.move(corner!.x+22+frame!.width/128,corner!.y+22,{steps:2});await page.mouse.up();
+ await page.getByRole('button',{name:'Apply crop',exact:true}).click();await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Save copy',exact:true}).click();await expect(page.getByText('Copy saved',{exact:true})).toBeVisible();
+ const dimensions=await page.evaluate(async()=>{const l=(await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary;const copy=(await l.list()).items.find(r=>r.id!=='1000')!;return [copy.width,copy.height];});expect(dimensions).toEqual([127,64]);
 });
