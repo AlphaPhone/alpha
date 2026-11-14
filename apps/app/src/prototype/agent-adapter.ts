@@ -1783,8 +1783,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
     const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,displayText:text,requestText}:null;
+    let stagedAttachmentKey:string|undefined;
     if(sentAttachment&&(mail||transcript||this.cameraAttachment)&&connection.session&&conversationId){
-      try{await saveAttachment(connection.session,conversationId,userId,sentAttachment);}
+      try{
+        await saveAttachment(connection.session,conversationId,userId,sentAttachment);
+        stagedAttachmentKey=attachmentKey(connection.session,conversationId,userId);
+      }
       catch{if(fromComposer)releaseComposerSend(this,heldKey,heldText);this.toast('Attachment could not be saved. Try again.');return;}
       // The local write may settle after the composer, attachment or conversation has been replaced.
       if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment){
@@ -1838,7 +1842,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (!this.live||!sameChat()) return;
       const identity=reply.messageBinding;
       if(sentAttachment&&identity&&reply.userMessageId&&(mail||transcript||sentAttachment.cameraAttachment)){
-        await saveAttachment(identity.session,identity.conversationId,reply.userMessageId,sentAttachment);
+        // The first send can create a conversation after the pre-dispatch save was skipped.
+        // History prefers the request ID when it carries one and uses the recorded ID otherwise.
+        if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
+          await saveAttachment(identity.session,identity.conversationId,userId,sentAttachment);
+        }
+        if(reply.userMessageId!==userId){
+          await saveAttachment(identity.session,identity.conversationId,reply.userMessageId,sentAttachment);
+        }
       }
 
       const planCard=planActionCard(reply.planAction);
