@@ -9,6 +9,29 @@ test('old visit rejection cannot erase fresh provider rows',async()=>{let reject
 test('permission denial and provider unavailability are distinct from empty; next cursor is forwarded',async()=>{let cursors=[];const f=fake({threadPage:async cursor=>{cursors.push(cursor);return {rows:[{id:'thread:3'}],next:cursor?null:'10:thread:3'};}}),s=createSmsSession(f.client,true,()=>{});s.setActive(true);await tick();await s.refresh(true);assert.deepEqual(cursors,[undefined,'10:thread:3']);s.setActive(false);const denied=createSmsSession(fake({status:async()=>({permissions:{sms:'denied'}})}).client,true,()=>{});denied.setActive(true);await tick();assert.match(denied.state.message,/not been granted/);denied.setActive(false);const broken=createSmsSession(fake({threadPage:async()=>{throw Error('null provider');}}).client,true,()=>{});broken.setActive(true);await tick();assert.match(broken.state.message,/could not be read completely/);assert.notEqual(broken.state.message,'No messages found.');broken.setActive(false);assert.match(receiptLabel('submitted'),/not confirmed/);assert.match(receiptLabel('unknown'),/Check the recipient/);});
 test('thread switches reject delayed prior thread reads',async()=>{let resolve;const f=fake({messagePage:async id=>id==='thread:1'?new Promise(r=>resolve=r):{rows:[{id:'sms:2'}],next:null}}),s=createSmsSession(f.client,true,()=>{});s.setActive(true);await tick();s.openThread('thread:1');await tick();s.openThread('thread:2');await tick();resolve({rows:[{id:'sms:1'}],next:null});await tick();assert.deepEqual(s.state.rows,[{id:'sms:2'}]);s.setActive(false);});
 
+test('a native sent receipt refreshes the open provider thread without a content notification',async()=>{
+ const incoming={id:'sms:1',direction:'incoming',body:'Hi',read:true,date:1};
+ const outgoing={id:'sms:2',direction:'outgoing',body:'Hello',status:'sent',date:2};
+ let rows=[incoming],sendUpdated,reads=0;
+ const receipts=[];
+ const f=fake({
+  messagePage:async id=>{assert.equal(id,'thread:1');reads++;return {rows,next:null};},
+  observeMessages:async(_changed,updated)=>{sendUpdated=updated;return async()=>{};},
+ });
+ const s=createSmsSession(f.client,true,()=>{},id=>receipts.push(id));
+ s.setActive(true);await tick();s.openThread('thread:1');await tick();
+ assert.deepEqual(s.state.rows,[incoming]);
+ rows=[outgoing,incoming];
+ sendUpdated('operation');await tick();
+ assert.deepEqual(receipts,['operation']);
+ assert.deepEqual(s.state.rows,[outgoing,incoming]);
+ assert.equal(receiptLabel('sent'),'Sent. Delivery is unconfirmed.');
+ s.setActive(false);await tick();
+ const before=reads;sendUpdated('operation');await tick();
+ assert.equal(reads,before,'no SMS provider read after leaving Messages');
+ assert.deepEqual(s.state.rows,[]);
+});
+
 test('SMS review completion cannot mutate a later visit and transport errors keep the operation ID',async()=>{
  const {mkdtempSync,rmSync}=await import('node:fs');const {join,resolve}=await import('node:path');const {tmpdir}=await import('node:os');
  const {build}=await import('esbuild');const {writeFileSync}=await import('node:fs');const {pathToFileURL}=await import('node:url');const dir=mkdtempSync(join(tmpdir(),'sms-adapter-'));const priorDocument=globalThis.document;const pending=[];const calls=[];

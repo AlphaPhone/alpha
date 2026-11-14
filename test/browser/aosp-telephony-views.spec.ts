@@ -64,6 +64,51 @@ test('a phone whose carrier has no voicemail source shows no voicemail tab', asy
   await expect(page.locator('[data-alpha-phone-tab="voicemail"]')).toHaveCount(0);
 });
 
+test('Phone keeps its selector in Contacts and switching tabs leaves one Back entry', async ({page}) => {
+  await setupTelephony(page);
+  await open(page, 'Phone');
+  const tab = (name: string) => page.locator(`[data-alpha-phone-tab="${name}"]`);
+  await tab('contacts').click();
+  await expect(page.locator('[data-alpha-contacts-search]')).toBeVisible();
+  await expect(tab('contacts')).toHaveAttribute('aria-pressed', 'true');
+  await tab('keypad').click();
+  await expect(page.locator('[data-alpha-phone-keypad]')).toBeVisible();
+  await tab('contacts').click();
+  await tab('recents').click();
+  await expect(tab('recents')).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable: true})));
+  await expect(tab('recents')).toHaveCount(0);
+  await open(page, 'Contacts');
+  await expect(page.locator('[data-alpha-contacts-search]')).toBeVisible();
+  await expect(tab('contacts')).toHaveCount(0);
+});
+
+test('Messages stays below the status bar at both launcher widths', async ({page}) => {
+  const inset = 64;
+  await setupTelephony(page);
+  await page.evaluate(inset => document.documentElement.style.setProperty('--native-top-inset', `${inset}px`), inset);
+  await open(page, 'Messages');
+  const button = page.locator('[data-alpha-messages-new]');
+  const threads = page.locator('[data-alpha-messages-threads]');
+  for (const size of [{width: 412, height: 915}, {width: 360, height: 640}]) {
+    await page.setViewportSize(size);
+    await expect(button).toBeInViewport({ratio: 0.99});
+    const buttonBox = await button.boundingBox();
+    const threadBox = await threads.boundingBox();
+    if (!buttonBox || !threadBox) throw Error('Messages list is missing its button or threads');
+    expect(buttonBox?.y).toBeGreaterThanOrEqual(inset);
+    expect(threadBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
+  }
+  await button.click();
+  const back = page.locator('[data-alpha-messages]').getByRole('button', {name: 'Back', exact: true});
+  await expect(back).toBeVisible();
+  expect((await back.boundingBox())?.y).toBeGreaterThanOrEqual(inset);
+  await back.click();
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  await expect(back).toBeVisible();
+  expect((await back.boundingBox())?.y).toBeGreaterThanOrEqual(inset);
+});
+
 test('a conversation has one bottom bar: its text field with the assistant in it', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Messages');
