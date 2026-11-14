@@ -76,6 +76,12 @@ jobs:
         env:
           ALPHA_CALENDAR_BRIDGE_EXPECTED_HEAD: ${{ github.sha }}
         run: python scripts/ci/calendar-bridge.py --source-frame
+      - name: Acquire hash-pinned Android Bun with step-only authentication
+        timeout-minutes: 12
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALPHA_LOCAL_AGENT_SOURCE_DIR: ${{ github.workspace }}/vendor/eliza
+        run: python3 scripts/ci/acquire-resident-bun.py
       - name: Build the launcher APKs
         env:
           ELIZA_DEV_ALLOW_TEST_MOCKS: ""
