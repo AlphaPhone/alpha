@@ -58,6 +58,24 @@ public class FreshTest {
   before=self.fixture(root)
   return stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,product_mk_hash=before,core_baseline=core_baseline)
 
+ def test_staged_boot_animations_reuse_the_admitted_archive(self):
+  with tempfile.TemporaryDirectory(prefix='alpha-brand-boot-') as d, patch.object(stage,'check_revision'):
+   root=Path(d)/'aosp';root.mkdir();plan,rows=self.plan(root)
+   stage.apply_plan(root,plan,rows,Path(d)/'backup')
+   makefile=root/'check-boot.mk'
+   makefile.write_text('''TARGET_COPY_OUT_PRODUCT := product
+include vendor/alphaphone/branding/branding.mk
+boot-animation-copies:
+	@printf '%s\\n' $(PRODUCT_COPY_FILES)
+''')
+   copies=subprocess.check_output(['make','-s','-f',str(makefile),'boot-animation-copies'],cwd=root,text=True)
+   admitted_hash=json.loads((ASSETS/'branding-assets.json').read_text())['bootAnimationSha256']
+   for name in ('bootanimation.zip','bootanimation-dark.zip'):
+    destination='product/media/'+name
+    sources=[source for source,target in (row.split(':',1) for row in copies.splitlines()) if target==destination]
+    self.assertEqual(sources,['vendor/alphaphone/branding/generated/bootanimation.zip'])
+    self.assertEqual(stage.digest((root/sources[0]).read_bytes()),admitted_hash)
+
  def test_guarded_staging_roundtrip_preserves_enterprise_and_completed_paths(self):
   with tempfile.TemporaryDirectory(prefix='alpha-brand-stage-')as d,patch.object(stage,'check_revision')as revision:
    root=Path(d)/'aosp';root.mkdir();plan,rows=self.plan(root)
