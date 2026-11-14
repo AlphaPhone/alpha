@@ -1,3 +1,4 @@
+import {CARRIER_SETUP_PAGE,carrierSetupSurfaceOpen,carrierFieldText,createCarrierSetupSession,type CarrierSetup,type CarrierField} from '../runtime/carrier-setup';
 import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
 import {cloudServiceName} from '../runtime/cloud-protocol';
@@ -113,6 +114,8 @@ const device = registerPlugin<{
   updateState(): Promise<{pending?: boolean}>;
   installUpdate(input: Pick<AppUpdate, 'apkUrl' | 'sha256' | 'sizeBytes' | 'versionCode'> & {automatic?: true}): Promise<{status?: string}>;
 }>('AlphaDevice');
+const carrierSetup = registerPlugin<{read():Promise<CarrierSetup>;readEid():Promise<CarrierField>;addListener(event:string,listener:()=>void):Promise<{remove():Promise<void>}>;openSettings(input:{page:string}):Promise<{specific:boolean}>}>('AlphaCarrierSetup');
+const carrierClipboard = registerPlugin<{copyText(input:{text:string}):Promise<void>}>('AlphaDevice');
 const notifications = registerPlugin<{status():Promise<Bag>;setAlertPreferences(input:{appEnabled?:boolean;channelId?:string;enabled?:boolean}):Promise<Bag>;openAppSettings():Promise<Bag>;openChannelSettings(input:{id:string}):Promise<{status:string}>;crossAppStatus():Promise<Bag>;notificationApps():Promise<{apps:Bag[]}>;setNotificationPolicy(input:Bag):Promise<Bag>;resumeCrossApp(input:{expectedRevision:string}):Promise<Bag>;openNotificationAccess():Promise<Bag>;notificationHistory():Promise<{items:Bag[]}>;clearNotificationHistory():Promise<void>}>('AlphaNotifications');
 const system = registerPlugin<{ getDeviceSettings(): Promise<Bag>; getStatus(): Promise<{ roles?: Bag[] }>; requestRole(input: { role: string }): Promise<{ role: string; held: boolean; resultCode: number }>; getBuildInfo(): Promise<{ launcher?: boolean; version?: string }> }>('ElizaSystem');
 type RoleRow = { role: string; held: boolean; available: boolean; holders: string[] };
@@ -314,6 +317,10 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     } finally { listenerBusy = false; if (owner === instance) changed(); }
   }
   const changed = () => owner?.vset('settings', { capabilityReadAt: Date.now() });
+  const carrierCurrent=()=>!document.hidden&&document.hasFocus()&&owner?.S?.().view==='settings'&&carrierSetupSurfaceOpen(owner?.vget('settings'));
+  const carrierSession=createCarrierSetupSession({read:()=>carrierSetup.read(),readEid:()=>carrierSetup.readEid(),copy:text=>carrierClipboard.copyText({text}),current:carrierCurrent,changed});
+  const forgetCarrier=()=>carrierSession.clear();
+  const carrierVisibility=()=>{if(document.hidden)forgetCarrier();};
   /** Only the existing authenticated local status; no provider/capability refresh. */
   async function refreshResidentDiagnostics(){
     inferenceAbort?.abort();const abort=inferenceAbort=new AbortController(),instance=owner;
@@ -488,8 +495,12 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   p.componentDidMount = function () {
     mount.call(this); owner = this;
     this.mailImagePreferenceChanged=changed;
-    this.settingsNavigation=(event:Event)=>{const page=(event as CustomEvent).detail?.page;if(typeof page!=='string'||!new Set(['display','sound','notifications','privacy','settings-account','settings-apps','settings-general','calendar','app-settings-workflows']).has(page))return;event.preventDefault();activeSettingsCategory=page==='privacy'?'settings-privacy':page==='settings-account'?'settings-account':['settings-apps','calendar','app-settings-workflows'].includes(page)?'settings-apps':'settings-general';this.openView('settings');this.vset('settings',{page});};
+    this.settingsNavigation=(event:Event)=>{const page=(event as CustomEvent).detail?.page;if(typeof page!=='string'||!new Set(['display','sound','notifications','privacy','settings-account','settings-apps','settings-general','calendar','app-settings-workflows',CARRIER_SETUP_PAGE]).has(page))return;event.preventDefault();activeSettingsCategory=page==='privacy'?'settings-privacy':page==='settings-account'?'settings-account':['settings-apps','calendar','app-settings-workflows'].includes(page)?'settings-apps':'settings-general';this.openView('settings');this.vset('settings',{page});};
     window.addEventListener('alpha:settings-page',this.settingsNavigation);
+    window.addEventListener('blur',forgetCarrier);
+    window.addEventListener('pagehide',forgetCarrier);
+    if(Capacitor.isNativePlatform())this.carrierForegroundListener=carrierSetup.addListener('foregroundEnded',forgetCarrier).catch(()=>null);
+    document.addEventListener('visibilitychange',carrierVisibility);
     window.addEventListener('alpha:device-settings',this.mailImagePreferenceChanged);
     initializeDevicePreferences(); void refresh(); void refreshCapabilities(); void checkForUpdate(false)?.then(changed);
     if (Capacitor.isNativePlatform() && !testMocksEnabled) {
@@ -525,6 +536,8 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   };
   p.componentDidUpdate = function (previousProps: Bag, previousState: Bag) {
     update?.call(this, previousProps, previousState);
+    // Device identifiers never survive leaving their foreground page, screen off or background.
+    if(!carrierCurrent())forgetCarrier();
     // Switching away from Settings (Home, another view) locks and forgets the password manager.
     if (typeof this.S === 'function' && this.S().view !== 'settings') leavePasswordManager();
     const theme = this.state?.theme;
@@ -537,6 +550,11 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     }
   };
   p.componentWillUnmount = function () {
+    forgetCarrier();
+    window.removeEventListener('blur',forgetCarrier);
+    window.removeEventListener('pagehide',forgetCarrier);
+    void this.carrierForegroundListener?.then((listener:any)=>listener?.remove());
+    document.removeEventListener('visibilitychange',carrierVisibility);
     automaticUpdates?.dispose(); automaticUpdates = undefined;
     document.removeEventListener('visibilitychange',automaticUpdateActive);
     if (owner === this) { capabilityAbort?.abort(); capabilityAbort = null; inferenceAbort?.abort();inferenceAbort=null; owner = null; ++generation; facts = {}; controls = {}; delivery = {}; cross={}; choices=null; history=null; roles=null; crashLog=null; }
@@ -558,7 +576,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   const categoryNames:Record<string,string>={'settings-account':'Account','settings-general':'General','settings-privacy':'Privacy','settings-help':'About','settings-apps':'Apps'};
   let activeSettingsCategory:string|null=null;
   const settingsBack = definition.back;
-  const settingsParents: Record<string,string> = {history:'agent-connection','agent-connection':'about',problems:'about',licenses:'about','password-entry':'password-provider','settings-permissions':'settings-privacy','license-detail':'licenses'};
+  const settingsParents: Record<string,string> = {history:'agent-connection','agent-connection':'about',problems:'about',licenses:'about','password-entry':'password-provider','settings-permissions':'settings-privacy','license-detail':'licenses',[CARRIER_SETUP_PAGE]:'settings-general'};
   definition.back = (state:Bag,api:Bag) => {
     if(!state.sheet&&((typeof state.page==='string'&&Object.hasOwn(categoryNames,state.page))||(!state.page&&activeSettingsCategory))){activeSettingsCategory=null;api.set({page:null});return true;}
     if(!state.sheet&&settingsParents[state.page]){if(state.page==='password-entry')leavePasswordEntry();api.set({page:settingsParents[state.page]});return true;}
@@ -567,10 +585,11 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   };
   definition.render = (state: Bag, api: Bag) => {
     settingsApi = api;
+    const carrierPage=carrierSetupSurfaceOpen(state);
     const permissionsPage=state.page==='settings-permissions'||state.page==='privacy';
     const appSettingsPage=typeof state.page==='string'&&state.page.startsWith('app-settings-')?state.page.slice(13):null;
     const categoryPage=typeof state.page==='string'&&Object.hasOwn(categoryNames,state.page)?state.page:!state.page?activeSettingsCategory:null;
-    const out = render({ ...state, page: categoryPage||appSettingsPage||permissionsPage?null:settingsPage(state.page, developerTools), acct: null, adding: false, sheet: ['conn', 'voice', 'wipe', 'wifiPw', 'forget'].includes(state.sheet?.kind) ? null : state.sheet }, api);
+    const out = render({ ...state, page: categoryPage||appSettingsPage||permissionsPage||carrierPage?null:settingsPage(state.page, developerTools), acct: null, adding: false, sheet: ['conn', 'voice', 'wipe', 'wifiPw', 'forget'].includes(state.sheet?.kind) ? null : state.sheet }, api);
     // Prototype personality values are mock-only until the agent reports them.
     out.persona = 'Voice & personality';
     const connection = connectionController.getSnapshot();
@@ -1011,9 +1030,58 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       if(selected){
         const [key,title,captions]=selected;
         let groups=detailGroups.filter((section:Bag)=>(captions as readonly string[]).includes(section.cap)).map((section:Bag)=>({...section,hasCap:false,cap:undefined}));
+        if(key==='settings-general')groups.unshift(group([{kNav:true,label:'Carrier & SIM setup',lbl:'Carrier & SIM setup',hasSub:true,sub:'IMEI, SIM status and activation',chev:true,noAB:true,go:()=>api.set({page:CARRIER_SETUP_PAGE})}]));
         if(key==='settings-apps')groups=[group(appCatalog.map(([label,id])=>({kNav:true,label,lbl:label,chev:true,noAB:true,go:()=>{activeSettingsCategory='settings-apps';const existing=existingAppRow(id);if(existing&&id!=='workflows')existing.go();else api.set({page:'app-settings-'+id});}})))];
         out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title,hasTitle:true,backLabel:'Back to Settings',back:()=>{activeSettingsCategory=null;api.set({page:null});},hero:{},groups});
       }
+    }
+    if(carrierPage){
+      const {data,busy,eidBusy,failed}=carrierSession.snapshot();
+      const native=Capacitor.isNativePlatform();
+      const openCarrier=(page:string)=>()=>void carrierSetup.openSettings({page}).then(result=>{if(result.specific===false)api.toast('Android Settings opened. Search for '+(page==='identifiers'?'IMEI or About phone':page==='apn'?'access point names':page==='default-sms'?'default SMS app':'SIMs or mobile network')+'.');},()=>api.toast('This Android settings page is unavailable.'));
+      const identifier=(label:string,field:CarrierField,token:string):Bag=>field.status==='available'&&field.value?{
+        ...action(label,()=>void carrierSession.copy(token).then(copied=>{if(copied&&carrierCurrent())api.toast(label+' copied to the Android clipboard.');},()=>api.toast('Could not copy. Keep Alpha open and unlocked.'))),
+        lbl:'Copy '+label,sub:carrierFieldText(field),hasSub:true,val:'Copy',hasVal:true,
+      }:info(label,carrierFieldText(field));
+      const groups=[group([
+        ...(native?[{...action(busy?'Reading identifiers…':data?'Refresh identifiers':'Show identifiers',()=>void carrierSession.show()),busy}]:[info('Device identifiers','Available only on an Android phone')]),
+        note('Private device information','Read only when you tap above. Values clear when you leave this page. Copy uses the Android clipboard.'),
+        ...(failed?[note('Read unavailable','Keep Alpha in front and the phone unlocked, then try again. You can also use Android device identifiers below.')]:[]),
+      ])];
+      if(data){
+        const identifiers=data.slots.flatMap(slot=>[identifier('IMEI '+(slot.slotIndex+1),slot.imei,'imei-'+slot.slotIndex),info('SIM state · slot '+(slot.slotIndex+1),carrierFieldText(slot.simState))]);
+        if(!data.slots.length)identifiers.push(info('IMEI','No modem slot was reported by Android'));
+
+        groups.push(group(identifiers));
+        groups.push(group([
+          info('Default SMS app',carrierFieldText(data.smsRole)),info('Default phone app',carrierFieldText(data.dialerRole)),
+          note('Identifier access','If Android denies access, use Android device identifiers below. After choosing a default SMS app, tap Refresh identifiers.'),
+          ...(data.canChooseSms?[action('Choose default SMS app in Android',openCarrier('default-sms'))]:[]),
+          ...(!data.aospImage?[note('Phone integration','Carrier activation remains a system task. Alpha Phone, Contacts and Messages require the admitted Alpha system image.')]:[]),
+        ]));
+        const subscriptions=data.subscriptions;
+        if(subscriptions.status!=='available')groups.push(group([info('Active SIMs',carrierFieldText(subscriptions))]));
+        else if(!subscriptions.items.length)groups.push(group([info('Active SIMs','No active subscription reported'),note('Not activated yet?','Insert the carrier’s physical SIM and complete its activation. A detected SIM or displayed IMEI does not confirm carrier compatibility or service.')]));
+        else for(const sub of subscriptions.items)groups.push({...group([
+          info('SIM type',sub.embedded?'eSIM':'Physical SIM'),info('SIM slot',sub.slotIndex>=0?String(sub.slotIndex+1):'Not reported'),
+          info('Carrier',carrierFieldText(sub.carrier)),info('SIM name',carrierFieldText(sub.name)),identifier('ICCID',sub.iccid,'iccid-'+sub.subscriptionId),
+          info('Network operator',carrierFieldText(sub.operator)),info('Operator code (MCC/MNC)',carrierFieldText(sub.operatorCode)),
+          info('Mobile data setting',carrierFieldText(sub.dataEnabled)),info('Data connection',carrierFieldText(sub.dataState)),info('Data network',carrierFieldText(sub.networkType)),info('Roaming',carrierFieldText(sub.roaming)),info('Default data SIM',sub.defaultData?'Yes':'No'),
+        ]),cap:'Active SIM · subscription '+sub.subscriptionId,hasCap:true});
+        groups.push(group([identifier('EID (eSIM)',data.eid,'eid'),...(data.eid.status!=='unsupported'?[{...action(eidBusy?'Reading eSIM EID…':'Read eSIM EID (optional)',()=>void carrierSession.showEid()),busy:eidBusy}]:[])]));
+        groups.push({...group((Object.entries({manufacturer:'Manufacturer',model:'Model',device:'Device',android:'Android version',baseband:'Baseband'}) as Array<[keyof CarrierSetup['hardware'],string]>).map(([key,label])=>info(label,carrierFieldText(data.hardware[key])))),cap:'Device hardware',hasCap:true});
+      }
+      groups.push(group([
+        note('Activate a physical SIM','For T-Mobile Connect with a new number, choose Bring your own phone, a physical SIM and a new number with the carrier. Check compatibility using the actual IMEI before ordering.'),
+        note('Before inserting a SIM','IMEI identifies the phone and can be read before a SIM is installed. ICCID identifies the SIM and may be printed on its card. EID is for eSIM and is optional for a physical SIM.'),
+      ]));
+      if(native)groups.push(group([
+        action('Android device identifiers / About phone',openCarrier('identifiers')),
+        note('If IMEI access is denied','In Android About phone, open IMEI or device identifiers. You can also check the original phone box. On a supported system Phone dial pad, *#06# may show identifiers; Alpha does not simulate this code.'),
+        action('Android SIM settings',openCarrier('sim')),action('Android mobile network settings',openCarrier('mobile')),action('Android access point names (APN)',openCarrier('apn')),
+        note('After activation','Refresh identifiers and confirm the SIM and network state. Test calls, SMS and mobile data with Wi-Fi off. Use APN values supplied by T-Mobile; this page does not change your plan, SIM, network or APN.'),
+      ]));
+      out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Carrier & SIM setup',hasTitle:true,backLabel:'Back to General',back:()=>{forgetCarrier();activeSettingsCategory='settings-general';api.set({page:'settings-general'});},hero:{},groups});
     }
     if(appSettingsPage){
       const names:Record<string,string>={browser:'Browser',calendar:'Calendar',camera:'Camera',files:'Files',inbox:'Inbox',maps:'Maps',notes:'Notes',passwords:'Passwords',photos:'Photos',workflows:'Workflows'};
@@ -1048,7 +1116,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if(activeSettingsCategory&&!categoryPage)for(const page of out.stack)if(!page.isTop&&page.backLabel==='Back to Settings')page.backLabel='Back to '+categoryNames[activeSettingsCategory];
     const nestedParents:Record<string,[string,string]>={'agent-connection':['about','About'],licenses:['about','About'],problems:['developer','Developer'],history:['agent-connection','Connection help'],'license-detail':['licenses','licenses']};
     if(nestedParents[state.page]){const [parent,label]=nestedParents[state.page];const page=out.stack[out.stack.length-1];if(page&&!page.isTop){page.backLabel='Back to '+label;page.back=()=>api.set({page:parent});}}
-    const settingsIcons:Record<string,string>={General:'settings',Privacy:'shield',Apps:'layout-grid',Help:'info',About:'info',Browser:'globe',Calendar:'calendar-days',Camera:'camera',Files:'folder',Inbox:'mail',Maps:'map-pin',Notes:'notebook-text',Passwords:'lock-keyhole',Photos:'images',Workflows:'workflow','Account & plan':'user-round','Google & email':'link','AI connection':'cpu',Display:'sun',Notifications:'bell','Privacy & data':'shield','App permissions':'fingerprint-pattern','Redeem code':'gift','Manage plan':'credit-card','Sign out':'log-out'};
+    const settingsIcons:Record<string,string>={General:'settings','Carrier & SIM setup':'smartphone',Privacy:'shield',Apps:'layout-grid',Help:'info',About:'info',Browser:'globe',Calendar:'calendar-days',Camera:'camera',Files:'folder',Inbox:'mail',Maps:'map-pin',Notes:'notebook-text',Passwords:'lock-keyhole',Photos:'images',Workflows:'workflow','Account & plan':'user-round','Google & email':'link','AI connection':'cpu',Display:'sun',Notifications:'bell','Privacy & data':'shield','App permissions':'fingerprint-pattern','Redeem code':'gift','Manage plan':'credit-card','Sign out':'log-out'};
     for(const page of out.stack)for(const section of page.groups||[])for(const row of section.rows||[])if(row.kNav){row.lucideIcon='/icons/lucide/'+(row.licenseComponent?'file-text':settingsIcons[row.label]||'sliders-horizontal')+'.svg';row.hasLucideIcon=!row.isTextSize;row.hasIcon=false;row.hasTile=false;}
     // Stable identities keep focused controls attached while async groups change.
     for(const page of out.stack){

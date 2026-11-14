@@ -5,9 +5,9 @@ const upstreamPin=JSON.parse(readFileSync(new URL('../../upstream.lock.json',imp
 // Real rendered Settings; only the Android IPC boundary is synthetic. These prove the renderer's
 // contract (what it reads, shows and sends). Emulator readback lives in SettingsRolesInstrumentedTest.
 // updates: AlphaDevice.checkForUpdate's answers in order: a manifest, null for a 404 (nothing published), or 'fail'.
-type Options={launcher?:boolean;decline?:number;updates?:Array<object|null|'fail'>};
+type Options={launcher?:boolean;decline?:number;updates?:Array<object|null|'fail'>;carrier?:object};
 async function nativeStub(page:Page,options:Options={}){
- await page.addInitScript(({launcher,decline,updates,upstreamPin})=>{
+ await page.addInitScript(({launcher,decline,updates,upstreamPin,carrier})=>{
   const w=window as any;w.androidBridge={};
   try{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));}catch{/* covered elsewhere */}
   const now=Date.now(),store=new Map<string,string>();
@@ -16,7 +16,7 @@ async function nativeStub(page:Page,options:Options={}){
   const answers=[...updates];
   const listeners:Array<{plugin:string;event:string;callback:(value:unknown)=>void}>=[];
   // Native events (appResumed) arrive through Capacitor's callback channel.
-  w.settingsFixture={calls:[] as any[],shared:[] as string[],resume:()=>listeners.filter(l=>l.plugin==='DailyApps'&&l.event==='appResumed').forEach(l=>l.callback({}))};
+  w.settingsFixture={calls:[] as any[],shared:[] as string[],resume:()=>listeners.filter(l=>l.plugin==='DailyApps'&&l.event==='appResumed').forEach(l=>l.callback({})),pauseCarrier:()=>listeners.filter(l=>l.plugin==='AlphaCarrierSetup'&&l.event==='foregroundEnded').forEach(l=>l.callback({}))};
   const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
   w.Capacitor={
    PluginHeaders:[
@@ -25,7 +25,8 @@ async function nativeStub(page:Page,options:Options={}){
     {name:'Agent',methods:methods(['getStatus','setGoogleAgentAccess'])},
     {name:'AlphaConnection',methods:methods(['secureRead','secureWrite','secureCompareExchange','secureRemove','addListener','removeListener'])},
     {name:'ElizaSystem',methods:methods(['getStatus','requestRole','getDeviceSettings','getBuildInfo'])},
-    {name:'AlphaDevice',methods:methods(['snapshot','crashLog','clearCrashLog','recordRendererFailure','diagnosticsFacts','shareDiagnostics','openSettings','checkForUpdate','installUpdate'])},
+    {name:'AlphaCarrierSetup',methods:[...methods(['read','readEid','openSettings']),{name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'}]},
+    {name:'AlphaDevice',methods:methods(['copyText','snapshot','crashLog','clearCrashLog','recordRendererFailure','diagnosticsFacts','shareDiagnostics','openSettings','checkForUpdate','installUpdate'])},
     {name:'DailyApps',methods:[{name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'}]},
    ],
    nativeCallback:(plugin:string,method:string,options:any,callback:(value:unknown)=>void)=>{if(method==='addListener'){listeners.push({plugin,event:options?.eventName,callback});return String(listeners.length);}return '0';},
@@ -47,7 +48,9 @@ async function nativeStub(page:Page,options:Options={}){
      if(method==='requestRole'){if(declines>0){declines--;return {role:input.role,held:false,resultCode:0};}roles[input.role]={held:true,holders:[]};return {role:input.role,held:true,resultCode:-1};}
      if(method==='getDeviceSettings')return {volumes:[]};
     }
+    if(plugin==='AlphaCarrierSetup'){if(method==='read'&&carrier)return carrier;if(method==='readEid')return {status:'available',value:'89012345678901234567890123456789'};if(method==='openSettings')return {specific:true};throw Error('Carrier read unavailable');}
     if(plugin==='AlphaDevice'){
+     if(method==='copyText')return {};
      if(method==='snapshot')return {readAt:now,model:'Fixture phone',manufacturer:'Fixture',appVersion:'0.1.0',androidRelease:'16',build:'fixture',securityPatch:'2026-09-05',permissions:{Microphone:true,Location:false,Camera:false,Calendar:true},locationAccess:'denied',batteryPercent:64,charging:false,powerSave:false,wifiActive:true,cellularActive:false,...(updates.length?{appVersionCode:7,appSigner:'5c'.repeat(32)}:{})};
      // Each check settles after 300 ms, so a second start or resume can arrive while it runs.
      if(method==='checkForUpdate'){const next=answers.shift();await new Promise(settle=>setTimeout(settle,300));if(next===undefined||next==='fail')throw Error('Update unavailable');return next===null?{}:{manifest:JSON.stringify(next)};}
@@ -61,7 +64,7 @@ async function nativeStub(page:Page,options:Options={}){
     throw Error('Unexpected native operation '+plugin+'.'+method);
    },
   };
- },{launcher:options.launcher??true,decline:options.decline??0,updates:options.updates??[],upstreamPin});
+ },{launcher:options.launcher??true,decline:options.decline??0,updates:options.updates??[],upstreamPin,carrier:options.carrier});
 }
 const settings=async(page:Page,query='')=>{await page.goto(`/${query}`);await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.locator('html')).toHaveAttribute('data-active-view','settings');};
 const general=async(page:Page)=>{await app(page).getByRole('button',{name:'General',exact:true}).click();};
@@ -193,4 +196,34 @@ test('a browser build never checks for updates',async({page})=>{
  await page.waitForTimeout(500);
  expect(await saved(page)).toBeNull();
  await expect(app(page).getByRole('button',{name:'Check for updates',exact:true})).toHaveCount(0);
+});
+
+
+test('Carrier setup reads real boundary facts only on demand, copies one IMEI and forgets it on leaving',async({page})=>{
+ const value=(value:string)=>({status:'available',value});
+ await nativeStub(page,{carrier:{status:'ready',aospImage:true,canChooseSms:true,smsRole:value('Alpha Phone is not the default SMS app'),modemCount:value('2'),eid:{status:'not-read'},hardware:{manufacturer:value('Fixture'),model:value('Fixture device'),device:value('fixture'),android:value('17'),baseband:{status:'unavailable'}},slots:[{slotIndex:0,imei:value('123456789012345'),simState:value('No SIM')},{slotIndex:1,imei:{status:'permission-denied'},simState:value('No SIM')}],subscriptions:{status:'available',items:[]}}});
+ await settings(page);await general(page);
+ await app(page).getByRole('button',{name:'Carrier & SIM setup',exact:true}).click();
+ expect(await calls(page,'AlphaCarrierSetup','read')).toBe(0);
+ await app(page).getByRole('button',{name:'Show identifiers',exact:true}).click();
+ await expect(app(page).getByRole('button',{name:'Copy IMEI 1',exact:true})).toContainText('123456789012345');
+ await expect(app(page).getByText('Access denied by Android',{exact:true})).toBeVisible();
+ await expect(app(page).getByText('No active subscription reported',{exact:true})).toBeVisible();
+ expect(await calls(page,'AlphaCarrierSetup','readEid'),'EID never delays the initial IMEI read').toBe(0);
+ await app(page).getByRole('button',{name:'Copy IMEI 1',exact:true}).click();
+ expect(await page.evaluate(()=>(window as any).settingsFixture.calls.filter((call:any)=>call.method==='copyText').map((call:any)=>call.input))).toEqual([{text:'123456789012345'}]);
+ await app(page).getByRole('button',{name:'Read eSIM EID (optional)',exact:true}).click();
+ await expect(app(page).getByRole('button',{name:'Copy EID (eSIM)',exact:true})).toContainText('89012345678901234567890123456789');
+ await page.getByRole('button',{name:'Back to General',exact:true}).click();
+ await app(page).getByRole('button',{name:'Carrier & SIM setup',exact:true}).click();
+ await expect(app(page).getByRole('button',{name:'Show identifiers',exact:true})).toBeVisible();
+ await expect(app(page).getByText('123456789012345',{exact:true})).toHaveCount(0);
+ await page.evaluate(()=>(window as any).settingsFixture.resume());
+ expect(await calls(page,'AlphaCarrierSetup','read'),'resume does not fetch identifiers').toBe(1);
+ await app(page).getByRole('button',{name:'Show identifiers',exact:true}).click();
+ await expect(app(page).getByRole('button',{name:'Copy IMEI 1',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).settingsFixture.pauseCarrier());
+ await expect(app(page).getByRole('button',{name:'Show identifiers',exact:true})).toBeVisible();
+ await expect(app(page).getByText('123456789012345',{exact:true})).toHaveCount(0);
+ expect(await page.evaluate(()=>Object.values(localStorage).some(value=>/123456789012345|89012345678901234567890123456789/.test(String(value))))).toBe(false);
 });

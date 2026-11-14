@@ -318,6 +318,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaMailAttachmentsPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
+  registerPlugin(AlphaCarrierSetupPlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaCloudSignInPlugin.class);
   registerPlugin(AlphaLocalAgentPlugin.class);

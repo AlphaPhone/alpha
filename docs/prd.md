@@ -35,7 +35,7 @@ Keep prototype styling and identity separate from real data/capability claims.
 | AP-09 | Gmail, Calendar and reviewed cross-app mail attachments | P1; incremental Gmail scopes, real delivery, optional Google Calendar connection and explicit local-first sync, availability semantics, durable deletion Undo and source/account isolation; Cloud Calendar remains separate from native Calendar access |
 | AP-10 | Browser, camera, full permitted Photos, Cloud Maps on Google Maps Platform (P-64), Notes and Files | P1; normal third-party cookies allowed, ephemeral private tabs, eligible autofill, native secure camera, agent Maps controls with Google attribution and caching terms (P-64), local speech by default (P-60), canonical Notes records (P-59) with three-day Trash; no app-data import/export |
 | AP-11 | Resident workflows, approvals and run history | P1; bounded permissions, durable receipts, missed recovery, owner-return notices and no powered-off execution |
-| AP-12 | Settings, subscriptions, permissions, local or cloud STT and TTS switches (P-60), system shade and reset | P0; truthful state, responsive controls, no backup/import/export, confirmed private-data reset |
+| AP-12 | Settings, subscriptions, permissions, local or cloud STT and TTS switches (P-60), system shade, on-demand carrier/SIM activation details and reset | P0; truthful state, responsive controls, no backup/import/export, confirmed private-data reset |
 | AP-13 | Wallet | Deferred: removed from MVP; views, native adapters and agent actions remain disabled in both distributions |
 | AP-14 | Pixel 10a Android 17 image, signing, listening and unattended update/recovery (P-75) | Release gate; exact input/signer lock; release keys as GitHub Actions secrets for a CI signing job, certificates for Alpha Compute, first versionName 0.1.0 (P-58); Cuttlefish boot and physical hardware/OTA/user qualification separate; unlocked pilot units are not production-representative (P-70); Shaw release owner |
 | AP-15 | Accessibility and resilience across intentional responsive layouts | P0; large text, TalkBack, keyboard, rotation, process death, permission loss, offline and repeated HOME |
@@ -64,3 +64,12 @@ and deferred Phone/SMS/Contacts. The approval itself changes no runtime or quali
 APK builds, native emulator/HOME checks, full AOSP boot, real services, physical
 hardware and user acceptance remain distinct. No existing failure is retired by
 changing the prose.
+
+
+Carrier setup must read actual device IMEIs independently of SIM activation when
+Android permits access, show per-field denial/unavailable states and provide
+Android Settings recovery. Identifier reads require an explicit foreground,
+unlocked action; values are cleared on leaving/backgrounding and never become
+routine snapshots, diagnostics, saved shell state or agent context. EID is an
+optional separate read. These surfaces do not establish hardware/carrier or
+activation acceptance.

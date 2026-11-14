@@ -5,6 +5,9 @@
       (AlphaImageCapabilities.aospImage). A sideloaded launcher APK declares them but never asks for them. -->
  <uses-permission android:name="android.permission.READ_CONTACTS" />
  <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+ <!-- Optional signature grant for the system image. A normal launcher install cannot grant this
+      permission; Carrier setup reports per-field denial and opens Android identifiers instead. -->
+ <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" tools:ignore="ProtectedPermissions" />
  <!-- SMS/MMS provider reads and reviewed native sends (#421), on the verified image only. Both are
       hard-restricted: Android grants them to the preinstalled image app or the SMS role holder, never
       to a sideloaded launcher APK. AlphaTelephonyPlugin requests them only on the verified image. -->
