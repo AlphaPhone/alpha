@@ -2143,10 +2143,10 @@
     }
   ],
   "currentUpstream": {
-    "revision": "98518de8c7737cfce9db88c028c5129829e0b9f8",
+    "revision": "0f79d23142ada138b8a12be6d3378b808c4102b3",
     "classification": "current-upstream-formal-specifications",
     "models": [],
-    "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof.",
+    "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate.",
     "quintSidecars": [
       {
         "path": "plugins/plugin-native-action-journal/quint/DeletionOwnerAdmission.cases.json",
@@ -2202,6 +2202,21 @@
         "path": "packages/agent/quint/check-trigger-recovery.mjs",
         "gitObject": "a60b801b18b6ce9f70bf25715369cd6b4b54685b",
         "sha256": "8688f870d4fdb48e7293e0350227119260dcf64fbf924537ca20e2d58aaa2e9f"
+      },
+      {
+        "path": "plugins/plugin-native-media/quint/PhotoCropReceipt.qnt",
+        "gitObject": "b56cedca4dd60d587ac333b456ea26f238b1eb3d",
+        "sha256": "2fc362f1f83af3b65d8db15f83d3287b76866dab9a21b7b56b681b8114207520"
+      },
+      {
+        "path": "plugins/plugin-native-media/quint/PhotoCropReceipt.cases.json",
+        "gitObject": "1afdf77c189088eb563dff197c06f29081ff657a",
+        "sha256": "73263715bd5e34dc2daf0e135fcb9a576ad6f8132568d537a3a27a1440e6d629"
+      },
+      {
+        "path": "plugins/plugin-native-media/quint/PhotoCropReceipt.coverage.json",
+        "gitObject": "9f35774aa94ff65e4de24e6deb6b22eceddb2cbc",
+        "sha256": "a9774a90e0d793b89eb0ec9318267846c620c3c39ecaefb9960d07cbc54194f8"
       }
     ]
   }

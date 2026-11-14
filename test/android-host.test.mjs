@@ -145,11 +145,11 @@ test('installed resident identities stay Alpha data-compatibility names', () => 
  const host = residentHostIdentity({packageName: identity.appId, ...descriptor.residentHost});
  assert.deepEqual(host.sockets, {agent: `${identity.appId}.agent.v1`, inference: `${identity.appId}.inference.v1`, secureStore: `${identity.appId}.secure-store`});
  assert.equal(host.notification.smallIcon, 'notification_icon');
- // The earlier service always offered Stop in its native notification. Keep that policy explicit.
- assert.equal(host.notification.primaryAction, 'stop');
+ // The resident notification is informational and exposes no Stop action.
+ assert.equal(host.notification.primaryAction, 'none');
  const residentSource = fs.readFileSync(path.join(ROOT, 'vendor/eliza/packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaAgentService.java'), 'utf8');
  const generatedResident = rewriteResidentClass('ElizaAgentService', residentSource, host);
- assert.match(generatedResident, /NOTIFICATION_PRIMARY_ACTION = "stop";/);
+ assert.match(generatedResident, /NOTIFICATION_PRIMARY_ACTION = "none";/);
  for (const name of Object.values(host.notification.strings)) assert.ok(generatedResident.includes(`R.string.${name}`), name);
  assert.deepEqual(host.environmentHook, {className: 'AlphaLocalAgentPlugin', method: 'configureEnvironment', unavailableStatus: 'provider-unavailable'});
  assert.deepEqual(host.lifecycleHooks, {rootPublication: {className: 'AlphaLocalAgentPlugin', method: 'publishNotificationRoot'}, ready: {className: 'AlphaCanonicalNotifications', method: 'resumeExisting'}});
