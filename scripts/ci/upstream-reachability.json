@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "head": "0f79d23142ada138b8a12be6d3378b808c4102b3",
+  "head": "35cf57828592a1ffccb5064be46ac9fb5b3746a4",
   "recordedAt": "2026-11-14",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...0f79d23142ada138b8a12be6d3378b808c4102b3",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...35cf57828592a1ffccb5064be46ac9fb5b3746a4",
   "status": "diverged",
-  "aheadBy": 100,
+  "aheadBy": 101,
   "behindBy": 1295,
   "mergeBase": "0c8d6868ae05a6100a3ed0246a5d078e783cc802",
   "pinOnlyCommits": [
@@ -406,6 +406,10 @@
     {
       "sha": "0f79d23142ada138b8a12be6d3378b808c4102b3",
       "subject": "Include existing native crop conformance driver"
+    },
+    {
+      "sha": "35cf57828592a1ffccb5064be46ac9fb5b3746a4",
+      "subject": "fix(host): remove unsupported company location from default prompt"
     }
   ],
   "pullRequests": []

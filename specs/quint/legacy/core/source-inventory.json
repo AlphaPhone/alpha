@@ -2143,7 +2143,7 @@
     }
   ],
   "currentUpstream": {
-    "revision": "0f79d23142ada138b8a12be6d3378b808c4102b3",
+    "revision": "35cf57828592a1ffccb5064be46ac9fb5b3746a4",
     "classification": "current-upstream-formal-specifications",
     "models": [],
     "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate.",
