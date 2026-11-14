@@ -82,6 +82,10 @@ body:has([data-alpha-layer="conversation"][aria-hidden="false"]) .alpha-plan-not
 .alpha-cloud-sign-in>header{display:block}
 .alpha-cloud-sign-in h1{margin:0 0 28px}
 .alpha-auth-methods,.alpha-own-keys{display:flex;flex-direction:column;gap:var(--alpha-gap)}
+.alpha-auth-network{margin-bottom:var(--alpha-gap);padding:12px 16px;border:1px solid var(--connection-line,#dedede);border-radius:12px}
+.alpha-auth-network p{margin:0}
+.alpha-auth-network .alpha-btn{width:auto;padding-inline:0}
+.alpha-auth-method-note{margin:0;font-size:.875rem;line-height:1.35}
 .alpha-cloud-sign-in form{display:flex;flex-direction:column;gap:var(--alpha-gap);margin:0}
 /* The own-keys form is the same form on the sign-in page and in Settings › AI provider. */
 .alpha-cloud-sign-in label,.alpha-connection .alpha-own-keys label{font-size:14px;font-weight:500;margin:0;gap:8px;color:var(--connection-fg,#000)}

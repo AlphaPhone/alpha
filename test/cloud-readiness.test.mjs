@@ -63,7 +63,7 @@ function cloud({ registration, overrides = {} }) {
   const document = { title: "Terms", revision: "2026-10-01", sections: [{ title: "Use", paragraphs: ["Text."] }] };
   const answers = {
     "/api/v1/app-auth/mobile/config": () => json(200, { success: true, clientId: registration.clientId, environment: registration.environment, redirectUri: registration.callback, codeChallengeMethod: "S256" }),
-    "/steward/auth/providers": () => json(200, { ok: true, email: true, sms: false, google: true, googleNative: true }),
+    "/steward/auth/providers": () => json(200, { ok: true, email: true, sms: true, google: true, googleNative: true }),
     "/steward/auth/email/code/send": () => json(400, { ok: false, error: "email is required" }),
     "/steward/auth/oauth/google/authorize": () => ({ status: 302, headers: new Headers({ location: "https://accounts.google.com/o/oauth2/v2/auth?x=1" }), text: async () => "" }),
     "/.well-known/assetlinks.json": () => json(200, statement),
@@ -87,7 +87,7 @@ test("a fully configured deployment passes every checkable gate with one request
   const { calls, fetchImpl } = cloud({ registration });
   const gates = await probe(registration, { fetchImpl });
   assert.deepEqual(gates.map(row => [row.gate, row.step, row.passed]), [
-    ["registration", "H-11", true], ["email sign-in", "H-12", true], ["native Google", "H-12", true], ["browser return", "H-12", true],
+    ["registration", "H-11", true], ["email sign-in", "H-12", true], ["phone sign-in", "H-12", true], ["native Google", "H-12", true], ["browser return", "H-12", true],
     ["App Links", "H-13", true], ["callback page", "H-13", true], ["service documents", "H-14", true], ["entitlement keys", "H-15", true],
     ["Maps route", "H-16", null], ["Google connector", "H-17", null],
   ]);
@@ -103,6 +103,7 @@ test("a fully configured deployment passes every checkable gate with one request
   const email = calls.find(call => call.url.pathname === "/steward/auth/email/code/send");
   assert.equal(email.method, "POST");
   assert.equal(email.body, "{}", "the email route probe names no address, so no email can be sent");
+  assert.ok(calls.every(call => !call.url.pathname.includes("/auth/sms/")), "the phone gate uses only provider discovery");
   const authorize = calls.find(call => call.url.pathname === "/steward/auth/oauth/google/authorize").url.searchParams;
   assert.equal(authorize.get("redirect_uri"), registration.callback);
   assert.equal(authorize.get("tenant_id"), registration.tenant);
@@ -131,6 +132,7 @@ test("each observed deployment gap fails its own gate and names its step", async
   assert.deepEqual(gates.filter(row => row.passed !== false).map(row => [row.gate, row.passed]), [["callback page", true], ["Maps route", null], ["Google connector", null]]);
   assert.match(byGate.registration.detail, /HTTP 503: Configured mobile App Auth app is not active and approved/);
   assert.match(byGate["email sign-in"].detail, /not offered \(or behind a captcha\)/);
+  assert.match(byGate["phone sign-in"].detail, /SMS not offered/);
   assert.match(byGate["native Google"].detail, /STEWARD_GOOGLE_NATIVE_CLIENT_IDS/);
   assert.match(byGate["browser return"].detail, /redirect_uri is not allowed for this tenant/);
   assert.match(byGate["App Links"].detail, /release certificate is not recorded yet/);
@@ -150,6 +152,17 @@ test("each observed deployment gap fails its own gate and names its step", async
   const down = await probe(registration, { fetchImpl: async () => { throw new Error("getaddrinfo ENOTFOUND"); } });
   assert.ok(down.every(row => row.passed === false || (row.passed === null && ["Maps route", "Google connector"].includes(row.gate))));
   assert.match(down[0].detail, /unreachable \(getaddrinfo ENOTFOUND\)/);
+});
+
+test("an SMS captcha closes the phone gate independently of email", async () => {
+  const registration = { ...productRegistration(root, "production"), signerSha256: RELEASE };
+  const { fetchImpl } = cloud({ registration, overrides: {
+    "/steward/auth/providers": () => Response.json({ email: true, sms: true, google: true, googleNative: true, captcha: { enabled: true, requiredFor: ["sms_otp"] } }),
+  } });
+  const gates = Object.fromEntries((await probe(registration, { fetchImpl })).map(row => [row.gate, row]));
+  assert.equal(gates["email sign-in"].passed, true);
+  assert.equal(gates["phone sign-in"].passed, false);
+  assert.match(gates["phone sign-in"].detail, /captcha Alpha cannot complete/);
 });
 
 test("staging, which serves only debug-signed test-mocks builds, needs some grant unless a build's certificate is named", async () => {
@@ -184,7 +197,7 @@ test("the CLI prints registration values offline, probes through an injected fet
   const code = await main(["probe", "--json"], { ...io, fetchImpl });
   // The committed release signer decides the App Links gate: it stays open until H-09 records it.
   assert.equal(code, registration.signerSha256 === "unset" ? 1 : 0);
-  assert.equal(JSON.parse(out.pop()).gates.length, 10);
+  assert.equal(JSON.parse(out.pop()).gates.length, 11);
   // Account rows never fail the exit code: everything checkable passing exits 0.
   const released = cloud({ registration: { ...registration, signerSha256: RELEASE } });
   const releasedRoot = fixtureRoot(t, RELEASE);

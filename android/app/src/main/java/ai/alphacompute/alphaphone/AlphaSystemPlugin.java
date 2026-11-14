@@ -5,12 +5,18 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.Settings;
 import ai.eliza.plugins.system.SystemLauncherApps;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
@@ -19,18 +25,49 @@ import com.getcapacitor.annotation.Permission;
 /** Product policy stays in Alpha; shared System behavior is unchanged for other hosts. */
 @CapacitorPlugin(name="ElizaSystem",permissions={@Permission(alias="camera",strings={Manifest.permission.CAMERA})})
 public final class AlphaSystemPlugin extends ai.eliza.plugins.system.SystemPlugin {
+ private ConnectivityManager connectivity;
+ private ConnectivityManager.NetworkCallback networkWatch;
+
+ @Override public void load(){
+  super.load();
+  connectivity=getContext().getSystemService(ConnectivityManager.class);
+  if(connectivity==null)return;
+  ConnectivityManager.NetworkCallback watch=new ConnectivityManager.NetworkCallback(){
+   private void changed(){if(networkWatch==this)notifyListeners("networkStatusChanged",new JSObject());}
+   @Override public void onAvailable(Network network){changed();}
+   @Override public void onLost(Network network){changed();}
+   @Override public void onCapabilitiesChanged(Network network,NetworkCapabilities capabilities){changed();}
+  };
+  try{
+   connectivity.registerDefaultNetworkCallback(watch,new Handler(Looper.getMainLooper()));
+   networkWatch=watch;
+  }catch(RuntimeException unavailable){ /* Foreground reads still work without change notifications. */ }
+ }
+
+ @Override protected void handleOnDestroy(){
+  ConnectivityManager.NetworkCallback watch=networkWatch;
+  networkWatch=null;
+  try{
+   if(watch!=null)connectivity.unregisterNetworkCallback(watch);
+  }catch(RuntimeException unavailable){ /* The system may already have removed the callback. */ }
+  super.handleOnDestroy();
+ }
+
  /** The app's default network, rather than WebView's potentially stale navigator.onLine hint.
   * Missing fields mean Android could not answer; an unvalidated network is still connected. */
  @PluginMethod public void getNetworkStatus(PluginCall call){
-  com.getcapacitor.JSObject out=new com.getcapacitor.JSObject();
+  JSObject out=new JSObject();
   try{
-   android.net.ConnectivityManager connectivity=getContext().getSystemService(android.net.ConnectivityManager.class);
    if(connectivity!=null){
-    android.net.Network network=connectivity.getActiveNetwork();
+    Network network=connectivity.getActiveNetwork();
     out.put("connected",network!=null);
-    if(network!=null){
-     android.net.NetworkCapabilities capabilities=connectivity.getNetworkCapabilities(network);
-     if(capabilities!=null)out.put("internetValidated",capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+    if(network==null)out.put("wifiActive",false);
+    else{
+     NetworkCapabilities capabilities=connectivity.getNetworkCapabilities(network);
+     if(capabilities!=null){
+      out.put("wifiActive",capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI));
+      out.put("internetValidated",capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+     }
     }
    }
   }catch(RuntimeException unavailable){ /* Unknown connectivity must be decided by the real transport. */ }
