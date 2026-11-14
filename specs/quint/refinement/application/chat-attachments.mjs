@@ -15,14 +15,14 @@ const observation = ({saved, recorded, ...state}) => ({
 
 async function composerTraces() {
   const traces = [];
-  async function scenario(name, drive) {
+  async function scenario(name, drive, emptyText=false) {
     const f = chatAttachmentComposerFixture();
     const trace = {name, expect: observation(f.observe()), steps: []};
     async function advance(label, actions, transition) {
       await transition();
       trace.steps.push({label, action: actions, expect: observation(f.observe())});
     }
-    await advance('Actual Notes action shows the transcript chip', action('attach'), f.attach);
+    await advance('Actual Notes action shows the transcript chip', action('attach'), () => f.attach(emptyText));
     await advance('The composer holds the exact attachment save', action('prepareSend'), async () => {f.holdStorage(); await f.start();});
     assert.equal(f.inspect().connectCalls, 0);
     await drive(f, advance);
@@ -89,6 +89,13 @@ async function composerTraces() {
     await change(f, advance, 'Conversation');
     await reload(f, advance);
   });
+  await scenario('attachment-only send keeps its blank display text and restores only its owned recorded chip',async(f,advance)=>{
+    assert.equal(f.inspect().draftText,'');await complete(f,advance);
+    await advance('The actual attachment-only send receives one recording receipt',[action('confirmRecorded'),action('finish')],f.accept);
+    assert.equal(f.inspect().sendCalls,1);assert.equal(f.inspect().records[0].displayText,'');
+    assert.ok(f.inspect().records[0].requestText.includes('Please review the attached file.'));
+    await reload(f,advance);assert.equal(f.inspect().draftText,'');
+  },true);
   return traces;
 }
 

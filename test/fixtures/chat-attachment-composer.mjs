@@ -1,3 +1,4 @@
+import {IMAGE_ONLY_CHAT_FALLBACK_PROMPT} from '../../vendor/eliza/packages/core/src/chat-upload-limits.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -7,7 +8,7 @@ import {copyVoiceScrollHooks,shellVoiceScrollSource} from '../support/shell-voic
 import {recordingRevision,summarySourceOf} from '../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
 
 const adapter = new URL('../../apps/app/src/prototype/agent-adapter.ts', import.meta.url);
-export const chatAttachmentComposerSources = [import.meta.url, adapter,
+export const chatAttachmentComposerSources = [import.meta.url, adapter,new URL('../../vendor/eliza/packages/core/src/chat-upload-limits.ts',import.meta.url),
   new URL('../support/strip-types.mjs', import.meta.url),new URL('../support/shell-voice-scroll.mjs', import.meta.url),shellVoiceScrollSource,new URL('../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts', import.meta.url)].map(fileURLToPath);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const prompt = 'Summarize this for me';
@@ -20,6 +21,7 @@ function between(source, start, end) {
 }
 
 export function chatAttachmentComposerFixture() {
+  let retirementGate;
   const source = readFileSync(adapter, 'utf8');
   const code = stripTypeScriptTypes([
     between(source, 'class NotDispatched extends Error', '\n'),
@@ -81,7 +83,7 @@ export function chatAttachmentComposerFixture() {
   copyVoiceScrollHooks(shell);
   shell.refreshDraftBinding = () => {shell.composerDraft.binding = key();};
   const ports = {
-    Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
+    IMAGE_ONLY_CHAT_FALLBACK_PROMPT, Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
     crypto: {randomUUID: () => `request-${++request}`},
     browserDocuments: {
       async edit(name, update) {
@@ -96,7 +98,7 @@ export function chatAttachmentComposerFixture() {
       },
       async read(name) {return stored.get(name) ?? null;},
     },
-    connectionController: {getSnapshot: snapshot, subscribe(callback) {listener = callback; return () => {};},
+    connectionController: {getSnapshot: snapshot,getCloudClient:()=>null, subscribe(callback) {listener = callback; return () => {};},
       captureViewNavigation: () => ({}), getSelectedConversationId: () => history.conversationId},
     alphaClient: {
       getState: () => ({context: {revision: 1, view: 'notes'}}), disconnect() {},
@@ -130,12 +132,15 @@ export function chatAttachmentComposerFixture() {
   }
 
   return {
-    attach() {
+    attach(emptyText=false) {
       actual.attachTranscript.call(shell);
       assert.equal(shell.state.draft, prompt);
+      if(emptyText)shell.setState({draft:''});
     },
     remove() {actual.renderAttachments.call(shell).removeTranscript();},
-    async start() {let settled=false;task = actual.send.call(shell);task.then(()=>{settled=true;},()=>{settled=true;});const deadline=Date.now()+5000;while(!settled&&!connections.length&&!storageGate){assert.ok(Date.now()<deadline,'Send reaches its controlled wait');await tick();}},
+    holdRetirement(){shell.stopVoiceConversation=()=>new Promise(resolve=>{retirementGate=resolve;});},
+    async completeRetirement(){assert.ok(retirementGate);const finish=retirementGate;retirementGate=undefined;finish();await task;},
+    async start() {let settled=false;task = actual.send.call(shell);task.then(()=>{settled=true;},()=>{settled=true;});const deadline=Date.now()+5000;while(!settled&&!connections.length&&!storageGate&&!retirementGate){assert.ok(Date.now()<deadline,'Send reaches its controlled wait');await tick();}},
     async refuse() {
       assert.equal(connections.length, 1, 'One closed connection attempt was admitted');
       connections.shift().reject(Error('Synthetic pre-dispatch refusal'));

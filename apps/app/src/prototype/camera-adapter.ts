@@ -1034,11 +1034,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     await session.exclusive(async token=>{
       shutterFlash(owner);
       const alpha=owner.get('camera').mode==='alpha';
+      const attachmentBinding=JSON.stringify([connectionController.getSnapshot().session,connectionController.getSelectedConversationId()]);
       try {
         const photo=await writePhoto(owner,!alpha);
-        if(alpha&&photo.id&&session.current(token)&&owner.isActive()&&owner.get('camera').mode==='alpha'){
+        if(alpha&&photo.id&&session.current(token)&&owner.isActive()&&owner.get('camera').mode==='alpha'&&attachmentBinding===JSON.stringify([connectionController.getSnapshot().session,connectionController.getSelectedConversationId()])){
           owner.open('photos',{tab:'lib',album:null,open:photo.id,nativePhotoSelection:captureSelection(photo),chrome:true});
-          owner.attachCameraPhoto(photo.id,photo.image);
+          owner.attachCameraPhoto(photo.id,photo.image,"What's this?");
         }
       }
       catch { if (session.current(token)) message('Photo not saved. Try again.'); }
@@ -1201,6 +1202,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     // The viewfinder stays black until the first real frame, then fades to the preview.
     data.bg = 'transparent'; data.vfBg = ready ? 'transparent' : '#000000'; data.vfOp = 1;
     data.zoomCss = ''; data.rec = session.recording; data.recTime = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`;
+    data.alphaCaptureBusy=st.mode==='alpha'&&session.busy;
     data.shutter = () => { void capture(); };
     data.ask = () => {
       if (!askCameraFrame(currentApi)) message(ready ? 'Finish the current capture, then ask again.' : 'Start the camera first.');

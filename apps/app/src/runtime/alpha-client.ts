@@ -372,7 +372,7 @@ export class AlphaClient {
     },signal,automatic);
   }
   async send(text: string, onText?:import('./local-agent-stream').StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal;images?:Array<{data:string;mimeType:string;name:string}>}): Promise<AgentReply> {
-    if (!text.trim()) throw new Error("Enter a message.");
+    if (!text.trim()&&!options?.images?.length) throw new Error("Enter a message or attach a file.");
     if(options?.channelType==='VOICE_DM'&&replyTo)throw Error("A voice turn cannot resend or edit a selected message.");
     return this.run(async (transport, context, signal) => {
       let accepting=true;let result:AgentReply;

@@ -62,7 +62,7 @@ export function installChatTools(Component: {prototype: Shell}) {
           throw Error(`Choose supported photos or documents, up to ${MAX_CHAT_IMAGES} attachments.`);
         if (!shell.live || binding() !== owner || shell.fileAttachments !== existing || shell.composerDraft?.holding) return;
         shell.fileAttachments = [...existing, ...result.attachments.map(file => ({...file, id:crypto.randomUUID()}))];
-        shell.setState((state: Shell) => ({chat:'sheet', draft:String(state.draft||'').trim() ? state.draft : 'Summarize this for me'}));
+        shell.setState({chat:'sheet'});
       } catch (error) {
         if (shell.live && binding() === owner) shell.toast(error instanceof Error ? error.message : 'The attachment could not open.');
       } finally {if(shell.live){shell.chatFileBusy=false;shell.setState({});}}
@@ -119,7 +119,10 @@ export function installChatTools(Component: {prototype: Shell}) {
         if (target) {target.classList.add('alpha-search-hit');setTimeout(() => target.classList.remove('alpha-search-hit'), 1800);}
       }));
     };
+    const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
+    if(turning)this.chatToolsOpen=false;
     output.chatTools = {
+      visible:!turning,
       open: !!this.chatToolsOpen,
       disabled: !!this.draftSendPending || !!this.composerDraft?.holding || !!this.S().typing || !!this.chatFileBusy,
       fileBusy:!!this.chatFileBusy,

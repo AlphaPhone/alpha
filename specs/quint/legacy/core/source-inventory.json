@@ -2143,7 +2143,7 @@
     }
   ],
   "currentUpstream": {
-    "revision": "35cf57828592a1ffccb5064be46ac9fb5b3746a4",
+    "revision": "7a1afe1ded2725fa3268637feb64b20b95052286",
     "classification": "current-upstream-formal-specifications",
     "models": [],
     "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate.",
@@ -2217,6 +2217,21 @@
         "path": "plugins/plugin-native-media/quint/PhotoCropReceipt.coverage.json",
         "gitObject": "9f35774aa94ff65e4de24e6deb6b22eceddb2cbc",
         "sha256": "a9774a90e0d793b89eb0ec9318267846c620c3c39ecaefb9960d07cbc54194f8"
+      },
+      {
+        "path": "plugins/plugin-elizacloud/quint/NativeImageOperation.qnt",
+        "gitObject": "d6bdb85a1b99985b6544bd37f5473036f4510255",
+        "sha256": "79e930c996390fcdb7f9f24cb6e5a4b183459e79a3e4e48e4f18922a55e83856"
+      },
+      {
+        "path": "plugins/plugin-elizacloud/quint/NativeImageOperation.cases.json",
+        "gitObject": "cbcea5daef238acc832a2ae7b86419f9c76373f0",
+        "sha256": "77b495dc5d8f08be24c2f98c97d003e7c38d11fb86272b9293dd30eb09cc5532"
+      },
+      {
+        "path": "plugins/plugin-elizacloud/quint/check-native-image-operation.mjs",
+        "gitObject": "840c986828c22a33226c8e8c2422ac49ac019578",
+        "sha256": "6299dcf236dbc63f2e1573e4bcd56b776a99eea4f3d31520292e405e5d5e0789"
       }
     ]
   }

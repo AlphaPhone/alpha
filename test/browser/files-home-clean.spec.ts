@@ -1,0 +1,5 @@
+import {test,expect} from '@playwright/test';
+test('Files keeps root folders inside Internal storage and preserves their contents',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByLabel('Files tools',{exact:true}).click();await page.getByRole('button',{name:'New folder',exact:true}).click();const dialog=page.getByRole('dialog',{name:'New folder',exact:true});await dialog.getByRole('textbox',{name:'Name',exact:true}).fill('QA home folder');await dialog.getByRole('button',{name:'Create',exact:true}).click();await expect(dialog).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'QA home folder',exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Internal storage',exact:true}).click();await expect(page.getByRole('button',{name:'Open QA home folder',exact:true})).toBeVisible();await page.getByRole('button',{name:'Open QA home folder',exact:true}).click();await expect(page.getByRole('heading',{name:'QA home folder',exact:true})).toBeVisible();
+});

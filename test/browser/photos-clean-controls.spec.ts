@@ -39,6 +39,10 @@ test('Camera cover, menu selection, info swipe and photo chat share use the save
  await page.getByRole('button',{name:'Preview attached photo',exact:true}).click();
  const preview=page.getByRole('dialog',{name:'Image preview',exact:true}),image=page.getByAltText('Attached image preview');
  await expect(preview).toBeVisible();
+ await page.evaluate(()=>document.documentElement.style.setProperty('--native-top-inset','58px'));
+ const closeButton=page.getByRole('button',{name:'Close image preview',exact:true});await expect.poll(()=>closeButton.evaluate(e=>{const screen=e.closest('[data-screen]')!.getBoundingClientRect();return e.getBoundingClientRect().top-screen.top;})).toBeGreaterThanOrEqual(69);
+ expect(await closeButton.evaluate(e=>getComputedStyle(e).webkitTapHighlightColor)).toBe('rgba(0, 0, 0, 0)');
+
  const coverage=await page.locator('.chat-image-preview').evaluate(el=>{
   const screen=el.closest('[data-screen]')!.getBoundingClientRect(),box=el.getBoundingClientRect();
   const bottom=document.elementFromPoint(screen.x+screen.width/2,screen.bottom-10);

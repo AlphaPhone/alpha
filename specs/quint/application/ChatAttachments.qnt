@@ -1,3 +1,4 @@
+/// Draft means an attachment, independent of typed text; actual conformance covers blank text.
 /// Composer attachment custody and history restoration for a bounded set of bindings.
 module ChatAttachments {
   type State = { owner: int, conversation: int, draft: bool, pending: bool,

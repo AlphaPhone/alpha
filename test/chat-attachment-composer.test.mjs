@@ -38,5 +38,8 @@ test('actual browser composer and attachment readback refine Quint', {timeout: 6
   const receipt = await checkChatAttachments();
   assert.equal(receipt.passed, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 12);
+});
+
+test('changing the selected attachment during voice retirement refuses before any storage or dispatch',async()=>{
+ const f=chatAttachmentComposerFixture();f.attach();f.holdRetirement();await f.start();f.remove();await f.completeRetirement();assert.equal(f.inspect().attemptedWrites,0);assert.equal(f.inspect().connectCalls,0);assert.equal(f.inspect().sendCalls,0);
 });

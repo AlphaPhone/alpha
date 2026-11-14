@@ -1,3 +1,4 @@
+import {IMAGE_ONLY_CHAT_FALLBACK_PROMPT} from '@elizaos/core/protocol';
 import {createImagePreview} from '../runtime/image-preview';
 import type {VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
@@ -1344,9 +1345,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
     api.openReviewedWebSource=(url:string,signal:AbortSignal)=>this.browserNavigateApproved(url,signal);
-    api.attachCameraPhoto=(id:string,image:string)=>{
+    api.attachCameraPhoto=(id:string,image:string,prefill?:string)=>{
+      if(this.messageEditTarget||this.draftSendPending||this.composerDraft?.holding){this.toast('Finish or cancel the current message first.');return false;}
       this.cameraAttachment={id,image};
-      this.setState({chat:'sheet',shade:false});
+      this.setState((previous:Shell)=>({chat:'sheet',shade:false,...(prefill&&!String(previous.draft||'').trim()?{draft:prefill}:{})}));return true;
     };
     api.composeTranscriptQuestion=(noteId:string,title:string)=>{
       context(this);
@@ -1498,7 +1500,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.canStopReply=!!this.S().typing&&alphaClient.getState().pending;
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
     const turn=!!this.S().typing;
-    out.sendVisible=!!out.hasDraft&&!turn;out.talkVisible=!!out.noDraft&&!turn;out.replyIdle=!turn;
+    const attached=!this.messageEditTarget&&!!(this.cameraAttachment||this.fileAttachments?.length||this.transcriptAttachment||this.mailAttachment);
+    out.sendVisible=(!!out.hasDraft||attached)&&!turn;out.talkVisible=!!out.noDraft&&!attached&&!turn;out.replyIdle=!turn;
     out.stopReply=()=>{connectionController.cancelViewNavigation();alphaClient.cancel();};
     if (isAndroid) {
       out.showStatus = false; out.showIndicator = false;
@@ -1658,19 +1661,22 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   };
   p.send = async function (argument?: string, expectedSession?: {sessionId:string;agentId:string;ownerId:string;origin:string}, focusAfterCommit?:()=>void) {
     const before=this.S(),reply=this.messageReplyTarget,edit=this.messageEditTarget;
+    const attachments=()=>[this.cameraAttachment??null,this.fileAttachments?.length?this.fileAttachments:null,this.transcriptAttachment??null,this.mailAttachment??null];
+    const initialAttachments=argument===undefined?attachments():null;
     const sendBinding=()=>JSON.stringify([connectionController.getSnapshot().session,connectionController.getSnapshot().history?.conversationId,connectionController.getCloudEnvironment?.(),connectionController.getCloudClient()?.sessionId,connectionController.getCloudClient()?.credentialId]);
     if(this.stopVoiceConversation)context(this);const expectedContext=JSON.stringify(alphaClient.getState().context);
     const binding=this.stopVoiceConversation?sendBinding():undefined,draft=String(before.draft||''),view=before.view;
-    const retiring=this.stopVoiceConversation?.();if(retiring){await retiring;context(this);const now=this.S();if(JSON.stringify(alphaClient.getState().context)!==expectedContext||!this.live||document.hidden||connectionController.getSnapshot().open||sendBinding()!==binding||now.view!==view||String(now.draft||'')!==draft||this.messageReplyTarget!==reply||this.messageEditTarget!==edit)return;}
+    const retiring=this.stopVoiceConversation?.();if(retiring){await retiring;context(this);const now=this.S();if(JSON.stringify(alphaClient.getState().context)!==expectedContext||!this.live||document.hidden||connectionController.getSnapshot().open||sendBinding()!==binding||now.view!==view||String(now.draft||'')!==draft||this.messageReplyTarget!==reply||this.messageEditTarget!==edit||initialAttachments&&attachments().some((item,index)=>item!==initialAttachments[index]))return;}
     let s = this.S(); const text = String(argument ?? s.draft);
-    if (!text.trim() || s.typing || this.chatFileBusy || this.draftSendPending || this.composerDraft?.holding) return;
+    const fromComposer=argument===undefined;
+    const attached=fromComposer&&!this.messageEditTarget&&!!(this.cameraAttachment||this.fileAttachments?.length||this.transcriptAttachment||this.mailAttachment);
+    if ((!text.trim()&&!attached) || s.typing || this.chatFileBusy || this.draftSendPending || this.composerDraft?.holding) return;
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
-    const fromComposer=argument===undefined;
     this.fileAttachments??=[];
     // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
-    if(!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
-    if(!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
+    if(!attached&&!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
+    if(!attached&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
     const editTarget:ConversationMessageTarget|undefined=this.messageEditTarget,replyTarget:ConversationMessageTarget|undefined=fromComposer?this.messageReplyTarget:undefined,editView=s.view;
     if(editTarget){
       // An app action must not replace or abandon the user's open edit.
@@ -1692,7 +1698,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     let mailText='';
     try{if(mail)mailText=await mail.validate();}catch(error){this.toast(error instanceof Error?error.message:'Reopen the email before sending.');return;}
     if(mail&&(this.mailAttachment??null)!==mail)return;
-    const requestText=mail?mailText+'\n\nQuestion: '+text:transcript?'Use the transcript of the selected voice note to answer this question.\n\n'+text:text;
+    const question=text.trim()?text:IMAGE_ONLY_CHAT_FALLBACK_PROMPT;
+    const requestText=mail?mailText+'\n\nQuestion: '+question:transcript?'Use the transcript of the selected voice note to answer this question.\n\n'+question:question;
     const transcriptCurrent=()=>!transcript||(this.S().view==='notes'&&JSON.stringify(this.notesSelection)===transcript.selection&&this.transcriptAttachment===transcript);
     if(!transcriptCurrent()){this.toast('The recording changed. Remove the transcript or attach it again.');return;}
     if(transcript){
@@ -1765,7 +1772,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!streamFrame&&!document.hidden)streamFrame=requestAnimationFrame(()=>{streamFrame=0;if(this.live)flushStream();});
         }
         else{streamed=true;this.setState((previous:Shell)=>({turnStatus:'',msgs:[...previous.msgs,{id:streamedId,from:'agent',text:value,card:null,streaming:true}]}));}
-      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,images:sentAttachment?(sentAttachment.fileAttachments.length||sentAttachment.cameraAttachment?[...sentAttachment.fileAttachments.map(({data,mimeType,name,thumbnail}:Shell)=>({data,mimeType,name,...(thumbnail?{thumbnail}: {})})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]:undefined):undefined});}
+      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,images:sentAttachment?(sentAttachment.fileAttachments.length||sentAttachment.cameraAttachment?[...sentAttachment.fileAttachments.map(({data,mimeType,name,thumbnail}:Shell)=>({data,mimeType,name,...(thumbnail?{thumbnail}: {})})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:sentAttachment.cameraAttachment.image.slice(5,sentAttachment.cameraAttachment.image.indexOf(';')),name:'Camera photo'}]:[])]:undefined):undefined});}
       // Before settlement, stop, or failure renders: a late frame must not overwrite the final text.
       finally{localTurnStatus.removeEventListener('label',showStatus);flushStream();}
       // Only the composer's own send holds its draft; a prompt from elsewhere never settles it.

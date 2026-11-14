@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "head": "35cf57828592a1ffccb5064be46ac9fb5b3746a4",
+  "head": "7a1afe1ded2725fa3268637feb64b20b95052286",
   "recordedAt": "2026-11-14",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...35cf57828592a1ffccb5064be46ac9fb5b3746a4",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...7a1afe1ded2725fa3268637feb64b20b95052286",
   "status": "diverged",
-  "aheadBy": 101,
+  "aheadBy": 104,
   "behindBy": 1295,
   "mergeBase": "0c8d6868ae05a6100a3ed0246a5d078e783cc802",
   "pinOnlyCommits": [
@@ -410,6 +410,18 @@
     {
       "sha": "35cf57828592a1ffccb5064be46ac9fb5b3746a4",
       "subject": "fix(host): remove unsupported company location from default prompt"
+    },
+    {
+      "sha": "066c80df4246f056f1500b967250b127e626d121",
+      "subject": "fix(cloud): retain native image funding operation across retries"
+    },
+    {
+      "sha": "408d076fa5e34e50d84920fe7452fc9ec044f97b",
+      "subject": "fix(native-agent): keep Cloud image model aligned with Qwen"
+    },
+    {
+      "sha": "7a1afe1ded2725fa3268637feb64b20b95052286",
+      "subject": "fix(native-agent): clear image model on unbound launches"
     }
   ],
   "pullRequests": []
