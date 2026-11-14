@@ -1207,14 +1207,21 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   function askCapture(selected:SavedPhoto,owner:Bag):boolean{
     if(selected.kind==='video'||selected.trashed)return false;
     closeQuestion?.();
+    const chatSession=connectionController.getSnapshot().session;
+    const conversation=connectionController.getSelectedConversationId();
+    const sameConversation=()=>connectionController.getSnapshot().session===chatSession&&connectionController.getSelectedConversationId()===conversation;
     const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
     void library.read({id:nativeId(selected.id)}).then(row=>{
       if(!current()||!captureUnchanged(selected,row)||row.kind==='video'||row.trashed){
         if(owner.isActive())owner.toast('Photo changed');
         return;
       }
+      if(!sameConversation()){
+        owner.toast('Chat changed. Choose the photo again.');
+        return;
+      }
       owner.attachCameraPhoto(selected.id,row.image);
-    }).catch(()=>{if(current())owner.toast('Couldn’t open');});
+    }).catch(()=>{if(current()&&sameConversation())owner.toast('Couldn’t open');});
     return true;
   }
 
