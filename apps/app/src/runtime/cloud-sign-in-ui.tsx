@@ -41,7 +41,7 @@ export function CloudSignInPanel({ view, busy, google, phone, showGoogle = googl
   dismissible?: boolean;
   /** The readiness probe is running; it is not an attempt the owner started. */
   probing?: boolean;
-  /** Readiness failed or was cancelled: only the reason and one retry are shown. */
+  /** Readiness failed or was cancelled. The owner can retry the full check. */
   unavailable?: boolean;
   /** Offers the owner-provided keys path instead of Cloud sign-in. */
   ownKeys?: () => void;
@@ -149,7 +149,7 @@ export function CloudSignInPanel({ view, busy, google, phone, showGoogle = googl
       {!offline && ready && missingPhone && <p id="cloud-sign-in-phone-unavailable" className="alpha-auth-method-note">Text message sign-in is currently unavailable.</p>}
       {errorLine ?? (!offline && (unavailable || noMethods) ? <p role="status">Sign-in unavailable</p> : null)}
       {!offline && actions.retry && (unavailable || noMethods || !google || missingPhone) && <div><button type="button" className="alpha-btn alpha-btn--text" disabled={busy} onClick={actions.retry}>
-        <span aria-hidden="true" style={iconStyle('rotate-cw')}/>Check sign-in options
+        <span aria-hidden="true" style={iconStyle('rotate-cw')}/>{unavailable ? 'Try again' : 'Check sign-in options'}
       </button></div>}
     </div>}
     {(view.step === 'code' || view.step === 'mfa') && <form key={`${view.step}:${view.attemptId}`} className="alpha-cloud-sign-in-code" aria-busy={busy || undefined} aria-label={view.step === 'code' ? view.phone ? 'Enter your phone code' : 'Enter your email code' : 'Enter your verification code'} onSubmit={submitCode}>
