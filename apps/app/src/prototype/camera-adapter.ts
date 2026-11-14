@@ -1,3 +1,4 @@
+import type {PhotoCropRect} from './browser-camera';
 import {platformSharingAvailable} from '../runtime/text-share';
 import {validateCameraCaptureResult,type CameraCaptureResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 // Shared camera host rules: explicit-denial classification and resume recovery that never re-prompts.
@@ -7,7 +8,6 @@ import {createCameraSession} from '../../../../.eliza/client-features/plugins/pl
 // A scanned page reaches Photos only through its explicit Keep, under one operation identity per capture.
 import {createScanCapture} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts';
 import type {CameraKeepOutcome} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
-import {reviewFileEmail} from './file-email-review';
 import {connectionController} from '../runtime/connection-ui';
 import type {MailAttachment} from '../runtime/inbox-attachment';
 import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,mediaCopyIntentDocument,type MediaCopyIntent} from '../runtime/media-copy-intent';
@@ -72,8 +72,8 @@ const nativeLibrary = registerPlugin<{
   openLibrarySettings():Promise<void>;
   listPermitted(options:{before?:string;query?:string;kind?:'all'|'image'|'video';thumbnails?:boolean;filter?:'all'|'favorites'|'trash'}):Promise<{items:SavedPhoto[];next:string;access:LibraryAccess}>;
   beginEdit(options:{id:string;revision:string}):Promise<EditPreview>;
-  previewEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string}):Promise<EditPreview>;
-  saveEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string;replace?:boolean}):Promise<EditReceipt>;
+  previewEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string;cropRect?:PhotoCropRect}):Promise<EditPreview>;
+  saveEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string;cropRect?:PhotoCropRect;replace?:boolean}):Promise<EditReceipt>;
   editResult(options:{operationId:string}):Promise<EditReceipt>;
   cancelEdit(options:{sessionId:string}):Promise<void>;
   beginVideoEdit(options:{id:string;revision:string}):Promise<{sessionId:string;operationId:string;duration:number;width:number;height:number}>;
@@ -234,12 +234,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let preview: SavedPhoto | undefined, reading = '', sharing = false;
   let photoReadEpoch=0;
   const retirePhotoRead=()=>{++photoReadEpoch;reading='';};
-  let edit: (EditPreview & {source:string;rotation:number;crop:boolean;busy:boolean;uncertain?:boolean})|undefined,editEpoch=0;
+  let edit: (EditPreview & {source:string;rotation:number;crop:boolean;cropRect?:PhotoCropRect;cropDraft?:PhotoCropRect;busy:boolean;uncertain?:boolean})|undefined,editEpoch=0;
   let editRecoveryChecked=false,copyRecovery:AbortController|undefined;
   let closeVideoEdit:(()=>void)|undefined,videoEditSource:string|undefined,nativeVideoSession:string|undefined,nativeVideoOpening:number|undefined;
   type PendingNativeVideoCopy={source:SavedPhoto;epoch:number;refresh:boolean;checkAgain:boolean;checking?:Promise<void>};
   let pendingNativeVideoCopy:PendingNativeVideoCopy|undefined;
-  function cancelEdit(){copyRecovery?.abort();copyRecovery=undefined;const oldVideo=nativeVideoSession,opening=nativeVideoOpening;nativeVideoSession=undefined;nativeVideoOpening=undefined;closeVideoEdit?.();closeVideoEdit=undefined;videoEditSource=undefined;++editEpoch;const old=edit;edit=undefined;if(old)void library.cancelEdit({sessionId:old.sessionId}).catch(()=>{});if(oldVideo||opening!==undefined)void nativeLibrary.cancelVideoEdit(oldVideo?{sessionId:oldVideo}:{}).catch(()=>{});}
+  function cancelEdit(){cropDrag=undefined;copyRecovery?.abort();copyRecovery=undefined;const oldVideo=nativeVideoSession,opening=nativeVideoOpening;nativeVideoSession=undefined;nativeVideoOpening=undefined;closeVideoEdit?.();closeVideoEdit=undefined;videoEditSource=undefined;++editEpoch;const old=edit;edit=undefined;if(old)void library.cancelEdit({sessionId:old.sessionId}).catch(()=>{});if(oldVideo||opening!==undefined)void nativeLibrary.cancelVideoEdit(oldVideo?{sessionId:oldVideo}:{}).catch(()=>{});}
   async function beginEdit(row:SavedPhoto,owner:Bag){
     if(!row.mutationRevision||edit||mutating||nativeVideoOpening!==undefined||closeVideoEdit)return;
     cancelEdit();closeVideo();const token=editEpoch;let videoSessionId:string|undefined,copyIntentChecked=false;
@@ -274,10 +274,51 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       edit={...value,source:row.id,rotation:0,crop:false,busy:false};owner.set({nativeEditRevision:Date.now()});
     }catch(error){if(videoSessionId){void nativeLibrary.cancelVideoEdit({sessionId:videoSessionId}).catch(()=>{});if(nativeVideoSession===videoSessionId)nativeVideoSession=undefined;}else if(nativeVideoOpening===token){nativeVideoOpening=undefined;void nativeLibrary.cancelVideoEdit({}).catch(()=>{});}if(current()){owner.set({nativeCopyRecovery:row.kind!=='video'||!copyIntentChecked});owner.toast(error instanceof Error?error.message:'Photo editor unavailable.');}}
   }
-  async function transformEdit(owner:Bag,rotate:boolean,chosenFilter?:string){const current=edit;if(!current||current.busy||current.uncertain)return;current.busy=true;const rotation=rotate?(current.rotation+90)%360:current.rotation,crop=chosenFilter!==undefined?current.crop:rotate?current.crop:!current.crop,filter=chosenFilter??current.filter;owner.set({nativeEditRevision:Date.now()});
-    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation,crop,filter});if(edit===current)edit={...current,...value,rotation,crop,busy:false};}
+  async function transformEdit(owner:Bag,rotate:boolean,chosenFilter?:string){
+    const current=edit;if(!current||current.busy||current.uncertain||current.cropDraft)return;
+    const rotation=rotate?(current.rotation+90)%360:current.rotation,filter=chosenFilter??current.filter;
+    const r=current.cropRect,cropRect=r&&rotate?{x:Math.max(0,1-r.y-r.height),y:r.x,width:r.height,height:r.width}:r;
+    current.busy=true;owner.set({nativeEditRevision:Date.now()});
+    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation,crop:false,filter,...(cropRect?{cropRect}:{})});if(edit===current)edit={...current,...value,rotation,crop:false,cropRect,busy:false};}
     catch(error){if(edit===current){current.busy=false;owner.toast(error instanceof Error?error.message:'Preview unavailable. Original unchanged.');}}
     finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
+  }
+  async function cropEdit(owner:Bag,action:'open'|'apply'|'cancel'){
+    const current=edit;if(!current||current.busy||current.uncertain)return;
+    const cropRect=action==='apply'?current.cropDraft:action==='cancel'?current.cropRect:undefined;
+    if(action==='apply'&&!cropRect)return;
+    current.busy=true;owner.set({nativeEditRevision:Date.now()});
+    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation:current.rotation,crop:false,filter:current.filter,...(cropRect?{cropRect}:{})});
+      if(edit===current)edit={...current,...value,crop:false,cropRect:action==='apply'?cropRect:current.cropRect,cropDraft:action==='open'?{...(current.cropRect??{x:0,y:0,width:1,height:1})}:undefined,busy:false};
+    }catch(error){if(edit===current){current.busy=false;owner.toast(error instanceof Error?error.message:'Crop preview unavailable. Original unchanged.');}}
+    finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
+  }
+  let cropDrag:{pointer:number;x:number;y:number;rect:PhotoCropRect;mode:string;bounds:DOMRect}|undefined;
+  function cropPointer(owner:Bag,event:PointerEvent,phase:'down'|'move'|'up',expected:typeof edit){
+    const current=edit;if(current!==expected||!current?.cropDraft||current.busy)return;
+    const target=event.currentTarget as HTMLElement;
+    if(phase==='down'){
+      if(event.button!==0)return;event.preventDefault();event.stopPropagation();
+      const frame=target.closest('[data-alpha-crop-image]');if(!frame)return;
+      cropDrag={pointer:event.pointerId,x:event.clientX,y:event.clientY,rect:{...current.cropDraft},mode:target.dataset.cropHandle||'move',bounds:frame.getBoundingClientRect()};target.setPointerCapture(event.pointerId);return;
+    }
+    const drag=cropDrag;if(!drag||drag.pointer!==event.pointerId)return;event.preventDefault();event.stopPropagation();
+    if(phase==='up'){cropDrag=undefined;return;}
+    const dx=(event.clientX-drag.x)/drag.bounds.width,dy=(event.clientY-drag.y)/drag.bounds.height,r=drag.rect,min=.05;
+    const clamp=(v:number,lo:number,hi:number)=>Math.min(hi,Math.max(lo,v));
+    let left=r.x,top=r.y,right=r.x+r.width,bottom=r.y+r.height;
+    if(drag.mode==='move'){left=clamp(r.x+dx,0,1-r.width);top=clamp(r.y+dy,0,1-r.height);right=left+r.width;bottom=top+r.height;}
+    else{if(drag.mode.includes('w'))left=clamp(r.x+dx,0,right-min);if(drag.mode.includes('e'))right=clamp(r.x+r.width+dx,left+min,1);if(drag.mode.includes('n'))top=clamp(r.y+dy,0,bottom-min);if(drag.mode.includes('s'))bottom=clamp(r.y+r.height+dy,top+min,1);}
+    current.cropDraft={x:+left.toFixed(6),y:+top.toFixed(6),width:+(right-left).toFixed(6),height:+(bottom-top).toFixed(6)};owner.set({nativeEditRevision:Date.now()});
+  }
+  function cropKey(owner:Bag,event:KeyboardEvent,expected:typeof edit){
+    if(edit!==expected||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)||!edit?.cropDraft||edit.busy)return;
+    event.preventDefault();event.stopPropagation();const r=edit.cropDraft,mode=(event.currentTarget as HTMLElement).dataset.cropHandle||'move',step=event.shiftKey?.05:.01;
+    const dx=event.key==='ArrowRight'?step:event.key==='ArrowLeft'?-step:0,dy=event.key==='ArrowDown'?step:event.key==='ArrowUp'?-step:0,clamp=(v:number,lo:number,hi:number)=>Math.min(hi,Math.max(lo,v));
+    let left=r.x,top=r.y,right=r.x+r.width,bottom=r.y+r.height;
+    if(mode==='move'){left=clamp(left+dx,0,1-r.width);top=clamp(top+dy,0,1-r.height);right=left+r.width;bottom=top+r.height;}
+    else{if(mode.includes('w'))left=clamp(left+dx,0,right-.05);if(mode.includes('e'))right=clamp(right+dx,left+.05,1);if(mode.includes('n'))top=clamp(top+dy,0,bottom-.05);if(mode.includes('s'))bottom=clamp(bottom+dy,top+.05,1);}
+    edit.cropDraft={x:+left.toFixed(6),y:+top.toFixed(6),width:+(right-left).toFixed(6),height:+(bottom-top).toFixed(6)};owner.set({nativeEditRevision:Date.now()});
   }
   type EditCompletion={token:string;epoch:number;source:string|undefined;intent?:MediaCopyIntent;replace?:boolean};
   const completionCurrent=(ticket:EditCompletion,owner:Bag)=>!disposed&&!document.hidden&&owner.isActive()&&editEpoch===ticket.epoch&&owner.get('photos').open===ticket.source&&(!edit||edit.operationId===ticket.token);
@@ -310,13 +351,13 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     finally{recoveringEdit=false;}
   }
   async function saveEdit(owner:Bag,replace=false){
-    const current=edit;if(!current||current.busy||replace&&!current.canReplace)return;
+    const current=edit;if(!current||current.busy||current.cropDraft||replace&&!current.canReplace)return;
     const ticket:EditCompletion={token:current.operationId,epoch:editEpoch,source:current.source,replace};
     if(current.uncertain){void recoverEdit(owner);return;}current.busy=true;owner.set({nativeEditRevision:Date.now()});
     try{
       ticket.intent=await admitMediaCopyIntent(ticket.token);automaticEditRecovery=ticket.token;
       if(!completionCurrent(ticket,owner)){await acknowledgeMediaCopyIntent(ticket.intent);return;}
-      const value=await library.saveEdit({sessionId:current.sessionId,rotation:current.rotation,crop:current.crop,filter:current.filter,...(replace?{replace:true}:{})});
+      const value=await library.saveEdit({sessionId:current.sessionId,rotation:current.rotation,crop:current.crop,filter:current.filter,...(current.cropRect?{cropRect:current.cropRect}:{}),...(replace?{replace:true}:{})});
       if(!await finishEdit(value,owner,ticket)){if(edit===current)current.uncertain=true;await recoverEdit(owner,ticket);}
     }catch{if(edit===current)current.uncertain=true;if(ticket.intent)await recoverEdit(owner,ticket);else if(completionCurrent(ticket,owner)){owner.set({nativeCopyRecovery:true});owner.toast('Copy request could not be retained. Check saved-copy recovery before another save.');}}
     finally{if(edit===current){current.busy=false;if(completionCurrent(ticket,owner))owner.set({nativeEditRevision:Date.now()});}}
@@ -1126,16 +1167,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const live=[preview,...captures,...albumRows].find(row=>row?.id===selected.id);
     return !!live&&!live.trashed===!selected.trashed&&(selected.mutationRevision&&live.mutationRevision?live.mutationRevision===selected.mutationRevision:live.revision===selected.revision)&&(selected.contentRevision===undefined||live.contentRevision===selected.contentRevision);
   }
-  function emailPhoto(selected:SavedPhoto,owner:Bag){
-    closeQuestion?.();const session=connectionController.getCloudClient()?.sessionId;
-    const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected)&&connectionController.getCloudClient()?.sessionId===session;
-    closeQuestion=reviewFileEmail({
-      sourceNote:'Uses the provider-readable source file, not the preview. Android privacy redactions are retained.',
-      read:()=>photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!}),current,
-      target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>current()&&views.inbox.attachReviewedFile(file,token),
-      inserted:()=>owner.open('inbox'),
-    });
-  }
   function askCapture(selected:SavedPhoto,owner:Bag):boolean{
     if(selected.kind==='video'||selected.trashed)return false;
     closeQuestion?.();
@@ -1540,8 +1571,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       data.v.hasPrevItem=at>0&&!edit;data.v.hasNextItem=at>=0&&at<shown.length-1&&!edit;data.v.prevItem=step(shown[at-1]);data.v.nextItem=step(shown[at+1]);
       data.v.viewerLabel=`${selected.kind==='video'?'Video':'Photo'}. Tap to show or hide controls, swipe to browse`;data.v.askLabel=`Ask Alpha about this ${selected.kind==='video'?'video':'photo'}`;
       data.v.editLabel=selected.kind==='video'?'Edit video':'Edit photo';data.v.shareLabel=selected.kind==='video'?'Share video':'Share photo';data.v.infoLabel=selected.kind==='video'?'Video info':'Photo info';data.v.deleteLabel=selected.kind==='video'?'Delete video':'Delete photo';
-      data.v.canEmail=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments')&&typeof views.inbox.fileEmailTarget==='function';
-      data.v.email=()=>emailPhoto(selected,currentApi);
       // Info: date, file, size, dimensions, folder and albums.
       const albums=customAlbums.filter(album=>album.memberIds.includes(nativeId(selected.id))).map(album=>album.name);
       const facts=[['Date',`${new Date(shotAt(selected)).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})} ${when.time}`],['File',selected.name||''],['Size',formatBytes(selected.size)],['Dimensions',selected.width&&selected.height?`${selected.width} × ${selected.height}`:''],['Length',durationLabel(selected)],['Folder',(selected.folder||'').replace(/\/$/,'')],['Albums',albums.join(', ')]].filter(([,value])=>value).map(([label,value])=>({label,value}));
@@ -1550,7 +1579,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         const infoControl=document.querySelector<HTMLElement>(`[data-alpha-subview="photos-viewer"] button[aria-label="${data.v.infoLabel}"]`)||undefined;
         openAlbumManager(currentApi,selected,undefined,infoControl);if(manager)manager.choosing=true;currentApi.set({nativeAlbumDraft:Date.now()});}};
       data.infoOpen=st.sheet==='photo-info'||!!data.infoOpen;
-      if(edit?.source===selected.id){const current=edit;data.v.ed={bg:`url("${current.image}") center / contain no-repeat`,tf:'',flt:'none',cropOn:current.crop,cropCss:current.crop?'background:#ffffff;color:#000000':'background:rgba(255,255,255,.12);color:#ffffff',status:current.uncertain?'Save outcome unknown. Tap Save copy to check it.':'',saveLabel:'Save copy',saveDisabled:current.busy,canReplace:!!current.canReplace&&!current.uncertain,replace:()=>void saveEdit(currentApi,true),rotate:()=>void transformEdit(currentApi,true),crop:()=>void transformEdit(currentApi,false),cancel:()=>{cancelEdit();currentApi.set({nativeEditRevision:Date.now()});},save:()=>void saveEdit(currentApi),filters:[['none','Original'],['vivid','Vivid'],['warm','Warm'],['cool','Cool'],['mono','Mono'],['fade','Fade'],['noir','Noir']].map(([id,label])=>({id,label,bg:`url("${selected.image}") center / cover no-repeat`,flt:({none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'} as Record<string,string>)[id],on:current.filter===id,ring:current.filter===id?'box-shadow:0 0 0 2px #000,0 0 0 4px #fff':'',lc:current.filter===id?'#fff':'rgba(255,255,255,.6)',pick:()=>void transformEdit(currentApi,false,id)}))};}
+      if(edit?.source===selected.id){const current=edit;data.v.ed={bg:`url("${current.image}") center / contain no-repeat`,tf:'',flt:'none',cropOn:!!current.cropDraft,cropCss:current.cropDraft?'background:#ffffff;color:#000000':'background:rgba(255,255,255,.12);color:#ffffff',status:current.uncertain?'Save outcome unknown. Tap Save copy to check it.':'',saveLabel:'Save copy',saveDisabled:current.busy||!!current.cropDraft,canReplace:!!current.canReplace&&!current.uncertain,replace:()=>void saveEdit(currentApi,true),rotate:()=>void transformEdit(currentApi,true),crop:()=>void cropEdit(currentApi,'open'),cropping:!!current.cropDraft,cropBusy:current.busy,applyCrop:()=>void cropEdit(currentApi,'apply'),cancelCrop:()=>void cropEdit(currentApi,'cancel'),resetCrop:()=>{if(edit?.cropDraft){edit.cropDraft={x:0,y:0,width:1,height:1};currentApi.set({nativeEditRevision:Date.now()});}},imageCss:`position:absolute;width:${Math.min(348,464*current.width/current.height)}px;height:${Math.min(464,348*current.height/current.width)}px;left:50%;top:50%;transform:translate(-50%,-50%)`,cropStyle:current.cropDraft?`left:${current.cropDraft.x*100}%;top:${current.cropDraft.y*100}%;width:${current.cropDraft.width*100}%;height:${current.cropDraft.height*100}%`:'',cropDown:(e:PointerEvent)=>cropPointer(currentApi,e,'down',current),cropMove:(e:PointerEvent)=>cropPointer(currentApi,e,'move',current),cropUp:(e:PointerEvent)=>cropPointer(currentApi,e,'up',current),cropKey:(e:KeyboardEvent)=>cropKey(currentApi,e,current),cropHandles:[['nw','top left'],['ne','top right'],['sw','bottom left'],['se','bottom right']].map(([id,label])=>({id,label:'Resize crop '+label,css:`${id.includes('n')?'top:0':'bottom:0'};${id.includes('w')?'left:0':'right:0'}`})),cancel:()=>{cancelEdit();currentApi.set({nativeEditRevision:Date.now()});},save:()=>void saveEdit(currentApi),filters:[['none','Original'],['vivid','Vivid'],['warm','Warm'],['cool','Cool'],['mono','Mono'],['fade','Fade'],['noir','Noir']].map(([id,label])=>({id,label,bg:`url("${selected.image}") center / cover no-repeat`,flt:({none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'} as Record<string,string>)[id],on:current.filter===id,ring:current.filter===id?'box-shadow:0 0 0 2px #000,0 0 0 4px #fff':'',lc:current.filter===id?'#fff':'rgba(255,255,255,.6)',pick:()=>void transformEdit(currentApi,false,id)}))};}
     }
     data.closeActions=(event:Event)=>{(event.currentTarget as HTMLElement)?.closest('details')?.removeAttribute('open');};
     if(data.alb)data.alb.menu=!!(data.alb.canSelect||data.alb.isCustom||data.alb.canEmpty);

@@ -26,6 +26,13 @@ test('browser photo rotation, crop and filter save a distinct copy with unchange
  await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Crop',exact:true}).click();
  await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeDisabled();
+ const nw=page.getByRole('button',{name:'Resize crop top left',exact:true}),se=page.getByRole('button',{name:'Resize crop bottom right',exact:true});
+ await nw.focus();for(let i=0;i<20;i++)await page.keyboard.press('ArrowRight');for(let i=0;i<10;i++)await page.keyboard.press('ArrowDown');
+ await se.focus();for(let i=0;i<20;i++)await page.keyboard.press('ArrowLeft');for(let i=0;i<20;i++)await page.keyboard.press('ArrowUp');
+ await page.screenshot({path:info.outputPath('adjustable-crop.png'),animations:'disabled'});
+ await page.getByRole('button',{name:'Apply crop',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Mono filter',exact:true}).click();
  await expect(page.getByRole('button',{name:'Mono filter',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.screenshot({path:info.outputPath('edit-preview.png'),animations:'disabled'});
@@ -38,7 +45,7 @@ test('browser photo rotation, crop and filter save a distinct copy with unchange
   const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let colorDifference=0;for(let i=0;i<pixels.length;i+=4)colorDifference=Math.max(colorDifference,Math.abs(pixels[i]-pixels[i+1]),Math.abs(pixels[i+1]-pixels[i+2]));
   return {count:rows.length,original:await library.read({id:'1000'}),width:copy.width,height:copy.height,colorDifference};
  });
- expect(result).toMatchObject({count:2,width:92,height:185,original});expect(result.colorDifference).toBeLessThanOrEqual(3);
+ expect(result).toMatchObject({count:2,width:72,height:168,original});expect(result.colorDifference).toBeLessThanOrEqual(3);
  await page.screenshot({path:info.outputPath('saved-copy.png'),animations:'disabled'});
 });
 test('lost photo-copy response and reload recover the same durable receipt without another copy',async({page})=>{
@@ -150,4 +157,31 @@ test('Replace overwrites the original in place: same id and date, new revisions,
  // A save that names the old revision can no longer apply (the reviewed revision is gone).
  const stale=await page.evaluate(async()=>{const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');try{await library.beginEdit({id:'1000',revision:'original-metadata'});return 'opened';}catch(error){return String((error as Error).message);}});
  expect(stale).toMatch(/changed/);
+});
+
+for(const viewport of [{width:412,height:915},{width:1280,height:900}])test(`crop corners drag to off-center source pixels at ${viewport.width}`,async({page},info)=>{
+ await page.setViewportSize(viewport);const original=await seed(page);await openEditor(page);
+ await page.getByRole('button',{name:'Crop',exact:true}).click();
+ const handle=page.getByRole('button',{name:'Resize crop top left',exact:true});await expect(handle).toBeVisible();
+ const bounds=await page.locator('[data-alpha-crop-image]').boundingBox(),corner=await handle.boundingBox();expect(bounds).not.toBeNull();expect(corner).not.toBeNull();
+ await page.mouse.move(corner!.x+22,corner!.y+22);await page.mouse.down();await page.mouse.move(corner!.x+22+bounds!.width/2,corner!.y+22,{steps:6});await page.mouse.up();
+ await page.screenshot({path:info.outputPath('crop-drag.png'),animations:'disabled'});
+ await page.getByRole('button',{name:'Apply crop',exact:true}).click();await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Save copy',exact:true}).click();
+ await expect(page.getByText('Copy saved',{exact:true})).toBeVisible();
+ const result=await page.evaluate(async()=>{const {browserPhotoLibrary:l}=await import('/src/prototype/browser-camera.ts');const copy=(await l.list()).items.find(r=>r.id!=='1000')!;const im=new Image();im.src=copy.image;await im.decode();const c=document.createElement('canvas');c.width=copy.width;c.height=copy.height;const ctx=c.getContext('2d')!;ctx.drawImage(im,0,0);const pixel=[...ctx.getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data];return {width:copy.width,height:copy.height,pixel,original:await l.read({id:'1000'})};});
+ expect(result.width).toBeGreaterThanOrEqual(119);expect(result.width).toBeLessThanOrEqual(121);expect(result.height).toBe(120);expect(result.pixel[1]).toBeGreaterThan(result.pixel[0]+60);expect(result.original).toEqual(original);
+});
+
+test('selected crop keeps its captured rectangle and canonical retry identity',async({page})=>{
+ await seed(page);
+ const result=await page.evaluate(async()=>{
+  const {browserPhotoLibrary:l}=await import('/src/prototype/browser-camera.ts');const edit=await l.beginEdit({id:'1000',revision:'original-metadata'});
+  const rect={x:.5,y:0,width:.5,height:1},input={sessionId:edit.sessionId,rotation:0,crop:false,filter:'none',cropRect:rect};
+  const pending=l.saveEdit(input);rect.x=0;const first=await pending;
+  const retry=await l.saveEdit({...input,cropRect:{height:1,width:.5,y:0,x:.5}});const copy=await l.read({id:first.id!});
+  const full=await l.beginEdit({id:'1000',revision:'original-metadata'});const unchanged=await l.saveEdit({sessionId:full.sessionId,rotation:0,crop:true,filter:'none',cropRect:{x:0,y:0,width:1,height:1}});
+  let invalid=0;for(const cropRect of [false,[],{x:NaN,y:0,width:1,height:1},{x:1,y:0,width:.1,height:1}]){try{await l.previewEdit({sessionId:full.sessionId,rotation:0,crop:false,filter:'none',cropRect} as any);}catch{invalid++;}}
+  return {same:first.id===retry.id,width:copy.width,height:copy.height,count:(await l.list()).items.length,unchanged:unchanged.status,invalid};
+ });
+ expect(result).toEqual({same:true,width:120,height:120,count:2,unchanged:'unchanged',invalid:4});
 });

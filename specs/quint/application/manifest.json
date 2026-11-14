@@ -3931,5 +3931,29 @@
     "abstractions": [
       "One map instance and two failures. Tile resource errors after load preserve the usable map. Engine and first-load failures retain failure handling. Browser and device rendering remain separate evidence."
     ]
+  },
+  {
+    "path": "specs/quint/application/PhotoCropSelection.qnt",
+    "module": "PhotoCropSelection",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "selectionNeedsApplyTest",
+      "cancelledPreviewCannotReturnTest",
+      "failureKeepsSelectionTest"
+    ],
+    "invariants": [
+      "RectInsideSource",
+      "OriginalPreserved"
+    ],
+    "sources": [
+      "apps/app/src/prototype/camera-adapter.ts",
+      "apps/app/src/prototype/browser-camera.ts",
+      "apps/app/src/prototype/template.html"
+    ],
+    "abstractions": [
+      "One edit and a 4x4 normalized source grid. Pointer and keyboard geometry use bounded representative rectangles. Preview completion is an external port; progress requires eventual provider success or failure. Pixel colour and native mutation admission are qualified separately by real browser and native tests."
+    ]
   }
 ]

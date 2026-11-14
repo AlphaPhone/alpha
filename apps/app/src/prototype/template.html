@@ -1718,7 +1718,6 @@
           <details class="photo-import-menu photo-viewer-menu"><summary aria-label="Photo actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.more}}"></path></svg></summary><div onClick="{{photos.closeActions}}">
             <sc-if value="{{photos.v.ask}}"><button onClick="{{photos.v.ask}}"><span class="alpha-compute-mark" aria-hidden="true"></span>Ask Alpha</button></sc-if>
             <sc-if value="{{photos.v.info2.canAlbum}}"><button onClick="{{photos.v.info2.addToAlbum}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.folder}}"></path></svg>Add to album</button></sc-if>
-            <sc-if value="{{photos.v.canEmail}}"><button onClick="{{photos.v.email}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.mail}}"></path></svg>Email</button></sc-if>
             <sc-if value="{{photos.v.notSecure}}"><button onClick="{{photos.v.share}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.share}}"></path></svg>Share</button></sc-if>
             <sc-if value="{{photos.v.notDeleted}}"><button aria-label="{{photos.v.deleteLabel}}" onClick="{{photos.v.del}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.trash}}"></path></svg>Delete</button></sc-if>
             <sc-if value="{{photos.v.isDeleted}}">
@@ -1741,9 +1740,9 @@
   </sc-if>
 
   <sc-if value="{{photos.albumManager}}">
-    <div ref="{{photos.am.modalRef}}" style="position:absolute;inset:0;z-index:20">
+    <div ref="{{photos.am.modalRef}}" data-alpha-popup style="position:absolute;inset:0;z-index:20">
     <button aria-hidden="true" tabindex="-1" aria-label="Close album management" onClick="{{photos.am.close}}" style="position:absolute;inset:0;z-index:20;background:var(--scrim)"></button>
-    <div class="enter" data-alpha-album-manager role="dialog" aria-modal="true" aria-label="{{photos.am.title}}" style="color:var(--fg);position:absolute;left:0;right:0;bottom:0;z-index:21;background:var(--s1);border-radius:28px 28px 0 0;padding:24px 24px 44px;max-height:80%;overflow-y:auto;box-sizing:border-box">
+    <div class="enter" data-alpha-album-manager data-alpha-bottom-sheet role="dialog" aria-modal="true" aria-label="{{photos.am.title}}" style="color:var(--fg);position:absolute;left:0;right:0;bottom:0;z-index:21;background:var(--s1);border-radius:28px 28px 0 0;padding:24px 24px 44px;max-height:80%;overflow-y:auto;box-sizing:border-box">
       <div style="display:flex;align-items:center;gap:12px"><h2 class="serif" style="font-size:26px;flex:1;margin:0">{{photos.am.title}}</h2><button class="ib" aria-label="Close dialog" onClick="{{photos.am.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></div>
       <div role="status" style="color:var(--mut);font-size:14px;margin-top:12px">{{photos.am.error}}</div>
       <sc-if value="{{photos.am.info}}"><p style="font-size:15px;color:var(--mut)">{{photos.am.description}}</p><button aria-label="Add to album" onClick="{{photos.am.choose}}" style="width:100%;padding:16px;border-radius:24px;background:var(--s2);color:var(--fg)">Add to album</button></sc-if>
@@ -1764,7 +1763,7 @@
   <sc-if value="{{photos.infoOpen}}">
     <div ref="{{photos.infoModal}}" data-alpha-popup style="display: contents">
     <button data-alpha-backdrop tabindex="-1" aria-label="Close info" onClick="{{photos.closeSheet}}" style="position: absolute; inset: 0; z-index: 12; background: rgba(0,0,0,.35)"></button>
-    <div class="enter photo-info-sheet" role="dialog" aria-label="{{photos.v.infoLabel}}" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 13; background: var(--s1); color: var(--fg); border-radius: 28px 28px 0 0; padding: 12px 24px 44px">
+    <div class="enter photo-info-sheet" data-alpha-bottom-sheet role="dialog" aria-label="{{photos.v.infoLabel}}" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 13; background: var(--s1); color: var(--fg); border-radius: 28px 28px 0 0; padding: 12px 24px 44px">
       <div style="display: flex; justify-content: center; padding-bottom: 14px"><span style="width: 40px; height: 4px; border-radius: 2px; background: var(--mut); opacity: .45"></span></div>
       <div class="serif" style="font-size: 26px; line-height: 1.1">{{photos.v.info2.date}}</div>
       <div style="font-size: 14px; color: var(--mut); margin-top: 4px">{{photos.v.info2.time}}</div>
@@ -1805,12 +1804,22 @@
         </div>
       </div>
       <sc-if value="{{photos.v.ed.status}}"><div role="status" style="font-size:12px;padding:0 20px;color:rgba(255,255,255,.7)">{{photos.v.ed.status}}</div></sc-if>
-      <div style="position: relative; width: 348px; height: 464px; margin: 18px auto 0; overflow: hidden; flex-shrink: 0">
-        <span style="position: absolute; inset: 0; display: block; background: {{photos.v.ed.bg}}; transform: {{photos.v.ed.tf}}; filter: {{photos.v.ed.flt}}; transition: transform .3s, filter .2s"></span>
+      <div data-alpha-photo-edit-frame style="position: relative; width: 348px; height: 464px; margin: 18px auto 0; overflow: hidden; flex-shrink: 0">
+        <div data-alpha-crop-image style="{{photos.v.ed.imageCss}}">
+          <span style="position:absolute;inset:0;background:{{photos.v.ed.bg}}"></span>
+          <sc-if value="{{photos.v.ed.cropping}}">
+            <div class="photo-crop-selection" role="group" tabindex="0" aria-label="Move crop selection with arrow keys" style="{{photos.v.ed.cropStyle}}" onPointerDown="{{photos.v.ed.cropDown}}" onPointerMove="{{photos.v.ed.cropMove}}" onPointerUp="{{photos.v.ed.cropUp}}" onPointerCancel="{{photos.v.ed.cropUp}}" onKeyDown="{{photos.v.ed.cropKey}}">
+              <sc-for list="{{photos.v.ed.cropHandles}}" key="{{handle.id}}" as="handle">
+                <button class="photo-crop-handle" data-crop-handle="{{handle.id}}" aria-label="{{handle.label}}" style="{{handle.css}}" onPointerDown="{{photos.v.ed.cropDown}}" onPointerMove="{{photos.v.ed.cropMove}}" onPointerUp="{{photos.v.ed.cropUp}}" onPointerCancel="{{photos.v.ed.cropUp}}" onKeyDown="{{photos.v.ed.cropKey}}"></button>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
       </div>
+      <sc-if value="{{photos.v.ed.cropping}}"><div class="photo-crop-actions"><p>Drag the corners to crop. Drag inside to move.</p><div><button onClick="{{photos.v.ed.cancelCrop}}" disabled="{{photos.v.ed.cropBusy}}">Cancel crop</button><button onClick="{{photos.v.ed.resetCrop}}" disabled="{{photos.v.ed.cropBusy}}">Reset crop</button><button onClick="{{photos.v.ed.applyCrop}}" disabled="{{photos.v.ed.cropBusy}}">Apply crop</button></div></div></sc-if>
       <div style="display: flex; justify-content: center; gap: 16px; margin-top: 26px; flex-shrink: 0">
-        <button class="ib" aria-label="Rotate" onClick="{{photos.v.ed.rotate}}" style="background: rgba(255,255,255,.12)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phRotate}}"></path></svg></button>
-        <button class="ib" aria-label="Crop" aria-pressed="{{photos.v.ed.cropOn}}" onClick="{{photos.v.ed.crop}}" style="{{photos.v.ed.cropCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phCrop}}"></path></svg></button>
+        <button class="ib" aria-label="Rotate" disabled="{{photos.v.ed.cropping}}" onClick="{{photos.v.ed.rotate}}" style="background: rgba(255,255,255,.12)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phRotate}}"></path></svg></button>
+        <button class="ib" aria-label="Crop" disabled="{{photos.v.ed.cropping}}" aria-pressed="{{photos.v.ed.cropOn}}" onClick="{{photos.v.ed.crop}}" style="{{photos.v.ed.cropCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phCrop}}"></path></svg></button>
       </div>
       <div class="scr" style="display: flex; gap: 12px; overflow-x: auto; padding: 22px 20px 0; touch-action: pan-x; flex-shrink: 0">
         <sc-for list="{{photos.v.ed.filters}}" key="{{f.id}}" as="f">
@@ -1828,7 +1837,7 @@
   <sc-if value="{{photos.shareOpen}}">
     <div ref="{{photos.shareModal}}" data-alpha-popup style="display: contents">
     <button data-alpha-backdrop tabindex="-1" aria-label="Close share" onClick="{{photos.closeSheet}}" style="position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.35)"></button>
-    <div class="enter" role="dialog" aria-label="Share photo" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--s1); color: var(--fg); border-radius: 28px 28px 0 0; padding: 12px 0 44px">
+    <div class="enter" data-alpha-bottom-sheet role="dialog" aria-label="Share photo" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--s1); color: var(--fg); border-radius: 28px 28px 0 0; padding: 12px 0 44px">
       <div style="display: flex; justify-content: center; padding-bottom: 10px"><span style="width: 40px; height: 4px; border-radius: 2px; background: var(--mut); opacity: .45"></span></div>
       <sc-if value="{{photos.shareTitle}}">
         <div style="font-size: 14px; color: var(--mut); padding: 0 24px 6px">{{photos.shareTitle}}</div>
