@@ -128,21 +128,42 @@ test.describe('landscape', () => {
 // The launcher variant draws under transparent system bars and reports them only as
 // --native-top-inset/--native-bottom-inset (env(safe-area-inset-*) stays 0 in its WebView).
 test('the sign-in page and sheet clear the native system bars', async ({ page }) => {
-  await signedOut(page);
-  const padding = await page.evaluate(() => {
-    const root = document.documentElement.style;
-    root.setProperty('--native-top-inset', '40px');
-    root.setProperty('--native-bottom-inset', '34px');
-    const scrim = document.body.appendChild(document.createElement('div'));
-    scrim.className = 'alpha-connection-scrim';
-    const content = getComputedStyle(document.querySelector('.alpha-auth-page .alpha-auth-content')!);
-    const sheet = getComputedStyle(scrim);
-    const out = { contentTop: parseFloat(content.paddingTop), contentBottom: parseFloat(content.paddingBottom), scrimTop: parseFloat(sheet.paddingTop), scrimBottom: parseFloat(sheet.paddingBottom) };
-    scrim.remove();
-    return out;
+  await page.setViewportSize({ width: 360, height: 640 });
+  const { welcome } = await signedOut(page);
+  await expect(welcome.getByRole('button', { name: 'Send code', exact: true })).toBeEnabled();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { get: () => false });
+    window.dispatchEvent(new Event('offline'));
   });
-  expect(padding.contentTop).toBeGreaterThanOrEqual(72);
-  expect(padding.contentBottom).toBeGreaterThanOrEqual(66);
-  expect(padding.scrimTop).toBeGreaterThanOrEqual(40);
-  expect(padding.scrimBottom).toBeGreaterThanOrEqual(34);
+  await expect(welcome.getByRole('button', { name: 'Open Wi-Fi settings', exact: true })).toBeVisible();
+  const phone = welcome.getByRole('button', { name: 'Continue with phone number', exact: true });
+  for (const [width, height] of [[360, 640], [640, 360]]) {
+    await page.setViewportSize({ width, height });
+    const geometry = await phone.evaluate(button => {
+      const root = document.documentElement.style;
+      root.setProperty('--native-top-inset', '40px');
+      root.setProperty('--native-bottom-inset', '48px');
+      const scrim = document.body.appendChild(document.createElement('div'));
+      scrim.className = 'alpha-connection-scrim';
+      const panel = button.closest<HTMLElement>('.alpha-auth-content')!;
+      panel.scrollTop = 0;
+      button.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const bounds = panel.getBoundingClientRect(), control = button.getBoundingClientRect();
+      const result = {
+        contentTop: parseFloat(getComputedStyle(panel).paddingTop),
+        panelBottom: bounds.bottom, panelTop: bounds.top,
+        buttonBottom: control.bottom, buttonTop: control.top,
+        scrimTop: parseFloat(getComputedStyle(scrim).paddingTop),
+        scrimBottom: parseFloat(getComputedStyle(scrim).paddingBottom),
+      };
+      scrim.remove();
+      return result;
+    });
+    expect(geometry.contentTop).toBeGreaterThanOrEqual(height > 620 ? 72 : 64);
+    expect(geometry.panelBottom).toBeCloseTo(height - 48);
+    expect(geometry.buttonTop).toBeGreaterThanOrEqual(geometry.panelTop);
+    expect(geometry.buttonBottom).toBeLessThanOrEqual(geometry.panelBottom);
+    expect(geometry.scrimTop).toBeGreaterThanOrEqual(40);
+    expect(geometry.scrimBottom).toBeGreaterThanOrEqual(48);
+  }
 });
