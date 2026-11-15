@@ -632,11 +632,15 @@ The upstream browser projections and native producer recipe retain the same byte
 The pin `f86b5038f897094df686da9d5a8d901f60b1e20e` preserves years stated
 before Calendar dates in the resident runtime ([eliza#39632](https://github.com/elizaOS/eliza/pull/39632)).
 Upstream verified the parser and saved event interval with the Calendar owning tests.
-The current pin `6821e9f0ca79c1f7cbe14c11330686461410234c` uses Android's SMS role to authorize incoming and
+The pin `6821e9f0ca79c1f7cbe14c11330686461410234c` uses Android's SMS role to authorize incoming and
 outgoing message persistence on the Alpha image
 ([eliza#39658](https://github.com/elizaOS/eliza/pull/39658)). Outgoing SMS is stored in the Android provider
 before dispatch. Incoming SMS is stored before its notification. A send result
 and a carrier delivery receipt remain separate.
+The current pin `b8526fd56c9aa683889fdc00c286e2db0280f12e` lets Alpha Messages authorize an owner-composed
+SMS or MMS when the owner taps Send. The native SMS journal and carrier
+dispatch guards remain in the shared SDK ([eliza#39660](https://github.com/elizaOS/eliza/pull/39660)).
+Assistant and external compose sends still use their existing confirmation.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

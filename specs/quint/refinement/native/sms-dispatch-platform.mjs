@@ -166,6 +166,7 @@ public class Activity {
  public final List<AlertDialog> dialogs=new ArrayList<>();
  public boolean closing, destroyed;
  public Activity(Context context){this.context=context;}
+ public boolean hasWindowFocus(){return true;}
  public boolean isFinishing(){return closing;}
  public boolean isDestroyed(){return destroyed;}
 }`,

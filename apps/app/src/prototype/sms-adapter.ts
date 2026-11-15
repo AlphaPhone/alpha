@@ -33,10 +33,13 @@ let askedDraftWriter:((text:string,number?:string)=>AskedDraft)|null=null;
 export const placeAskedSmsDraft=(text:string,number?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number):'none-selected';
 const THREAD_TAIL=20;
 const SMS_NOTICE_OPEN='alpha:sms-notice-open';
-type SmsNoticeBridge=AlphaTelephonyPlugin&{
+type SmsComposeRequest=Parameters<AlphaTelephonyPlugin['sendSms']>[0];
+type MmsComposeRequest=Parameters<NonNullable<AlphaTelephonyPlugin['sendMms']>>[0];
+type MessagesBridge=AlphaTelephonyPlugin&{
  smsNoticePending():Promise<{threadId?:string;token?:string}>;
  acknowledgeSmsNotice(options:{token:string}):Promise<void>;
 };
+type ComposerPort=Pick<EventTarget,'addEventListener'|'removeEventListener'>&{postMessage(value:string):void};
 type Bag=Record<string,any>;
 type ReviewedSms=SmsReview&{subscriptionId:number};
 type OutgoingSms={id:string;threadId:string|null;review:ReviewedSms;startedAt:number;createdAt?:number;seen:Set<string>};
@@ -55,7 +58,7 @@ function smsProblemLabel(problem:SmsReviewProblem,mode:'direct'|'handoff',chosen
 }
 export function installSmsAdapter(Component:any,views:Bag){
  if(!aospImage)return;
- const native=registerPlugin<SmsNoticeBridge>('AlphaTelephony');
+ const native=registerPlugin<MessagesBridge>('AlphaTelephony');
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
  let receipt:SmsSendResult|null=null,selectedThread:{id:string;addresses:string[]}|null=null;
@@ -64,6 +67,7 @@ export function installSmsAdapter(Component:any,views:Bag){
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
  /* The reviewed text an operation ID was assigned for: the native send and its read-back hash exactly this. */
  let smsReview:ReviewedSms|null=null;
+ let composerAbort=new AbortController();
  /* The last text sent this visit: its composer is clear, and its result is still read back for exactly what was reviewed. */
  let sent:{id:string;review:ReviewedSms}|null=null;
  const outgoing=new Map<string,OutgoingSms>(),matchedProviderRows=new Set<string>();
@@ -77,7 +81,9 @@ export function installSmsAdapter(Component:any,views:Bag){
  registerTelephonyProfile(client);
  const session=createSmsSession(client,true,changed,id=>void reconcile(id),id=>void reconcileMms(id));
  /* Android's picture chooser covers the WebView and reports it hidden; the draft stays while it is open. */
- const sync=()=>{const next=!!owner&&owner.S().view==='messages'&&(!document.hidden||picking);if(next===active)return;active=next;lifecycle++;session.setActive(next);if(!next){busy=false;suggestConfirm=false;draftRevision++;
+ const sync=()=>{const next=!!owner&&owner.S().view==='messages'&&(!document.hidden||picking);if(next===active)return;active=next;lifecycle++;
+  if(next)composerAbort=new AbortController();else composerAbort.abort();
+  session.setActive(next);if(!next){busy=false;suggestConfirm=false;draftRevision++;
   // Provider rows and observation are cleared by the inactive session. Keep the
   // owner's unfinished draft in memory across navigation/backgrounding. Preserve
   // its operation identity so returning cannot replay an uncertain send.
@@ -88,6 +94,45 @@ export function installSmsAdapter(Component:any,views:Bag){
  const resetMms=(pictures:boolean)=>{mmsOperationId='';mmsReview=null;if(pictures){attachments=[];pictureSeq=0;}};
  const inputRecipients=()=>recipients.split(',').map(v=>v.trim()).filter(Boolean);
  const inFront=()=>active&&owner?.S().view==='messages'&&!document.hidden;
+ /* Keep the shared profile on reviewed sends. Only this click's local client substitutes
+  * the origin-checked composer port, retaining the shared digest and receipt validation. */
+ function composerClient(visit:number){
+  const signal=composerAbort.signal;
+  const unavailable=()=>Object.assign(new Error('Open the Messages composer to send this draft.'),{code:'unavailable'});
+  const post=(kind:'sms'|'mms',draft:SmsComposeRequest|MmsComposeRequest)=>{
+   const port=(window as Window&{alphaMessagesComposer?:ComposerPort}).alphaMessagesComposer;
+   if(!port||signal.aborted||!inFront()||visit!==lifecycle||owner?.props?.assistantSurface)throw unavailable();
+   const requestId=crypto.randomUUID();
+   return new Promise<unknown>((resolve,reject)=>{
+    const cleanup=()=>{
+     port.removeEventListener('message',receive);
+     signal.removeEventListener('abort',abort);
+    };
+    const abort=()=>{cleanup();reject(unavailable());};
+    const receive=(event:Event)=>{
+     const data=(event as MessageEvent).data;
+     if(typeof data!=='string')return;
+     let reply;
+     try{reply=JSON.parse(data);}catch{return;}
+     if(!reply||reply.requestId!==requestId)return;
+     cleanup();
+     if(reply.error)reject(Object.assign(new Error(reply.error.message),{code:reply.error.code}));
+     else resolve(reply.result);
+    };
+    port.addEventListener('message',receive);
+    signal.addEventListener('abort',abort,{once:true});
+    try{port.postMessage(JSON.stringify({requestId,kind,draft}));}
+    catch(error){cleanup();reject(error);}
+   });
+  };
+  return createAospTelephony(new Proxy(native,{
+   get(bridge,method,receiver){
+    if(method==='sendSms')return (request:SmsComposeRequest)=>post('sms',request);
+    if(method==='sendMms')return (request:MmsComposeRequest)=>post('mms',request);
+    return Reflect.get(bridge,method,receiver);
+   },
+  }),true);
+ }
  const ready=()=>inFront()&&!busy&&session.state.status?.permissions.sms==='granted';
  const normalizeRecipients=(addresses:readonly string[])=>{
   const normalized=addresses.map(normalizePhoneNumber);
@@ -257,7 +302,7 @@ export function installSmsAdapter(Component:any,views:Bag){
  const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
  const dismissSuggestion=()=>{if(busy||!drafted())return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';notice='';changed();};
  async function reconcile(id=operationId||sent?.id){const review=id===operationId?smsReview:id===sent?.id?sent?.review:id?outgoing.get(id)?.review:null;if(!inFront()||!id||!review)return;const token=lifecycle,draft=draftRevision;try{const value=await client.smsSendResult(review,id);if(active&&token===lifecycle){outgoingResult(value);if(draft===draftRevision&&(id===operationId||id===sent?.id)){receipt=value;notice=receiptLabel(value.status);}changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
- async function send(){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
+ async function send(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
   const status=session.state.status;if(!status){notice='Refresh Messages, then review the text again.';return;}
   /* The shared review normalizes and dedupes numbers and takes the only active SIM; a SIM that is no longer active is refused. */
   const checked=reviewSms({recipients:draftRecipients(),body,subscriptionId:sim?Number(sim):undefined},status,'direct');
@@ -269,7 +314,7 @@ export function installSmsAdapter(Component:any,views:Bag){
    outgoing.set(id,{id,threadId:session.state.thread,review,startedAt:Date.now(),seen:new Set(threadRows().map(row=>row.id))});
    paint();showLatest();
   }
-  const result=await client.sendSms(review,id);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);
+  const result=await sender.sendSms(review,id);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);
   outgoingResult(result,id);
   /* Cancelled and denied prove nothing was sent: the next Send opens a new review. */
   if(result.status==='cancelled'||result.status==='denied'){operationId='';draftRevision++;}else{finished(result.status);if(accepted(result.status)){
@@ -283,14 +328,13 @@ export function installSmsAdapter(Component:any,views:Bag){
   if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';notice=message;}else if(operationId&&code==='expired'&&message)notice=message;
   else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;changed();}}}
  async function reconcileMms(id=mmsOperationId||mmsSent?.id){const review=id===mmsOperationId?mmsReview:id===mmsSent?.id?mmsSent?.review:null;if(!inFront()||!id||!review)return;const token=lifecycle,draft=draftRevision;try{const value=await client.mmsSendResult(review,id);if(active&&token===lifecycle&&draft===draftRevision){notice=mmsReceiptLabel(value.status);changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
- /** One MMS to every recipient, with the text and the picked pictures. Android's review dialog shows
-  * it again; only the owner's Send there sends. A repeated operation ID never sends twice. */
- async function sendMms(){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;let dispatched=false;busy=true;changed();try{
+ /** One MMS to every recipient, with the text and the picked pictures. A repeated operation ID never sends twice. */
+ async function sendMms(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;let dispatched=false;busy=true;changed();try{
   const status=session.state.status;if(!status)throw Error('Refresh Messages, then review the MMS again.');
   const checked=reviewMms({recipients:draftRecipients(),body,attachments,subscriptionId:sim?Number(sim):undefined},status);
   if('problem' in checked)throw Error(mmsProblemLabel(checked.problem));
   if(!mmsOperationId){mmsOperationId=crypto.randomUUID();mmsReview=checked.review;}
-  dispatched=true;const result=await client.sendMms(mmsReview??checked.review,mmsOperationId);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=null;notice=mmsReceiptLabel(result.status);const sentMms=mmsReview??checked.review;finished(result.status);if(result.status==='cancelled'||result.status==='denied'){resetMms(false);draftRevision++;}else if(accepted(result.status)){mmsSent={id:mmsOperationId,review:sentMms};resetMms(true);draftRevision++;}await session.refresh();
+  dispatched=true;const result=await sender.sendMms(mmsReview??checked.review,mmsOperationId);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=null;notice=mmsReceiptLabel(result.status);const sentMms=mmsReview??checked.review;finished(result.status);if(result.status==='cancelled'||result.status==='denied'){resetMms(false);draftRevision++;}else if(accepted(result.status)){mmsSent={id:mmsOperationId,review:sentMms};resetMms(true);draftRevision++;}await session.refresh();
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':error instanceof Error?error.message:'Couldn’t open';}finally{if(token===lifecycle){busy=false;changed();}}}
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
  function attach(){if(!active||busy)return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
@@ -316,7 +360,6 @@ export function installSmsAdapter(Component:any,views:Bag){
  /* Back returns to the list and keeps the draft bound to its recipients. */
  const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){if(suggestConfirm){suggestConfirm=false;paint();}else closeThread();return true;}if(composing){if(!busy){composing=false;changed();}return true;}return back?back(st,api):false;};
  views.messages.reply=()=>null;views.messages.suggestions=()=>[];
- /* One Send: several recipients or pictures go as one reviewed MMS, otherwise a reviewed SMS. */
  /* The orb in the conversation bar is Alpha. Text the owner typed there goes with it as the request,
   * so "tell her I'm running late" can be typed in place and is sent to Alpha by the same tap; a draft Alpha wrote stays where it is. */
  const askAlpha=()=>{if(busy)return;const request=draft.draft==='owner'?body.trim():'';if(request){draft=typed(draft,'');body='';draftRevision++;operationId='';notice='';paint();api?.send?.(request);}else api?.chat?.();};
@@ -324,7 +367,13 @@ export function installSmsAdapter(Component:any,views:Bag){
  const picks=()=>{const typedTo=inputRecipients(),last=recipients.trim().endsWith(',')?'':(typedTo[typedTo.length-1]||''),query=last.toLowerCase(),digits=last.replace(/\D/g,''),chosen=new Set(typedTo.map(numberKey));
   return people.filter(person=>!chosen.has(numberKey(person.number))&&(!query||person.name.toLowerCase().includes(query)||(digits.length>=3&&person.number.replace(/\D/g,'').includes(digits)))).slice(0,30)
    .map(person=>({name:person.name,number:displayNumber(person.number),ini:initials(person.name),label:`${person.name}, ${displayNumber(person.number)}`,pick:()=>{if(busy)return;const kept=recipients.trim().endsWith(',')?typedTo:typedTo.slice(0,-1);recipients=[...kept,person.number].join(', ');draftRevision++;operationId='';resetMms(false);notice='';paint();}}));};
- const submit=()=>{if(attachments.length||draftRecipients().length>1)void sendMms();else void send();};
+ /* One trusted Send tap approves the current visible draft, including its recipient set and SIM. */
+ const submit=(event:MouseEvent&{nativeEvent?:MouseEvent})=>{
+  if(!inFront()||busy||owner?.props?.assistantSurface||!(event.nativeEvent??event).isTrusted
+   ||!(event.currentTarget instanceof HTMLButtonElement)||!event.currentTarget.hasAttribute('data-alpha-messages-send'))return;
+  const sender=composerClient(lifecycle);
+  if(attachments.length||draftRecipients().length>1)void sendMms(sender);else void send(sender);
+ };
  /** Values of the designed Messages view: a thread list, one thread with its composer, or a new message. */
  function designed(opens:readonly {open:()=>void}[]){
   const state=session.state,now=Date.now(),status=state.status,access=!!status&&status.permissions.sms!=='granted',thread=openRow();
@@ -408,7 +457,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   this.smsSelection=undefined;this.smsReturn?.();
   document.removeEventListener('visibilitychange',this.smsHide);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
-  if(owner===this){owner=null;active=false;lifecycle++;noticeSignal++;noticeRequested=false;session.setActive(false);clearDraft();recipients='';draftThread=null;composing=false;suggestConfirm=false;api=null;names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
+  if(owner===this){owner=null;active=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);clearDraft();recipients='';draftThread=null;composing=false;suggestConfirm=false;api=null;names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
   unmount?.call(this);
  };
 }

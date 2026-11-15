@@ -14,6 +14,7 @@ export type TelephonyFixture = {
   smsNoticeThread?: string;
   controlledSms?: boolean;
   smsRoleHeld?: boolean;
+  mms?: boolean;
 };
 
 export async function setupTelephony(page: Page, options: TelephonyFixture = {}) {
@@ -89,7 +90,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     const status = () => ({
       version: 2, voiceCapable: true, smsCapable: true,
       permissions: {contacts: w.access.contacts ? 'granted' : 'prompt', phoneState: w.access.phoneState ? 'granted' : 'prompt', sms: w.access.sms ? 'granted' : 'prompt', sendSms: w.access.sendSms ? 'granted' : 'prompt', callLog: w.access.callLog ? 'granted' : 'prompt'},
-      sendMode: w.access.sendSms && w.access.phoneState ? 'direct' : 'handoff', mmsSend: false,
+      sendMode: w.access.sendSms && w.access.phoneState ? 'direct' : 'handoff', mmsSend: !!options.mms && direct,
       roles: {dialer: {available: true, held: true, eligible: true}, sms: {available: true, held: smsRoleHeld, eligible: true}},
       defaultDialer: 'ai.alphacompute.alphaphone', defaultSms: smsRoleHeld ? 'ai.alphacompute.alphaphone' : 'com.android.messaging',
       subscriptions: w.access.phoneState ? [{id: 1, slot: 0, displayName: 'Synthetic SIM', carrierName: 'Synthetic Carrier', defaultSms: true, defaultVoice: true}] : null, defaultSmsSubscriptionId: w.access.phoneState ? 1 : null,
@@ -135,7 +136,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
         if (method === 'listMessages') return {messages: [...(w.messages[input.threadId] || [])].reverse().slice(0, input.limit), next: null};
         if (method === 'markThreadRead') { w.readThreads = [...(w.readThreads || []), input.threadId]; return {status: 'marked'}; }
         if (method === 'composeSms') return {status: 'handed-off', target: 'sms', handler: 'com.android.messaging', message: 'Your messaging app is open with the draft.'};
-        if (method === 'sendSms' && options.controlledSms) {
+        if ((method === 'sendSms' || method === 'sendComposedSms') && options.controlledSms) {
           const {body, recipients, subscriptionId, operationId} = input;
           const createdAt = Date.now();
           return new Promise(resolve => {
@@ -175,6 +176,18 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
       if (['secureRead', 'readSecret'].includes(method)) return {value: null};
       return {apps: [], events: [], calendars: [], reminders: [], bookmarks: [], results: [], items: [], entries: [], pending: [], capabilities: [], available: false};
     }};
+    const composer = new EventTarget() as EventTarget & {postMessage(text: string): void};
+    composer.postMessage = async text => {
+      const {requestId, kind, draft} = JSON.parse(text);
+      const method = kind === 'sms' ? 'sendComposedSms' : 'sendComposedMms';
+      try {
+        const result = await w.Capacitor.nativePromise('AlphaTelephony', method, draft);
+        composer.dispatchEvent(new MessageEvent('message', {data: JSON.stringify({requestId, result})}));
+      } catch (error) {
+        composer.dispatchEvent(new MessageEvent('message', {data: JSON.stringify({requestId, error: {message: String(error)}})}));
+      }
+    };
+    w.alphaMessagesComposer = composer;
   }, options);
   await page.goto('/');
   if (!options.smsNoticeThread) await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
