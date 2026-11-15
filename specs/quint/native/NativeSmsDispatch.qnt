@@ -114,11 +114,13 @@ module NativeSmsDispatch {
       else {
         val starting=project({ ...noRecord,binding:review.binding,dispatching:true,boot:s.boot },s.recipients*s.parts)
         if (mode=="begin-after-and-deny-before") s' = response({ ...state,disk:starting },"unavailable",0)
+        else if (s.role and s.refuseOutbox) s' = decide(state,review.binding,"denied")
         else {
           val attempted=if (mode.in(Set("guard-change","throw-before","throw-after"))) 1 else s.recipients
           val accepted=if (mode=="throw-before") 0 else attempted
-          val outbox=if (s.role and not(s.refuseOutbox)) Set(1,2).filter(recipient => recipient<=attempted) else Set()
-          val beforeEnd={ ...starting,rows:outbox }
+          val prepared=if (s.role) Set(1,2).filter(recipient => recipient<=s.recipients) else Set()
+          val outbox=prepared.filter(recipient => recipient<=attempted)
+          val beforeEnd={ ...starting,rows:prepared }
           val returned=not(mode.in(Set("throw-before","throw-after"))) and (mode!="guard-change" or s.recipients==1)
           val ended=project({ ...beforeEnd,dispatching:false,submitted:returned,unknown:not(returned) },s.recipients*s.parts)
           s' = receipt({ ...state,memory:ended,disk:if (mode=="end-before") beforeEnd else ended,

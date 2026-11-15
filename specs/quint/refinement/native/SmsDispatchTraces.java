@@ -130,9 +130,11 @@ public final class SmsDispatchTraces {
      callbackShape(call.sent().get(p),config.sentAction,index*parts+p);
      callbackShape(call.delivery().get(p),config.deliveredAction,index*parts+p);
     }
-    if(context.role&&!context.provider.refuseInsert)
-     check(disk.providerRow[index]>0&&context.provider.rows.get(disk.providerRow[index]).get(Sms.TYPE).equals(4),
-      "Default app's exact outbox row precedes radio");
+    if(context.role&&index==0)for(int recipient=0;recipient<recipients;recipient++){
+     var row=context.provider.rows.get(disk.providerRow[recipient]);
+     check(row!=null&&row.get(Sms.TYPE).equals(4)&&row.get(Sms.ADDRESS).equals(TO[recipient]),
+      "All exact default app outbox rows precede the first radio call");
+    }
    }catch(Exception failure){throw new AssertionError(failure);}
   }
 
@@ -385,7 +387,7 @@ public final class SmsDispatchTraces {
   String mode=args[0];
   int recipients=mode.equals("per-recipient-sim-change")||mode.equals("partial-radio-throw")?2:1;
   int parts=mode.equals("multipart-provider-cannot-prove-delivery")||mode.equals("default-role-outbox")?2:1;
-  boolean role=Set.of("default-role-outbox","provider-insert-refused","retired-role-outbox").contains(mode);
+  boolean role=Set.of("default-role-outbox","provider-insert-refused","retired-role-outbox","partial-radio-throw").contains(mode);
   Fixture f=new Fixture(mode,recipients,parts,role);
   try{
    switch(mode){
@@ -446,6 +448,9 @@ public final class SmsDispatchTraces {
      break;
     case "partial-radio-throw":
      f.request(1,1,"complete");f.approve(1,"throw-after");
+     check(f.context.radio.attempts==1&&f.context.provider.rows.size()==1&&
+      f.context.provider.rows.values().iterator().next().get(Sms.ADDRESS).equals(TO[0]),
+      "Keep the attempted recipient's row and discard the unattempted recipient's row");
      f.callback(1,"sent",true,"complete");f.request(1,1,"complete");
      break;
     case "radio-refused-before-acceptance":
@@ -503,7 +508,11 @@ public final class SmsDispatchTraces {
      break;
     case "provider-insert-refused":
      f.refuseProviderInsert(true);f.request(1,1,"complete");f.approve(1,"complete");
-     f.callback(1,"sent",true,"complete");f.readback(2);
+     check(f.reply.equals("denied")&&f.context.radio.attempts==0&&f.context.provider.rows.isEmpty(),
+      "Default role provider refusal denies dispatch without a radio call");
+     f.refuseProviderInsert(false);f.request(2,1,"complete");f.readback(2);
+     check(f.reply.equals("denied")&&f.context.radio.attempts==0,
+      "An exact replay retains the denial after the provider recovers");
      break;
     case "retired-role-outbox":
      f.request(1,1,"complete");f.approve(1,"complete");f.access("role",false);

@@ -32,6 +32,11 @@ let askedDraftWriter:((text:string,number?:string)=>AskedDraft)|null=null;
  */
 export const placeAskedSmsDraft=(text:string,number?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number):'none-selected';
 const THREAD_TAIL=20;
+const SMS_NOTICE_OPEN='alpha:sms-notice-open';
+type SmsNoticeBridge=AlphaTelephonyPlugin&{
+ smsNoticePending():Promise<{threadId?:string;token?:string}>;
+ acknowledgeSmsNotice(options:{token:string}):Promise<void>;
+};
 type Bag=Record<string,any>;
 const MMS_PICTURES:Record<string,string>={'image/jpeg':'jpg','image/png':'png','image/gif':'gif'};
 /* Native rejects with these codes before it journals or sends anything, so its message is the
@@ -43,7 +48,8 @@ function smsProblemLabel(problem:SmsReviewProblem,mode:'direct'|'handoff',chosen
 }
 export function installSmsAdapter(Component:any,views:Bag){
  if(!aospImage)return;
- const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
+ const native=registerPlugin<SmsNoticeBridge>('AlphaTelephony');
+ const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
  let receipt:SmsSendResult|null=null,selectedThread:{id:string;addresses:string[]}|null=null;
  /* Composer draft and suggested reply (MessageThreads.qnt); contact names for the visit only. */
@@ -96,6 +102,61 @@ export function installSmsAdapter(Component:any,views:Bag){
   if(!normalized.length||!sameRecipients(normalizeRecipients(inputRecipients()),normalized)||(draftThread&&draftThread!==id))clearDraft();
   selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;suggestConfirm=false;session.openThread(id);
  };
+ let noticeRequested=false,noticeOpening=false,noticeSignal=0;
+ const canOpenNotice=(shell:any)=>{
+  const state=shell.S();
+  return owner===shell&&!shell.props?.assistantSurface&&!document.hidden&&state.screen==='home'
+   &&!state.typing&&!state.recording&&!state.draft&&(!state.voice||state.voice==='off')
+   &&!busy&&!picking&&!suggestConfirm&&!body&&!attachments.length&&!operationId&&!mmsOperationId
+   &&!(draftThread===null&&recipients&&!sent&&!mmsSent);
+ };
+ async function drainSmsNotice(){
+  const shell=owner;
+  if(!noticeRequested||noticeOpening||!shell||!canOpenNotice(shell))return;
+  noticeRequested=false;noticeOpening=true;
+  const signal=noticeSignal,view=shell.S().view,selected=session.state.thread;
+  const current=()=>owner===shell&&signal===noticeSignal;
+  const canContinue=()=>{
+   if(!current()||shell.S().view!==view||session.state.thread!==selected)return false;
+   if(canOpenNotice(shell))return true;
+   noticeRequested=true;
+   return false;
+  };
+  try{
+   const {threadId,token}=await native.smsNoticePending();
+   if(typeof token!=='string'||!/^\d+$/.test(token)||typeof threadId!=='string'||!/^thread:[1-9]\d{0,18}$/.test(threadId)||!canContinue())return;
+   const acknowledge=()=>{
+    if(current()&&canOpenNotice(shell)&&inFront()&&session.state.thread===threadId)
+     void native.acknowledgeSmsNotice({token}).catch(()=>{});
+   };
+   if(inFront()&&selected===threadId){void session.refresh();acknowledge();return;}
+   // Look up only the named conversation's participants. Never open another thread as a fallback.
+   let cursor:string|undefined;
+   for(let page=0;page<3;page++){
+    const result=await client.threadPage(cursor);
+    if(!canContinue())return;
+    const target=result.rows.find(row=>row.id===threadId);
+    if(target){
+     if(isIncompleteSmsRow(target))return;
+     const open=()=>{
+      if(!current()||!canOpenNotice(shell)||!inFront())return;
+      chooseThread(threadId,target.addresses);
+      shell.setState({},acknowledge);
+     };
+     if(inFront())open();
+     else{shell.openView('messages');shell.setState({},open);}
+     return;
+    }
+    if(!result.next)return;
+    cursor=result.next;
+   }
+  }catch{/* A foreground retry can read the native pending tap. */}
+  finally{
+   noticeOpening=false;
+   if(noticeRequested&&signal!==noticeSignal)void drainSmsNotice();
+  }
+ }
+ const wakeSmsNotice=()=>{noticeSignal++;noticeRequested=true;void drainSmsNotice();};
  const closeThread=()=>{if(!busy){selectedThread=null;suggestConfirm=false;session.openThread(null);}};
  const compose=(prefill?:string)=>{
   if(busy)return;
@@ -262,7 +323,22 @@ export function installSmsAdapter(Component:any,views:Bag){
   : {...row,label:row.addresses.join(', ')||'Conversation',open:()=>chooseThread(row.id,row.addresses)});
  return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeReceipts:session.state.receipts.map(row=>({id:row.operationId,label:`${formatDateTime(new Date(row.createdAt))} · Subscription ${row.subscriptionId} · ${receiptLabel(row.status)}`})),nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:busy||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:()=>{if(busy)return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);changed();}})),nativeSim:sim?`Selected subscription ${sim}`:session.state.status?.permissions.phoneState!=='granted'?'Grant SIM access to select a SIM.':session.state.status?.subscriptions?.length===0?'No active SIM is available.':'Select a SIM below',nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:edit(value=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);}),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttach:()=>attach(),nativeMmsAvailable:!!session.state.status?.mmsSend,nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:()=>{if(busy)return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();}})),nativeHandoff:()=>void handoff(),nativeNotice:notice,nativeClear:()=>{if(busy)return;clearDraft();if(draftThread===null)recipients='';changed();},
   ...designed(nativeThreads)};};
- p.componentDidMount=function(){mount?.call(this);owner=this;this.smsSelection=()=>{const selected=session.state.status?.subscriptions?.find(row=>String(row.id)===sim);return inFront()&&selected?{kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)}:undefined;};lifecycle++;this.smsReturn=watchReturnToApp(()=>void session.refresh());this.smsHide=()=>{if(!document.hidden)picking=false;sync();};document.addEventListener('visibilitychange',this.smsHide);sync();};
- p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();};
- p.componentWillUnmount=function(){this.smsSelection=undefined;this.smsReturn?.();document.removeEventListener('visibilitychange',this.smsHide);if(owner===this){owner=null;active=false;lifecycle++;session.setActive(false);clearDraft();recipients='';draftThread=null;composing=false;suggestConfirm=false;api=null;names.clear();people.length=0;selectedThread=null;namesLoaded=false;}unmount?.call(this);};
+ p.componentDidMount=function(){
+  mount?.call(this);owner=this;lifecycle++;
+  this.smsSelection=()=>{const selected=session.state.status?.subscriptions?.find(row=>String(row.id)===sim);return inFront()&&selected?{kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)}:undefined;};
+  this.smsNoticeWake=()=>{if(owner===this)wakeSmsNotice();};
+  this.smsReturn=watchReturnToApp(()=>{void session.refresh();this.smsNoticeWake();});
+  this.smsHide=()=>{if(!document.hidden)picking=false;sync();};
+  document.addEventListener('visibilitychange',this.smsHide);
+  window.addEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
+  sync();wakeSmsNotice();
+ };
+ p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();void drainSmsNotice();};
+ p.componentWillUnmount=function(){
+  this.smsSelection=undefined;this.smsReturn?.();
+  document.removeEventListener('visibilitychange',this.smsHide);
+  window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
+  if(owner===this){owner=null;active=false;lifecycle++;noticeSignal++;noticeRequested=false;session.setActive(false);clearDraft();recipients='';draftThread=null;composing=false;suggestConfirm=false;api=null;names.clear();people.length=0;selectedThread=null;namesLoaded=false;}
+  unmount?.call(this);
+ };
 }

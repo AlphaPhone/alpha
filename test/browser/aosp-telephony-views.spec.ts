@@ -22,6 +22,31 @@ test('Home shows one Messages card and one Phone card and keeps no telephony con
   expect(await page.evaluate(() => /Ada Okafor|Running ten minutes/.test(JSON.stringify({...localStorage})))).toBe(false);
 });
 
+test('an SMS notification opens only its thread on launch and waits for an unsent draft', async ({page}) => {
+  await setupTelephony(page, {smsNoticeThread: 'thread:102'});
+  const title = page.locator('[data-alpha-messages-title]');
+  const draft = page.locator('[data-alpha-messages-body]');
+  await expect(title).toHaveText('Bao Tran');
+  await expect.poll(() => inputs(page, 'acknowledgeSmsNotice')).toEqual([{token: '1'}]);
+  expect(new Set((await inputs(page, 'listMessages')).map(input => input.threadId))).toEqual(new Set(['thread:102']));
+
+  await draft.fill('Unsent draft');
+  await page.evaluate(() => {
+    (window as any).smsNoticeTap = {threadId: 'thread:101', token: '2'};
+    window.dispatchEvent(new Event('alpha:sms-notice-open'));
+  });
+  await expect(title).toHaveText('Bao Tran');
+  await expect(draft).toHaveValue('Unsent draft');
+  expect(await inputs(page, 'acknowledgeSmsNotice')).toEqual([{token: '1'}]);
+  await draft.fill('');
+
+  await expect(title).toHaveText('Ada Okafor');
+  await expect.poll(() => inputs(page, 'acknowledgeSmsNotice')).toEqual([{token: '1'}, {token: '2'}]);
+  expect(new Set((await inputs(page, 'listMessages')).map(input => input.threadId))).toEqual(new Set(['thread:102', 'thread:101']));
+  await expect.poll(async () => new Set((await inputs(page, 'markThreadRead')).map(input => input.threadId))).toEqual(new Set(['thread:101']));
+  expect(await inputs(page, 'sendSms')).toEqual([]);
+});
+
 test('recents call on the owner tap; the keypad fits above the assistant controls on a small phone', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Phone');

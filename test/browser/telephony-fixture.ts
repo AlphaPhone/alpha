@@ -11,6 +11,7 @@ export type TelephonyFixture = {
   voicemail?: 'ready' | 'unconfigured' | 'unsupported';
   empty?: boolean;
   singleUnread?: boolean;
+  smsNoticeThread?: string;
 };
 
 export async function setupTelephony(page: Page, options: TelephonyFixture = {}) {
@@ -20,6 +21,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.androidBridge = {};
     w.telephonyCalls = [];
     w.telephonyInputs = [];
+    if (options.smsNoticeThread) w.smsNoticeTap = {threadId: options.smsNoticeThread, token: '1'};
     const granted = options.granted !== false, direct = options.sendMode !== 'handoff';
     w.access = {callLog: granted, sms: granted, contacts: granted, phoneState: granted, sendSms: granted && direct};
     if (options.singleUnread) w.readThreads = ['thread:103'];
@@ -94,12 +96,15 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     const names = ['AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
     const methods = ['addListener', 'removeListener', 'surfaceInfo', 'readPending', 'readPendingResult', 'readDelegationCallback', 'readSecret', 'secureRead', 'secureWrite', 'secureRemove', 'get', 'save', 'remove', 'status', 'getStatus', 'getState', 'state', 'permissionState', 'permissions', 'list', 'listCalendars', 'listEvents', 'listReminders', 'listBookmarks', 'getBookmarks', 'bookmarks', 'settings', 'getSettings', 'buildInfo', 'platformCapabilities', 'capabilities', 'query', 'read', 'readJournal', 'getPending', 'readSelection', 'requestPermissions', 'create', 'edit',
       'imageCapability', 'requestAccess', 'requestRole', 'searchContacts', 'listRecentCalls', 'dial', 'placeCall', 'composeSms', 'listThreads', 'listMessages', 'observeMessages', 'markThreadRead', 'sendSms', 'cancelSmsReview', 'smsSendHistory', 'smsSendResult',
+      'smsNoticePending', 'acknowledgeSmsNotice',
       'voicemailStatus', 'listVoicemail', 'fetchVoicemailAudio', 'voicemailAudio', 'voicemailPcm', 'markVoicemailHeard', 'deleteVoicemail', 'observeVoicemail', 'callState', 'answerCall', 'endCall', 'setCallAudio', 'observeCalls', 'sendCallTone', 'setGoogleAgentAccess', 'phoneInfo', 'openSettings'];
     w.Capacitor = {Plugins: {}, PluginHeaders: names.map(name => ({name, methods: methods.map(name => ({name, rtype: name === 'addListener' ? 'callback' : 'promise'}))})), nativeCallback: () => 'fixture-callback', nativePromise: async (plugin: string, method: string, input: any) => {
       if (plugin === 'AlphaTelephony') {
         w.telephonyCalls.push(method); w.telephonyInputs.push([method, input]);
         if (w.telephonyAnswers?.[method]) return w.telephonyAnswers[method](input);
         if (method === 'imageCapability') return {version: 1, image: true, feature: 'fixture.image'};
+        if (method === 'smsNoticePending') return w.smsNoticeTap || {};
+        if (method === 'acknowledgeSmsNotice') { if (w.smsNoticeTap?.token === input.token) w.smsNoticeTap = undefined; return {}; }
         if (method === 'status') return status();
         if (method === 'requestAccess') { w.access[input.access] = true; return status(); }
         if (method === 'searchContacts') { const query = String(input.query || '').toLowerCase(); return {contacts: people.filter(p => !query || p.name.toLowerCase().includes(query) || p.phones.some(n => n.includes(query))).slice(0, input.limit).map(p => ({id: p.id, lookupKey: `lookup-${p.id}`, displayName: p.name, phoneNumbers: p.phones, emailAddresses: p.emails, starred: false}))}; }
@@ -138,5 +143,5 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     }};
   }, options);
   await page.goto('/');
-  await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
+  if (!options.smsNoticeThread) await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
 }
