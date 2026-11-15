@@ -603,6 +603,7 @@ export const featureParityAllowlist = {
     "apps/app/src/runtime/service-read-cache.ts",
     "apps/app/src/runtime/share-panel.ts",
     "apps/app/src/runtime/sms-agent-contract.ts",
+    "apps/app/src/runtime/sms-draft-store.ts",
     "apps/app/src/runtime/sms-subscription-revision.ts",
     "apps/app/src/runtime/source-renewal-question.ts",
     "apps/app/src/runtime/stage-session-store.ts",
