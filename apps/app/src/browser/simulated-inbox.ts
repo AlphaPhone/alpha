@@ -25,6 +25,7 @@ export function installSimulatedInbox(view:Bag){
  view.back=(state:Bag,api:Bag)=>{if(confirm){confirm=false;api.set({localMailRevision:Date.now()});return true;}if(state.compose){keep(api,true);return true;}if(state.localDraftFolder){api.set({localDraftFolder:false});return true;}return back?.(state,api);};
  view.onLeave=(api:Bag)=>{if(api.get('inbox').compose)keep(api,true);epoch++;busy=false;confirm=false;return leave?.(api);};
  view.render=(state:Bag,api:Bag)=>{const out=render(state,api),repaint=()=>api.set({localMailRevision:Date.now()}),setDraft=(patch:Bag)=>{status='';api.set({compose:{...api.get('inbox').compose,...patch}});};
+ out.mailOptions=[{label:'Refresh',icon:'/icons/lucide/rotate-cw.svg',run:repaint}].map(item=>({...item,disabled:false,pick:(event:Event)=>{(event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open');item.run();}}));
  // Drafts use the normal folder/list, not one recovery button per email.
  const normalChips=out.chips.map((chip:Bag)=>({...chip,css:state.localDraftFolder?'background:var(--s2);color:var(--mut)':chip.css,on:state.localDraftFolder?false:chip.on,pick:()=>{api.set({localDraftFolder:false});chip.pick();}}));
  out.chips=out.folderChips=[...normalChips,{label:'Drafts',css:state.localDraftFolder?'background:var(--fg);color:var(--bg)':'background:var(--s2)',pick:()=>api.set({localDraftFolder:true,open:null,q:null})}];

@@ -47,3 +47,15 @@ test('multiple drafts retain identity and discarding one keeps the other',async(
 test('an older draft receives an identity on restore and saving it does not create a duplicate',async({page})=>{
  await page.evaluate(()=>{const key='alpha.dev.app.inbox',data=JSON.parse(localStorage.getItem(key)!);data.localDrafts=[{to:['legacy@example.test'],subject:'Legacy draft',body:'Before identities'}];localStorage.setItem(key,JSON.stringify(data));});await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await openSavedMailDraft(page);const id=(await stored(page)).localDrafts[0].localDraftId;expect(typeof id).toBe('string');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Updated legacy');await retainedMailDraft(page,'save');const drafts=(await stored(page)).localDrafts;expect(drafts).toHaveLength(1);expect(drafts[0]).toMatchObject({localDraftId:id,body:'Updated legacy'});
 });
+
+
+test('Inbox options visibly opens and Refresh preserves the local mailbox',async({page})=>{
+ const before=await stored(page);
+ await page.getByLabel('Mail options',{exact:true}).click();
+ const menu=page.getByRole('menu');await expect(menu).toBeVisible();
+ const refresh=menu.getByRole('menuitem',{name:'Refresh',exact:true});await expect(refresh).toBeVisible();
+ expect((await menu.boundingBox())!.height).toBeGreaterThan(40);
+ await refresh.click();await expect(menu).toBeHidden();
+ expect(await stored(page)).toEqual(before);
+ await expect(page.getByRole('button',{name:/Sender One, Planning notes/})).toBeVisible();
+});
