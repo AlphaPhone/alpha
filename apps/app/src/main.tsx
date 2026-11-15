@@ -1,6 +1,6 @@
-import {installChatTools} from './prototype/chat-tools-adapter';
 // Register browser implementations before any runtime module claims plugin identity.
 import './browser/register';
+import {installChatTools} from './prototype/chat-tools-adapter';
 import {installCanonicalNotesView} from './prototype/canonical-notes-ui';
 import {installCanonicalCalendarDrafts} from './prototype/canonical-calendar-drafts';
 import {installAgentCalendarAdapter,deviceCalendarScope} from './prototype/agent-calendar-adapter';
