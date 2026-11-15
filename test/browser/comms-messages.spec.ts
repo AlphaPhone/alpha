@@ -70,12 +70,27 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
 
   test('type to Ada, open Alpha, reload: the SMS draft returns to the thread', async ({page}) => {
     await setupTelephony(page);
+    // The stub bridge keeps no secure slots; this one keeps the SMS draft slots across a reload, as the
+    // phone's renderer secure store would (a stand-in, not the Android store).
+    await page.addInitScript(() => {
+      const cap = (window as any).Capacitor, native = cap.nativePromise, key = (slot: string) => 'fixture.secure.' + slot;
+      cap.PluginHeaders.find((header: any) => header.name === 'AlphaConnection').methods.push({name: 'secureCompareExchange', rtype: 'promise'});
+      cap.nativePromise = async (plugin: string, method: string, input: any) => {
+        if (plugin !== 'AlphaConnection' || !String(input?.slot).startsWith('sms-draft:v1:')) return native(plugin, method, input);
+        if (method === 'secureRead') return {value: localStorage.getItem(key(input.slot))};
+        if (method !== 'secureCompareExchange') return native(plugin, method, input);
+        if (localStorage.getItem(key(input.slot)) !== (input.expectedValue ?? null)) return {status: 'conflict'};
+        if (input.value === null) localStorage.removeItem(key(input.slot)); else localStorage.setItem(key(input.slot), input.value);
+        return {status: 'saved'};
+      };
+    });
+    await page.reload();
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
     await page.getByRole('button', {name: /^Ada Okafor/}).click();
     await page.locator(personField).fill('Draft that survives');
     await openAlpha(page);
     await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'owner');
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('alpha.browser.sms-draft:v1:')).length)).toBe(1);
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('fixture.secure.sms-draft:v1:')).length)).toBe(1);
     await page.reload();
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
     await page.getByRole('button', {name: /^Ada Okafor/}).click();

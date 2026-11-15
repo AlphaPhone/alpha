@@ -92,6 +92,14 @@ function rendererSlots(){
    if(where.endsWith('runtime/inbox-local-store.ts')&&match[2].trim()==='slot')continue;
    // The reminder journal binding passes its caller's slot through; its callers' slots are checked below.
    if(where.endsWith('runtime/reminder-journal-store.ts')&&match[2].trim()==='slot')continue;
+   // The shared draft slot builder names `prefix` + SHA-256 of the binding; each caller names its prefix.
+   if(where.endsWith('runtime/assistant-draft-store.ts')&&match[2].trim()==='slot'){
+    assert.ok(text.includes('const slot=prefix+hash'));
+    const prefixes=files.flatMap(other=>[...readFileSync(other,'utf8').matchAll(/durableDraftSlotStore\((['"])([^'"]+)\1/g)].map(call=>call[2]));
+    assert.ok(prefixes.length>=2,'the assistant and SMS draft slots name their prefixes');
+    for(const prefix of prefixes)found.push({slot:prefix+SAMPLE,where});
+    continue;
+   }
    if(where.endsWith('runtime/service-read-cache-store.ts')&&match[2].trim()==='slot'){found.push({slot:'connected-read-cache:v1:'+SAMPLE,where});assert.ok(text.includes("slot='connected-read-cache:v1:'+hash"));continue;}
    // The Calendar adapter accepts only this exact owner/source-derived namespace.
    if(where.endsWith('runtime/calendar-linked-storage.ts')&&match[2].trim()==='slot'){
