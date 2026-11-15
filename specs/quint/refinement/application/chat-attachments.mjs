@@ -1,3 +1,4 @@
+import {storedChatFiles} from '../../../../apps/app/src/runtime/stored-chat-files.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -102,7 +103,7 @@ export async function checkChatAttachments(extraSources = []) {
   const start = text.indexOf('function attachmentKey(');
   const end = text.indexOf('\nconst preDispatchRefusals', start);
   assert.ok(start >= 0 && end > start, 'actual attachment helper boundaries');
-  const load = new Function('browserDocuments', stripTypeScriptTypes(text.slice(start, end), {mode: 'strip'}) +
+  const load = new Function('browserDocuments', 'storedChatFiles', stripTypeScriptTypes(text.slice(start, end), {mode: 'strip'}) +
     '\nreturn {saveAttachment,restoreAttachments};');
   const traces = [];
   for (const kind of ['transcript', 'image']) for (const change of ['owner', 'conversation']) {
@@ -111,7 +112,7 @@ export async function checkChatAttachments(extraSources = []) {
       async read(key) { return stored.get(key) ?? null; },
       async edit(key, update) { const next = await update(stored.get(key) ?? null); stored.set(key, {raw: next.raw}); return next.result; },
     };
-    let helpers = load(port), owner = 1, conversation = 1;
+    let helpers = load(port, storedChatFiles), owner = 1, conversation = 1;
     const session = () => ({origin: 'https://alpha.invalid', ownerId: `owner-${owner}`, agentId: 'agent'});
     const message = {id: 'server-message', clientMessageId: 'client-message', from: 'user', text: 'Summarize this for me'};
     const attachment = kind === 'transcript'
@@ -129,7 +130,7 @@ export async function checkChatAttachments(extraSources = []) {
     // This separate helper campaign receives an already recorded history row as input.
     await helpers.saveAttachment(session(), `conversation-${conversation}`, message.clientMessageId, attachment);
     trace.steps.push({action: [action('attach'), action('send'), action('store'), action('confirmRecorded')], expect: {'s.saved': saved()}});
-    helpers = load(port);
+    helpers = load(port, storedChatFiles);
     trace.steps.push({action: [action('finish'), action('reload')], expect: {'s.visible': await visible(), 's.saved': saved()}});
     if (change === 'owner') owner = 2; else conversation = 2;
     trace.steps.push({action: [action(change === 'owner' ? 'switchOwner' : 'switchConversation'), action('reload')], expect: {'s.visible': await visible(), 's.saved': saved()}});

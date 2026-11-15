@@ -3571,6 +3571,8 @@
     ],
     "sources": [
       "apps/app/src/prototype/agent-adapter.ts",
+      "apps/app/src/runtime/stored-chat-files.ts",
+      ".eliza/client-features/packages/core/src/chat-upload-limits.ts",
       "apps/app/src/runtime/alpha-client.ts",
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/local-agent.ts",

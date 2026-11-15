@@ -1,3 +1,4 @@
+import {storedChatFiles} from '../../apps/app/src/runtime/stored-chat-files.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -7,7 +8,9 @@ import {recordingRevision,summarySourceOf} from '../../.eliza/client-features/pl
 
 const adapter = new URL('../../apps/app/src/prototype/agent-adapter.ts', import.meta.url);
 export const chatAttachmentComposerSources = [import.meta.url, adapter,
-  new URL('../support/strip-types.mjs', import.meta.url),new URL('../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts', import.meta.url)].map(fileURLToPath);
+  new URL('../support/strip-types.mjs', import.meta.url),
+  new URL('../../apps/app/src/runtime/stored-chat-files.ts', import.meta.url),
+  new URL('../../.eliza/client-features/packages/core/src/chat-upload-limits.ts', import.meta.url),new URL('../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts', import.meta.url)].map(fileURLToPath);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const prompt = 'Summarize this for me';
 const title = 'Synthetic Notes transcript';
@@ -79,7 +82,7 @@ export function chatAttachmentComposerFixture() {
   };
   shell.refreshDraftBinding = () => {shell.composerDraft.binding = key();};
   const ports = {
-    Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
+    storedChatFiles, Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
     crypto: {randomUUID: () => `request-${++request}`},
     browserDocuments: {
       async edit(name, update) {

@@ -1,3 +1,4 @@
+import {storedChatFiles,type ChatFile} from '../runtime/stored-chat-files';
 import {createImagePreview} from '../runtime/image-preview';
 import {ChatAttachmentPicker,encodeChatAttachment} from './attachment-picker';
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
@@ -89,13 +90,6 @@ const elizaSystem = registerPlugin<{ setFlashlight(input: { enabled: boolean }):
 // The reference renderer is a JavaScript state machine. Its presentation API is
 // intentionally kept intact; authenticated effects are installed at this seam.
 type Shell = any;
-type ChatFile = {id:string;data:string;mimeType:string;name:string};
-function storedChatFiles(value:unknown):ChatFile[] {
-  if(!Array.isArray(value))return [];
-  return value.slice(0,MAX_CHAT_UPLOAD_ATTACHMENTS).filter((file):file is ChatFile=>
-    typeof file?.id==='string'&&typeof file?.name==='string'&&file.name.length<=255&&
-    typeof file?.mimeType==='string'&&typeof file?.data==='string'&&/^[A-Za-z0-9+/]+={0,2}$/.test(file.data));
-}
 /** One composer send. A message is dispatched once the transport accepted it for delivery. */
 type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>};
 /** Refused before any request carrying the message could leave this phone. */
