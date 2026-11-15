@@ -80,8 +80,8 @@ export function installSimulatedInbox(view:Bag){
   ...(selecting?[
    {label:'Select all',icon:'list-checks',disabled:!rows.length,run:()=>{if(!current())return;selected=new Set(visibleIds);review=null;repaint();}},
    ...(drafts?[{label:'Delete drafts',icon:'trash-2',disabled:!selected.size,run:()=>prepare('discard-local','Delete')}]:[
-    {label:folder==='trash'?'Restore':folder==='archive'?'Move to Inbox':'Archive',icon:folder==='trash'?'rotate-ccw':'archive',disabled:!selected.size,run:()=>prepare(folder==='trash'?'untrash':folder==='archive'?'unarchive':'archive',folder==='trash'?'Restore':folder==='archive'?'Move to Inbox':'Archive')},
-    {label:'Mark as read',icon:'mail-open',disabled:!selected.size,run:()=>prepare('read','Mark as read')},
+    {label:folder==='trash'?'Restore':folder==='archive'?'Move to Inbox':'Archive',icon:folder==='trash'?'rotate-cw':'archive',disabled:!selected.size,run:()=>prepare(folder==='trash'?'untrash':folder==='archive'?'unarchive':'archive',folder==='trash'?'Restore':folder==='archive'?'Move to Inbox':'Archive')},
+    {label:'Mark as read',icon:'check',disabled:!selected.size,run:()=>prepare('read','Mark as read')},
     {label:'Mark as unread',icon:'mail',disabled:!selected.size,run:()=>prepare('unread','Mark as unread')},
     ...(folder!=='trash'?[{label:'Move to Trash',icon:'trash-2',disabled:!selected.size,run:()=>prepare('trash','Move to Trash')}]:[]),
    ]),

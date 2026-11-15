@@ -115,6 +115,8 @@ test('preview sent-mail recovery cannot change a received message with the same 
 for(const width of [412,1040])test(`preview selection menu visual at ${width}px`,async({page})=>{
  await page.setViewportSize({width,height:915});await mailMenu(page,'Select emails');await mailMenu(page,'Select all');await page.getByLabel('Mail options',{exact:true}).click();
  await expect(page.getByRole('menuitem',{name:'Move to Trash',exact:true})).toBeVisible();await expect(page.getByRole('heading',{name:'2 selected',exact:true})).toBeVisible();
+ const icons=await page.getByRole('menu').locator('.mail-toolbar-icon').evaluateAll(nodes=>nodes.map(node=>(node as HTMLElement).style.maskImage.match(/url\(["']?([^"')]+)/)?.[1]).filter(Boolean));
+ for(const icon of icons){const response=await page.request.get(icon!);expect(response.headers()['content-type']).toContain('image/svg+xml');}
  await page.screenshot({path:test.info().outputPath('inbox-selection-menu.png'),fullPage:true});
  const menu=await page.getByRole('menu').boundingBox();expect(menu).not.toBeNull();expect(menu!.x).toBeGreaterThanOrEqual(0);expect(menu!.x+menu!.width).toBeLessThanOrEqual(width+1);
 });
