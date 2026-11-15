@@ -872,7 +872,7 @@
           <details class="mail-addresses"><summary aria-label="Show message details"><span style="font-weight:600;font-size:16px">{{inbox.d.name}}</span><span class="mail-address-chevron" aria-hidden="true"></span><span style="display:block;font-size:13px;color:var(--mut);margin-top:2px">{{inbox.d.meta}}</span></summary><dl><dt>From</dt><dd>{{inbox.d.fullFrom}}</dd><dt>To</dt><dd>{{inbox.d.fullTo}}</dd><sc-if value="{{inbox.d.hasCc}}"><dt>Cc</dt><dd>{{inbox.d.fullCc}}</dd></sc-if><sc-if value="{{inbox.d.hasReplyTo}}"><dt>Reply-to</dt><dd>{{inbox.d.fullReplyTo}}</dd></sc-if><dt>Date</dt><dd>{{inbox.d.fullDate}}</dd></dl></details>
         </div>
         <sc-if value="{{inbox.d.hasRemoteImages}}"><p style="margin:16px 0 8px;font-size:13px;color:var(--mut)"><button aria-label="Show images" onClick="{{inbox.d.showImages}}" style="min-height:44px;color:var(--acct);display:inline-flex;align-items:center;gap:6px;padding:0 14px;border-radius:22px;background:var(--s2)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.photo}}"></path></svg>Show</button></p></sc-if>
-        <sc-if value="{{inbox.d.hasHtml}}"><iframe title="Formatted email" sandbox="allow-same-origin" referrerpolicy="no-referrer" srcdoc="{{inbox.d.htmlDocument}}" onLoad="{{inbox.d.htmlLoaded}}" style="width:100%;border:0;display:block;height:400px;margin-top:22px;background:var(--alpha-white)"></iframe></sc-if>
+        <sc-if value="{{inbox.d.hasHtml}}"><iframe ref="{{inbox.d.formattedMailRef}}" title="Formatted email" sandbox="allow-same-origin" referrerpolicy="no-referrer" srcdoc="{{inbox.d.htmlDocument}}" onLoad="{{inbox.d.htmlLoaded}}" style="width:100%;border:0;display:block;height:400px;margin-top:22px;background:var(--alpha-white)"></iframe></sc-if>
         <sc-if value="{{inbox.d.noHtml}}"><div role="status" aria-busy="{{inbox.d.loading}}" style="font-size: 16px; line-height: 1.6; margin-top: 22px; white-space: pre-wrap">{{inbox.d.body}}</div></sc-if>
         <sc-if value="{{inbox.d.failed}}"><button aria-label="Retry message" onClick="{{inbox.d.retry}}" style="min-height:44px;color:var(--acct);display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.phRotate}}"></path></svg>Retry</button></sc-if>
         <sc-if value="{{inbox.d.hasLinks}}">
@@ -2434,7 +2434,12 @@
     <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">{{notes.notesTitle}}</h1>
     <sc-if value="{{notes.canRecord}}"><button class="ib" data-agent-id="notes-record" aria-label="Record voice note" onClick="{{notes.record}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.mic}}"></path></svg></button></sc-if>
       <sc-if value="{{notes.canCreate}}"><button class="ib" data-agent-id="notes-new" aria-label="New note" disabled="{{notes.createDisabled}}" onClick="{{notes.newNote}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg></button></sc-if>
+    <sc-if value="{{notes.previousNotesAction}}"><button class="ib" aria-label="Notes options" aria-haspopup="dialog" aria-expanded="{{notes.previousNotesMenu}}" onClick="{{notes.openPreviousNotesMenu}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
   </div>
+  <sc-if value="{{notes.previousNotesMenu}}"><div ref="{{notes.previousNotesModal}}" data-alpha-popup style="display:contents">
+    <button aria-hidden="true" tabindex="-1" onClick="{{notes.closePreviousNotesMenu}}" style="position:absolute;inset:0;z-index:11;background:transparent"></button>
+    <div class="notes-menu" role="dialog" aria-label="Notes options"><button onClick="{{notes.previousNotesAction}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg>On this phone</button></div>
+  </div></sc-if>
   <sc-if value="{{notes.hasDeleted}}"><div style="padding:0 16px 10px"><button class="tap notes-chip" data-agent-id="notes-trash" onClick="{{notes.openTrash}}"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></div></sc-if>
   <sc-if value="{{notes.filterOn}}">
     <div style="display: flex; padding: 0 16px 10px; flex-shrink: 0">
@@ -2466,7 +2471,6 @@
           </button>
     </sc-for>
     <sc-if value="{{notes.canImportText}}"><button class="tap" aria-label="Import text note" disabled="{{notes.documentBusy}}" onClick="{{notes.importText}}" style="display: flex; align-items: center; gap: 8px; min-height: 48px; margin-top: 16px; padding: 0 14px; border-radius: 22px; background: var(--s2); color: var(--fg); font-size: 14px"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.filesDown}}"></path></svg>Import</button></sc-if>
-    <sc-if value="{{notes.olderNotesAction}}"><button class="tap" aria-label="Previous notes" onClick="{{notes.olderNotesAction}}" style="min-height:48px;margin-top:16px;padding:0 8px;color:var(--mut);font-size:14px">Older</button></sc-if>
   </div>
 
   

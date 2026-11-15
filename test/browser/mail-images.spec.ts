@@ -43,6 +43,32 @@ test('plain-text email retains its reviewed link controls',async({page})=>{
  await setup(page,false);await openMail(page);await expect(page.getByRole('group',{name:'Links in this email'})).toBeVisible();await expect(page.getByRole('button',{name:'Read more (example.invalid)',exact:true})).toBeVisible();await expect(page.locator('iframe[title="Formatted email"]')).toHaveCount(0);
 });
 
+test.describe('responsive formatted mail',()=>{
+ test.use({hasTouch:true,isMobile:true});
+ test('keeps table columns visible when the reader narrows and widens',async({page})=>{
+  await page.setViewportSize({width:1440,height:900});
+  await page.route('https://images.invalid/**',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90"><rect width="90" height="90" fill="teal"/></svg>'}));
+  await setup(page,'<table width="600" cellpadding="0" cellspacing="0"><tr><td><table width="394"><tr><td><img src="https://images.invalid/avatar.svg" alt="Profile image" style="width:90px;height:90px"></td><td width="100%"><strong>Suggested account</strong><p>A long account description that stays next to the profile image.</p></td></tr></table></td></tr></table>');
+  await openMail(page);
+  const frame=page.locator('iframe[title="Formatted email"]');
+  const document=page.frameLocator('iframe[title="Formatted email"]');
+  await expect(document.getByRole('img',{name:'Profile image',exact:true})).toBeVisible();
+  const geometry=()=>frame.evaluate((element:HTMLIFrameElement)=>{
+   const doc=element.contentDocument!,reader=element.closest('.inbox-message-content')!;
+   const image=doc.querySelector('img')!.getBoundingClientRect(),description=doc.querySelector('strong')!.getBoundingClientRect();
+   return {width:element.clientWidth,height:element.clientHeight,viewportOverflow:doc.documentElement.scrollWidth-element.clientWidth,readerOverflow:reader.scrollWidth-reader.clientWidth,imageWidth:image.width,ordered:image.right<=description.left};
+  });
+  const fitting=()=>expect.poll(async()=>{const g=await geometry();return g.viewportOverflow<=1&&g.readerOverflow<=1&&g.ordered&&g.imageWidth>30&&g.height>=120&&g.height<=32000;}).toBe(true);
+  await fitting();const desktop=await geometry();
+  await page.setViewportSize({width:360,height:800});
+  await expect.poll(async()=>(await geometry()).imageWidth).toBeLessThan(desktop.imageWidth);
+  await fitting();expect((await geometry()).width).toBeLessThan(desktop.width);
+  await page.setViewportSize({width:1440,height:900});
+  await expect.poll(async()=>(await geometry()).imageWidth).toBeCloseTo(desktop.imageWidth);
+  await fitting();
+ });
+});
+
 test('Show images applies only to the chosen message when paging a conversation',async({page})=>{
  const requests:string[]=[];
  await page.route('https://images.invalid/**',route=>{requests.push(route.request().url());return route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP4/x8AAwAB/2+Bq7YAAAAASUVORK5CYII=','base64')});});

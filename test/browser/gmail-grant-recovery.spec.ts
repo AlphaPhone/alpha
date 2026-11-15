@@ -1,10 +1,19 @@
 import {test,expect} from '@playwright/test';
+import {preloadPageModules} from './helpers/page-modules';
 // The fixture models an installation that already finished access setup; a signed-in account with
 // pending setup is owed the startup walkthrough, which would otherwise cover Home once the swapped
 // snapshot re-renders (startup-permissions-walkthrough.spec.ts owns that flow).
 for(const reason of ['disconnected','scope-revoked'] as const)test(`Gmail same-ID ${reason} clears read availability and recovers explicitly`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
  await page.goto('/');
+ await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
+ // Finish startup before replacing the live binding. A late startup update would
+ // otherwise make the Inbox observer see the fixture account as a new session.
+ await page.waitForFunction(()=>{
+  const {connectionController}=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'];
+  const state=connectionController.getSnapshot();
+  return state.startupResolved&&!state.busy;
+ });
  await page.evaluate(async()=>{
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
   const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');s.read=async()=>null;

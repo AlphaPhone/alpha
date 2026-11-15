@@ -65,15 +65,16 @@ import { readNativeNetwork } from './native-network';
 import type { AgentReply, ActionProposal, OperationReceipt, ContextEnvelope, VerifiedSession } from './alpha-client';
 import { CloudResidentBindingController, CloudResidentBindingError, ResidentRebindQueue, parseResidentPlanAdmission, recentResidentPlanAdmission, type ResidentPlanAdmissionRecord } from '../../../../.eliza/client-features/packages/auth/src/auth/cloud-resident-binding.ts';
 import { cloudServiceName, cloudSignInHandOffAvailable, CloudProtocol, CloudProtocolError, type CloudAgent, type CloudEnvironment } from './cloud-protocol';
-import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSignInError, normalizeSignInCode, signInFailureMessage as formatSignInFailureMessage, signInReadiness, validSignInEmail, validSignInPhone, type CloudSignInAuthenticated } from './cloud-sign-in';
+import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSignInError, normalizeSignInCode, signInFailureMessage as formatSignInFailureMessage, signInReadiness, signInReadinessChanged, validSignInEmail, validSignInPhone, type CloudSignInAuthenticated } from './cloud-sign-in';
 import { DevelopmentCloudAgentProtocol, type CloudPhoneTarget } from './development-cloud-agents';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
 import { phoneContextMessage, selectDeviceCapabilities } from './phone-context';
 import {calendarSource,calendarTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
-import { CloudSignInPanel } from './cloud-sign-in-ui';
+import { CloudSignInPanel, SIGN_IN_SENDING } from './cloud-sign-in-ui';
+import { useCloudSignInNetwork } from './cloud-sign-in-network';
 import { Busy, StatusDot, type StatusTone } from './status-ui';
-import { cloudCredentialStore, cloudSelfRevocationSupported, cloudSignIn, cloudSignInPhone, remoteCredentialStore, nativeCloudRequest, nativeRemoteRequest, openConnectionBrowser, removeStoredCloudCredential, secureConnectionStore } from './native-connection';
+import { cloudCredentialStore, cloudSelfRevocationSupported, cloudSignIn, cloudSignInGoogle, cloudSignInPhone, remoteCredentialStore, nativeCloudRequest, nativeRemoteRequest, openConnectionBrowser, removeStoredCloudCredential, secureConnectionStore } from './native-connection';
 import { findStoppedUserTurn, type StoppedUserTurn as StoppedTurn } from '../../../../.eliza/client-features/packages/ui/src/api/conversation-turn-controller.ts';
 import './connection-ui.css';
 import {CloudMembershipControls,FUNDING_NEEDED,fundingRefusedReply,type MembershipBalance} from './cloud-membership-ui';
@@ -685,7 +686,7 @@ function prepareSignInReplacement() {
   const replacingCloud = active?.kind === 'cloud' || selection()?.kind === 'cloud';
   detachCloudTarget(); detachService(); if (replacingCloud) save({ kind: 'none' }); update({ agents: [], accountCreated: false });
 }
-/** How long sign-in waits for optional Google readiness before offering email alone. */
+/** How long sign-in waits for optional method readiness before making email usable. */
 const SIGN_IN_READINESS_WAIT_MS = 6000;
 /** A later operation retires the optional result even when it leaves the chooser mounted. */
 let signInReadinessOwner: AbortSignal | null = null;
@@ -695,8 +696,8 @@ let inAppGoogle = false, inAppPhone = false, inAppEmail = true;
  * The verified optional sign-in methods, or null when the readiness probe is unavailable. The host
  * (AlphaCloudSignInPlugin) runs a cheap, cached readiness probe: the native client registration,
  * Steward's redirect allowlist and providers, /.well-known/assetlinks.json listing this app's
- * package and signing certificate, and Android's verification of the return host. Fail-safe: no
- * host, an error or a malformed answer hides Google. A slow answer initially offers email;
+ * package and signing certificate, and Android's verification of the return host. An unknown or
+ * malformed answer leaves optional methods unavailable. A slow answer initially enables email;
  * a validated late answer can update only the same still-current chooser.
  */
 async function inAppSignInMethods(environment: CloudEnvironment, signal: AbortSignal, refreshNegative = false, onLateReady?: (methods: NonNullable<ReturnType<typeof signInReadiness>>) => void): Promise<{ google: boolean; phone: boolean; email: boolean } | null> {
@@ -718,6 +719,18 @@ async function inAppSignInMethods(environment: CloudEnvironment, signal: AbortSi
     return signInReadiness(value);
   } catch { return null; }
   finally { clearTimeout(timer); if (abort) signal.removeEventListener('abort', abort); }
+}
+/** A reconnect can recover optional methods without starting over or clearing a draft. */
+async function refreshSignInMethods(view: Extract<SignInView, {step: 'choose'}>, signal: AbortSignal) {
+  if (state.signIn !== view || operation || state.cloudAccount || cloud.environment !== view.environment) return;
+  signInReadinessOwner = signal;
+  const apply = (methods: NonNullable<ReturnType<typeof signInReadiness>>) => {
+    if (signal.aborted || signInReadinessOwner !== signal || state.signIn !== view || operation || state.cloudAccount || cloud.environment !== view.environment) return;
+    inAppGoogle = methods.google; inAppPhone = methods.phone; inAppEmail = methods.email;
+    update({});
+  };
+  const methods = await inAppSignInMethods(view.environment, signal, true, apply);
+  if (methods) apply(methods);
 }
 /** A failed or cancelled step leaves the stored sign-in and the running service as they were. */
 function signInFailed(environment: CloudEnvironment, keepStep = false, prefill: {email?: string; phone?: string} = {}) {
@@ -949,9 +962,11 @@ function errorMessage(error: unknown): string {
 }
 /** A resident start that does not open the dialog: Home shows the starting state (P-43). */
 let residentStartInBackground = false;
+let homePresentationRevision = 0;
 /** `openOnError`: a background check (the quiet Cloud account restore) that opens the dialog only to report a failure. */
 async function work(message: string, action: (signal: AbortSignal) => Promise<void>, background = false, openOnError = false, preserveError = false) {
   if (operation) return;
+  const presentationRevision = homePresentationRevision;
   // An owner step never waits behind a background plan read: the read stops and the next return checks again.
   planRecheck?.abort();
   const controller = new AbortController(); cancelStoppedVoiceRead(); signInReadinessOwner = null; operation = controller; residentStartInBackground = background;
@@ -959,15 +974,16 @@ async function work(message: string, action: (signal: AbortSignal) => Promise<vo
   try { await action(controller.signal); }
   catch (error) {
     if(operation!==controller)return;
+    const showError = () => state.open || presentationRevision === homePresentationRevision;
     const recovery=residentRecoveryReason(error);if(recovery&&!active)update({residentRecoveryReason:recovery});
     if(controller.signal.aborted&&(!state.open||error===controller.signal.reason)){update({error:'',message:''});return;}
     if(background&&!openOnError&&!state.open){update({error:errorMessage(error),errorKind:errorKindOf(error),message:''});return;}
     if (testMocksEnabled && expired(error) && active?.kind === 'cloud' && active.cloud.environment === cloud.environment) {
       const previous = active; retire('Sign-in required'); detachService();
       try { await previous.cloud.disconnect(); }
-      catch { update({ error: 'Couldn’t clear sign-in', open: true, message: '' }); return; }
+      catch { update({ error: 'Couldn’t clear sign-in', open: showError(), message: '' }); return; }
     }
-    update({ error: errorMessage(error), errorKind: errorKindOf(error), ...(background&&!state.open?{purpose:residentCloudFlow()?'agent' as const:'cloud-account' as const}:{}), open: true, message: '' });
+    update({ error: errorMessage(error), errorKind: errorKindOf(error), ...(background&&!state.open?{purpose:residentCloudFlow()?'agent' as const:'cloud-account' as const}:{}), open: showError(), message: '' });
   }
   // A resident start ends with its operation, in one update: setup shown behind the start never
   // sees a still-busy connection that is no longer starting.
@@ -2928,9 +2944,13 @@ export const connectionController = {
   async residentCloudLogin() { await connectionController.beginSignIn(residentEnvironment()); },
   /** Opens Alpha's own sign-in screen when ready. Nothing is sent until the owner chooses Google or
    * enters an email; no Eliza Cloud web page is opened. */
-  async beginSignIn(environment: CloudEnvironment = residentCloudFlow() ? residentEnvironment() : cloud.environment, refreshNegative = true, automatic = false, selectCloudAfterSignIn = false) {
+  async beginSignIn(environment: CloudEnvironment = residentCloudFlow() ? residentEnvironment() : cloud.environment, refreshNegative = true, automatic = false, selectCloudAfterSignIn: boolean | ConnectionSnapshot['providerSignInSelection'] = false) {
     if (operation || !cloudEnvironmentAllowed(environment)) return;
-    update({providerSignInSelection:selectCloudAfterSignIn?{id:crypto.randomUUID(),environment}:undefined});
+    // An options retry may retain the exact selection owned by the current chooser.
+    const selection = state.providerSignInSelection;
+    const retrySelection = selectCloudAfterSignIn === selection && selection?.environment === environment &&
+      state.signIn?.step === 'choose' && state.signIn.environment === environment ? selection : undefined;
+    update({providerSignInSelection:selectCloudAfterSignIn===true?{id:crypto.randomUUID(),environment}:retrySelection});
     googleSignInGeneration++;providerStatusGeneration++;
     // An automatic readiness probe must not erase why the saved sign-in was refused.
     // A new attempt explicitly started by the owner still clears the earlier error.
@@ -3019,7 +3039,8 @@ export const connectionController = {
   },
   /** Google's external browser flow, followed by the existing native session exchange. */
   async signInGoogle() {
-    const view=state.signIn;if(!view)return;
+    const view = state.signIn;
+    if (view?.step !== 'choose' || !inAppGoogle) return;
     await work('In browser',async signal=>{
       const generation=++googleSignInGeneration;
       update({signIn:{step:'google',environment:view.environment}});
@@ -3052,16 +3073,18 @@ export const connectionController = {
   },
   /** Sends a six-digit code to the address. Resending waits out the cooldown the host enforces. */
   async signInEmail(email: string) {
-    const view = state.signIn; if (!view) return;
+    const view = state.signIn;
+    if (!view || (view.step === 'choose' ? !inAppEmail : view.step !== 'code' || !!view.phone)) return;
     const address = email.trim();
     if (!validSignInEmail(address)) { update({ error: signInFailureMessage('invalid-email') }); return; }
-    await work('Sending your code…', signal => sendSignInCode(view, 'email', address, signal));
+    await work(SIGN_IN_SENDING, signal => sendSignInCode(view, 'email', address, signal));
   },
   async signInPhone(phone: string) {
-    const view = state.signIn; if (!view || !cloudSignInPhone || !inAppPhone) return;
-    const number = phone.trim();
+    const view = state.signIn;
+    if (!view || !cloudSignInPhone || (view.step === 'choose' ? !inAppPhone : view.step !== 'code' || !view.phone)) return;
+    const number = phone.replace(/[\s().-]/g, '');
     if (!validSignInPhone(number)) { update({ error: signInFailureMessage('invalid-phone') }); return; }
-    await work('Sending your code…', signal => sendSignInCode(view, 'phone', number, signal));
+    await work(SIGN_IN_SENDING, signal => sendSignInCode(view, 'phone', number, signal));
   },
   async resendSignInCode() { const view = state.signIn; if (view?.step === 'code') { if (view.phone) await connectionController.signInPhone(view.phone); else await connectionController.signInEmail(view.email); } },
   /** Verifies the emailed code, or the second verification Cloud asked for. */
@@ -3188,6 +3211,7 @@ export const connectionController = {
    */
   async residentRedeem(code:string):Promise<boolean> {
     if(operation)return false;
+    const presentationRevision = homePresentationRevision;
     let redeemed=false;
     const idempotencyKey=crypto.randomUUID();
     update({redeemError:'',redeemNotice:''});
@@ -3217,7 +3241,7 @@ export const connectionController = {
       // The restart re-verifies the account into a new connection object: compare the account, not the object.
       if(known&&service?.identity.environment===account.identity.environment&&service.identity.credentialId===account.identity.credentialId){recordEnd();update({planEndsAt:endsAt});}
       // The code was redeemed from the plan panel: show its outcome there beside the running agent.
-      if(!state.error)update({open:true,purpose:'plan',redeemNotice:notice,message:''});
+      if(!state.error && presentationRevision === homePresentationRevision)update({open:true,purpose:'plan',redeemNotice:notice,message:''});
     });
     return redeemed;
   },
@@ -3665,6 +3689,19 @@ export const connectionController = {
 if (cloudSignIn?.addListener) Promise.resolve(cloudSignIn.addListener('signInCompleted', outcome => { void connectionController.signInReturned(outcome); })).catch(() => { /* No retained return. */ });
 if (cloudSignIn?.addListener) Promise.resolve(cloudSignIn.addListener('signInMfaRequired', outcome => { void connectionController.signInReturned(outcome); })).catch(() => { /* No retained challenge. */ });
 if (cloudSignIn?.addListener) Promise.resolve(cloudSignIn.addListener('signInIncomplete', value => { connectionController.signInIncomplete(value); })).catch(() => { /* No retained return. */ });
+// Android can finish verifying an App Link after the first status response. Apply this hint only
+// to the active deployment; an explicit status request already owns its own result.
+if (isAndroid && cloudSignIn?.addListener) Promise.resolve(cloudSignIn.addListener('signInReadinessChanged', value => {
+  const view = state.signIn;
+  if (!view || state.cloudAccount || view.environment !== cloud.environment || (operation && operation.signal === signInReadinessOwner)) return;
+  const methods = signInReadinessChanged(value, view.environment)?.readiness;
+  if (!methods) return;
+  signInReadinessOwner = null;
+  inAppGoogle = methods.google;
+  inAppPhone = methods.phone;
+  inAppEmail = methods.email;
+  update({});
+})).catch(() => { /* Check sign-in options still works. */ });
 export function productionCloudSignInRequired(snapshot: Pick<ConnectionSnapshot,'cloudAccount'|'error'>&Partial<Pick<ConnectionSnapshot,'errorKind'|'startupResolved'|'residentSavedCredential'|'residentPlanNotice'|'providerStatus'>>): boolean {
   // A null account before saved-session restoration finishes is not signed out.
   // Do not let the automatic readiness probe compete with that restoration.
@@ -3724,16 +3761,38 @@ export function ConnectionChooser() {
   const signInPage=signInEntryPage(snapshot)||signInPageLatched&&signInEntryPage({...snapshot,error:'',startupResolved:true});
   if(signInPage!==signInPageLatched)setSignInPageLatched(signInPage);
   const signInEntryRequired=snapshot.purpose!=='provider'&&(productionSignInRequired||explicitSignInEntry||signInPage);
+  const signInPageShown=!!snapshot.signIn||signInEntryRequired;
+  const cloudSignInNetwork=useCloudSignInNetwork(signInPageShown);
   const automaticSignInProbe = useRef(false);
+  const refreshSignInOnReconnect = useRef(false);
   useEffect(() => {
-    if (!signInEntryRequired) { automaticSignInProbe.current = false; return; }
-    if (snapshot.signIn) { automaticSignInProbe.current = false; return; }
-    if (automaticSignInProbe.current || snapshot.busy || snapshot.startupResolved===false || snapshot.automaticRestore) return;
+    if (!signInPageShown) {
+      automaticSignInProbe.current = false;
+      refreshSignInOnReconnect.current = false;
+      return;
+    }
+    if (cloudSignInNetwork.offline || cloudSignInNetwork.unvalidated) refreshSignInOnReconnect.current = true;
+    if (snapshot.signIn) {
+      automaticSignInProbe.current = false;
+      if (!refreshSignInOnReconnect.current || !cloudSignInNetwork.reachable || snapshot.busy || snapshot.cloudAccount || snapshot.signIn.step !== 'choose') return;
+      refreshSignInOnReconnect.current = false;
+      if (inAppGoogle && inAppEmail && (!cloudSignInPhone || inAppPhone)) return;
+      const refresh = new AbortController();
+      void refreshSignInMethods(snapshot.signIn, refresh.signal);
+      return () => refresh.abort();
+    }
+    if (cloudSignInNetwork.offline) {
+      automaticSignInProbe.current = false;
+      return;
+    }
+    if (cloudSignInNetwork.checking || automaticSignInProbe.current || snapshot.busy || snapshot.startupResolved===false || snapshot.automaticRestore) return;
     automaticSignInProbe.current = true;
     // Readiness only: neither email nor Google starts until the owner chooses it.
-    // Automatic probes preserve a genuine saved-sign-in or startup refusal.
-    void connectionController.beginSignIn(residentEnvironment(), false, true);
-  }, [signInEntryRequired, snapshot.busy, snapshot.signIn, snapshot.startupResolved, snapshot.automaticRestore]);
+    // Refresh any negative result the native host cached while internet access was unavailable.
+    const refreshNegative = refreshSignInOnReconnect.current && cloudSignInNetwork.reachable;
+    if (refreshNegative) refreshSignInOnReconnect.current = false;
+    void connectionController.beginSignIn(residentEnvironment(), refreshNegative, true);
+  }, [signInPageShown, snapshot.busy, snapshot.signIn, snapshot.cloudAccount, snapshot.startupResolved, snapshot.automaticRestore, cloudSignInNetwork.offline, cloudSignInNetwork.unvalidated, cloudSignInNetwork.reachable, cloudSignInNetwork.checking]);
   useEffect(()=>{
     if(!isAndroid||!signInEntryRequired||(snapshot.signIn?.environment??residentEnvironment())!=='production'||snapshot.cloudAccount||!cloudSignIn?.savedSignInRecoveryStatus)return;
     let current=true;
@@ -3759,10 +3818,7 @@ export function ConnectionChooser() {
   const providerKey=useRef<HTMLInputElement>(null);
   // The signed-out sign-in page can swap its Cloud methods for the own-keys form.
   const [ownKeyEntry,setOwnKeyEntry]=useState(false),[ownKeyAttempted,setOwnKeyAttempted]=useState(false);
-  const signInPageShown=!!snapshot.signIn||signInEntryRequired;
   useEffect(()=>{if(!signInPageShown){setOwnKeyEntry(false);setOwnKeyAttempted(false);}},[signInPageShown]);
-  // Readiness that failed while offline is checked again when the phone reconnects.
-  useEffect(()=>{if(!signInEntryRequired||snapshot.signIn)return;const online=()=>{const current=connectionController.getSnapshot();if(!current.signIn&&!current.busy)void connectionController.beginSignIn(residentEnvironment(),true,true);};window.addEventListener('online',online);return()=>window.removeEventListener('online',online);},[signInEntryRequired,!!snapshot.signIn]);
 
   const qaEnvironment=useRef<HTMLSelectElement>(null);
   const [confirmRemove,setConfirmRemove]=useState(false);
@@ -3848,8 +3904,26 @@ export function ConnectionChooser() {
     const previous = document.activeElement as HTMLElement | null;
     const phone = document.querySelector<HTMLElement>('.os');
     const releaseInert = holdPhoneInert(phone);
-    return () => { releaseInert(); previous?.focus(); };
+    const presentationRevision = homePresentationRevision;
+    return () => {
+      releaseInert();
+      if (presentationRevision === homePresentationRevision) previous?.focus();
+    };
   }, [visible]);
+  useEffect(() => {
+    const home = () => {
+      homePresentationRevision++;
+      if (signInEntryPage(state)) return;
+      if (state.signIn || explicitSignedOutCloudEntry(state)) {
+        connectionController.close();
+      } else if (state.open) {
+        // A submitted account operation can finish after Home leaves its panel.
+        update({ open: false, purpose: 'agent', membershipDismissed: true });
+      }
+    };
+    window.addEventListener('launcher-home', home);
+    return () => window.removeEventListener('launcher-home', home);
+  }, []);
   // Escape, Android Back and the own-key form's Cancel during a check share one dispatch.
   const dismiss = () => {
     if (connectionController.getSnapshot().signIn) connectionController.cancelSignIn();
@@ -3962,10 +4036,11 @@ export function ConnectionChooser() {
     requiredSignInView.step === 'choose' && !requiredSignInView.email && !requiredSignInView.phone;
   if (signInPageShown) return <div className={signInPage?'alpha-auth-page':'alpha-connection-scrim'}><div className={`alpha-connection alpha-connection-native alpha-cloud-sign-in${signInPage?' alpha-auth-content':''}`} role={signInPage?'main':'dialog'} aria-modal={signInPage?undefined:true} aria-labelledby="cloud-sign-in-title" aria-busy={snapshot.busy||undefined} tabIndex={-1} ref={panel}
     data-alpha-app-update-sign-in={firstSignInLanding && !snapshot.busy ? '' : undefined}>
-    <CloudSignInPanel phone={cloudSignInPhone && inAppPhone} emailEnabled={inAppEmail} view={requiredSignInView} busy={snapshot.busy} ready={!!snapshot.signIn} dismissible={!signInPage} google={inAppGoogle} message={snapshot.message} error={signInError} errorIsNotice={signInError===RESIDENT_UNPACKAGED} focusEmailOnChoose={!firstSignInLanding}
+    <CloudSignInPanel phone={cloudSignInPhone && inAppPhone} showPhone={isAndroid || cloudSignInPhone} showGoogle={isAndroid || cloudSignInGoogle || inAppGoogle} emailEnabled={inAppEmail} view={requiredSignInView} busy={snapshot.busy} ready={!!snapshot.signIn} dismissible={!signInPage} google={inAppGoogle} message={snapshot.message} error={signInError} errorIsNotice={signInError===RESIDENT_UNPACKAGED} focusEmailOnChoose={!firstSignInLanding}
       probing={probing} unavailable={!snapshot.signIn&&!snapshot.busy&&(!!signInError||automaticSignInProbe.current)}
+      offline={cloudSignInNetwork.offline} networkNotice={cloudSignInNetwork.notice}
       ownKeys={offerOwnKeys?()=>{connectionController.dismissError();setOwnKeyAttempted(false);setOwnKeyEntry(true);}:undefined} alternate={ownKeyForm}
-      actions={{phone:number=>void connectionController.signInPhone(number),google:()=>void connectionController.signInGoogle(),email:address=>void connectionController.signInEmail(address),verify:code=>void connectionController.verifySignInCode(code),resend:()=>void connectionController.resendSignInCode(),cancel:()=>connectionController.cancelSignIn(),reopenGoogle:()=>void connectionController.reopenGoogle(),retry:()=>void connectionController.beginSignIn(requiredSignInView.environment,true)}}
+      actions={{phone:number=>void connectionController.signInPhone(number),google:()=>void connectionController.signInGoogle(),email:address=>void connectionController.signInEmail(address),verify:code=>void connectionController.verifySignInCode(code),resend:()=>void connectionController.resendSignInCode(),cancel:()=>connectionController.cancelSignIn(),reopenGoogle:()=>void connectionController.reopenGoogle(),retry:()=>void connectionController.beginSignIn(requiredSignInView.environment,true,false,snapshot.providerSignInSelection),clearError:()=>connectionController.dismissError()}}
       extra={signInExtra}/>
     {snapshot.signOutNotice && snapshot.signOutNotice!==snapshot.message && <p role="status">{snapshot.signOutNotice}</p>}
     {productionSignInRequired && <ResidentRecoveryPanel snapshot={snapshot}/>}
