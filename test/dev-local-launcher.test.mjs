@@ -21,11 +21,11 @@ const stubs={
  'node_modules/vite/bin/vite.js':"import fs from 'node:fs';const until=Date.now()+15000;while(!fs.existsSync('agent.json')&&Date.now()<until)await new Promise(r=>setTimeout(r,20));fs.writeFileSync('vite.json',JSON.stringify({argv:process.argv.slice(2),env:process.env}));\n",
 };
 const freePort=()=>new Promise((resolve,reject)=>{const server=createServer();server.once('error',reject);server.listen(0,'127.0.0.1',()=>{const {port}=server.address();server.close(()=>resolve(port));});});
-async function launch(overrides={}){
+async function launch(overrides={},fixture={}){
  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'alpha-dev-local-')));
  try{
   for(const file of ['scripts/dev-local.ts','scripts/dev-speech-settings.ts','scripts/speech-env.ts']){fs.mkdirSync(path.join(root,path.dirname(file)),{recursive:true});fs.copyFileSync(file,path.join(root,file));}
-  for(const [file,text] of Object.entries(stubs)){fs.mkdirSync(path.join(root,path.dirname(file)),{recursive:true});fs.writeFileSync(path.join(root,file),text);}
+  for(const [file,text] of Object.entries({...stubs,...fixture})){fs.mkdirSync(path.join(root,path.dirname(file)),{recursive:true});fs.writeFileSync(path.join(root,file),text);}
   fs.mkdirSync(path.join(root,'source/node_modules'),{recursive:true});
   const env={...process.env,ALPHA_ELIZA_SOURCE:path.join(root,'source'),ALPHA_REMOTE_PROFILE:path.join(root,'profile'),ALPHA_REMOTE_PORT:String(await freePort()),...overrides};
   for(const key of ['NODE_TEST_CONTEXT',...['ALPHA_DEV_CONNECTION_TOOLS'].filter(key=>!Object.hasOwn(overrides,key))])delete env[key];
@@ -69,4 +69,24 @@ test('ALPHA_DEV_CONNECTION_TOOLS=1 restores the development connection sheet',as
 test('dev:ui with the local agent and no connection tools setting keeps the development sheet',async()=>{
  const env={...process.env,ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_LOCAL_AGENT:'1',ALPHA_LOCAL_AGENT_ORIGIN:'http://127.0.0.1:1'};delete env.ALPHA_DEV_CONNECTION_TOOLS;
  assert.deepEqual({...await renderer(env,true)},{testMocksEnabled:true,devSurfacesEnabled:true,privateLocalPreviewEnabled:false});
+});
+
+test('the preview survives repeated resident exits and shuts down the replacement',async()=>{
+ const {stdout,vite}=await launch({},{
+  'scripts/start-local-remote.ts':`import fs from 'node:fs';
+   const attempt=fs.existsSync('attempt')?Number(fs.readFileSync('attempt','utf8'))+1:1;
+   fs.writeFileSync('attempt',String(attempt));
+   if(attempt<=2)process.exit(attempt-1);
+   process.on('SIGTERM',()=>{console.log('replacement stopped');process.exit(0);});
+   fs.writeFileSync('agent.json.tmp',JSON.stringify({attempt}));
+   fs.renameSync('agent.json.tmp','agent.json');
+   setInterval(()=>{},1000);
+  `,
+  'node_modules/vite/bin/vite.js':`import fs from 'node:fs';
+   while(!fs.existsSync('agent.json'))await new Promise(resolve=>setTimeout(resolve,20));
+   fs.writeFileSync('vite.json',fs.readFileSync('agent.json'));
+  `,
+ });
+ assert.deepEqual(vite,{attempt:3});
+ assert.match(stdout,/replacement stopped/);
 });

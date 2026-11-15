@@ -46,7 +46,7 @@ export function workflowRendererFixture(overrides: Record<string, unknown>) {
     ...overrides,
   };
   const scope = { setTimeout,clearTimeout,setInterval,clearInterval, formatDateTime, createWorkflowApprovalPoster,definiteNoticeFailure,projectNoteForModel, NoticeOwnerCoordinator, revalidateWorkflowApprovalNotice, document:{hidden:false,addEventListener(){},removeEventListener(){}}, window:{addEventListener(){},removeEventListener(){},dispatchEvent(){}}, Event, ...context, normalizePhoneSpec, assertPhoneCapabilities, describePhoneTrigger, phoneTriggerClockChangeNote, workflowDeviceTimeZone,workflowLocalInstant,workflowClockContext,automationLocalDateInput,localDate,phoneScheduleTiming, WorkflowActivationRejected, workflowSha, workflowBytes, alphaClient, crypto:globalThis.crypto, TextEncoder, registerPlugin:()=>new Proxy({}, {get:()=>()=>Promise.reject(Error('Unexpected native authoring operation in existing-workflow fixture'))}) };
-  vm.runInNewContext('{'+stripTypeScriptTypes(source,{mode:'transform'})+'\nglobalThis.createWorkflowAuthoring=createWorkflowAuthoring;globalThis.showAgentStatus=typeof showAgentStatus==="function"?showAgentStatus:()=>{};}', scope);
+  vm.runInNewContext('{'+stripTypeScriptTypes(source,{mode:'transform'})+'\nglobalThis.createWorkflowAuthoring=createWorkflowAuthoring;globalThis.showWorkflowAgentUnavailable=showWorkflowAgentUnavailable;}', scope);
   // Exercise the actual installed-slot adapter here; IndexedDB concurrency is
   // qualified by the owning browser suite, not this bounded HTTP fixture.
   const intents=readFileSync(new URL('../apps/app/src/runtime/workflow-intents.ts',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,'');

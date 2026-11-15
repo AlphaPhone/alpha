@@ -5,6 +5,10 @@ export function residentRecoveryReason(error:unknown):ResidentRecoveryReason|und
  const code=error.code;
  return code==='ipc-recovery-retention-limit'||code==='ipc-recovery-required'||code==='runtime-identity-unavailable'?code:undefined;
 }
+export function isResidentRetryable(error:unknown):boolean {
+ const code=(error as {code?:unknown}|null)?.code;
+ return code==='start-failed'||code==='LOCAL_AGENT_NOT_READY'||code==='LOCAL_AGENT_EPOCH_CHANGED'||code==='LOCAL_AGENT_ATTACH_PENDING';
+}
 export function residentRecoveryMessage(reason:ResidentRecoveryReason):string {
  if(reason==='runtime-identity-unavailable')return 'Startup check failed';
  return reason==='ipc-recovery-retention-limit'?'Restart needed':'Couldn’t start';
@@ -54,9 +58,8 @@ export function residentBootLost(status:ResidentBootStatus|undefined):boolean {
 export function residentBootMessage(reason:unknown):string {
  const code=typeof reason==='string'?reason:'';
  if(code.startsWith('agent startup blocked'))return 'Agent didn’t start';
- if(code==='fatal')return 'Agent stopped';
  if(code==='agent-update-deferred')return 'Update ready';
- return 'Agent stopped';
+ return 'Agent restarting';
 }
 /**
  * A rate-limited native boot-state read after a channel or request failure: one in flight, at most

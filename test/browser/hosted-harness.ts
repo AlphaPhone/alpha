@@ -11,9 +11,12 @@ import {localAgentStorage} from '../../scripts/local-agent-dev-storage';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 
 export type HostedServer={origin:string;close():Promise<void>};
-export async function startHostedServer():Promise<HostedServer>{
+export async function startHostedServer({privatePreview=false}:{privatePreview?:boolean}={}):Promise<HostedServer>{
  const cache=await mkdtemp(path.join(tmpdir(),'alpha-hosted-vite-'));
- const server:ViteDevServer=await createServer({cacheDir:cache,define:{'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')},server:{host:'127.0.0.1',port:0,hmr:false,watch:null}});
+ const server:ViteDevServer=await createServer({cacheDir:cache,define:{
+  'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1'),
+  ...(privatePreview?{'import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW':JSON.stringify('1')}:{}),
+ },server:{host:'127.0.0.1',port:0,hmr:false,watch:null}});
  await server.listen();
  return {origin:`http://127.0.0.1:${(server.httpServer!.address() as any).port}`,close:async()=>{await server.close();await rm(cache,{recursive:true,force:true});}};
 }
