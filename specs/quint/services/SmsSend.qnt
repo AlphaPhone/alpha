@@ -217,4 +217,20 @@ module SmsSend {
     .expect(s.operationId == 0 and not(s.draftReady) and s.lastSent == 1 and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
   run retainedRefusalIsNotNewAttemptAuthorityTest = init.then(open).then(send).then(callRejected(true)).then(send).then(leave).then(open)
     .expect(s.operationId == 2 and s.shown == "refused" and s.shownFrom == "retained" and safety)
+  /// A closed answer delivered to a retired visit is reconciled on return. Preserve the authored
+  /// draft and prior accepted receipt; only a new owner Send can mint the retry's operation ID.
+  run staleCancelledAnswerReleasesIdOnOpenTest = init.then(open).then(send).then(nativeDecide(true)).then(deliver)
+    .then(edit).then(send).then(nativeDecide(false)).then(leave).then(deliver)
+    .expect(s.operationId == 2 and s.draftReady and s.lastSent == 1 and safety)
+    .then(open).expect(s.shown == "cancelled" and s.operationId == 0 and s.draftReady and s.lastSent == 1
+      and s.minted == 2 and s.dispatches.get(2) == 0 and safety)
+    .then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.minted == 3 and s.lastSent == 3 and s.dispatches.get(2) == 0 and s.dispatches.get(3) == 1 and safety)
+  run staleDeniedAnswerReleasesIdOnOpenTest = init.then(open).then(send).then(nativeDecide(true)).then(deliver)
+    .then(edit).then(accessChanged).then(send).then(nativeDecide(true)).then(leave).then(deliver)
+    .expect(s.operationId == 2 and s.draftReady and s.lastSent == 1 and safety)
+    .then(open).expect(s.shown == "denied" and s.operationId == 0 and s.draftReady and s.lastSent == 1
+      and s.minted == 2 and s.dispatches.get(2) == 0 and safety)
+    .then(accessChanged).then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.minted == 3 and s.lastSent == 3 and s.dispatches.get(2) == 0 and s.dispatches.get(3) == 1 and safety)
 }

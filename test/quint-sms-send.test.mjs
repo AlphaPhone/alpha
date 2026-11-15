@@ -14,7 +14,8 @@ const MODEL = {path: 'specs/quint/services/SmsSend.qnt', module: 'SmsSend'};
 const SCENARIOS = ['retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest', 'staleAnswerDroppedTest', 'editResetsOperationTest',
   'deliveryEvidenceTest', 'cancelledJournalReceiptReleasesIdTest', 'refusedBeforeJournalTest',
   'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest',
-  'lateJournalReceiptRetiresDraftTest'];
+  'lateJournalReceiptRetiresDraftTest',
+  'staleCancelledAnswerReleasesIdOnOpenTest', 'staleDeniedAnswerReleasesIdOnOpenTest'];
 const WITNESSES = ['RetryAfterClosedRecordWitness', 'RepeatedIdAnsweredFromJournalWitness', 'StaleAnswerDroppedWitness', 'SentEvidenceWitness', 'RefusedBeforeJournalWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const STUBS = {

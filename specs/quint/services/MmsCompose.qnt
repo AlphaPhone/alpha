@@ -255,4 +255,20 @@ module MmsCompose {
     .then(journalAdvance(1, "sent")).then(journalReadsAvailable(true)).then(reconcile)
     .expect(s.pictures == 0 and s.operationId == 0 and not(s.draftReady) and s.lastSent == 1
       and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
+  /// A declined answer delivered to a retired visit is reconciled on show. Keep its pictures,
+  /// authored draft and prior accepted receipt; only a new trusted Send can mint the next ID.
+  run staleCancelledAnswerReleasesIdOnShowTest = init.then(openView).then(send).then(nativeDecide(true)).then(deliver)
+    .then(edit(false)).then(attach).then(chooserAnswers(1, true)).then(send).then(nativeDecide(false))
+    .then(hide).then(deliver).expect(s.operationId == 2 and s.pictures == 1 and s.lastSent == 1 and safety)
+    .then(show).expect(s.shown == "cancelled" and s.operationId == 0 and s.pictures == 1 and s.draftReady
+      and s.lastSent == 1 and s.minted == 2 and s.dispatches.get(2) == 0 and safety)
+    .then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.minted == 3 and s.lastSent == 3 and s.dispatches.get(2) == 0 and s.dispatches.get(3) == 1 and safety)
+  run staleDeniedAnswerReleasesIdOnShowTest = init.then(openView).then(send).then(nativeDecide(true)).then(deliver)
+    .then(edit(false)).then(attach).then(chooserAnswers(1, true)).then(accessChanged).then(send).then(nativeDecide(true))
+    .then(hide).then(deliver).expect(s.operationId == 2 and s.pictures == 1 and s.lastSent == 1 and safety)
+    .then(show).expect(s.shown == "denied" and s.operationId == 0 and s.pictures == 1 and s.draftReady
+      and s.lastSent == 1 and s.minted == 2 and s.dispatches.get(2) == 0 and safety)
+    .then(accessChanged).then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.minted == 3 and s.lastSent == 3 and s.dispatches.get(2) == 0 and s.dispatches.get(3) == 1 and safety)
 }

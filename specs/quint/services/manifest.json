@@ -3052,7 +3052,9 @@
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
       "retainedRefusalIsNotNewAttemptAuthorityTest",
-      "lateJournalReceiptRetiresDraftTest"
+      "lateJournalReceiptRetiresDraftTest",
+      "staleCancelledAnswerReleasesIdOnOpenTest",
+      "staleDeniedAnswerReleasesIdOnOpenTest"
     ],
     "invariants": [
       "TypeOK",
@@ -4818,7 +4820,9 @@
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
       "cancelledJournalReceiptReleasesIdOnReturnTest",
-      "lateJournalReceiptRetiresDraftTest"
+      "lateJournalReceiptRetiresDraftTest",
+      "staleCancelledAnswerReleasesIdOnShowTest",
+      "staleDeniedAnswerReleasesIdOnShowTest"
     ],
     "invariants": [
       "TypeOK",
