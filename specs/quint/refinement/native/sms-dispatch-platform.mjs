@@ -11,7 +11,7 @@ function member(source, regex) {
   return value;
 }
 
-export function smsMembers(plugin, mms, provider) {
+export function smsMembers(plugin, mms, provider, {includeMms=false}={}) {
   return {
     'ai/eliza/plugins/messages/TelephonyPlugin.java': `package ai.eliza.plugins.messages;
 import android.telephony.*;
@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 public abstract class TelephonyPlugin extends Plugin {
  ${between(plugin,' public static final Pattern NUMBER',' /** Runs a request that launches')}
  ${between(plugin,' private android.app.AlertDialog review;',' // ---- Reviewed native MMS')}
+ ${includeMms?'':'protected final void sendOwnerApprovedMms(PluginCall call,SmsTelephony.DispatchGuard guard){throw new AssertionError("MMS outside SMS fixture");}'}
  ${member(plugin,/^ @Override protected void handleOnDestroy\(\)[^\n]+/m)}
  private void stopObserving(){}
  private void resumeObserving(){}
@@ -48,6 +49,7 @@ public final class MmsStore {
  static Uri fileUri(String authority,String name){throw new AssertionError("MMS outside SMS fixture");}
  static void delete(Context c,String name){throw new AssertionError("MMS outside SMS fixture");}
  static long persistOutgoingMms(Context c,String[] to,List<MmsPdu.Part> parts,String txn,int sim,long at){throw new AssertionError("MMS outside SMS fixture");}
+ static void discardOutgoingMms(Context c,long row,String transactionId){throw new AssertionError("MMS outside SMS fixture");}
  static void settleOutgoingMms(Context c,long row,boolean success){throw new AssertionError("MMS outside SMS fixture");}
 }`,
     'ai/eliza/plugins/messages/SmsProviderReader.java': `package ai.eliza.plugins.messages;
@@ -57,6 +59,28 @@ final class SmsProviderReader {
 }`,
   };
 }
+
+/** The authenticated historical SDK predates Alpha's manual composer. Keep its host on the
+ * original reviewed entry points with the same Alpha configuration and callback receiver. */
+export const historicalTelephonyHost={
+ 'ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java': `package ai.alphacompute.alphaphone;
+import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
+import ai.eliza.plugins.messages.TelephonyPlugin;
+import android.Manifest;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+@CapacitorPlugin(name="AlphaTelephony",permissions={
+ @Permission(alias="contacts",strings={Manifest.permission.READ_CONTACTS}),
+ @Permission(alias="phoneState",strings={Manifest.permission.READ_PHONE_STATE}),
+ @Permission(alias="sms",strings={Manifest.permission.READ_SMS}),
+ @Permission(alias="sendSms",strings={Manifest.permission.SEND_SMS}),
+ @Permission(alias="callLog",strings={Manifest.permission.READ_CALL_LOG})
+})
+public final class AlphaTelephonyPlugin extends TelephonyPlugin {
+ @Override protected SmsTelephonyConfiguration configuration(){return AlphaTelephony.CONFIGURATION;}
+ @Override protected String unavailableMessage(){return AlphaImageCapability.UNAVAILABLE;}
+}`,
+};
 
 export const smsPlatform={
   'android/Manifest.java': `package android;

@@ -7,7 +7,7 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {captureInputs, checkTraces, qmap, qset} from '../check-traces.mjs';
 import {app, directory, javaTraceCampaign, root} from './java.mjs';
-import {smsMembers, smsPlatform} from './sms-dispatch-platform.mjs';
+import {historicalTelephonyHost, smsMembers, smsPlatform} from './sms-dispatch-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {prepareNativeFixture} from '../../../../test/fixtures/native-source.mjs';
 import {upstreamNativeSource} from '../../../../scripts/upstream-native-source.ts';
@@ -19,26 +19,28 @@ const modulePath='plugins/plugin-native-messages/android';
 const shared=modulePath+'/src/main/java/ai/eliza/plugins/messages/';
 const members=['TelephonyPlugin','MmsStore','SmsProviderReader'];
 const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal'];
-const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver','SmsNoticeOpenRequest'].map(name=>app+name+'.java');
+const historicalProduct=['AlphaTelephony','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
+const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'SmsNoticeOpenRequest.java'];
 const paths=[...members,...compiled].map(name=>shared+name+'.java');
 const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const patchManifest='android/upstream-native-sources.json';
 const harness='SmsDispatchTraces.java';
 const historicalInventory='specs/quint/refinement/native/mms-historical-sources.json';
 
-function driverInputs(temporary, sourceRoot, resolveSource=path=>join(sourceRoot,path)) {
-  const generated={...smsPlatform,...smsMembers(...members.map(name=>readFileSync(resolveSource(shared+name+'.java'),'utf8')))};
+function driverInputs(temporary, sourceRoot, resolveSource=path=>join(sourceRoot,path), historical=false) {
+  const generated={...smsPlatform,...smsMembers(...members.map(name=>readFileSync(resolveSource(shared+name+'.java'),'utf8'))),
+    ...(historical?historicalTelephonyHost:{})};
   const files=Object.entries(generated).map(([path,contents])=>{
     const file=join(temporary,'driver',path);
     mkdirSync(dirname(file),{recursive:true});
     writeFileSync(file,contents);
     return file;
   });
-  return {files,complete:compiled.map(name=>resolveSource(shared+name+'.java'))};
+  return {files,complete:compiled.map(name=>resolveSource(shared+name+'.java')),productSources:historical?historicalProduct:product};
 }
 
-function runScenarios(scenarios, {files,complete}, historical=false) {
-  return javaTraceCampaign(harness,[...product,...complete,...files],scenarios.map(mode=>historical?[mode,'historical']:[mode]),'ai.eliza.plugins.messages.SmsDispatchTraces');
+function runScenarios(scenarios, {files,complete,productSources}, historical=false) {
+  return javaTraceCampaign(harness,[...productSources,...complete,...files],scenarios.map(mode=>historical?[mode,'historical']:[mode]),'ai.eliza.plugins.messages.SmsDispatchTraces');
 }
 
 /** Reproduce only the historical raw-pin regression with authenticated immutable bytes. */
@@ -46,9 +48,11 @@ export function historicalSmsSourceTraces(scenarios) {
   const temporary=mkdtempSync(join(tmpdir(),'quint-sms-dispatch-'));
   try {
     const history=materializeHistoricalSources(root,paths.map(path=>'vendor/eliza/'+path),historicalInventory);
-    const hashes=captureInputs(history.sources);
-    try {return runScenarios(scenarios,driverInputs(temporary,null,path=>history.resolveSource('vendor/eliza/'+path)),true);}
-    finally {assert.deepEqual(captureInputs(history.sources),hashes,'Historical SMS inputs changed during replay');}
+    const inputs=driverInputs(temporary,null,path=>history.resolveSource('vendor/eliza/'+path),true);
+    const sources=[...history.sources,...inputs.productSources,...inputs.files];
+    const hashes=captureInputs(sources);
+    try {return runScenarios(scenarios,inputs,true);}
+    finally {assert.deepEqual(captureInputs(sources),hashes,'Historical SMS inputs changed during replay');}
   }
   finally {rmSync(temporary,{recursive:true,force:true});}
 }
