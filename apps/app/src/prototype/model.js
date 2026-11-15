@@ -16,6 +16,8 @@ import {
   ATTENTION_ROWS, HOME_DEFAULTS
 } from "./fixtures.js";
 import { isMvpView, DEFERRED_MVP_VIEWS, deferredMvpPrompt } from "./mvp-features";
+import { isAskSentence, openSuggestion, proposalCanAct } from "../runtime/comms-bar";
+import { stageSessionStore } from "../runtime/stage-session-store";
 import { ALPHA_PRODUCT, alphaPaletteColor, alphaThemeVariables } from "../product/alpha-product";
 import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile-shell/core";
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
@@ -5177,7 +5179,9 @@ var BASE = {
   q: Object.assign({}, QUICK_SETTINGS),
   nGone: [], nSlide: null, bright: 70, theme: null, fs: null, now: Date.now(),
   charName: ALPHA_PRODUCT.identity.characterName, vs: {}, secure: false, stack: [], toastUndo: false, drawer: false, drawerQ: "",
-  msgs: []
+  msgs: [],
+  // AP-16 stage history while the chat is open: where each Alpha stage switch came from (D11).
+  stageFrom: []
 };
 // A long conversation renders only its newest rows: enough for the closed bar, a page once chat
 // opens, and another page each time the owner scrolls to the top of what is shown.
@@ -5211,6 +5215,7 @@ class Component extends DCLogic {
     for (var kind of ["wheel", "pointerdown", "touchstart", "keydown"]) document.addEventListener(kind, this.chatReadingInput, true);
     this.chatWindowCommitted = this.chatWindowRows;
     this.preset(this.props.initial || "boot");
+    this.restoreStageSession();
   }
   transcriptWindow(msgs, open) {
     var key = msgs.length ? msgs[0].id : null;
@@ -5279,6 +5284,7 @@ class Component extends DCLogic {
   componentDidUpdate(prev) {
     if (prev && prev.initial !== this.props.initial) this.preset(this.props.initial || "boot");
     this.syncShadeFocus();
+    this.settleStageSession();
     var list = document.querySelector("[data-alpha-transcript]"), saved = this.chatScrollSnapshot;
     this.chatWindowCommitted = this.chatWindowRows;
     if (list && saved && saved.list === list && saved.fromBottom !== undefined) list.scrollTop = list.scrollHeight - saved.fromBottom;
@@ -5304,6 +5310,7 @@ class Component extends DCLogic {
     this.chatScrollSize = { height: list.scrollHeight, client: list.clientHeight };
   }
   componentWillUnmount() {
+    this.stageStore = null;
     this.chatScrollObserver?.disconnect();
     document.removeEventListener("scroll", this.chatWindowScroll, true);
     for (var kind of ["wheel", "pointerdown", "touchstart", "keydown"]) document.removeEventListener(kind, this.chatReadingInput, true);
@@ -5416,6 +5423,12 @@ class Component extends DCLogic {
       chat: function (draft) { self.setState({ chat: "sheet", draft: draft || "" }); },
       send: function (t) { self.send(t); },
       say: function (text, card) { self.agentSay(text, card); },
+      // AP-16 (runtime/comms-bar.ts): stage switches, the person target, quiet notes and proposals.
+      stage: function (view, patch, restorePatch) { self.stage(view, patch, restorePatch); },
+      stageBack: function () { return self.stageBack(); },
+      toPerson: function () { self.toPerson(); },
+      note: function (text, opts) { self.note(text, opts); },
+      propose: function (proposal, text) { return self.propose(proposal, text); },
       sw: function (fn, opts) { return self.sw(fn, opts); },
       swallowed: function () { return self.swallowed(); },
       later: function (fn, ms) { return self.later(fn, ms, "m_" + k); },
@@ -5426,8 +5439,123 @@ class Component extends DCLogic {
     };
   }
   mod(k) { return VIEWS[k] || {}; }
-  defaultChat(k) { return this.mod(k).chat === "input" ? "input" : "hidden"; }
+  defaultChat(k) { return this.isCommsView(k) || this.mod(k).chat === "input" ? "input" : "hidden"; }
   rest() { var v = this.S().view; return v ? this.defaultChat(v) : "input"; }
+  /* ---- AP-16 comms surfaces (docs/agentic-comms.md, runtime/comms-bar.ts) ----
+     A comms view declares one bottom bar (bar(st, api)); AP-08 keeps it unopened where it is not
+     admitted. Its bar replaces the pill: the chat rests on the bar, never on the pill (D2). */
+  isCommsView(k) { return !!k && !!VIEWS[k] && typeof VIEWS[k].bar === "function" && isMvpView(k); }
+  /** The view's bar for this render. A throw counts as no bar: the view is non-comms for that render. */
+  commsSpec(k) {
+    if (k === undefined) k = this.S().view;
+    if (!this.isCommsView(k)) return null;
+    try { return VIEWS[k].bar(this.vget(k), this.api(k)) || null; } catch (error) { return null; }
+  }
+  /** An agent row id after every row already shown. */
+  nextMessageId(msgs) {
+    var id = Date.now(), last = msgs.length ? Number(msgs[msgs.length - 1].id) : 0;
+    return Number.isFinite(last) && last >= id ? last + 1 : id;
+  }
+  /**
+   * AC-05/AC-06: the stage switches view while the chat stays open at its height. The switch keeps
+   * S.stack (history "keep"); stageFrom is the only way back while the chat is open (D11).
+   */
+  stage(view, patch, restorePatch) {
+    var S = this.S(), from = S.view;
+    if (from) {
+      var spec = this.commsSpec(from);
+      var entry = { view: from, title: (spec && spec.target && spec.target.app) || (VIEWS[from] && VIEWS[from].title) || "", patch: restorePatch == null ? null : restorePatch };
+      this.setState(function (prev) { return { stageFrom: (prev.stageFrom || []).concat([entry]) }; });
+    }
+    this.stageSwitched("left");
+    this.openView(view, patch, S.chat, { keepState: true });
+  }
+  /** Returns the stage to the view it came from; false when there is none. */
+  stageBack() {
+    var from = this.S().stageFrom || [];
+    if (!from.length) return false;
+    var entry = from[from.length - 1];
+    this.setState(function (prev) { return { stageFrom: (prev.stageFrom || []).slice(0, -1) }; });
+    this.stageSwitched("right");
+    this.openView(entry.view, entry.patch, this.S().chat, { keepState: true });
+    return true;
+  }
+  /** The sheet holds its height across a switch, and the stage slides in from that side (AC-05). */
+  stageSwitched(side) {
+    this.stageEnter = { side: side, at: Date.now() };
+    this.stageHold = this.renderedSheetHeight ? { height: this.renderedSheetHeight } : null;
+    var avatar = typeof document !== "undefined" ? document.querySelector('[data-alpha-layer="app"] [data-alpha-stage-avatar]') : null;
+    this.stageAvatarFrom = avatar ? avatar.getBoundingClientRect() : null;
+  }
+  /** AC-16: the bar addresses the person, keyboard up, caret after the text. */
+  toPerson() {
+    this.setState({ chat: "input", stageFrom: [] }, function () {
+      var field = document.querySelector('[data-alpha-bar-field="person"]');
+      if (!field) return;
+      field.focus();
+      var end = field.value.length; try { field.setSelectionRange(end, end); } catch (error) {}
+    });
+  }
+  /** A local line in the chat ("Sent to Maya", the briefing). It never moves the chat. */
+  note(text, opts) {
+    var self = this;
+    this.setState(function (prev) {
+      var msgs = (prev && prev.msgs) || [];
+      return { msgs: msgs.concat([{ id: self.nextMessageId(msgs), from: "agent", text: String(text), local: true, quiet: opts && opts.quiet !== undefined ? !!opts.quiet : true, briefing: !!(opts && opts.briefing) }]) };
+    });
+  }
+  /**
+   * AC-26: one open proposal at a time. A new one replaces every open one, which can never act again.
+   * AC-19: no acting proposal is shown over an emergency call.
+   */
+  propose(p, text) {
+    var spec = this.commsSpec();
+    if (p.acts && spec && spec.emergency === true) return { shown: false, replaced: [] };
+    var self = this, replaced = [], card = Object.assign({ type: "proposal" }, p, { state: "open" });
+    var close = function (msgs, found) {
+      return msgs.map(function (m) {
+        var c = m.card;
+        if (!c || c.type !== "proposal" || c.state !== "open") return m;
+        if (found) { var plain = Object.assign({}, c); delete plain.type; delete plain.state; delete plain.done; found.push(plain); }
+        return Object.assign({}, m, { card: Object.assign({}, c, { state: "replaced" }) });
+      });
+    };
+    close(this.S().msgs, replaced);
+    // Applied to the latest state, so a row queued in the same event is kept.
+    this.setState(function (prev) {
+      var msgs = close((prev && prev.msgs) || []);
+      return { chat: prev && prev.chat === "full" ? "full" : "sheet", msgs: msgs.concat([{ id: self.nextMessageId(msgs), from: "agent", text: text || p.title, card: card }]) };
+    });
+    return { shown: true, replaced: replaced };
+  }
+  /** Stage history exists only while the chat is open (D11); the comms stage is kept for AC-30. */
+  settleStageSession() {
+    var S = this.S(), open = S.chat === "sheet" || S.chat === "full";
+    if (!open && (S.stageFrom || []).length) this.setState({ stageFrom: [] });
+    if (!open) this.stageHold = null;
+    if (!this.stageStore || !this.stageSessionRead) return;
+    var comms = S.screen === "home" && this.isCommsView(S.view);
+    var session = comms ? { chat: open ? S.chat : "input", sheetShare: open && this.chatSheetShare ? this.chatSheetShare : null, view: S.view, stageFrom: open ? S.stageFrom || [] : [] } : null;
+    var key = JSON.stringify(session);
+    if (key === this.stageSessionKey) return;
+    this.stageSessionKey = key;
+    void this.stageStore.write(session).catch(function () {});
+  }
+  /** AC-30: back to the comms view, chat height and stage history that were left. Data only. */
+  restoreStageSession() {
+    var self = this, store = this.stageStore = stageSessionStore();
+    this.stageSessionRead = false;
+    store.read().then(function (saved) {
+      self.stageSessionRead = true;
+      var S = self.S();
+      if (self.stageStore !== store || self.live === false || !saved || S.screen !== "home" || S.view || !self.isCommsView(saved.view)) return;
+      self.stageSessionKey = undefined;
+      if (saved.sheetShare) self.chatSheetShare = saved.sheetShare;
+      self.openView(saved.view, null, saved.chat, { keepState: true });
+      var from = saved.chat === "input" ? [] : saved.stageFrom.filter(function (entry) { return self.isCommsView(entry.view); });
+      if (from.length) self.setState({ stageFrom: from });
+    }, function () { self.stageSessionRead = true; });
+  }
   leave() {
     var v = this.S().view;
     if (v) { this.clear("m_" + v); this.stopEvery("m_" + v); var m = this.mod(v); if (m.onLeave) m.onLeave(this.api(v)); }
@@ -5504,12 +5632,12 @@ class Component extends DCLogic {
     // keepState returns to a view exactly as it was left (open note, event, email or tab and its
     // selection revision): the target's state is not reset. A different current view still gets
     // its onLeave, so its camera, recording or timers stop exactly as on any other switch.
-    if (opts && opts.keepState && VIEWS[k]) { if (this.S().view !== k) this.leave(); if (patch) this.vpatch(k, patch); this.setState(Object.assign(this.shellNavigate({ type: "open", view: k, history: "keep", assistant: this.shellDetent(chat) }), { screen: "home", shade: false, heads: false })); return; }
+    if (opts && opts.keepState && VIEWS[k]) { if (this.S().view !== k) this.leave(); if (patch) this.vpatch(k, patch); this.setState(Object.assign(this.shellNavigate({ type: "open", view: k, history: "keep", assistant: this.shellDetent(chat, k) }), { screen: "home", shade: false, heads: false })); return; }
     // Back's stack pop: the caller already set the stack; only the view changes here.
     if (opts && opts.keepStack) { var S0 = this.S(); if (S0.view !== k) { this.leave(); } this.setState({ screen: "home", view: k, shade: false, heads: false, chat: chat || this.defaultChat(k) }); return; }
     if (!VIEWS[k]) return;
     var S = this.S(); opts = opts || {};
-    var nav = this.shellNavigate({ type: "open", view: k, history: opts.push ? "push" : "reset", assistant: this.shellDetent(chat) });
+    var nav = this.shellNavigate({ type: "open", view: k, history: opts.push ? "push" : "reset", assistant: this.shellDetent(chat, k) });
     if (S.view !== k) {
       this.leave();
       var m = this.mod(k), cur = this.vget(k);
@@ -5521,20 +5649,30 @@ class Component extends DCLogic {
   }
   /* ---- navigation: the shared mobile shell reducer owns view, Back stack, drawer and the
      assistant detent (Alpha's "hidden" chat is the shell's pill) ---- */
-  shellNav() { var S = this.S(); return { view: S.view || null, stack: S.stack || [], drawer: !!S.drawer, drawerQuery: S.drawerQ || "", assistant: this.shellDetent(S.chat) || "input" }; }
-  /** A chat state as a shell assistant detent; none for an absent request (the surface's rest). */
-  shellDetent(chat) { return chat === "hidden" ? "pill" : chat === "input" || chat === "sheet" || chat === "full" ? chat : undefined; }
+  shellNav() { var S = this.S(); return { view: S.view || null, stack: S.stack || [], drawer: !!S.drawer, drawerQuery: S.drawerQ || "", assistant: this.shellDetent(S.chat, S.view) || "input" }; }
+  /** A chat state as a shell assistant detent; none for an absent request (the surface's rest).
+      A comms view k has no pill: its bar is where the chat rests (D2). */
+  shellDetent(chat, k) {
+    if (chat === "hidden" && k && this.isCommsView(k)) chat = "input";
+    return chat === "hidden" ? "pill" : chat === "input" || chat === "sheet" || chat === "full" ? chat : undefined;
+  }
   shellNavigate(action) {
     var self = this, next = navigateMobileShell(this.shellNav(), action, { assistantRest: function (k) { return self.defaultChat(k) === "input" ? "input" : "pill"; } });
-    return { view: next.view, stack: next.stack.slice(), drawer: next.drawer, drawerQ: next.drawerQuery, chat: next.assistant === "pill" ? "hidden" : next.assistant };
+    var out = { view: next.view, stack: next.stack.slice(), drawer: next.drawer, drawerQ: next.drawerQuery, chat: next.assistant === "pill" ? "hidden" : next.assistant };
+    // Lowering the chat below the sheet ends its stage history and keeps the current view (D11).
+    if (out.chat !== "sheet" && out.chat !== "full") out.stageFrom = [];
+    return out;
   }
   back() {
     var S = this.S();
     if (S.shade) return this.setState({ shade: false });
     if (this.props && this.props.assistantSurface && !S.view && S.voice === "off") return this.closeAssistant();
     if (S.voice !== "off") return this.stopVoice();
-    // Alpha's assistant floats above the Apps drawer and the current view.
-    if (S.chat === "full" || S.chat === "sheet") return this.setState(this.shellNavigate({ type: "assistant", detent: S.chat === "full" ? "sheet" : "rest" }));
+    // Alpha's assistant floats above the Apps drawer and the current view. Full lowers to the sheet;
+    // an open sheet first returns the stage to where Alpha switched it from (AC-06), then closes.
+    if (S.chat === "full") return this.setState(this.shellNavigate({ type: "assistant", detent: "sheet" }));
+    if (S.chat === "sheet" && (S.stageFrom || []).length && this.stageBack()) return;
+    if (S.chat === "sheet") return this.setState(this.shellNavigate({ type: "assistant", detent: "rest" }));
     if (S.drawer && !S.view) return this.setState(this.shellNavigate({ type: "back" }));
     // A bar raised from the pill lowers before Back leaves the view.
     if (S.chat === "input" && this.rest() === "hidden") return this.setState({ chat: "hidden" });
@@ -5671,7 +5809,9 @@ class Component extends DCLogic {
     this.setState({ msgs: S.msgs.concat([{ id: id, from: "user", text: text }]), draft: "", typing: true, chat: S.chat === "full" ? "full" : "sheet", shade: false });
     this.later(function () {
       var r = self.reply(text); var S2 = self.S();
-      self.setState({ typing: false, msgs: S2.msgs.concat([{ id: id + 1, from: "agent", text: r.text, card: r.card || null }]) });
+      // A view's reply never acts: an action comes back as a proposal the owner approves (D8).
+      if (r.proposal) { self.setState({ typing: false }); self.propose(r.proposal, r.text); }
+      else self.setState({ typing: false, msgs: S2.msgs.concat([{ id: id + 1, from: "agent", text: r.text, card: r.card || null }]) });
       if (r.nav) self.later(function () { var n = typeof r.nav === "string" ? { view: r.nav } : r.nav; self.openView(n.view, n.patch, n.chat || self.defaultChat(n.view)); }, 1300);
       if (r.then) self.later(function () { r.then(); }, 700);
     }, 800);
@@ -5682,13 +5822,15 @@ class Component extends DCLogic {
   }
   cardAct(m) {
     var S = this.S(); var c = m.card || {}; var self = this;
+    // AC-26: a replaced or finished proposal never acts, however it is reached.
+    if (!proposalCanAct(c)) return;
     if ((c.act && DEFERRED_MVP_VIEWS.has(c.act.mod)) || (c.go && DEFERRED_MVP_VIEWS.has(c.go.view))) return this.toast("This action is not available on this phone yet.");
-    var markDone = function () { self.setState({ msgs: self.S().msgs.map(function (x) { return x.id === m.id ? Object.assign({}, x, { card: Object.assign({}, x.card, m.card, { done: true }) }) : x; }) }); };
+    var markDone = function () { self.setState({ msgs: self.S().msgs.map(function (x) { return x.id === m.id ? Object.assign({}, x, { card: Object.assign({}, x.card, m.card, { done: true }, c.type === "proposal" ? { state: "done" } : null) }) : x; }) }); };
     if (c.act && VIEWS[c.act.mod] && VIEWS[c.act.mod].actions && VIEWS[c.act.mod].actions[c.act.fn]) {
-      if (c.done) { if (c.go) this.openView(c.go.view, c.go.patch, c.go.chat || "hidden"); return; }
+      if (c.done) { if (c.go) this.openView(c.go.view, c.go.patch, c.go.chat || self.defaultChat(c.go.view)); return; }
       markDone(); VIEWS[c.act.mod].actions[c.act.fn](c, this.api(c.act.mod)); return;
     }
-    if (c.go) return this.openView(c.go.view, c.go.patch, c.go.chat || "hidden");
+    if (c.go) return this.openView(c.go.view, c.go.patch, c.go.chat || self.defaultChat(c.go.view));
   }
 
   startVoice() {
@@ -5713,8 +5855,9 @@ class Component extends DCLogic {
           var S2 = self.S(); var lockedNow = S2.screen === "lock";
           var r = lockedNow ? { text: VOICE.lockedAnswer } : self.reply(phrase);
           var patch = { voice: "speaking", vcap: r.text };
-          if (!lockedNow) { var id = Date.now(); patch.msgs = S2.msgs.concat([{ id: id, from: "user", text: phrase }, { id: id + 1, from: "agent", text: r.text, card: r.card || null }]); }
+          if (!lockedNow) { var id = Date.now(); patch.msgs = S2.msgs.concat([{ id: id, from: "user", text: phrase }].concat(r.proposal ? [] : [{ id: id + 1, from: "agent", text: r.text, card: r.card || null }])); }
           self.setState(patch);
+          if (!lockedNow && r.proposal) self.propose(r.proposal, r.text);
           if (!lockedNow && r.then) r.then();
           if (!lockedNow && r.nav) self.later(function () { var n = typeof r.nav === "string" ? { view: r.nav } : r.nav; self.openView(n.view, n.patch, n.chat || self.defaultChat(n.view)); }, 2600, "v");
         }, 1500, "v");
@@ -5781,6 +5924,18 @@ class Component extends DCLogic {
     var is = {};
     ORDER.forEach(function (k) { is[k] = isView && v === k; });
     out.is = is;
+    // AP-16 (runtime/comms-bar.ts): a comms view's bar, stage and strip. Its chat rests on the bar,
+    // so a "hidden" chat shows the bar there, never the pill (D2).
+    var spec = isView ? this.commsSpec(v) : null;
+    this.commsRendered = spec;
+    var comms = !!spec;
+    var chatMode = S.chat === "hidden" && comms ? "input" : S.chat;
+    var commsOpen = comms && (chatMode === "sheet" || chatMode === "full");
+    var landscape = typeof document !== "undefined" && document.documentElement.classList.contains("alpha-landscape");
+    // Short landscape keeps its side-by-side layout: no stage compaction there (AC-29).
+    var stage = { on: isOn && comms && chatMode === "sheet" && !spec.emergency && !landscape, compact: false, full: isOn && comms && chatMode === "full" };
+    stage.compact = stage.on;
+    out.stage = stage;
     if (v === "inbox" && out.inbox && !out.inbox.folderTitle) out.inbox.folderTitle = "Inbox";
     // Compose attach copy follows the provider adapter's attachment limit (c.attachLabel); one
     // reviewed file until an adapter reports more.
@@ -5818,6 +5973,10 @@ class Component extends DCLogic {
       return {
         id: m.id, text: m.text, displayText: shown, hasCalendarText: true, calendarReviews: [], workflowRuns: [], mapsCards: [], hasMapsChoice: false, mapsChoices: [], isUser: m.from === "user", isAgent: m.from === "agent", c: c,
         cAgenda: t === "agenda", cEvent: t === "event", cDigest: t === "digest", cNote: t === "note", cFlow: t === "flow", cSummary: t === "summary", cDraft: t === "draft", cCall: t === "call", cGeneric: t === "generic",
+        // AC-26: a proposal card's one button shows only while it is open; `state` is its one field.
+        cProposal: t === "proposal", proposalOpen: t === "proposal" && c.state === "open", proposalReplaced: t === "proposal" && c.state === "replaced", proposalDone: t === "proposal" && c.state === "done",
+        // A quiet local note ("Sent to Maya") reads as a muted line.
+        lineClass: m.from === "agent" && m.quiet ? "alpha-agent-line alpha-agent-line-quiet" : "alpha-agent-line",
         gIcon: IC[c.icon] || IC.spark, evIcon: c.act && !c.done ? IC.plus : IC.check, callIni: c.ini || ((c.who || "").split(" ").map(function (w) { return w.charAt(0); }).join("").slice(0, 2)),
         sumSave: t === "summary" && !c.done && !!c.act, sumOpen: t === "summary" && !c.act && !!c.go,
         draftActs: !c.done && S.editCard !== m.id,
@@ -5828,10 +5987,58 @@ class Component extends DCLogic {
         edit: function () { self.setState({ draft: c.body || "", editCard: m.id }); }
       };
     });
-    var baseSug = ["Plan my afternoon", "What needs me?", "Take a note: call the landlord Friday", "Every weekday at 6, wrap up my day"];
-    var sugList = (mod && mod.suggestions) ? mod.suggestions(st, this.api(v)) : baseSug;
-    // A suggestion is a prompt to send, or a { label, go } control that acts instead of sending.
-    var sugg = sugList.filter(function (s) { return typeof s !== "string" || !deferredMvpPrompt(s); }).map(function (s) { return typeof s === "string" ? { label: s, go: function () { self.send(s); } } : s; });
+    // AP-16 bar: the field addresses the closed bar's target (person, list filter or Alpha); the open
+    // bar always addresses Alpha. Nothing is sent while typing (AC-22, D9).
+    var onDraft = function (e) { self.setState(e.target.value ? { draft: e.target.value } : { draft: "", editCard: null }); };
+    var onKey = function (e) { if (e.key === "Enter") { e.preventDefault(); self.send(); } };
+    var closed = comms ? spec.closed : null;
+    var barTarget = comms && !commsOpen ? closed.kind : "alpha";
+    var heldFilter = barTarget === "filter" && this.barFilter && this.barFilter.key === spec.contextKey && isAskSentence(this.barFilter.text) ? this.barFilter.text : null;
+    var barValue = barTarget === "alpha" ? S.draft : heldFilter != null ? heldFilter : String(closed.value || "");
+    var barFilled = !!String(barValue || "").trim();
+    var barOnText = barTarget === "person" ? function (e) { if (closed.onText) closed.onText(e.target.value); }
+      : barTarget === "filter" ? function (e) {
+        // A sentence is a question for Alpha: the list keeps its last filter until Enter asks it.
+        var text = e.target.value; self.barFilter = { key: spec.contextKey, text: text };
+        if (!isAskSentence(text) && closed.onText) closed.onText(text);
+        self.setState({});
+      } : onDraft;
+    var barOnKey = barTarget === "filter" ? function (e) {
+      if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+      e.preventDefault();
+      var text = String(barValue || "").trim(); if (!text) return;
+      self.barFilter = null; self.send(text); if (closed.onText) closed.onText("");
+    } : barTarget === "person" ? undefined : onKey;
+    var barDictate = isOn && (barTarget === "filter" || barTarget === "person" && !barFilled);
+    // AC-24: one faint suggestion inside the bar, only while its field is empty and no reply runs.
+    var faint = null;
+    if (isOn && !voiceOn && !S.typing && !S.secure) {
+      if (panelOpen && !S.draft) {
+        var candidates = (mod && mod.suggestions ? mod.suggestions(st, this.api(v)) || [] : []).map(function (s) { return typeof s === "string" ? s : s && s.label; })
+          .filter(function (s) { return typeof s === "string" && s.trim() && !deferredMvpPrompt(s); });
+        var openText = openSuggestion({ view: v || null, spec: spec, candidates: candidates });
+        if (openText) faint = { text: openText, accept: function () { self.setState({ draft: openText }); } };
+      } else if (comms && !commsOpen && !barFilled && closed.suggestion && closed.acceptSuggestion) {
+        var accept = closed.acceptSuggestion;
+        faint = { text: closed.suggestion, accept: function () { accept(); } };
+      }
+    }
+    if (faint) faint.label = "Suggestion: " + faint.text + ", double-tap to use";
+    // A swipe right of more than 40 canvas pixels across the bar takes the suggestion; nothing is sent.
+    var faintSw = {
+      down: function (e) { self.faintPress = faint && e.isPrimary !== false ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null; },
+      up: function (e) {
+        var press = self.faintPress; self.faintPress = null;
+        if (!faint || !press || press.id !== e.pointerId) return;
+        var o = self.scale(e.currentTarget), dx = (e.clientX - press.x) / o.s, dy = (e.clientY - press.y) / o.s;
+        if (dx > 40 && Math.abs(dy) < dx) { self.swallow = Date.now(); faint.accept(); }
+      }
+    };
+    var left = commsOpen ? spec.left : null;
+    var LEFT_ICONS = { call: IC.phone, search: IC.search, keypad: IC.dial };
+    var stageFrom = S.stageFrom || [];
+    var stripSpec = comms ? spec.strip : null;
+    var STRIP_ICONS = { mute: IC.phoneMute, end: IC.phone, send: IC.send, answer: IC.phone, decline: IC.phone };
 
     var bars = []; for (var b = 0; b < 28; b++) bars.push({ h: 10 + ((b * 37) % 30), dl: ((b * 0.137) % 1).toFixed(2) });
     var vShow = S.voice === "speaking" ? S.vcap : (S.vtext || "…");
@@ -5856,8 +6063,8 @@ class Component extends DCLogic {
       [IC.lock, "Side key: tap · lock or wake"]
     ].map(function (l) { return { d: l[0], t: l[1] }; });
 
-    var showPill = isOn && S.chat === "hidden" && !voiceOn;
-    var showComposer = isOn && S.chat === "input" && !voiceOn;
+    var showPill = isOn && chatMode === "hidden" && !voiceOn;
+    var showComposer = isOn && chatMode === "input" && !voiceOn;
     var sbColor = isView && imm.dark && !S.shade && S.chat !== "full" && S.chat !== "sheet" ? "var(--alpha-white)" : "var(--fg)";
     if (S.secure) { showPill = false; showComposer = false; }
     var ongoing = null;
@@ -5901,21 +6108,51 @@ class Component extends DCLogic {
       shadeKey: function (event) { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); self.setState({ shade: false }); } }, clearAll: function () { self.setState({ nGone: NOTIFS.map(function (n) { return n.id; }), shade: false }); },
       // Policy P-23: the system Keyguard owns secure camera access. The preview
       // lock frame also requires Unlock before opening Camera or the media library.
-      msgs: msgs, typing: S.typing && !S.turnStatus, turnStatus: S.typing ? S.turnStatus || "" : "", sugg: sugg, showSugg: panelOpen && !S.draft && !S.typing && !voiceOn,
+      msgs: msgs, typing: S.typing && !S.turnStatus, turnStatus: S.typing ? S.turnStatus || "" : "",
       panelComposer: panelOpen && !voiceOn,
       panelH: !isOn ? 0 : (S.chat === "full" ? 915 : (S.chat === "sheet" ? 560 : 0)), panelR: S.chat === "full" ? "0px" : "30px 30px 0 0",
+      // AP-16 shell values (runtime/comms-bar.ts, docs/agentic-comms.md).
+      comms: comms, chatMode: chatMode, barTarget: barTarget, barAlphaLabel: comms ? "Open " + name : "Open conversation",
+      barFieldClass: comms && barTarget === "alpha" ? "alpha-bar-field-alpha" : "",
+      barValue: barValue, barOnText: barOnText, barOnKey: barOnKey, barMaxLength: barTarget === "person" && closed.maxLength ? closed.maxLength : undefined,
+      barPlaceholder: faint ? "" : comms ? closed.placeholder : (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,
+      barAskHint: barTarget === "filter" && isAskSentence(barValue) ? "Enter asks " + name : "",
+      barAlphaControls: barTarget === "alpha", barPersonSend: barTarget === "person" && barFilled,
+      barSendDisabled: barTarget === "person" && !closed.canSubmit, barSubmit: function () { if (closed && closed.submit) closed.submit(); },
+      barDictate: barDictate, barDictateLabel: barTarget === "person" ? "Dictate a text to " + (spec.target.first || spec.target.name || "them") : "Dictate a search or question",
+      barMic: function () { if (typeof self.startTranscription === "function") self.startTranscription({ commsTarget: barTarget }); else self.toast("Voice input is not connected"); },
+      barLeft: left ? { label: left.label, initials: left.initials || "", avatar: left.icon === "avatar", glyph: left.icon === "avatar" ? null : LEFT_ICONS[left.icon] || IC.back,
+        // The left slot swaps the target: the chat closes onto the bar, then the view's own step runs.
+        tap: function () { var run = left.run; self.setState({ chat: "input", stageFrom: [] }, function () { if (run) run(); }); } } : null,
+      panelPlaceholder: faint ? "" : comms ? "Ask " + name : "Message " + name, panelLabel: comms ? "Ask " + name : "Message " + name,
+      panelFieldClass: comms ? "alpha-chat-composer alpha-bar-field-alpha" : "alpha-chat-composer",
+      faint: faint, faintSw: faintSw,
+      sheetContext: comms && isOn ? spec.context : "",
+      showEnd: isOn && comms && !commsOpen && !voiceOn && !S.secure && typeof spec.end === "function",
+      endCall: function () { if (spec && spec.end) spec.end(); },
+      // The closed bar makes room for End: 44 wide and 8 apart, centred on the 62 tall bar.
+      cmpRight: isOn && comms && !commsOpen && !voiceOn && !S.secure && typeof spec.end === "function" ? 68 : 16, endBottom: 37,
+      showStrip: stage.full && !voiceOn,
+      strip: stripSpec ? { title: stripSpec.title, subtitle: stripSpec.subtitle, initials: stripSpec.initials || "", hasInitials: !!stripSpec.initials, live: !!stripSpec.live,
+        tap: function () { if (self.swallowed()) return; self.setState({ chat: "sheet" }); },
+        actions: (stripSpec.actions || []).map(function (a) {
+          var tone = a.id === "end" || a.id === "decline" ? "alpha-strip-action alpha-end-button" : a.id === "answer" ? "alpha-strip-action alpha-answer-button" : a.id === "send" ? "alpha-strip-action alpha-strip-send" : "alpha-strip-action";
+          return { id: a.id, label: a.label, pressed: a.pressed === undefined ? undefined : !!a.pressed, cls: tone, glyph: STRIP_ICONS[a.id] || IC.right, run: function (e) { if (e) e.stopPropagation(); a.run(); } };
+        }) } : null,
+      stageReturn: stageFrom.length && comms && chatMode === "sheet" ? { label: "‹ " + stageFrom[stageFrom.length - 1].title, aria: "Back to " + stageFrom[stageFrom.length - 1].title, go: function () { self.stageBack(); } } : null,
+      stageEnter: stage.on && this.stageEnter && Date.now() - this.stageEnter.at < 450 ? this.stageEnter.side : undefined,
       panelOp: panelOpen ? 1 : 0, panelPE: panelOpen ? "auto" : "none", panelTop: S.chat === "full" && this.props.systemShell !== false ? "var(--alpha-chat-full-top,60px)" : "4px",
       scrimOp: 0, scrimPE: "none", scrimZ: 45,
       showGrabber: S.chat !== "full", sizeIcon: S.chat === "full" ? IC.shrink : IC.expand, sizeLabel: S.chat === "full" ? "Shrink chat" : "Expand chat",
       showComposer: showComposer, showPill: showPill, cmpBottom: 28,
-      cmpPlaceholder: (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,
+      cmpPlaceholder: comms ? closed.placeholder : (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,
       draft: S.draft, hasDraft: !!S.draft, noDraft: !S.draft,
       // The composer template binds these; the agent adapter refines them for a live turn.
       sendVisible: !!S.draft && !S.typing, talkVisible: !S.draft && !S.typing, replyIdle: !S.typing,
       // The voice adapter replaces this while a voice conversation owns the pill; without it (mock mode) the pill keeps its controls.
       pillVoiceInactive: true,
-      onDraft: function (e) { self.setState(e.target.value ? { draft: e.target.value } : { draft: "", editCard: null }); },
-      onKey: function (e) { if (e.key === "Enter") { e.preventDefault(); self.send(); } },
+      onDraft: onDraft,
+      onKey: onKey,
       sendNow: function () { self.send(); },
       openSheet: function () { if (self.swallowed()) return; self.setState({ chat: "sheet" }); },
       /* Android raises the keyboard only for a focused field, so the Type button focuses the composer it reveals. */

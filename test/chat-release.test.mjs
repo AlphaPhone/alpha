@@ -59,3 +59,31 @@ test('a remembered height follows the screen but never rests too short for the c
   assert.equal(m.restingHeight(0.23, 450, 270), 200, 'the keyboard shrank the screen');
   assert.equal(m.restingHeight(0.23, 300, 180), 180, 'a short window keeps its default');
 });
+
+// AC-04/AC-13: the fitted open height. 915 canvas, low .38, high .6.
+const fit = (options = {}) => m.fitSheetHeight({ viewport: 915, low: 348, high: 549, full: 915, content: 420, floor: 160, draft: false, stageNeed: 0, stageMin: 0, ...options });
+
+test('without a draft the open sheet fits its chat between 38% and 60% of the screen', () => {
+  assert.equal(m.SHEET_FIT_LOW, 0.38);
+  assert.equal(m.SHEET_FIT_HIGH, 0.6);
+  assert.equal(fit(), 420);
+  assert.equal(fit({ content: 120 }), 348, 'a short chat still opens at the low share');
+  assert.equal(fit({ content: 2000 }), 549, 'a long chat scrolls inside the high share');
+});
+
+test('a waiting draft gives the stage what it needs, down to Alpha\'s latest line and the bar', () => {
+  assert.equal(fit({ draft: true, stageNeed: 600 }), 315, 'the stage fits header, last message and draft');
+  assert.equal(fit({ draft: true, stageNeed: 300 }), 420, 'a short draft leaves the content fit');
+  assert.equal(fit({ draft: true, stageNeed: 900 }), 160, 'a draft taller than the screen scrolls in the stage; the sheet keeps its floor');
+});
+
+test('the stage keeps its large-text minimum and the sheet never leaves its bounds', () => {
+  assert.equal(fit({ content: 2000, stageMin: 500 }), 415);
+  assert.equal(fit({ content: 2000, stageMin: 900 }), 160, 'the floor wins over the stage minimum');
+  assert.equal(fit({ full: 300, high: 300, low: 300, content: 2000, floor: 400 }), 300, 'a floor above full is capped at full');
+  // full shorter than the low share: the caller clamps low to high, and the result stays within full.
+  for (const content of [0, 150, 260, 900]) {
+    const height = fit({ viewport: 400, full: 200, high: 200, low: 200, content, floor: 90 });
+    assert.ok(height <= 200 && height >= 90, `content ${content} rests at ${height}`);
+  }
+});
