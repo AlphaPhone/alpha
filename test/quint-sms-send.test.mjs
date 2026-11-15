@@ -13,7 +13,8 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 const MODEL = {path: 'specs/quint/services/SmsSend.qnt', module: 'SmsSend'};
 const SCENARIOS = ['retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest', 'staleAnswerDroppedTest', 'editResetsOperationTest',
   'deliveryEvidenceTest', 'readBackKeepsIdUntilSendAnswersTest', 'refusedBeforeJournalTest',
-  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest'];
+  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest',
+  'lateJournalReceiptRetiresDraftTest'];
 const WITNESSES = ['RetryAfterClosedRecordWitness', 'RepeatedIdAnsweredFromJournalWitness', 'StaleAnswerDroppedWitness', 'SentEvidenceWitness', 'RefusedBeforeJournalWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const STUBS = {
@@ -42,7 +43,7 @@ function create() {
   // Operation IDs in the order native first saw them: the model's 1, 2, 3.
   const ids = [], journal = new Map(), dispatches = new Map();
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  let sendAccess = true, call = null, sendUpdated = () => {}, probing = null, edits = 0;
+  let sendAccess = true, journalReadable = true, call = null, sendUpdated = () => {}, probing = null, edits = 0;
   const ordinal = id => { if (!ids.includes(id)) ids.push(id); return ids.indexOf(id) + 1; };
   const status = {permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, subscriptions: [{id: 1, slot: 0, displayName: 'SIM', carrierName: 'Carrier'}],
     defaultSmsSubscriptionId: 1, sendMode: 'direct', mmsSend: false, roles: {sms: {available: true, held: false, eligible: true}}};
@@ -60,7 +61,7 @@ function create() {
     },
     async smsSendResult(_review, operationId) {
       if (probing) { probing.push(operationId); throw Error('no record'); }
-      if (!journal.has(operationId)) throw Error('no record');
+      if (!journalReadable || !journal.has(operationId)) throw Error('no readable record');
       return {operationId, status: journal.get(operationId)};
     },
   };
@@ -75,13 +76,15 @@ function create() {
   const type = (field, value) => page()[field]({target: {value}});
   return {
     async open() {
+      const draftWasEmpty = !page().nativeBody;
       shell.view = 'messages'; shell.componentDidUpdate(); await settle();
       // The owner writes only an empty draft; an unfinished or uncertain draft survives re-entry.
-      if (!page().nativeBody) {type('nativeOnRecipients', '+1 555 555 0100'); type('nativeOnBody', 'hello');}
+      if (draftWasEmpty && !page().nativeBody) {type('nativeOnRecipients', '+1 555 555 0100'); type('nativeOnBody', 'hello');}
     },
     async leave() { shell.view = 'home'; shell.componentDidUpdate(); await settle(); },
     async edit() { type('nativeOnBody', `hello ${++edits}`); await settle(); },
     accessChanged() { sendAccess = !sendAccess; },
+    journalReadsAvailable(available) { journalReadable = available; },
     async send() { page().nativeSend(); await settle(); },
     nativeDecide(confirmed) {
       const existing = journal.get(call.operationId);
@@ -97,7 +100,7 @@ function create() {
       await settle();
     },
     journalAdvance(id, next) { journal.set(ids[id - 1], next); },
-    async reconcile(_context) { sendUpdated(ids[_context.before.operationId - 1]); await settle(); },
+    async reconcile({before}) { sendUpdated(ids[(before.operationId || before.lastSent) - 1]); await settle(); },
     async observe() {
       // A refresh can also reconcile the last sent receipt. It does not grant that receipt's ID
       // to the edited draft; read both actual closure identities and validate every native read.
@@ -141,7 +144,7 @@ async function runSmsSendCase2(t, {canaries=true}={}) {
     const f = create();
     try {
       await f.open();await f.send();f.nativeDecide(true);
-      if (retired) {await f.callRejected(false);await f.leave();}
+      if (retired) {f.journalReadsAvailable(false);await f.callRejected(false);await f.leave();}
       else await f.deliver();
       const before = f.effects();await f.send();assert.deepEqual(f.effects(), before, 'no new native request or carrier effect');
       if (retired) {await f.open();assert.deepEqual(f.effects(), before);assert.ok(globalThis.__smsDraftProbe().operationId);}

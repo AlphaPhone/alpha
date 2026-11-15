@@ -1,5 +1,5 @@
 import {createImagePreview} from '../runtime/image-preview';
-import type {VerifiedSession} from '../runtime/alpha-client';
+import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
@@ -1788,6 +1788,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
     const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,displayText:text,requestText}:null;
     let stagedAttachmentKey:string|undefined;
+    const rememberSentAttachment=async (identity:NonNullable<AgentReply['messageBinding']>,recordedId:string)=>{
+      if(!sentAttachment||!(mail||transcript||sentAttachment.cameraAttachment))return;
+      // First send can create the conversation after pre-dispatch storage was skipped.
+      // History prefers the request ID and falls back to the recorded ID only if absent.
+      if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
+        await saveAttachment(identity.session,identity.conversationId,userId,sentAttachment);
+      }
+      if(recordedId!==userId)await saveAttachment(identity.session,identity.conversationId,recordedId,sentAttachment);
+    };
     if(sentAttachment&&(mail||transcript||this.cameraAttachment)&&connection.session&&conversationId){
       try{
         await saveAttachment(connection.session,conversationId,userId,sentAttachment);
@@ -1845,16 +1854,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(fromComposer)await this.composerDraft?.commit();
       if (!this.live||!sameChat()) return;
       const identity=reply.messageBinding;
-      if(sentAttachment&&identity&&reply.userMessageId&&(mail||transcript||sentAttachment.cameraAttachment)){
-        // The first send can create a conversation after the pre-dispatch save was skipped.
-        // History prefers the request ID when it carries one and uses the recorded ID otherwise.
-        if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
-          await saveAttachment(identity.session,identity.conversationId,userId,sentAttachment);
-        }
-        if(reply.userMessageId!==userId){
-          await saveAttachment(identity.session,identity.conversationId,reply.userMessageId,sentAttachment);
-        }
-      }
+      if(identity&&reply.userMessageId)await rememberSentAttachment(identity,reply.userMessageId);
 
       const planCard=planActionCard(reply.planAction);
       const settlementCurrent=()=>this.live&&sameChat()&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(sourceSession)&&(!identity||connectionController.getSelectedConversationId()===identity.conversationId);
@@ -1924,7 +1924,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(fromComposer)await this.composerDraft?.commit();
         // The agent recorded the user turn before the reply failed: the sent bubble adopts its
         // message identity, as on success, so a later conversation re-read merges onto it.
-        const recorded=e&&typeof e==='object'?e as {userMessageId?:unknown;messageBinding?:unknown}:{};
+        const recorded:Pick<AgentReply,'userMessageId'|'messageBinding'>=e instanceof AlphaClientError?e as AlphaClientError&Pick<AgentReply,'userMessageId'|'messageBinding'>:{};
+        const binding=recorded.messageBinding;
+        if(this.live&&sameChat()&&binding&&typeof recorded.userMessageId==='string'&&binding.conversationId===connectionController.getSelectedConversationId()&&JSON.stringify(binding.session)===JSON.stringify(connectionController.getSnapshot().session)){
+          // The owner and recorded message are verified even though the reply failed.
+          // A storage failure must not replace the original reply error.
+          try{await rememberSentAttachment(binding,recorded.userMessageId);}catch{}
+        }
         if(this.live&&sameChat()&&typeof recorded.userMessageId==='string'&&recorded.messageBinding&&typeof recorded.messageBinding==='object')this.setState((previous:Shell)=>({msgs:previous.msgs.map((item:Shell)=>item.id===userId?{...item,id:recorded.userMessageId,messageBinding:recorded.messageBinding}:item)}));
         // After Stop the controller cancels, announces and reconciles once; its notice is the one shown.
         const reconciling=!!connectionController.getSnapshot().replyNotice&&e instanceof AlphaClientError&&e.code==='cancelled';

@@ -367,6 +367,38 @@ test('the journal clears a sent group draft after the MMS composer reply times o
   expect(await inputs(page, 'sendComposedMms')).toHaveLength(1);
 });
 
+test('clearing the text through Ask Alpha sends only the remaining picture on the next MMS tap', async ({page}) => {
+  await page.clock.install();
+  await setupTelephony(page, {mms: true, controlledMms: true});
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator('[data-alpha-messages-body]');
+  const send = page.locator('[data-alpha-messages-send]');
+  const body = 'These words must not go with the picture again.';
+  const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1kAAAAASUVORK5CYII=', 'base64');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', {name: 'Add picture', exact: true}).click();
+  await (await chooser).setFiles({name: 'picture.png', mimeType: 'image/png', buffer: picture});
+  await expect(page.getByRole('button', {name: 'Remove picture-1.png'})).toBeVisible();
+  await draft.fill(body);
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedMms')).length).toBe(1);
+  const [first] = await inputs(page, 'sendComposedMms');
+  expect(first).toMatchObject({body, attachments: [{data: picture.toString('base64')}]});
+
+  await page.clock.fastForward(30_001);
+  await expect(send).toBeEnabled();
+  await page.locator('[data-alpha-messages-alpha]').click();
+  await expect(draft).toHaveValue('');
+  await page.getByRole('button', {name: 'Close connection settings', exact: true}).click();
+  await page.getByRole('button', {name: 'Minimize chat', exact: true}).click();
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedMms')).length).toBe(2);
+  const [, second] = await inputs(page, 'sendComposedMms');
+  expect(second).toMatchObject({body: '', recipients: first.recipients, attachments: first.attachments});
+  expect(second.operationId).not.toBe(first.operationId);
+});
+
 test('a refused or failed manual SMS removes the provisional bubble and keeps the draft', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
