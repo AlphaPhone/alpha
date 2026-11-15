@@ -225,7 +225,9 @@ public final class AlphaLocalAgentPlugin extends Plugin {
  static long powerAuthorizationMutationEpoch,credentialMutationEpoch=-1,credentialShutdownRequest=-1;
  static boolean stopping;
 ${exact(agent,' static final class PowerLaunchPin', ' private final java.util.Set<String> cancelledStarts')}
-${exact(agent,' @PluginMethod public void launchSurface(', ' /** Read-only: may this surface')}
+${exact(agent,' @PluginMethod public void launchSurface(', '\n /** How this assistant surface was opened')}
+${exact(agent,' @PluginMethod public void takeInvocation(', '\n }')}
+ }
 }
 final class AlphaCredentialStore {
  AlphaCredentialStore(Context context){}
