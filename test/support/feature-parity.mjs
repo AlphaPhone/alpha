@@ -475,7 +475,6 @@ export const featureParityAllowlist = {
     "apps/app/src/runtime/calendar-sync-settings.ts",
     "apps/app/src/runtime/canonical-calendar-draft.ts",
     "apps/app/src/runtime/canvas-geometry.ts",
-    "apps/app/src/runtime/comms-bar.ts",
     "apps/app/src/runtime/client-observation-support.ts",
     "apps/app/src/runtime/clock-agent-review.ts",
     "apps/app/src/runtime/clock-contract.ts",

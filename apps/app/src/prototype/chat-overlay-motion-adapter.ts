@@ -971,7 +971,7 @@ export function installChatOverlayMotion(Component: Shell) {
 					event.target.value.length === 0 &&
 					String(out.barValue ?? out.draft ?? "").length === 0;
 				if (
-					shell.S().chat === "input" &&
+					(out.chatMode ?? shell.S().chat) === "input" &&
 					!emptyInput &&
 					(!(event.target instanceof Element) ||
 						!event.target.closest(
@@ -989,7 +989,8 @@ export function installChatOverlayMotion(Component: Shell) {
 				event.stopPropagation();
 				if (emptyInput) event.preventDefault();
 				const g = bounds(),
-					mode = shell.S().chat as Mode,
+					// A comms view rests on its bar even when the chat state says hidden (D2).
+					mode = (out.chatMode ?? shell.S().chat) as Mode,
 					rest = sheetHeight(shell, g),
 					floor =
 						(document.querySelector<HTMLElement>("[data-alpha-input-bar]")
