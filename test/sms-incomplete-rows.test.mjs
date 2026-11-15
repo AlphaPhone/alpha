@@ -36,14 +36,14 @@ const incompleteThread={id:'thread:2',date:1700000002000,incomplete:true,reason:
 const completeMessage={id:'sms:1',kind:'sms',threadId:'thread:1',direction:'incoming',status:'received',date:1700000001000,read:false,subscriptionId:3,addresses:['+15555550100'],body:'Known full text',deliveryReport:null,attachments:0};
 const incompleteMessage={id:'mms:2',kind:'mms',threadId:'thread:1',date:1700000002000,incomplete:true,reason:'text-as-attachment'};
 
-async function mount(messages=[]){
+async function mount(messages=[],nativeStatus=status){
   const calls=[],previousDocument=globalThis.document,previousPlugin=globalThis.__incompleteSmsPlugin;
   const previousWindow=Object.getOwnPropertyDescriptor(globalThis,'window');
   globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
   globalThis.window=new EventTarget();
   globalThis.__incompleteSmsPlugin=new Proxy({},{get:(_,method)=>method==='then'?undefined:async options=>{
     calls.push([method,options]);
-    if(method==='status')return status;
+    if(method==='status')return nativeStatus;
     if(method==='smsNoticePending')return {};
     if(method==='smsSendHistory')return {receipts:[]};
     if(method==='listThreads')return {threads:[incompleteThread,completeThread],next:null};
@@ -53,7 +53,7 @@ async function mount(messages=[]){
     if(method==='observeMessages')return {};
     throw Error('Unexpected native effect: '+String(method));
   }});
-  class Component{S(){return {screen:'home',view:'messages'};}setState(){}}
+  class Component{view='messages';S(){return {screen:'home',view:this.view};}setState(){}}
   const restore=()=>{
     globalThis.document=previousDocument;globalThis.__incompleteSmsPlugin=previousPlugin;
     if(previousWindow)Object.defineProperty(globalThis,'window',previousWindow);
@@ -63,9 +63,28 @@ async function mount(messages=[]){
   const owner=new Component();
   try{owner.componentDidMount();await tick();}
   catch(error){restore();throw error;}
-  return {calls,model:()=>views.messages.render({},{}),async close(){try{owner.componentWillUnmount();await tick();}finally{restore();}}};
+  return {owner,calls,model:()=>views.messages.render({},{}),async close(){try{owner.componentWillUnmount();await tick();}finally{restore();}}};
 }
 const effects=calls=>calls.filter(([method])=>['markThreadRead','sendSms','sendMms','composeSms'].includes(method));
+
+test('agent context uses the sole current SIM and respects explicit choices',async()=>{
+  const nativeStatus=structuredClone(status),single=nativeStatus.subscriptions[0];
+  const fixture=await mount([],nativeStatus);
+  try{
+    assert.equal(fixture.owner.smsSelection()?.id,String(single.id));
+    nativeStatus.subscriptions=[single,{...single,id:4,slot:1,defaultSms:false,defaultVoice:false}];
+    fixture.model().nativeRefresh();await tick();
+    assert.equal(fixture.owner.smsSelection(),undefined);
+    fixture.model().nativeSims.find(row=>row.id===4).pick();
+    assert.equal(fixture.owner.smsSelection()?.id,'4');
+    nativeStatus.subscriptions=[single];
+    fixture.model().nativeRefresh();await tick();
+    assert.equal(fixture.owner.smsSelection(),undefined);
+    fixture.owner.view='home';fixture.owner.componentDidUpdate();await tick();
+    assert.equal(fixture.owner.smsSelection(),undefined);
+    assert.deepEqual(effects(fixture.calls),[]);
+  }finally{await fixture.close();}
+});
 
 test('incomplete conversations show unavailable copy and cannot open, prefill or mark content read',async()=>{
   const fixture=await mount();
