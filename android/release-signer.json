@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Reviewed v77 Cloud launcher with shared attachments, clean native call controls, durable drafts and trusted single-SIM agent context. Preserve the current signer and lineage.",
+  "description": "Private v78 fixes resident agent startup. Keep the retained app identity and current signer lineage.",
   "signerSha256": "edbfcacb1da689008bf4e7d675176c302decf83161a877eb8b1de4ffae0445ed",
   "lastRelease": {
     "versionCode": null,
@@ -11,27 +11,27 @@
     "schema": 1,
     "approval": "approved",
     "fromVersionCode": 49,
-    "versionCode": 77,
+    "versionCode": 78,
     "previousSignerSha256": "0438dccb2d5e83fc2ad1ab11cbb882f837d97c4aee7cba72af9229c39b149b80",
     "lineageSha256": "bca212509a83e8f2e60d2b9b744b1e0a4a014b780be058dcf81ff88a5d593759",
     "apksignerSha256": "b47549e373b895ce6ca620d0c7887e674d9615ffa837a86ac601dcfd04adb0f0",
     "verifierJarSha256": "3716d9311e55d2b0918a2fd9d54ba9e406c5f6abeea700b287f11259bc163dec",
     "unsignedApkSHA256": {
-      "launcher": "ab5466a4e68a3c6f4adb4fbd022326d0a799adc66cee9e0619fbf04f935795e1"
+      "launcher": "ee9e474fa6ca671648783c677fb28a1a927002eb9cdcc81f2c008e73b19217bc"
     },
     "preserveSignaturePermissions": true
   },
   "privateProducerApproval": {
-    "alphaCommit": "68d393f8e6bbebaa2da8df9826085b5b9287e64f",
-    "sdkCommit": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
-    "versionCode": 77,
-    "archiveSHA256": "2163593c31d987538fa2bee332616c63082ef91f7cbdf24b023fc4b41eb601e2",
-    "archiveBytes": 634011036,
-    "producerManifestSHA256": "5ad4b8ef30202682a293259ece18776ba38e5df72f0c24eb601a02e8d28ee7f7",
-    "privateProducerReceiptSHA256": "2f8187a6557ebfeffc19f721bfe22ce2df2b8e11180e486355391582855231a9",
+    "alphaCommit": "778fcdaa8ce31dce1ae4cd285af2b6c8425192cc",
+    "sdkCommit": "5b2070469895b3c4ff6623f576d8de53810fafa5",
+    "versionCode": 78,
+    "archiveSHA256": "98c46ab473582edfc9bc05ea311979af8c5ca8fd7ec20585f42f126e45d6ac70",
+    "archiveBytes": 634001375,
+    "producerManifestSHA256": "15779da1deba9109282e6d89c555db1b8d84636cbd7940cc45f92c929ac087ee",
+    "privateProducerReceiptSHA256": "c360cd2985ae6db1eb464dc80105555cb47285557c62f763999d0a8ba9f6b9b4",
     "unsignedApkSHA256": {
-      "standalone": "dbbc7d6f932031336e3ab78ec271db7abd74a291fb1503d594596fd2d2b92d10",
-      "launcher": "ab5466a4e68a3c6f4adb4fbd022326d0a799adc66cee9e0619fbf04f935795e1"
+      "standalone": "b208da32bedebb2cf4a9ea67982cac0ada621388a912e6c21c86bf5f7cf9c950",
+      "launcher": "ee9e474fa6ca671648783c677fb28a1a927002eb9cdcc81f2c008e73b19217bc"
     },
     "updateChannel": {
       "kind": "public",
