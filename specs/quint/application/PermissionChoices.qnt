@@ -18,7 +18,7 @@ module PermissionChoices {
   val selected = if (s.target >= 0) s.target else if (s.progress >= 0) s.progress else 0
   pure def selectedOf(v: State): int = if (v.target >= 0) v.target else if (v.progress >= 0) v.progress else 0
   pure def shownOf(v: State): bool = (v.active or v.ready) and (v.enabled or v.reopened) and not(v.connectionOpen or v.googleOpen)
-  pure def automaticOf(v: State): bool = v.image and v.active and not(v.ready) and v.target < 0 and not(v.review)
+  pure def automaticOf(v: State): bool = v.image and v.active and not(v.ready) and not(v.reopened) and v.target < 0 and not(v.review)
     and (v.states.get(selectedOf(v)) == "ready" or (v.states.get(selectedOf(v)) == "checking" and not(v.canSkip)))
   val shown = shownOf(s)
   val automatic = automaticOf(s)
@@ -113,10 +113,13 @@ module PermissionChoices {
       s' = if (state == "ready" and s.target < 0) advanced(current, s.pendingChoice) else current
     } }
   action result(granted: bool): bool = resultState(if (granted) "ready" else "settings")
-  /// The verified image's already-ready row advances without requesting access. A checking,
-  /// denied or unknown row cannot take this action, and Settings review remains explicit.
+  /// The verified image's already-ready row advances without requesting access. Completion
+  /// goes Home when every row was continued and the write succeeds. Account attention is out of scope.
   action imageContinue = all { shown, automatic, not(busy), s.states.get(selected) == "ready",
-    s' = advanced(s, "continued") }
+    val current = advanced(s, "continued")
+    val pregranted = s.choices.foldl(true, (allContinued, choice) => allContinued and choice == "continued")
+    s' = if (current.ready and s.writeWorks and pregranted)
+      { ...current, ready: false, homeRequests: current.homeRequests + 1 } else current }
   action staleResult(key: int): bool = all { Keys.contains(key), s.operations.get(key) >= 0,
     s.operations.get(key) != s.generation, s' = { ...s, operations: s.operations.set(key, -1),
       flowTickets: if (s.flowTickets.get(key) == s.operations.get(key)) s.flowTickets.set(key, -1) else s.flowTickets } }
@@ -254,9 +257,8 @@ module PermissionChoices {
     .then(platformStatus(4, true)).then(imageContinue)
     .then(platformStatus(5, true)).then(imageContinue)
     .then(platformStatus(6, true)).then(imageContinue)
-    .expect(s.ready and s.completed and s.savedProgress == 7 and s.homeRequests == 0
+    .expect(not(visible) and s.completed and s.savedProgress == 7 and s.homeRequests == 1
       and AllKeys.forall(key => s.requests.get(key) == 0) and safety)
-    .then(finish).expect(not(visible) and s.homeRequests == 1 and safety)
   run imageCheckingNeverGrantsTest = imageInit.then(signIn)
     .expect(shown and automatic and not(visible) and s.progress == 0 and not(s.completed) and safety)
     .then(imageContinue.fail())
