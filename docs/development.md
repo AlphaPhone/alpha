@@ -644,9 +644,12 @@ outgoing message persistence on the Alpha image
 ([eliza#39658](https://github.com/elizaOS/eliza/pull/39658)). Outgoing SMS is stored in the Android provider
 before dispatch. Incoming SMS is stored before its notification. A send result
 and a carrier delivery receipt remain separate.
-The current pin `b8526fd56c9aa683889fdc00c286e2db0280f12e` includes the shared reviewed send path
+The pin `b8526fd56c9aa683889fdc00c286e2db0280f12e` includes the shared reviewed send path
 for trusted native composers and retires a staged MMS if Android never
 received it ([eliza#39660](https://github.com/elizaOS/eliza/pull/39660)).
+The current pin `a81d7059045f9b96b8c85ffa79b731d3ba574159` keeps retrying unexpected
+Android resident crashes with capped backoff and retires stale startup
+probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
