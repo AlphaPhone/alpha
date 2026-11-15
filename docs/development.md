@@ -524,6 +524,13 @@ Complete it in this order:
 
    For production Cloud acceptance on the Pixel, use the admitted release APK.
    Android requires a separate device or fresh installation when the installed copy uses an incompatible signer.
+   For Google sign-in, verify the installed build's `eliza.app` App Link with
+   `adb shell pm get-app-links --user cur ai.alphacompute.alphaphone` and make
+   sure the image has an external browser that can sign in to Google. A passing
+   Cloud redirect or published App Links file does not verify either condition on
+   the phone. An unregistered debug signer cannot receive the production return.
+   The probe's phone sign-in result checks whether Cloud offers SMS without a
+   captcha; it sends no code and does not establish delivery.
 3. Qualify the exact signed baseline and establish it on both installation
    paths before exposing the phones to a newer offer. If using
    `scripts/provision-unit.ts`, provision before recording the baseline's version
@@ -629,9 +636,14 @@ has its own deployment and operator steps.
 The pin `76c80623c5ee782fbb9893943455d3dafd74befb` includes the upstream
 resident assistant's current-time reply fix ([eliza#39629](https://github.com/elizaOS/eliza/pull/39629)).
 The upstream browser projections and native producer recipe retain the same bytes.
-The current pin `f86b5038f897094df686da9d5a8d901f60b1e20e` preserves years stated
+The pin `f86b5038f897094df686da9d5a8d901f60b1e20e` preserves years stated
 before Calendar dates in the resident runtime ([eliza#39632](https://github.com/elizaOS/eliza/pull/39632)).
 Upstream verified the parser and saved event interval with the Calendar owning tests.
+The current pin `6821e9f0ca79c1f7cbe14c11330686461410234c` uses Android's SMS role to authorize incoming and
+outgoing message persistence on the Alpha image
+([eliza#39658](https://github.com/elizaOS/eliza/pull/39658)). Outgoing SMS is stored in the Android provider
+before dispatch. Incoming SMS is stored before its notification. A send result
+and a carrier delivery receipt remain separate.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

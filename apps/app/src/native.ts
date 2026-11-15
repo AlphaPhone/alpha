@@ -1,15 +1,17 @@
 import { registerPlugin } from './platform-plugins';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import type { System as UpstreamSystem } from "../../../vendor/eliza/plugins/plugin-native-system/src/index";
 import { createSystemLauncherBridge, type LauncherBridge } from '@elizaos/capacitor-system/launcher';
+import type { NativeNetworkStatus } from './runtime/native-network';
 const System = registerPlugin<typeof UpstreamSystem & {
   /** The app's active Android network. Omitted facts mean Android could not answer. */
-  getNetworkStatus(): Promise<{connected?: boolean; internetValidated?: boolean}>;
+  getNetworkStatus(): Promise<NativeNetworkStatus>;
+  addListener(event: 'networkStatusChanged', listener: () => void): Promise<PluginListenerHandle>;
 }>("ElizaSystem");
 /** Alpha's product-only native reads. Installed apps, default handlers and the build, launch and
  * locale facts are the shared ElizaSystem plugin (@elizaos/capacitor-system). */
 export const DeviceApps = registerPlugin<{
-  platformCapabilities(): Promise<{aospImage: boolean; phone: boolean; contacts: boolean; sms: boolean; sense?: boolean}>;
+  platformCapabilities(): Promise<{aospImage: boolean; phone: boolean; contacts: boolean; sms: boolean; sense?: boolean; startupPermissionDefaults?: boolean}>;
 }>("DeviceApps");
 export const isAndroid = Capacitor.getPlatform() === "android";
 /** The one launcher bridge over ElizaSystem, on Android and in the browser development device. */
