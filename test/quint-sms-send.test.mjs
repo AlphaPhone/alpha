@@ -12,9 +12,9 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 
 const MODEL = {path: 'specs/quint/services/SmsSend.qnt', module: 'SmsSend'};
 const SCENARIOS = ['retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest', 'staleAnswerDroppedTest', 'editResetsOperationTest',
-  'deliveryEvidenceTest', 'readBackKeepsIdUntilSendAnswersTest', 'refusedBeforeJournalTest',
+  'deliveryEvidenceTest', 'readBackReleasesClosedIdWithoutSendTest', 'refusedBeforeJournalTest',
   'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest',
-  'lateJournalReceiptRetiresDraftTest'];
+  'lateJournalReceiptRetiresDraftTest', 'staleCancelledAnswerReleasesIdOnOpenTest', 'staleDeniedAnswerReleasesIdOnOpenTest'];
 const WITNESSES = ['RetryAfterClosedRecordWitness', 'RepeatedIdAnsweredFromJournalWitness', 'StaleAnswerDroppedWitness', 'SentEvidenceWitness', 'RefusedBeforeJournalWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const STUBS = {

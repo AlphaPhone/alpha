@@ -3047,12 +3047,14 @@
       "staleAnswerDroppedTest",
       "editResetsOperationTest",
       "deliveryEvidenceTest",
-      "readBackKeepsIdUntilSendAnswersTest",
+      "readBackReleasesClosedIdWithoutSendTest",
       "refusedBeforeJournalTest",
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
       "retainedRefusalIsNotNewAttemptAuthorityTest",
-      "lateJournalReceiptRetiresDraftTest"
+      "lateJournalReceiptRetiresDraftTest",
+      "staleCancelledAnswerReleasesIdOnOpenTest",
+      "staleDeniedAnswerReleasesIdOnOpenTest"
     ],
     "invariants": [
       "TypeOK",
