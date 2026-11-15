@@ -92,7 +92,7 @@ export function signInController({platform = 'browser', commitBoundary = false} 
     SIGN_IN_READINESS_WAIT_MS: 6000, SIGN_IN_SENDING: 'Sending code', signInReadiness: value => value,
     cloudSignInNetwork: {offline: false, unvalidated: false, reachable: true, checking: false},
     operation: null, sending: null, epoch: 1, active: null, planRecheck: null, providerStatusGeneration: 0, googleSignInGeneration: 0, googleSignInPrior: null,
-    residentStartInBackground: false, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true,
+    residentStartInBackground: false, homePresentationRevision: 0, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true,
     isAndroid: platform === 'android', browserCloudResidentEnabled: platform === 'first-run', cloudSignInPhone: null,
     state: {open: false, purpose: 'agent', signIn: null, message: '', error: '', errorKind: null, busy: false, startupResolved: false, automaticRestore: false, cloudAccount: null,
       residentSavedCredential: false, residentStarting: false, residentRecoveryReason: null, residentPlanNotice: null, providerStatus: null},

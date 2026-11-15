@@ -5,7 +5,7 @@ import {setTextScale} from './accessibility-states';
 // Live agent Notes are drawn by Alpha's own Notes template, the one mock mode shows, in the view refresh
 // layout: header with Back, title, Record and +, the folder chips, and a one-column
 // list (title, date, two-line preview) with a Pinned section. Recently deleted is a folder chip while it
-// has items; Previous notes is a quiet text action under the list. Screenshots land in test-results/notes-restore for side-by-side review
+// has items; Notes options appears only when previous notes are available. Screenshots land in test-results/notes-restore for side-by-side review
 // with the mock-mode reference.
 const SHOTS='test-results/notes-restore';
 const at='2026-10-30T09:00:00.000Z';
@@ -75,7 +75,7 @@ test('live agent Notes use the mock-mode Notes design with typed cards',async({p
  await shot(page,'live-list');
  // The list stays flat; removing navigation never removes saved notes.
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Notes options',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'New folder',exact:true})).toHaveCount(0);
  await expect(page.getByRole('group',{name:'Folders',exact:true})).toHaveCount(0);
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
