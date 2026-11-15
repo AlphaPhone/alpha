@@ -128,7 +128,7 @@ public final class Bundle {
   public static final Uri CONTENT_URI=Uri.parse("content://mms");
   public static final String THREAD_ID="thread",DATE="date",DATE_SENT="sent",MESSAGE_BOX="box",READ="read",SEEN="seen",
    MESSAGE_TYPE="type",MMS_VERSION="version",TRANSACTION_ID="transaction",CONTENT_TYPE="ctype",MESSAGE_CLASS="class",
-   TEXT_ONLY="text",SUBSCRIPTION_ID="sub";
+   TEXT_ONLY="text",SUBSCRIPTION_ID="sub",_ID="id",CREATOR="creator";
   public static final int MESSAGE_BOX_OUTBOX=4,MESSAGE_BOX_SENT=2,MESSAGE_BOX_FAILED=5;
   public static final class Outbox {public static final Uri CONTENT_URI=Uri.parse("content://mms/outbox");}
   public static final class Addr {public static final String ADDRESS="address",TYPE="type",CHARSET="charset",MSG_ID="message";}
@@ -151,8 +151,8 @@ import java.io.*;`);
  public OutputStream openOutputStream(Uri row){
   if(!children.containsKey(row))throw new AssertionError("MMS part must be created");
   ByteArrayOutputStream out=new ByteArrayOutputStream();bytes.put(row,out);return out;
- }
- public int delete(Uri uri,String where,String[] args){
+ }`);
+  edit(resolver,' public int delete(Uri uri,String where,String[] args){',` private int deleteMms(Uri uri){
   long id=ContentUris.parseId(uri);
   if(mms.remove(id)==null)return 0;
   String prefix=uri+"/";
@@ -160,12 +160,25 @@ import java.io.*;`);
   bytes.keySet().removeIf(key->key.toString().startsWith(prefix));
   deletedMms++;
   return 1;
- }`);
+ }
+ public int delete(Uri uri,String where,String[] args){
+  if(uri.equals(Mms.CONTENT_URI)){
+   if(!context.role||!(Mms._ID+" = ? AND "+Mms.MESSAGE_BOX+" = ? AND "+Mms.CREATOR+" = ? AND "+Mms.TRANSACTION_ID+" = ?").equals(where)||
+    args.length!=4||!args[1].equals("4")||!args[2].equals(context.getPackageName()))
+    throw new AssertionError("Only exact app-owned MMS outbox row may be discarded");
+   long id=Long.parseLong(args[0]);ContentValues row=mms.get(id);
+   if(row==null||!String.valueOf(row.get(Mms.MESSAGE_BOX)).equals(args[1])||!Objects.equals(row.get(Mms.CREATOR),args[2])||
+    !Objects.equals(row.get(Mms.TRANSACTION_ID),args[3]))return 0;
+   return deleteMms(ContentUris.withAppendedId(Mms.CONTENT_URI,id));
+  }
+  // The authenticated historical source deleted the inserted item URI directly.
+  if(uri.toString().startsWith("content://mms/"))return deleteMms(uri);`);
   edit(resolver,'  if(refuseInsert)return null;',`  if(refuseInsert)return null;
   if(uri.toString().startsWith("content://mms/")){
    if(!context.role)throw new AssertionError("Only default role can persist MMS");
    if(uri.equals(Mms.Outbox.CONTENT_URI)){
-    long id=++sequence;mms.put(id,value);return ContentUris.withAppendedId(Mms.CONTENT_URI,id);
+    long id=++sequence;value.put(Mms.CREATOR,context.getPackageName());
+    mms.put(id,value);return ContentUris.withAppendedId(Mms.CONTENT_URI,id);
    }
    String[] pieces=uri.toString().split("/");
    if(pieces.length!=5||!mms.containsKey(Long.parseLong(pieces[3]))||!Set.of("addr","part").contains(pieces[4]))
