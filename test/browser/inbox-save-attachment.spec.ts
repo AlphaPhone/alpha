@@ -1,5 +1,8 @@
 import {test,expect,type Page} from '@playwright/test';
+import {seedCompletedAccessSetup} from './flag-off-android';
+
 async function setup(page:Page){
+ await seedCompletedAccessSetup(page);
  await page.goto('/');await page.evaluate(async()=>{
   const{connectionController:c}=await import('/src/runtime/connection-ui.tsx');const{secureConnectionStore:s}=await import('/src/runtime/native-connection.ts');s.read=async()=>null;s.compareExchange=async()=>({status:'saved'});
   const{reviewMailAttachment}=await import('/src/runtime/inbox-attachment.ts');const input={name:'mail-source.txt',mimeType:'text/plain',dataBase64:btoa('Reviewed attachment bytes. <script>not executed</script>')};const file={...input,...await reviewMailAttachment(input)};

@@ -1,4 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
+import {seedCompletedAccessSetup} from './flag-off-android';
 // MVP-14: "Use in email" from the assistant conversation into the exact email selected in Inbox.
 // Closed fixture: a synthetic Cloud client and agent session, no account, network or mail. Any
 // provider write (prepare or dispatch) fails the test.
@@ -8,6 +9,7 @@ const review=(page:Page)=>page.getByRole('dialog',{name:'Review email suggestion
 const reply=(page:Page,text:string)=>page.locator('[data-alpha-message-text]').filter({hasText:text});
 const body=(page:Page)=>page.getByRole('textbox',{name:'Message',exact:true});
 async function setup(page:Page,theme='light',own=false,launcher=false){
+ await seedCompletedAccessSetup(page);
  // The launcher shell reserves the status bar above a full-height conversation, as the phone does.
  await page.goto('/?theme='+theme+(launcher?'&shell=launcher':''));
  await page.evaluate(async own=>{
