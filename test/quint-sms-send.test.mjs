@@ -17,7 +17,7 @@ const SCENARIOS = ['retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatche
 const WITNESSES = ['RetryAfterClosedRecordWitness', 'RepeatedIdAnsweredFromJournalWitness', 'StaleAnswerDroppedWitness', 'SentEvidenceWitness', 'RefusedBeforeJournalWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const STUBS = {
-  'platform-plugins$': 'export const registerPlugin=()=>({});',
+  'platform-plugins$': 'export const registerPlugin=()=>({smsNoticePending:async()=>({})});',
   'runtime/aosp-image$': 'export const aospImage=true;',
   'native-adapter$': 'export const watchReturnToApp=()=>()=>{};',
   'runtime/aosp-telephony$': `export {reviewSms,reviewMms} from ${JSON.stringify(`${contracts}/native-telephony.ts`)};
@@ -41,6 +41,7 @@ const project = s => ({busy: s.busy, operationId: s.operationId, minted: s.minte
 function create() {
   // Operation IDs in the order native first saw them: the model's 1, 2, 3.
   const ids = [], journal = new Map(), dispatches = new Map();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let sendAccess = true, call = null, sendUpdated = () => {}, probing = null, edits = 0;
   const ordinal = id => { if (!ids.includes(id)) ids.push(id); return ids.indexOf(id) + 1; };
   const status = {permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, subscriptions: [{id: 1, slot: 0, displayName: 'SIM', carrierName: 'Carrier'}],
@@ -64,8 +65,9 @@ function create() {
     },
   };
   globalThis.document = {hidden: false, addEventListener() {}, removeEventListener() {}};
+  globalThis.window = new EventTarget();
   const views = {messages: {}};
-  class Shell { view = 'home'; S() { return {view: this.view}; } setState() {} }
+  class Shell { view = 'home'; S() { return {screen: 'home', view: this.view}; } setState() {} }
   adapter.installSmsAdapter(Shell, views);
   const shell = new Shell();
   shell.componentDidMount();
@@ -112,7 +114,11 @@ function create() {
         journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(model.nativeNotice) : 'none'};
     },
     effects: () => ({ids: [...ids], call: call?.operationId ?? null, journal: [...journal], dispatches: [...dispatches]}),
-    close() { shell.componentWillUnmount(); delete globalThis.document; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe; },
+    close() {
+      shell.componentWillUnmount(); delete globalThis.document; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe;
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else delete globalThis.window;
+    },
   };
 }
 

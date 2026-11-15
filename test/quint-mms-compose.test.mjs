@@ -18,7 +18,7 @@ const WITNESSES = ['VisitKeptBehindChooserWitness', 'PicturesAddedWhileHiddenWit
   'LatePicturesDroppedWitness', 'PickedPicturesResetIdWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const adapter = await observedSmsAdapter({
-  'platform-plugins$': 'export const registerPlugin=()=>({});',
+  'platform-plugins$': 'export const registerPlugin=()=>({smsNoticePending:async()=>({})});',
   'runtime/aosp-image$': 'export const aospImage=true;',
   'native-adapter$': 'export const watchReturnToApp=()=>()=>{};',
   'runtime/aosp-telephony$': `export {reviewSms,reviewMms} from ${JSON.stringify(`${contracts}/native-telephony.ts`)};
@@ -40,7 +40,8 @@ const project = s => ({busy: s.busy, pictures: s.pictures, chooser: s.chooser, o
   journal: s.journal, dispatches: s.dispatches, shown: s.shown});
 
 function create() {
-  const ids = [], journal = new Map(), dispatches = new Map(), pageHideListeners = new Set();
+  const ids = [], journal = new Map(), dispatches = new Map();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let sendAccess = true, call = null, mmsUpdated = () => {}, probing = null, edits = 0, input = null;
   const ordinal = id => { if (!ids.includes(id)) ids.push(id); return ids.indexOf(id) + 1; };
   const status = {permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, subscriptions: [{id: 1, slot: 0, displayName: 'SIM', carrierName: 'Carrier'}],
@@ -65,9 +66,9 @@ function create() {
   };
   globalThis.document = {hidden: false, addEventListener() {}, removeEventListener() {},
     createElement() { assert.equal(input, null, 'one chooser at a time'); return input = {click() {}, files: [], value: ''}; }};
-  globalThis.window = {addEventListener: (_type, listener) => pageHideListeners.add(listener), removeEventListener: (_type, listener) => pageHideListeners.delete(listener)};
+  globalThis.window = new EventTarget();
   const views = {messages: {}};
-  class Shell { view = 'home'; S() { return {view: this.view}; } setState() {} }
+  class Shell { view = 'home'; S() { return {screen: 'home', view: this.view}; } setState() {} }
   adapter.installSmsAdapter(Shell, views);
   const shell = new Shell();
   shell.componentDidMount();
@@ -81,7 +82,7 @@ function create() {
   const picture = readable => ({type: readable ? 'image/jpeg' : 'text/plain', size: 16, arrayBuffer: async () => new ArrayBuffer(16)});
   return {
     openView: () => view('messages'), closeView: () => view('home'), hide: () => visibility(true), show: () => visibility(false),
-    async pageHide() { for (const listener of [...pageHideListeners]) listener({type: 'pagehide'}); await settled(); },
+    async pageHide() { window.dispatchEvent(new Event('pagehide')); await settled(); },
     async attach() { page().nativeAttach(); await settled(); },
     async attachAtLimit() { page().nativeAttach(); await settled(); },
     async chooserAnswers(count, readable) {
@@ -121,7 +122,11 @@ function create() {
         journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(model.nativeNotice) : 'none'};
     },
     effects: () => ({ids: [...ids], call: call?.operationId ?? null, journal: [...journal], dispatches: [...dispatches]}),
-    close() { shell.componentWillUnmount(); delete globalThis.document; delete globalThis.window; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe; },
+    close() {
+      shell.componentWillUnmount(); delete globalThis.document; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe;
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else delete globalThis.window;
+    },
   };
 }
 
