@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSmsSession,receiptLabel} from '../apps/app/src/runtime/image-sms.ts';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+const noSmsNotice=async()=>({});
+function installTestWindow(){
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'window');
+ globalThis.window=new EventTarget();
+ return ()=>{if(previous)Object.defineProperty(globalThis,'window',previous);else delete globalThis.window;};
+}
 const status={permissions:{sms:'granted'},subscriptions:[]};
 function fake(overrides={}){let reads=0,stops=0;return {client:{smsSendHistory:async()=>[],status:async()=>status,threadPage:async()=>{reads++;return {rows:[],next:null};},messagePage:async()=>({rows:[],next:null}),requestAccess:async()=>{},observeMessages:async()=>async()=>{stops++;},...overrides},get reads(){return reads;},get stops(){return stops;}};}
 test('off-image no provider call; background clears memory and stops observer',async()=>{const f=fake(),s=createSmsSession(f.client,false,()=>{});s.setActive(true);await tick();assert.equal(f.reads,0);const a=createSmsSession(f.client,true,()=>{});a.setActive(true);await tick();assert.equal(f.reads,1);a.setActive(false);await tick();assert.equal(f.stops,1);assert.equal(a.state.status,null);assert.deepEqual(a.state.threads,[]);});
@@ -35,16 +41,18 @@ test('a native sent receipt refreshes the open provider thread without a content
 test('SMS review completion cannot mutate a later visit and transport errors keep the operation ID',async()=>{
  const {mkdtempSync,rmSync}=await import('node:fs');const {join,resolve}=await import('node:path');const {tmpdir}=await import('node:os');
  const {build}=await import('esbuild');const {writeFileSync}=await import('node:fs');const {pathToFileURL}=await import('node:url');const dir=mkdtempSync(join(tmpdir(),'sms-adapter-'));const priorDocument=globalThis.document;const pending=[];const calls=[];
+ const restoreWindow=installTestWindow();
  globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
  globalThis.__smsFixturePort={smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',phoneState:'granted'},subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[{id:'thread:1',addresses:['+15555550100'],date:1,snippet:'Hi',unread:false}],next:null}),messagePage:async()=>({rows:[{id:'sms:1',threadId:'thread:1',kind:'sms',addresses:['+15555550100'],date:1,body:'Hi',direction:'incoming',status:'received',subscriptionId:3},{id:'sms:2',threadId:'thread:1',kind:'sms',addresses:['+15555550100'],date:2,body:'Other SIM',direction:'incoming',status:'received',subscriptionId:4}],next:null}),observeMessages:async()=>async()=>{},sendSms:(review,operationId)=>{calls.push({...review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));}};
  try{
+  globalThis.__smsFixturePort.smsNoticePending=noSmsNotice;
   const result=await build({entryPoints:[resolve('apps/app/src/prototype/sms-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'native-fixture',setup(builder){builder.onResolve({filter:/platform-plugins|aosp-image|aosp-telephony|native-adapter$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({resolveDir:process.cwd(),contents:args.path.includes('aosp-telephony')?'export const MMS_MAX_ATTACHMENTS=5;export const reviewMms=()=>({problem:"mms-unavailable"});export {reviewSms} from '+JSON.stringify(resolve('.eliza/client-features/packages/contracts/src/native-telephony.ts'))+';export const createAospTelephony=()=>globalThis.__smsFixturePort;export const registerTelephonyProfile=()=>()=>{};':args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__smsFixturePort;':args.path.includes('aosp-image')?'export const aospImage=true;':'export const watchReturnToApp=()=>()=>{};'}));}}]});const filename=join(dir,'adapter.mjs');writeFileSync(filename,result.outputFiles[0].text);const {installSmsAdapter}=await import(pathToFileURL(filename));
-  class Component{view='messages';S(){return {view:this.view}}setState(){}}
+  class Component{view='messages';S(){return {screen:'home',view:this.view}}setState(){}}
   const views={messages:{}};installSmsAdapter(Component,views);const owner=new Component();owner.componentDidMount();await tick();
   const compose=()=>{let model=views.messages.render();model.nativeOnRecipients({target:{value:'+15555550100'}});model.nativeOnBody({target:{value:'hello'}});model=views.messages.render();model.nativeSims[0].pick();views.messages.render().nativeSend();};
   compose();await tick();owner.view='home';owner.componentDidUpdate();owner.view='messages';owner.componentDidUpdate();await tick();pending[0].resolve({status:'sent'});await tick();assert.equal(views.messages.render().nativeNotice,'');assert.equal(views.messages.render().nativeBody,'hello','navigating within Alpha retains the draft');assert.equal(views.messages.render().nativeRecipients,'+15555550100');assert.equal(calls.length,1,'returning never dispatches a send');views.messages.render().nativeSend();await tick();assert.equal(calls[1].operationId,calls[0].operationId,'returning preserves the uncertain operation identity');pending[1].resolve({status:'unknown'});await tick();
   compose();await tick();pending[2].reject(Error('transport lost'));await tick();assert.match(views.messages.render().nativeNotice,/May have sent/);views.messages.render().nativeSend();await tick();assert.equal(calls[2].operationId,calls[3].operationId,'same uncertain operation is queried, never assigned a fresh replay ID');pending[3].resolve({status:'unknown'});await tick();views.messages.render().nativeThreads[0].open();await tick();assert.deepEqual(views.messages.render().nativeRows.map(row=>row.sim),['SIM 1','SIM'],'thread rows use the active slot label and leave an inactive subscription unnamed');owner.componentWillUnmount();
- }finally{globalThis.document=priorDocument;delete globalThis.__smsFixturePort;rmSync(dir,{recursive:true,force:true});}
+ }finally{globalThis.document=priorDocument;restoreWindow();delete globalThis.__smsFixturePort;rmSync(dir,{recursive:true,force:true});}
 });
 
 test('holding the SMS role, an opened conversation is marked read through the newest shown message only',async()=>{
@@ -63,15 +71,16 @@ test('old observer cleanup finishes before a new visit enables observation',asyn
 
 test('Cancel, denial and native refusals let Send review again; Back and the picture picker keep the draft',async()=>{
  const {mkdtempSync,rmSync,writeFileSync}=await import('node:fs');const {join,resolve}=await import('node:path');const {tmpdir}=await import('node:os');const {pathToFileURL}=await import('node:url');
- const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'sms-retry-'));const priorDocument=globalThis.document,priorWindow=globalThis.window;const pending=[],calls=[],inputs=[];let visibility;
+ const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'sms-retry-'));const priorDocument=globalThis.document;const pending=[],calls=[],inputs=[];let visibility;
  globalThis.document={hidden:false,addEventListener(type,listener){if(type==='visibilitychange')visibility=listener;},removeEventListener(){},createElement(){const input={files:[],value:'',click(){inputs.push(input);}};return input;}};
- globalThis.window={addEventListener(){},removeEventListener(){}};
+ const restoreWindow=installTestWindow();
  globalThis.__smsRetryPort={smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},mmsSend:true,subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[{id:'thread:1',addresses:['+15555550100']}],next:null}),messagePage:async()=>({rows:[],next:null}),observeMessages:async()=>async()=>{},sendSms:(review,operationId)=>{calls.push({...review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));}};
  const refusal=(message,code)=>Object.assign(Error(message),{code});
  try{
+  globalThis.__smsRetryPort.smsNoticePending=noSmsNotice;
   const result=await build({entryPoints:[resolve('apps/app/src/prototype/sms-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'native-fixture',setup(builder){builder.onResolve({filter:/platform-plugins|aosp-image|aosp-telephony|native-adapter$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({resolveDir:process.cwd(),contents:args.path.includes('aosp-telephony')?'export const MMS_MAX_ATTACHMENTS=5;export const reviewMms=()=>({problem:"mms-unavailable"});export {reviewSms} from '+JSON.stringify(resolve('.eliza/client-features/packages/contracts/src/native-telephony.ts'))+';export const createAospTelephony=()=>globalThis.__smsRetryPort;export const registerTelephonyProfile=()=>()=>{};':args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__smsRetryPort;':args.path.includes('aosp-image')?'export const aospImage=true;':'export const watchReturnToApp=()=>()=>{};'}));}}]});
   const filename=join(dir,'adapter.mjs');writeFileSync(filename,result.outputFiles[0].text);const {installSmsAdapter}=await import(pathToFileURL(filename));
-  class Component{view='messages';S(){return {view:this.view}}setState(){}}
+  class Component{view='messages';S(){return {screen:'home',view:this.view}}setState(){}}
   let shellBack=0;const views={messages:{back:()=>{shellBack++;return false;}}};installSmsAdapter(Component,views);const owner=new Component();owner.componentDidMount();await tick();await tick();
   const model=()=>views.messages.render();
   model().nativeOnRecipients({target:{value:'+15555550100'}});model().nativeOnBody({target:{value:'hello'}});model().nativeSims[0].pick();
@@ -101,13 +110,13 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
   assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.jpg · 1 KB']);assert.equal(model().nativeBody,'hello');assert.equal(model().nativeRecipients,'+15555550100');
   globalThis.document.hidden=true;visibility();assert.equal(model().nativeBody,'hello','backgrounding retains the owner draft');assert.equal(model().nativeAttachments.length,1);assert.deepEqual(model().nativeThreads,[],'backgrounding still retires provider content');
   globalThis.document.hidden=false;visibility();owner.view='home';owner.componentDidUpdate();assert.equal(model().nativeBody,'hello');owner.view='messages';owner.componentDidUpdate();await tick();assert.equal(model().nativeRecipients,'+15555550100');assert.equal(model().nativeAttachments.length,1);model().nativeClear();assert.equal(model().nativeBody,'');assert.equal(model().nativeAttachments.length,0);owner.componentWillUnmount();
- }finally{globalThis.document=priorDocument;globalThis.window=priorWindow;delete globalThis.__smsRetryPort;rmSync(dir,{recursive:true,force:true});}
+ }finally{globalThis.document=priorDocument;restoreWindow();delete globalThis.__smsRetryPort;rmSync(dir,{recursive:true,force:true});}
 });
 
 test('a reviewed MMS carries the picked pictures, keeps its operation ID when uncertain and reads back only its reviewed content',async()=>{
  const {mkdtempSync,rmSync,writeFileSync}=await import('node:fs');const {join,resolve}=await import('node:path');const {tmpdir}=await import('node:os');const {pathToFileURL}=await import('node:url');
- const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'mms-adapter-'));const priorDocument=globalThis.document,priorWindow=globalThis.window;const pending=[],calls=[],reads=[],inputs=[];let mmsUpdated;
- globalThis.window={addEventListener(){},removeEventListener(){}};
+ const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'mms-adapter-'));const priorDocument=globalThis.document;const pending=[],calls=[],reads=[],inputs=[];let mmsUpdated;
+ const restoreWindow=installTestWindow();
  globalThis.document={hidden:false,addEventListener(){},removeEventListener(){},createElement(){const input={files:[],value:'',click(){inputs.push(input);}};return input;}};
  const file=(type,bytes)=>({type,size:bytes.length,arrayBuffer:async()=>new Uint8Array(bytes).buffer});
  globalThis.__mmsFixture={
@@ -115,11 +124,12 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   port:{smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},mmsSend:true,subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[],next:null}),observeMessages:async(_change,_sms,mms)=>{mmsUpdated=mms;return async()=>{};},sendMms:(review,operationId)=>{calls.push({review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));},mmsSendResult:async(review,operationId)=>{reads.push({review,operationId});return {status:'sent'};}},
  };
  try{
+  globalThis.__mmsFixture.port.smsNoticePending=noSmsNotice;
   // Only the native port is faked: the draft is validated by the shared reviewMms and MMS_MAX_ATTACHMENTS from the projected contract the adapter imports.
   const contract=name=>resolve('.eliza/client-features/packages/contracts/src',name);
   const result=await build({entryPoints:[resolve('apps/app/src/prototype/sms-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'native-fixture',setup(builder){builder.onResolve({filter:/platform-plugins|aosp-image|aosp-telephony|native-adapter$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({resolveDir:process.cwd(),contents:args.path.includes('aosp-telephony')?`export {MMS_MAX_ATTACHMENTS} from ${JSON.stringify(contract('mms-send.ts'))};export {reviewMms,reviewSms} from ${JSON.stringify(contract('native-telephony.ts'))};export const createAospTelephony=()=>globalThis.__mmsFixture.port;export const registerTelephonyProfile=client=>{globalThis.__mmsFixture.profiles.push(client);return ()=>{};};`:args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__mmsFixture.port;':args.path.includes('aosp-image')?'export const aospImage=true;':'export const watchReturnToApp=()=>()=>{};'}));}}]});
   const filename=join(dir,'adapter.mjs');writeFileSync(filename,result.outputFiles[0].text);const {installSmsAdapter}=await import(pathToFileURL(filename));
-  class Component{view='messages';S(){return {view:this.view}}setState(){}}
+  class Component{view='messages';S(){return {screen:'home',view:this.view}}setState(){}}
   const views={messages:{}};installSmsAdapter(Component,views);const owner=new Component();owner.componentDidMount();await tick();await tick();
   assert.deepEqual(globalThis.__mmsFixture.profiles,[globalThis.__mmsFixture.port],'the image client the adapter uses is the shared Messages and Phone profile');
   const model=()=>views.messages.render();model().nativeSims[0].pick();
@@ -133,27 +143,30 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   assert.deepEqual(calls[0].review.recipients,['+15555550100','+15555550101']);assert.deepEqual(calls[0].review.attachments.map(a=>[a.name,a.contentType,[...a.bytes]]),[['picture-1.jpg','image/jpeg',[1,2,3]],['picture-2.png','image/png',[4,5]]]);
   pending[0].reject(Error('transport lost'));await tick();await tick();assert.match(model().nativeNotice,/May have sent/);
   model().nativeSendMms();await tick();await tick();assert.equal(calls[1].operationId,calls[0].operationId,'an uncertain MMS is never given a fresh ID');
-  pending[1].resolve({status:'submitted'});await tick();await tick();assert.match(model().nativeNotice,/submitted/);
+  pending[1].resolve({status:'submitted'});await tick();await tick();assert.equal(model().nativeNotice,'','submission shows no status text');
   mmsUpdated('someone-else');await tick();assert.equal(reads.length,0,'another operation is not read');
-  mmsUpdated(calls[0].operationId);await tick();await tick();assert.equal(reads.length,1);assert.equal(reads[0].review,calls[0].review,'the result is bound to the reviewed content');assert.match(model().nativeNotice,/carrier accepted the MMS; delivery is not confirmed/);
+  mmsUpdated(calls[0].operationId);await tick();await tick();assert.equal(reads.length,1);assert.equal(reads[0].review,calls[0].review,'the result is bound to the reviewed content');assert.equal(model().nativeNotice,'','successful read-back shows no status text');
   assert.equal(model().nativeAttachments.length,0,'a sent MMS clears the composer and its pictures');assert.equal(model().nativeBody,'');
   model().nativeOnBody({target:{value:'one more'}});model().nativeAttach();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
-  pending[2].resolve({status:'cancelled'});await tick();await tick();assert.match(model().nativeNotice,/Cancelled — MMS not sent/);
+  pending[2].resolve({status:'cancelled'});await tick();await tick();assert.equal(model().nativeNotice,'','cancellation shows no status text');
+  assert.equal(model().nativeBody,'one more','cancellation preserves the draft');
   model().nativeClear();assert.equal(model().nativeAttachments.length,0);
   owner.view='home';owner.componentDidUpdate();owner.componentWillUnmount();
- }finally{globalThis.document=priorDocument;globalThis.window=priorWindow;delete globalThis.__mmsFixture;rmSync(dir,{recursive:true,force:true});}
+ }finally{globalThis.document=priorDocument;restoreWindow();delete globalThis.__mmsFixture;rmSync(dir,{recursive:true,force:true});}
 });
 
 test('direct SMS and the handoff go through the shared SMS review',async()=>{
  const {mkdtempSync,rmSync,writeFileSync}=await import('node:fs');const {join,resolve}=await import('node:path');const {tmpdir}=await import('node:os');const {pathToFileURL}=await import('node:url');
  const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'sms-review-'));const priorDocument=globalThis.document;const sends=[],reads=[],handoffs=[];let sims=[{id:3,slot:0,displayName:'SIM'}],smsUpdated;
+ const restoreWindow=installTestWindow();
  globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
  globalThis.__smsReviewPort={smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},subscriptions:sims}),threadPage:async()=>({rows:[],next:null}),observeMessages:async(_change,sms)=>{smsUpdated=sms;return async()=>{};},sendSms:async(review,operationId)=>{sends.push({review,operationId});return {status:'submitted'};},smsSendResult:async(review,operationId)=>{reads.push({review,operationId});return {status:'sent'};},composeSms:async review=>{handoffs.push(review);return {message:'Your messaging app is open.'};}};
  try{
+  globalThis.__smsReviewPort.smsNoticePending=noSmsNotice;
   const contract=resolve('.eliza/client-features/packages/contracts/src/native-telephony.ts');
   const result=await build({entryPoints:[resolve('apps/app/src/prototype/sms-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'native-fixture',setup(builder){builder.onResolve({filter:/platform-plugins|aosp-image|aosp-telephony|native-adapter$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({resolveDir:process.cwd(),contents:args.path.includes('aosp-telephony')?`export const MMS_MAX_ATTACHMENTS=5;export {reviewMms,reviewSms} from ${JSON.stringify(contract)};export const createAospTelephony=()=>globalThis.__smsReviewPort;export const registerTelephonyProfile=()=>()=>{};`:args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__smsReviewPort;':args.path.includes('aosp-image')?'export const aospImage=true;':'export const watchReturnToApp=()=>()=>{};'}));}}]});
   const filename=join(dir,'adapter.mjs');writeFileSync(filename,result.outputFiles[0].text);const {installSmsAdapter}=await import(pathToFileURL(filename));
-  class Component{view='messages';S(){return {view:this.view}}setState(){}}
+  class Component{view='messages';S(){return {screen:'home',view:this.view}}setState(){}}
   const views={messages:{}};installSmsAdapter(Component,views);const owner=new Component();owner.componentDidMount();await tick();await tick();
   const model=()=>views.messages.render();const settle=async()=>{await tick();await tick();};
   model().nativeOnRecipients({target:{value:'+1 (415) 555-0100, +14155550100'}});model().nativeOnBody({target:{value:'hello'}});
@@ -171,5 +184,5 @@ test('direct SMS and the handoff go through the shared SMS review',async()=>{
   owner.view='home';owner.componentDidUpdate();sims=null;owner.view='messages';owner.componentDidUpdate();await settle();
   model().nativeOnRecipients({target:{value:'4155550100'}});model().nativeOnBody({target:{value:'hello'}});model().nativeSend();await settle();assert.equal(sends.length,1);assert.equal(model().nativeNotice,'Allow SIM','without SIM access the owner is asked for it, not told there is no SIM');
   owner.view='home';owner.componentDidUpdate();owner.componentWillUnmount();
- }finally{globalThis.document=priorDocument;delete globalThis.__smsReviewPort;rmSync(dir,{recursive:true,force:true});}
+ }finally{globalThis.document=priorDocument;restoreWindow();delete globalThis.__smsReviewPort;rmSync(dir,{recursive:true,force:true});}
 });

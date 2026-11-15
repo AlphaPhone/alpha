@@ -212,6 +212,98 @@ test('the open conversation owns its send target after a new-message draft', asy
   await expect.poll(async () => (await inputs(page, 'sendSms')).map(input => [input.recipients, input.body])).toEqual([[['+15550100101'], 'Draft for Ada']]);
 });
 
+test('an outgoing SMS bubble appears on Send and an exact provider row replaces it', async ({page}) => {
+  await setupTelephony(page, {controlledSms: true});
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const body = 'Yes. Seven at the usual place?';
+  const draft = page.locator('[data-alpha-messages-body]');
+  const thread = page.locator('[data-alpha-messages-thread]');
+  const send = page.locator('[data-alpha-messages-send]');
+  const text = thread.getByText(body, {exact: true});
+  await expect(text).toHaveCount(1);
+  await draft.fill(body);
+  await send.click();
+  await expect(text).toHaveCount(2);
+  await expect(send).toBeDisabled();
+  const [request] = await inputs(page, 'sendSms');
+  const provisional = thread.locator(`[data-alpha-message-id="${request.operationId}"]`);
+  await expect(provisional).toHaveCSS('opacity', '0.68');
+  await page.evaluate(() => (window as any).smsReview.finish('sent'));
+  await expect(draft).toHaveValue('');
+  await expect(provisional).toHaveCSS('opacity', '1');
+  await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.smsReview.addProviderRow(41, 'thread:101');
+    w.smsProviderChanged();
+  });
+  await expect(thread.locator('[data-alpha-message-id="sms:41"]')).toHaveText(body);
+  await expect(provisional).toHaveCount(0);
+  await expect(text).toHaveCount(2);
+  expect(await inputs(page, 'sendSms')).toHaveLength(1);
+});
+
+test('cancelling or failing the native SMS review removes the provisional bubble and keeps the draft', async ({page}) => {
+  await setupTelephony(page, {controlledSms: true});
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator('[data-alpha-messages-body]');
+  const body = 'Leave this draft unsent';
+  const bubble = page.locator('[data-alpha-messages-thread]').getByText(body, {exact: true});
+  await draft.fill(body);
+  await page.locator('[data-alpha-messages-send]').click();
+  await expect(bubble).toBeVisible();
+  await expect.poll(async () => (await inputs(page, 'sendSms')).length).toBe(1);
+  await page.evaluate(() => (window as any).smsReview.finish('cancelled'));
+  await expect(bubble).toHaveCount(0);
+  await expect(draft).toHaveValue(body);
+  await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
+  await page.locator('[data-alpha-messages-send]').click();
+  await expect(bubble).toBeVisible();
+  await expect.poll(async () => (await inputs(page, 'sendSms')).length).toBe(2);
+  await page.evaluate(() => (window as any).smsReview.finish('failed'));
+  await expect(bubble).toHaveCount(0);
+  await expect(draft).toHaveValue(body);
+  await expect(page.getByRole('img', {name: 'Message failed'})).toBeVisible();
+  await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
+  expect(await inputs(page, 'sendSms')).toHaveLength(2);
+});
+
+for (const smsRoleHeld of [true, false]) {
+  test(`a new SMS uses the provider conversation when available (SMS role held: ${smsRoleHeld})`, async ({page}) => {
+    await setupTelephony(page, {controlledSms: true, smsRoleHeld});
+    await open(page, 'Messages');
+    await page.locator('[data-alpha-messages-new]').click();
+    const body = 'Starting a conversation';
+    const draft = page.locator('[data-alpha-messages-body]');
+    const messages = page.locator('[data-alpha-messages]');
+    const bubbles = messages.locator('[data-alpha-message-id]').filter({hasText: body});
+    await page.locator('[data-alpha-messages-recipients]').fill('+1 (555) 010-0501');
+    await draft.fill(body);
+    await page.locator('[data-alpha-messages-send]').click();
+    await expect(bubbles).toBeVisible();
+    await expect.poll(async () => (await inputs(page, 'sendSms')).length).toBe(1);
+    await page.evaluate(() => (window as any).smsReview.finish('submitted'));
+    if (smsRoleHeld) {
+      await expect(draft).toHaveValue('');
+      await expect(bubbles).toBeVisible();
+      await page.evaluate(() => {
+        const w = window as any;
+        w.smsReview.addProviderRow(42, 'thread:501');
+        w.smsProviderChanged();
+      });
+      await expect(page.locator('[data-alpha-messages-thread] [data-alpha-message-id="sms:42"]')).toHaveText(body);
+      await expect(bubbles).toHaveCount(1);
+    } else {
+      await expect(page.locator('[data-alpha-messages-threads]')).toBeVisible();
+      await expect(draft).toHaveCount(0);
+      await expect(bubbles).toHaveCount(0);
+    }
+    await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
+  });
+}
+
 test('one unread thread opened from Home can send only to that conversation', async ({page}) => {
   await setupTelephony(page, {singleUnread: true});
   await page.getByRole('button', {name: 'Open Messages, 1 unread'}).click();
