@@ -1,9 +1,9 @@
 import {expect,type Page} from '@playwright/test';
 
 /** Isolated browser-owned pixels: exercises the real library/editor, never device media. */
-export async function openOwnedPhotoViewer(page:Page,theme='light'){
+export async function openOwnedPhotoViewer(page:Page,theme='light',mode?:'dev'){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
- await page.goto(`/?theme=${theme}`);
+ await page.goto(`/?theme=${theme}${mode?'&mode='+mode:''}`);
  await page.evaluate(async()=>{
   const {importBrowserPhoto}=await import('/src/prototype/browser-camera.ts');
   const canvas=document.createElement('canvas');canvas.width=240;canvas.height=180;
