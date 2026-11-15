@@ -159,6 +159,32 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await noHandOff(page);
  });
 
+ test('checking sign-in options preserves an explicit switch from Own keys to Cloud',async({page})=>{
+  await boot(page,{...await entitlements(),ownProvider:true,methods:{email:true,phone:false,google:true}});
+  await expect.poll(async()=>{
+   const current=await snapshot(page);
+   return {ready:current.startupResolved,busy:current.busy,mode:current.providerStatus?.mode};
+  }).toEqual({ready:true,busy:false,mode:'own'});
+  await page.evaluate(()=>(window as any).planController.selectCloudProvider());
+  await readySignIn(page);
+  const dialog=signInDialog(page);
+  await expect(googleButton(page)).toBeEnabled();
+  await expect(dialog.getByRole('button',{name:'Continue with phone number',exact:true})).toBeDisabled();
+  const statusReads=async()=>(await calls(page)).filter(call=>call.plugin==='AlphaCloudSignIn'&&call.method==='status');
+  const before=(await statusReads()).length;
+  await dialog.getByRole('button',{name:'Check sign-in options',exact:true}).click();
+  await expect.poll(async()=>(await statusReads()).length).toBe(before+1);
+  expect((await statusReads()).at(-1)?.refreshNegative).toBe(true);
+  expect((await calls(page)).filter(call=>call.method==='selectProvider')).toHaveLength(0);
+  await googleButton(page).click();
+  await expect.poll(async()=>{
+   const current=await snapshot(page);
+   return {userId:current.cloudAccount?.userId,provider:current.providerStatus};
+  }).toMatchObject({userId:USER,provider:{mode:'cloud',keys:{text:{configured:true},voice:{configured:true}}}});
+  expect((await calls(page)).filter(call=>call.method==='selectProvider')).toHaveLength(1);
+  await noHandOff(page);
+ });
+
  test('a native App Link readiness event enables Google without interrupting the email draft',async({page})=>{
   await boot(page,{...await entitlements(),methods:{email:true,phone:true,google:false}});
   await readySignIn(page);
