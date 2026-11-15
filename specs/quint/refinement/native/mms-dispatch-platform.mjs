@@ -128,7 +128,7 @@ public final class Bundle {
   public static final Uri CONTENT_URI=Uri.parse("content://mms");
   public static final String _ID="_id",CREATOR="creator",THREAD_ID="thread",DATE="date",DATE_SENT="sent",MESSAGE_BOX="box",READ="read",SEEN="seen",
    MESSAGE_TYPE="type",MMS_VERSION="version",TRANSACTION_ID="transaction",CONTENT_TYPE="ctype",MESSAGE_CLASS="class",
-   TEXT_ONLY="text",SUBSCRIPTION_ID="sub";
+   TEXT_ONLY="text",SUBSCRIPTION_ID="sub",_ID="id",CREATOR="creator";
   public static final int MESSAGE_BOX_OUTBOX=4,MESSAGE_BOX_SENT=2,MESSAGE_BOX_FAILED=5;
   public static final class Outbox {public static final Uri CONTENT_URI=Uri.parse("content://mms/outbox");}
   public static final class Addr {public static final String ADDRESS="address",TYPE="type",CHARSET="charset",MSG_ID="message";}

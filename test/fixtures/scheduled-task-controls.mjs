@@ -26,7 +26,7 @@ function compile() {
     ['../daily', 'export const DailyApps=ports.daily;'],
     ['../browser/review', 'export class BrowserReviews{confirm(id,title,details,label,choice){return Promise.resolve(ports.reviewAccepted()&&choice?.current?.()!==false);}cancel(){}cancelAll(){}}'],
     ['./workflow-filters', 'export const openWorkflowFilters=()=>{};export const workflowFilterLabel=()=>"";'],
-    ['./workflow-authoring', 'export const showAgentStatus=()=>{};'],
+    ['./workflow-authoring', 'export const showWorkflowAgentUnavailable=()=>{};'],
     ['./home-cards', 'export const homeReadIsStale=()=>false;export const presentHomeWorkflowFreshness=()=>({});'],
     ['../runtime/workflow-request-recovery', 'export const createWorkflowRequestRecovery=()=>({retire(){},open(){throw Error("Browser recovery outside installed-slot fixture");}});'],
     ['../browser/domain-recovery', 'export function openDomainRecovery(){throw Error("Browser dialog outside installed-slot fixture");}'],

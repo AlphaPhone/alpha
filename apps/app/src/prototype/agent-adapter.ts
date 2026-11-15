@@ -1491,9 +1491,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.draftRecovery=!!draft?.error&&!!this.composerDraft?.recovery();
     out.recoverDraft=()=>{const recovery=this.composerDraft?.recovery();if(!recovery)return;this.draftRecoveryAbort?.abort();const controller=this.draftRecoveryAbort=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,currentDraft:String(this.S().draft||'')})};},reset:recovery.reset},'assistant draft','Assistant draft recovery','Download the saved bytes and current text before resetting this conversation’s draft. Reset does not delete messages or send anything. Reloading discards the current unsaved text.',controller.signal,undefined,Capacitor.getPlatform()==='android'?'device':'browser');};
     const connection=connectionController.getSnapshot();
-    // Routine startup stays quiet. Recovery failures remain actionable, and an
-    // attempted send still explains why it cannot dispatch before readiness.
-    const residentPending=residentAlwaysPresent&&!connection.session&&connection.kind==='recovering'?agentPendingText(connection):'';
+    // Attempted sends explain why they cannot dispatch before readiness.
+    const residentPending=residentAlwaysPresent&&!connection.session?agentAvailabilityNotice(connection):'';
     out.draftRetry=!!draft?.error;out.draftStatus=[draft?.message,residentPending].filter(Boolean).join(' ');out.draftConflict=!!draft?.conflict;out.draftSavedText=draft?.savedText||'(Empty saved draft)';out.draftOpening=!!draft?.consuming;
     out.restoreSavedDraft=async()=>{await this.composerDraft?.restoreSaved();if(this.live&&this.firstSendReview)this.refreshDraftBinding();};out.keepCurrentDraft=()=>{this.composerDraft?.keepCurrent();if(this.firstSendReview)this.refreshDraftBinding();};out.retryDraft=()=>{this.composerDraft?.retire();this.refreshDraftBinding();};
     const onDraft=out.onDraft;
@@ -1521,8 +1520,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         void connectionController.newConversation().then(()=>{const after=connectionController.getSnapshot();if(after.error&&!after.open&&after.history?.conversationId===before)this.toast('Couldn’t start a new chat. Try again.');});
       },
       openHistory:()=>{
-        // Android lists saved chats in Settings; elsewhere the connection panel holds them.
-        if(Capacitor.isNativePlatform()&&!testMocksEnabled)this.openView('settings',{page:'agent-connection'});
+        // Android lists saved chats in Agent activity.
+        if(Capacitor.isNativePlatform()&&!testMocksEnabled)this.openView('settings',{page:'agent-activity'});
         else connectionController.open();
       },
     };
