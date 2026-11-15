@@ -52,7 +52,7 @@ export async function entitlements(overrides:Record<string,unknown>={}){
 
 
 type SignInMode='ok'|'created'|'mfa'|'hold'|'offline'|'readiness-hold'|'not-ready';
-type SignInFixtureInput={signIn?:SignInMode;tokens?:Record<string,string>;keys?:unknown[];serviceName?:string;keyLifetimeMs?:number;methods?:{email:boolean;phone:boolean;google:boolean};network?:{connected:boolean;wifiActive:boolean;internetValidated?:boolean}};
+type SignInFixtureInput={signIn?:SignInMode;tokens?:Record<string,string>;keys?:unknown[];serviceName?:string;keyLifetimeMs?:number;methods?:{email:boolean;phone:boolean;google:boolean};network?:{connected:boolean;wifiActive:boolean;internetValidated?:boolean};ownProvider?:boolean};
 async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
  page.on('pageerror',(error:Error)=>console.error('Composition page error:',error.message));
  const initialize=(initial:SignInFixtureInput)=>{
@@ -60,6 +60,13 @@ async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
   if(!sessionStorage.getItem('signin-fixture-seeded')){sessionStorage.setItem('signin-fixture-seeded','1');localStorage.setItem('alpha.startup-permissions.v1',JSON.stringify({dismissed:true,attempted:{}}));}
   const f=w.signInFixture={signIn:'ok',...initial,saved:false as boolean,credential:null as any,running:false,bound:false,calls:[] as any[],release:null as null|((error:unknown)=>void)};
   const names={AlphaConnection:['secureRead','secureWrite','secureRemove','request','cancel','openExternal'],AlphaCloudSignIn:['serviceInfo','startPhone','verifyPhone','startGoogle','startEmail','verifyEmail','verifyMfa','cancel','status','addListener','removeListener'],Agent:['start','stop','getStatus','configureCloudProvider','clearProvider','providerStatus','residentAttachment','request','addListener','requestStream','cancelStream'],DailyApps:['addListener','removeListener'],ElizaSystem:['getNetworkStatus','addListener','removeListener'],AlphaDevice:['openSettings'],AlphaNotifications:['status'],AlphaVoiceCloud:['checkPermissions'],AlphaHostedResults:['disableBackground']};
+  let providerMode:'own'|'cloud'='own';
+  const providerLeases=new Set<string>();
+  const providerStatus=()=>({
+   provider:providerMode==='own'?'cerebras':'elizacloud',mode:providerMode,configured:true,selected:true,
+   revision:providerMode,persistence:'native-secure-store',keys:{text:{configured:true},voice:{configured:true}},
+  });
+  if(initial.ownProvider)names.Agent.push('prepareProviderConfiguration','selectProvider','cancelProviderConfiguration');
   let nextListenerId=0;
   const listeners=new Map<string,{plugin:string;event:string;callback:(value:unknown)=>void}>();
   f.emit=(plugin:string,event:string,value:unknown)=>{for(const listener of listeners.values())if(listener.plugin===plugin&&listener.event===event)listener.callback(value);};
@@ -96,7 +103,14 @@ async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
     if(method==='stop'){f.running=false;return {};}
     if(method==='configureCloudProvider'){f.running=false;f.bound=true;return {configured:true};}
     if(method==='clearProvider'){if(f.bound)f.running=false;f.bound=false;return {configured:false};}
-    if(method==='providerStatus')return {provider:'elizacloud',configured:f.bound,...(f.bound?{model:'cerebras/qwen-3.8-27b'}:{})};
+    if(method==='providerStatus')return initial.ownProvider?providerStatus():{provider:'elizacloud',configured:f.bound,...(f.bound?{model:'cerebras/qwen-3.8-27b'}:{})};
+    if(method==='prepareProviderConfiguration'){const requestId=crypto.randomUUID();providerLeases.add(requestId);return {requestId};}
+    if(method==='cancelProviderConfiguration'){providerLeases.delete(input.requestId);return {};}
+    if(method==='selectProvider'){
+     if(!providerLeases.delete(input.requestId)||input.expectedRevision!==providerMode||input.mode!=='cloud')throw Error('Unexpected provider selection');
+     providerMode='cloud';
+     return providerStatus();
+    }
     if(method==='residentAttachment')return {attachable:false,reason:'not-enrolled'};
     if(method==='addListener')return {remove:async()=>{}};
     if(method==='requestStream')throw Error('Native stream unavailable');

@@ -2930,9 +2930,13 @@ export const connectionController = {
   async residentCloudLogin() { await connectionController.beginSignIn(residentEnvironment()); },
   /** Opens Alpha's own sign-in screen when ready. Nothing is sent until the owner chooses Google or
    * enters an email; no Eliza Cloud web page is opened. */
-  async beginSignIn(environment: CloudEnvironment = residentCloudFlow() ? residentEnvironment() : cloud.environment, refreshNegative = true, automatic = false, selectCloudAfterSignIn = false) {
+  async beginSignIn(environment: CloudEnvironment = residentCloudFlow() ? residentEnvironment() : cloud.environment, refreshNegative = true, automatic = false, selectCloudAfterSignIn: boolean | ConnectionSnapshot['providerSignInSelection'] = false) {
     if (operation || !cloudEnvironmentAllowed(environment)) return;
-    update({providerSignInSelection:selectCloudAfterSignIn?{id:crypto.randomUUID(),environment}:undefined});
+    // An options retry may retain the exact selection owned by the current chooser.
+    const selection = state.providerSignInSelection;
+    const retrySelection = selectCloudAfterSignIn === selection && selection?.environment === environment &&
+      state.signIn?.step === 'choose' && state.signIn.environment === environment ? selection : undefined;
+    update({providerSignInSelection:selectCloudAfterSignIn===true?{id:crypto.randomUUID(),environment}:retrySelection});
     googleSignInGeneration++;providerStatusGeneration++;
     // An automatic readiness probe must not erase why the saved sign-in was refused.
     // A new attempt explicitly started by the owner still clears the earlier error.
@@ -3999,7 +4003,7 @@ export function ConnectionChooser() {
       probing={probing} unavailable={!snapshot.signIn&&!snapshot.busy&&(!!signInError||automaticSignInProbe.current)}
       offline={cloudSignInNetwork.offline} networkNotice={cloudSignInNetwork.notice}
       ownKeys={offerOwnKeys?()=>{connectionController.dismissError();setOwnKeyAttempted(false);setOwnKeyEntry(true);}:undefined} alternate={ownKeyForm}
-      actions={{phone:number=>void connectionController.signInPhone(number),google:()=>void connectionController.signInGoogle(),email:address=>void connectionController.signInEmail(address),verify:code=>void connectionController.verifySignInCode(code),resend:()=>void connectionController.resendSignInCode(),cancel:()=>connectionController.cancelSignIn(),reopenGoogle:()=>void connectionController.reopenGoogle(),retry:()=>void connectionController.beginSignIn(requiredSignInView.environment,true),clearError:()=>connectionController.dismissError()}}
+      actions={{phone:number=>void connectionController.signInPhone(number),google:()=>void connectionController.signInGoogle(),email:address=>void connectionController.signInEmail(address),verify:code=>void connectionController.verifySignInCode(code),resend:()=>void connectionController.resendSignInCode(),cancel:()=>connectionController.cancelSignIn(),reopenGoogle:()=>void connectionController.reopenGoogle(),retry:()=>void connectionController.beginSignIn(requiredSignInView.environment,true,false,snapshot.providerSignInSelection),clearError:()=>connectionController.dismissError()}}
       extra={signInExtra}/>
     {snapshot.signOutNotice && snapshot.signOutNotice!==snapshot.message && <p role="status">{snapshot.signOutNotice}</p>}
     {productionSignInRequired && <ResidentRecoveryPanel snapshot={snapshot}/>}
