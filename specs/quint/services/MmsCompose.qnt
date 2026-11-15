@@ -13,7 +13,7 @@ module MmsCompose {
     // The native call in flight and the answer native has resolved but the renderer has not received.
     call: int, callLifecycle: int, callDraft: int, reply: str,
     journal: int -> str, dispatches: int -> int,
-    shown: str, shownFrom: str, shownLifecycle: int, sendAccess: bool, edits: int, retainedShown: str, retainedFrom: str
+    shown: str, shownFrom: str, shownLifecycle: int, sendAccess: bool, journalReadable: bool, edits: int, retainedShown: str, retainedFrom: str
   }
   var s: State
   pure val IDS = Set(1, 2, 3)
@@ -23,20 +23,30 @@ module MmsCompose {
     picking: false, chooser: false, chooserLifecycle: 0, chooserDraft: 0, pictures: 0,
     operationId: 0, minted: 0, lastSent: 0, draftReady: false, started: false, sendWasCurrent: true, call: 0, callLifecycle: 0, callDraft: 0, reply: "none",
     journal: IDS.mapBy(_ => "none"), dispatches: IDS.mapBy(_ => 0),
-    shown: "none", shownFrom: "none", shownLifecycle: 0, sendAccess: true, edits: 0, retainedShown: "none", retainedFrom: "none"
+    shown: "none", shownFrom: "none", shownLifecycle: 0, sendAccess: true, journalReadable: true, edits: 0, retainedShown: "none", retainedFrom: "none"
   }
   /// Messages is in front, or hidden only behind the picture chooser it opened.
   pure def availableIn(v: State): bool = v.viewOpen and (not(v.hidden) or v.picking)
+  action journalReadsAvailable(available: bool): bool = s' = { ...s, journalReadable: available }
+  pure def readBack(v: State, id: int): State =
+    if (not(v.journalReadable) or v.hidden or id == 0) v
+    else {
+      val status = v.journal.get(id)
+      val accepted = id == v.operationId and not(v.busy) and status.in(Set("submitted", "sent"))
+      if (status == "none") v
+      else { ...v, shown: status, shownFrom: "read-back", shownLifecycle: v.lifecycle,
+        draftRevision: if (accepted) v.draftRevision + 1 else v.draftRevision,
+        operationId: if (accepted) 0 else v.operationId, lastSent: if (accepted) id else v.lastSent,
+        draftReady: v.draftReady and not(accepted), pictures: if (accepted) 0 else v.pictures }
+    }
   /// A retired visit loses review/send/publication authority. Its unfinished owner draft and
   /// uncertain ID remain private in memory; re-entry re-reads its journal without sending.
   def synced(target: State): State =
     if (availableIn(target) == s.active) target
     else if (availableIn(target)) {
       val id = if (s.operationId != 0) s.operationId else s.lastSent
-      val readback = id != 0 and s.journal.get(id) != "none"
-      { ...target, active: true, lifecycle: s.lifecycle + 1,
-        shown: if (readback) s.journal.get(id) else s.retainedShown,
-        shownFrom: if (readback) "read-back" else if (s.retainedShown != "none") "retained" else "none", shownLifecycle: s.lifecycle + 1 }
+      readBack({ ...target, active: true, lifecycle: s.lifecycle + 1,
+        shown: s.retainedShown, shownFrom: if (s.retainedShown != "none") "retained" else "none", shownLifecycle: s.lifecycle + 1 }, id)
     }
     else { ...target, active: false, lifecycle: s.lifecycle + 1, draftRevision: s.draftRevision + 1, busy: false,
       retainedShown: s.shown, retainedFrom: s.shownFrom, shown: "none", shownFrom: "none" }
@@ -111,7 +121,7 @@ module MmsCompose {
     val current = s.active and s.callLifecycle == s.lifecycle and s.callDraft == s.draftRevision
     val closed = current and s.reply.in(CLOSED)
     val accepted = current and s.reply.in(Set("submitted", "sent"))
-    s' = { ...s, call: 0, reply: "none",
+    val delivered = { ...s, call: 0, reply: "none",
       busy: if (s.callLifecycle == s.lifecycle) false else s.busy,
       shown: if (current) s.reply else s.shown, shownFrom: if (current) "send" else s.shownFrom,
       shownLifecycle: if (current) s.lifecycle else s.shownLifecycle,
@@ -119,28 +129,28 @@ module MmsCompose {
       operationId: if (closed or accepted) 0 else s.operationId,
       lastSent: if (accepted) s.call else s.lastSent, draftReady: s.draftReady and not(accepted),
       pictures: if (accepted) 0 else s.pictures }
+    s' = if (current) readBack(delivered, delivered.operationId) else delivered
   }
-  /// The call rejects: the outcome is unknown, so the ID stays with the draft.
+  /// A rejected call re-reads the journal. Without a receipt the draft keeps the ID for retry.
   action callRejected = all {
     s.call != 0,
     val current = s.active and s.callLifecycle == s.lifecycle and s.callDraft == s.draftRevision
-    s' = { ...s, call: 0, reply: "none",
+    val rejected = { ...s, call: 0, reply: "none",
       busy: if (s.callLifecycle == s.lifecycle) false else s.busy,
       shown: if (current) "outcome-unknown" else s.shown, shownFrom: if (current) "send" else s.shownFrom,
       shownLifecycle: if (current) s.lifecycle else s.shownLifecycle }
+    s' = if (current) readBack(rejected, rejected.operationId) else rejected
   }
   /// The carrier's answer, or startup reconciliation of an interrupted dispatch.
   action journalAdvance(id: int, status: str): bool = all {
     s.journal.get(id) == "submitted", status.in(Set("sent", "failed", "unknown")),
     s' = { ...s, journal: s.journal.set(id, status) }
   }
-  /// A native MMS update re-reads the record for the ID the draft holds; it only replaces the notice.
+  /// A native read-back can retire the idle draft and its pictures after finding acceptance.
   action reconcile = all {
     s.active, not(s.hidden),
     val id = if (s.operationId != 0) s.operationId else s.lastSent
-    all { id != 0, s.journal.get(id) != "none",
-      s' = { ...s, shown: s.journal.get(id), shownFrom: "read-back", shownLifecycle: s.lifecycle }
-    }
+    all { s.journalReadable, id != 0, s.journal.get(id) != "none", s' = readBack(s, id) }
   }
   action step = {
     nondet id = IDS.oneOf()
@@ -149,7 +159,7 @@ module MmsCompose {
     nondet flag = Set(true, false).oneOf()
     any { openView, closeView, hide, show, pageHide, attach, attachAtLimit, chooserAnswers(count, flag), chooserCancelled,
       edit(flag), clearDraft, accessChanged, send, nativeDecide(flag), deliver, callRejected, journalAdvance(id, status),
-      reconcile, s' = s }
+      journalReadsAvailable(flag), reconcile, s' = s }
   }
   val ActiveMatchesAvailability = s.active == availableIn(s)
   /// A hidden page keeps its visit only behind the chooser it opened.
@@ -205,7 +215,8 @@ module MmsCompose {
     .expect(s.shown == "submitted" and s.operationId == 0 and s.lastSent == 3 and not(s.draftReady) and s.dispatches.get(3) == 1
       and s.dispatches.get(1) == 0 and s.dispatches.get(2) == 0 and s.edits == 0 and safety)
   /// After an unknown outcome the same ID is sent again and native answers from its record.
-  run repeatedIdNeverDispatchesTwiceTest = init.then(openView).then(send).then(nativeDecide(true)).then(callRejected)
+  run repeatedIdNeverDispatchesTwiceTest = init.then(openView).then(send).then(nativeDecide(true))
+    .then(journalReadsAvailable(false)).then(callRejected)
     .expect(s.shown == "outcome-unknown" and s.operationId == 1 and safety)
     .then(send).then(nativeDecide(true)).expect(RepeatedIdAnsweredFromJournalWitness)
     .then(deliver).expect(s.shown == "submitted" and s.dispatches.get(1) == 1 and s.minted == 1 and safety)
@@ -228,7 +239,13 @@ module MmsCompose {
     .expect(not(s.draftReady) and s.pictures == 0 and s.operationId == 0 and s.lastSent == 1 and safety)
     .then(edit(false)).then(send).expect(s.operationId == 2 and s.dispatches.get(1) == 1 and s.dispatches.get(2) == 0 and safety)
   run retiredUncertainDraftResumesWithoutDispatchTest = init.then(openView).then(attach).then(chooserAnswers(1, true))
-    .then(send).then(nativeDecide(true)).then(callRejected).then(hide)
+    .then(send).then(nativeDecide(true)).then(journalReadsAvailable(false)).then(callRejected).then(hide)
     .expect(s.pictures == 1 and s.operationId == 1 and not(s.busy) and safety)
     .then(show).expect(s.pictures == 1 and s.operationId == 1 and s.call == 0 and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
+  run lateJournalReceiptRetiresDraftTest = init.then(openView).then(attach).then(chooserAnswers(1, true))
+    .then(send).then(nativeDecide(true)).then(journalReadsAvailable(false)).then(callRejected)
+    .expect(s.pictures == 1 and s.operationId == 1 and s.shown == "outcome-unknown")
+    .then(journalAdvance(1, "sent")).then(journalReadsAvailable(true)).then(reconcile)
+    .expect(s.pictures == 0 and s.operationId == 0 and not(s.draftReady) and s.lastSent == 1
+      and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
 }
