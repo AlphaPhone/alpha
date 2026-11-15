@@ -24,7 +24,7 @@ const sourceDir='artifacts';
 // Archives are always flag-off; build-android also strips these.
 const buildEnv=androidBuildEnv(process.env);
 const verifyEnv=androidBuildEnv(process.env);
-const updateChannel=publicUpdateChannel(androidIdentity().updateManifestUrl);
+const updateChannel=publicUpdateChannel(androidIdentity(process.cwd()).updateManifestUrl);
 assert.ok(destination && path.resolve(destination).startsWith(path.resolve('test-results')+path.sep), 'Use a new archive beneath test-results');
 assert.ok(!fs.existsSync(destination), 'Archive already exists; preserve earlier evidence');
 fs.mkdirSync(destination,{recursive:true});

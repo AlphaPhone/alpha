@@ -14,7 +14,9 @@ const write = (root, file, value) => { const target=path.join(root,file); fs.mkd
 function fixture(t, auth = original) {
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-dependency-fingerprint-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- write(root,'android/consumer-host.json',JSON.stringify({schema:1,residentHost:{},profile:{schema:1,dependencies:[],modules:[{name:'eliza-cloud-auth',source:{root:'patchedNative',path:'packages/auth/android'}}]}}));
+ fs.copyFileSync(new URL('../app.config.json',import.meta.url),path.join(root,'app.config.json'));
+ const {residentHost}=JSON.parse(fs.readFileSync(new URL('../android/consumer-host.json',import.meta.url),'utf8'));
+ write(root,'android/consumer-host.json',JSON.stringify({schema:1,residentHost,profile:{schema:1,dependencies:[],modules:[{name:'eliza-cloud-auth',source:{root:'patchedNative',path:'packages/auth/android'}}]}}));
  write(root,'vendor/eliza/packages/app/scripts/mobile/android/consumer-host/toolchain.json',JSON.stringify({androidGradlePlugin:'8.7.2',kotlin:'2.1.0',versions:{}}));
  write(root,'vendor/eliza/packages/app/scripts/mobile/android/consumer-host/app.gradle',"dependencies { implementation project(':eliza-cloud-auth') }\n");
  write(root,`vendor/eliza/${descriptor}`,auth);
