@@ -184,12 +184,13 @@ test('a new message offers matching contacts and addresses the one tapped', asyn
   await expect(page.locator('[data-alpha-messages-picks]').getByRole('button', {name: /Carmen Ruiz/})).toHaveCount(0);
 });
 
-test('Contacts searches in place, edits in the app with the version it read, and deletes after confirmation', async ({page}) => {
+test('Contacts searches from the bar, edits in the app with the version it read, and deletes after confirmation', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Contacts');
-  await expect(page.locator('[data-alpha-contacts-search]')).toBeVisible();
-  await expect(page.getByRole('heading', {name: 'Contacts'})).toHaveCount(0);
-  await page.locator('[data-alpha-contacts-search]').fill('carm');
+  // AP-16 (AC-22): the bar is the search field; the list header keeps only its title.
+  await expect(page.locator('[data-alpha-bar-field="filter"]')).toHaveAttribute('placeholder', 'Search or ask');
+  await expect(page.getByRole('heading', {name: 'Contacts'})).toBeVisible();
+  await page.locator('[data-alpha-bar-field="filter"]').fill('carm');
   await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('carm');
   await page.getByRole('button', {name: /Carmen Ruiz/}).first().click();
   await expect(page.getByText('(555) 010-0103', {exact: true})).toBeVisible();

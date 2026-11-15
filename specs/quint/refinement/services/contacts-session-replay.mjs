@@ -9,8 +9,8 @@ const MODEL = {path: 'specs/quint/services/ContactsSession.qnt', module: 'Contac
 const SCENARIOS = ['readRowsTest', 'answerAfterLeaveTest', 'supersededReadTest', 'revokedWhileOpenTest', 'editorReturnRereadsTest', 'noAccessTest'];
 const WITNESSES = ['RowsKeptWhileLoadingWitness', 'SupersededReadWitness', 'RevokedWhileOpenWitness', 'EditorOverLoadedListWitness'];
 
-const {installContactsAdapter, admitImageContacts, applyImageContacts, isMvpView, DEFERRED_MVP_VIEWS} = await sourceModule(
-  ['apps/app/src/prototype/contacts-adapter.ts', 'apps/app/src/prototype/mvp-features.ts', 'apps/app/src/runtime/image-contacts.ts'], {
+const {installContactsAdapter, admitImageContacts, applyImageContacts, isMvpView, DEFERRED_MVP_VIEWS, applyListFilter} = await sourceModule(
+  ['apps/app/src/prototype/contacts-adapter.ts', 'apps/app/src/prototype/mvp-features.ts', 'apps/app/src/runtime/image-contacts.ts', 'apps/app/src/runtime/comms-bar.ts'], {
     'platform-plugins$': 'export const registerPlugin=()=>new Proxy({},{get:(_,name)=>globalThis.__contactsPort[name]});',
     'native-adapter$': 'export const watchReturnToApp=()=>()=>{};',
     'browser/dev-profile$': 'export const browserDevProfile=false;',
@@ -31,7 +31,8 @@ function create() {
     list: async options => { assert.ok(answer, 'the list is read only after access is granted'); assert.equal(options.limit, answer.limit); return {contacts: [{id: '1', name: 'Ada'}], more: answer.more}; }};
   globalThis.document = {hidden: false, addEventListener() {}, removeEventListener() {}};
   admitImageContacts(true);
-  const views = {contacts: {render: state => ({list: state.list})}};
+  // The model's list filter handler (model.js ctFilterHandler) reduced to its view-state write.
+  const views = {contacts: {render: state => ({list: state.list, filter: {apply: () => true, clear() {}, current: () => null}})}};
   // The shell reports a deferred view as no view, and returns Home through the view's update path.
   class Shell {
     view = 'home';
@@ -50,7 +51,8 @@ function create() {
     async admission(admitted) { applyImageContacts(admitted, order, shell, admitImageContacts); await settle(); },
     async refresh() { page().nativeRefresh(); await settle(); },
     async loadMore() { page().nativeLoadMore(); await settle(); },
-    async search() { page().onQ({target: {value: 'a'}}); await settle(); },
+    // AC-22: the bar's typed query reaches the provider through the registered list filter.
+    async search() { page(); applyListFilter('contacts', {query: 'a', label: 'a', by: 'owner'}); await settle(); },
     async readCompletes(token, outcome, more, {before}) {
       const [read] = reads.splice(before.reads.indexOf(token), 1);
       answer = outcome === 'rows' && token === before.epoch ? {more, limit: 50 * before.limit} : null;
