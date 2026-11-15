@@ -21,6 +21,7 @@ async function responseDrained(res: ServerResponse,signal: AbortSignal): Promise
 export const LOCAL_AGENT_BRIDGE_PATH='/__alpha-local-agent';
 export const LOCAL_RENDERER_WS_PATH='/__alpha-local-renderer/ws';
 export const LOCAL_VOICE_WS_PATH='/__alpha-local-voice/ws';
+class LocalOwnerUnconfirmed extends Error {}
 const LIMIT=2*1024*1024;
 const AUDIO_ENVELOPE_LIMIT=3*1024*1024;
 const ASR_PATH='/api/asr/libelizainference';
@@ -89,28 +90,43 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
   const request=options.request||fetch;
   const tickets=new Map<string,{root:string;ownerId:string;expiresAt:number;claimed:boolean;clientId?:string;close?:()=>void}>();
   let pairing:Promise<{root:string;token:string;ownerId:string;expiresAt:number}>|undefined;
+  let unconfirmedOwnerInstance:string|undefined;
   async function session(root:string) {
-    if(pairing){const saved=await pairing;if(saved.root===root&&saved.expiresAt>Date.now()+30000)return saved;pairing=undefined;}
-    pairing=(async()=>{
+    while(pairing){
+      const previous=pairing,saved=await previous;
+      if(saved.root===root&&saved.expiresAt>Date.now()+30000)return saved;
+      if(pairing===previous)pairing=undefined;
+    }
+    const current=(async()=>{
       const headers={Authorization:`Bearer ${root}`,'Content-Type':'application/json'};
       const json=async(path:string,body?:unknown)=>{
         const result=await request(origin.origin+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});
         if(!result.ok)throw Error('Local owner enrollment failed');return result.json();
       };
       const status=await json('/api/auth/status');
+      const instanceId=status.instanceId;
+      if(typeof instanceId!=='string'||!instanceId)throw Error('Invalid local runtime instance');
+      if(unconfirmedOwnerInstance===instanceId)throw new LocalOwnerUnconfirmed();
       const code=await json('/api/auth/pair-code');
-      const paired=await json('/api/auth/pair',{code:code.code,instanceId:status.instanceId});
-      if(paired.access!=='owner'||typeof paired.token!=='string'||paired.instanceId!==status.instanceId)throw Error('Invalid local owner enrollment');
-      const verified=await request(origin.origin+'/api/auth/me',{headers:{Authorization:`Bearer ${paired.token}`},redirect:'error',signal:AbortSignal.timeout(15000)});
-      if(!verified.ok)throw Error('Local owner verification failed');
-      const who=await verified.json();
-      if(who.identity?.id!==paired.identityId||who.access?.role!=='OWNER'||who.session?.id!==paired.token||!Number.isFinite(who.session?.expiresAt)||who.session.expiresAt<=Date.now())throw Error('Invalid local owner identity');
-      return {root,token:paired.token,ownerId:paired.identityId,expiresAt:who.session.expiresAt};
+      // A lost pairing response can follow a committed owner session. The profile's
+      // bearer survives a restart, so only a fresh runtime instance admits a new POST.
+      unconfirmedOwnerInstance=instanceId;
+      try{
+        const paired=await json('/api/auth/pair',{code:code.code,instanceId});
+        if(paired.access!=='owner'||typeof paired.token!=='string'||paired.instanceId!==instanceId)throw Error('Invalid local owner enrollment');
+        const verified=await request(origin.origin+'/api/auth/me',{headers:{Authorization:`Bearer ${paired.token}`},redirect:'error',signal:AbortSignal.timeout(15000)});
+        if(!verified.ok)throw Error('Local owner verification failed');
+        const who=await verified.json();
+        if(who.identity?.id!==paired.identityId||who.access?.role!=='OWNER'||who.session?.id!==paired.token||!Number.isFinite(who.session?.expiresAt)||who.session.expiresAt<=Date.now())throw Error('Invalid local owner identity');
+        unconfirmedOwnerInstance=undefined;
+        return {root,token:paired.token,ownerId:paired.identityId,expiresAt:who.session.expiresAt};
+      }catch{throw new LocalOwnerUnconfirmed();}
     })();
-    try{return await pairing;}catch(error){pairing=undefined;throw error;}
+    pairing=current;
+    try{return await current;}catch(error){if(pairing===current)pairing=undefined;throw error;}
   }
   const handler=async(req:IncomingMessage,res:ServerResponse)=>{
-    const fail=(status:number,message:string)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:message}));};
+    const fail=(status:number,message:string,code?:string)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:message,...(code?{code}:{})}));};
     const host=req.headers.host;
     if(!host||!/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)||req.headers.origin!==`http://${host}`||
        req.headers['x-alpha-local-agent']!=='1'||req.method!=='POST'||req.headers['content-type']!=='application/json'){
@@ -258,7 +274,13 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       if(result.status===401)pairing=undefined; // Never replay the failed request.
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
       res.end(JSON.stringify({status:result.status,body,...(timings.length?{timings}:{})}));
-    }catch{if(!abort.signal.aborted){if(!res.headersSent)fail(503,'Local runtime unavailable. Check the private host log.');else res.destroy();}}
+    }catch(error){
+      if(!abort.signal.aborted){
+        if(res.headersSent)res.destroy();
+        else if(error instanceof LocalOwnerUnconfirmed)fail(409,'Local owner enrollment could not be confirmed.','local-owner-unconfirmed');
+        else fail(503,'Local runtime unavailable. Check the private host log.');
+      }
+    }
     finally{res.off('close',onClose);}
   };
   const upgrade=async(req:IncomingMessage,socket:Duplex,head:Buffer)=>{
