@@ -103,15 +103,11 @@ test('APK path: a verified email code goes straight to the seven access steps wh
   for (const text of STARTING_SLOP) expect(await setup.innerText()).not.toContain(text);
   await setup.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(setup).toHaveCount(0);
-  // Settings › Agent connection while it starts: Starting…, never "Not available".
   const settings = await openYourAgent(page);
-  await expect(settings.getByText('Starting', { exact: true })).toHaveCount(2);
-  await expect(settings.getByText('Not available', { exact: true })).toHaveCount(0);
-  await shot(page, info, '05-agent-connection-while-starting');
+  await expect(settings.getByRole('button', { name: 'Load conversations', exact: true })).toHaveCount(0);
+  await expect(settings.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
   await page.evaluate(() => (window as any).postSignIn.release());
-  await expect(settings.getByText('Running', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(settings.getByText('Eliza Cloud', { exact: true })).toBeVisible();
-  await shot(page, info, '06-agent-connection-running');
+  await expect(settings.getByRole('button', { name: 'Load conversations', exact: true })).toBeVisible({ timeout: 30_000 });
   expect(await starts(page)).toBe(2);
   expect(foreign).toEqual([]);
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));

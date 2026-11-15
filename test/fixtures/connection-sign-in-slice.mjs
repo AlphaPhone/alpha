@@ -19,7 +19,7 @@ const code = stripTypeScriptTypes([
   between('function signInFailed(environment', '/** A verified interactive sign-in finishes'),
   between('class CodeExpiredError', '\n'),
   between('function ownProviderSelected(', 'function residentEnvironment()'),
-  between('async function work(message: string', '/** Only an explicitly failed native start'),
+  between('async function work(message: string', 'const RESIDENT_AUTO_RETRY_MS'),
   between('async function ensureResident() {', '/** Retires the running agent and restarts'),
   plain(between('export function productionCloudSignInRequired(', '/** Explicit account/plan')),
   plain(between('export function explicitSignedOutCloudEntry(', 'export function connectionChooserVisible(')),

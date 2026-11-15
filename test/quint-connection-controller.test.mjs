@@ -34,7 +34,7 @@ const startup = /\.finally\(\(\)=>\{(update\(\{startupResolved:true,automaticRes
 assert.ok(startup, 'startup settles and then runs the sign-in queue');
 const code = stripTypeScriptTypes([
   between('let residentRebindQueue: ResidentRebindQueue | null = null;', '/**'),
-  between('async function work(message: string', '/** Only an explicitly failed native start'),
+  between('async function work(message: string', 'const RESIDENT_AUTO_RETRY_MS'),
   between("async function manageProviderKey(action:'reveal'", '/** P-43: a startup path'),
   between('function queueResidentRebind(', '/** A native sign-in return that arrived while'),
   between('/** A native sign-in return that arrived while', 'async function remoteIdentity('),

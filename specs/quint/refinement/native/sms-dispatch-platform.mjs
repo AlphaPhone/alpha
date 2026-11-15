@@ -34,6 +34,7 @@ public abstract class TelephonyPlugin extends Plugin {
  protected final void fencedRead(PluginCall call,String alias,String name,ReadTask work){throw new AssertionError("Unrelated Contacts read");}
 }`,
     'ai/eliza/plugins/messages/MmsStore.java': `package ai.eliza.plugins.messages;
+import android.app.role.RoleManager;
 import android.content.*;
 import android.net.Uri;
 import android.provider.Telephony;
@@ -47,6 +48,7 @@ public final class MmsStore {
  static Uri fileUri(String authority,String name){throw new AssertionError("MMS outside SMS fixture");}
  static void delete(Context c,String name){throw new AssertionError("MMS outside SMS fixture");}
  static long persistOutgoingMms(Context c,String[] to,List<MmsPdu.Part> parts,String txn,int sim,long at){throw new AssertionError("MMS outside SMS fixture");}
+ static void discardOutgoingMms(Context c,long row,String txn){throw new AssertionError("MMS outside SMS fixture");}
  static void settleOutgoingMms(Context c,long row,boolean success){throw new AssertionError("MMS outside SMS fixture");}
 }`,
     'ai/eliza/plugins/messages/SmsProviderReader.java': `package ai.eliza.plugins.messages;
@@ -64,6 +66,15 @@ public final class Manifest {public static final class permission {
 }}`,
   'android/os/Build.java': `package android.os;
 public final class Build {public static final class VERSION {public static final int SDK_INT=35;}}`,
+  'android/app/role/RoleManager.java': `package android.app.role;
+import java.util.function.BooleanSupplier;
+public final class RoleManager {
+ public static final String ROLE_SMS="android.app.role.SMS";
+ private final BooleanSupplier held;
+ public RoleManager(BooleanSupplier held){this.held=held;}
+ public boolean isRoleAvailable(String role){return ROLE_SMS.equals(role);}
+ public boolean isRoleHeld(String role){return isRoleAvailable(role)&&held.getAsBoolean();}
+}`,
   'android/os/Looper.java': `package android.os;
 public final class Looper {
  private static final Looper main=new Looper();private static final ThreadLocal<Looper> active=new ThreadLocal<>();
@@ -289,6 +300,15 @@ public final class ContentResolver {
   if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[0])||!Objects.equals(row.get(Sms.CREATOR),args[1]))return 0;
   row.putAll(value);return 1;
  }
+ public int delete(Uri uri,String where,String[] args){
+  if(!uri.equals(Sms.CONTENT_URI)||!context.role||
+   !(Sms._ID+" = ? AND "+Sms.TYPE+" = ? AND "+Sms.CREATOR+" = ?").equals(where)||
+   args.length!=3||!args[1].equals("4")||!args[2].equals(context.getPackageName()))
+   throw new AssertionError("Only exact app-owned outbox row may be discarded");
+  long id=Long.parseLong(args[0]);ContentValues row=rows.get(id);
+  if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[1])||!Objects.equals(row.get(Sms.CREATOR),args[2]))return 0;
+  rows.remove(id);return 1;
+ }
  public Cursor query(Uri uri,String[] fields,String where,String[] args,String order){
   List<ContentValues> result=new ArrayList<>();
   if(uri.equals(Sms.CONTENT_URI)){
@@ -322,6 +342,7 @@ public final class ContentResolver {
 }`,
   'android/content/Context.java': `package android.content;
 import android.app.KeyguardManager;
+import android.app.role.RoleManager;
 import android.os.UserManager;
 import android.telephony.*;
 import java.io.File;
@@ -331,6 +352,7 @@ public final class Context {
  public int boot=1;
  public final Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
  public final KeyguardManager lock=new KeyguardManager();
+ public final RoleManager roles=new RoleManager(()->role);
  public final UserManager users=new UserManager();
  public final SubscriptionManager subscriptions=new SubscriptionManager();
  public final TelephonyManager telephony=new TelephonyManager();
@@ -350,7 +372,7 @@ public final class Context {
  }
  public <T>T getSystemService(Class<T> type){
   Object value=type==KeyguardManager.class?lock:type==UserManager.class?users:type==SubscriptionManager.class?subscriptions:
-   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:null;
+   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:type==RoleManager.class?roles:null;
   return type.cast(value);
  }
  public void unregisterReceiver(BroadcastReceiver receiver){dynamicReceivers.remove(receiver);}

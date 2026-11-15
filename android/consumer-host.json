@@ -122,7 +122,7 @@
     ],
     "notification": {
       "smallIcon": "notification_icon",
-      "primaryAction": "stop",
+      "primaryAction": "none",
       "color": "0xff0000ff",
       "channelLabel": "Alpha",
       "strings": {
@@ -139,7 +139,6 @@
         "runningDetail": "alpha_runtime_running_detail",
         "startingDetail": "alpha_runtime_starting_detail",
         "bootstrapDetail": "alpha_runtime_bootstrap_detail",
-        "crashedDetail": "alpha_runtime_crashed_detail",
         "extractFailedDetail": "alpha_runtime_extract_failed_detail",
         "spawnFailedDetail": "alpha_runtime_spawn_failed_detail",
         "stopFailedDetail": "alpha_runtime_stop_failed_detail",

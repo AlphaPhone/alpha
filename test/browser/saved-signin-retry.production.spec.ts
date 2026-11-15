@@ -82,20 +82,20 @@ const cloudRequests = async (page: Page) => (await calls(page)).filter(call => c
 const agentCalls = async (page: Page) => (await calls(page)).filter(call => call.plugin === 'Agent').map(call => call.method);
 const selection = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('alpha.connection.selection.v1') || 'null'));
 
-test('an unreachable saved sign-in stays available in agent settings and can be retried without replacing its key',async({page})=>{
+test('an unreachable saved sign-in survives a new resident connection without replacing its key',async({page})=>{
   await boot(page,'offline');
   await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
   const gate=await openYourAgent(page);
-  await expect(gate.getByRole('button',{name:'Reconnect agent',exact:true})).toBeEnabled();
+  await expect(gate.getByRole('button',{name:'Load conversations',exact:true})).toBeEnabled();
   await expect(gate).not.toContainText(/Signed in|Credits available/);
   // Cloud being unreachable shows no banner or status text, and no sign-in is asked for (owner, 2026-11-03).
   await expect(page.getByRole('region',{name:'Eliza Cloud plan notice',exact:true})).toHaveCount(0);
   await expect(page.getByText(/Cloud cannot be reached/)).toHaveCount(0);
   await expect(gate).not.toContainText('Sign in required');
-  const starts=(await agentCalls(page)).filter(call=>call==='start').length;
-  await gate.getByRole('button',{name:'Reconnect agent',exact:true}).click();
-  await expect.poll(async()=>(await agentCalls(page)).filter(call=>call==='start').length).toBeGreaterThan(starts);
-  await expect(gate).toBeVisible();expect(await agentCalls(page)).not.toContain('configureCloudProvider');
+  await page.reload();
+  await expect.poll(() => agentCalls(page)).toContain('start');
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
+  expect(await agentCalls(page)).not.toContain('configureCloudProvider');
   expect((await calls(page)).filter(call=>call.plugin==='AlphaConnection'&&call.method==='secureWrite'&&call.slot==='cloud:production')).toEqual([]);
   expect(await selection(page)).toEqual({kind:'resident'});
 });
@@ -122,8 +122,7 @@ test('a kept sign-in Cloud admits binds inference at start and runs the on-devic
   expect(paths).toEqual(expect.arrayContaining(['/api/v1/user', '/api/v1/billing/limits']));
   expect(paths.filter(path => !['/api/v1/user', '/api/v1/subscription/entitlement', '/api/v1/billing/limits', '/api/v1/eliza/google/accounts', '/api/v1/maps/capabilities'].includes(path))).toEqual([]);
   const dialog = await openYourAgent(page);
-  await expect(dialog.getByText('Running', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Eliza Cloud',{exact:true}).filter({visible:true})).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
   expect((await selection(page))?.kind).toBe('resident');
 });
 

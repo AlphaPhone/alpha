@@ -349,9 +349,8 @@ private static final class ResidentAttachDiagnostic {
   boolean locked=keyguard==null||keyguard.isKeyguardLocked();
   call.resolve(new JSObject().put("assistant",invocation!=null).put("invocation",invocation).put("locked",locked));
  }
- /** Read-only: may this surface attach to the admitted running resident under the stored provider
-  * admission? Never starts, stops, pairs or rebinds. With credentialId, the stored admission must
-  * be that Cloud credential on the pinned model. Reasons are non-sensitive diagnostics. */
+ /** Read-only: checks the stored Cloud admission and the current runtime independently. A matching
+  * admission stays valid while the watchdog starts the process and owner enrollment is renewed. */
  @PluginMethod public void residentAttachment(PluginCall call) {
   final String credentialId=call.getString("credentialId");
   PluginWorkers.submit(workers,()->{try{
@@ -365,9 +364,21 @@ private static final class ResidentAttachDiagnostic {
       if(!"elizacloud".equals(provider.optString("provider"))||!credentialId.equals(provider.optString("credentialId"))||!CLOUD_PROVIDER_MODEL.equals(provider.optString("model")))refusal="provider-changed";
      }catch(Exception unreadable){refusal="provider-unadmitted";}
     }
-    if(refusal==null)refusal=attachRefusalLocked(bootState,ElizaAgentService.localAgentToken(),storedProviderGeneration(store));
+    boolean bindingRetained=false;
+    if(refusal==null){
+     String generation=storedProviderGeneration(store);
+     refusal=attachRefusalLocked(bootState,ElizaAgentService.localAgentToken(),generation);
+     if(credentialId!=null&&generation!=null){
+      String phase=bootState.optString("state");
+      boolean booting="runtime-not-running".equals(refusal)&&("restarting".equals(phase)||"booting".equals(phase));
+      boolean enrolling="not-enrolled".equals(refusal)||"runtime-changed".equals(refusal)||"enrollment-expiring".equals(refusal);
+      bindingRetained=(booting&&(launchedGeneration==null||generation.equals(launchedGeneration)))||
+        (enrolling&&generation.equals(launchedGeneration));
+     }
+    }
     JSObject result=new JSObject(ResidentAttachment.describe(refusal).toString());
-    if(refusal==null&&credentialId!=null)result.put("bindingGuard",store.providerBindingGuard(saved));
+    if(credentialId!=null&&(refusal==null||bindingRetained))result.put("bindingGuard",store.providerBindingGuard(saved));
+    if(bindingRetained)result.put("bindingRetained",true);
     call.resolve(result);
    }}
   }catch(Exception unavailable){call.resolve(new JSObject().put("attachable",false).put("reason","unavailable"));}},()->{call.reject("Local agent bridge is closed.");});
@@ -805,6 +816,11 @@ private static final class ResidentAttachDiagnostic {
      // An admitted running resident is attached to, never restarted: another surface's work,
      // the runtime epoch, the owner enrollment and the launch owner all stay as they are.
      if(attachLocked(nativeState,currentRoot,currentGeneration)==null){admitted=lifecycleEpoch;attached=true;attachedStarts.add(requestId);pending.add(call);break;}
+     // An admitted supervisor already owns this launch. A new renderer epoch here would
+     // also invalidate the provider environment that the service is preparing.
+     if(accepting&&credentialShutdownRequest==-1&&supervisedStartupPending(nativeState)){
+      call.reject("Alpha is getting ready.","start-failed");return;
+     }
      attachUnverified=false;
      invalidateCalls();admitted=++lifecycleEpoch;credentialShutdownRequest=-1;accepting=true;clearEnrollment();pending.add(call);
      startRequestId=requestId;startRequestEpoch=admitted;startOwnsLaunch=shutdownConfirmed(nativeState);
@@ -841,12 +857,16 @@ private static final class ResidentAttachDiagnostic {
       // A launch the service already reports as ended fails now, not at the deadline. The first
       // seconds may still show the previous process's state.
       if(android.os.SystemClock.elapsedRealtime()-launched>=3000&&startFailed(boot)){android.util.Log.w("AlphaLocalAgent","start-failed "+boot.optString("reason"));rejectStartFailed(call,epoch);return;}
-      // Once the request socket listens, readiness is close: poll it closely.
-      if(boot.optBoolean("socketListening"))pause=200;
-      String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;
+      requireCurrent(epoch);
+      // A socket can still accept during the watchdog's replacement backoff.
+      if(!"restarting".equals(boot.optString("state"))){
+       if(boot.optBoolean("socketListening"))pause=200;
+       String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;
+      }
      }
      catch(Superseded stale){rejectSuperseded(call);return;}
-     catch(Exception unavailable){try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}}
+     catch(Exception unavailable){ /* Wait for the resident to accept requests. */ }
+     try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
     }
     if(ready){
      // Never poll enrollment: a failed response may follow a committed pairing POST.
@@ -862,6 +882,10 @@ private static final class ResidentAttachDiagnostic {
   * 120 s); the start call waits as long before it reports failure. */
  private static final long START_DEADLINE_MS=120000;
  static final String START_FAILED="Your agent couldn't start. Try again.";
+ static boolean supervisedStartupPending(JSONObject boot){
+  String state=boot.optString("state");
+  return boot.optBoolean("serviceActive")&&("booting".equals(state)||"restarting".equals(state));
+ }
  /** A terminal boot state no retry within this launch can change; watchdog restarts are "restarting". */
  static boolean startFailed(JSONObject boot){
   if(!"dead".equals(boot.optString("state")))return false;
