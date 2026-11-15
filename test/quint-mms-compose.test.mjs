@@ -13,7 +13,7 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 const MODEL = {path: 'specs/quint/services/MmsCompose.qnt', module: 'MmsCompose'};
 const SCENARIOS = ['pictureChooserKeepsVisitTest', 'hideWithoutChooserEndsVisitTest', 'retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest',
   'pickedPicturesResetIdTest', 'pageHideEndsPickTest', 'sixthPictureRefusedTest', 'carrierAnswerReadBackTest',
-  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest'];
+  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'lateJournalReceiptRetiresDraftTest'];
 const WITNESSES = ['VisitKeptBehindChooserWitness', 'PicturesAddedWhileHiddenWitness', 'RetryAfterCancelledWitness', 'RepeatedIdAnsweredFromJournalWitness',
   'LatePicturesDroppedWitness', 'PickedPicturesResetIdWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
@@ -42,7 +42,7 @@ const project = s => ({busy: s.busy, pictures: s.pictures, chooser: s.chooser, o
 function create() {
   const ids = [], journal = new Map(), dispatches = new Map();
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  let sendAccess = true, call = null, mmsUpdated = () => {}, probing = null, edits = 0, input = null;
+  let sendAccess = true, journalReadable = true, call = null, mmsUpdated = () => {}, probing = null, edits = 0, input = null;
   const ordinal = id => { if (!ids.includes(id)) ids.push(id); return ids.indexOf(id) + 1; };
   const status = {permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, subscriptions: [{id: 1, slot: 0, displayName: 'SIM', carrierName: 'Carrier'}],
     defaultSmsSubscriptionId: 1, sendMode: 'direct', mmsSend: true, roles: {sms: {available: true, held: true, eligible: true}}};
@@ -60,7 +60,7 @@ function create() {
     },
     async mmsSendResult(_review, operationId) {
       if (probing) { probing.push(operationId); throw Error('no record'); }
-      if (!journal.has(operationId)) throw Error('no record');
+      if (!journalReadable || !journal.has(operationId)) throw Error('no readable record');
       return {operationId, status: journal.get(operationId)};
     },
   };
@@ -94,6 +94,7 @@ function create() {
     async edit(removePicture) { if (removePicture) page().nativeAttachments[0].remove(); else type('nativeOnBody', `hello ${++edits}`); await settled(); },
     async clearDraft() { page().nativeClear(); await settled(); },
     accessChanged() { sendAccess = !sendAccess; },
+    journalReadsAvailable(available) { journalReadable = available; },
     async send() { page().nativeSendMms(); await settled(); },
     nativeDecide(confirmed) {
       const existing = journal.get(call.operationId);
@@ -105,7 +106,7 @@ function create() {
     async deliver() { const pending = call; call = null; pending.resolve({operationId: pending.operationId, status: pending.reply}); await settled(); },
     async callRejected() { const pending = call; call = null; pending.reject(Error('The bridge closed.')); await settled(); },
     journalAdvance(id, next) { journal.set(ids[id - 1], next); },
-    async reconcile(context) { mmsUpdated(ids[context.before.operationId - 1]); await settled(); },
+    async reconcile({before}) { mmsUpdated(ids[(before.operationId || before.lastSent) - 1]); await settled(); },
     async observe() {
       // The last sent receipt can reconcile independently of the current draft's held ID.
       probing = [];
@@ -150,7 +151,7 @@ async function runMmsComposeCase2(t, {canaries=true}={}) {
     const f = create();
     try {
       await f.openView();await f.send();f.nativeDecide(true);
-      if (hidden) {await f.callRejected();await f.hide();}
+      if (hidden) {f.journalReadsAvailable(false);await f.callRejected();await f.hide();}
       else await f.deliver();
       const before = f.effects();await f.send();assert.deepEqual(f.effects(), before, 'no new native request or carrier effect');
       if (hidden) {await f.show();assert.deepEqual(f.effects(), before);assert.ok(globalThis.__smsDraftProbe().mmsOperationId);}
