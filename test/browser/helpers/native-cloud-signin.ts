@@ -52,20 +52,32 @@ export async function entitlements(overrides:Record<string,unknown>={}){
 
 
 type SignInMode='ok'|'created'|'mfa'|'hold'|'offline'|'readiness-hold'|'not-ready';
-type SignInFixtureInput={signIn?:SignInMode;tokens?:Record<string,string>;keys?:unknown[];serviceName?:string;keyLifetimeMs?:number;methods?:{email:boolean;phone:boolean;google:boolean}};
+type SignInFixtureInput={signIn?:SignInMode;tokens?:Record<string,string>;keys?:unknown[];serviceName?:string;keyLifetimeMs?:number;methods?:{email:boolean;phone:boolean;google:boolean};network?:{connected:boolean;wifiActive:boolean;internetValidated?:boolean}};
 async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
  page.on('pageerror',(error:Error)=>console.error('Composition page error:',error.message));
  const initialize=(initial:SignInFixtureInput)=>{
   const w=window as any;
   if(!sessionStorage.getItem('signin-fixture-seeded')){sessionStorage.setItem('signin-fixture-seeded','1');localStorage.setItem('alpha.startup-permissions.v1',JSON.stringify({dismissed:true,attempted:{}}));}
   const f=w.signInFixture={signIn:'ok',...initial,saved:false as boolean,credential:null as any,running:false,bound:false,calls:[] as any[],release:null as null|((error:unknown)=>void)};
-  const names={AlphaConnection:['secureRead','secureWrite','secureRemove','request','cancel','openExternal'],AlphaCloudSignIn:['serviceInfo','startPhone','verifyPhone','startGoogle','startEmail','verifyEmail','verifyMfa','cancel','status','addListener','removeListener'],Agent:['start','stop','getStatus','configureCloudProvider','clearProvider','providerStatus','residentAttachment','request','addListener','requestStream','cancelStream'],DailyApps:['addListener','removeListener'],AlphaNotifications:['status'],AlphaVoiceCloud:['checkPermissions'],AlphaHostedResults:['disableBackground']};
+  const names={AlphaConnection:['secureRead','secureWrite','secureRemove','request','cancel','openExternal'],AlphaCloudSignIn:['serviceInfo','startPhone','verifyPhone','startGoogle','startEmail','verifyEmail','verifyMfa','cancel','status','addListener','removeListener'],Agent:['start','stop','getStatus','configureCloudProvider','clearProvider','providerStatus','residentAttachment','request','addListener','requestStream','cancelStream'],DailyApps:['addListener','removeListener'],ElizaSystem:['getNetworkStatus','addListener','removeListener'],AlphaDevice:['openSettings'],AlphaNotifications:['status'],AlphaVoiceCloud:['checkPermissions'],AlphaHostedResults:['disableBackground']};
+  let nextListenerId=0;
+  const listeners=new Map<string,{plugin:string;event:string;callback:(value:unknown)=>void}>();
+  f.emit=(plugin:string,event:string,value:unknown)=>{for(const listener of listeners.values())if(listener.plugin===plugin&&listener.event===event)listener.callback(value);};
   const fail=(code:string)=>Object.assign(new Error(code),{code});
   // The native host stores the key before reporting success and returns only non-secret fields.
   const store=()=>{f.saved=true;f.credential={credentialId:crypto.randomUUID(),token:'synthetic-mobile-key',expiresAt:Date.now()+((f as any).keyLifetimeMs??30*24*3600*1000),serverCredentialId:'55555555-5555-4555-8555-555555555555'};return {status:'authenticated',environment:'production',expiresAt:f.credential.expiresAt,accountCreated:f.signIn==='created'};};
   const reply=(status:number,body:unknown)=>({status,body:JSON.stringify(body)});
-  w.Capacitor={PluginHeaders:Object.entries(names).map(([name,methods])=>({name,methods:methods.map(name=>({name,rtype:'promise'}))})),nativePromise:async(plugin:string,method:string,input:any)=>{
-   f.calls.push({plugin,method,path:input?.url?new URL(input.url).pathname:input?.path,email:input?.email,phone:input?.phone,environment:input?.environment,refreshNegative:input?.refreshNegative});
+  w.Capacitor={PluginHeaders:Object.entries(names).map(([name,methods])=>({name,methods:methods.map(name=>({name,rtype:name==='addListener'?'callback':'promise'}))})),
+   nativeCallback:async(plugin:string,method:string,input:{eventName:string},listener:(value:unknown)=>void)=>{
+    if(method!=='addListener')throw Error('Unexpected native callback');
+    const id=String(++nextListenerId);
+    listeners.set(id,{plugin,event:input.eventName,callback:listener});
+    return id;
+   },nativePromise:async(plugin:string,method:string,input:any)=>{
+   f.calls.push({plugin,method,path:input?.url?new URL(input.url).pathname:input?.path,email:input?.email,phone:input?.phone,environment:input?.environment,refreshNegative:input?.refreshNegative,page:input?.page});
+   if(method==='removeListener'){listeners.delete(input.callbackId);return {};}
+   if(plugin==='ElizaSystem'&&method==='getNetworkStatus')return f.network??{connected:true,wifiActive:true,internetValidated:true};
+   if(plugin==='AlphaDevice'&&method==='openSettings')return {status:'opened'};
    if(plugin==='AlphaCloudSignIn'){
     if(method==='addListener'||method==='removeListener')return {};
     if(method==='serviceInfo'){const doc={title:'Terms of Service',revision:'fixture-v1',sections:[{title:'Provider terms',paragraphs:['Synthetic provider document.']}]};return {success:true,version:1,service:{name:f.serviceName||'Eliza Cloud',terms:doc,privacy:{...doc,title:'Privacy Policy'}}};}
