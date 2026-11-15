@@ -13,7 +13,7 @@ function replace(source, first, replacement) {
 }
 
 export function mmsPlatform(plugin, store, provider, {historical=false}={}) {
-  const files={...smsPlatform,...smsMembers(plugin,store,provider)};
+  const files={...smsPlatform,...smsMembers(plugin,store,provider,{includeMms:true})};
   const pkg='ai/eliza/plugins/messages/';
   const product='ai/alphacompute/alphaphone/';
   function edit(path, from, to) {files[path]=replace(files[path],from,to);}
