@@ -48,6 +48,31 @@ export class BrowserFiles extends SharedFiles {
  }
  storageQuery(input:Record<string,unknown>){return this.volume.run('storageQuery',input);}
  async storageReviewedIdentities(input:{paths:string[]}){if(input.paths.every(path=>this.photoPath(path))){const rows=await this.photoRows(input.paths);return {status:'ready',reviewed:rows.map(row=>JSON.stringify([row.path,row.revision]))};}return this.volume.run('storageReviewedIdentities',input);}
+ async storageReadAttachment(input:{path:string;reviewed:string}){
+  const {path,reviewed}=input;
+  const current=async()=>{
+   const result=await this.storageReviewedIdentities({paths:[path]});
+   return result.status==='ready'&&Array.isArray(result.reviewed)&&result.reviewed[0]===reviewed;
+  };
+  const changed=()=>Error('This file changed. Select it again.');
+  if(!await current())throw changed();
+  if(this.photoPath(path)){
+   const [entry]=await this.photoRows([path]),id=this.mediaId(path);
+   if(reviewed!==JSON.stringify([path,entry.revision]))throw changed();
+   const row=await browserPhotoLibrary.read({id});
+   const match=/^data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)$/.exec(row.image);
+   if(row.id!==id||row.trashed||row.mutationRevision!==entry.revision||!match||!await current())throw changed();
+   return {name:entry.name,mimeType:match[1],dataBase64:match[2]};
+  }
+  const selected=await this.storageSelect({path});
+  if(selected.status!=='selected'||typeof selected.selectionId!=='string')throw changed();
+  try{
+   if(!await current())throw changed();
+   const value=await this.attachment({selectionId:selected.selectionId});
+   if(!await current())throw changed();
+   return value;
+  }finally{await this.forgetSelected({selectionId:selected.selectionId});}
+ }
  async storageTransfer(input:{paths:string[];dest:string;copy?:boolean;reviewed?:string[]}){
   if(!input.paths.every(path=>this.photoPath(path)))return this.volume.run('storageTransfer',input);
   if(!input.copy)throw Error('Use Add to folder to keep the original in Photos.');

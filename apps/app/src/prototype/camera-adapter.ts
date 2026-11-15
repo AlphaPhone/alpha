@@ -65,7 +65,7 @@ const nativeCamera = registerPlugin<{
 const cameraAccess = registerPlugin<{ checkPermissions(): Promise<{ camera?: string }> }>('ElizaCamera');
 export {restartAfterResume};
 type LibraryAccess = {scope:'full'|'partial'|'selected'|'denied';images:'full'|'selected'|'denied';videos:'full'|'selected'|'denied'};
-type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
+export type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
 const nativeLibrary = registerPlugin<{
   addListener(event:'libraryChanged',listener:()=>void):Promise<{remove():Promise<void>}>;
   libraryAccess():Promise<LibraryAccess>;
@@ -127,8 +127,8 @@ const browserMode=!Capacitor.isNativePlatform();
 const camera:typeof nativeCamera=browserMode?browserCamera:nativeCamera;
 // Check every implemented browser method against the native port contract.
 browserPhotoLibrary satisfies Pick<typeof nativeLibrary,Exclude<keyof typeof browserPhotoLibrary,'saveVideoCopy'|'forgetEdit'|'share'|'shareMany'>>;
-const library=browserMode?browserLibrary as unknown as typeof nativeLibrary:nativeLibrary;
-const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos');
+export const library=browserMode?browserLibrary as unknown as typeof nativeLibrary:nativeLibrary;
+export const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos');
 /** canReplace: the native edit pipeline can overwrite this original (owned, or Android allows a write request). */
 type EditPreview={sessionId:string;operationId:string;image:string;width:number;height:number;reduced:boolean;maxEdge:number;filter:string;canReplace?:boolean};
 type EditReceipt={status:string;operationId:string;id?:string;replaced?:boolean;revision?:string;message?:string};

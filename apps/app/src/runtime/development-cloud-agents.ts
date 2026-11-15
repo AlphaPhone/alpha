@@ -131,7 +131,7 @@ export class DevelopmentCloudAgentProtocol extends CloudProtocol {
   async send(agentId: string, conversationId: string, text: string,
     options: { images?:Array<{data:string;mimeType:string;name:string}>;metadata?: Record<string, unknown>; clientMessageId?: string; channelType?:ChatChannel; signal: AbortSignal },
   ): Promise<{ text: string; agentName: string; messageId?:string;userMessageId?:string;actionResults?:readonly unknown[];interrupted?: boolean; noResponseReason?: "ignored"; failureKind?: unknown; terminalFailure?: unknown }> {
-    if (!text.trim()) throw new TypeError("Message must not be empty");
+    if (!text.trim() && !((options.channelType??'DM')==='DM'&&options.images?.length)) throw new TypeError("Message must not be empty");
     const response = await this.runtimeCall(agentId,
       `/api/conversations/${encodeURIComponent(string(conversationId))}/messages`, options.signal,
       { text, images:options.images, channelType: options.channelType ?? "DM", ...(options.metadata ? { metadata: options.metadata } : {}),
