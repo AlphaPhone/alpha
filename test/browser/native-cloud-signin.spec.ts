@@ -183,19 +183,46 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await dialog.getByRole('button',{name:'Open Wi-Fi settings',exact:true}).click();
   expect((await calls(page)).filter(call=>call.method==='openSettings')).toEqual([expect.objectContaining({plugin:'AlphaDevice',page:'wifi'})]);
   expect((await calls(page)).some(call=>call.plugin==='AlphaCloudSignIn'&&call.method==='status')).toBe(false);
-  const changeNetwork=(wifiActive:boolean)=>page.evaluate(wifiActive=>{
+  const changeNetwork=(wifiActive:boolean,internetValidated=true)=>page.evaluate(({wifiActive,internetValidated})=>{
    const f=(window as any).signInFixture;
-   f.network={connected:true,wifiActive,internetValidated:true};
+   f.network={connected:true,wifiActive,internetValidated};
    f.emit('ElizaSystem','networkStatusChanged',{});
-  },wifiActive);
+  },{wifiActive,internetValidated});
   await changeNetwork(false);
   await readySignIn(page);
   expect((await calls(page)).find(call=>call.plugin==='AlphaCloudSignIn'&&call.method==='status')?.refreshNegative).toBe(true);
-  await expect(dialog.getByText(/Wi-Fi isn’t connected/)).toBeVisible();
+  await expect(dialog.getByText('Sign-in isn’t using Wi-Fi. You can use mobile data or connect to Wi-Fi.')).toBeVisible();
   await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toBeEnabled();
+  await changeNetwork(false,false);
+  await expect(dialog.getByText('Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access.')).toBeVisible();
   await changeNetwork(true);
   await expect(dialog.getByRole('button',{name:'Open Wi-Fi settings',exact:true})).toHaveCount(0);
   await expect(googleButton(page)).toBeEnabled();
+ });
+
+ test('validated Wi-Fi refreshes sign-in options after captive Wi-Fi without resetting a draft',async({page})=>{
+  await boot(page,{...await entitlements(),network:{connected:true,wifiActive:true,internetValidated:false},
+   methods:{email:true,phone:false,google:false}});
+  await readySignIn(page);
+  const dialog=signInDialog(page);
+  const phone=dialog.getByRole('button',{name:'Continue with phone number',exact:true});
+  await expect(dialog.getByText(/couldn’t verify internet access/)).toBeVisible();
+  await expect(googleButton(page)).toBeDisabled();
+  await expect(phone).toBeDisabled();
+  await entry(page).fill('draft@example.invalid');
+  await page.evaluate(()=>{
+   const f=(window as any).signInFixture;
+   f.methods={email:true,phone:true,google:true};
+   f.network.internetValidated=true;
+   f.emit('DailyApps','appResumed',{});
+  });
+  await expect(googleButton(page)).toBeEnabled();
+  await expect(phone).toBeEnabled();
+  await expect(dialog.getByRole('button',{name:'Open Wi-Fi settings',exact:true})).toHaveCount(0);
+  await expect(entry(page)).toHaveValue('draft@example.invalid');
+  const signInCalls=(await calls(page)).filter(call=>call.plugin==='AlphaCloudSignIn');
+  expect(signInCalls.filter(call=>call.method==='status').at(-1)?.refreshNegative).toBe(true);
+  expect(signInCalls.some(call=>call.method.startsWith('start'))).toBe(false);
  });
 
  test('a slow sign-in readiness check keeps the screen white until the chooser is ready',async({page})=>{

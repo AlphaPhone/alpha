@@ -720,6 +720,18 @@ async function inAppSignInMethods(environment: CloudEnvironment, signal: AbortSi
   } catch { return null; }
   finally { clearTimeout(timer); if (abort) signal.removeEventListener('abort', abort); }
 }
+/** A reconnect can recover optional methods without starting over or clearing a draft. */
+async function refreshSignInMethods(view: Extract<SignInView, {step: 'choose'}>, signal: AbortSignal) {
+  if (state.signIn !== view || operation || state.cloudAccount || cloud.environment !== view.environment) return;
+  signInReadinessOwner = signal;
+  const apply = (methods: NonNullable<ReturnType<typeof signInReadiness>>) => {
+    if (signal.aborted || signInReadinessOwner !== signal || state.signIn !== view || operation || state.cloudAccount || cloud.environment !== view.environment) return;
+    inAppGoogle = methods.google; inAppPhone = methods.phone; inAppEmail = methods.email;
+    update({});
+  };
+  const methods = await inAppSignInMethods(view.environment, signal, true, apply);
+  if (methods) apply(methods);
+}
 /** A failed or cancelled step leaves the stored sign-in and the running service as they were. */
 function signInFailed(environment: CloudEnvironment, keepStep = false, prefill: {email?: string; phone?: string} = {}) {
   if (!keepStep) update({ signIn: { step: 'choose', environment, ...(prefill.phone ? {phone: prefill.phone} : prefill.email ? {email: prefill.email} : {}) } });
@@ -3733,26 +3745,35 @@ export function ConnectionChooser() {
   const signInPageShown=!!snapshot.signIn||signInEntryRequired;
   const cloudSignInNetwork=useCloudSignInNetwork(signInPageShown);
   const automaticSignInProbe = useRef(false);
-  const signInWasOffline = useRef(false);
+  const refreshSignInOnReconnect = useRef(false);
   useEffect(() => {
-    if (!signInEntryRequired || snapshot.signIn) {
+    if (!signInPageShown) {
       automaticSignInProbe.current = false;
-      signInWasOffline.current = false;
+      refreshSignInOnReconnect.current = false;
       return;
+    }
+    if (cloudSignInNetwork.offline || cloudSignInNetwork.unvalidated) refreshSignInOnReconnect.current = true;
+    if (snapshot.signIn) {
+      automaticSignInProbe.current = false;
+      if (!refreshSignInOnReconnect.current || !cloudSignInNetwork.reachable || snapshot.busy || snapshot.cloudAccount || snapshot.signIn.step !== 'choose') return;
+      refreshSignInOnReconnect.current = false;
+      if (inAppGoogle && inAppEmail && (!cloudSignInPhone || inAppPhone)) return;
+      const refresh = new AbortController();
+      void refreshSignInMethods(snapshot.signIn, refresh.signal);
+      return () => refresh.abort();
     }
     if (cloudSignInNetwork.offline) {
       automaticSignInProbe.current = false;
-      signInWasOffline.current = true;
       return;
     }
     if (cloudSignInNetwork.checking || automaticSignInProbe.current || snapshot.busy || snapshot.startupResolved===false || snapshot.automaticRestore) return;
     automaticSignInProbe.current = true;
     // Readiness only: neither email nor Google starts until the owner chooses it.
-    // Refresh any negative result the native host cached while the phone was offline.
-    const refreshNegative = signInWasOffline.current;
-    signInWasOffline.current = false;
+    // Refresh any negative result the native host cached while internet access was unavailable.
+    const refreshNegative = refreshSignInOnReconnect.current && cloudSignInNetwork.reachable;
+    if (refreshNegative) refreshSignInOnReconnect.current = false;
     void connectionController.beginSignIn(residentEnvironment(), refreshNegative, true);
-  }, [signInEntryRequired, snapshot.busy, snapshot.signIn, snapshot.startupResolved, snapshot.automaticRestore, cloudSignInNetwork.offline, cloudSignInNetwork.checking]);
+  }, [signInPageShown, snapshot.busy, snapshot.signIn, snapshot.cloudAccount, snapshot.startupResolved, snapshot.automaticRestore, cloudSignInNetwork.offline, cloudSignInNetwork.unvalidated, cloudSignInNetwork.reachable, cloudSignInNetwork.checking]);
   useEffect(()=>{
     if(!isAndroid||!signInEntryRequired||(snapshot.signIn?.environment??residentEnvironment())!=='production'||snapshot.cloudAccount||!cloudSignIn?.savedSignInRecoveryStatus)return;
     let current=true;

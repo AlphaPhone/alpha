@@ -40,11 +40,14 @@ export function useCloudSignInNetwork(active: boolean) {
   const offline = status?.connected === false;
   const wifiMissing = status?.wifiActive === false;
   const unvalidated = status?.internetValidated === false;
+  const reachable = status?.connected === true && (!isAndroid || status.internetValidated === true);
   let message = '';
   if (offline) message = isAndroid ? 'You’re offline. Connect to Wi-Fi to sign in.' : 'You’re offline. Connect to the internet to sign in.';
-  else if (wifiMissing) message = 'Wi-Fi isn’t connected. Sign-in needs an internet connection and can use mobile data.';
+  else if (wifiMissing) message = unvalidated
+    ? 'Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access.'
+    : 'Sign-in isn’t using Wi-Fi. You can use mobile data or connect to Wi-Fi.';
   else if (unvalidated) message = 'Android couldn’t verify internet access. Sign-in needs an internet connection.';
-  return {checking: active && status === undefined, offline, notice: message && <NetworkNotice message={message} />};
+  return {checking: active && status === undefined, offline, unvalidated, reachable, notice: message && <NetworkNotice message={message} />};
 }
 
 function NetworkNotice({message}: {message: string}) {

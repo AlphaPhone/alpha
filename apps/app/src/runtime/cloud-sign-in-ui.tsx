@@ -135,7 +135,7 @@ export function CloudSignInPanel({ view, busy, google, phone, showGoogle = googl
           autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={usingPhone ? 32 : 320} required
           placeholder={usingPhone ? '+1 415 555 0100' : undefined}
           aria-describedby={usingPhone ? 'cloud-sign-in-phone-format' : undefined}
-          defaultValue={drafts.current[method] ?? choose[method]} disabled={busy || !ready} /></label>
+          defaultValue={drafts.current[method] ?? choose[method]} onChange={event => { drafts.current[method] = event.currentTarget.value; }} disabled={busy || !ready} /></label>
         {usingPhone && <p className="alpha-auth-method-note" id="cloud-sign-in-phone-format">Include your country code.</p>}
         <button className="alpha-btn alpha-btn--primary" aria-busy={(sending && pending === method) || undefined} disabled={busy || offline || !ready || !methodReady || wait > 0}>
           {sending && pending === method ? <Busy label="Sending code"/> : wait > 0 ? `Send code · ${wait}s` : 'Send code'}

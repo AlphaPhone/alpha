@@ -28,12 +28,12 @@ ${between('  close() {', '  async initialize() {')}
 ${between('  async configureLocal(apiKey:string', '  async selectCloudProvider(){')}
 ${between('  async beginSignIn(environment: CloudEnvironment', '  /**\n   * A retained native Google outcome')}};`,
   // The automatic entry: what the chooser derives on every render, then the body of its effect.
-  `const automaticSignInProbe={current:false},signInWasOffline={current:false};let signInPageLatch=false;
+  `const automaticSignInProbe={current:false},refreshSignInOnReconnect={current:false};let signInPageLatch=false;
    function renderSignInEntry(){const snapshot=state,useState=()=>[signInPageLatch,value=>{signInPageLatch=value;}];
 ${between('  const productionSignInRequired=productionCloudSignInRequired(snapshot);', '  const signInPageShown=')}
      return {productionSignInRequired,explicitSignInEntry,signInPage,signInEntryRequired};}
-   function automaticEntryEffect(){const snapshot=state,{signInEntryRequired}=renderSignInEntry();
-${between('    if (!signInEntryRequired || snapshot.signIn) {', '  }, [signInEntryRequired, snapshot.busy')}}`,
+   function automaticEntryEffect(){const snapshot=state,{signInEntryRequired}=renderSignInEntry(),signInPageShown=!!snapshot.signIn||signInEntryRequired;
+${between('    if (!signInPageShown) {', '  }, [signInPageShown, snapshot.busy')}}`,
   `Object.assign(globalThis,{work,automaticEntryEffect,renderSignInEntry,productionCloudSignInRequired,explicitSignedOutCloudEntry,signInEntryPage,
      readinessOwned:()=>!!operation&&signInReadinessOwner===operation.signal,readinessOwner:()=>signInReadinessOwner,
      offered:()=>({google:inAppGoogle,phone:inAppPhone,email:inAppEmail}),automaticLatch:()=>automaticSignInProbe.current});`,
@@ -90,7 +90,7 @@ export function signInController({platform = 'browser', commitBoundary = false} 
       return setTimeout(run, 0);
     },
     SIGN_IN_READINESS_WAIT_MS: 6000, SIGN_IN_SENDING: 'Sending code', signInReadiness: value => value,
-    cloudSignInNetwork: {offline: false, checking: false},
+    cloudSignInNetwork: {offline: false, unvalidated: false, reachable: true, checking: false},
     operation: null, sending: null, epoch: 1, active: null, planRecheck: null, providerStatusGeneration: 0, googleSignInGeneration: 0, googleSignInPrior: null,
     residentStartInBackground: false, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true,
     isAndroid: platform === 'android', browserCloudResidentEnabled: platform === 'first-run', cloudSignInPhone: null,
