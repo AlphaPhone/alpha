@@ -44,7 +44,7 @@ export function planAdmissionFixture(implementation,{credential=1,endDays=2}={})
   setTimeout:(callback,delay)=>{const id=++timerId;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id),
   PLAN_ADMISSION:'fixture-plan',cloudEnvironmentAllowed:value=>value==='production',
   localStorage:{getItem:key=>disk.get(key)??null,setItem:(key,value)=>{const record=JSON.parse(value);writes.push({record:structuredClone(record),at:now,background});disk.set(key,value);},removeItem:key=>{writes.push({record:null,at:now,background});disk.delete(key);}},
-  operation:null,entitlementRefresher:null,redeemedPlanEnd:null,membershipRead:null,appRequests:new Set(),
+  operation:null,homePresentationRevision:0,entitlementRefresher:null,redeemedPlanEnd:null,membershipRead:null,appRequests:new Set(),
   state:{session:{},cloudAccount:null,planEndsAt:null,residentPlanNotice:null,error:''},cloud:client,service:null,active:{kind:'resident'},
   CloudProtocolError,LocalCloudProviderStopUnconfirmed:class extends Error{},
   cloudCredentialStore:{read:async()=>{reads.push(['credential',saved]);return saved===null?null:{credentialId:`credential-${saved}`,credentialReference:`reference-${saved}`};}},
