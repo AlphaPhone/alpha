@@ -4,27 +4,34 @@ import {flagOffAndroid,fenceNetwork,harness,button,completeAccessSetup,openYourA
 import {residentStub} from './resident-stub';
 // Actual flag-off UI/CSS with closed native boundary fixtures. These tests do not archive real files.
 const token='d32f7f34-962b-47b7-8f0d-f2fe7f12610a';
-type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost'|'attach-pending';
+type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost'|'attach-pending'|'startup-read';
 async function boot(page:Page,mode:Mode='success',signedOut=false){
  await fenceNetwork(page);await flagOffAndroid(page);await residentStub(page,{nativeSignIn:true,emptyKeystore:signedOut,accounts:[{token:'synthetic-cloud-key',userId:'9f1dc45a-4011-4e44-947a-30d999d24fa5',email:'owner@example.invalid',balance:5}]});
  await page.addInitScript(({mode,token})=>{
   const w=window as any,c=w.Capacitor,previous=c.nativePromise;let archived=false;
   const calls=w.recoveryCalls={starts:0,reviews:0,archives:[] as unknown[]};
   const control=w.recoveryControl={pending:false,hidden:false,dead:false,release:null as null|(()=>void),initialProviderCalls:[] as string[]};
+  const startupFailure=(message:string)=>{
+    control.initialProviderCalls=w.flagOff.calls.filter((call:string)=>call==='Agent.stop'||call==='Agent.configureCloudProvider');
+    return Object.assign(Error(message),{code:'LOCAL_AGENT_ATTACH_PENDING'});
+  };
   Object.defineProperty(document,'hidden',{get:()=>control.hidden});
   c.PluginHeaders.find((p:any)=>p.name==='Agent').methods.push(...['reviewRecovery','archiveRecovery','residentAttachment'].map(name=>({name,rtype:'promise'})));
   c.nativePromise=async(p:string,m:string,input:any)=>{
    if(p==='Agent'&&m==='getStatus'&&control.dead)return {packaged:true,state:'restarting',reason:'agent exited: 137'};
-   if(p==='Agent'&&m==='residentAttachment'&&(mode==='lost'||mode==='transient'||mode==='attach-pending')&&calls.starts>0)
+   if(p==='Agent'&&m==='residentAttachment'&&(mode==='lost'||mode==='transient'||mode==='attach-pending'||mode==='startup-read')&&calls.starts>0)
      return {attachable:false,bindingRetained:true,bindingGuard:'a'.repeat(64)};
+   if(p==='Agent'&&m==='request'&&mode==='startup-read'&&calls.starts===1&&input.path==='/api/auth/me')
+     throw startupFailure('Resident restarted before the first owner read');
    if(p==='Agent'&&m==='start'){
     calls.starts++;
-    if(mode==='attach-pending'){
-      if(calls.starts===1){
-        control.initialProviderCalls=w.flagOff.calls.filter((call:string)=>call==='Agent.stop'||call==='Agent.configureCloudProvider');
-        throw Object.assign(Error('Transient native status read failure'),{code:'LOCAL_AGENT_ATTACH_PENDING'});
+    if(mode==='attach-pending'||mode==='startup-read'){
+      if(mode==='attach-pending'&&calls.starts===1)throw startupFailure('Transient native status read failure');
+      if(calls.starts===2)await new Promise<void>(resolve=>control.release=resolve);
+      if(mode==='startup-read'){
+        await previous(p,m,input);
+        return {state:'ready',attached:true};
       }
-      await new Promise<void>(resolve=>control.release=resolve);
     }else if(mode==='lost'){
       if(control.dead){control.dead=false;throw Object.assign(Error('Native restart pending'),{code:'start-failed'});}
     }else if(!archived&&(mode!=='transient'||calls.starts<=5)){
@@ -103,9 +110,12 @@ test('automatic recovery continues past the old retry limit without a Status pag
  expect(await harness(page,f=>f.streams)).toBe(0);
 });
 
-test('a transient native attach check retries without changing the saved binding',async({page})=>{
+for(const [mode,name] of [
+ ['attach-pending','a transient native attach check'],
+ ['startup-read','a native owner read interrupted by restart'],
+] as const)test(`${name} retries without changing the saved binding`,async({page})=>{
  await page.clock.install();
- const activity=await boot(page,'attach-pending');
+ const activity=await boot(page,mode);
  const load=activity.getByRole('button',{name:'Load conversations',exact:true});
  await expect(load).toHaveCount(0);
  await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();

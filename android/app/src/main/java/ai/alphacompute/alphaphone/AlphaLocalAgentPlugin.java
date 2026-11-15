@@ -1268,9 +1268,16 @@ private static final class ResidentAttachDiagnostic {
   if(remaining<RESIDENT_MINIMUM_TIMEOUT_MS)throw new RequestDeadlineExpired();
   return (int)remaining;
  }
+ /** The first renderer reads verify the owner enrolled by start. They never attempt to enroll. */
+ private String startupReadToken(long epoch,String root) throws Exception {
+  requireEnrollmentRoot(epoch,root);
+  if(!root.equals(rootToken)||ownerToken==null||expiresAt<=System.currentTimeMillis()+30000)throw new RuntimeRootChanged();
+  return ownerToken;
+ }
  @PluginMethod public void request(PluginCall call) {
   long entered=android.os.SystemClock.elapsedRealtime();
   String path=call.getString("path",""),method=call.getString("method","GET"),body=call.getString("body"),expectedOwner=call.getString("ownerId");
+  boolean startupRead=expectedOwner==null&&"GET".equals(method)&&("/api/auth/me".equals(path)||"/api/agents".equals(path));
   if(path.endsWith("/navigate")&&!PreparedViewNavigation.allowed(path,method,body)){call.reject("Unsupported navigation preparation.");return;}
   OwnerRoutes routes;
   try{routes=OwnerRoutes.shipped(getContext().getAssets()::open);}catch(IllegalStateException unavailable){logRequestFailure("other",method,0,"route-table");call.reject("Unsupported local agent request.");return;}
@@ -1294,7 +1301,15 @@ private static final class ResidentAttachDiagnostic {
    // A withdrawn or superseded call is no longer owned: it stops here, before enrollment.
    requireOwned(call,epoch);
    remainingLocalRequestTimeout(deadline);
-   String token=enroll(epoch);
+   final String token,startupRoot;
+   if(startupRead)synchronized(lifecycleLock){
+    requireOwned(call,epoch);
+    startupRoot=rootToken;
+    token=startupReadToken(epoch,startupRoot);
+   }else{
+    startupRoot=null;
+    token=enroll(epoch);
+   }
    synchronized(lifecycleLock){requireCurrent(epoch);if(expectedOwner!=null&&!expectedOwner.equals(ownerIdentity)){logRequestFailure(group==null?"other":group,method,409,"owner-mismatch");resolveCurrent(call,epoch,new JSObject().put("status",409).put("body","{\"error\":\"Local owner changed; reconnect before continuing\"}"));return;}}
    requireOwned(call,epoch);
    if("telephony".equals(group)){
@@ -1302,14 +1317,30 @@ private static final class ResidentAttachDiagnostic {
     requireProviderOwner(true);
    }
    JSONObject result=raw(path,method,body,token,headers,remainingLocalRequestTimeout(deadline));
-   if(result.getInt("status")>=400)logRequestFailure(group==null?"other":group,method,result.getInt("status"),"http");
-   requireCurrent(epoch);
-   if(result.getInt("status")==401)synchronized(lifecycleLock){requireCurrent(epoch);clearEnrollment();}
-   if(path.equals("/api/auth/me")&&result.getInt("status")==200){JSONObject who=new JSONObject(result.getString("body"));who.getJSONObject("session").put("id","native-owned-session");result.put("body",who.toString());result.remove("bodyBase64");}
+   int status=result.getInt("status");
+   if(status>=400)logRequestFailure(group==null?"other":group,method,status,"http");
+   synchronized(lifecycleLock){
+    requireCurrent(epoch);
+    if(startupRead){
+     if(!token.equals(startupReadToken(epoch,startupRoot)))throw new RuntimeRootChanged();
+     if(status>=500&&status<=599)throw new java.io.IOException();
+    }
+    if(status==401||startupRead&&status==403)clearEnrollment();
+    if(startupRead&&(status==401||status==403)){
+     if(pending.remove(call))call.reject("Alpha couldn’t verify the local agent.","runtime-identity-unavailable");
+     return;
+    }
+   }
+   if(path.equals("/api/auth/me")&&status==200){JSONObject who=new JSONObject(result.getString("body"));who.getJSONObject("session").put("id","native-owned-session");result.put("body",who.toString());result.remove("bodyBase64");}
    resolveCurrent(call,epoch,new JSObject(result.toString()));
   }catch(RequestDeadlineExpired expired){rejectPending(call,REQUEST_DEADLINE_MESSAGE);}
   catch(Superseded stale){rejectSuperseded(call);}
-  catch(Exception error){logRequestFailure(group==null?"other":group,method,0,"transport");rejectPending(call,"Local agent request failed. No automatic retry was made.");}
+  catch(Exception error){
+   logRequestFailure(group==null?"other":group,method,0,"transport");
+   if(startupRead&&(error instanceof RuntimeRootChanged||error instanceof java.io.IOException)){
+    synchronized(lifecycleLock){if(pending.remove(call))call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");}
+   }else rejectPending(call,"Local agent request failed. No automatic retry was made.");
+  }
   finally{forgetWithdrawable(cancelId,call);}},()->{forgetWithdrawable(cancelId,call);rejectPending(call,"Local agent bridge is closed.");});
  }
  private void forgetWithdrawable(String cancelId,PluginCall call){if(cancelId!=null)synchronized(lifecycleLock){withdrawable.remove(cancelId,call);}}
