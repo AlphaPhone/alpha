@@ -25,7 +25,7 @@ def mark(t,label,call,**observed):t['steps'].append({'label':label,'action':call
 class AssetsAdmitted(Exception):pass
 def admission(directory,bad=None):
  assets=directory/'assets';assets.mkdir();(assets/'bootanimation.zip').write_bytes(b'finite boot payload');(assets/'default_wallpaper.png').write_bytes(b'finite wallpaper payload')
- report={'sourceLogoSha256':module.digest((module.REPO/'apps/app/public/logo-mark.svg').read_bytes()),'width':1080,'height':2424,'accent':'#0000FF','wallpaperBackground':'#050505','bootAnimationSha256':module.digest((assets/'bootanimation.zip').read_bytes()),'wallpaperSha256':module.digest((assets/'default_wallpaper.png').read_bytes())}
+ report={'sourceLogoSha256':module.digest((module.REPO/'apps/app/public/logo-mark.svg').read_bytes()),'width':1080,'height':2424,'accent':'#0000FF','wallpaperBackground':'#000000','bootAnimationSha256':module.digest((assets/'bootanimation.zip').read_bytes()),'wallpaperSha256':module.digest((assets/'default_wallpaper.png').read_bytes())}
  path=assets/'branding-assets.json';path.write_text(json.dumps(report));pin=module.digest(path.read_bytes())
  if bad=='payload':(assets/'bootanimation.zip').write_bytes(b'drifted payload')
  if bad=='report':pin='0'*64
