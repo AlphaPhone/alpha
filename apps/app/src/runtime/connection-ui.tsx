@@ -1936,7 +1936,7 @@ async function conversationList(selected: Active, signal: AbortSignal) {
   return list.map(item => ({ id: item.id, title: typeof item.title === 'string' && item.title ? item.title : 'Conversation' }));
 }
 
-async function restoreConversationHistory(id:string,signal:AbortSignal,automatic:boolean,afterConnect=false,fallbackExpected?:ConversationChoice,canCommit?:()=>boolean) {
+async function restoreConversationHistory(id:string,signal:AbortSignal,automatic:boolean,afterConnect=false,fallbackExpected?:ConversationChoice,canCommit?:()=>boolean,around?:string) {
   const selected=active,session=state.session,generation=epoch;
   if(!selected||!session)throw noSessionError(NO_SESSION_FALLBACK);
   const account=selected.kind==='resident'&&residentCloudFlow()?service:null;
@@ -1952,7 +1952,7 @@ async function restoreConversationHistory(id:string,signal:AbortSignal,automatic
   if(automatic&&expected?.id!==id)throw Error('Saved conversation selection changed.');
   const list=await conversationList(selected,signal);await assertAccount();
   if(!list.some(item=>item.id===id))throw new ConversationMissing(list[0]?.id);
-  const result=await readConversation(selected,id,signal,assertCurrent);
+  const result=around&&selected.kind!=='cloud'?{...(await selected.remote.messagesAround(id,around,signal)),partial:true,deliveryRevisionAtStart:state.conversationDelivery?.revision||0}:await readConversation(selected,id,signal,assertCurrent);
   assertCurrent();
   const messages=restoredMessages(result.messages);
   if(selected.actions){
@@ -3412,6 +3412,14 @@ export const connectionController = {
       detachService(); const url = new URL(location.href); url.searchParams.set('mode', 'mock'); location.assign(url.href);
     });
   },
+  async searchMessages(query:string,signal:AbortSignal,offset=0) {
+    const selected=active,session=state.session,generation=epoch;
+    if(!selected||!session||selected.kind==='cloud')throw Error('Start the agent to search chats.');
+    const results=await selected.remote.searchMessages(query,signal,offset);
+    signal.throwIfAborted();
+    if(active!==selected||state.session!==session||epoch!==generation)throw Error('The conversation account changed.');
+    return results;
+  },
   async listHistory() {
     if (sending) { update({ error: 'Reply in progress' }); return; }
     await work('Loading', async signal => {
@@ -3422,10 +3430,10 @@ export const connectionController = {
       update({ conversations: list, message: list.length ? '' : 'None' });
     });
   },
-  async restoreHistory(id: string, canCommit?:()=>boolean) {
+  async restoreHistory(id: string, canCommit?:()=>boolean, around?:string) {
     if (sending) { update({ error: 'Reply in progress' }); return; }
     await work('Restoring',async signal=>{
-      try{await restoreConversationHistory(id,signal,false,false,undefined,canCommit);}
+      try{await restoreConversationHistory(id,signal,false,false,undefined,canCommit,around);}
       catch(error){if(canCommit&&!canCommit()&&error instanceof DOMException&&error.name==='AbortError')return;throw error;}
     },!!canCommit);
   },

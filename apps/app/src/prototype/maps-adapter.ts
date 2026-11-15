@@ -32,14 +32,14 @@ import { mapsConnection, onMapsConnectionChange } from '../maps/runtime';
 import { MapsScreenController, type MapsScreenView } from '../maps/screen';
 import { connectionController } from '../runtime/connection-ui';
 import { cloudServiceName } from '../runtime/cloud-protocol';
-import type { Coordinate, TravelMode } from '../maps/contracts';
+import type { TravelMode } from '../maps/contracts';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
 const VOICE_ON = 'M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11';
 const VOICE_OFF = 'M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 10l4 4M20 10l-4 4';
 const PIN = 'M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0zM15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z';
-const coordLabel = (point: Coordinate) => `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
+const locationText = (text: string) => text === 'Your location' ? 'My location' : /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text.trim()) ? 'Selected location' : text;
 const mapsConnected = () => mapsConnection().config.status === 'configured';
 
 /**
@@ -58,6 +58,10 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   let mapGeneration=0,mapFailed=false,mapObserver:MutationObserver|undefined;
   let mapCopyright='';
   let pendingHandoff: {query:string}|undefined, mapsController:MapsController|undefined;
+  let queryTimer:ReturnType<typeof setTimeout>|undefined,originTimer:ReturnType<typeof setTimeout>|undefined;
+  let queryDraft:string|undefined,originDraft:string|undefined,searchEpoch=0;
+  const cancelSearchTimers=()=>{if(queryTimer!==undefined)clearTimeout(queryTimer);if(originTimer!==undefined)clearTimeout(originTimer);queryTimer=originTimer=undefined;};
+  const retireSearch=()=>{++searchEpoch;cancelSearchTimers();queryDraft=originDraft=undefined;};
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
   const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
   const googleProviders = new Set<string>();
@@ -173,8 +177,9 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       if (returningToEvent === attempt) returningToEvent = undefined;
     }
   }
-  module.back = () => screen.back();
+  module.back = () => {retireSearch();return screen.back();};
   module.onLeave = () => {
+    retireSearch();
     retireEventReturn();
     screen.leaveView();
   };
@@ -209,6 +214,30 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     return text.length > 200 ? `${text.slice(0, 199)}…` : text;
   }
   function bind(data: Bag, view: MapsScreenView, st: Bag, currentApi: Bag) {
+    const submitQuery=()=>{
+      if(queryTimer!==undefined)clearTimeout(queryTimer);queryTimer=undefined;
+      if(!active()||!currentApi.isActive())return;
+      const text=queryDraft??screen.view().query;queryDraft=undefined;
+      screen.setQuery(text);if(text.trim())screen.submit();
+    };
+    const submitOrigin=()=>{
+      if(originTimer!==undefined)clearTimeout(originTimer);originTimer=undefined;
+      if(!active()||!currentApi.isActive())return;
+      const text=originDraft??screen.view().directions?.originText??'';originDraft=undefined;
+      if(text==='My location'||text==='Your location'){screen.locate();return;}
+      if(screen.view().directions?.originText!==text)screen.setOriginText(text);if(text.trim())screen.planOrigin();
+    };
+    const schedule=(origin:boolean,text:string)=>{
+      const token=++searchEpoch,provider=mapsConnection().provider,owner=shell;
+      cancelSearchTimers();
+      if(origin){originDraft=text;queryDraft=undefined;screen.setOriginText(text);}else{queryDraft=text;originDraft=undefined;}
+      currentApi.set({nativeMapsRevision:++renders});
+      const timer=setTimeout(()=>{
+        if(token!==searchEpoch||provider!==mapsConnection().provider||shell!==owner||!owner?.live||!active()||!currentApi.isActive())return;
+        if(origin)submitOrigin();else submitQuery();
+      },350);
+      if(origin)originTimer=timer;else queryTimer=timer;
+    };
     const status = view.status, region = regionalMap(), raster = cloudMapsBasemap();
     const coverage = cloudMapsCoverage();
     const connectedGoogle = !region && googleContent();
@@ -275,9 +304,9 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         plane?.update(view.map.selected,view.map.route,view.map.overlay);
       },
       native: true, nativeStatusVisible:status.visible, nativeStatus: statusText, nativeStatusTop: directionsOpen?232:isPlace ? 128 : view.mode==='results' ? 130 : 174,
-      nativeSavedEmpty: !view.saved.length, nativeLocationBusy: status.locationBusy, nativeLocation: () => screen.locate(),
+      nativeSavedEmpty: !view.saved.length, nativeLocationBusy: status.locationBusy, nativeLocation: () => {retireSearch();screen.locate();},
       nativeLocationState:status.location,nativeMapState:status.map,nativeMapStatus:status.mapText,
-      nativeLocationLabel:status.locationLabel,nativeLocationDenied:status.locationDenied,nativeStatusControls:status.controls,
+      nativeLocationLabel:status.locationBusy?status.locationLabel:'My location',nativeLocationDenied:status.locationDenied,nativeStatusControls:status.controls,
       nativeLocationHelp:status.locationHelp,
       nativeLocationSettings:()=>{if(!active())return;void device.openSettings({page:'privacy'}).catch(()=>{if(!disposed&&currentApi.isActive())screen.notify('Couldn’t open settings');});},
       nativeManualLocation:()=>{if(!active())return;screen.manualLocation();queueMicrotask(()=>{if(active())document.querySelector<HTMLInputElement>('input[aria-label="Search places"]')?.focus();});},
@@ -290,18 +319,18 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       },
       mode:view.mode==='navigation'?'nav':view.mode==='directions'?'dir':view.mode, isBase:view.mode==='base',isResults,isPlace,isDir:view.mode==='directions',isNav,
       showSearch:view.showSearch, showRec:!isNav||view.map.overlay.follow===false, grid: '', major: '', fwy: '', water: '', parks: '', rwy: '', routeD: '', doneD: '', hasRoute: false, pins: [], labels: [], meCss: 'display:none;',
-      q: view.query, hasQ: !!view.query, searchIcon:view.searchLead==='back'?'M15 5l-7 7 7 7':data.searchIcon, searchLabel: view.searchLead === 'back' ? 'Back' : 'Search', leadIsSearch: view.searchLead !== 'back',
-      searchLead: () => screen.searchLead(),
-      onQ: (event: Event) => screen.setQuery((event.target as HTMLInputElement).value),
-      focusQ: () => screen.focusQuery(),
-      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault(); screen.submit(); (event.target as HTMLInputElement).blur(); } },
-      clearQ: () => screen.clearQuery(),
+      q: queryDraft??view.query, hasQ: !!(queryDraft??view.query), searchIcon:view.searchLead==='back'?'M15 5l-7 7 7 7':data.searchIcon, searchLabel: view.searchLead === 'back' ? 'Back' : 'Search', leadIsSearch: view.searchLead !== 'back',
+      searchLead: () => {retireSearch();screen.searchLead();},
+      onQ: (event: Event) => schedule(false,(event.target as HTMLInputElement).value),
+      focusQ: () => {},
+      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();++searchEpoch;submitQuery();(event.target as HTMLInputElement).blur(); } },
+      clearQ: () => {retireSearch();screen.clearQuery();},
       chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => screen.chooseSaved(item.id) })),
       cats: (view.map.selected||view.map.overlay.position?data.cats:[]).map((category: Bag) => ({ ...category, go: () => screen.searchFor(category.label) })),
-      savedRows: view.saved.map(item => ({ id: 'saved:' + item.id, name: item.label, sub: coordLabel(item.coordinate), d: PIN, go: () => screen.chooseSaved(item.id) })),
-      results: results.map(row => ({ id: row.key, name: row.name, sub: row.detail, d: PIN, go: () => screen.choose(row.key) })),
-      hasResults: results.length > 0, noResults: view.noResults || view.hasResults && results.length === 0, emptyQ: view.emptyQuery,
-      recenter: () => screen.recenter(), recBottom, recCss: '',
+      savedRows: view.saved.map(item => ({ id: 'saved:' + item.id, name: locationText(item.label), sub: '', d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
+      results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {retireSearch();screen.choose(row.key);} })),
+      hasResults: queryDraft===undefined&&originDraft===undefined&&results.length > 0, noResults: queryDraft===undefined&&originDraft===undefined&&(view.noResults || view.hasResults && results.length === 0), emptyQ: view.emptyQuery,
+      recenter: () => {retireSearch();screen.recenter();}, recBottom, recCss: '',
       sheetH: sheetHeight,
       askAlpha: () => currentApi.send(view.query || 'Help me with Maps.'), noResTxt: 'Ask',
     });
@@ -310,13 +339,13 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       // Provider detail for this exact place: opening hours, phone and website when the
       // source has them. Phone is shown as text; calling stays deferred with Phone.
       data.pc = {
-        name: place.name, meta: place.meta, addr: place.address,
+        name: locationText(place.name), meta: place.meta==='Coordinates'?'Selected location':place.meta, addr: locationText(place.address),
         hasHours: !!place.hours, openTxt: 'Hours', openCss: '', hoursTxt: place.hours || '',
         hasWeb: !!place.website, web: () => screen.openWebsite(),
         canDir: place.canDirections && placeSourceVerified, min: 'Directions', saved: place.saved,
         saveLabel: place.saved ? 'Remove from saved' : 'Save', starCss: place.saved ? 'color:var(--acct)' : '', starFill: place.saved ? 'fill:currentColor' : '',
-        close: () => screen.closePlace(), save: !restrictedPlace || place.saved ? () => screen.toggleSaved() : undefined,
-        dirs: placeSourceVerified ? () => screen.openDirections() : undefined,
+        close: () => {retireSearch();screen.closePlace();}, save: !restrictedPlace || place.saved ? () => screen.toggleSaved() : undefined,
+        dirs: placeSourceVerified ? () => {retireSearch();screen.openDirections();const next=screen.view().directions;if(next&&!next.originText.trim())screen.locate();} : undefined,
         share: restrictedPlace ? undefined : () => screen.sharePlace(),
         nativeName: place.name, nativeEditing: place.editingName,
         canRename:!restrictedPlace&&(place.saved||place.meta==='Coordinates'||place.meta==='Device location'),
@@ -328,12 +357,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     const directions = view.directions;
     if (directions) {
       // Coordinates plan directly; any other text searches places and saved places.
-      data.originText=directions.originText;
-      data.onOrigin=(event:Event)=>screen.setOriginText((event.target as HTMLInputElement).value);
-      data.originKey=(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();screen.planOrigin();}};
-      data.originLocation=()=>screen.locate();
+      data.originText=originDraft??locationText(directions.originText||'Your location');
+      data.originPlaceholder='My location';
+      data.originFocus=(event:FocusEvent)=>{const input=event.target as HTMLInputElement;if(input.value==='My location')input.select();};
+      data.onOrigin=(event:Event)=>schedule(true,(event.target as HTMLInputElement).value);
+      data.originKey=(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();++searchEpoch;submitOrigin();}};
+      data.originLocation=()=>{retireSearch();screen.locate();};
       const nav = view.navigation;
-      data.dr={name:directions.name,close:()=>screen.back(),min:directions.duration,meta:directions.meta,via:directions.via,shareLabel:'Share route',shareEta:googleMaps ? undefined : () => screen.shareRoute(),
+      data.dr={name:locationText(directions.name),close:()=>{retireSearch();screen.back();},min:directions.duration,meta:directions.meta,via:directions.via,shareLabel:'Share route',shareEta:googleMaps ? undefined : () => screen.shareRoute(),
        modes:data.nativeModeMetadata.map((reference:{mode:'drive'|'walk'|'bike'|'transit';label:string;d:string})=>{const mode:TravelMode=reference.mode==='bike'?'bicycle':reference.mode;const on=!!directions.modes.find(choice=>choice.mode===mode)?.selected;return {label:reference.label,t:reference.label,d:reference.d,on,available:!!directions.modes.find(choice=>choice.mode===mode)?.available,css:on?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>screen.setMode(mode)};}),
        // The provider's ordered route choice (recommended first); choosing requests nothing.
        hasRoutes:directions.routes.length>0,
@@ -385,6 +416,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   });
   // Coverage is read once the account is bound and the resident is ready, so the agent can navigate
   // before Maps is opened. A new account gets coverage only; its routes still need a new search.
+  const stopSearchConnection=onMapsConnectionChange(()=>{retireSearch();});
   const stopCoverage=keepCloudMapsCoverage({
     enabled:()=>!regionalMapsConfigured&&!shell?.props?.assistantSurface&&!document.documentElement.classList.contains('alpha-assistant-surface'),
     ready:()=>!!connectionController.getSnapshot().session,
@@ -397,11 +429,13 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   const shareEvents=['launcher-home','alpha:device-state','alpha:dev-incoming-call'];for(const event of shareEvents)window.addEventListener(event,retireShare);
   const visibility = () => {
     if (document.hidden) {
+      retireSearch();
       retireEventReturn();
       screen.hidden();
     } else {screen.refresh();void notificationOpen.flush();}
   };
   const pagehide = () => {
+    retireSearch();
     retireEventReturn();
     screen.release();
   };
@@ -411,7 +445,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   window.addEventListener('alpha:maps-open',openNavigation);
   window.addEventListener('pagehide', pagehide);
   document.addEventListener('visibilitychange', visibility);
-  return () => { disposed = true; notificationOpen.dispose(); window.removeEventListener('launcher-home',cancelNavigationOpen); retireEventReturn(); stopCoverage(); agentNavigation.dispose(); shell=undefined; for(const event of shareEvents)window.removeEventListener(event,retireShare); screen.dispose(); window.removeEventListener('alpha:maps-open',openNavigation); window.removeEventListener('pagehide', pagehide); document.removeEventListener('visibilitychange', visibility); Object.assign(module, original); };
+  return () => { disposed = true; retireSearch(); stopSearchConnection(); notificationOpen.dispose(); window.removeEventListener('launcher-home',cancelNavigationOpen); retireEventReturn(); stopCoverage(); agentNavigation.dispose(); shell=undefined; for(const event of shareEvents)window.removeEventListener(event,retireShare); screen.dispose(); window.removeEventListener('alpha:maps-open',openNavigation); window.removeEventListener('pagehide', pagehide); document.removeEventListener('visibilitychange', visibility); Object.assign(module, original); };
 }
 
 /** Presentation only: stored messages, model context and copied source text remain unchanged.
