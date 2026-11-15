@@ -100,7 +100,7 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await expect(page.locator('[data-alpha-call-card]')).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBeNull();
     const sheet = await page.evaluate(() => getComputedStyle(document.querySelector('[data-screen]')!).getPropertyValue('--alpha-sheet-height'));
-    await proposal.getByRole('button', {name: 'Call', exact: true}).click();
+    await proposal.locator('[data-alpha-proposal-act]').click();
     await expect(page.locator('[data-alpha-call-card]')).toBeVisible();
     await expect(page.locator('[data-alpha-stage-return]')).toContainText('Messages');
     expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-screen]')!).getPropertyValue('--alpha-sheet-height'))).toBe(sheet);
@@ -118,6 +118,8 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await page.evaluate(() => { const shell = (window as any).alphaShell(); shell.mod('phone').actions.ring({args: {pid: 'maya'}}, shell.api(shell.S().view)); });
     await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
     expect(await page.evaluate(() => (window as any).alphaShell().S().chat)).toBe('sheet');
+    // The stage slides the incoming card in (AC-05); hit-test once it has landed.
+    await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.timeline instanceof DocumentTimeline && a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished.catch(() => {}))));
     for (const marker of ['[data-alpha-incoming-answer]', '[data-alpha-incoming-decline]']) expect(await hits(page, marker), `open ${marker}`).toBe(true);
     await page.evaluate(() => (window as any).alphaShell().setState({chat: 'full'}));
     for (const action of ['answer', 'decline']) await expect(page.locator(`[data-alpha-strip-action="${action}"]`)).toBeVisible();

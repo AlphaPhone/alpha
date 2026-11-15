@@ -51,7 +51,13 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
 
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
     await setupTelephony(page);
-    await page.addInitScript(() => { let first = true; (window as any).telephonyAnswers = {sendSms: () => { if (first) { first = false; throw Error('transport'); } return {status: 'submitted'}; }}; });
+    // The first send fails in transport; the retry returns a receipt bound to the reviewed text.
+    await page.addInitScript(() => { let first = true; (window as any).telephonyAnswers = {sendSms: async (input: any) => {
+      if (first) { first = false; throw Error('transport'); }
+      const {smsBindingHash} = await import('/src/runtime/aosp-telephony.ts' as string);
+      const bindingHash = await smsBindingHash({recipients: input.recipients, body: input.body, subscriptionId: input.subscriptionId});
+      return {kind: 'sms-send', operationId: input.operationId, subscriptionId: input.subscriptionId, bindingHash, status: 'submitted', parts: [{index: 0, recipientIndex: 0, partIndex: 0, sent: 'unknown', delivery: 'unknown'}], createdAt: Date.now()};
+    }}; });
     await page.reload();
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
     await page.getByRole('button', {name: /^Ada Okafor/}).click();
