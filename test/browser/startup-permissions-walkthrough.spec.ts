@@ -1,4 +1,15 @@
 import {test,expect,type Page} from '@playwright/test';
+import {preloadPageModules} from './helpers/page-modules';
+
+const connectionModule='/src/runtime/connection-ui.tsx';
+const googleModule='/src/runtime/google-connection-ui.tsx';
+async function reopenWalkthrough(page:Page){
+ await preloadPageModules(page,[connectionModule]);
+ await page.evaluate(path=>{
+  (window as any).__alphaModules[path].connectionController.close();
+  window.dispatchEvent(new Event('alpha:startup-permissions-reopen'));
+ },connectionModule);
+}
 async function open(page:Page,deny=false,theme='light'){
  await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());
  await page.addInitScript(({deny})=>{
@@ -11,7 +22,8 @@ async function open(page:Page,deny=false,theme='light'){
   Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition(_ok,fail){proof.requests.push({kind:'location'});proof.states.location='granted';persist();fail({code:2});}}});
   localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'none'}));
  },{deny});
- await page.goto('/?theme='+theme);await page.evaluate(async()=>{(await import('/src/runtime/connection-ui.tsx')).connectionController.close();window.dispatchEvent(new Event('alpha:startup-permissions-reopen'));});
+ await page.goto('/?theme='+theme);
+ await reopenWalkthrough(page);
  await expect(page.locator('dialog.alpha-startup-permissions')).toBeVisible();
 }
 for(const viewport of [{width:412,height:915,theme:'light'},{width:1280,height:800,theme:'light'},{width:842,height:390,theme:'dark'}])test(`recovered original required design/order and Ready ${viewport.width}`,async({page},info)=>{
@@ -41,7 +53,7 @@ for(const viewport of [{width:412,height:915,theme:'light'},{width:1280,height:8
  await panel.getByRole('button',{name:'Done'}).click();await expect(panel).toHaveCount(0);expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha:startup-permission-walkthrough:v1')!))).toEqual({version:1,status:'completed',step:4});await page.reload();await expect(panel).toHaveCount(0);
 });
 test('required browser denial and cold return expose Settings/check access without another prompt',async({page})=>{
- await open(page,true);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();await panel.getByRole('button',{name:'Check',exact:true}).click();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);await expect(panel.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);await page.reload();await page.evaluate(async()=>{(await import('/src/runtime/connection-ui.tsx')).connectionController.close();window.dispatchEvent(new Event('alpha:startup-permissions-reopen'));});await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
+ await open(page,true);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();await panel.getByRole('button',{name:'Check',exact:true}).click();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);await expect(panel.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);await page.reload();await reopenWalkthrough(page);await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
 });
 
 // Browser-rendered recovery with controlled permission APIs, not proof of an OS grant.
@@ -74,5 +86,10 @@ test('a pending notification prompt releases Checking at its deadline while requ
 });
 
 test('existing Google panel owns the modal and returning resumes the same required permission',async({page})=>{
- await open(page);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();await page.evaluate(async()=>(await import('/src/runtime/google-connection-ui.tsx')).googleConnectionController.open());await expect(panel).toHaveCount(0);await page.evaluate(async()=>(await import('/src/runtime/google-connection-ui.tsx')).googleConnectionController.close());await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);
+ await open(page);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();
+ await preloadPageModules(page,[googleModule]);
+ await page.evaluate(path=>(window as any).__alphaModules[path].googleConnectionController.open(),googleModule);
+ await expect(panel).toHaveCount(0);
+ await page.evaluate(path=>(window as any).__alphaModules[path].googleConnectionController.close(),googleModule);
+ await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);
 });
