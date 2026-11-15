@@ -64,44 +64,50 @@ test('a phone whose carrier has no voicemail source shows no voicemail tab', asy
   await expect(page.locator('[data-alpha-phone-tab="voicemail"]')).toHaveCount(0);
 });
 
-test('a conversation has one bottom bar: its text field with the assistant in it', async ({page}) => {
+// AP-16: the one bottom bar is the composer. In a conversation it addresses the person; on the list it filters.
+const personField = '[data-alpha-bar-field="person"]';
+const barSend = (page: Page) => page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Send', exact: true});
+test('a conversation has one bottom bar: the bar addresses the person, with no second composer, mic or send', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Messages');
-  await expect(page.locator(pill)).toBeVisible();
+  await expect(page.locator('[data-alpha-bar-field="filter"]')).toBeVisible();
+  await expect(page.locator(pill)).not.toBeVisible();
   await page.getByRole('button', {name: /^Ada Okafor/}).click();
   await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
   await expect.poll(() => inputs(page, 'markThreadRead')).toHaveLength(1);
-  await expect(page.locator(pill)).toHaveCount(0);
-  await expect(page.locator('[data-alpha-layer="composer"]')).toHaveCount(0);
-  await expect(page.locator('[data-alpha-messages-alpha]')).toBeVisible();
-  await expect(page.locator('[data-alpha-messages-composer]')).toBeInViewport({ratio: 1});
-  await expect(page.locator('[data-alpha-messages-send]')).toBeDisabled();
-  // Text typed in the field is the owner's; the assistant button takes it to Alpha instead of the contact.
-  await page.locator('[data-alpha-messages-body]').fill('tell her I am ten minutes away');
-  await page.locator('[data-alpha-messages-alpha]').click();
-  await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('');
+  await expect(page.locator('[data-alpha-composer]:visible')).toHaveCount(1);
+  await expect(page.locator(personField)).toBeVisible();
+  await expect(page.locator(personField)).toHaveAttribute('placeholder', /^Text /);
+  for (const gone of ['[data-alpha-messages-body]', '[data-alpha-messages-send]', '[data-alpha-messages-alpha]']) await expect(page.locator(gone)).toHaveCount(0);
+  await expect(page.locator('[data-alpha-messages-accessories]')).toBeInViewport({ratio: 1});
+  await expect(barSend(page)).toBeDisabled();
+  // Text typed in the bar is the owner's text to the person; nothing goes anywhere until Send.
+  await page.locator(personField).fill('tell her I am ten minutes away');
+  await expect(page.locator(personField)).toHaveValue('tell her I am ten minutes away');
   expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
-test('a draft Alpha was asked for lands in the open conversation and never replaces the owner text or sends', async ({page}) => {
+test('a draft Alpha was asked for replaces the slot, keeps one Undo, and never sends', async ({page}) => {
   await setupTelephony(page);
-  const place = (text: string, number?: string) => page.evaluate(async ([text, number]) => (await import('/src/prototype/sms-adapter.ts' as string)).placeAskedSmsDraft(text, number), [text, number] as const);
+  const sms = (call: string, ...args: unknown[]) => page.evaluate(async ([call, args]) => ((await import('/src/prototype/sms-adapter.ts' as string)) as any)[call as string](...(args as unknown[])), [call, args] as const);
   await open(page, 'Messages');
   await expect(page.locator('[data-alpha-messages-threads]')).toBeVisible();
-  expect(await place('Ten minutes away')).toBe('none-selected');
+  expect(await sms('placeAskedSmsDraft', 'Ten minutes away')).toBe('none-selected');
   await page.getByRole('button', {name: /^Ada Okafor/}).click();
   await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
-  expect(await place('Wrong person', '+15550100102'), 'a draft for another number does not land here').toBe('none-selected');
-  expect(await place('Same ten digits abroad', '+445550100101')).toBe('none-selected');
-  expect(await place('Ten minutes away', '+1 (555) 010-0101')).toBe('drafted');
-  await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('Ten minutes away');
-  await expect(page.locator('[data-alpha-messages-suggested]')).toBeVisible();
-  expect(await place('A second draft')).toBe('drafted');
-  await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('A second draft');
-  await page.locator('[data-alpha-messages-body]').fill('My own words');
-  expect(await place('Ignored')).toBe('occupied');
-  await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('My own words');
-  await expect(page.locator('[data-alpha-messages-suggested]')).toHaveCount(0);
+  expect(await sms('placeAskedSmsDraft', 'Wrong person', '+15550100102'), 'a draft for another number does not land here').toBe('none-selected');
+  expect(await sms('placeAskedSmsDraft', 'Same ten digits abroad', '+445550100101')).toBe('none-selected');
+  expect(await sms('placeAskedSmsDraft', 'Ten minutes away', '+1 (555) 010-0101')).toBe('drafted');
+  await expect(page.locator(personField)).toHaveValue('Ten minutes away');
+  expect(await sms('placeAskedSmsDraft', 'A second draft')).toBe('drafted');
+  await expect(page.locator(personField)).toHaveValue('A second draft');
+  await page.locator(personField).fill('My own words');
+  expect(await sms('placeAskedSmsDraft', 'Alpha rewrote it')).toBe('drafted');
+  await expect(page.locator(personField)).toHaveValue('Alpha rewrote it');
+  expect(await sms('readSmsDraft')).toEqual({by: 'alpha', text: 'Alpha rewrote it', canUndo: true, threadId: expect.any(String)});
+  expect(await sms('undoSmsDraft')).toBe(true);
+  await expect(page.locator(personField)).toHaveValue('My own words');
+  expect(await sms('undoSmsDraft'), 'one Undo').toBe(false);
   expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
@@ -132,13 +138,13 @@ test('the open conversation owns its send target after a new-message draft', asy
   await open(page, 'Messages');
   await page.locator('[data-alpha-messages-new]').click();
   await page.locator('[data-alpha-messages-recipients]').fill('+15550100102');
-  await page.locator('[data-alpha-messages-body]').fill('Draft for Bao');
+  await page.locator(personField).fill('Draft for Bao');
   await page.locator('[data-alpha-messages]').getByRole('button', {name: 'Back', exact: true}).click();
   await page.getByRole('button', {name: /^Ada Okafor/}).click();
   await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
-  await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('');
-  await page.locator('[data-alpha-messages-body]').fill('Draft for Ada');
-  await page.locator('[data-alpha-messages-send]').click();
+  await expect(page.locator(personField)).toHaveValue('');
+  await page.locator(personField).fill('Draft for Ada');
+  await barSend(page).click();
   await expect.poll(async () => (await inputs(page, 'sendSms')).map(input => [input.recipients, input.body])).toEqual([[['+15550100101'], 'Draft for Ada']]);
 });
 
@@ -146,8 +152,8 @@ test('one unread thread opened from Home can send only to that conversation', as
   await setupTelephony(page, {singleUnread: true});
   await page.getByRole('button', {name: 'Open Messages, 1 unread'}).click();
   await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
-  await page.locator('[data-alpha-messages-body]').fill('Draft for Ada');
-  await page.locator('[data-alpha-messages-send]').click();
+  await page.locator(personField).fill('Draft for Ada');
+  await barSend(page).click();
   await expect.poll(async () => (await inputs(page, 'sendSms')).map(input => input.recipients)).toEqual([['+15550100101']]);
 });
 
@@ -157,13 +163,13 @@ test('Messages can open a system review without SMS permissions and request each
   await expect(page.getByRole('button', {name: 'Allow SMS read access'})).toBeVisible();
   await page.locator('[data-alpha-messages-new]').click();
   await page.locator('[data-alpha-messages-recipients]').fill('+15550100102');
-  await page.locator('[data-alpha-messages-body]').fill('A draft for the messaging app');
+  await page.locator(personField).fill('A draft for the messaging app');
   await page.getByRole('button', {name: 'Review in messaging app'}).click();
   await expect.poll(() => inputs(page, 'composeSms')).toEqual([{recipients: ['+15550100102'], body: 'A draft for the messaging app'}]);
   await page.getByRole('button', {name: 'Allow SMS send access'}).click();
   await page.getByRole('button', {name: 'Allow SIM access'}).click();
   await expect.poll(() => inputs(page, 'requestAccess')).toEqual([{access: 'sendSms'}, {access: 'phoneState'}]);
-  await expect(page.locator('[data-alpha-messages-send]')).toBeEnabled();
+  await expect(barSend(page)).toBeEnabled();
 });
 
 test('a new message offers matching contacts and addresses the one tapped', async ({page}) => {

@@ -8,7 +8,7 @@ import iconCatalog from '../icon-catalog.json';
    specifier to ./fixtures.empty.js (same names, empty values). */
 import {
   IMG, PEOPLE, PN_REC, PN_VM, PN_SCRIPT, PN_SCREEN, PN_REPLIES, MSG_PHOTOS, MSG_SEED, MSG_UNREAD,
-  MSG_SMART, MSG_BOT, INBOX_ACCTS, INBOX_SEED, CAL_SEED, CAL_PREP, BR_START, BR_PAGES, BR_ME,
+  MSG_BOT, INBOX_ACCTS, INBOX_SEED, CAL_SEED, CAL_PREP, BR_START, BR_PAGES, BR_ME,
   PH_SEED, PH_DESC, PH_SHARE, MAPS_PLACES, MAPS_FAR, MAPS_MATCH, MAPS_SAVED, NOTES_SEED,
   CT_SEED, FILES_FOLDERS_EXTRA, FILES_SEED, WAL_CARDS, WAL_TRIPS,
   WAL_MERCH, WAL_PASSES, WF_SEED, ST_ACCOUNTS, ST_NETS, ST_BT, ST_PERM0, ST_MODELS, ST_LOG,
@@ -21,10 +21,12 @@ import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
+import { askedDraftPlaced, draftAdopted, draftStageFit, draftUndone, emptyDraft, typed } from "../runtime/message-draft";
 import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWeek, visibleCalendarDays } from "./calendar-days";
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
+import { applyListFilter, clearListFilter, setListFilterHandler } from "../runtime/comms-bar";
 
 
 var IC = {
@@ -486,10 +488,8 @@ registerView("phone", {
 });
 
 /* ===== module: messages ===== */
-/* Messages: SMS / RCS. Holes are {{messages.*}}. */
+/* Messages: SMS / RCS. Holes are {{messages.*}}. The one bottom bar is the composer (bar(), AP-16). */
 IC.msgUnread = IC.msgUnread || "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z";
-
-var MSG_GENERIC = [["Sounds good", "Sounds good."], ["Thanks!", "Thanks!"]];
 
 function msgPeople(api) { var c = api.get("contacts") || {}; return (c.list && c.list.length) ? c.list : api.people; }
 function msgWho(api, pid, st) {
@@ -513,15 +513,17 @@ function msgFmt(k) {
 function msgMaxK(threads) { var mx = 0; Object.keys(threads).forEach(function (p) { threads[p].forEach(function (m) { if (m.k > mx) mx = m.k; }); }); return mx; }
 function msgNowK(api, threads) { var d = api.now; return Math.max(d.getHours() * 60 + d.getMinutes(), msgMaxK(threads) + 1); }
 function msgLastIn(list) { for (var i = list.length - 1; i >= 0; i--) if (!list[i].me && list[i].text) return list[i]; return null; }
+function msgOpen(st) { return st.thread || (typeof st.compose === "string" ? st.compose : null); }
 
-function msgPush(api, pid, msgs) {
+/* `extra` joins the same write, so a sent message and its cleared draft are saved together or not at all. */
+function msgPush(api, pid, msgs, extra) {
   var st = api.get("messages"); var th = Object.assign({}, st.threads);
   if (!Array.isArray(msgs)) msgs = [msgs];
   var k0 = msgNowK(api, st.threads);
   msgs = msgs.map(function (x) { return Object.assign({ k: k0 }, x); });
   var msg = msgs[msgs.length - 1];
   th[pid] = (th[pid] || []).concat(msgs);
-  var patch = { threads: th };
+  var patch = Object.assign({ threads: th }, extra);
   var viewing = api.get("messages").thread === pid && api.S.view === "messages";
   if (!msg.me && !viewing) { var u = Object.assign({}, st.unread); u[pid] = (u[pid] || 0) + 1; patch.unread = u; }
   api.set(patch);
@@ -530,37 +532,123 @@ function msgFiles(api, ids) {
   var fl = VIEWS.files ? ((api.get("files") || {}).files || []) : [];
   return (ids || []).map(function (id) { var f = fl.filter(function (x) { return x.id === id; })[0]; return f ? { id: f.id, name: f.name, size: f.size } : null; }).filter(Boolean);
 }
-function msgSend(api, pid, text, photo, files) {
+/* The id of the last message sent, or null when there was nothing to send. */
+function msgSend(api, pid, text, photo, files, extra) {
   var out = (files || []).map(function (f) { return { me: true, file: f.name, fid: f.id, size: f.size }; });
   var names = (files || []).map(function (f) { return f.name; }).join(", ");
   if (photo != null) out.push({ me: true, photo: photo });
   else if (text && text !== names) out.push({ me: true, text: text });
-  if (!out.length) return;
+  if (!out.length) return null;
   out = out.map(function (m) { return Object.assign({ id: crypto.randomUUID() }, m); });
   var sentId = out[out.length - 1].id;
-  msgPush(api, pid, out);
+  msgPush(api, pid, out, extra);
   var stillSent = function () { return (api.get("messages").threads[pid] || []).some(function (m) { return m.id === sentId; }); };
   var st = api.get("messages");
-  var bot = MSG_BOT[pid]; if (!bot) return;
-  var n = (st.botI || {})[pid] || 0; if (n >= bot.length) return;
+  var bot = MSG_BOT[pid]; if (!bot) return sentId;
+  var n = (st.botI || {})[pid] || 0; if (n >= bot.length) return sentId;
   var bi = Object.assign({}, st.botI); bi[pid] = n + 1; api.set({ botI: bi });
   api.later(function () { if (stillSent()) api.set({ typing: pid }); }, 900);
   api.later(function () { if (!stillSent()) return; api.set({ typing: null }); msgPush(api, pid, { me: false, text: bot[n] }); }, 2600);
+  return sentId;
 }
-function msgDraftCard(api, pid) {
-  var st = api.get("messages"); var p = msgWho(api, pid, st);
-  var sm = MSG_SMART[pid] || MSG_GENERIC;
-  return { type: "draft", to: p.name, body: sm[0][1], pid: pid, act: { mod: "messages", fn: "sendDraft" } };
+/* The draft slot of each thread (runtime/message-draft.ts): one pending text with its provenance and
+   one Undo. It is never sent from here except by the owner's Send (AC-14). */
+function msgDraft(st, pid) {
+  var d = ((st || {}).drafts || {})[pid];
+  return d ? Object.assign(emptyDraft(), { draft: d.draft, text: d.text, undo: d.undo || null }) : emptyDraft();
+}
+function msgDraftsPatch(st, pid, d) {
+  var all = Object.assign({}, st.drafts);
+  if (d.draft === "none" && !d.undo) delete all[pid]; else all[pid] = { draft: d.draft, text: d.text, undo: d.undo };
+  return { drafts: all };
+}
+function msgSetDraft(api, pid, d) { api.set(msgDraftsPatch(api.get("messages"), pid, d)); }
+/* The owner's Send for a thread: its draft and any picked files, in one write with the cleared slot. */
+function msgSubmit(api, pid) {
+  var s = api.get("messages"); var fs = msgFiles(api, s.attach); var d = msgDraft(s, pid);
+  var tx = String(d.text).trim(); if (!tx && !fs.length) return null;
+  return msgSend(api, pid, tx, null, fs, Object.assign(msgDraftsPatch(s, pid, emptyDraft()), { tray: false, attach: null }));
+}
+/* Send on the draft bubble (AC-15): the same Send, then the bubble shows as sent and Alpha notes it quietly. */
+function msgBubbleSend(api, pid) {
+  var id = VIEWS.messages.submit(api, pid); if (!id) return;
+  api.set({ sentDraft: id });
+  api.later(function () { if (api.get("messages").sentDraft === id) api.set({ sentDraft: null }); }, 1200);
+  api.note("Sent to " + msgWho(api, pid).name);
 }
 function msgOpenThread(api, pid, local) {
   var st = api.get("messages"); var u = Object.assign({}, st.unread); delete u[pid];
   api.set({ thread: pid, compose: null, unread: u, tray: false, q: "", local: local !== false });
 }
+/* A draft Alpha placed is shown where it will be sent: the stage moves to that thread with the chat
+   kept open (over the list, it returns with Back), or Messages opens on it from another app. */
+function msgDrafted(api, pid, text) {
+  if (api.S.view !== "messages") return { text: text, nav: { view: "messages", patch: { thread: pid }, chat: "sheet" } };
+  var tp = msgOpen(api.get("messages"));
+  if (tp === pid) return { text: text };
+  return { text: text, then: function () { api.stage("messages", { thread: pid }, { thread: tp }); } };
+}
+/* AC-22: Alpha answers a list question by filtering the same list, with a clearable chip. */
+function msgFiltered(api, filter, text) {
+  if (api.S.view !== "messages") return { text: text, nav: { view: "messages", patch: { thread: null, compose: null, filter: filter }, chat: "sheet" } };
+  var tp = msgOpen(api.get("messages"));
+  return { text: text, then: function () { if (tp) api.stage("messages", { thread: null, compose: null }, { thread: tp }); applyListFilter("messages", filter); } };
+}
+function msgMatches(api, st, id, q) {
+  var w = msgWho(api, id, st);
+  return (w.name + " " + (w.phone || "") + " " + st.threads[id].map(function (m) { return m.text || m.file || ""; }).join(" ")).toLowerCase().indexOf(q) >= 0;
+}
+function msgWhen(k) { return k < 0 ? "yesterday" : "at " + msgFmt(k); }
+/* AC-25: facts from the threads on this phone; null when there are none. */
+function msgBriefing(st, api, tp) {
+  var threads = st.threads || {};
+  if (tp) {
+    var list = threads[tp] || [], last = list[list.length - 1]; if (!last) return null;
+    var f = msgFirst(msgWho(api, tp, st));
+    return last.me ? "You last texted " + f + " " + msgWhen(last.k) + "." : f + " texted " + msgWhen(last.k) + " and hasn't had a reply.";
+  }
+  var ids = Object.keys(threads).filter(function (id) { return threads[id].length; }); if (!ids.length) return null;
+  var un = ids.filter(function (id) { return ((st.unread || {})[id] || 0) > 0; });
+  return !un.length ? "No unread conversations." : un.length === 1 ? msgWho(api, un[0], st).name + " sent an unread text." : un.length + " conversations have unread texts.";
+}
+/* AC-01: the one bottom bar. In a thread it addresses the person; on the list it filters (AC-22). */
+function msgBar(st, api) {
+  var tp = msgOpen(st);
+  if (tp) {
+    var w = msgWho(api, tp, st), f = msgFirst(w), d = msgDraft(st, tp);
+    var waits = (d.draft === "asked" || d.draft === "owner") && !!d.text.trim();
+    return {
+      target: { kind: "thread", app: "Messages", name: w.name, first: f, initials: w.ini },
+      closed: {
+        kind: "person", placeholder: "Text " + f, value: d.text,
+        onText: function (text) { msgSetDraft(api, tp, typed(msgDraft(api.get("messages"), tp), String(text))); },
+        submit: function () { VIEWS.messages.submit(api, tp); }, canSubmit: !!d.text.trim() || (st.attach || []).length > 0,
+        maxLength: 1600, suggestion: null, acceptSuggestion: null
+      },
+      left: { icon: "avatar", label: "Back to texting " + f, initials: w.ini, run: null },
+      context: w.name + " · Messages", contextKey: "messages:thread:" + tp,
+      strip: { title: w.name, subtitle: waits ? "Messages · draft waiting" : "Messages", initials: w.ini, live: false, actions: waits ? [{ id: "send", label: "Send draft", run: function () { msgBubbleSend(api, tp); } }] : [] },
+      end: null, incoming: null, emergency: false, fit: function () { return draftStageFit(); }, briefing: msgBriefing(st, api, tp)
+    };
+  }
+  var fl = st.filter;
+  return {
+    target: { kind: "list", app: "Messages", name: null, first: null, initials: null },
+    closed: {
+      kind: "filter", placeholder: "Search or ask", value: fl && fl.by === "owner" ? fl.query : "",
+      onText: function (text) { text = String(text); api.set({ filter: text.trim() ? { query: text, label: text.trim(), by: "owner" } : null }); },
+      submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null
+    },
+    left: { icon: "search", label: "Back to search", initials: null, run: null },
+    context: "Messages", contextKey: "messages:list:",
+    strip: { title: "Messages", subtitle: "", initials: null, live: false, actions: [] },
+    end: null, incoming: null, emergency: false, fit: null, briefing: msgBriefing(st, api, null)
+  };
+}
 
 registerView("messages", {
   title: "Messages", icon: "bubble", aliases: ["texts", "sms", "text"],
-  chat: "hidden",
-  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", attach: null, tray: false, typing: null, q: "", sq: null, local: false, slide: null },
+  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, tray: false, typing: null, q: "", filter: null, sentDraft: null, local: false, slide: null },
   persist: ["threads", "unread", "extra"],
   jumps: [[null, "Messages"], ["thread", "Thread"], ["new", "New message"]],
   preset: function (sub) {
@@ -568,43 +656,51 @@ registerView("messages", {
     if (sub === "new") return { compose: true };
   },
   badge: function (st) { var u = st.unread || {}; return Object.keys(u).some(function (k) { return u[k] > 0; }); },
-  immersive: function (st) { return (st.thread || typeof st.compose === "string") ? { noPill: true } : null; },
   back: function (st, api) {
     if (st.tray) { api.set({ tray: false }); return true; }
     // Opened from this app's list: back to the list. Deep-linked (contacts, shade, chat, share): hand back to the shell's stack.
     if (st.thread || st.compose) { var u = Object.assign({}, st.unread); var tp = st.thread || st.compose; if (typeof tp === "string") delete u[tp]; api.set({ thread: null, compose: null, text: "", attach: null, q: "", unread: u }); return !!st.local; }
-    if (st.sq != null) { api.set({ sq: null }); return true; }
+    if (st.filter) { api.set({ filter: null }); return true; }
     return false;
   },
   onLeave: function (api) {
-    var st = api.st; var tp = st.thread || (typeof st.compose === "string" ? st.compose : null);
+    var st = api.st; var tp = msgOpen(st);
     var p = latchPatch(st, ["typing"]);
     if (tp) { var u = Object.assign({}, st.unread); delete u[tp]; p = Object.assign(p || {}, { unread: u }); }
+    if (st.filter || st.sentDraft) p = Object.assign(p || {}, { filter: null, sentDraft: null });
     if (p) api.set(p);
   },
   suggestions: function (st, api) {
-    var tp = st.thread || (typeof st.compose === "string" ? st.compose : null);
-    if (tp) { var f = msgFirst(msgWho(api, tp, st)); return ["Reply for me", "What did " + f + " say?", "Tell " + f + " I'm 5 min late"]; }
-    return copy("messages").suggestions || ["Any new texts?"];
+    var tp = msgOpen(st), c = copy("messages");
+    if (tp) { var f = msgFirst(msgWho(api, tp, st)); return (c.threadSuggestions || []).map(function (s) { return s.replace(/\{first\}/g, f); }); }
+    return c.suggestions || [];
   },
   voicePhrase: copy("messages").voicePhrase,
   reply: function (t, raw, api) {
     var st = api.st; var m, p;
     var here = api.active;
-    var tp = st.thread || (typeof st.compose === "string" ? st.compose : null);
-    // text <person> <body> / tell <person> <body>
+    var tp = msgOpen(st);
+    var reply = copy("messages").replyDraft;
+    // text <person> <body> / tell <person> <body>: a draft in that thread's slot, never sent (AC-14)
     m = t.match(/^(?:text|message|sms|tell)\s+(\w+)[\s,:]*(?:that\s+|saying\s+)?(.*)$/);
     if (m && (p = msgFind(api, m[1]))) {
       var body = m[2] ? raw.trim().slice(raw.trim().length - m[2].length).trim() : "";
       if (!body) return { text: "Opening " + msgFirst(p) + ".", nav: { view: "messages", patch: { thread: p.id } } };
       body = cap(body.replace(/\bi'm\b/gi, "I'm").replace(/\bim\b/gi, "I'm"));
       if (!/[.!?]$/.test(body)) body += ".";
-      return { text: "Here's a text to " + msgFirst(p) + ".", card: { type: "draft", to: p.name, body: body, pid: p.id, act: { mod: "messages", fn: "sendDraft" } } };
+      msgSetDraft(api, p.id, askedDraftPlaced(msgDraft(api.get("messages"), p.id), body, true));
+      return msgDrafted(api, p.id, "Drafted a text to " + msgFirst(p) + ". It isn't sent.");
     }
     // reply for me (in thread) / reply to <person>
-    if (here && tp && /^(reply for me|draft a reply|reply|write (a )?reply)/.test(t)) return { text: "Here's a reply to " + msgFirst(msgWho(api, tp, st)) + ".", card: msgDraftCard(api, tp) };
+    if (here && tp && reply && /^(reply for me|draft a reply|reply|write (a )?reply)/.test(t)) {
+      msgSetDraft(api, tp, askedDraftPlaced(msgDraft(st, tp), reply, true));
+      return msgDrafted(api, tp, "Drafted a reply to " + msgFirst(msgWho(api, tp, st)) + ". It isn't sent.");
+    }
     m = t.match(/reply to (\w+)/);
-    if (m && (p = msgFind(api, m[1])) && (st.threads || {})[p.id] && !/e-?mail/.test(t)) return { text: "Here's a reply to " + msgFirst(p) + ".", card: msgDraftCard(api, p.id) };
+    if (reply && m && (p = msgFind(api, m[1])) && (st.threads || {})[p.id] && !/e-?mail/.test(t)) {
+      msgSetDraft(api, p.id, askedDraftPlaced(msgDraft(api.get("messages"), p.id), reply, true));
+      return msgDrafted(api, p.id, "Drafted a reply to " + msgFirst(p) + ". It isn't sent.");
+    }
     // what did <person> send/say
     m = t.match(/what did (\w+) (send|say|text|write|want)|(\w+)'s (texts|messages)/);
     if (m && (p = msgFind(api, m[1] || m[3])) && (st.threads || {})[p.id]) {
@@ -615,13 +711,13 @@ registerView("messages", {
       if (photos) txt += " Plus " + (photos === 1 ? "a photo" : photos + " photos") + ".";
       return { text: txt, card: { type: "generic", icon: "bubble", title: p.name, sub: last ? last.text : "", go: { view: "messages", patch: { thread: p.id } } } };
     }
-    // search texts
+    // search texts: Alpha filters the list (AC-22)
     m = t.match(/(?:find|search(?: for)?|look for)\s+(?:my\s+)?(?:texts?|messages)\s+(?:about|from|with|mentioning)\s+(.+)/);
     if (m) {
-      var q = m[1].replace(/[?.]$/, "").trim(); var qp = msgFind(api, q.split(" ")[0]);
-      var hits = Object.keys(st.threads || {}).filter(function (id) { return (qp && qp.id === id) || st.threads[id].some(function (x) { return (x.text || "").toLowerCase().indexOf(q) >= 0; }); });
+      var q = m[1].replace(/[?.]$/, "").trim();
+      var hits = Object.keys(st.threads || {}).filter(function (id) { return msgMatches(api, st, id, q); });
       if (!hits.length) return { text: "No texts match \u201c" + q + "\u201d." };
-      return { text: hits.length === 1 ? "One conversation." : hits.length + " conversations.", card: { type: "digest", rows: hits.map(function (id) { var w = msgWho(api, id, st); var x = st.threads[id].filter(function (y) { return (y.text || "").toLowerCase().indexOf(q) >= 0; }).pop() || msgLastIn(st.threads[id]) || {}; return { ini: w.ini, who: w.name, text: x.text || "Photo", go: { view: "messages", patch: { thread: id } } }; }), go: { view: "messages", patch: { sq: q } } } };
+      return msgFiltered(api, { query: q, label: q, by: "alpha" }, hits.length === 1 ? "One conversation." : hits.length + " conversations.");
     }
     // unread texts
     if (/(new|unread|any) (texts|messages|sms)|texts\?$/.test(t)) {
@@ -641,16 +737,21 @@ registerView("messages", {
       api.toast("Sent to " + msgFirst(msgWho(api, pid)));
     }
   },
+  bar: msgBar,
+  submit: msgSubmit,
   render: function (st, api) {
     var threads = st.threads || {};
     var unread = st.unread || {};
     var ids = Object.keys(threads).filter(function (id) { return threads[id].length; });
     ids.sort(function (a, b) { var la = threads[a][threads[a].length - 1].k, lb = threads[b][threads[b].length - 1].k; return lb - la; });
-    var sq = (st.sq || "").trim().toLowerCase();
-    if (sq) ids = ids.filter(function (id) {
-      var w = msgWho(api, id, st);
-      return (w.name + " " + (w.phone || "") + " " + threads[id].map(function (m) { return m.text || m.file || ""; }).join(" ")).toLowerCase().indexOf(sq) >= 0;
+    // AC-22: the list filters on this phone as the bar is typed in, or as Alpha answers.
+    setListFilterHandler("messages", {
+      apply: function (f) { var q0 = String(f.query || "").trim(); api.set({ filter: q0 ? { query: f.query, label: f.label || q0, by: f.by } : null }); return true; },
+      clear: function () { api.set({ filter: null }); },
+      current: function () { return api.get("messages").filter || null; }
     });
+    var sq = ((st.filter && st.filter.query) || "").trim().toLowerCase();
+    if (sq) ids = ids.filter(function (id) { return msgMatches(api, st, id, sq); });
     var convos = ids.map(function (id) {
       var w = msgWho(api, id, st); var l = threads[id][threads[id].length - 1];
       var un = (unread[id] || 0) > 0;
@@ -685,15 +786,21 @@ registerView("messages", {
         ini: w.ini, name: w.name, last: (l.me ? "You: " : "") + prev, time: msgFmt(l.k),
         nameW: un ? "700" : "500", lastCss: un ? "color:var(--fg);font-weight:600" : "color:var(--mut)", dot: un ? "var(--acct)" : "transparent",
         label: (un ? "Unread, " : "") + w.name,
-        down: s.down, up: s.up, tx: st.slide && st.slide.id === id ? st.slide.x : 0,
+        down: s.down, up: s.up, tx: st.slide && st.slide.id === id ? st.slide.x : 0, stageLast: undefined,
         open: function () { if (api.swallowed()) return; msgOpenThread(api, id); }
       };
     });
 
-    var tp = st.thread || (typeof st.compose === "string" ? st.compose : null);
+    var tp = msgOpen(st);
+    // Text handed over with the open (Maps, Notes, Files sharing) becomes the owner's draft in that thread's slot.
+    if (tp && typeof st.text === "string" && st.text) {
+      var handed = st.text;
+      queueMicrotask(function () { var s = api.get("messages"); if (s.text !== handed || msgOpen(s) !== tp) return; api.set(Object.assign(msgDraftsPatch(s, tp, typed(msgDraft(s, tp), handed)), { text: "" })); });
+    }
     var th = null;
     if (tp) {
       var w = msgWho(api, tp, st); var list = threads[tp] || [];
+      var lastIn = -1; list.forEach(function (m, i) { if (!m.me) lastIn = i; });
       var bubbles = list.map(function (m, i) {
         var prev = list[i - 1], next = list[i + 1];
         var sep = !prev || m.k - prev.k >= 60;
@@ -703,6 +810,8 @@ registerView("messages", {
         return {
           sep: sep, sepLabel: sep ? (m.k < 0 ? "Yesterday " : "") + msgFmt(m.k < 0 ? m.k + 1440 : m.k) : "",
           text: m.text || "", isText: !isPhoto && !isFile, isPhoto: isPhoto, isFile: isFile, file: m.file || "", size: m.size || "",
+          // The stage keeps the newest inbound message above the sheet, never the owner's own (AC-02).
+          stageLast: i === lastIn ? true : undefined, draftSent: st.sentDraft && m.id === st.sentDraft ? "true" : undefined,
           openFile: function () { if (VIEWS.files && m.fid) api.open("files", { open: m.fid }); else api.toast(m.file); },
           row: "justify-content:" + (m.me ? "flex-end" : "flex-start") + ";margin-top:" + (sep ? "4px" : (prev && prev.me === m.me ? "3px" : "12px")),
           css: (m.me ? "background:var(--acc);color:var(--alpha-white);" : "background:var(--s2);color:var(--fg);") + "border-radius:" + r,
@@ -710,28 +819,23 @@ registerView("messages", {
           openPhoto: function () { if (VIEWS.photos) api.open("photos"); else api.toast("Photo"); }
         };
       });
-      var lastIn = list.length && !list[list.length - 1].me ? list[list.length - 1] : null;
-      var sm = lastIn ? (MSG_SMART[tp] && (st.botI || {})[tp] ? MSG_GENERIC : (MSG_SMART[tp] || MSG_GENERIC)) : [];
       var atts = msgFiles(api, st.attach);
-      var send = function (text) {
-        var s2 = api.get("messages"); var fs = text != null ? [] : msgFiles(api, s2.attach);
-        var tx = String(text != null ? text : s2.text).trim(); if (!tx && !fs.length) return;
-        msgSend(api, tp, tx, null, fs); api.set({ text: "", tray: false, attach: text != null ? s2.attach : null });
-      };
+      // AC-14: the slot's draft shows in the stage while the chat is open: Alpha's dashed, the owner's grey.
+      var d = msgDraft(st, tp), open = api.S.chat === "sheet" || api.S.chat === "full";
+      var by = d.draft === "asked" ? "alpha" : d.draft === "owner" ? "owner" : null;
       th = {
         name: w.name, ini: w.ini, bubbles: bubbles, typing: st.typing === tp,
         who: function () { if (api.person(tp) || msgPeople(api).some(function (p) { return p.id === tp; })) api.open("contacts", { open: tp }); else api.open("contacts", { add: true }); },
         call: function () { api.open("phone", { call: tp }); },
-        smart: sm.map(function (s) { return { label: s[0], go: function () { send(s[1]); } }; }),
-        hasSmart: !st.tray && !atts.length,
-        ask: function () { api.say("Here's a reply to " + msgFirst(w) + ".", msgDraftCard(api, tp)); },
+        draftBubble: open && by && d.text.trim() ? {
+          by: by, alpha: by === "alpha", sent: undefined, text: d.text, canUndo: !!d.undo, canAct: true,
+          label: by === "alpha" ? api.name + "'s draft · not sent" : "Your draft", aria: by === "alpha" ? api.name + "'s draft, not sent" : "Your draft, not sent",
+          edit: function () { msgSetDraft(api, tp, draftAdopted(msgDraft(api.get("messages"), tp))); api.toPerson(); },
+          send: function () { msgBubbleSend(api, tp); },
+          undo: function () { msgSetDraft(api, tp, draftUndone(msgDraft(api.get("messages"), tp))); }
+        } : null,
         atts: atts.map(function (f) { return { name: f.name, rm: function () { api.set({ attach: (api.get("messages").attach || []).filter(function (x) { return x !== f.id; }) }); } }; }),
         hasAtts: atts.length > 0,
-        text: st.text || "", hasText: !!(st.text || "").trim(),
-        sendCss: ((st.text || "").trim() || atts.length) ? "background:var(--acc);color:var(--alpha-white)" : "background:var(--s2);color:var(--mut)",
-        onText: function (e) { api.set({ text: e.target.value }); },
-        onKey: function (e) { if (e.key === "Enter") { e.preventDefault(); send(); } },
-        send: function () { send(); },
         tray: !!st.tray, trayCss: st.tray ? "background:var(--fg);color:var(--bg);transform:rotate(45deg)" : "background:var(--s2);color:var(--fg)",
         toggleTray: function () { api.set({ tray: !api.get("messages").tray }); },
         camera: function () { api.open("camera", { mode: "photo" }); },
@@ -761,16 +865,17 @@ registerView("messages", {
       };
     }
 
+    // The list's stage markers apply only while the list is on screen, not under a thread or the picker.
+    var listStage = !th && !pick ? true : undefined;
+    if (listStage && convos[0]) convos[0].stageLast = true;
+    var fl = st.filter;
     return {
       nativePrototype: true,
-      convos: convos,
+      convos: convos, listStage: listStage,
       newMsg: function () { api.set({ compose: true, q: "", local: true }); },
-      searching: st.sq != null, notSearching: st.sq == null, sq: st.sq || "", hasSq: !!sq, empty: convos.length === 0,
+      filterChip: fl && fl.by === "alpha" ? { label: fl.label, clearLabel: "Clear filter " + fl.label, clear: function () { api.set({ filter: null }); } } : null,
+      empty: convos.length === 0,
       emptyIcon: sq ? IC.search : IC.bubble, emptyText: sq ? "No results" : "No messages",
-      openSearch: function () { api.set({ sq: "" }); },
-      closeSearch: function () { api.set({ sq: null }); },
-      onSq: function (e) { api.set({ sq: e.target.value }); },
-      askSq: function () { var q0 = (api.get("messages").sq || "").trim(); api.set({ sq: null }); api.send(/text|message|sent|said|say/i.test(q0) ? q0 : "Find texts about " + q0); },
       inThread: !!th, t: th,
       picking: !!pick, p: pick
     };
