@@ -2,7 +2,8 @@ import {existsSync,lstatSync,readFileSync} from 'node:fs';
 import {resolve,join,relative,dirname,isAbsolute} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {sourceDirectory,assertWorkerOutputSeparation} from './local-agent-source.ts';
-import {verifyWorkerArtifact,workerHash} from './workflow-worker-artifact.ts';
+import {verifyWorkerArtifact} from './workflow-worker-artifact.ts';
+import {sha256 as workerHash} from './sha256.ts';
 
 function preparedWorkerIdentity(source: string) {
  return {
@@ -42,7 +43,7 @@ export async function ensurePreparedWorkflowWorker(root: string, source: string,
  if(existsSync(resolve(output))){
   const expected=preparedWorkerIdentity(source);
   try{return {reused:true,...verifyWorkerArtifact(output,expected)};}
-  catch(error){throw Error(`Existing worker artifact ${output} does not match the prepared runtime source (${error instanceof Error ? error.message : String(error)}). Move it aside, or set ALPHA_WORKFLOW_WORKER_OUTPUT to a fresh directory under artifacts, then rerun npm run agent:build-workflow-worker.`);}
+  catch(error){throw Error(`Existing worker artifact ${output} does not match the prepared runtime source (${error instanceof Error ? error.message : String(error)}). Move it aside, or set ALPHA_WORKFLOW_WORKER_OUTPUT to a fresh directory under artifacts, then rerun bun run agent:build-workflow-worker.`);}
  }
  return {reused:false,...await buildPreparedWorkflowWorker(root,source,output)};
 }

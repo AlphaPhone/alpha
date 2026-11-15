@@ -1,3 +1,4 @@
+import {toastObservation,finishUndoWindow} from './helpers/undo-feedback';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
@@ -70,12 +71,14 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
 });
 
 test('Delete now and Empty ask first, and checklists use the same Recently deleted',async({page})=>{
+ await page.clock.install();
  await page.goto('/');await openNotes(page);
  await createNote(page,'First','One');await createNote(page,'Second','Two');
  await page.getByRole('button',{name:'Open Second',exact:true}).click();
  await page.getByRole('button',{name:'Turn into checklist',exact:true}).click();
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await createNote(page,'Third','Three');
+ await page.clock.pauseAt(new Date(await page.evaluate(()=>Date.now()+1000)));
  for(const title of ['First','Second','Third'])await deleteNote(page,title);
  await openDeleted(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
@@ -88,6 +91,13 @@ test('Delete now and Empty ask first, and checklists use the same Recently delet
  await expect(trash.getByText('First',{exact:true})).toBeVisible();
  await askDelete();
  await page.getByRole('dialog',{name:'Delete “First”?'}).getByRole('button',{name:'Delete',exact:true}).click();
+ // The permanent erase settled without touching the other two Trash records. Its passive
+ // confirmation cannot replace the three previously offered restore actions.
+ await expect.poll(async()=>{const state=await toastObservation(page);return state.queued.some(notice=>!notice.undo&&notice.text==='Deleted');}).toBe(true);
+ expect((await trashEntries(page)).map((entry:any)=>entry.note.title).sort()).toEqual(['Second','Third']);
+ expect(await savedRecords(page)).toEqual([]);
+ await expect.poll(async()=>{const state=await toastObservation(page);return Number(state.undo)+state.queued.filter(notice=>notice.undo).length;}).toBe(3);
+ for(let offer=0;offer<3;offer++)await finishUndoWindow(page);
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0,{timeout:10000});await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await expect(trash.getByText('First',{exact:true})).toHaveCount(0);
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Second','Third']);
@@ -109,6 +119,11 @@ test('canonical startup preserves unselected legacy Trash; Older notes purges ex
  const deletedAt=(await trashEntries(page))[0].deletedAt;
  await page.clock.setSystemTime(deletedAt+DAY);
  await deleteNote(page,'Later');
+ // The first deletion's toast may still be visible. Verify both durable writes before reload.
+ await expect.poll(async()=>({
+  trash:(await trashEntries(page)).map(entry=>entry.note.title).sort(),
+  saved:(await savedRecords(page)).map((note:{title:string})=>note.title),
+ })).toEqual({trash:['Expiring','Later'],saved:[]});
 
  // One minute before the boundary: still restorable after a restart.
  await page.clock.setSystemTime(deletedAt+30*DAY-60_000);

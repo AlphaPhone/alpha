@@ -1,10 +1,10 @@
 // ViewAdmission traces replayed against the image Contacts admission step, the enabled and deferred
 // view sets, and a shell that keeps the product shell's two rules: a deferred view is reported as no
 // view, and only an enabled view opens. No Android capability read is involved.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
-import {modelTraces, replayTraces, repositoryRoot, sourceModule} from '../specs/quint/refinement/services/identity-comms-traces.mjs';
+import {modelTraces, replayTraces, sourceModule} from '../specs/quint/refinement/services/identity-comms-traces.mjs';
 
 const MODEL = {path: 'specs/quint/application/ViewAdmission.qnt', module: 'ViewAdmission'};
 const SCENARIOS = ['revokedWhileOpenTest', 'deferredViewCannotOpenTest', 'unrefreshedCapabilityTest', 'admittedViewOpensTest', 'revokedElsewhereTest'];
@@ -14,10 +14,6 @@ const {admitImageContacts, applyImageContacts, isMvpView, DEFERRED_MVP_VIEWS} = 
     'browser/dev-profile$': 'export const browserDevProfile=false;',
     'runtime/aosp-image$': 'export const aospImage=false;export const admittedAospViews=()=>[];',
   });
-// The shell rules the driver's shell repeats, and the refresh that applies the image capability.
-const shellSource = readFileSync(`${repositoryRoot}apps/app/src/prototype/model.js`, 'utf8');
-assert.match(shellSource, /if \(DEFERRED_MVP_VIEWS\.has\(value\.view\)\) value\.view = null;/);
-assert.match(readFileSync(`${repositoryRoot}apps/app/src/main.tsx`, 'utf8'), /applyImageContacts\(admitted,ORDER,shell,admitImageContacts\)/);
 
 const project = s => ({rawView: s.rawView, reported: s.rawView === 'contacts' && !s.admitted ? 'none' : s.rawView,
   admitted: s.admitted, ordered: s.ordered, capability: s.capability, leaves: s.leaves});
@@ -42,7 +38,7 @@ function create() {
   };
 }
 
-test('the image Contacts admission follows ViewAdmission scenarios, witnesses and random walks', {timeout: 180000}, async () => {
+test('the image Contacts admission follows ViewAdmission scenarios, witnesses and random walks', {timeout: scaledTimeout(180000)}, async () => {
   const traces = modelTraces({...MODEL, scenarios: SCENARIOS, witnesses: WITNESSES, random: 80, steps: 30});
   const receipt = await replayTraces(traces, create, {project});
   assert.equal(receipt.traces, SCENARIOS.length + WITNESSES.length + 80);

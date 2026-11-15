@@ -1,3 +1,5 @@
+// Partial source-contract regression: authenticated extracted production members execute
+// with controlled ports; this is not whole-file implementation refinement.
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -15,8 +17,7 @@ const model='NativeSettingsHandoff';
 const harness='SettingsHandoffTraces.java';
 const modulePath='plugins/plugin-native-system/android';
 const provider=app+'PasswordProviderSupport.java';
-const scenarios=['all-pages-launcher','all-pages-standalone','fallback-launcher','fallback-standalone',
-  'invalid','absent-host','retired-host-launcher','provider-launcher','provider-standalone'];
+const scenarios=['all-pages','fallback','invalid','absent-host','retired-host','provider'];
 
 export async function checkNativeSettingsHandoff(extraSources=[]) {
   const temporary=mkdtempSync(join(tmpdir(),'quint-native-settings-handoff-'));
@@ -43,7 +44,7 @@ export async function checkNativeSettingsHandoff(extraSources=[]) {
     assert.equal(driverHashes[join(root,'vendor/eliza',settingsPagesPath)],pinned.sha256);
     assert.equal(driverHashes[core],staged.files[settingsPagesPath]);
     const traces=javaTraceCampaign(harness,[provider,core,...ports],scenarios.map(name=>[name]));
-    const receipt=await checkTraces({model,sources,driverHashes,generatedSources,traces,scope:'bounded-orchestration',assumptions:[
+    const receipt=await checkTraces({model,sources,driverHashes,generatedSources,traces,scope: 'bounded-orchestration',assumptions:[
       'Exact AlphaDevicePlugin members and PasswordProviderSupport plus the authenticated installed SystemSettingsPages source.',
       'Android Settings constants are distinct closed-port symbols. Explicit string actions, package URIs, package extra, flags, attempts and native result fields are observed.',
       'A single pending request per trace position. Synthetic Activity outcomes execute no installed settings, provider, permission or external launch.',

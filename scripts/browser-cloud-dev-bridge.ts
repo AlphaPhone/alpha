@@ -6,6 +6,7 @@ import {CLOUD_EMAIL_CODE,emailCodeExpiresAt,emailCodeResendAt,emailCodeSendBody,
 import {parseCloudServiceInfo} from '../apps/app/src/runtime/cloud-service-info.ts';
 import {readCloudVoiceLimit,type CloudVoiceLimitFacts} from '../apps/app/src/runtime/cloud-voice-limit.ts';
 import {randomUUID,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
+import {sha256} from './sha256.ts';
 import {mkdir,readFile,writeFile,rename,lstat,unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {homedir} from 'node:os';
@@ -39,6 +40,21 @@ type Environment=keyof typeof authorities;
 type Credential={credentialReference:string;credentialId:string;userId:string;organizationId:string;email?:string;expiresAt?:number;token?:string;credentialFile?:string;credentialSha256?:string};
 const publicCredential=(c:Credential)=>({credentialReference:c.credentialReference,credentialId:c.credentialId,userId:c.userId,organizationId:c.organizationId,...(c.expiresAt===undefined?{}:{expiresAt:c.expiresAt})});
 function environment(value:unknown):Environment{if(value!=='production'&&value!=='staging')throw Error('Unsupported Cloud environment');return value;}
+// The Content-Type a multipart file part declares, read from the part's own headers. Request.formData()
+// on Bun names a file's type after its filename extension instead (audio/webm arrives as video/webm).
+function multipartFileType(bytes:Buffer,content:string,field:string):string|undefined{
+  const boundary=/;\s*boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(content);if(!boundary)return undefined;
+  const marker=Buffer.from('--'+(boundary[1]??boundary[2]));
+  for(let at=bytes.indexOf(marker);at>=0;at=bytes.indexOf(marker,at+marker.length)){
+    // A delimiter starts the body or follows a line break; part content cannot contain one.
+    if(at>0&&bytes.toString('latin1',at-2,at)!=='\r\n')continue;
+    const start=at+marker.length,end=bytes.indexOf('\r\n\r\n',start);if(end<0)return undefined;
+    const headers=bytes.toString('latin1',start,end);
+    if(/^content-disposition:[ \t]*form-data;[ \t]*name="([^"]*)"/im.exec(headers)?.[1]!==field)continue;
+    return /^content-type:[ \t]*([^\r\n]+)$/im.exec(headers)?.[1].trim();
+  }
+  return undefined;
+}
 function refusal(status:number,code:string){return Object.assign(Error(code),{status,code});}
 function requestId(value:unknown):string{if(typeof value!=='string'||!UUID.test(value))throw Error('Invalid request identity');return value;}
 /** DEV transport only. Canonical Cloud owns login, identity, plan entitlement and speech authorization. */
@@ -63,10 +79,10 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
  }
  async function save(value:Partial<Record<Environment,Credential>>){resetCalendarAccess();if(options.resident)await options.resident.clear();await directory();const tmp=stateFile+'.'+randomUUID();await writeFile(tmp,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'});await rename(tmp,stateFile);}
  function serial<T>(run:()=>Promise<T>):Promise<T>{const result=queue.then(run,run);queue=result.catch(()=>{});return result;}
- async function keyFor(c:Credential){if(c.token)return c.token;if(!c.credentialFile||!c.credentialSha256)throw Error('Cloud credential unavailable');const token=(await privateFile(c.credentialFile)).trim();if(createHash('sha256').update(token).digest('hex')!==c.credentialSha256)throw Error('Cloud credential changed');return token;}
+ async function keyFor(c:Credential){if(c.token)return c.token;if(!c.credentialFile||!c.credentialSha256)throw Error('Cloud credential unavailable');const token=(await privateFile(c.credentialFile)).trim();if(sha256(token)!==c.credentialSha256)throw Error('Cloud credential changed');return token;}
  async function admitted(env:Environment,reference:unknown,id?:unknown){const c=(await load())[env];if(!c)throw refusal(401,'credentials-missing');if(c.credentialReference!==reference||id!==undefined&&c.credentialId!==id)throw refusal(409,'account-changed');if(c.expiresAt!==undefined&&c.expiresAt<=Date.now())throw refusal(401,'expired');return c;}
  async function current(env:Environment,c:Credential,signal:AbortSignal){signal.throwIfAborted();await admitted(env,c.credentialReference,c.credentialId);await keyFor(c);signal.throwIfAborted();}
- function retire(env:Environment){for(const row of active.values())if(row.environment===env)row.controller.abort(new DOMException('Cloud account changed','AbortError'));for(const [id,login]of pending)if(login.environment===env)pending.delete(id);for(const [ref,claim]of claims)if(claim.environment===env)claims.delete(ref);}
+ function retire(env:Environment){if(googleCommitted?.environment===env)googleCommitted=undefined;for(const row of active.values())if(row.environment===env)row.controller.abort(new DOMException('Cloud account changed','AbortError'));for(const [id,login]of pending)if(login.environment===env)pending.delete(id);for(const [ref,claim]of claims)if(claim.environment===env)claims.delete(ref);}
  async function canonical(env:Environment,route:string,signal:AbortSignal,init:RequestInit={},credential?:Credential){const headers=new Headers(init.headers);headers.set('Accept','application/json');headers.set('User-Agent','AlphaPhone-Browser-Cloud/1');if(credential)headers.set('Authorization','Bearer '+await keyFor(credential));const result=await fetchCloud(authorities[env]+route,{...init,headers,redirect:'error',signal});signal.throwIfAborted();return result;}
  // Browser-host sign-in: email stays in app; Google uses canonical hosted OAuth, not Android App Links. The same Steward and mobile App Auth contracts as AlphaCloudSignInPlugin; the Steward
  // session, PKCE material and the minted key stay in this process and the private profile file.
@@ -126,7 +142,14 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
      }return {status:response.status,data:result};}
  type GoogleAttempt={id:string;environment:Environment;controller:AbortController;state:string;verifier:string;previousReference:string|null;expiresAt:number;busy:boolean;phase:'preparing'|'committing'|'committed'|'failed';returned?:{code:string}|{error:string};mfa?:{type:string;challengeId:string;failed:number};outcome?:{status:'authenticated';environment:Environment;expiresAt:number;accountCreated:boolean|null;attemptId:string;credentialId:string}};
  let googleAttempt:GoogleAttempt|null=null;
+ let googleCommitted:GoogleAttempt['outcome'];
  async function cancelGoogleAttempt(expectedId?:string){
+  // The committed poll may still be travelling to the renderer when Cancel arrives.
+  // Retain only its non-secret outcome, never the verifier or the authorization code.
+  if(expectedId!==undefined&&googleCommitted?.attemptId===expectedId){
+   if(googleCommitted.expiresAt>Date.now())return googleCommitted;
+   googleCommitted=undefined;
+  }
   const attempt=googleAttempt;if(!attempt||expectedId!==undefined&&attempt.id!==expectedId)return {};
   // Once rename is dispatched, cancellation cannot truthfully promise the old account.
   // Wait for its serialized outcome instead of aborting and misreporting a committed login.
@@ -160,6 +183,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
   });
   // Do not recheck an aborted request after the durable commit: report what committed.
   if(googleAttempt===attempt)googleAttempt=null;
+  googleCommitted=attempt.outcome;
   return attempt.outcome!;
  }
 
@@ -335,7 +359,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
   try{
    const chunks:Buffer[]=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>17_000_000)throw Error('Cloud request too large');chunks.push(Buffer.from(chunk));}
    const bytes=Buffer.concat(chunks),content=req.headers['content-type']||'';let data:Record<string,any>,audio:File|undefined;
-   if(content.startsWith('multipart/form-data;')){const form=await new Request('http://127.0.0.1',{method:'POST',headers:{'Content-Type':content},body:bytes}).formData();if([...form.keys()].some(k=>!['operation','environment','credentialReference','credentialId','requestId','audio'].includes(k)))throw Error('Invalid speech form');data=Object.fromEntries([...form].filter(([k])=>k!=='audio'));const value=form.get('audio');if(!(value instanceof File)||value.size<1||value.size>16_000_000||!['audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg'].includes(value.type.split(';')[0]))throw Error('Invalid speech audio');audio=value;}
+   if(content.startsWith('multipart/form-data;')){const form=await new Request('http://127.0.0.1',{method:'POST',headers:{'Content-Type':content},body:bytes}).formData();if([...form.keys()].some(k=>!['operation','environment','credentialReference','credentialId','requestId','audio'].includes(k)))throw Error('Invalid speech form');data=Object.fromEntries([...form].filter(([k])=>k!=='audio'));const value=form.get('audio'),type=multipartFileType(bytes,content,'audio');if(!(value instanceof File)||!type||value.size<1||value.size>16_000_000||!['audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg'].includes(type.split(';')[0]))throw Error('Invalid speech audio');audio=value.type===type?value:new File([value],value.name,{type});}
    else{if(content!=='application/json'||size>9*1024*1024)throw Error('JSON development request required');data=object(JSON.parse(bytes.toString('utf8')));}
    if(typeof data.operation==='string'&&data.operation.startsWith('signIn')){send(res,200,await signInOperation(data,controller.signal));return;}
    if(data.operation==='cancel'){active.get(requestId(data.requestId))?.controller.abort();send(res,200,{});return;}
@@ -472,7 +496,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
   const read=async(input:Parameters<typeof agentRead>[0])=>{await current();const result=await agentRead(input);await current();return result;};
   const calendar=async(input:Parameters<typeof agentCalendarOperation>[0])=>{if(!new URL(input.url).pathname.startsWith('/api/v1/eliza/google/calendar/sync-v1/'))return read(input);await current();if(!calendarAllowed(binding,generation))throw refusal(403,'calendar-owner-access-disabled');const result=await agentCalendarOperation(input);await current();if(!calendarAllowed(binding,generation))throw refusal(409,'calendar-owner-access-changed');return result;};
   const port={agentCredential:current,agentRead:read,agentGmailOperation:read,agentCalendarOperation:calendar};
-  await current();const host=await startManagedGoogleAgentHost({port,apiToken,apiOrigin:authorities[agentEnvironment],calendarReadTiming:process.env.ALPHA_CALENDAR_READ_TIMING==='1',access:()=>({gmailChanges:false,calendarEdits:calendarAllowed(binding,generation)})});
+  await current();const host=await startManagedGoogleAgentHost({port,apiToken,apiOrigin:authorities[agentEnvironment],access:()=>({gmailChanges:false,calendarEdits:calendarAllowed(binding,generation)})});
   return {port:host.port,close:()=>{retired=true;if(generation===calendarGeneration)resetCalendarAccess();return host.close();}};
  }
  return Object.assign(handler,{
@@ -496,9 +520,8 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
 export function browserCloudDevBridge():Plugin {
  return {name:'alpha-browser-cloud-dev-bridge',apply:'serve',async configureServer(server){
   const cloudResident=process.env.VITE_ALPHA_CLOUD_RESIDENT==='1';
-  const privatePreview=process.env.ALPHA_PRIVATE_LOCAL_PREVIEW==='1'&&process.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW==='1'&&process.env.VITE_LOCAL_AGENT==='1'&&!!process.env.ALPHA_BROWSER_CLOUD_PROFILE;
-  if(process.env.ELIZA_DEV_ALLOW_TEST_MOCKS!=='1'&&!cloudResident&&!privatePreview)return;
-  if(cloudResident&&(process.env.ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||process.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||process.env.VITE_LOCAL_AGENT!=='1'||!process.env.ALPHA_ELIZA_SOURCE||!process.env.ALPHA_REMOTE_PROFILE))throw Error('Cloud resident requires real local source and mocks off');
+  if(process.env.ELIZA_DEV_ALLOW_TEST_MOCKS!=='1'&&!cloudResident)return;
+  if(cloudResident&&(process.env.ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||process.env.VITE_LOCAL_AGENT!=='1'||!process.env.ALPHA_ELIZA_SOURCE||!process.env.ALPHA_REMOTE_PROFILE))throw Error('Cloud resident requires real local source and mocks off');
   const profile=path.resolve(process.env.ALPHA_BROWSER_CLOUD_PROFILE??path.join(homedir(),'.local/share/alphaphone/browser-cloud'));
   const selected=environment(process.env.VITE_ALPHA_CLOUD_ENVIRONMENT??'production');
   let resident:Awaited<ReturnType<typeof createCloudResidentHost>>|undefined;

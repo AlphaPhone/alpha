@@ -1,9 +1,20 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {lifeOpsScheduledTaskRouteFixture} from './fixtures/lifeops-scheduled-task-route.mjs';
 import {checkLifeOpsScheduledTaskRoute} from '../specs/quint/refinement/services/lifeops-scheduled-task-route.mjs';
 
-test('the generic SDK route exposes the unfenced occurrence change through closed ports', async () => {
+test("partial source contract: the generic SDK route exposes the unfenced occurrence change through closed ports", async () => {
   const f = await lifeOpsScheduledTaskRouteFixture();
   await f.fire(1);
   await f.claim(1);
@@ -24,7 +35,7 @@ test('the generic SDK route exposes the unfenced occurrence change through close
   await f.finish(2, 'ok');
 });
 
-test('pinned SDK scheduled-task route and in-memory claim schedules refine the as-built model', {timeout: 60_000}, async () => {
+test("partial source contract: pinned SDK scheduled-task route and in-memory claim schedules refine the as-built model", {timeout: scaledTimeout(60_000)}, async () => {
   const {receipt, obligations} = await checkLifeOpsScheduledTaskRoute();
   assert.equal(receipt.passed, true);
   assert.equal(receipt.driverInputsBound, true);

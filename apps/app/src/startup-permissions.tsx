@@ -101,9 +101,9 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const shown = (active || ready) && (enabled || reopened) && !connection.open && !googleOpen;
   // The Alpha image grants this access at first boot (scripts/stage-aosp.ts LAUNCHER_DEFAULT_PERMISSIONS
   // and AlphaSharedStoragePolicy), so first setup there passes a row Android already reports as allowed
-  // without a tap, and shows nothing while it reads. A row that is off still stops and asks; a Settings
+  // without a tap. A stalled read exposes Checking and Skip after the usual wait. A row that is off still stops and asks; a Settings
   // review shows every row.
-  const granted = image && active && !ready && !target && !review && (state === 'ready' || state === 'checking');
+  const granted = image && active && !ready && !target && !review && (state === 'ready' || (state === 'checking' && !canSkip));
   const visible = shown && !granted;
   const writeProgress = (value: Progress | null, choices = value?.choices ?? []) => {
     if (!reviewRef.current) try {
@@ -206,10 +206,10 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
 
   useEffect(() => {
     setCanSkip(false);setCheckNotice('');
-    if (!visible || ready) return;
+    if (!shown || ready) return;
     const timer = setTimeout(() => setCanSkip(true), 20_000);
     return () => clearTimeout(timer);
-  }, [key, visible, ready]);
+  }, [key, shown, ready]);
 
   useEffect(() => {if (visible) dialog.current?.querySelector<HTMLHeadingElement>('h2')?.focus({preventScroll: true});}, [key, visible, ready]);
 
@@ -288,6 +288,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   return <dialog ref={dialog} className="alpha-startup-permissions" aria-labelledby="alpha-permission-title" onCancel={event => {event.preventDefault(); close();}}>
     <div className="alpha-permission-content alpha-permission-checklist">
       <h2 id="alpha-permission-title" className="serif" tabIndex={-1}>Access</h2>
+      {progress && !review && !target && <p className="alpha-permission-progress" role="status">Step {progress.step + 1} of {keys.length}</p>}
       <ul className="alpha-permission-rows">{keys.map(k => <li key={k} className="alpha-permission-row" aria-current={k === key ? 'step' : undefined} data-state={states[k]}>
         <span className="alpha-permission-row-icon" aria-hidden="true"><span style={iconStyle(details[k].icon)}/></span>
         <span className="alpha-permission-label"><span className="alpha-permission-name">{details[k].title}</span>{k === key && <span className="alpha-permission-rationale">{details[k].reason}</span>}</span>

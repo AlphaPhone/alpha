@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {runQuintChecker} from '../../../scripts/quint-lib.ts';
+import {scaledTimeout} from './timeouts.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const identifier = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -13,7 +14,9 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const hash = path => digest(readFileSync(path));
 const hashPattern = /^[a-f0-9]{64}$/;
 const snapshotDirectory = join(root, 'test-results/quint-refinement/input-snapshots');
-const checkerSources = [fileURLToPath(import.meta.url), join(root, 'scripts/quint-lib.ts')];
+const checkerSources = [fileURLToPath(import.meta.url), join(root, 'scripts/quint-lib.ts'),
+  join(root, 'scripts/sha256.ts'), join(root, 'scripts/upstream-pin.ts'),
+  fileURLToPath(new URL('./timeouts.mjs', import.meta.url))];
 
 function containsPath(directory, file) {
   const name = relative(directory, file);
@@ -81,7 +84,7 @@ function registeredModelInputs() {
     const manifest = join(root, 'specs/quint', family, 'manifest.json');
     paths.add(manifest);
     const document = JSON.parse(readFileSync(manifest));
-    for (const model of Array.isArray(document) ? document : document.models) {
+    for (const model of document) {
       for (const path of modelDependencies(join(root, model.path))) paths.add(path);
     }
   }
@@ -138,7 +141,7 @@ function modelFile(model, requested) {
   if (requested) return isAbsolute(requested) ? requested : resolve(root, requested);
   for (const family of ['application', 'services', 'native', 'legacy']) {
     const document = JSON.parse(readFileSync(join(root, 'specs/quint', family, 'manifest.json')));
-    const found = (Array.isArray(document) ? document : document.models).find(row => row.module === model);
+    const found = document.find(row => row.module === model);
     if (found) return join(root, found.path);
   }
   throw new Error(`Unknown model ${model}`);
@@ -147,7 +150,7 @@ function modelFile(model, requested) {
 function invariantFor(model) {
   for (const family of ['application', 'services', 'native', 'legacy']) {
     const document = JSON.parse(readFileSync(join(root, 'specs/quint', family, 'manifest.json')));
-    const found = (Array.isArray(document) ? document : document.models).find(row => row.module === model);
+    const found = document.find(row => row.module === model);
     if (found) return found.invariant;
   }
   return null;
@@ -232,7 +235,7 @@ export async function checkTraces({model, modelPath, sources, traces, assumption
         const args = [join(root, 'node_modules/@informalsystems/quint/dist/src/cli.js'), 'test', wrapper,
           `--main=${module}`, '--backend=typescript', '--max-samples=1', '--seed=20261107', '--match=^trace[0-9]+(Reject[0-9]+)?Test$'];
         const {result, interruptedAttempt} = await runQuintChecker(() => spawnSync(process.execPath, args,
-          {cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024}));
+          {cwd: root, encoding: 'utf8', timeout: scaledTimeout(120000), maxBuffer: 16 * 1024 * 1024}));
         const output = `${result.stdout || ''}${result.stderr || ''}`;
         const checked = Number(output.match(/(\d+) passing/)?.[1] || 0);
         const passed = !result.error && !result.signal && result.status === 0 && checked === group.length;

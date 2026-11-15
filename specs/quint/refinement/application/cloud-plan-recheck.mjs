@@ -11,7 +11,7 @@ import {call, checkpoint, deferred, root, tick, trace} from './support.mjs';
 const driver = fileURLToPath(import.meta.url);
 const implementation = 'apps/app/src/runtime/connection-ui.tsx';
 const helpers = ['specs/quint/refinement/application/support.mjs', 'test/support/strip-types.mjs',
-  'specs/quint/refinement/application/index.mjs', 'test/quint-application-refinement.test.mjs'];
+   'test/quint-application-refinement.test.mjs'];
 
 function compile(text) {
   const section = (start, end) => {
@@ -49,7 +49,7 @@ function fixture(code) {
     residentStartInBackground: false,
     ownProviderSelected: () => false, residentEnvironment: () => 'production', residentCloudFlow: () => true,
     residentBindable: () => false, update: patch => Object.assign(state, patch), retractReadiness() {},
-    runQueuedResidentRebind() {}, runQueuedSignInReturn() {}, scheduleResidentAutoRetry() {},
+    cancelStoppedVoiceRead() {}, runQueuedResidentRebind() {}, runQueuedSignInReturn() {}, scheduleResidentAutoRetry() {},
     queueResidentRebind() {assert.fail('The live resident must not need a startup admission');},
     residentRebinds() {assert.fail('Synthetic admission keeps the current inference binding');},
     refreshMembershipBalance() {assert.fail('No optional Cloud service is installed in this fixture');},

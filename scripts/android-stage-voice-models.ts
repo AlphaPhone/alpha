@@ -1,8 +1,8 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Stage the on-device voice outputs (.eliza/paradee-voice/native) from operator-supplied files.
  *
- *   node scripts/android-stage-voice-models.ts --from <directory> [--from <directory> ...]
+ *   bun scripts/android-stage-voice-models.ts --from <directory> [--from <directory> ...]
  *
  * Every row of android/voice-host/qualified-voice-host.json (the engine library per ABI and every
  * bundle file: Paradee GGUF, misaki lexicon, eSpeak NG data, the ASR slot pair, Silero VAD and the
@@ -89,9 +89,9 @@ function stageHostLibraries(productRoot: string, rows: readonly HostLibrary[]) {
   // and a retry validates and reuses them before completing the remaining library set.
 }
 
-export function stageVoiceModels(productRoot: string, {from, abis}: {from: readonly string[]; abis?: readonly string[]}) {
+export function stageVoiceModels(productRoot: string, {from, abis, record: supplied}: {from: readonly string[]; abis?: readonly string[]; record?: ReturnType<typeof readVoiceHost>}) {
   productRoot = path.resolve(productRoot);
-  const record = readVoiceHost(productRoot);
+  const record = supplied ?? readVoiceHost(productRoot);
   const selected = selectedAndroidAbis(abis);
   const selectedRows = selected.map(abi => {
     const entry = record.abis.find(row => row.abi === abi);
@@ -154,7 +154,7 @@ function main() {
   const from: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--from' && args[i + 1] && !args[i + 1].startsWith('--')) { from.push(args[++i]); continue; }
-    throw Error('Usage: node scripts/android-stage-voice-models.ts --from <directory> [--from <directory> ...]');
+    throw Error('Usage: bun scripts/android-stage-voice-models.ts --from <directory> [--from <directory> ...]');
   }
   if (!from.length) throw Error('--from <directory of pinned voice outputs and models> is required');
   const result = stageVoiceModels(root, {from, abis});

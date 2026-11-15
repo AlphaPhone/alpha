@@ -69,7 +69,7 @@ function fixture(code){
 
 export async function checkVoiceTranscriptFollow(extraSources=[]){
  const sources=[product,'apps/app/src/prototype/voice-adapter.ts','apps/app/src/prototype/agent-adapter.ts',
-  'apps/app/src/runtime/development-cartesia-conversation.ts','specs/quint/refinement/application/index.mjs',
+  'apps/app/src/runtime/development-cartesia-conversation.ts',
   'test/quint-application-refinement.test.mjs',driver,...extraSources];
  const hashes=captureInputs(sources),temporary=mkdtempSync(join(tmpdir(),'alpha-voice-follow-'));
  const generated=join(temporary,'shell-observer.js');

@@ -53,7 +53,7 @@ async function remoteAgent(page: Page, options: Options = {}) {
         if (plugin === 'AlphaNotifications') return { permissionGranted: true, appEnabled: true };
         if (plugin === 'AlphaVoiceCloud') return { microphone: 'granted' };
         if (plugin === 'ElizaSystem' && method === 'getBuildInfo') return { launcher: false, version: 'continuity-fixture' };
-        if (plugin === 'DailyApps' && method === 'surfaceInfo') return { developmentBuild: true, assistant: sessionStorage.getItem('continuity-assistant') === '1' };
+        if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: sessionStorage.getItem('continuity-assistant') === '1' };
         if (plugin === 'DailyApps' && method === 'closeAssistant') { f.assistantClosed++; return {}; }
         if (plugin === 'AlphaActionJournal') return method === 'list' ? { entries: [] } : { entry: null };
         if (plugin !== 'AlphaConnection') throw Error('Unexpected native operation');
@@ -475,7 +475,7 @@ test('a restored conversation longer than the chat window scrolls up to its firs
 });
 
 // One notice for every stop the single check could not settle (not run, not finished, overtaken).
-const UNCHECKED = 'Stopped';
+const UNCHECKED = 'Outcome unknown';
 
 test('a rate limit before the message is posted keeps the text instead of reporting an unknown outcome', async ({ page }) => {
   test.setTimeout(90_000);

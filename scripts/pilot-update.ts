@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Update a provisioned pilot unit in place with a higher-versionCode signed APK.
  *
- *   node scripts/pilot-update.ts --serial <adb serial> --alias <unit-name> \
- *     --apk-manifest <new build>/apk-manifest.json [--variant launcher|standalone] \
+ *   bun scripts/pilot-update.ts --serial <adb serial> --alias <unit-name> \
+ *     --apk-manifest <new build>/apk-manifest.json [--variant launcher] \
  *     [--build release|debug] [--units test-results/pilot-units] [--stock-home <package/activity>]
  *
  * Generalizes scripts/test-installed-upgrade.ts from one domain to the whole app:
@@ -32,7 +32,8 @@
  * erasing data, and the rollback design (A-06) is still blocked.
  */
 import { execFileSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
+import {sha256} from "./sha256.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,7 +44,7 @@ import { readReleaseSigner } from "./build-android.ts";
 import { pilotRotationRecord, verifyPilotRotation } from "./owner/pilot-rotation.ts";
 import { androidEnv, tool } from "./toolchain.ts";
 import { beginPilotRotation, claimPilotInstall, completePilotRotation, inspectPilotRotation, observePilotRotation } from "./owner/pilot-rotation-journal.ts";
-import { adbFor, admitUnitApk, deviceFacts, installedApkSha256, PACKAGE, packageFacts, parseUnitArgs, requireConsistentApk } from "./provision-unit.ts";
+import { adbFor, admitUnitApk, deviceFacts, installedApkSha256, PACKAGE, packageFacts, parseUnitArgs, requireConsistentApk, snapshotUnitApk } from "./provision-unit.ts";
 import { apkUpdateAdmission, compareDomains, DOMAIN_SCRIPT, inPlaceUpdateFailures, integrityQuery as sharedIntegrityQuery, parseDomainInventory, parseIntegrityExport, readbackInventory } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
 
 type Adb = ReturnType<typeof adbFor>;
@@ -69,7 +70,6 @@ type Unit = {
   updates?: unknown[];
 };
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-const sha256 = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 // The comparison, inventory and export parsers are shared with every product
 // (vendor/eliza/packages/os/scripts/android/apk-release-record.mjs); Alpha binds its package.
@@ -320,7 +320,6 @@ async function main() {
   const device = deviceFacts(adb, options.serial);
   const apiLevel = device.sdk;
   if (apiLevel === null || !Number.isSafeInteger(apiLevel) || apiLevel < 1) throw new Error("Device Android API level is unavailable");
-  requireConsistentApk(apk, {apiLevel});
   if (device.serialSha256 !== unit.device?.serialSha256) throw new Error(`Serial does not belong to unit ${options.alias}`);
   if (apk.rehearsal && !device.emulator) throw new Error("--build debug is an emulator rehearsal only");
 
@@ -332,18 +331,18 @@ async function main() {
       throw new Error("A pilot rotation outcome is unknown. Use --reconcile-rotation before any further install.");
     if (rotation && pendingRotation.state !== "none")
       throw new Error("The pilot rotation attempt is already consumed");
-    const before = packageFacts(adb(["shell", "dumpsys", "package", PACKAGE]));
     pulled = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-installed-"));
+    const candidate = snapshotUnitApk(apk, pulled);
+    requireConsistentApk(candidate, {descriptor, apiLevel});
+    const replacementFile = candidate.file;
+    const before = packageFacts(adb(["shell", "dumpsys", "package", PACKAGE]));
     const installedFile = path.join(pulled, "installed.apk");
     const apkPath = /^package:(\/\S+\.apk)$/m.exec(adb(["shell", "pm", "path", PACKAGE]))?.[1];
     if (!apkPath) throw new Error("Alpha Phone is not installed on this unit");
     adb(["pull", apkPath, installedFile], { timeout: 600_000 });
     const installedSigner = signerDigest(installedFile, {apiLevel});
-    const replacementFile = lineageFile ? path.join(pulled, "migration.apk") : apk.file;
     let rotationLineageSha256: string | undefined;
     if (lineageFile) {
-      fs.copyFileSync(apk.file, replacementFile, fs.constants.COPYFILE_EXCL);
-      fs.chmodSync(replacementFile, 0o400);
       rotationLineageSha256 = verifyPilotRotation({
         descriptor, apk, device, before, installedFile, replacementFile, lineageFile,
         packageName: PACKAGE, javaHome: androidEnv().JAVA_HOME, apksigner: tool("apksigner"),

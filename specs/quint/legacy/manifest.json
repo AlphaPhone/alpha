@@ -102,7 +102,7 @@
     "historicalSourceLinks": {
       "revision": "875f5a8550935c5ca1797cea4ea38e7c7759ca54",
       "paths": [
-        "android/app/src/main/java/ai/alphacompute/alphaphone/CloudSignInFlow.java"
+        "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java"
       ]
     }
   },
@@ -662,6 +662,7 @@
   {
     "path": "specs/quint/legacy/SettingsNav.qnt",
     "module": "SettingsNav",
+    "verifyBackend": "tlc",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -868,6 +869,7 @@
   {
     "path": "specs/quint/legacy/PhotosLibrary.qnt",
     "module": "PhotosLibrary",
+    "verifyBackend": "tlc-bounded",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -973,6 +975,7 @@
   {
     "path": "specs/quint/legacy/NotesView.qnt",
     "module": "NotesView",
+    "verifyBackend": "tlc-bounded",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -1100,6 +1103,7 @@
   {
     "path": "specs/quint/legacy/FilesBrowser.qnt",
     "module": "FilesBrowser",
+    "verifyBackend": "tlc-bounded",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -1283,7 +1287,8 @@
     "tests": [
       "cancelledHeadSkippedTest",
       "cancellationListenerTest",
-      "preAbortedCallerTest"
+      "preAbortedCallerTest",
+      "consecutiveCancelledWaitersTest"
     ],
     "temporal": [
       "CheckedTemporal"
@@ -1316,7 +1321,8 @@
         "tests": [
           "cancelledHeadSkippedTest",
           "cancellationListenerTest",
-          "preAbortedCallerTest"
+          "preAbortedCallerTest",
+          "consecutiveCancelledWaitersTest"
         ]
       },
       {
@@ -1344,7 +1350,8 @@
           "N = 2"
         ],
         "tests": [
-          "twoOwnersTest"
+          "twoOwnersTest",
+          "twoCancelledWaitersTest"
         ]
       }
     ],
@@ -2310,6 +2317,7 @@
   {
     "path": "specs/quint/legacy/CoreServiceLifecycleDesign.qnt",
     "module": "CoreServiceLifecycleDesign",
+    "verifyBackend": "tlc-bounded",
     "init": "init",
     "step": "step",
     "invariant": "safety",
