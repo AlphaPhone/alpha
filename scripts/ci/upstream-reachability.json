@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "a81d7059045f9b96b8c85ffa79b731d3ba574159",
-  "head": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
+  "baseCommit": "db8071d97d897429e62f01d0a9a53ef0a05138f0",
+  "head": "5b2070469895b3c4ff6623f576d8de53810fafa5",
   "recordedAt": "2026-11-15",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...66138a513aa6ffabfb35146c5ae8de2ea76906df",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...5b2070469895b3c4ff6623f576d8de53810fafa5",
   "status": "diverged",
-  "aheadBy": 111,
-  "behindBy": 1304,
+  "aheadBy": 112,
+  "behindBy": 1307,
   "mergeBase": "0c8d6868ae05a6100a3ed0246a5d078e783cc802",
   "pinOnlyCommits": [
     {
@@ -450,6 +450,10 @@
     {
       "sha": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
       "subject": "fix(native-phone): preserve caller identity and retire stale contact reads"
+    },
+    {
+      "sha": "5b2070469895b3c4ff6623f576d8de53810fafa5",
+      "subject": "fix(native): keep image service routes out of model slot preferences"
     }
   ],
   "pullRequests": []

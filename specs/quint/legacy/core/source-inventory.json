@@ -2143,7 +2143,7 @@
     }
   ],
   "currentUpstream": {
-    "revision": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
+    "revision": "5b2070469895b3c4ff6623f576d8de53810fafa5",
     "classification": "current-upstream-formal-specifications",
     "models": [],
     "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate. NativeSmsOutgoingHistory sidecars authenticate the selectively backported outgoing-history role/outbox/rollback model and checker; native carrier round trip, default roles and agent cellular audio remain separate. Optional native contact-photo metadata and initial Maps sign-in wording preserve the existing scope and session fences; Android editor/photo persistence and provider/device acceptance remain separate. Inbox saveAndClose reuses the existing durable owner-bound set-aside operation; it does not save or send through a provider.",
@@ -2235,18 +2235,18 @@
       },
       {
         "path": "packages/app/quint/NativeMediaRouting.qnt",
-        "gitObject": "dc7f8d8e50a142169f5314dc167fd4f00235d3b6",
-        "sha256": "adfe6aca17f2e7b528e1fe5c5bfdaca759a7b4ef73be332c3dbe11d1c8c4707d"
+        "gitObject": "170f33959e1282a856e971e2e3f24c0bc636bb9e",
+        "sha256": "09417be953e27713f06017463168dd3f4f560c3af21b1ad9e7bc83f013de2b4f"
       },
       {
         "path": "packages/app/quint/NativeMediaRouting.cases.json",
-        "gitObject": "9f2b7df1796f46446eee11a268fb0bd96d8ffa11",
-        "sha256": "e485454228280d074a9333c7aaadd9022cab2a460bc37468dc4db772fc0298ec"
+        "gitObject": "62672a1f2a521e13fceab3eac5793f926408cb06",
+        "sha256": "bbf1e16be02663d4da05000a458d8582b627dee3bf6df8706278278ebaf280be"
       },
       {
         "path": "packages/app/quint/check-native-media-routing.mjs",
-        "gitObject": "6cfada75dba87c2f42e3971a86586922997b71dd",
-        "sha256": "93439fed72001256b4bd8d0fd39f7ad932a1cc0c62cb8005338cd651cbce346c"
+        "gitObject": "5584172e21312c9d591b5db822ee43e37221a622",
+        "sha256": "68baaab2b154e6b5752e28907999dca1df5bab2b0707c6f5e70eb1bd3de2773e"
       },
       {
         "path": "plugins/plugin-files/quint/SelectedChatAttachment.qnt",
