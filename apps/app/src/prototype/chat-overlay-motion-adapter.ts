@@ -703,7 +703,8 @@ export function installChatOverlayMotion(Component: Shell) {
 			drag &&
 			(s.view !== drag.view ||
 				s.screen !== drag.screen ||
-				s.chat !== drag.mode ||
+				// A comms view's hidden chat rests on its bar (D2), the mode the drag started from.
+				(s.chat === "hidden" && this.isCommsView(s.view) ? "input" : s.chat) !== drag.mode ||
 				s.voice !== "off")
 		)
 			retire(this);

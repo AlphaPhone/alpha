@@ -407,6 +407,7 @@ html.alpha-text-xl:not(.standalone-app) [data-alpha-app-header="main"]:not([data
 .alpha-strip-text span{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .alpha-strip-action{width:44px;height:44px;min-width:44px;border-radius:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:var(--s3);color:var(--fg)}
 .alpha-strip-action[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.alpha-strip-action.alpha-end-button{background:var(--alpha-call-red);color:var(--alpha-white)}
 .alpha-strip-action.alpha-end-button svg{transform:rotate(135deg)}
 .alpha-answer-button{background:var(--alpha-call-green);color:var(--alpha-white)}
 .alpha-strip-send{background:var(--acc);color:var(--alpha-white)}

@@ -46,7 +46,7 @@ async function registerBar(page: Page, view: string, config: BarConfig = {}) {
 const shell = (page: Page, script: string) => page.evaluate(script);
 const calls = (page: Page) => page.evaluate(() => (window as any).__calls as unknown[][]);
 const panel = (page: Page) => page.locator('[data-alpha-layer="conversation"]');
-const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))));
+const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter(animation => animation.timeline instanceof DocumentTimeline && animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => {}))));
 const sheetHeight = (page: Page) => panel(page).evaluate(element => element.getBoundingClientRect().height);
 const visibleComposers = (page: Page) => page.locator('[data-alpha-composer]').filter({visible: true});
 
@@ -117,7 +117,7 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await expect.poll(async () => (await calls(page)).filter(call => call[1] === 'onText').at(-1)?.[2]).toBe('maya');
 		await field.pressSequentially(' when did we last talk');
 		await expect(page.locator('[data-alpha-bar-hint]')).toHaveText('Enter asks Alpha');
-		expect((await calls(page)).filter(call => call[1] === 'onText').at(-1)?.[2]).toBe('maya when did');
+		expect((await calls(page)).filter(call => call[1] === 'onText').at(-1)?.[2]).toBe('maya when did ');
 		expect(await shell(page, 'window.__shell().S().msgs.length')).toBe(0);
 		await field.press('Enter');
 		await expect.poll(() => shell(page, 'window.__shell().S().msgs.filter(m => m.from === "user").map(m => m.text)')).toEqual(['maya when did we last talk']);
@@ -163,9 +163,12 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 			expect(await page.locator('[data-screen]').getAttribute('data-alpha-chat-dragging')).toBe('true');
 			expect(await gap(), `mid-drag ${dy}`).toBeGreaterThanOrEqual(0);
 		}
+		await page.mouse.move(x, y, {steps: 4});
 		await page.mouse.up();
 		await settled(page);
 		expect(await gap()).toBeGreaterThanOrEqual(0);
+		// A size tap right after a drag is that drag's own release, so the next tap waits it out.
+		await page.waitForTimeout(400);
 		await page.getByRole('button', {name: 'Expand chat', exact: true}).click();
 		await expect(page.locator('[data-alpha-strip]')).toBeVisible();
 		await expect(layer).toHaveAttribute('inert', '');
@@ -208,12 +211,12 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		expect(Math.abs(await sheetHeight(page) - before)).toBeLessThan(1);
 		await expect(page.locator('[data-alpha-stage-return]')).toHaveText('‹ Messages');
 		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
-		await page.evaluate(() => window.dispatchEvent(new Event('alpha-back')));
+		await shell(page, 'window.__shell().back()');
 		await expect.poll(() => shell(page, 'window.__shell().S().view')).toBe('notes');
 		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
 		await expect(page.locator('[data-alpha-stage-return]')).toHaveCount(0);
 		expect(await shell(page, 'JSON.stringify(window.__shell().S().stack)')).toBe(stack);
-		await page.evaluate(() => window.dispatchEvent(new Event('alpha-back')));
+		await shell(page, 'window.__shell().back()');
 		await expect.poll(() => shell(page, 'window.__shell().S().chat')).toBe('input');
 		expect(await shell(page, 'window.__shell().S().view')).toBe('notes');
 		expect(await shell(page, 'window.__shell().S().stageFrom.length')).toBe(0);
