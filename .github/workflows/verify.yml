@@ -3,7 +3,7 @@ name: Verify
 # the Lemma proofs run in promotion.yml when develop is promoted to main; authors run the
 # browser tests locally before finalising a pull request.
 on:
-  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -20,6 +20,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
+          ref: 6e8731a227131ccd953bc610c9ed357e885bd5df
+      - name: Verify the reviewed source identity
+        run: |
+          test "$(git rev-parse HEAD)" = '6e8731a227131ccd953bc610c9ed357e885bd5df'
+          test "$(git rev-parse HEAD^{tree})" = '2f2427ab0b218564251d088a8ca85ed700195307'
+          test "$(git -C vendor/eliza rev-parse HEAD)" = 'a81d7059045f9b96b8c85ffa79b731d3ba574159'
       # bun run verify's LemmaScript fixture tests run on genuine Node.js.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
