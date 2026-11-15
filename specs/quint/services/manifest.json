@@ -3047,7 +3047,7 @@
       "staleAnswerDroppedTest",
       "editResetsOperationTest",
       "deliveryEvidenceTest",
-      "readBackReleasesClosedIdWithoutSendTest",
+      "cancelledJournalReceiptReleasesIdTest",
       "refusedBeforeJournalTest",
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
@@ -4819,6 +4819,7 @@
       "carrierAnswerReadBackTest",
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
+      "cancelledJournalReceiptReleasesIdOnReturnTest",
       "lateJournalReceiptRetiresDraftTest",
       "staleCancelledAnswerReleasesIdOnShowTest",
       "staleDeniedAnswerReleasesIdOnShowTest"
