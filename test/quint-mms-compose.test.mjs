@@ -119,7 +119,7 @@ function create() {
       const byId = (map, missing) => Object.fromEntries(IDS.map((key, index) => [key, map.get(ids[index]) ?? missing]));
       return {busy: model.nativeBusy, pictures: model.nativeAttachments.length, chooser: input !== null, operationId: held.mmsOperationId ? ordinal(held.mmsOperationId) : 0,
         minted: ids.length, call: call ? ordinal(call.operationId) : 0, reply: call ? call.reply : 'none',
-        journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(model.nativeNotice) : 'none'};
+        journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(held.notice) : 'none'};
     },
     effects: () => ({ids: [...ids], call: call?.operationId ?? null, journal: [...journal], dispatches: [...dispatches]}),
     close() {

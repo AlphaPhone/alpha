@@ -143,12 +143,13 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   assert.deepEqual(calls[0].review.recipients,['+15555550100','+15555550101']);assert.deepEqual(calls[0].review.attachments.map(a=>[a.name,a.contentType,[...a.bytes]]),[['picture-1.jpg','image/jpeg',[1,2,3]],['picture-2.png','image/png',[4,5]]]);
   pending[0].reject(Error('transport lost'));await tick();await tick();assert.match(model().nativeNotice,/May have sent/);
   model().nativeSendMms();await tick();await tick();assert.equal(calls[1].operationId,calls[0].operationId,'an uncertain MMS is never given a fresh ID');
-  pending[1].resolve({status:'submitted'});await tick();await tick();assert.match(model().nativeNotice,/submitted/);
+  pending[1].resolve({status:'submitted'});await tick();await tick();assert.equal(model().nativeNotice,'','submission shows no status text');
   mmsUpdated('someone-else');await tick();assert.equal(reads.length,0,'another operation is not read');
-  mmsUpdated(calls[0].operationId);await tick();await tick();assert.equal(reads.length,1);assert.equal(reads[0].review,calls[0].review,'the result is bound to the reviewed content');assert.match(model().nativeNotice,/carrier accepted the MMS; delivery is not confirmed/);
+  mmsUpdated(calls[0].operationId);await tick();await tick();assert.equal(reads.length,1);assert.equal(reads[0].review,calls[0].review,'the result is bound to the reviewed content');assert.equal(model().nativeNotice,'','successful read-back shows no status text');
   assert.equal(model().nativeAttachments.length,0,'a sent MMS clears the composer and its pictures');assert.equal(model().nativeBody,'');
   model().nativeOnBody({target:{value:'one more'}});model().nativeAttach();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
-  pending[2].resolve({status:'cancelled'});await tick();await tick();assert.match(model().nativeNotice,/Cancelled — MMS not sent/);
+  pending[2].resolve({status:'cancelled'});await tick();await tick();assert.equal(model().nativeNotice,'','cancellation shows no status text');
+  assert.equal(model().nativeBody,'one more','cancellation preserves the draft');
   model().nativeClear();assert.equal(model().nativeAttachments.length,0);
   owner.view='home';owner.componentDidUpdate();owner.componentWillUnmount();
  }finally{globalThis.document=priorDocument;restoreWindow();delete globalThis.__mmsFixture;rmSync(dir,{recursive:true,force:true});}

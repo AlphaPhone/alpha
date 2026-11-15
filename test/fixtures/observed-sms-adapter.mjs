@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {build} from 'esbuild';
 import {repositoryRoot} from '../../specs/quint/refinement/services/identity-comms-traces.mjs';
 
-/** Read the actual held draft identities separately from the last sent receipt. This adds only
+/** Read the actual held draft identities and internal outcome separately from their display. This adds only
  * a closure observation; every adapter statement, native request and journal path still runs. */
 export async function observedSmsAdapter(stubs) {
   const entries = Object.entries(stubs).map(([pattern, contents]) => [new RegExp(pattern), contents]);
@@ -21,7 +21,7 @@ export async function observedSmsAdapter(stubs) {
         const source = readFileSync(path, 'utf8'), marker = ' const sync=()=>{';
         assert.equal(source.split(marker).length, 2, 'one actual SMS draft-observation seam');
         return {loader: 'ts', contents: source.replace(marker,
-          ' globalThis.__smsDraftProbe=()=>({operationId,mmsOperationId,sentId:sent?.id,mmsSentId:mmsSent?.id,active,body});\n' + marker)};
+          ' globalThis.__smsDraftProbe=()=>({operationId,mmsOperationId,sentId:sent?.id,mmsSentId:mmsSent?.id,active,body,notice});\n' + marker)};
       });
     }}]});
   return import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);

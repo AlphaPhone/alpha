@@ -538,10 +538,10 @@
     <sc-if value="{{messages.nativeMore}}"><div style="display:flex;justify-content:center"><button aria-label="Older messages" onClick="{{messages.nativeLoadMore}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M6 15l6-6 6 6"></path></svg></button></div></sc-if>
     <div style="flex-grow:1"></div>
     <sc-for list="{{messages.bubbles}}" as="m">
-     <div style="align-self:{{m.side}};max-width:280px;display:flex;flex-direction:column;gap:2px;align-items:{{m.side}}">
+     <div data-alpha-message-id="{{m.id}}" style="align-self:{{m.side}};max-width:280px;display:flex;flex-direction:column;gap:2px;align-items:{{m.side}};opacity:{{m.opacity}}">
       <sc-if value="{{m.picture}}"><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5"></path></svg>{{m.pictureLabel}}</span></sc-if>
       <sc-if value="{{m.hasText}}"><div style="background:{{m.bg}};color:{{m.fg}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap">{{m.text}}</div></sc-if>
-      <sc-if value="{{m.failed}}"><span style="font-size:13px;color:var(--alpha-call-red)">Not sent</span></sc-if>
+      <sc-if value="{{m.failed}}"><svg class="i" role="img" aria-label="Message failed" viewBox="0 0 24 24" style="width:16px;height:16px;color:var(--alpha-call-red)"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6m0 3h.01"></path></svg></sc-if>
      </div>
     </sc-for>
    </div>
@@ -552,6 +552,9 @@
     <input type="tel" data-alpha-messages-recipients aria-label="To" placeholder="To" disabled="{{messages.nativeBusy}}" value="{{messages.nativeRecipients}}" onChange="{{messages.nativeOnRecipients}}" maxlength="230" style="flex-grow:1;min-width:0;height:44px;padding:0 16px;border-radius:22px;background:var(--s2);font-size:16px;font-family:inherit;color:inherit;border:0;outline:0;box-sizing:border-box">
    </div>
    <div class="scr" data-alpha-messages-picks style="flex-grow:1;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
+    <sc-for list="{{messages.newBubbles}}" as="m">
+     <div data-alpha-message-id="{{m.id}}" style="width:fit-content;max-width:min(280px,calc(100% - 32px));margin:8px 16px 0 auto;background:{{m.bg}};color:{{m.fg}};opacity:{{m.opacity}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap">{{m.text}}</div>
+    </sc-for>
     <sc-for list="{{messages.picks}}" as="c">
      <button aria-label="{{c.label}}" onClick="{{c.pick}}" disabled="{{messages.nativeBusy}}" style="display:flex;align-items:center;gap:12px;width:100%;padding:6px 20px;min-height:60px;text-align:left;box-sizing:border-box">
       <span aria-hidden="true" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">{{c.ini}}</span>
@@ -564,6 +567,7 @@
   <sc-if value="{{messages.showComposer}}">
    <div data-alpha-messages-composer style="flex-shrink:0;display:flex;flex-direction:column;gap:8px;padding:0 12px 26px">
     <sc-if value="{{messages.hasNotice}}"><p role="status" data-alpha-messages-notice style="margin:0 8px;font-size:13px;line-height:1.35;color:var(--mut)">{{messages.nativeNotice}}</p></sc-if>
+    <sc-if value="{{messages.sendFailed}}"><svg class="i" role="img" aria-label="Message failed" viewBox="0 0 24 24" style="width:16px;height:16px;margin:0 8px;color:var(--alpha-call-red)"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6m0 3h.01"></path></svg></sc-if>
     <div style="display:flex;flex-wrap:wrap;gap:4px 12px;padding:0 8px;color:var(--mut);font-size:13px">
      <sc-if value="{{messages.needsSendAccess}}"><button onClick="{{messages.nativeSendAccess}}" disabled="{{messages.nativeBusy}}" style="min-height:44px;text-decoration:underline">Allow SMS send access</button></sc-if>
      <sc-if value="{{messages.needsSimAccess}}"><button onClick="{{messages.nativeSimAccess}}" disabled="{{messages.nativeBusy}}" style="min-height:44px;text-decoration:underline">Allow SIM access</button></sc-if>
