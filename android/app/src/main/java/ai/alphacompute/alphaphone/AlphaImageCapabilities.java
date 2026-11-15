@@ -12,6 +12,10 @@ final class AlphaImageCapabilities {
  private AlphaImageCapabilities(){}
  static final ImageCapability IMAGE=new ImageCapability(true,BuildConfig.DEBUG,false,
   R.bool.alpha_aosp_image_capability);
+ // Both development and release images allow a silent check of existing grants. This capability
+ // only changes setup presentation and never enables image-only services or grants access.
+ private static final ImageCapability STARTUP_DEFAULTS = new ImageCapability(true, false, false, 0);
+ static boolean startupPermissionDefaults(Context context) { return STARTUP_DEFAULTS.admitted(context); }
  /** A provisioned release launcher installed from a system partition (no image feature read). */
  static boolean aospImage(Context context){return IMAGE.provisioned(context);}
  // Provisioning is necessary but not sufficient: Telecom/SMS roles remain unavailable.

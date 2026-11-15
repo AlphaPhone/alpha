@@ -5,7 +5,6 @@ import {connectionController} from './runtime/connection-ui';
 import {googleConnectionController} from './runtime/google-connection-ui';
 import {startupPhotoAccess,startupLocationAccess,startupFilesAccess,lateReadyNotice,STARTUP_PERMISSIONS_REOPEN} from './startup-permission-flow';
 import {iconStyle} from './icon-style';
-import {detectTelephonyProfile} from '../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {Busy,StatusDot} from './runtime/status-ui';
 import {browserStartupPermission} from './startup-browser-permissions';
 import {createStartupPermissionFlow, startupPermissionKeys, nativeStartupPermissionKeys, type NativeStartupPermissionKey as PermissionKey, type StartupPermissionState} from './startup-permission-flow';
@@ -24,6 +23,7 @@ const location = registerPlugin<{checkPermissions(): Promise<{location: string}>
 const photos = registerPlugin<{scope():Promise<unknown>;requestAccess():Promise<unknown>}>('AlphaPhotoLibrary');
 const calendar = registerPlugin<{checkPermissions(): Promise<{calendar: string}>; requestAccess(): Promise<{status: string}>}>('AlphaCalendar');
 const device = registerPlugin<{openSettings(options: {page: 'notifications' | 'privacy'}): Promise<unknown>}>('AlphaDevice');
+const deviceApps = registerPlugin<{platformCapabilities(): Promise<{startupPermissionDefaults?: boolean}>}>('DeviceApps');
 const files = registerPlugin<{storageState(): Promise<{access?: string}>; storageRequestAccess(options?: {settings?: boolean}): Promise<{access?: string}>}>('AlphaFiles');
 const details = {
   notifications: {title: 'Notifications', icon: 'bell', reason: 'Reminders and updates'},
@@ -63,7 +63,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const [silent,setSilent] = useState(false);
   const locationDescription=useRef(''),photoDescription=useRef('');
   const native = Capacitor.getPlatform() === 'android';
-  const image = detectTelephonyProfile(Capacitor.getPlatform(), (Capacitor as typeof Capacitor & {PluginHeaders?: unknown}).PluginHeaders, 'AlphaTelephony');
+  const [imageDefaults, setImageDefaults] = useState<boolean | undefined>(native ? undefined : false);
   const keys: readonly PermissionKey[] = native ? nativeStartupPermissionKeys : startupPermissionKeys;
   const [flows] = useState(() => {
     const nativeBridges = {
@@ -99,20 +99,38 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const key = target ?? keys[progress?.step ?? 0];
   const state = states[key];
   const shown = (active || ready) && (enabled || reopened) && !connection.open && !googleOpen;
-  // The Alpha image grants this access at first boot (scripts/stage-aosp.ts LAUNCHER_DEFAULT_PERMISSIONS
-  // and AlphaSharedStoragePolicy), so first setup there passes a row Android already reports as allowed
-  // without a tap. A stalled read exposes Checking and Skip after the usual wait. A row that is off still stops and asks; a Settings
-  // review shows every row.
-  const granted = image && active && !ready && !target && !review && (state === 'ready' || (state === 'checking' && !canSkip));
-  const visible = shown && !granted;
+  // The image grants startup access at first boot. Read Android's current grants and
+  // pass the allowed steps. Missing access, stalled checks and Settings reviews still show the panel.
+  const automaticImageSetup = imageDefaults === true && !reopened && !target && !review;
+  const hideAccessPanel = automaticImageSetup && active && !ready && (state === 'ready' || (state === 'checking' && !canSkip));
+  const waitingForImage = imageDefaults === undefined && active && !reopened;
+  const visible = shown && !hideAccessPanel && !waitingForImage;
+  useEffect(() => {
+    if (!native) return;
+    let current = true;
+    const finish = (image: boolean) => {
+      if (!current) return;
+      current = false;
+      clearTimeout(timeout);
+      setImageDefaults(image);
+    };
+    const timeout = setTimeout(() => finish(false), 1500);
+    void Promise.resolve().then(() => deviceApps.platformCapabilities())
+      .then(value => finish(value?.startupPermissionDefaults === true), () => finish(false));
+    return () => { current = false; clearTimeout(timeout); };
+  }, [native]);
+  const revokeNotice = connection.previousSignInUnconfirmed && connection.message ? 'Check sign-in' : '';
+  const accountAttention = !!(connection.error || revokeNotice || connection.residentPlanNotice === 'needs-plan' || connection.residentInference === 'unavailable');
   const writeProgress = (value: Progress | null, choices = value?.choices ?? []) => {
+    let saved = true;
     if (!reviewRef.current) try {
       writeStartupPermissionProgress(localStorage, {version: native ? 4 : 1, status: value ? 'pending' : 'completed', step: value?.step ?? keys.length, ...(choices.includes('skipped') ? {choices} : {})}, native);
       setProgressError(false);
-    } catch { setProgressError(true); }
+    } catch { saved = false; setProgressError(true); }
     // Browser storage may be blocked. Keep the current session usable without
     // claiming durable storage or treating a reviewed step as an OS grant.
     progressRef.current = value; setProgress(value);
+    return saved;
   };
 
   const invalidatePending = () => {
@@ -217,10 +235,23 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     if (!currentInteraction()) return;
     if (target) {setActive(false); return;}
     const current = progress ?? {version: 3 as const, step: 0, choices: []};
-    if (current.step + 1 < keys.length) writeProgress({version: 3, step: current.step + 1, choices: [...current.choices, choice]});
-    else {finalChoices.current=[...current.choices, choice];writeProgress(null, finalChoices.current);setActive(false);setReady(true);}
+    const choices = [...current.choices, choice];
+    if (current.step + 1 < keys.length) {
+      writeProgress({version: 3, step: current.step + 1, choices});
+      return;
+    }
+    finalChoices.current = choices;
+    const saved = writeProgress(null, choices);
+    if (automaticImageSetup && saved && !accountAttention && choices.every(value => value === 'continued')) {
+      // Keep the existing late sign-in error path while the resident finishes connecting.
+      setSilent(connection.busy);
+      finish(false);
+      return;
+    }
+    setActive(false);
+    setReady(true);
   }
-  useEffect(() => {if (shown && granted && state === 'ready' && !busy) advance('continued');}, [shown, granted, state, busy, key]);
+  useEffect(() => {if (shown && hideAccessPanel && state === 'ready' && !busy) advance('continued');}, [shown, hideAccessPanel, state, busy, key]);
   function skip() {
     if (!canSkip || !currentInteraction()) return;
     ++sequence.current;flows[key].cancel();actionPending.current=false;setBusy(false);
@@ -251,12 +282,12 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     } catch {if (contextCurrent(ticket, credentialId)) setStates(previous => ({...previous, [key]: 'unavailable'}));}
     finally {if (id === action.current) {actionPending.current = false; if (alive.current) setBusy(false);}}
   }
-  function finish() {
+  function finish(retryProgress = progressError) {
     if(actionPending.current || !currentInteraction())return;
     // Completing the walkthrough records choices, never permission authority.
     // Each feature still checks current OS/browser access when it is used.
     // A failed completion write is retried here; the session continues either way.
-    if(progressError&&!reviewRef.current)writeProgress(null,finalChoices.current);
+    if(retryProgress&&!reviewRef.current)writeProgress(null,finalChoices.current);
     setActive(false);setReady(false);
     if(!reopened)window.dispatchEvent(new Event('launcher-home'));
   }
@@ -264,7 +295,6 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   if(ready){
     // A missing plan is known at admission. Setup does not wait for the agent to start, so this notice does not either.
     const aiNotice=connection.residentPlanNotice==='needs-plan'?'No plan':connection.residentInference==='unknown'?'AI · checking':connection.residentInference==='unavailable'?'AI off':'';
-    const revokeNotice=connection.previousSignInUnconfirmed&&connection.message?'Check sign-in':'';
     const attention=!!(aiNotice||connection.error||revokeNotice||progressError);
     const title='All set';
     return <dialog ref={dialog} className="alpha-startup-permissions" aria-label={title} data-attention={attention||undefined} onCancel={event=>{event.preventDefault();if(reviewRef.current)close();else finish();}}><div className="alpha-permission-content">

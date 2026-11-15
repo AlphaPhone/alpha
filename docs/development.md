@@ -524,6 +524,13 @@ Complete it in this order:
 
    For production Cloud acceptance on the Pixel, use the admitted release APK.
    Android requires a separate device or fresh installation when the installed copy uses an incompatible signer.
+   For Google sign-in, verify the installed build's `eliza.app` App Link with
+   `adb shell pm get-app-links --user cur ai.alphacompute.alphaphone` and make
+   sure the image has an external browser that can sign in to Google. A passing
+   Cloud redirect or published App Links file does not verify either condition on
+   the phone. An unregistered debug signer cannot receive the production return.
+   The probe's phone sign-in result checks whether Cloud offers SMS without a
+   captcha; it sends no code and does not establish delivery.
 3. Qualify the exact signed baseline and establish it on both installation
    paths before exposing the phones to a newer offer. If using
    `scripts/provision-unit.ts`, provision before recording the baseline's version
