@@ -265,7 +265,6 @@ export function installSmsAdapter(Component:any,views:Bag){
   const firstAttempt=!operationId||!smsReview;
   if(firstAttempt){operationId=crypto.randomUUID();smsReview={...checked.review,subscriptionId:checked.review.subscriptionId as number};}
   const id=operationId,review=smsReview!;
-  notice='';
   if(firstAttempt&&review.recipients.length===1){
    outgoing.set(id,{id,threadId:session.state.thread,review,startedAt:Date.now(),seen:new Set(threadRows().map(row=>row.id))});
    paint();showLatest();
