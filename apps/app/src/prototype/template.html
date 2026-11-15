@@ -988,6 +988,7 @@
             </sc-for>
             <input aria-label="To" placeholder="{{inbox.c.toPh}}" value="{{inbox.c.toQ}}" disabled="{{inbox.c.busy}}" onChange="{{inbox.c.onTo}}" onKeyDown="{{inbox.c.toKey}}" style="flex:1;min-width:110px;width:100%;height:38px;border:0;outline:0;background:transparent;color:var(--fg);font-size:16px;padding:0">
           </div>
+          <sc-if value="{{inbox.c.contactsAvailable}}"><button class="ib" aria-label="Choose contact" aria-expanded="{{inbox.c.contactsExpanded}}" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.openContacts}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/user-round.svg');-webkit-mask-image:url('/icons/lucide/user-round.svg')"></span></button></sc-if>
           <sc-if value="{{inbox.c.local}}"><button class="ib" aria-label="Cc and Bcc" aria-expanded="{{inbox.c.showRecipientDetails}}" onClick="{{inbox.c.toggleRecipientDetails}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/chevron-down.svg');-webkit-mask-image:url('/icons/lucide/chevron-down.svg')"></span></button></sc-if>
         </div>
         <sc-if value="{{inbox.c.hasRaw}}">
@@ -1005,7 +1006,9 @@
         </sc-if>
 
         <sc-if value="{{inbox.c.showSendHint}}"><button aria-label="Sending off · Turn on in Settings" onClick="{{inbox.openSendSettings}}" style="align-self:flex-start;min-height:36px;margin:8px 0;padding:0 12px;border-radius:18px;background:var(--s2);font-size:13px;display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="{{ic.lock}}"></path></svg>Sending off · <span style="color:var(--acct);font-weight:600">Turn on</span></button></sc-if>
-        <sc-if value="{{inbox.c.canSaveProvider}}"><button disabled="{{inbox.c.busy}}" onClick="{{inbox.c.saveProvider}}" aria-label="Save to Gmail drafts" style="padding:12px 0;text-align:left;color:var(--acct)">Save to Gmail</button></sc-if>
+        <sc-if value="{{inbox.c.recipientStatus}}"><div role="status" style="font-size:13px;color:var(--mut);padding:8px 0">{{inbox.c.recipientStatus}}</div></sc-if>
+        <sc-if value="{{inbox.c.contactsNeedsAccess}}"><button disabled="{{inbox.c.contactsBusy}}" onClick="{{inbox.c.allowContacts}}" style="min-height:44px;text-align:left;color:var(--acct)">Allow Contacts</button></sc-if>
+        <sc-if value="{{inbox.c.moreContacts}}"><button disabled="{{inbox.c.contactsBusy}}" onClick="{{inbox.c.loadMoreContacts}}" style="min-height:44px;text-align:left;color:var(--acct)">More contacts</button></sc-if>
         <sc-if value="{{inbox.c.local}}"><div role="status" style="font-size:12px;color:var(--mut);padding:8px 0">{{inbox.c.status}}</div></sc-if>
         <sc-if value="{{inbox.c.recoveryVisible}}"><div role="status" aria-label="Unsaved edits status" style="font-size:12px;color:var(--mut);padding:8px 0"><span class="settings-dot" data-dot="warn" aria-hidden="true"></span>{{inbox.c.retainedStatus}}</div></sc-if>
         <sc-if value="{{inbox.c.retainedConflict}}"><div><button aria-label="Restore my edits" onClick="{{inbox.c.restoreEdits}}" style="min-height:44px;padding:12px">Restore</button><button aria-label="Replace my saved edits" onClick="{{inbox.c.replaceEdits}}" style="min-height:44px;padding:12px">Replace</button></div></sc-if>
@@ -2310,7 +2313,7 @@
       <div style="display: flex; align-items: center; gap: 4px">
         <button class="ib" aria-label="Back to place" onClick="{{maps.dr.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
         <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
-          <sc-if value="{{maps.native}}"><input aria-label="Starting point" placeholder="Search or enter coordinates" value="{{maps.originText}}" onChange="{{maps.onOrigin}}" onKeyDown="{{maps.originKey}}" style="height:32px;border:0;background:transparent;color:var(--fg);font-size:15px;width:100%"><button aria-label="Use current location for route" onClick="{{maps.originLocation}}" style="min-height:48px;font-size:15px;text-align:left;color:var(--acct);display:flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="{{ic.mapsLoc}}"></path></svg>My location</button></sc-if>
+          <sc-if value="{{maps.native}}"><div style="display:flex;align-items:center;gap:6px"><input aria-label="Starting point" placeholder="{{maps.originPlaceholder}}" value="{{maps.originText}}" onFocus="{{maps.originFocus}}" onChange="{{maps.onOrigin}}" onKeyDown="{{maps.originKey}}" style="height:44px;border:0;background:transparent;color:var(--fg);font-size:16px;flex:1;min-width:0"><button class="ib" aria-label="Use my location" onClick="{{maps.originLocation}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mapsLoc}}"></path></svg></button></div></sc-if>
           <div style="display: flex; align-items: center; gap: 12px; height: 32px; font-size: 15px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px; color: var(--acct)"><path d="{{ic.pin}}"></path></svg>{{maps.dr.name}}</div>
         </div>
       </div>

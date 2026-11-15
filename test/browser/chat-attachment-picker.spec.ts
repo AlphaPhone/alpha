@@ -44,7 +44,8 @@ async function setup(page:Page) {
   (window as any).attachmentFixture=fixture;
  });
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
- await page.getByRole('button',{name:'Attach files',exact:true}).click();
+ await page.getByRole('button',{name:'Chat actions',exact:true}).click();
+ await page.getByRole('dialog',{name:'Chat actions',exact:true}).getByRole('button',{name:'Attach media',exact:true}).click();
  const picker=page.getByRole('dialog',{name:'Attach files',exact:true});
  await expect(picker).toBeVisible();
  await picker.getByRole('button',{name:'Files',exact:true}).click();

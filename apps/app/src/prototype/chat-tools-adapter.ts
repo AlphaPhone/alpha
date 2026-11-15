@@ -1,6 +1,5 @@
 import {connectionController} from '../runtime/connection-ui';
 import {createInlineModal} from '../runtime/inline-modal';
-import {runFilePicker} from '../browser/file-picker';
 
 type Shell = Record<string, any>;
 
@@ -63,15 +62,17 @@ export function installChatTools(Component: {prototype: Shell}) {
       if (query.length < 2) {shell.chatSearchResults = [];shell.chatSearchMore=false;shell.chatSearchError='';shell.chatSearchBusy = false;shell.setState({});return;}
       const abort = shell.chatSearchAbort = new AbortController();
       const owner = binding();
+      const current = () => !abort.signal.aborted && shell.live && shell.chatSearchOpen
+        && !shell.S().secure && !document.hidden && binding() === owner;
       shell.chatSearchBusy = true;
       shell.chatSearchError = '';
       shell.setState({});
       void connectionController.searchMessages(query, abort.signal, append ? (shell.chatSearchResults?.length || 0) : 0).then(results => {
-        if (abort.signal.aborted || !shell.live || binding() !== owner || shell.chatSearchQuery.trim() !== query) return;
+        if (!current() || shell.chatSearchQuery.trim() !== query) return;
         shell.chatSearchResults = append ? [...shell.chatSearchResults, ...results] : results;
         shell.chatSearchMore = results.length === 50;
       }).catch(error => {
-        if (!abort.signal.aborted && shell.live && binding()===owner) shell.chatSearchError = error instanceof Error ? error.message : 'Search could not finish.';
+        if (current()) shell.chatSearchError = error instanceof Error ? error.message : 'Search could not finish.';
       }).finally(() => {
         if (shell.chatSearchAbort === abort) {shell.chatSearchBusy = false;shell.setState({});}
       });

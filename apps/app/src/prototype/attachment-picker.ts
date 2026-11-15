@@ -73,7 +73,7 @@ export class ChatAttachmentPicker {
   private readonly modal;
 
   constructor(private readonly changed:()=>void,private readonly storage:PickerFiles=files) {
-    this.modal=createInlineModal(()=>this.finish([]),()=>document.querySelector('button[aria-label="Attach files"]'),{coverAssistant:true});
+    this.modal=createInlineModal(()=>this.finish([]),()=>document.querySelector('button[aria-label="Chat actions"]'),{coverAssistant:true});
   }
   choose(signal:AbortSignal,maximum:number,current:()=>boolean):Promise<File[]> {
     this.finish([],false);
