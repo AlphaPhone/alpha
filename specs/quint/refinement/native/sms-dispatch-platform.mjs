@@ -65,6 +65,10 @@ public final class Manifest {public static final class permission {
 }}`,
   'android/os/Build.java': `package android.os;
 public final class Build {public static final class VERSION {public static final int SDK_INT=35;}}`,
+  'android/os/SystemClock.java': `package android.os;
+public final class SystemClock {
+ public static long elapsedRealtime(){throw new AssertionError("Notification receipt clock outside dispatch fixture");}
+}`,
   'android/app/role/RoleManager.java': `package android.app.role;
 import java.util.function.BooleanSupplier;
 public final class RoleManager {
@@ -156,7 +160,7 @@ public final class KeyguardManager {public boolean locked;public boolean isDevic
   'android/app/Activity.java': `package android.app;
 import java.util.*;
 import android.content.Context;
-public final class Activity {
+public class Activity {
  public static final int RESULT_OK=-1;
  public final Context context;
  public final List<AlertDialog> dialogs=new ArrayList<>();
@@ -164,6 +168,13 @@ public final class Activity {
  public Activity(Context context){this.context=context;}
  public boolean isFinishing(){return closing;}
  public boolean isDestroyed(){return destroyed;}
+}`,
+  'ai/alphacompute/alphaphone/MainActivity.java': `package ai.alphacompute.alphaphone;
+import android.app.Activity;
+import android.content.Context;
+public final class MainActivity extends Activity {
+ public MainActivity(Context context){super(context);}
+ public boolean isAssistantSurface(){throw new AssertionError("Notification handoff outside dispatch fixture");}
 }`,
   'android/view/WindowManager.java': `package android.view;
 public interface WindowManager {final class LayoutParams{public static final int FLAG_SECURE=8192;}}`,

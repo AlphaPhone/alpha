@@ -34,6 +34,26 @@ public class AlphaTelephonyPlugin extends TelephonyPlugin {
  @Override protected SmsTelephonyConfiguration configuration() { return AlphaTelephony.CONFIGURATION; }
  @Override protected String unavailableMessage() { return AlphaImageCapability.UNAVAILABLE; }
 
+ @PluginMethod public void smsNoticePending(PluginCall call) {
+  if (refused(call)) return;
+  JSObject result = new JSObject();
+  if (getActivity() instanceof MainActivity && !((MainActivity) getActivity()).isAssistantSurface()) {
+   SmsNoticeOpenRequest.Tap tap = SmsNoticeOpenRequest.current();
+   if (tap != null) {
+    result.put("threadId", tap.threadId);
+    result.put("token", tap.token);
+   }
+  }
+  call.resolve(result);
+ }
+
+ @PluginMethod public void acknowledgeSmsNotice(PluginCall call) {
+  if (refused(call)) return;
+  if (getActivity() instanceof MainActivity && !((MainActivity) getActivity()).isAssistantSurface())
+   SmsNoticeOpenRequest.acknowledge(call.getString("token"));
+  call.resolve();
+ }
+
  /** Bounded same-profile reads, cancelled on background and checked again before publication. */
  @PluginMethod public void searchContacts(PluginCall call) {
   if (refused(call)) return;

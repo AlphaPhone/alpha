@@ -18,7 +18,7 @@ const model='NativeMmsDispatch';
 const shared='plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/';
 const extracted=['TelephonyPlugin','MmsStore','SmsProviderReader'];
 const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal','MmsPdu'];
-const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
+const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver','SmsNoticeOpenRequest'].map(name=>app+name+'.java');
 const paths=[...extracted,...compiled].map(name=>shared+name+'.java');
 const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const harness='MmsDispatchTraces.java';

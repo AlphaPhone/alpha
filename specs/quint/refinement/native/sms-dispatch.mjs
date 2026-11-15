@@ -19,7 +19,7 @@ const modulePath='plugins/plugin-native-messages/android';
 const shared=modulePath+'/src/main/java/ai/eliza/plugins/messages/';
 const members=['TelephonyPlugin','MmsStore','SmsProviderReader'];
 const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal'];
-const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
+const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver','SmsNoticeOpenRequest'].map(name=>app+name+'.java');
 const paths=[...members,...compiled].map(name=>shared+name+'.java');
 const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const patchManifest='android/upstream-native-sources.json';

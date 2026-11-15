@@ -11,6 +11,9 @@ export type TelephonyFixture = {
   voicemail?: 'ready' | 'unconfigured' | 'unsupported';
   empty?: boolean;
   singleUnread?: boolean;
+  smsNoticeThread?: string;
+  controlledSms?: boolean;
+  smsRoleHeld?: boolean;
 };
 
 export async function setupTelephony(page: Page, options: TelephonyFixture = {}) {
@@ -20,7 +23,15 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.androidBridge = {};
     w.telephonyCalls = [];
     w.telephonyInputs = [];
-    const granted = options.granted !== false, direct = options.sendMode !== 'handoff';
+    const messageListeners = new Map<string, {eventName: string; callback: (data: unknown) => void}>();
+    let listenerSequence = 0;
+    w.smsProviderChanged = () => {
+      for (const listener of messageListeners.values()) {
+        if (listener.eventName === 'messagesChanged') listener.callback({});
+      }
+    };
+    if (options.smsNoticeThread) w.smsNoticeTap = {threadId: options.smsNoticeThread, token: '1'};
+    const granted = options.granted !== false, direct = options.sendMode !== 'handoff', smsRoleHeld = options.smsRoleHeld ?? direct;
     w.access = {callLog: granted, sms: granted, contacts: granted, phoneState: granted, sendSms: granted && direct};
     if (options.singleUnread) w.readThreads = ['thread:103'];
     const now = Date.now(), minute = 60_000, hour = 60 * minute, day = 24 * hour;
@@ -79,8 +90,8 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
       version: 2, voiceCapable: true, smsCapable: true,
       permissions: {contacts: w.access.contacts ? 'granted' : 'prompt', phoneState: w.access.phoneState ? 'granted' : 'prompt', sms: w.access.sms ? 'granted' : 'prompt', sendSms: w.access.sendSms ? 'granted' : 'prompt', callLog: w.access.callLog ? 'granted' : 'prompt'},
       sendMode: w.access.sendSms && w.access.phoneState ? 'direct' : 'handoff', mmsSend: false,
-      roles: {dialer: {available: true, held: true, eligible: true}, sms: {available: true, held: direct, eligible: true}},
-      defaultDialer: 'ai.alphacompute.alphaphone', defaultSms: direct ? 'ai.alphacompute.alphaphone' : 'com.android.messaging',
+      roles: {dialer: {available: true, held: true, eligible: true}, sms: {available: true, held: smsRoleHeld, eligible: true}},
+      defaultDialer: 'ai.alphacompute.alphaphone', defaultSms: smsRoleHeld ? 'ai.alphacompute.alphaphone' : 'com.android.messaging',
       subscriptions: w.access.phoneState ? [{id: 1, slot: 0, displayName: 'Synthetic SIM', carrierName: 'Synthetic Carrier', defaultSms: true, defaultVoice: true}] : null, defaultSmsSubscriptionId: w.access.phoneState ? 1 : null,
     });
     const wav = () => {
@@ -94,12 +105,20 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     const names = ['AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
     const methods = ['addListener', 'removeListener', 'surfaceInfo', 'readPending', 'readPendingResult', 'readDelegationCallback', 'readSecret', 'secureRead', 'secureWrite', 'secureRemove', 'get', 'save', 'remove', 'status', 'getStatus', 'getState', 'state', 'permissionState', 'permissions', 'list', 'listCalendars', 'listEvents', 'listReminders', 'listBookmarks', 'getBookmarks', 'bookmarks', 'settings', 'getSettings', 'buildInfo', 'platformCapabilities', 'capabilities', 'query', 'read', 'readJournal', 'getPending', 'readSelection', 'requestPermissions', 'create', 'edit',
       'imageCapability', 'requestAccess', 'requestRole', 'searchContacts', 'listRecentCalls', 'dial', 'placeCall', 'composeSms', 'listThreads', 'listMessages', 'observeMessages', 'markThreadRead', 'sendSms', 'cancelSmsReview', 'smsSendHistory', 'smsSendResult',
+      'smsNoticePending', 'acknowledgeSmsNotice',
       'voicemailStatus', 'listVoicemail', 'fetchVoicemailAudio', 'voicemailAudio', 'voicemailPcm', 'markVoicemailHeard', 'deleteVoicemail', 'observeVoicemail', 'callState', 'answerCall', 'endCall', 'setCallAudio', 'observeCalls', 'sendCallTone', 'setGoogleAgentAccess', 'phoneInfo', 'openSettings'];
-    w.Capacitor = {Plugins: {}, PluginHeaders: names.map(name => ({name, methods: methods.map(name => ({name, rtype: name === 'addListener' ? 'callback' : 'promise'}))})), nativeCallback: () => 'fixture-callback', nativePromise: async (plugin: string, method: string, input: any) => {
+    w.Capacitor = {Plugins: {}, PluginHeaders: names.map(name => ({name, methods: methods.map(name => ({name, rtype: name === 'addListener' ? 'callback' : 'promise'}))})), nativeCallback: (plugin: string, method: string, input: any, callback: (data: unknown) => void) => {
+      const id = String(++listenerSequence);
+      if (plugin === 'AlphaTelephony' && method === 'addListener') messageListeners.set(id, {eventName: input.eventName, callback});
+      return id;
+    }, nativePromise: async (plugin: string, method: string, input: any) => {
       if (plugin === 'AlphaTelephony') {
         w.telephonyCalls.push(method); w.telephonyInputs.push([method, input]);
         if (w.telephonyAnswers?.[method]) return w.telephonyAnswers[method](input);
+        if (method === 'removeListener') { messageListeners.delete(input.callbackId); return {}; }
         if (method === 'imageCapability') return {version: 1, image: true, feature: 'fixture.image'};
+        if (method === 'smsNoticePending') return w.smsNoticeTap || {};
+        if (method === 'acknowledgeSmsNotice') { if (w.smsNoticeTap?.token === input.token) w.smsNoticeTap = undefined; return {}; }
         if (method === 'status') return status();
         if (method === 'requestAccess') { w.access[input.access] = true; return status(); }
         if (method === 'searchContacts') { const query = String(input.query || '').toLowerCase(); return {contacts: people.filter(p => !query || p.name.toLowerCase().includes(query) || p.phones.some(n => n.includes(query))).slice(0, input.limit).map(p => ({id: p.id, lookupKey: `lookup-${p.id}`, displayName: p.name, phoneNumbers: p.phones, emailAddresses: p.emails, starred: false}))}; }
@@ -116,6 +135,26 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
         if (method === 'listMessages') return {messages: [...(w.messages[input.threadId] || [])].reverse().slice(0, input.limit), next: null};
         if (method === 'markThreadRead') { w.readThreads = [...(w.readThreads || []), input.threadId]; return {status: 'marked'}; }
         if (method === 'composeSms') return {status: 'handed-off', target: 'sms', handler: 'com.android.messaging', message: 'Your messaging app is open with the draft.'};
+        if (method === 'sendSms' && options.controlledSms) {
+          const {body, recipients, subscriptionId, operationId} = input;
+          const createdAt = Date.now();
+          return new Promise(resolve => {
+            w.smsReview = {
+              addProviderRow(id: number, threadId: string) {
+                const row = {...message(id, threadId, false, 0, body, recipients[0]), date: createdAt, subscriptionId};
+                w.messages[threadId] = [...(w.messages[threadId] || []), row];
+              },
+              async finish(status: 'sent' | 'submitted' | 'cancelled' | 'denied' | 'failed') {
+                const bytes = new TextEncoder().encode(JSON.stringify({body, recipients, subscriptionId, type: 'sms_send'}));
+                const hash = await crypto.subtle.digest('SHA-256', bytes);
+                const bindingHash = [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+                const parts = status === 'cancelled' || status === 'denied' ? []
+                  : [{index: 0, recipientIndex: 0, partIndex: 0, sent: status === 'sent' ? 'success' : status === 'failed' ? 'failed' : 'unknown', delivery: 'unknown'}];
+                resolve({kind: 'sms-send', operationId, subscriptionId, bindingHash, status, parts, createdAt});
+              },
+            };
+          });
+        }
         if (method === 'smsSendHistory') return {receipts: []};
         if (method === 'phoneInfo') return {access: {phoneState: true, phoneNumbers: true, deviceIdentifiers: false}, lines: [{subscriptionId: 1, slot: 0, displayName: 'Synthetic SIM', carrierName: 'Synthetic Carrier', number: '+15550100100', countryIso: 'us', networkType: '5g', roaming: false, signalLevel: 3, embedded: false, iccid: null, imei: null}]};
         if (method === 'callState') return w.callState || {calls: []};
@@ -138,5 +177,5 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     }};
   }, options);
   await page.goto('/');
-  await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
+  if (!options.smsNoticeThread) await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
 }
