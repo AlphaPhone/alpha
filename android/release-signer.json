@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Reviewed v76 Cloud launcher with crop, attachment and native image operation repairs. Preserve the current signer and lineage.",
+  "description": "Reviewed v77 Cloud launcher with shared attachments, clean native call controls, durable drafts and trusted single-SIM agent context. Preserve the current signer and lineage.",
   "signerSha256": "edbfcacb1da689008bf4e7d675176c302decf83161a877eb8b1de4ffae0445ed",
   "lastRelease": {
     "versionCode": null,
@@ -11,27 +11,27 @@
     "schema": 1,
     "approval": "approved",
     "fromVersionCode": 49,
-    "versionCode": 76,
+    "versionCode": 77,
     "previousSignerSha256": "0438dccb2d5e83fc2ad1ab11cbb882f837d97c4aee7cba72af9229c39b149b80",
     "lineageSha256": "bca212509a83e8f2e60d2b9b744b1e0a4a014b780be058dcf81ff88a5d593759",
     "apksignerSha256": "b47549e373b895ce6ca620d0c7887e674d9615ffa837a86ac601dcfd04adb0f0",
     "verifierJarSha256": "3716d9311e55d2b0918a2fd9d54ba9e406c5f6abeea700b287f11259bc163dec",
     "unsignedApkSHA256": {
-      "launcher": "bad6c64acf475385a788fe8216c4b5ce297c30282674a2f221731c4b3d26df71"
+      "launcher": "ab5466a4e68a3c6f4adb4fbd022326d0a799adc66cee9e0619fbf04f935795e1"
     },
     "preserveSignaturePermissions": true
   },
   "privateProducerApproval": {
-    "alphaCommit": "bec05a99549cea496a0ec52b2da1d7df7c51e7a3",
-    "sdkCommit": "7a1afe1ded2725fa3268637feb64b20b95052286",
-    "versionCode": 76,
-    "archiveSHA256": "3ae6cd6a8c987efd23a4b0b117a4d3797aeb082e8cad92a395d4e2d09537a89d",
-    "archiveBytes": 633886898,
-    "producerManifestSHA256": "d954942c6749377b2689d8ca767fb9fc8284569ebf3123e4a0742981cc3db92b",
-    "privateProducerReceiptSHA256": "8fef23d73fbfaa192086052958e0ace857c8bc4ea5dacd54f0846247423a7ad1",
+    "alphaCommit": "68d393f8e6bbebaa2da8df9826085b5b9287e64f",
+    "sdkCommit": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
+    "versionCode": 77,
+    "archiveSHA256": "2163593c31d987538fa2bee332616c63082ef91f7cbdf24b023fc4b41eb601e2",
+    "archiveBytes": 634011036,
+    "producerManifestSHA256": "5ad4b8ef30202682a293259ece18776ba38e5df72f0c24eb601a02e8d28ee7f7",
+    "privateProducerReceiptSHA256": "2f8187a6557ebfeffc19f721bfe22ce2df2b8e11180e486355391582855231a9",
     "unsignedApkSHA256": {
-      "standalone": "71f45c5c6791378d76dab459af5281fc0b97b4a209c8cbd6fe0e080f273b9cbd",
-      "launcher": "bad6c64acf475385a788fe8216c4b5ce297c30282674a2f221731c4b3d26df71"
+      "standalone": "dbbc7d6f932031336e3ab78ec271db7abd74a291fb1503d594596fd2d2b92d10",
+      "launcher": "ab5466a4e68a3c6f4adb4fbd022326d0a799adc66cee9e0619fbf04f935795e1"
     },
     "updateChannel": {
       "kind": "public",
