@@ -1,8 +1,7 @@
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {app, directory} from './java.mjs';
-import {mainActivityPlatform} from './main-activity-platform.mjs';
+import {mainActivityPlatform, mainActivitySources} from './main-activity-platform.mjs';
 import {modelTraces, replayJava} from './itf-replay.mjs';
 
 // The activity's started state is an input here, so the lifecycle port carries it.
@@ -22,7 +21,7 @@ export function checkRendererBackgroundRebuild({traces = 60, maxSteps = 40} = {}
     const surfaces = state => Object.values(state.surfaces);
     return replayJava({
       harness: 'RendererBackgroundRebuildReplay.java',
-      sources: [app + 'MainActivity.java', app + 'RendererRecoveryBudget.java', app + 'NavigationOpenRequest.java', `${directory}/MainActivityPorts.java`, ...fixture.paths],
+      sources: [...mainActivitySources, ...fixture.paths],
       traces: generated,
       required: ['start', 'stop', 'rendererDies', 'report', 'repeatReport', 'timerFires', 'reload', 'recreated', 'windowPasses'],
       reached: {
