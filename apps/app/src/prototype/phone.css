@@ -8,8 +8,12 @@ html:not([data-alpha-keyboard-navigation]) :focus{outline:none!important}
 html:not([data-alpha-keyboard-navigation]) .maplibregl-ctrl :focus{box-shadow:none!important}
 /* Pressing a launcher tile (Home or the Apps library) fades its icon; the tile itself stays as it is. */
 html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:var(--surface)}
-html :is([data-mobile-shell-tile-face],[data-launcher-app]>button>:first-child){transition:opacity .12s ease-out}
-html :is([data-mobile-shell-tile]:active [data-mobile-shell-tile-face],[data-launcher-app]>button:active>:first-child){opacity:.55}
+[data-mobile-shell-tile-face]>:is(img,[aria-hidden="true"]:not([data-alpha-home-remove])):first-child,
+[data-launcher-app]>button>img:first-child,
+[data-launcher-app]>button>:first-child>[aria-hidden="true"]{transition:opacity .12s ease-out}
+[data-mobile-shell-tile]:active [data-mobile-shell-tile-face]>:is(img,[aria-hidden="true"]:not([data-alpha-home-remove])):first-child,
+[data-launcher-app]>button:active>img:first-child,
+[data-launcher-app]>button:active>:first-child>[aria-hidden="true"]{opacity:.55}
 .alpha-phone{position:absolute!important;left:var(--phone-left,0px)!important;top:var(--phone-top,0px)!important;width:var(--phone-width,412px)!important;height:var(--phone-height,915px)!important;padding:0!important;display:block!important;transform-origin:top left;transform:scale(var(--phone-scale,1));background:var(--bg)!important}
 .browser-desktop body{background:var(--alpha-desktop-backdrop)}
 .browser-desktop .alpha-phone{box-shadow:0 12px 60px var(--alpha-shadow-soft);border-radius:24px;overflow:hidden}
