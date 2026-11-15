@@ -14,7 +14,7 @@ import { workflowApprovalNotice, type WorkflowPhoneReview } from '../runtime/wor
 import type { WorkflowNoticeRoute } from '../runtime/device-actions';
 import { connectionController, agentAvailabilityNotice, residentAlwaysPresent } from '../runtime/connection-ui';
 import { testMocksEnabled } from '../build-flags';
-import { showAgentStatus } from './workflow-authoring';
+import { showWorkflowAgentUnavailable } from './workflow-authoring';
 import { WorkflowAdmissionRejected, WorkflowMetadataRejected, WorkflowLifecycleRejected, WorkflowActivationRejected, type RemoteWorkflow, type WorkflowRun, type WorkflowApproval, type WorkflowApprovalReceipt } from '../runtime/workflow-protocol';
 import { describePhoneTrigger, normalizePhoneSpec, type PhoneTimeTrigger } from '../runtime/phone-workflow-authoring';
 type Bag=Record<string,any>;
@@ -219,7 +219,7 @@ export function installWorkflowAdapter(Component:any,views:Bag){
   catch(error){if(valid()){lifecycleAvailable=false;publish();}throw error;}
  };
  async function work(task:(client:NonNullable<ReturnType<typeof connectionController.getWorkflowClient>>['client'],signal:AbortSignal,valid:()=>boolean,sessionId:string,intents:WorkflowIntentStore)=>Promise<void>){
-  if(operation)return;const binding=connectionController.getWorkflowClient();if(!binding){showAgentStatus(owner);return;}
+  if(operation)return;const binding=connectionController.getWorkflowClient();if(!binding){showWorkflowAgentUnavailable(owner);return;}
   const controller=new AbortController(),token=++generation,account=runAccountKey();operation=controller;phase='busy';publish();
   // A result read for one signed-in account is never applied after another account signed in.
   const valid=()=>token===generation&&!controller.signal.aborted&&binding.sessionId===connectionController.getWorkflowClient()?.sessionId&&(!account||runAccountKey()===account);
@@ -241,7 +241,7 @@ export function installWorkflowAdapter(Component:any,views:Bag){
  };
  // A run card in chat opens that exact run: its workflow is read first, then the run's own receipt.
  p.openWorkflowRun=function(workflowId:string,runId:string){
-  if(this!==owner)return;if(!connectionController.getWorkflowClient()){showAgentStatus(this);return;}
+  if(this!==owner)return;if(!connectionController.getWorkflowClient()){showWorkflowAgentUnavailable(this);return;}
   this.openView('workflows');
   void open(workflowId).then(()=>{if(this!==owner||this.S().view!=='workflows'||detail?.id!==workflowId)return;const run=runs.find(r=>r.id===runId&&r.workflowId===workflowId);if(run)void read(run);else api?.toast('Pending');});
  };
@@ -337,7 +337,7 @@ export function installWorkflowAdapter(Component:any,views:Bag){
    homeWorkflowTitle:rows.length?'':!binding?'Connect':listPhase==='failed'?'Couldn’t load':listPhase==='ready'?'No workflows yet':'Loading workflows…',
    homeWorkflowTime:!binding||listPhase!=='ready'?'':saved.length>2?`+${saved.length-2} more`:saved.length?'View '+(saved.length===1?'workflow':'workflows'):'',
    homeWorkflowLabel:!binding?'Connect agent':listPhase==='failed'?'Retry workflows':'Open workflows',
-   goFlows:()=>{if(!binding){showAgentStatus(this);return;}if(listPhase==='failed'){void refresh();return;}if(!operation)phase='idle';this.openView('workflows');}
+   goFlows:()=>{if(!binding){showWorkflowAgentUnavailable(this);return;}if(listPhase==='failed'){void refresh();return;}if(!operation)phase='idle';this.openView('workflows');}
   };
  };
 

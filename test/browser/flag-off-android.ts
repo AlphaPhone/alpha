@@ -478,7 +478,7 @@ export async function residentHome(page: Page) {
   await expect(button(page, 'Notes')).toBeVisible();
   await completeAccessSetup(page);
 }
-/** Production sign-in is a page; signed-in agent controls live in Settings. */
+/** Opens the required sign-in gate or the signed-in agent activity page. */
 export async function openYourAgent(page: Page) {
   const gate = page.locator('[role="main"].alpha-cloud-sign-in');
   if (await gate.isVisible()) return gate;
@@ -486,10 +486,9 @@ export async function openYourAgent(page: Page) {
   const minimize = page.getByRole('button', { name: 'Minimize chat', exact: true });
   if (await minimize.isVisible()) await minimize.click();
   await button(page, 'Settings').click();
-  // Recovery and conversation controls live under Settings › About › Status.
   await page.getByRole('button', { name: 'About', exact: true }).click();
-  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  await page.getByRole('button', { name: 'Agent activity', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Settings', exact: true });
-  await expect(panel.getByRole('heading', {name:'Status',exact:true})).toBeVisible();
+  await expect(panel.getByRole('heading', {name:'Agent activity',exact:true})).toBeVisible();
   return panel;
 }

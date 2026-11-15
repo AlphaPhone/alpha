@@ -39,14 +39,18 @@ module DevelopmentHost {
   action signOut = all { not(s.retiring), s.host == "stopped", s.generation < 2,
     s' = { ...s, credential: 0, claim: 0, loginPending: false, active: Set(),
       repliedOwner: 0, generation: s.generation + 1 } }
-  action childFailed = all { s.childCount > 0,
+  action residentExited = all { not(s.stopping), s.childCount == 2,
+    s' = { ...s, childCount: 1 } }
+  action restartResident = all { not(s.stopping), s.childCount == 1,
+    s' = { ...s, childCount: 2 } }
+  action previewExited = all { not(s.stopping), s.childCount > 0,
     s' = { ...s, stopping: true, childCount: s.childCount - 1 } }
   action stopChildren = s' = { ...s, stopping: true, childCount: 0 }
   action close = all { s.host == "stopped", s' = { ...s, closed: true, active: Set(), loginPending: false } }
   action step = {
     nondet id = Set(1, 2).oneOf()
     any { beginLogin, receiveClaim, retireResident, stopped, commitCredential, bind, ready,
-      request(id), response(id), cancel(id), expire, signOut, childFailed, stopChildren, close, s' = s }
+      request(id), response(id), cancel(id), expire, signOut, residentExited, restartResident, previewExited, stopChildren, close, s' = s }
   }
   val BoundedRequests = s.active.size() <= 2
   val CurrentResponse = s.repliedOwner == 0 or s.repliedOwner == s.credential
@@ -71,5 +75,9 @@ module DevelopmentHost {
   run failedRetirementStopsReplacementTest = init.then(retireResident).expect(s.retiring and s.host == "retiring" and safety)
   run expiryStopsInferenceTest = init.then(beginLogin).then(receiveClaim).then(commitCredential).then(bind).then(ready)
     .then(expire).expect(s.bound == 0 and s.host == "stopped" and safety)
-  run childrenStopTogetherTest = init.then(childFailed).then(stopChildren).expect(s.childCount == 0 and s.stopping and safety)
+  run childrenStopTogetherTest = init.then(previewExited).then(stopChildren).expect(s.childCount == 0 and s.stopping and safety)
+  run residentRestartsTest = init.then(residentExited).then(restartResident)
+    .then(residentExited).then(restartResident).expect(s.childCount == 2 and not(s.stopping) and safety)
+  run previewStopsDuringRetryTest = init.then(residentExited).then(previewExited)
+    .expect(s.childCount == 0 and s.stopping and safety)
 }

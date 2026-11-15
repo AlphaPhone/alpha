@@ -117,7 +117,7 @@ test('a second sign-in over a saved key uses the native replacement result witho
   await residentStub(page, { nativeSignIn:true, emptyKeystore: true, accounts: [A, B] });
   await page.goto('/');
   await setStub(page, { nextToken: A.token });
-  // P-43: the resident starts signed out; sign-in is offered from Settings › Agent connection.
+  // P-43: the resident starts signed out and the sign-in gate opens.
   await expect.poll(() => harness(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
   let welcome = await openYourAgent(page);
   await enterNativeEmailCode(page,undefined,{checkLayout:true});

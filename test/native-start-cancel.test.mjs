@@ -30,3 +30,22 @@ test('a start that completes sends no cancellation',async()=>{
  const result=await new LocalAgentProtocol().connect(new AbortController().signal);
  assert.equal(result.name,'Agent');assert.deepEqual(cancels,[]);
 });
+
+test('failed starts and a still-starting attachment leave the native startup alone',async()=>{
+ const cancels=[];
+ agent.cancelStart=async input=>{cancels.push(input);};
+ agent.start=async()=>{throw Object.assign(Error('Start pending'),{code:'start-failed'});};
+ const signal=new AbortController().signal;
+ for(let attempt=0;attempt<130;attempt++)
+  await assert.rejects(new LocalAgentProtocol().connect(signal),{code:'start-failed'});
+ assert.deepEqual(cancels,[]);
+
+ agent.start=async()=>({state:'ready',attached:true});
+ const identity={identity:{id:'00000000-0000-4000-8000-000000000001',kind:'owner'},access:{role:'OWNER',mode:'local'}};
+ let status='starting';
+ agent.request=async({path})=>({status:200,body:JSON.stringify(path==='/api/auth/me'?identity:{agents:[{id:'00000000-0000-4000-8000-000000000002',name:'Agent',status}]})});
+ await assert.rejects(new LocalAgentProtocol().connect(signal),{code:'LOCAL_AGENT_NOT_READY'});
+ assert.deepEqual(cancels,[]);
+ status='running';
+ assert.equal((await new LocalAgentProtocol().connect(signal)).attached,true);
+});

@@ -21,7 +21,12 @@ function fixture(device) {
   const requests = [];
   const document = {hidden: false};
   const shell = {live: true, pageSuspended: false, notesSourceMode: 'canonical', notesSourceEpoch: 0,
-    previousNotesProbeKey: null, S: () => ({view: visible ? 'notes' : 'home'}), setState: () => {paints++;}};
+    previousNotesProbeKey: null, S: () => ({view: visible ? 'notes' : 'home'}),
+    vget(key) {
+      assert.equal(key, 'notes');
+      return {previousNotesMenu: false};
+    },
+    setState: () => {paints++;}};
   const startProbe = signal => {
     const request = {id: requests.length + 1, signal};
     requests.push(request);

@@ -6,7 +6,7 @@ import {openWorkflowFilters,workflowFilterLabel,type WorkflowTypeFilter,type Wor
 import {FEED_FILTERS,passesFilter,type FeedFilter} from '../../../../.eliza/client-features/packages/ui/src/utils/automation-feed-filter';
 import {AutomationsProtocol,AutomationOutcomeError,automationIssue,automationLocalDateInput,automationWhen,workflowDeviceTimeZone,mergeAutomationRows,scheduledTaskEnded,scheduledSnoozeAt,type AutomationRow,type AutomationIssue,type PromptDraft,type ReminderDraft,type AutomationRequest} from '../runtime/automations-protocol';
 import {connectionController,agentPendingText,agentAvailabilityNotice} from '../runtime/connection-ui';
-import {showAgentStatus} from './workflow-authoring';
+import {showWorkflowAgentUnavailable} from './workflow-authoring';
 import {DailyApps,type Reminder} from '../daily';
 import {WorkflowIntentStore,workflowIntentKey} from '../runtime/workflow-intents';
 import {createWorkflowRequestRecovery} from '../runtime/workflow-request-recovery';
@@ -131,7 +131,7 @@ export function installAutomationsAdapter(Component:any,views:Bag){
   finally{if(ticket===epoch){controller=null;publish();}}
  }
  async function work(task:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>,rowKey?:string){
-  if(controller)return;const selected=binding();if(!selected){showAgentStatus(owner);return;}
+  if(controller)return;const selected=binding();if(!selected){showWorkflowAgentUnavailable(owner);return;}
   const ownerContext=connectionController.getSnapshot().session;if(!ownerContext)return;
   const intents=new WorkflowIntentStore(ownerContext),ticket=++epoch,abort=controller=new AbortController();let dispatched=false,retained:string|undefined,sent='';activeMutationKey=rowKey;message='';publish();
   const valid=()=>ticket===epoch&&!abort.signal.aborted&&visible()&&selected.sessionId===binding()?.sessionId;

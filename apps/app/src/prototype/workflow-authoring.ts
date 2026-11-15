@@ -7,7 +7,7 @@ import {browserDevProfile} from '../browser/dev-profile';
 import { registerPlugin } from '../platform-plugins';
 import { browserLocalAgentEnabled } from '../runtime/local-agent';
 import { developmentWorkflowDraftStore } from '../runtime/local-agent-storage';
-import { connectionController } from '../runtime/connection-ui';
+import { agentPendingText, connectionController } from '../runtime/connection-ui';
 import { normalizePhoneSpec, assertPhoneCapabilities, describePhoneTrigger, phoneTriggerClockChangeNote, type PhoneSpec, type PhoneStep, type PhoneCatalog, type PhoneTimeTrigger } from '../runtime/phone-workflow-authoring';
 import { workflowSha, workflowBytes } from '../runtime/workflow-device-contract';
 import { checkWorkflowScope, WORKFLOW_OPERATION_LABELS } from '../../../../.eliza/client-features/packages/contracts/src/workflow-scope.ts';
@@ -91,7 +91,7 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
  async function localSaved(){await storage?.queue;if(!storage||storage.failed)throw new Error('Resolve local draft storage before saving');}
  function close(){requested=null;unreceipted=false;resendReview=false;describeOn=false;descriptionPrompt='';generated=null;generating=false;active=false;generation++;controller?.abort();controller=null;busy=false;sheet=null;review=null;discard=false;calendars=[];publish();}
  async function open(workflow?:RemoteWorkflow){
-  if(active||busy)return;const binding=connectionController.getWorkflowClient(),session=connectionController.getSnapshot().session;if(!binding||!session){showAgentStatus(owner());return;}
+  if(active||busy)return;const binding=connectionController.getWorkflowClient(),session=connectionController.getSnapshot().session;if(!binding||!session){showWorkflowAgentUnavailable(owner());return;}
   if(storage)retainedDraftState={storage,draft};
   const previousStorage=retainedDraftState?.storage,previousDraft=retainedDraftState?.draft;
   active=true;busy=true;unreceipted=false;resendReview=false;draft=null;catalog=null;storage=null;requested=null;targetName=workflow?.name??'';status='';const token=++generation;controller=new AbortController();const signal=controller.signal;publish();
@@ -242,11 +242,8 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
  return {get active(){return active;},open,close,render,flushForAppUpdate};
 }
 
-type AgentStatusShell = {S():{view?:string|null};openView(view:string,patch?:Record<string,unknown>|null,chat?:unknown,opts?:{push?:boolean}):unknown};
-/** Where a tap on an unavailable agent goes. Product Android hides the connection chooser, so it opens
- * Settings > About > Status (Back returns to the calling view); development and browser builds keep the chooser. */
-export function showAgentStatus(shell:AgentStatusShell|null|undefined){
- if(!shell||!Capacitor.isNativePlatform()||testMocksEnabled){connectionController.open();return;}
- const from=shell.S().view;
- shell.openView('settings',{page:'agent-connection'},undefined,{push:!!from&&from!=='settings'});
+/** Preserve the current view while the on-device agent reconnects. */
+export function showWorkflowAgentUnavailable(shell:{toast(message:string):void}|null|undefined){
+ if(!Capacitor.isNativePlatform()||testMocksEnabled){connectionController.open();return;}
+ shell?.toast(agentPendingText());
 }
