@@ -1,5 +1,6 @@
 import type { CapacitorConfig } from "@capacitor/cli";
-import identity from "./app.config.json" with { type: "json" };
+import {androidIdentity} from './scripts/android-identity.ts';
+const identity = androidIdentity();
 const config: CapacitorConfig = {
   appId: identity.appId,
   appName: identity.appName,

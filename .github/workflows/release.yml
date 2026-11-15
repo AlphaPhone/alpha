@@ -262,7 +262,15 @@ jobs:
           const { apkUpdateChannel, validateUpdateChannel } = await import(pathToFileURL(path.join(sourceRoot, 'scripts/update-channel' + suffix)).href);
           const directory = process.env.ALPHA_ADMITTED_APK_DIR;
           const plan = JSON.parse(fs.readFileSync(path.join(directory, '..', 'pins.json'), 'utf8'));
-          const expectedPackage = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'app.config.json'), 'utf8')).appId;
+          const expectedPackage = execFileSync('python3', ['-B', '-c',
+            'import json,sys;sys.path.insert(0,"scripts/ci");from app_update_producer import release_contract;print(release_contract(json.load(open(sys.argv[1])))["packageName"])',
+            path.join(directory, '..', 'pins.json')], { encoding: 'utf8' }).trim();
+          const sourcePackage = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'app.config.json'), 'utf8')).appId;
+          if (sourcePackage !== expectedPackage) {
+            const { androidIdentity } = await import(pathToFileURL(path.join(sourceRoot, 'scripts/android-identity.ts')).href);
+            if (androidIdentity(sourceRoot, expectedPackage).appId !== expectedPackage)
+              throw new Error('Installation identity is not declared by the reviewed producer source');
+          }
           const channel = validateUpdateChannel(plan.updateChannel);
           const aapt = path.join(process.env.ANDROID_HOME, 'build-tools', '36.0.0', 'aapt');
           for (const variant of process.env.ALPHA_RELEASE_VARIANTS.split(' ')) {

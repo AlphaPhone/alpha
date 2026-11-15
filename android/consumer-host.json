@@ -1,5 +1,11 @@
 {
   "schema": 1,
+  "installedIdentities": [
+    {
+      "appId": "ai.elizaresearch.alphaphone",
+      "updateManifestUrl": "https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-update-stable.json"
+    }
+  ],
   "description": "Alpha's Android host descriptor. The upstream generator (vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs) owns the Gradle setup, toolchain, variants, signing and version policy and writes the build files into android/ (bun scripts/android-host.ts). This file supplies only Alpha's identity inputs, modules, dependencies, admission and installed-data compatibility names. References use the consumer, upstream (vendor/eliza) and dependencies (node_modules) roots; patchedNative names the authenticated staging of android/upstream-native-sources.json.",
   "profile": {
     "schema": 1,
@@ -79,6 +85,7 @@
     },
     "versionOverride": { "versionCode": "ELIZAOS_VERSION_CODE", "versionName": "ELIZAOS_VERSION_NAME" },
     "settingsAdmission": [
+      { "command": ["bun", "scripts/android-host.ts", "--check-identity"], "directory": { "root": "consumer", "path": "." } },
       { "command": ["bun", "scripts/prepare-patched-native.ts"], "directory": { "root": "consumer", "path": "." } }
     ],
     "admission": [
@@ -103,6 +110,7 @@
       { "root": "consumer", "path": "android/upstream-native-sources.json" },
       { "root": "consumer", "path": "scripts/prepare-patched-native.ts" },
       { "root": "consumer", "path": "scripts/android-host.ts" },
+      { "root": "consumer", "path": "scripts/android-identity.ts" },
       { "root": "consumer", "path": "apps/app/src/product/owner-route-table.ts" },
       { "root": "consumer", "path": ".eliza/generated-android/owner-routes.json" }
     ]

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import {androidIdentity} from './android-identity.ts';
 /**
  * Release SBOM: a CycloneDX 1.6 JSON inventory of what the product ships, built offline and
  * deterministically from committed pins (no timestamp; the serial number is derived from content).
@@ -341,7 +342,7 @@ export function buildSbom(root = ROOT, {packagedRuntime = false, apks = null}: S
     if (refs.has(component['bom-ref'])) throw new Error(`Duplicate SBOM component ${component['bom-ref']}`);
     refs.add(component['bom-ref']);
   }
-  const identity = readJson(root, 'app.config.json');
+  const identity = androidIdentity(root);
   const digest = sha256(JSON.stringify(components));
   // Content-derived, so the same inputs always produce the same document.
   const serial = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
@@ -355,7 +356,7 @@ export function buildSbom(root = ROOT, {packagedRuntime = false, apks = null}: S
       properties: [
         property('evidence', `${evidence}; not a scan of the contents of built APK or web bundle bytes`),
         property('bun-lock-sha256', sha256(lockText)),
-        property('android-application-id', identity.appId ?? identity.applicationId ?? 'see app.config.json'),
+        property('android-application-id', identity.appId),
         property('gradle-verification-metadata-sha256', exists(root, GRADLE_METADATA) ? sha256(fs.readFileSync(path.join(root, GRADLE_METADATA))) : 'absent'),
         ...(packagedRuntime ? [property('resident-runtime-source-stamp-sha256', sha256(fs.readFileSync(path.join(root, AGENT_ASSETS, 'alpha-source.json'))))] : [property('not-covered', NOT_COVERED)]),
       ],
