@@ -1,11 +1,12 @@
 import {expect,test} from '@playwright/test';
 import {choosePhotoAction,openOwnedPhotoViewer} from './helpers/owned-photo';
 
-test('the first sent photo stays with its recorded message when history is reopened',async({page})=>{
+for (const failed of [false, true]) {
+test(`the first sent photo stays with its recorded message after ${failed?'a failed reply':'a reply'}`,async({page})=>{
  const outbound:string[]=[];
  await page.route('https://**/*',route=>{outbound.push(route.request().url());return route.abort();});
  await openOwnedPhotoViewer(page,'light','dev');
- const starting=await page.evaluate(async()=>{
+ const starting=await page.evaluate(async failed=>{
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   await connectionController.initialize();
   await connectionController.startDevelopment('local');
@@ -21,14 +22,16 @@ test('the first sent photo stays with its recorded message when history is reope
    fixture.recordedId=crypto.randomUUID();
    fixture.image=options.images?.[0]?.data??'';
    const replyId=crypto.randomUUID();
-   fixture.rows=[{id:fixture.recordedId,clientMessageId:fixture.requestId,role:'user',text,userTextFormat:options.metadata?.userTextFormat},
-    {id:replyId,role:'assistant',text:'Photo received'}];
-   return {text:'Photo received',agentName:'Alpha',userMessageId:fixture.recordedId,messageId:replyId};
+   fixture.rows=[{id:fixture.recordedId,clientMessageId:fixture.requestId,role:'user',text,userTextFormat:options.metadata?.userTextFormat}];
+   if(!failed)fixture.rows.push({id:replyId,role:'assistant',text:'Photo received'});
+   return failed
+    ? {text:'',agentName:'Alpha',userMessageId:fixture.recordedId,interrupted:true}
+    : {text:'Photo received',agentName:'Alpha',userMessageId:fixture.recordedId,messageId:replyId};
   };
   LocalAgentProtocol.prototype.messages=async()=>({messages:structuredClone(fixture.rows)});
   (window as any).photoHistory={room,fixture};
   return {hasSession:!!connectionController.getSnapshot().session,history:connectionController.getSnapshot().history??null,selected:connectionController.getSelectedConversationId()??null};
- });
+ },failed);
  expect(starting).toEqual({hasSession:true,history:null,selected:null});
  await choosePhotoAction(page,'Ask Alpha');
  const draft=page.getByRole('button',{name:'Preview attached photo',exact:true}).getByRole('img');
@@ -37,7 +40,8 @@ test('the first sent photo stays with its recorded message when history is reope
  const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true});
  await composer.fill('What is in this photo?');
  await composer.press('Enter');
- await expect(page.getByText('Photo received',{exact:true})).toBeVisible();
+ if(failed)await expect(page.getByText('Didn’t finish',{exact:true})).toBeVisible();
+ else await expect(page.getByText('Photo received',{exact:true})).toBeVisible();
  const sent=page.getByRole('button',{name:'Preview sent photo',exact:true}).getByRole('img');
  await expect(sent).toHaveAttribute('src',pixels!);
  const receipt=await page.evaluate(async()=>{
@@ -68,3 +72,4 @@ test('the first sent photo stays with its recorded message when history is reope
  await expect(sent).toHaveAttribute('src',pixels!);
  expect(outbound).toEqual([]);
 });
+}
