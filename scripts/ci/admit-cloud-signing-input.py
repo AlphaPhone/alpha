@@ -286,14 +286,14 @@ def native_evidence(data, pin, candidate, source_root=None):
     return candidate["apks"]
 
 
-def debug_apk_members(archive, verified, kind, variants=VARIANTS):
+def debug_apk_members(archive, verified, kind, variants=VARIANTS, *, contract=None):
     members = {}
     for variant in variants:
         name = f"{variant}-debug.apk"
         rows = [row for row in verified["results"] if row.get("mode") == "debug" and row.get("variant") == variant]
         require(len(rows) == 1, "Producer debug APK is required for full verification")
         entry = archive.getinfo(name)
-        require(0 < entry.file_size <= apk_member_limit(kind) and
+        require(0 < entry.file_size <= apk_member_limit(kind, contract) and
                 stat.S_IFMT(entry.external_attr >> 16) in (0, stat.S_IFREG) and not entry.flag_bits & 1,
                 "Invalid debug archive member")
         members[name] = (entry, rows[0]["sha256"])
@@ -348,7 +348,8 @@ def admit(archive, pin, stage=None, *, source_root=None):
     variants = contract["variants"]
     profile = contract["runtimeProfile"]
     package = contract["packageName"]
-    archive_json = decode if kind == CANDIDATE else json.loads
+    current_native = kind == CANDIDATE or kind == PRIVATE_RUNNER and profile == "native" and package == RETAINED_PACKAGE
+    archive_json = decode if current_native else json.loads
     for field in ("alphaCommit", "sdkCommit"):
         require(isinstance(pin.get(field), str) and COMMIT.fullmatch(pin[field]), f"Invalid {field} pin")
     require(type(pin.get("versionCode")) is int and pin["versionCode"] > 0, "Invalid version pin")
@@ -382,7 +383,7 @@ def admit(archive, pin, stage=None, *, source_root=None):
                 private_bytes = data("private-producer.json")
                 require(digest(private_bytes) == pin["privateProducerReceiptSHA256"],
                         "Private producer receipt differs from the reviewed digest")
-                private = json.loads(private_bytes)
+                private = archive_json(private_bytes)
                 require(private["schema"] == 1 and
                         private["producerKind"] == PRIVATE_RUNNER and
                         private["project"] == "alpha-aosp-lab-20261024" and
@@ -457,7 +458,7 @@ def admit(archive, pin, stage=None, *, source_root=None):
                         and row["releaseAdmission"]["blockers"] == ["unsigned release"],
                         f"{variant} is not the reviewed unsigned release")
                 require(row["sha256"] == name_map[name] == apks[variant], f"{variant} APK digests disagree")
-                apk_member = regular_member(names, name, apk_member_limit(kind))
+                apk_member = regular_member(names, name, apk_member_limit(kind, contract))
                 if candidate_apks is not None:
                     require(candidate_apks[variant] == {"file": name, "bytes": apk_member.file_size, "sha256": apks[variant]},
                             f"{variant} candidate receipt differs from the exact APK")
@@ -466,9 +467,9 @@ def admit(archive, pin, stage=None, *, source_root=None):
                             voice["asr"] is True and voice["differences"] == [],
                             f"{variant} candidate requires admitted on-device voice with ASR")
                 release_members[variant] = apk_member
-            if kind == CANDIDATE:
-                # Refuse archives that publication cannot restore before signing.
-                for entry, expected in debug_apk_members(bundle, verified, kind, variants).values():
+            if current_native:
+                # Refuse archives that qualification cannot restore before signing.
+                for entry, expected in debug_apk_members(bundle, verified, kind, variants, contract=contract).values():
                     with bundle.open(entry) as apk:
                         copy_verified(apk, entry.file_size, expected, "Producer debug APK bytes differ")
                 for _, entry, expected in producer_evidence_members(names, producer["files"]):

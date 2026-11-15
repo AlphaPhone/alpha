@@ -278,7 +278,7 @@ class CloudSigningInputTest(unittest.TestCase):
         return {f"repos/{PRODUCER.REPOSITORY}/actions/runs/171/attempts/2": run,
                 f"repos/{PRODUCER.REPOSITORY}/actions/artifacts/202": artifact}
 
-    def write_retained_native(self):
+    def write_retained_native(self, debug=None):
         self.prepare_native_source()
         source = Path(os.environ["ALPHA_NATIVE_SOURCE_ROOT"])
         url = "https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-update-stable.json"
@@ -301,7 +301,7 @@ class CloudSigningInputTest(unittest.TestCase):
         def identity(native):
             for key in ("voice", "embedding"):
                 native[key]["identity"] = PRODUCER.RETAINED_PACKAGE
-        self.write_candidate(change_native=identity)
+        self.write_candidate(debug, change_native=identity)
         with zipfile.ZipFile(self.archive) as bundle:
             candidate = json.loads(bundle.read("app-update-candidate.json"))
             extras = {name: bundle.read(name) for name in bundle.namelist() if name in
@@ -320,7 +320,30 @@ class CloudSigningInputTest(unittest.TestCase):
         raw = json.dumps(private).encode()
         self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(raw)
         self.write_archive({**extras, "private-producer.json": raw})
+        self.pin["archiveBytes"] = self.archive.stat().st_size
+        digest = self.pin["archiveSHA256"]
+        self.pin["privateStorage"].update(inputObject=f"unsigned/{digest}.zip",
+                                          outputObject=f"signed/{digest}/{'d' * 32}/signed-apks.tar")
         return extras, private
+
+    def test_retained_native_uses_the_existing_native_member_bound_only_for_its_contract(self):
+        payload = bytes(4097)
+        self.apk_bytes["launcher-release-unsigned.apk"] = payload
+        self.pin["unsignedApkSHA256"]["launcher"] = ADMISSION.digest(payload)
+        self.verification["results"][0]["sha256"] = ADMISSION.digest(payload)
+        extras, private = self.write_retained_native({"launcher-debug.apk": payload})
+        contract = PRODUCER.input_contract(self.pin)
+        with patch.object(PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            self.assertTrue(ADMISSION.admit(self.archive, self.pin)["inputVerified"])
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.HOSTED_DISPATCH), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "runtimeProfile": "cloud"}), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "packageName": PRODUCER.CANDIDATE_PACKAGE}), 4096)
+        extras["launcher-debug.apk"] = b"changed debug input"
+        self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(json.dumps(private).encode())
+        self.write_archive({**extras, "private-producer.json": json.dumps(private).encode()})
+        with self.assertRaisesRegex(ValueError, "Producer debug APK bytes differ"):
+            ADMISSION.admit(self.archive, self.pin)
 
     def test_retained_native_requires_truthful_profile_complete_native_evidence_and_source_identity(self):
         extras, private = self.write_retained_native()
