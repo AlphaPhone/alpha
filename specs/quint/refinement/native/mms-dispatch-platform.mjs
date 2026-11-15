@@ -151,8 +151,8 @@ import java.io.*;`);
  public OutputStream openOutputStream(Uri row){
   if(!children.containsKey(row))throw new AssertionError("MMS part must be created");
   ByteArrayOutputStream out=new ByteArrayOutputStream();bytes.put(row,out);return out;
- }
- public int delete(Uri uri,String where,String[] args){
+ }`);
+  edit(resolver,' public int delete(Uri uri,String where,String[] args){',` private int deleteMms(Uri uri){
   long id=ContentUris.parseId(uri);
   if(mms.remove(id)==null)return 0;
   String prefix=uri+"/";
@@ -160,7 +160,9 @@ import java.io.*;`);
   bytes.keySet().removeIf(key->key.toString().startsWith(prefix));
   deletedMms++;
   return 1;
- }`);
+ }
+ public int delete(Uri uri,String where,String[] args){
+  if(uri.toString().startsWith("content://mms/"))return deleteMms(uri);`);
   edit(resolver,'  if(refuseInsert)return null;',`  if(refuseInsert)return null;
   if(uri.toString().startsWith("content://mms/")){
    if(!context.role)throw new AssertionError("Only default role can persist MMS");
