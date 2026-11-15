@@ -44,7 +44,8 @@ test.describe('dev Contacts (?mode=dev&fixture=1 dev build with ELIZA_DEV_ALLOW_
   });
 
   test('a sentence is not a filter; Enter asks Alpha, whose answer filters the list behind a chip that clears it', async ({page}) => {
-    await page.locator(field).pressSequentially('Who do I know at Lumen?');
+    // A whole sentence at once: typed word by word, its first words would filter (D9).
+    await page.locator(field).fill('Who do I know at Lumen?');
     await expect(row(page, 'Sam Okafor')).toBeVisible();
     await page.locator(field).press('Enter');
     await expect(page.locator(chip)).toContainText('Lumen · 1');

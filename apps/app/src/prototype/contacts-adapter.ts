@@ -2,7 +2,7 @@ import { registerPlugin } from '../platform-plugins';
 import { watchReturnToApp } from './native-adapter';
 import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
-import { setListFilterHandler } from '../runtime/comms-bar';
+import { applyListFilter, setListFilterHandler } from '../runtime/comms-bar';
 import {contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
@@ -128,7 +128,14 @@ export function installContactsAdapter(Component:any,views:Bag){
  /* AP-16 bar: the model's Contacts bar over the rows read on the device. Alpha gets no briefing from
     the address book: its rows never enter agent context. */
  const bar=views.contacts.bar;
- views.contacts.bar=(st:Bag,viewApi:Bag)=>({...bar({...st,list:shown()},viewApi),briefing:null});
+ views.contacts.bar=(st:Bag,viewApi:Bag)=>{
+  const spec=bar({...st,list:shown()},viewApi);
+  if(!spec)return spec;
+  /* The prototype adapter leaves reference controls unavailable; on the image the list field is the
+     provider query (setListFilterHandler below). Emptying it keeps a filter Alpha applied. */
+  const closed=spec.target?.kind==='list'?{...spec.closed,onText:(text:string)=>{if(!text&&viewApi.get('contacts').chip)return;applyListFilter('contacts',{query:text,label:text,by:'owner'});}}:spec.closed;
+  return {...spec,closed,briefing:null};
+ };
  views.contacts.render=function(st:Bag,viewApi:Bag){
   const api=viewApi;setApi(viewApi);
   if(st.open&&st.open!==detailFor&&readable)void loadDetail(String(st.open));

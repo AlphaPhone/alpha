@@ -1176,9 +1176,10 @@ export function installChatOverlayMotion(Component: Shell) {
 		};
 		// An outside tap lowers the sheet or dock without activating what it uncovers.
 		// A drag has no click, so it collapses on release. Assistive technology can
-		// still activate app controls directly.
+		// still activate app controls directly. A comms view stays live above the sheet (staged, or an emergency call): its
+		// controls (draft Send, the call card, list chips) take their own taps (AC-02).
 		out.scrimPE =
-			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface
+			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface && !out.comms
 				? "auto"
 				: "none";
 		const ownedPress = (event: PointerEvent) => {
