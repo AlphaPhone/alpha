@@ -928,7 +928,9 @@
       "replacementAbortsRequestsTest",
       "failedRetirementStopsReplacementTest",
       "expiryStopsInferenceTest",
-      "childrenStopTogetherTest"
+      "childrenStopTogetherTest",
+      "residentRestartsTest",
+      "previewStopsDuringRetryTest"
     ],
     "abstractions": [
       "One private profile, two credentials and requests, serial resident replacement, immutable deployment choice.",
