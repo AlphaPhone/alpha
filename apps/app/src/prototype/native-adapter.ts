@@ -220,7 +220,7 @@ export function installPrototypeNativeAdapters(
     if (module === 'phone') {
       if (key === 'dialCall') return () => perform(module, api, 'phone', { query: text(api.get('phone').dial) });
       if (key === 'call' || key === 'play') return native('phone');
-      if (['accept', 'decline', 'endCall', 'endScreen', 'alphaAnswer', 'del'].includes(key) || path.includes('controls.') || path.includes('dkeys.')) return unavailable(api, 'Use Phone app');
+      if (['accept', 'decline', 'endCall', 'endScreen', 'alphaAnswer', 'toggleNotes', 'del'].includes(key) || path.includes('controls.') || path.includes('dkeys.')) return unavailable(api, 'Use Phone app');
       if (key === 'send') return native('messages', { body: text(row.text) });
     }
     if (module === 'messages') {

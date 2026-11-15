@@ -103,6 +103,118 @@ test('a call that replaces another does not inherit the ended call\'s return tar
   same(k.state().ret, {view: 'maps'});
 });
 
+// AP-16 Phone (docs/agentic-comms.md): the whole module with its view definition, against stub people
+// and a view api that records what the shell is asked to do.
+const presenters = await import('../apps/app/src/prototype/telephony-presenters.ts');
+const comms = await import('../apps/app/src/runtime/comms-bar.ts');
+const NOW = new Date(2026, 10, 15, 12).getTime();
+const PHONE_PEOPLE = [{id: 'maya', name: 'Maya Chen', first: 'Maya', ini: 'MC', phone: '(415) 555-0132', fav: true}, {id: 'jordan', name: 'Jordan Park', ini: 'JP', phone: '(212) 555-0187'}];
+function phoneModule() {
+  const source = model.slice(model.indexOf('/* ===== module: phone ===== */'), model.indexOf('/* ===== module: messages ===== */'));
+  const views = {}, ctx = vm.createContext({Date, Math, Object, String, Number, RegExp, JSON, console, crypto: globalThis.crypto,
+    IC: {}, PEOPLE: PHONE_PEOPLE, PN_REC: [], PN_VM: [], PN_SCRIPT: {}, PN_SCREEN: [['alpha', 'Hi'], ['them', 'Hello']], PN_REPLIES: [],
+    copy: () => ({}), person: id => PHONE_PEOPLE.find(p => p.id === id) || null, pad2: n => String(n).padStart(2, '0'),
+    DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], formatTime: d => `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`, formatMonthDay: d => `${d.getMonth() + 1}/${d.getDate()}`,
+    registerView: (key, def) => { views[key] = def; }, ...presenters, ...comms});
+  vm.runInContext(source + '\nglobalThis.out={PN, pnEnd};', ctx);
+  return {view: views.phone, ...ctx.out};
+}
+function phoneApi(initial, shell = {view: 'phone', chat: 'input', stack: []}, staged = false) {
+  let state = {recents: [], vms: [], ...initial}; const log = [];
+  const api = {name: 'Alpha', S: shell, now: new Date(NOW), isActive: () => shell.view === 'phone', swallowed: () => false,
+    get: () => state, set: patch => { log.push(['set', patch]); state = {...state, ...patch}; },
+    stage: (...args) => log.push(['stage', ...args]), stageBack: () => { log.push(['stageBack']); return staged; },
+    open: (...args) => log.push(['open', ...args]), shell: patch => log.push(['shell', patch]), toast: text => log.push(['toast', text]),
+    stop() {}, stopBg() {}, later() {}, laterBg() {}, every() {}, everyBg() {}};
+  Object.defineProperty(api, 'st', {get: () => state});
+  return {api, log, state: () => state};
+}
+
+test('Alpha asks before a call: the reply is a proposal naming the number, and only its approval stages the call', () => {
+  const {view} = phoneModule(), h = phoneApi({});
+  const named = view.reply('call maya', 'call maya', h.api);
+  same(named, {text: 'Call Maya Chen?', proposal: {id: named.proposal.id, kind: 'call', title: 'Call Maya Chen', detail: '(415) 555-0132', button: 'Call', acts: true,
+    act: {mod: 'phone', fn: 'callApproved'}, args: {pid: 'maya', num: ''}}});
+  same(view.reply('call 415 555 0199', 'call 415 555 0199', h.api).proposal.args, {pid: null, num: '(415) 555-0199'});
+  same(h.log, [], 'proposing sets, opens and dials nothing');
+  view.actions.callApproved(named.proposal, h.api);
+  same(h.log, [['stage', 'phone', {call: 'maya', num: ''}, null]]);
+});
+
+test('ending a staged call returns the stage first; an owner-started call keeps its return target', () => {
+  for (const staged of [true, false]) {
+    const P = phoneModule(), h = phoneApi({call: 'maya', callWho: 'maya', ret: {view: 'contacts', patch: {open: 'maya'}}}, {view: 'phone', chat: 'sheet', stack: ['contacts']}, staged);
+    P.PN.live = 'maya';
+    P.pnEnd(h.api);
+    same(h.log.filter(([kind]) => kind !== 'set'), staged ? [['stageBack']] : [['stageBack'], ['open', 'contacts', {open: 'maya'}], ['shell', {stack: []}]]);
+  }
+  const P = phoneModule(), h = phoneApi({call: 'maya', callWho: 'maya'}, undefined, true);
+  P.PN.live = 'maya';
+  P.pnEnd(h.api, {quiet: true});
+  same(h.log.filter(([kind]) => kind !== 'set'), [], 'a replaced call leaves the stage alone');
+});
+
+test('a ring stages the incoming card over the open chat; Decline hands the stage back and Screen it answers for the owner', () => {
+  const {view} = phoneModule(), ring = {incoming: 'maya', ring: 'ring', rs: false, scrN: 0};
+  const open = phoneApi({}, {view: 'messages', chat: 'sheet', stack: []});
+  view.actions.ring({args: {pid: 'maya'}}, open.api);
+  same(open.log, [['stage', 'phone', ring, null]]);
+  const closed = phoneApi({}, {view: 'messages', chat: 'input', stack: []});
+  view.actions.ring({args: {pid: 'maya'}}, closed.api);
+  same(closed.log, [['open', 'phone', ring]]);
+  const h = phoneApi({incoming: 'maya', ring: 'ring'});
+  const spec = view.bar(h.state(), h.api);
+  spec.incoming.screen();
+  same(h.log, [['set', {ring: 'screen', scrN: 1}]]);
+  assert.equal(view.bar(h.state(), h.api).incoming.screen, null, 'a screened call offers no second Screen it');
+  view.actions.screenIncoming({}, h.api);
+  assert.equal(h.log.length, 1, 'screening twice changes nothing');
+  view.bar(h.state(), h.api).incoming.decline();
+  assert.equal(h.state().incoming, null);
+  same(h.log.filter(([kind]) => kind === 'stageBack'), [['stageBack']]);
+});
+
+test('the Phone bar addresses Recents, the call or the ringing call with the contract strings', () => {
+  const {view} = phoneModule();
+  const recents = view.bar({recents: [], vms: []}, phoneApi({}).api);
+  same({target: recents.target, kind: recents.closed.kind, placeholder: recents.closed.placeholder, left: [recents.left.icon, recents.left.label], context: recents.context, key: recents.contextKey, strip: recents.strip, end: recents.end, briefing: recents.briefing},
+    {target: {kind: 'recents', app: 'Phone', name: null, first: null, initials: null}, kind: 'filter', placeholder: 'Call or ask', left: ['keypad', 'Back to the keypad'], context: 'Phone', key: 'phone:recents:', strip: {title: 'Phone', subtitle: '', initials: null, live: false, actions: []}, end: null, briefing: null});
+  const h = phoneApi({tab: 'recents'});
+  view.bar(h.state(), h.api).left.run();
+  assert.equal(h.state().tab, 'keypad');
+  const call = view.bar({call: 'maya', callWho: 'maya', liveAt: NOW - 65000, mute: false}, phoneApi({}).api);
+  same({target: call.target, closed: [call.closed.kind, call.closed.placeholder], left: [call.left.icon, call.left.label], context: call.context, key: call.contextKey, strip: {...call.strip, actions: call.strip.actions.map(a => [a.id, a.label])}, emergency: call.emergency},
+    {target: {kind: 'call', app: 'Phone', name: 'Maya Chen', first: 'Maya', initials: 'MC'}, closed: ['alpha', 'Ask during call'], left: ['call', 'Back to the call'], context: 'Maya Chen · Call', key: 'phone:call:maya',
+      strip: {title: 'Maya Chen · 1:05', subtitle: 'On call', initials: 'MC', live: true, actions: [['mute', 'Mute'], ['end', 'End call']]}, emergency: false});
+  assert.equal(typeof call.end, 'function');
+  assert.equal(view.bar({call: null, num: '911', callWho: '#911'}, phoneApi({}).api).emergency, true, 'AC-19');
+  const ringing = view.bar({incoming: 'maya', ring: 'ring'}, phoneApi({}).api);
+  same({kind: ringing.target.kind, context: ringing.context, key: ringing.contextKey, actions: ringing.strip.actions.map(a => [a.id, a.label]), end: ringing.end},
+    {kind: 'incoming', context: 'Maya Chen · Incoming call', key: 'phone:incoming:maya', actions: [['answer', 'Answer'], ['decline', 'Decline']], end: null});
+});
+
+test('typing filters Recents by name and digits; an Alpha filter shows a chip that the cleared field keeps', () => {
+  const {view} = phoneModule();
+  const h = phoneApi({tab: 'recents', recents: [{id: 'r1', pid: 'maya', dir: 'missed', at: NOW - 60000, dur: 0}, {id: 'r2', pid: null, num: '(646) 555-0100', dir: 'in', at: NOW - 7200000, dur: 30}]});
+  const shown = () => view.render(h.state(), h.api).recents.map(row => row.who);
+  same(shown(), ['Maya Chen', '(646) 555-0100']);
+  view.bar(h.state(), h.api).closed.onText('may');
+  same(shown(), ['Maya Chen']);
+  assert.equal(view.render(h.state(), h.api).favs.length, 0, 'favorites hide while a filter is typed');
+  view.bar(h.state(), h.api).closed.onText('6465');
+  same(shown(), ['(646) 555-0100']);
+  assert.equal(view.render(h.state(), h.api).filterChip, null, 'an owner filter shows no chip');
+  assert.equal(comms.applyListFilter('phone', {query: 'Maya Chen', label: 'Maya Chen', by: 'alpha'}), true);
+  same(view.render(h.state(), h.api).filterChip, {label: 'Maya Chen', clearLabel: 'Clear filter Maya Chen'});
+  assert.equal(view.bar(h.state(), h.api).closed.value, '');
+  view.bar(h.state(), h.api).closed.onText('');
+  same(shown(), ['Maya Chen'], 'the shell clearing the sent text keeps Alpha\'s filter');
+  view.render(h.state(), h.api).clearFilter();
+  same(shown(), ['Maya Chen', '(646) 555-0100']);
+  const brief = view.bar({recents: h.state().recents, vms: [{id: 'v1', pid: 'maya', heard: false}]}, h.api).briefing;
+  assert.equal(brief, 'Maya Chen called 1 min ago and you missed it. One new voicemail, from Maya Chen.');
+});
+
 test('directions to the start point have a one-point route and still render their line', () => {
   const M = load(['MAPS_H', 'MAPS_V', 'MAPS_STREETS', 'mapsAddr', 'mapsLen', 'mapsStreet', 'mapsSteps', 'mapsVia'], {MAPS_FAR: []});
   const here = M.mapsAddr('300 Folsom St');

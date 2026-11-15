@@ -4,6 +4,7 @@ import { nextDefaultNoteTitle } from '../runtime/note-default-title';
 import { accessibilityTimeoutScale } from '../runtime/accessibility-timeout';
 import { recordRendererFailure } from '../runtime/crash-log';
 import iconCatalog from '../icon-catalog.json';
+import { callsBriefing, matchesCallQuery } from "./telephony-presenters";
 /* Seeds, scripted replies and fixture images. Production builds resolve this
    specifier to ./fixtures.empty.js (same names, empty values). */
 import {
@@ -143,7 +144,8 @@ function restoreById(list, item, at) {
 
 /* ===== module: phone ===== */
 /* Phone (dialer). Holes are {{phone.*}}. Tabs: Recents (with favorites row), Keypad, Voicemail.
-   Call screen + incoming screen are immersive overlays. Recents/voicemail persist. */
+   The call and incoming cards follow the theme and compact into the stage while the chat is open
+   (AP-16). Recents/voicemail persist. */
 IC.phoneIn = IC.phoneIn || "M17 7L7 17M7 10v7h7";
 IC.phoneOut = IC.phoneOut || "M7 17L17 7M10 7h7v7";
 IC.phoneVm = IC.phoneVm || "M10 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM21 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM6.5 15.5h11";
@@ -228,6 +230,8 @@ function pnEnd(api, opt) {
   PN.live = null; api.stopBg();
   if (opt.quiet) return;
   if (note) api.toast(api.name + " saved notes from the call");
+  /* a call Alpha staged over another view (AC-06/AC-20) returns there with the chat still open */
+  if (api.isActive() && api.stageBack()) return;
   /* started from another app's detail (e.g. a contact): hang up returns there, and drop it from the back stack */
   if (s.ret && api.isActive()) { var stack = (api.S.stack || []).slice(); if (stack[stack.length - 1] === s.ret.view) stack.pop(); api.open(s.ret.view, s.ret.patch); api.shell({ stack: stack }); }
 }
@@ -236,6 +240,38 @@ function pnRingEnd(api, entry, patch) {
   if (!s.incoming) return;
   api.set(Object.assign({}, patch || {}, { incoming: null, ring: null, rs: false, scrN: 0, recents: [Object.assign({ id: "r" + crypto.randomUUID(), pid: s.incoming, at: Date.now(), dur: 0 }, entry)].concat(s.recents || []) }));
   api.stopBg();
+  /* AC-21: a call that rang over another stage hands it back */
+  if (api.isActive()) api.stageBack();
+}
+/* A call rings (fixture only: on the Alpha image the system call screen owns ringing). With the chat
+   open the stage turns into the incoming card and the sheet keeps its height (AC-21). */
+function pnRing(api, pid) {
+  if (!pid) return;
+  var patch = { incoming: pid, ring: "ring", rs: false, scrN: 0 };
+  if (api.S.chat === "sheet" || api.S.chat === "full") api.stage("phone", patch, null);
+  else api.open("phone", patch);
+}
+function pnAnswer(api) {
+  var s = api.get("phone");
+  if (!s.incoming) return;
+  PN.lastTab = s.tab === "favorites" ? "recents" : (s.tab || "recents");
+  pnStart(api, s.incoming, "", { dir: "in", live: true });
+}
+/* "Screen it": Alpha answers the ringing call and relays what the caller says. */
+function pnScreen(api) {
+  var s = api.get("phone");
+  if (!s.incoming || s.ring === "screen") return;
+  api.stopBg(); api.set({ ring: "screen", scrN: 1 });
+  api.everyBg(function () { var s2 = api.get("phone"); if (s2.ring !== "screen") return; if ((s2.scrN || 0) < PN_SCREEN.length) api.set({ scrN: (s2.scrN || 0) + 1 }); }, 1900);
+}
+function pnEndScreen(api) {
+  if (!api.get("phone").incoming) return;
+  pnRingEnd(api, { dir: "in", screened: true, dur: (api.get("phone").scrN || 0) * 2, note: copy("phone").screenSummary || "" });
+  api.toast(api.name + " saved the message");
+}
+/* AC-19: emergency short codes keep the full-screen call and no acting proposal. */
+function pnEmergency(num) {
+  return ["112", "911", "999", "000", "08", "100", "101", "102", "108", "110", "118", "119", "120", "122", "15", "17", "18"].indexOf(pnDigits(num)) >= 0;
 }
 function pnDecline(api, why) {
   var s = api.get("phone"); var pid = s.incoming;
@@ -249,7 +285,7 @@ function pnDecline(api, why) {
 
 registerView("phone", {
   title: "Phone", icon: "phone", aliases: ["dialer", "calls", "recents", "voicemail", "keypad"],
-  state: { tab: "recents", dial: "", recents: PN_REC, vms: PN_VM, vmOpen: null, playing: null, vpos: 0, call: null, num: "", callWho: null, incoming: null, ring: null, rs: false, scrN: 0, min: false },
+  state: { tab: "recents", dial: "", recents: PN_REC, vms: PN_VM, vmOpen: null, playing: null, vpos: 0, call: null, num: "", callWho: null, incoming: null, ring: null, rs: false, scrN: 0, min: false, q: "", qBy: "owner", qLabel: "" },
   persist: ["recents", "vms"],
   jumps: [[null, "Phone"], ["keypad", "Keypad"], ["voicemail", "Voicemail"], ["call", "In call"], ["incoming", "Incoming call"]],
   preset: function (sub) {
@@ -260,7 +296,6 @@ registerView("phone", {
     if (sub === "incoming") return who ? { incoming: who, ring: "ring" } : null;
   },
   badge: function (st) { return (st.vms || []).some(function (v) { return !v.heard; }); },
-  immersive: function (st) { return (pnWant(st) && !st.min) || st.incoming ? { dark: true, noPill: true } : null; },
   back: function (st, api) {
     if (st.incoming) { if (st.rs) api.set({ rs: false }); return true; }
     if (pnWant(st) && !st.min) { if (st.kp) api.set({ kp: false }); else api.set({ min: true }); return true; }
@@ -283,13 +318,19 @@ registerView("phone", {
   },
   suggestions: function (st) {
     var sg = copy("phone").suggestions || {};
-    if (st.tab === "voicemail") return sg.voicemail || ["Summarize my voicemail", "Who called?"];
+    if (st.tab === "voicemail") return sg.voicemail || [];
     if (st.tab === "keypad") return sg.keypad || [];
-    return sg.recents || ["Who called?", "Check voicemail"];
+    return sg.recents || [];
   },
   voicePhrase: copy("phone").voicePhrase,
   actions: {
-    hangup: function (card, api) { pnEnd(api); }
+    hangup: function (card, api) { pnEnd(api); },
+    /* AC-20: the owner's tap on the proposal card is the only path from Alpha to a dial. The stage
+       switches to the call and the sheet keeps its height; Back or End returns to the stage before. */
+    callApproved: function (card, api) { api.stage("phone", { call: card.args.pid || null, num: card.args.pid ? "" : card.args.num }, null); },
+    screenIncoming: function (card, api) { pnScreen(api); },
+    /* fixture only: a call rings, over the open chat when it is open */
+    ring: function (card, api) { pnRing(api, card.args && card.args.pid); }
   },
   reply: function (t, raw, api) {
     var st = api.st;
@@ -303,6 +344,15 @@ registerView("phone", {
       var lp = pnWho(api, lead.pid);
       var txt = (nu.length ? (nu.length === 1 ? "One new, from " : nu.length + " new. Latest from ") : "Nothing new. Last one from ") + (lp ? pnFirst(lp) : lead.label || lead.num) + ": " + (lead.gist || lead.text) + ".";
       return { text: txt, card: { type: "digest", go: { view: "phone", patch: { tab: "voicemail", vmOpen: lead.id } }, rows: vms.slice(0, 3).map(function (v) { var p = pnWho(api, v.pid); return { ini: pnIni(p), who: p ? p.name : v.label || v.num, text: v.text }; }) } };
+    }
+    /* AC-22: a question about one person's calls answers by filtering Recents to them */
+    var fp = /\b(calls? (from|with|to)|did .+ (call|ring)|ha(s|ve) .+ called)\b/.test(t) ? pnFind(t, api) : null;
+    if (fp) {
+      var count = (st.recents || []).filter(function (e) { return e.pid === fp.id; }).length;
+      var filter = { query: fp.name, label: fp.name, by: "alpha" };
+      var text = count ? (count === 1 ? "One call with " : count + " calls with ") + pnFirst(fp) + "." : "No calls with " + pnFirst(fp) + ".";
+      return api.isActive() ? { text: text, then: function () { applyListFilter("phone", filter); } }
+        : { text: text, nav: { view: "phone", patch: { tab: "recents", vmOpen: null, q: filter.query, qBy: "alpha", qLabel: filter.label } } };
     }
     if (/who (called|rang)|missed call|recent calls|call log/.test(t)) {
       var now = api.now.getTime();
@@ -325,9 +375,54 @@ registerView("phone", {
       else { var v3 = (st.vms || []).filter(function (v) { return v.label && rest.indexOf(v.label.toLowerCase().split(" ")[1] || "~") >= 0; })[0]; if (v3) num = v3.num; }
     }
     if (!p && !num) return null;
+    /* AC-20: never dials. The owner approves on the card, which names the number. */
     var who = p ? p.name : num;
-    return { text: "Calling " + (p ? pnFirst(p) : num) + ".", card: { type: "call", who: who, ini: p ? p.ini : "#", act: { mod: "phone", fn: "hangup" } },
-      nav: { view: "phone", patch: p ? { call: p.id, num: "" } : { call: null, num: num }, chat: "hidden" } };
+    return { text: "Call " + who + "?", proposal: { id: "call:" + crypto.randomUUID(), kind: "call", title: "Call " + who, detail: pnFmt(p ? p.phone : num), button: "Call", acts: true,
+      act: { mod: "phone", fn: "callApproved" }, args: { pid: p ? p.id : null, num: p ? "" : num } } };
+  },
+  /* AP-16 bar: Recents, Keypad and Voicemail filter the calls; a call or a ringing call addresses Alpha. */
+  bar: function (st, api) {
+    var now = api.now.getTime();
+    var ask = { kind: "alpha", placeholder: "Ask during call", value: "", onText: null, submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null };
+    var left = { icon: "call", label: "Back to the call", initials: null, run: null };
+    var none = { end: null, incoming: null, emergency: false, fit: null, briefing: null };
+    if (st.incoming) {
+      var ip = pnWho(api, st.incoming), rn = ip ? ip.name : "Unknown", screening = st.ring === "screen";
+      var decline = screening ? function () { pnEndScreen(api); } : function () { pnDecline(api); };
+      var answer = function () { pnAnswer(api); };
+      return Object.assign({}, none, {
+        target: { kind: "incoming", app: "Phone", name: rn, first: ip ? pnFirst(ip) : rn, initials: ip ? ip.ini : "#" },
+        closed: ask, left: left, context: rn + " · Incoming call", contextKey: "phone:incoming:" + st.incoming,
+        strip: { title: rn, subtitle: "Incoming call", initials: ip ? ip.ini : "#", live: false, actions: [{ id: "answer", label: "Answer", run: answer }, { id: "decline", label: "Decline", run: decline }] },
+        incoming: { answer: answer, decline: decline, screen: screening ? null : function () { pnScreen(api); } }
+      });
+    }
+    var want = pnWant(st);
+    if (want && !st.min) {
+      var cp = pnWho(api, st.call), cn = cp ? cp.name : (st.num || ""), hang = function () { pnEnd(api); };
+      return Object.assign({}, none, {
+        target: { kind: "call", app: "Phone", name: cn, first: cp ? pnFirst(cp) : cn, initials: cp ? cp.ini : "#" },
+        closed: ask, left: left, context: cn + " · Call", contextKey: "phone:call:" + want,
+        strip: { title: cn + " · " + pnClock(st.liveAt ? (now - st.liveAt) / 1000 : 0), subtitle: "On call", initials: cp ? cp.ini : "#", live: true, actions: [
+          { id: "mute", label: st.mute ? "Unmute" : "Mute", pressed: !!st.mute, run: function () { api.set({ mute: !api.get("phone").mute }); } },
+          { id: "end", label: "End call", run: hang }] },
+        end: hang, emergency: pnEmergency(cp ? cp.phone : st.num)
+      });
+    }
+    /* Recents, Keypad and Voicemail: typing filters Recents on the device (AC-22); a typed sentence or
+       Enter goes to Alpha through the shell. An Alpha filter shows as a chip and survives the cleared field. */
+    var day = now - 864e5;
+    var missed = (st.recents || []).filter(function (e) { return e.dir === "missed" && pnAt(e, now) >= day; }).map(function (e) { var p = pnWho(api, e.pid); return { name: p ? p.name : (e.num || "Unknown"), date: pnAt(e, now) }; });
+    var fresh = (st.vms || []).filter(function (v) { return !v.heard; }).map(function (v) { var p = pnWho(api, v.pid); return { name: p ? p.name : (v.label || v.num) }; });
+    return Object.assign({}, none, {
+      target: { kind: "recents", app: "Phone", name: null, first: null, initials: null },
+      closed: { kind: "filter", placeholder: "Call or ask", value: st.qBy === "alpha" ? "" : (st.q || ""), submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null,
+        onText: function (text) { if (!text && api.get("phone").qBy === "alpha") return; api.set({ q: text, qBy: "owner", qLabel: "" }); } },
+      left: { icon: "keypad", label: "Back to the keypad", initials: null, run: function () { api.stop(); api.set({ tab: "keypad", vmOpen: null, playing: null, vpos: 0 }); } },
+      context: "Phone", contextKey: "phone:recents:",
+      strip: { title: "Phone", subtitle: "", initials: null, live: false, actions: [] },
+      briefing: callsBriefing(missed, fresh, now)
+    });
   },
   render: function (st, api) {
     var now = api.now.getTime();
@@ -347,11 +442,18 @@ registerView("phone", {
         pick: function () { api.stop(); api.set({ tab: d[0], vmOpen: null, playing: null, vpos: 0 }); } };
     });
 
-    /* recents */
-    var favs = pnPeople(api).filter(function (p) { return p.fav; }).map(function (p) { return { ini: p.ini, first: pnFirst(p), label: "Call " + p.name, call: callFrom(p.id) }; });
-    var recents = (st.recents || []).map(function (e) {
+    /* recents: the bar's query (AC-22) filters them in memory; Keypad and Voicemail only keep it */
+    setListFilterHandler("phone", {
+      apply: function (f) { api.set(Object.assign({ q: f.query, qBy: f.by, qLabel: f.label }, f.by === "alpha" ? { tab: "recents", vmOpen: null, playing: null } : {})); return true; },
+      clear: function () { api.set({ q: "", qBy: "owner", qLabel: "" }); },
+      current: function () { var s = api.get("phone"); return s.q ? { query: s.q, label: s.qLabel || s.q, by: s.qBy === "alpha" ? "alpha" : "owner" } : null; }
+    });
+    var q = st.q || "";
+    var favs = q ? [] : pnPeople(api).filter(function (p) { return p.fav; }).map(function (p) { return { ini: p.ini, first: pnFirst(p), label: "Call " + p.name, call: callFrom(p.id) }; });
+    var recents = (st.recents || []).filter(function (e) { var p = pnWho(api, e.pid); return matchesCallQuery({ name: p ? p.name : "", number: p ? p.phone : (e.num || "") }, q); }).map(function (e, i) {
       var p = pnWho(api, e.pid); var missed = e.dir === "missed";
       return {
+        last: i === 0 && !favs.length ? true : undefined,
         ini: pnIni(p), who: p ? p.name : e.num, nameCss: missed ? "color:var(--acct)" : "",
         dirD: e.dir === "out" ? IC.phoneOut : IC.phoneIn, dirCss: missed ? "color:var(--acct)" : "color:var(--mut)",
         sub: pnRel(pnAt(e, now), now) + (e.dur ? " · " + pnDur(e.dur) : ""),
@@ -422,29 +524,34 @@ registerView("phone", {
     var status = !live ? "Calling…" : (st.hold ? "On hold · " : "") + pnClock(el);
     var sc = pnScript(st.call);
     var themName = cp ? pnFirst(cp) : "Caller";
-    var lines = sc.lines.slice(0, st.aiN || 0).map(function (l) { return { who: l[0] === "you" ? "You" : themName, text: l[1], css: l[0] === "you" ? "color:var(--alpha-gray-8f)" : "color:var(--alpha-white)" }; }).slice(-5);
-    var ctrl = function (key, d, label, on, extra) {
-      return { d: d, label: label, on: !!on, css: on ? (key === "ai" ? "background:var(--acc);color:var(--alpha-white)" : "background:var(--alpha-white);color:var(--alpha-black)") : "background:rgba(255,255,255,.12);color:var(--alpha-white)", glyph: key === "ai", icon: key !== "ai",
-        toggle: function () { var s = api.get("phone"); var p = {}; p[key] = !s[key]; if (key === "ai" && p.ai) p.kp = false; api.set(p); if (key === "ai" && p.ai) api.toast(api.name + " is taking notes"); } };
+    var lines = sc.lines.slice(0, st.aiN || 0).map(function (l) { return { who: l[0] === "you" ? "You" : themName, text: l[1], css: l[0] === "you" ? "color:var(--mut)" : "color:var(--fg)" }; }).slice(-5);
+    var toggle = function (key) {
+      return function () { var s = api.get("phone"); var p = {}; p[key] = !s[key]; if (key === "ai" && p.ai) p.kp = false; api.set(p); if (key === "ai" && p.ai) api.toast(api.name + " is taking notes"); };
+    };
+    /* AC-03: mute, keypad, speaker, hold, then End as the right-most control (template) */
+    var ctrl = function (key, d, label, text, on) {
+      return { d: d, label: label, text: text, on: !!on, css: on ? "background:var(--fg);color:var(--bg)" : "background:var(--s2);color:var(--fg)", toggle: toggle(key) };
     };
     var controls = inCall ? [
-      ctrl("mute", IC.phoneMute, st.mute ? "Unmute" : "Mute", st.mute),
-      ctrl("kp", IC.dial, st.kp ? "Hide keypad" : "Show keypad", st.kp),
-      ctrl("spk", IC.phoneSpk, "Speaker", st.spk),
-      ctrl("hold", IC.pause, st.hold ? "Resume" : "Hold", st.hold),
-      ctrl("ai", null, st.ai ? api.name + " notes off" : api.name + " takes notes", st.ai)
+      ctrl("mute", IC.phoneMute, st.mute ? "Unmute" : "Mute", st.mute ? "Unmute" : "Mute", st.mute),
+      ctrl("kp", IC.dial, st.kp ? "Hide keypad" : "Show keypad", "Keypad", st.kp),
+      ctrl("spk", IC.phoneSpk, "Speaker", "Speaker", st.spk),
+      ctrl("hold", IC.pause, st.hold ? "Resume" : "Hold", st.hold ? "Resume" : "Hold", st.hold)
     ] : [];
 
     /* incoming */
     var ip = st.incoming ? pnWho(api, st.incoming) : null;
     var screening = st.ring === "screen";
-    var scrLines = PN_SCREEN.slice(0, st.scrN || 0).map(function (l) { return { who: l[0] === "alpha" ? api.name : (ip ? pnFirst(ip) : "Caller"), text: l[1].replace("{name}", api.name), css: l[0] === "alpha" ? "color:var(--alpha-gray-8f)" : "color:var(--alpha-white)" }; });
+    var scrLines = PN_SCREEN.slice(0, st.scrN || 0).map(function (l) { return { who: l[0] === "alpha" ? api.name : (ip ? pnFirst(ip) : "Caller"), text: l[1].replace("{name}", api.name), css: l[0] === "alpha" ? "color:var(--mut)" : "color:var(--fg)" }; });
     var scrDone = screening && (st.scrN || 0) >= PN_SCREEN.length;
 
     return {
       nativePrototype: true,
       tab: tab, title: tab === "keypad" ? "Keypad" : (tab === "voicemail" ? "Voicemail" : "Recents"),
       tabs: tabs, isRecents: tab === "recents", isKeypad: tab === "keypad", isVm: tab === "voicemail",
+      showList: !(inCall && !st.min) && !st.incoming,
+      filterChip: q && st.qBy === "alpha" ? { label: st.qLabel || q, clearLabel: "Clear filter " + (st.qLabel || q) } : null,
+      clearFilter: function () { clearListFilter("phone"); },
       favs: favs, hasFavs: favs.length > 0, recents: recents, noRecents: recents.length === 0,
       addContact: function () { api.open("contacts", { add: true }); },
       dial: pnFmt(dial) || dial, hasDial: dial.length > 0, noDial: dial.length === 0, dialSize: dial.length > 11 ? 30 : 38,
@@ -463,10 +570,12 @@ registerView("phone", {
       },
       vms: vms, noVms: vms.length === 0,
 
-      inCall: inCall, callFull: inCall && !st.min, banner: inCall && !!st.min,
-      cName: cp ? cp.name : cnum, cIni: cp ? cp.ini : "#", cStatus: status, calling: inCall && !live,
+      inCall: inCall, callFull: inCall && !st.min && !st.incoming, banner: inCall && !!st.min,
+      cName: cp ? cp.name : cnum, cIni: cp ? cp.ini : "#", cStatus: status, calling: inCall && !live, live: inCall && live,
+      emergency: inCall && pnEmergency(cp ? cp.phone : st.num),
       showAvatar: inCall && !st.kp && !(st.ai && lines.length), showLines: inCall && !st.kp && st.ai && lines.length > 0, lines: lines,
       aiOn: inCall && st.ai, aiWait: inCall && st.ai && !lines.length && !st.kp,
+      notesLabel: st.ai ? api.name + " notes off" : api.name + " takes notes", notesText: st.ai ? "Notes on" : "Take notes", toggleNotes: toggle("ai"),
       showDkp: inCall && !!st.kp, kpd: st.kpd || "", controls: controls,
       endCall: function () { pnEnd(api); },
       restore: function () { api.set({ min: false }); },
@@ -475,13 +584,10 @@ registerView("phone", {
       rCtx: copy("phone").ringContext || "", hasCtx: !!copy("phone").ringContext,
       isRing: !!st.incoming && !screening, isScreen: screening, scrLines: scrLines, scrDone: scrDone, scrLive: screening && !scrDone,
       scrSum: copy("phone").screenSummary || "",
-      accept: function () { var s = api.get("phone"); PN.lastTab = tab; pnStart(api, s.incoming, "", { dir: "in", live: true }); },
+      accept: function () { pnAnswer(api); },
       decline: function () { pnDecline(api); },
-      endScreen: function () { pnRingEnd(api, { dir: "in", screened: true, dur: (api.get("phone").scrN || 0) * 2, note: copy("phone").screenSummary || "" }); api.toast(api.name + " saved the message"); },
-      alphaAnswer: function () {
-        api.stopBg(); api.set({ ring: "screen", scrN: 1 });
-        api.everyBg(function () { var s = api.get("phone"); if (s.ring !== "screen") return; if ((s.scrN || 0) < PN_SCREEN.length) api.set({ scrN: (s.scrN || 0) + 1 }); }, 1900);
-      },
+      endScreen: function () { pnEndScreen(api); },
+      alphaAnswer: function () { pnScreen(api); },
       rsOpen: !!st.rs, openReply: function () { api.set({ rs: true }); }, closeReply: function () { api.set({ rs: false }); },
       replies: PN_REPLIES.map(function (r) { return { text: r, send: function () { var s = api.get("phone"); var pp = pnWho(api, s.incoming); pnDecline(api, "Replied: " + r); api.toast("Sent to " + (pp ? pnFirst(pp) : "caller")); } }; }),
       writeReply: function () { var s = api.get("phone"); var pid = s.incoming; pnDecline(api, "Declined with a message"); api.open("messages", { compose: pid }); }
