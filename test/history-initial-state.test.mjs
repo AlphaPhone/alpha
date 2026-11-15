@@ -48,3 +48,22 @@ test('asynchronous attachment restoration cannot replace messages after an owner
  await new Promise(setImmediate);f.flush();
  assert.equal(f.shell.state.msgs[0].text,'Current owner');assert.equal(f.shell.state.msgs[0].transcriptAttachment,undefined);
 });
+
+test('a durable user echo adopts its client identity once and keeps the authored attachment-only display',()=>{
+ const f=fixture(),client='11111111-1111-4111-8111-111111111111',server='22222222-2222-4222-8222-222222222222';
+ const files=[{id:'synthetic-image',name:'shapes.png',mimeType:'image/png',data:'AA=='}];
+ f.shell.state.msgs=[{id:client,from:'user',text:'',fileAttachments:files}];
+ const delivery=revision=>({sessionId:'owner-a',conversationId:'room',revision,messages:[{id:server,clientMessageId:client,from:'user',text:'Please review the attached file.'},{id:'reply',from:'agent',text:'Controlled reply'}]});
+ f.setSnapshot({...f.snapshot,conversationDelivery:delivery(1)});f.changed();f.flush();
+ assert.deepEqual(Array.from(f.shell.state.msgs,m=>m.id),[server,'reply']);
+ assert.equal(f.shell.state.msgs[0].text,'');assert.equal(f.shell.state.msgs[0].fileAttachments,files);
+ assert.equal(f.shell.state.msgs[0].clientMessageId,client);
+ f.setSnapshot({...f.snapshot,conversationDelivery:delivery(2)});f.changed();f.flush();
+ assert.equal(f.shell.state.msgs.length,2);assert.equal(f.shell.state.msgs[0].text,'');
+});
+
+test('a modern receipt for another client operation cannot collapse an identical pending message',()=>{
+ const f=fixture();f.shell.state.msgs=[{id:'client-a',from:'user',text:'Same words'}];
+ f.setSnapshot({...f.snapshot,conversationDelivery:{sessionId:'owner-a',conversationId:'room',revision:1,messages:[{id:'server-b',clientMessageId:'client-b',from:'user',text:'Same words'}]}});
+ f.changed();f.flush();assert.deepEqual(Array.from(f.shell.state.msgs,m=>m.id),['client-a','server-b']);
+});

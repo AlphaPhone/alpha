@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "head": "7a1afe1ded2725fa3268637feb64b20b95052286",
-  "recordedAt": "2026-11-14",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...7a1afe1ded2725fa3268637feb64b20b95052286",
+  "head": "e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
+  "recordedAt": "2026-11-15",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
   "status": "diverged",
-  "aheadBy": 104,
+  "aheadBy": 107,
   "behindBy": 1295,
   "mergeBase": "0c8d6868ae05a6100a3ed0246a5d078e783cc802",
   "pinOnlyCommits": [
@@ -422,6 +422,18 @@
     {
       "sha": "7a1afe1ded2725fa3268637feb64b20b95052286",
       "subject": "fix(native-agent): clear image model on unbound launches"
+    },
+    {
+      "sha": "91956326e51016db81e5a00f400a78c19759ef22",
+      "subject": "fix(app): register vision for the native Cloud profile"
+    },
+    {
+      "sha": "60792807f9a4fcf55d2cf8644d89686d3f6a02e7",
+      "subject": "fix(files): read selected chat attachments with the shared intake bound"
+    },
+    {
+      "sha": "e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
+      "subject": "fix(files): declare the shared chat upload contract dependency"
     }
   ],
   "pullRequests": []

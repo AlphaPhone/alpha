@@ -25,6 +25,27 @@ fact is known, and explicit empty-state copy. `test/fixtures-parity.test.mjs`
 keeps the two export lists identical, and `test/fixtures-swap.test.mjs` builds
 the swapped bundle and checks that no fixture strings or images remain.
 
+## Chat attachment picker
+
+`attachment-picker.ts` selects authorized local Photos and Files for the composer.
+Search, folders and multi-selection use metadata and thumbnails; Attach reads the
+selected bytes. Cancel preserves the draft. Android Back clears search, then moves
+up a folder, then closes. From computer is available only in the browser.
+
+`chat-tools-adapter.ts` passes selections to shared intake, which owns supported
+types, attachment count, the 20 MiB image limit, the 60 MiB aggregate limit and image
+compression. Uploads occur on Send. Native Files reads require an opaque
+`storageSelect` selection and the `chat` purpose; the selection grant is released
+in `finally`. Owner, conversation, request and visibility checks discard late work.
+
+The sheet inherits Public Sans controls, the Denton serif title and neutral Alpha
+surfaces. Source segments use adaptive foreground/background colors; Attach and
+selected checks use blue. Files and folders share aligned icon, name and trailing
+columns. The sheet covers the assistant; its compact footer clears the bottom safe
+area without padding for the hidden assistant dock. Loading, access, empty and
+error states stay explicit. Browser previews do not qualify native permissions,
+keyboard behavior, device acceptance or a live provider.
+
 ## Sources and licensing
 
 Design source: https://alpha-phone-prototype.pages.dev/ (retrieved 2026-09-29).

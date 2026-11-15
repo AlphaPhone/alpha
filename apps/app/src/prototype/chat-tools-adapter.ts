@@ -1,7 +1,8 @@
 import {connectionController} from '../runtime/connection-ui';
 import {createInlineModal} from '../runtime/inline-modal';
-import {inputFiles, runFilePicker} from '../browser/file-picker';
-import {intakeAttachmentFiles, CHAT_UPLOAD_ACCEPT, MAX_CHAT_IMAGES} from '../../../../.eliza/client-features/packages/ui/src/utils/image-attachment';
+import {runFilePicker} from '../browser/file-picker';
+import {intakeAttachmentFiles, MAX_CHAT_IMAGES} from '../../../../.eliza/client-features/packages/ui/src/utils/image-attachment';
+import {ChatAttachmentPicker} from './attachment-picker';
 
 type Shell = Record<string, any>;
 
@@ -18,6 +19,7 @@ export function installChatTools(Component: {prototype: Shell}) {
   prototype.renderVals = function() {
     const output = render.call(this);
     const shell = this;
+    this.chatAttachmentPicker ??= new ChatAttachmentPicker(()=>shell.setState({}));
     const owner = JSON.stringify(connectionController.getSnapshot().session);
     if (this.chatToolsOwner !== owner) {
       this.chatSearchAbort?.abort();
@@ -47,10 +49,10 @@ export function installChatTools(Component: {prototype: Shell}) {
       shell.setState({});
       const existing = shell.fileAttachments;
       try {
-        const files = await runFilePicker(signal => inputFiles(signal, {
-          multiple: true,
-          accept: CHAT_UPLOAD_ACCEPT.split(',').filter(type => !/^(audio|video)\//.test(type)).join(','),
-        }), []);
+        const maximum=MAX_CHAT_IMAGES-existing.length-(shell.cameraAttachment?1:0);
+        if(maximum<1)throw Error('Remove an attachment before adding another.');
+        const files = await runFilePicker<File[]>(signal => shell.chatAttachmentPicker.choose(signal,maximum,
+          ()=>shell.live&&binding()===owner&&!shell.draftSendPending&&!shell.composerDraft?.holding&&!shell.messageEditTarget), [],{nativeBack:false});
         if (!files.length || !shell.live || binding() !== owner) return;
         if (files.some(file => /^(audio|video)\//.test(file.type))) {
           throw Error('Choose a photo or document.');
@@ -134,6 +136,7 @@ export function installChatTools(Component: {prototype: Shell}) {
       upload: () => void upload(),
       search: () => {closeMenu();shell.chatSearchOpen = true;shell.chatSearchQuery = '';shell.chatSearchResults = [];shell.chatSearchMore = false;shell.chatSearchBusy = false;shell.chatSearchError = '';shell.setState({chat:'full'});},
     };
+    output.attachmentPicker=this.chatAttachmentPicker.view(output.ic);
     output.chatSearch = {
       open: !!this.chatSearchOpen,
       query: this.chatSearchQuery || '',
@@ -165,6 +168,7 @@ export function installChatTools(Component: {prototype: Shell}) {
     return output;
   };
   prototype.componentWillUnmount = function(...args: unknown[]) {
+    this.chatAttachmentPicker?.dispose();
     this.chatSearchAbort?.abort();clearTimeout(this.chatSearchTimer);
     this.chatToolsModal?.ref(null);this.chatSearchModal?.ref(null);
     return unmount?.apply(this,args);

@@ -420,8 +420,8 @@ export function mergeConversationDelivery<T extends{id:string}>(current:T[],deli
     const message=delivered[i];if(seen.has(message.id)){previous=message.id;continue;}
     if(result===current)result=[...current];let index=-1;
     // A failed stream can end without the saved id; the saved copy replaces its unconfirmed local bubble.
-    const sent=message as {from?:unknown;text?:unknown},twin=sent.from==='user'?result.findIndex(item=>{const local=item as {from?:unknown;text?:unknown;messageBinding?:unknown};return local.from==='user'&&!local.messageBinding&&local.text===sent.text&&!delivered.some(other=>other.id===item.id);}):-1;
-    if(twin>=0){result[twin]=message;seen.add(message.id);previous=message.id;continue;}
+    const sent=message as {from?:unknown;text?:unknown;clientMessageId?:unknown},twin=sent.from==='user'?result.findIndex(item=>{const local=item as {from?:unknown;text?:unknown;messageBinding?:unknown};return local.from==='user'&&!local.messageBinding&&(typeof sent.clientMessageId==='string'?item.id===sent.clientMessageId:local.text===sent.text)&&!delivered.some(other=>other.id===item.id);}):-1;
+    if(twin>=0){const local=result[twin],authored=(local as {text?:unknown}).text;result[twin]={...local,...message,...(typeof authored==='string'?{text:authored}:{})};seen.add(message.id);previous=message.id;continue;}
     for(let j=i+1;j<delivered.length;j++){index=result.findIndex(item=>item.id===delivered[j].id);if(index>=0)break;}
     if(index<0&&previous!==undefined){const anchor=result.findIndex(item=>item.id===previous);if(anchor>=0)index=anchor+1;}
     result.splice(index<0?result.length:index,0,message);seen.add(message.id);previous=message.id;

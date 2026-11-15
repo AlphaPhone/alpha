@@ -2143,7 +2143,7 @@
     }
   ],
   "currentUpstream": {
-    "revision": "7a1afe1ded2725fa3268637feb64b20b95052286",
+    "revision": "e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
     "classification": "current-upstream-formal-specifications",
     "models": [],
     "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate.",
@@ -2232,6 +2232,36 @@
         "path": "plugins/plugin-elizacloud/quint/check-native-image-operation.mjs",
         "gitObject": "840c986828c22a33226c8e8c2422ac49ac019578",
         "sha256": "6299dcf236dbc63f2e1573e4bcd56b776a99eea4f3d31520292e405e5d5e0789"
+      },
+      {
+        "path": "packages/app/quint/NativeMediaRouting.qnt",
+        "gitObject": "dc7f8d8e50a142169f5314dc167fd4f00235d3b6",
+        "sha256": "adfe6aca17f2e7b528e1fe5c5bfdaca759a7b4ef73be332c3dbe11d1c8c4707d"
+      },
+      {
+        "path": "packages/app/quint/NativeMediaRouting.cases.json",
+        "gitObject": "9f2b7df1796f46446eee11a268fb0bd96d8ffa11",
+        "sha256": "e485454228280d074a9333c7aaadd9022cab2a460bc37468dc4db772fc0298ec"
+      },
+      {
+        "path": "packages/app/quint/check-native-media-routing.mjs",
+        "gitObject": "6cfada75dba87c2f42e3971a86586922997b71dd",
+        "sha256": "93439fed72001256b4bd8d0fd39f7ad932a1cc0c62cb8005338cd651cbce346c"
+      },
+      {
+        "path": "plugins/plugin-files/quint/SelectedChatAttachment.qnt",
+        "gitObject": "d9e696da7371be2c936eef613c035ddc8bc52204",
+        "sha256": "166a557a1e1c5af76d09f093b16ac17022d7e68df72167e7fb6cafa1a6c593b1"
+      },
+      {
+        "path": "plugins/plugin-files/quint/SelectedChatAttachment.cases.json",
+        "gitObject": "47296c1336b38caa62199cf06ea67a61d47bd63e",
+        "sha256": "855293c47800f866d23e6925f98c8013a352406832b4982ad065e3222a44d9ec"
+      },
+      {
+        "path": "plugins/plugin-files/quint/check-selected-chat-attachment.mjs",
+        "gitObject": "689e5d26145a11a1d889667edcf2c454d86fa4eb",
+        "sha256": "aedf4c15d27cf37ddb900185a5d37071cc76e06bdc167aec8fbddf45e17a7ae7"
       }
     ]
   }

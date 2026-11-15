@@ -3955,5 +3955,36 @@
     "abstractions": [
       "One edit and a 4x4 normalized source grid. Pointer and keyboard geometry use bounded representative rectangles. Preview completion is an external port; progress requires eventual provider success or failure. Pixel colour and native mutation admission are qualified separately by real browser and native tests."
     ]
+  },
+  {
+    "path": "specs/quint/application/ChatAttachmentPicker.qnt",
+    "module": "ChatAttachmentPicker",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "selectedOnlyTest",
+      "cancellationReleasesTest",
+      "retiredSelectionTest",
+      "oldReplyKeepsNewResultTest",
+      "failedReadCanRetryTest"
+    ],
+    "invariants": [
+      "SelectionBound",
+      "NativeReadWasAdmitted",
+      "NoDuplicateLease",
+      "QueuedOnlyForCapturedScope"
+    ],
+    "sources": [
+      "apps/app/src/prototype/attachment-picker.ts",
+      "apps/app/src/prototype/chat-tools-adapter.ts",
+      "apps/app/src/browser/file-picker.ts",
+      "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaFilesPlugin.java"
+    ],
+    "abstractions": [
+      "Two owner/conversation binding classes, two selected files, three native read tickets and six picker epochs. Each ticket abstracts the serial reads of one captured selection.",
+      "Native selection and read callbacks return fairly; cancel does not claim to synchronously stop an already executing read. No network/model send occurs in this component.",
+      "Shared MIME/byte limits and platform document authorization are separate SelectedChatAttachment/native-host obligations. Search, directory presentation and actual device permission UI are checked in browser/device evidence."
+    ]
   }
 ]

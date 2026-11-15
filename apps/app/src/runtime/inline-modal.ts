@@ -1,7 +1,7 @@
 import {holdPhoneInert} from './modal-inert';
 
 /** Focus ownership for a phone-positioned modal and its pointer-only backdrop. */
-export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|null,options:{coverAssistant?:boolean}={}) {
+export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|null,options:{coverAssistant?:boolean;back?:()=>boolean}={}) {
  let mounted:HTMLElement|null=null, dispose:(()=>void)|undefined;
  const ref=(container:HTMLElement|null):void=>{
   if(container===mounted)return;
@@ -35,7 +35,7 @@ export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|nu
    else if(event.shiftKey&&(active===first||!dialog.contains(active))){event.preventDefault();last!.focus();}
    else if(!event.shiftKey&&(active===last||!dialog.contains(active))){event.preventDefault();first.focus();}
   };
-  const back=(event:Event)=>{if(!ownsFocus())return;event.preventDefault();event.stopImmediatePropagation();close();};
+  const back=(event:Event)=>{if(!ownsFocus())return;event.preventDefault();event.stopImmediatePropagation();if(!options.back?.())close();};
   const assistantTarget=(target:EventTarget|null)=>!options.coverAssistant&&target instanceof Element&&!!target.closest('[data-alpha-layer="pill"],[data-alpha-layer="composer"],[data-alpha-layer="conversation"]');
   const assistantPress=(event:PointerEvent)=>{if(ownsFocus()&&assistantTarget(event.target)&&!dialog.contains(event.target as Node))close();};
   const contain=()=>{if(ownsFocus()&&!dialog.contains(document.activeElement)&&!assistantTarget(document.activeElement))focus();};

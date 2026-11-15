@@ -3,6 +3,7 @@ package ai.elizaresearch.alphaphone;
 import ai.eliza.plugins.filesystem.browser.StorageBrowser;
 import ai.eliza.plugins.filesystem.browser.StorageCatalog;
 import ai.eliza.plugins.media.DocumentFolderTree;
+import ai.eliza.plugins.media.DocumentBytes;
 import android.app.Activity;
 import android.content.*;
 import android.net.Uri;
@@ -187,6 +188,25 @@ public class AlphaFilesPlugin extends Plugin {
   String id=SelectedDocumentAccess.authorize(getContext(),contentUri(f),0);
   JSObject out=result("selected","");out.put("action","files");out.put("selectionId",id);out.put("name",f.getName());out.put("mimeType",StorageBrowser.mime(f.getName()));out.put("canRename",false);return out;
  });}
+ /** Reads only an opaque selection already authorized by the owner's Files action. */
+ @PluginMethod public void attachment(PluginCall call){
+  if(!"chat".equals(call.getString("purpose",""))){call.reject("Unsupported attachment purpose.");return;}
+  storage(call,b->{
+   String id=call.getString("selectionId","");Uri uri=SelectedDocumentAccess.resolve(id);
+   if(uri==null)throw new SecurityException();
+   try{
+    String name;
+    try(android.database.Cursor row=resolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)){
+     if(row==null||!row.moveToFirst())throw new java.io.FileNotFoundException();name=row.getString(0);
+    }
+    if(name==null||name.isBlank()||name.matches(".*[\\\\/\\p{Cntrl}].*"))throw new IllegalArgumentException();
+    String mime=resolver().getType(uri);if(mime==null)mime=StorageBrowser.mime(name);
+    byte[] bytes;try(java.io.InputStream in=resolver().openInputStream(uri)){if(in==null)throw new java.io.FileNotFoundException();bytes=DocumentBytes.read(in,DocumentBytes.CHAT_MAX_BYTES);}
+    if(!uri.equals(SelectedDocumentAccess.resolve(id)))throw new SecurityException();
+    JSObject out=result("ready","");out.put("name",name);out.put("mimeType",mime);out.put("size",bytes.length);out.put("dataBase64",android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP));return out;
+   }catch(java.io.IOException error){return result("failed",error.getMessage()!=null&&error.getMessage().startsWith("File exceeds")?"Choose a file up to 20 MB.":"This file could not be read. Select it again.");}
+  });
+ }
  /** Opens a file in the Android app that handles its type. */
  @PluginMethod public void storageOpen(PluginCall call){storage(call,b->{
   java.io.File f=b.resolve(call.getString("path",""),false);if(!f.isFile())throw new java.io.FileNotFoundException();

@@ -19,7 +19,43 @@
 </sc-if>
 
 
-<sc-if value="{{chatTools.open}}"><div data-alpha-chat-tools-popup ref="{{chatTools.ref}}" class="chat-tools-backdrop" onClick="{{chatTools.close}}"><div role="dialog" aria-label="Chat actions" class="chat-tools-menu" onClick="{{chatTools.inside}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>Upload file</button><button onClick="{{chatTools.search}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.search}}"></path></svg>Search chat</button></div></div></sc-if>
+<sc-if value="{{attachmentPicker.open}}">
+  <div data-alpha-attachment-picker data-alpha-popup class="attachment-picker-backdrop" ref="{{attachmentPicker.ref}}" onClick="{{attachmentPicker.close}}">
+    <section role="dialog" aria-modal="true" aria-label="Attach files" data-alpha-bottom-sheet class="attachment-picker-sheet" onClick="{{attachmentPicker.inside}}">
+      <header>
+        <button class="ib" aria-label="Close attachments" onClick="{{attachmentPicker.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
+        <h2 class="serif">Attach</h2>
+        <button class="attachment-picker-confirm" aria-label="Attach selected files" disabled="{{attachmentPicker.attachDisabled}}" onClick="{{attachmentPicker.attach}}">Attach</button>
+      </header>
+      <div class="attachment-picker-search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.search}}"></path></svg><input type="search" aria-label="{{attachmentPicker.searchLabel}}" placeholder="{{attachmentPicker.searchLabel}}" value="{{attachmentPicker.query}}" onChange="{{attachmentPicker.search}}" disabled="{{attachmentPicker.reading}}"></div>
+      <nav class="attachment-picker-tabs" aria-label="Attachment sources">
+        <button aria-pressed="{{attachmentPicker.photos}}" onClick="{{attachmentPicker.photosTab}}" disabled="{{attachmentPicker.reading}}">Photos</button>
+        <button aria-pressed="{{attachmentPicker.files}}" onClick="{{attachmentPicker.filesTab}}" disabled="{{attachmentPicker.reading}}">Files</button>
+      </nav>
+      <sc-if value="{{attachmentPicker.files}}"><div class="attachment-picker-location">
+        <sc-if value="{{attachmentPicker.backFolder}}"><button class="ib" aria-label="Parent folder" onClick="{{attachmentPicker.up}}" disabled="{{attachmentPicker.reading}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if><strong>{{attachmentPicker.folderName}}</strong>
+        <sc-for list="{{attachmentPicker.locations}}" key="{{v.id}}" as="v"><button aria-pressed="{{v.selected}}" onClick="{{v.choose}}">{{v.label}}</button></sc-for>
+      </div></sc-if>
+      <div class="attachment-picker-content" aria-busy="{{attachmentPicker.loading}}">
+        <sc-if value="{{attachmentPicker.photoAccess}}"><div class="attachment-picker-access"><button onClick="{{attachmentPicker.allowPhotos}}">Choose more photos</button></div></sc-if>
+        <sc-if value="{{attachmentPicker.fileAccess}}"><div class="attachment-picker-access"><p>Allow file access to browse storage.</p><button onClick="{{attachmentPicker.allowFiles}}">Allow file access</button></div></sc-if>
+        <sc-if value="{{attachmentPicker.error}}"><div class="attachment-picker-access"><p role="alert">{{attachmentPicker.error}}</p><button onClick="{{attachmentPicker.retry}}">Try again</button></div></sc-if>
+        <sc-if value="{{attachmentPicker.firstLoading}}"><div class="attachment-picker-loading" role="status" aria-label="Loading files"><span></span><span></span><span></span><span></span><span></span><span></span></div></sc-if>
+        <sc-if value="{{attachmentPicker.empty}}"><p class="attachment-picker-empty">{{attachmentPicker.emptyLabel}}</p></sc-if>
+        <sc-if value="{{attachmentPicker.photos}}"><div class="attachment-picker-photos">
+          <sc-for list="{{attachmentPicker.rows}}" key="{{p.key}}" as="p"><button aria-label="{{p.name}}" aria-pressed="{{p.selected}}" disabled="{{p.disabled}}" onClick="{{p.choose}}"><sc-if value="{{p.hasImage}}"><img src="{{p.image}}" alt="" loading="lazy"></sc-if><sc-if value="{{p.imageMissing}}"><span class="attachment-picker-photo-placeholder"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.photo}}"></path></svg><small>{{p.name}}</small></span></sc-if><span class="attachment-picker-check"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.check}}"></path></svg></span></button></sc-for>
+        </div></sc-if>
+        <sc-if value="{{attachmentPicker.files}}"><div class="attachment-picker-files">
+          <sc-for list="{{attachmentPicker.rows}}" key="{{p.key}}" as="p"><button aria-label="{{p.name}}" aria-pressed="{{p.pressed}}" disabled="{{p.disabled}}" onClick="{{p.choose}}"><svg class="i attachment-picker-file-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="{{p.icon}}"></path></svg><span class="attachment-picker-file-name"><strong>{{p.name}}</strong><small>{{p.detail}}</small></span><sc-if value="{{p.folder}}"><svg class="i attachment-picker-trailing" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.right}}"></path></svg></sc-if><sc-if value="{{p.selectable}}"><span class="attachment-picker-check attachment-picker-trailing"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.check}}"></path></svg></span></sc-if></button></sc-for>
+        </div></sc-if>
+        <sc-if value="{{attachmentPicker.more}}"><button class="attachment-picker-more" onClick="{{attachmentPicker.loadMore}}" disabled="{{attachmentPicker.loading}}">More photos</button></sc-if>
+        <sc-if value="{{attachmentPicker.truncated}}"><p class="attachment-picker-empty">Use search to find more files in this folder.</p></sc-if>
+      </div>
+      <footer><span role="status">{{attachmentPicker.selectionLabel}}</span><sc-if value="{{attachmentPicker.selectionLabel}}"><button onClick="{{attachmentPicker.clear}}" disabled="{{attachmentPicker.reading}}">Clear</button></sc-if><sc-if value="{{attachmentPicker.computer}}"><button onClick="{{attachmentPicker.fromComputer}}" disabled="{{attachmentPicker.reading}}">From computer</button></sc-if></footer>
+    </section>
+  </div>
+</sc-if>
+<sc-if value="{{chatTools.open}}"><div data-alpha-chat-tools-popup ref="{{chatTools.ref}}" class="chat-tools-backdrop" onClick="{{chatTools.close}}"><div role="dialog" aria-label="Chat actions" class="chat-tools-menu" onClick="{{chatTools.inside}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>Photos and files</button><button onClick="{{chatTools.search}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.search}}"></path></svg>Search chat</button></div></div></sc-if>
 <sc-if value="{{chatSearch.open}}"><div data-alpha-chat-search-popup ref="{{chatSearch.ref}}" class="chat-tools-backdrop" onClick="{{chatSearch.close}}"><section role="dialog" aria-label="Search chats" class="chat-search-panel" onClick="{{chatSearch.inside}}"><header><h2>Search chats</h2><button class="ib" aria-label="Close search" onClick="{{chatSearch.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></header><input aria-label="Search messages" data-alpha-initial-focus placeholder="Search messages" value="{{chatSearch.query}}" onChange="{{chatSearch.change}}"><sc-if value="{{chatSearch.error}}"><p role="alert">{{chatSearch.error}}</p></sc-if><div class="chat-search-results" aria-busy="{{chatSearch.busy}}"><sc-for list="{{chatSearch.rows}}" key="{{r.id}}" as="r"><button onClick="{{r.go}}"><small>{{r.date}}</small><span>{{r.text}}</span></button></sc-for><sc-if value="{{chatSearch.more}}"><button onClick="{{chatSearch.loadMore}}">More results</button></sc-if></div></section></div></sc-if>
 
 <div data-alpha-system-cutout style="position: absolute; top: 13px; left: 195px; width: 22px; height: 22px; border-radius: 11px; background: var(--alpha-black); box-shadow: 0 0 0 1.5px var(--alpha-gray-11); z-index: 99; pointer-events: none"></div>
@@ -4007,7 +4043,7 @@
           <sc-if value="{{m.sentTranscript}}"><div class="sent-content-attachment" aria-label="Sent transcript"><small>Transcript</small><strong>{{m.sentTranscript}}</strong></div></sc-if>
           <sc-if value="{{m.sentPhoto}}"><button class="sent-content-attachment" aria-label="Preview sent photo" onClick="{{m.openPhotoPreview}}"><img src="{{m.sentPhoto}}" alt="Sent photo" /></button></sc-if>
 
-          <div data-alpha-message-text role="{{m.messageActionsRole}}" tabIndex="{{m.messageActionsTabIndex}}" aria-label="{{m.messageActionsLabel}}" aria-haspopup="{{m.messageActionsPopup}}" aria-expanded="{{m.messageActionsOpen}}" onClick="{{m.openMessageActions}}" onKeyDown="{{m.messageActionsKey}}" onContextMenu="{{m.messageActionsContext}}" onPointerDown="{{m.messageActionsDown}}" onPointerMove="{{m.messageActionsMove}}" onPointerUp="{{m.messageActionsCancel}}" onPointerCancel="{{m.messageActionsCancel}}" style="align-self: flex-end; max-width: 80%; background: var(--acc); color: var(--alpha-white); padding: 11px 16px; border-radius: 22px 22px 6px 22px; font-size: 15px; line-height: 1.4" class="alpha-user-message">{{m.linkedText}}</div>
+          <sc-if value="{{m.hasDisplayText}}"><div data-alpha-message-text role="{{m.messageActionsRole}}" tabIndex="{{m.messageActionsTabIndex}}" aria-label="{{m.messageActionsLabel}}" aria-haspopup="{{m.messageActionsPopup}}" aria-expanded="{{m.messageActionsOpen}}" onClick="{{m.openMessageActions}}" onKeyDown="{{m.messageActionsKey}}" onContextMenu="{{m.messageActionsContext}}" onPointerDown="{{m.messageActionsDown}}" onPointerMove="{{m.messageActionsMove}}" onPointerUp="{{m.messageActionsCancel}}" onPointerCancel="{{m.messageActionsCancel}}" style="align-self: flex-end; max-width: 80%; background: var(--acc); color: var(--alpha-white); padding: 11px 16px; border-radius: 22px 22px 6px 22px; font-size: 15px; line-height: 1.4" class="alpha-user-message">{{m.linkedText}}</div></sc-if>
         </sc-if>
         <sc-if value="{{m.isAgent}}">
           <div style="display: flex; flex-direction: column; gap: 12px">

@@ -4,6 +4,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { openSelectedDocumentViewer } from './selected-document-viewer';
 import { runFilePicker, inputFiles } from './file-picker';
 import { BrowserStorageVolume } from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-volume.ts';
+import {MAX_CHAT_IMAGE_INTAKE_BYTES} from '@elizaos/core/protocol';
 /** Keep installed data and Alpha presentation; storage behavior belongs to plugin-files. */
 const SharedFiles = createBrowserFiles({
  databaseName: 'alpha.browser.files.v1',
@@ -15,6 +16,19 @@ const SharedFiles = createBrowserFiles({
  inputFiles,
 });
 export class BrowserFiles extends SharedFiles {
+ async attachment(input:Parameters<InstanceType<typeof SharedFiles>['attachment']>[0]){
+  if(input.purpose==='chat'&&input.selectionId.startsWith('browser-photo:')){
+   const id=input.selectionId.slice('browser-photo:'.length),row=await browserPhotoLibrary.read({id});
+   if(row.trashed||row.kind==='video')throw Error('Select a current photo.');
+   const match=/^data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)$/.exec(row.image);
+   if(!match)throw Error('This photo could not be read. Select it again.');
+   if(match[2].length>Math.ceil(MAX_CHAT_IMAGE_INTAKE_BYTES/3)*4||atob(match[2]).length>MAX_CHAT_IMAGE_INTAKE_BYTES)throw Error('Choose a photo up to 20 MB.');
+   const [metadata]=await this.photoRows(['Photos/Images/'+encodeURIComponent(id)]),latest=await browserPhotoLibrary.read({id});
+   if(latest.trashed||latest.mutationRevision!==row.mutationRevision)throw Error('This photo changed. Select it again.');
+   return {name:metadata.name,mimeType:match[1],dataBase64:match[2]};
+  }
+  return super.attachment(input);
+ }
  private readonly reviewedPhotoTrash=new Map<string,string>();
  private photoPath(path:string){return /^Photos\/(Images|Videos)\//.test(path);}
  private async photoRows(paths:string[],trashed=false){

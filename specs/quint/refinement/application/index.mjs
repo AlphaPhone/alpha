@@ -16,6 +16,7 @@ import {checkCalendarFormControls} from './calendar-form-controls.mjs';
 import {checkSettingsPageFocus} from './settings-page-focus.mjs';
 import {checkKeyboardFocus} from './keyboard-focus.mjs';
 import {checkChatAttachments} from './chat-attachments.mjs';
+import {checkAttachmentPicker} from './attachment-picker.mjs';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {root} from './support.mjs';
@@ -120,7 +121,7 @@ import {checkOSDefaults} from './os-defaults.mjs';
 import {checkOSProvisioning} from './os-provisioning.mjs';
 import {checkOSSourceStaging} from './os-source-staging.mjs';
 
-const adapters = [checkMapPlaneFailures, checkChatTools, checkHomeStartupCache, checkCalendarActionReview, checkMailComposerPresentation, checkSavedServiceRead, checkMailDraftSelection, checkWorkflowRecoverySelection, checkHomeAutomationsRead, checkVoiceTranscriptFollow, checkAccountSheet, checkMailSelection, checkNotesStartupCache, checkContentLinks, checkCalendarFormControls, checkSettingsPageFocus, checkKeyboardFocus, checkChatAttachments, application, shellNavigation, startupPermissions, assistantConversation, notesLifecycle,
+const adapters = [checkMapPlaneFailures, checkChatTools, checkHomeStartupCache, checkCalendarActionReview, checkMailComposerPresentation, checkSavedServiceRead, checkMailDraftSelection, checkWorkflowRecoverySelection, checkHomeAutomationsRead, checkVoiceTranscriptFollow, checkAccountSheet, checkMailSelection, checkNotesStartupCache, checkContentLinks, checkCalendarFormControls, checkSettingsPageFocus, checkKeyboardFocus, checkChatAttachments, checkAttachmentPicker, application, shellNavigation, startupPermissions, assistantConversation, notesLifecycle,
   browserSession, credentialVault, developmentSurfaces, filesAndSharing, preferences, durableStore,
   permissionWalkthrough, developmentDevice, permanentVoiceDeletion, developmentHost, filesTree,
   calendarPresentation, draftDispatch, notificationCollection, callbackLanding,
