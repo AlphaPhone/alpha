@@ -5806,8 +5806,9 @@ class Component extends DCLogic {
     if (!open && (S.stageFrom || []).length) this.setState({ stageFrom: [] });
     if (!open) this.stageHold = null;
     if (!this.stageStore || !this.stageSessionRead) return;
-    var comms = S.screen === "home" && this.isCommsView(S.view);
-    var session = comms ? { chat: open ? S.chat : "input", sheetShare: open && this.chatSheetShare ? this.chatSheetShare : null, view: S.view, stageFrom: open ? S.stageFrom || [] : [] } : null;
+    // Only an open stage is restored: a closed comms view reloads like any other app, onto Home.
+    var staged = open && S.screen === "home" && this.isCommsView(S.view);
+    var session = staged ? { chat: S.chat, sheetShare: this.chatSheetShare || null, view: S.view, stageFrom: S.stageFrom || [] } : null;
     var key = JSON.stringify(session);
     if (key === this.stageSessionKey) return;
     this.stageSessionKey = key;

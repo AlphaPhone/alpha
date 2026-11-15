@@ -1148,7 +1148,9 @@ export function installChatOverlayMotion(Component: Shell) {
 		};
 		out.inputComposerFocus = () => setInputFocus(true);
 		out.inputComposerBlur = () => setInputFocus(false);
-		const dockScrim =
+		// A comms view's bar is the app's own field (D3): the app stays live while it is typed in, so a
+		// filtered list, the thread accessories and Back keep their taps.
+		const dockScrim = !out.comms &&
 			s.chat === "input" && !!out.showComposer && !s.shade &&
 			s.voice === "off" && !shell.props.assistantSurface &&
 			(shell.chatInputFocused || shell.rest() === "hidden");

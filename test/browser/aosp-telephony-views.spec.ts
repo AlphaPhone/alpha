@@ -80,10 +80,12 @@ test('a conversation has one bottom bar: the bar addresses the person, with no s
   await expect(page.locator(personField)).toHaveAttribute('placeholder', /^Text /);
   for (const gone of ['[data-alpha-messages-body]', '[data-alpha-messages-send]', '[data-alpha-messages-alpha]']) await expect(page.locator(gone)).toHaveCount(0);
   await expect(page.locator('[data-alpha-messages-accessories]')).toBeInViewport({ratio: 1});
-  await expect(barSend(page)).toBeDisabled();
+  // An empty bar offers dictation; Send appears with text.
+  await expect(barSend(page)).toHaveCount(0);
   // Text typed in the bar is the owner's text to the person; nothing goes anywhere until Send.
   await page.locator(personField).fill('tell her I am ten minutes away');
   await expect(page.locator(personField)).toHaveValue('tell her I am ten minutes away');
+  await expect(barSend(page)).toBeEnabled();
   expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
