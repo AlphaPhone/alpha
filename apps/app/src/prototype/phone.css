@@ -372,6 +372,8 @@ html.alpha-text-xl:not(.standalone-app) [data-alpha-app-header="main"]:not([data
    out above the sheet, bottom-anchored, never covered. --alpha-sheet-height has one writer at a time:
    the shell's render at rest, the drag's paint while a finger moves (then nothing animates behind it). */
 [data-alpha-layer="app"][data-alpha-stage="true"]{bottom:var(--alpha-sheet-height,0px)!important;transition:bottom .42s cubic-bezier(.22,1,.36,1)}
+/* The staged app ends at the sheet, so nothing inside it reserves room for the closed bar. */
+[data-alpha-layer="app"][data-alpha-stage="true"]{--alpha-dock-reserve:12px}
 [data-screen][data-alpha-chat-dragging="true"] [data-alpha-layer="app"][data-alpha-stage="true"]{transition:none}
 [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"][data-alpha-stage="true"] :is([data-alpha-app-scroll],.calendar-timeline,.calendar-draft-fields){padding-bottom:16px!important;scroll-padding-bottom:16px}
 [data-alpha-layer="app"][data-alpha-stage-enter="left"]{animation:alpha-stage-left .42s cubic-bezier(.22,1,.36,1) both}
