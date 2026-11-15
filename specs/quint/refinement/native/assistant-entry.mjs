@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {captureInputs,checkTraces,qmap} from '../check-traces.mjs';
 import {app,directory,javaTraceCampaign,root} from './java.mjs';
 import {assistantAgent,assistantNavigation,assistantEntryPlatform,assistantShared,senseFixtures,systemModule,imageModule,imageCapabilitySource,imageAdmissionSource} from './assistant-entry-platform.mjs';
+import {mainActivitySources} from './main-activity-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {upstreamNativeSource} from '../../../../scripts/upstream-native-source.ts';
 
@@ -15,10 +16,9 @@ const harness='AssistantEntryTraces.java';
 const capacitor='node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/';
 const hostPath='android/consumer-host.json';
 const patchManifest='android/upstream-native-sources.json';
-const appSources=['AlphaAssistActivity','AlphaPowerVoiceActivity','AlphaQuickSettingsTile','MainActivity','RendererRecoveryBudget','NavigationOpenRequest','AlphaSenseAdmission','AlphaImageCapabilities']
-  .map(name=>app+name+'.java');
+const appSources=['AlphaAssistActivity','AlphaPowerVoiceActivity','AlphaQuickSettingsTile','AlphaSenseAdmission','AlphaImageCapabilities']
+  .map(name=>app+name+'.java').concat(mainActivitySources);
 const sharedSources=[...assistantShared.map(path=>'vendor/eliza/'+path),imageCapabilitySource];
-const ports=[join(directory,'MainActivityPorts.java')];
 const scenarios=[
   ...['cold-listener','cold-system','cold-exact-deadline','cold-expired','cold-rebound','cold-locked',
     'public-same-object','copy-during-load','restored-and-warm','cold-no-bridge','locked-warm',
@@ -47,7 +47,7 @@ export async function checkNativeAssistantEntry(extraSources=[]) {
     const sources=[...appSources,imageAdmissionSource,assistantAgent,assistantNavigation,...sharedSources,senseFixtures,
       'android/app/src/main/AndroidManifest.xml',hostPath,patchManifest,'upstream.lock.json',
       capacitor+'BridgeActivity.java',capacitor+'Bridge.java','scripts/upstream-native-source.ts',
-      'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),...ports,
+      'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),
       ...[harness,'Trace.java','java.mjs','main-activity-platform.mjs','assistant-entry-platform.mjs']
         .map(name=>join(directory,name)),
       fileURLToPath(import.meta.url),...fixture.paths,...extraSources];
@@ -68,7 +68,7 @@ export async function checkNativeAssistantEntry(extraSources=[]) {
       assert.ok(patches.every(patch=>patch.targets.every(target=>target.path!==path)),`Image input has a staged patch: ${path}`);
       assert.equal(driverHashes[join(root,source)],imagePinned.get(path).sha256);
     }
-    const traces=javaTraceCampaign(harness,[...appSources,...sharedSources,...ports,...fixture.paths],scenarios);
+    const traces=javaTraceCampaign(harness,[...appSources,...sharedSources,...fixture.paths],scenarios);
     for(const trace of traces) {
       mapSurfaces(trace.expect);
       for(const step of trace.steps) mapSurfaces(step.expect);
