@@ -107,15 +107,18 @@ test('client feature publication retires once while a peer moves the winner',()=
  });
  const marker=(actor,key)=>path.join(control,actor+'-'+key);
  async function ready(actor,key,timeout=20000){
-  const until=Date.now()+timeout;
-  while(!fs.existsSync(marker(actor,key+'.json'))){
+  const until=Date.now()+timeout,target=marker(actor,key+'.json');
+  while(!fs.existsSync(target)){
    const running=children.find(row=>row.actor===actor),state=running.diagnostic(),complete=marker(actor,'complete.json');
-   if(fs.existsSync(complete))throw Error('Worker completed before fixture event: '+actor+' '+key+'; '+fs.readFileSync(complete,'utf8')+'; '+JSON.stringify(state));
+   const finished=fs.existsSync(complete),expired=Date.now()>until;
+   // The child can publish the requested event between the first poll and the completion check.
+   if(fs.existsSync(target))break;
+   if(finished)throw Error('Worker completed before fixture event: '+actor+' '+key+'; '+fs.readFileSync(complete,'utf8')+'; '+JSON.stringify(state));
    if(state.status!==null||state.signal!==null)throw Error('Worker exited before fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
-   if(Date.now()>until)throw Error('Missing fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
+   if(expired)throw Error('Missing fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
    await new Promise(resolve=>setTimeout(resolve,5));
   }
-  const event=JSON.parse(fs.readFileSync(marker(actor,key+'.json')));locations[actor]={stage:event.stage,aside:event.aside};return event;
+  const event=JSON.parse(fs.readFileSync(target));locations[actor]={stage:event.stage,aside:event.aside};return event;
  }
  const allow=(actor,key)=>fs.writeFileSync(marker(actor,key+'.allow'),'');
  function inventoryAt(directory){
