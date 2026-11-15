@@ -762,6 +762,12 @@
       <sc-if value="{{inbox.canRefresh}}"><button class="ib" aria-label="Refresh inbox" disabled="{{inbox.refreshDisabled}}" onClick="{{inbox.refresh}}"><span aria-hidden="true" style="display:block;width:20px;height:20px;background:currentColor;mask:url('/icons/lucide/rotate-cw.svg') center/contain no-repeat;-webkit-mask:url('/icons/lucide/rotate-cw.svg') center/contain no-repeat"></span></button></sc-if>
       <button class="ib" aria-label="Search email" onClick="{{inbox.openSearch}}"><span aria-hidden="true" style="display:block;width:20px;height:20px;background:currentColor;mask:url('/icons/lucide/search.svg') center/contain no-repeat;-webkit-mask:url('/icons/lucide/search.svg') center/contain no-repeat"></span></button>
       <button class="ib" aria-label="Compose" disabled="{{inbox.composeDisabled}}" onClick="{{inbox.compose}}"><span aria-hidden="true" style="display:block;width:20px;height:20px;background:currentColor;mask:url('/icons/lucide/plus.svg') center/contain no-repeat;-webkit-mask:url('/icons/lucide/plus.svg') center/contain no-repeat"></span></button>
+      <sc-if value="{{inbox.mailOptions.length}}">
+        <details class="photo-import-menu mailbox-options-menu" onKeyDown="{{inbox.mailMenuKey}}">
+          <summary class="ib" aria-label="Mail options"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.more}}"></path></svg></summary>
+          <div role="menu"><sc-for list="{{inbox.mailOptions}}" as="option"><button role="menuitem" disabled="{{option.disabled}}" onClick="{{option.pick}}"><span class="mail-toolbar-icon" aria-hidden="true" style="mask-image:url('{{option.icon}}');-webkit-mask-image:url('{{option.icon}}')"></span>{{option.label}}</button></sc-for></div>
+        </details>
+      </sc-if>
     </div>
   </sc-if>
   <sc-if value="{{inbox.searching}}">
@@ -783,13 +789,15 @@
 
   <sc-if value="{{inbox.hasActionChips}}"><div class="scr" style="display:flex;gap:8px;padding:0 20px 8px;overflow-x:auto;flex-shrink:0"><sc-for list="{{inbox.actionChips}}" as="action"><button aria-label="{{action.label}}" onClick="{{action.pick}}" style="min-height:36px;padding:0 12px;border-radius:18px;background:var(--s2);color:var(--fg);font-size:13px;white-space:nowrap;flex-shrink:0">{{action.label}}</button></sc-for></div></sc-if>
   <sc-if value="{{inbox.cachedListNotice}}"><p role="status" style="margin:0;padding:0 20px 8px;font-size:12px;color:var(--mut)">{{inbox.cachedListNotice}}</p></sc-if>
+  <sc-if value="{{inbox.mailBatchStatus}}"><p role="status" style="margin:0;padding:0 20px 8px;font-size:12px;color:var(--mut)">{{inbox.mailBatchStatus}}</p></sc-if>
   <div class="scr" data-alpha-app-scroll="inbox" data-mail-cached="{{inbox.cachedListShown}}" style="flex-grow: 1; overflow-y: auto; padding-bottom: 120px; touch-action: pan-y">
     <sc-for list="{{inbox.rows}}" as="it">
       <div onPointerDown="{{it.down}}" onPointerUp="{{it.up}}" style="position: relative; overflow: hidden; touch-action: pan-y">
         <div aria-hidden="true" style="position: absolute; inset: 0; display: flex; justify-content: flex-end; align-items: center; padding: 0 24px; background: var(--s2); color: var(--mut)">
           <svg class="i" viewBox="0 0 24 24"><path d="{{ic.archive}}"></path></svg>
         </div>
-        <button aria-label="{{it.label}}" aria-current="{{it.current}}" onClick="{{it.open}}" style="position: relative; width: 100%; display: flex; gap: 14px; padding: 13px 20px; align-items: flex-start; background: var(--bg); transform: translateX({{it.tx}}px); transition: transform .28s cubic-bezier(.19,1,.22,1); box-sizing: border-box">
+        <button role="{{it.rowRole}}" aria-checked="{{it.checked}}" aria-label="{{it.label}}" aria-current="{{it.current}}" onClick="{{it.open}}" style="position: relative; width: 100%; display: flex; gap: 14px; padding: 13px 20px; align-items: flex-start; background: var(--bg); transform: translateX({{it.tx}}px); transition: transform .28s cubic-bezier(.19,1,.22,1); box-sizing: border-box">
+          <sc-if value="{{it.selecting}}"><span class="mail-selection-check" aria-hidden="true" data-checked="{{it.checked}}"><sc-if value="{{it.selected}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.check}}"></path></svg></sc-if></span></sc-if>
           <span class="mail-sender-avatar"><span>{{it.ini}}</span><sc-if value="{{it.senderImage}}"><img src="{{it.senderImage}}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onError="{{it.hideSenderImage}}"></sc-if></span>
           <div style="flex-grow: 1; min-width: 0">
             <div style="display: flex; align-items: center; gap: 6px">
@@ -973,6 +981,16 @@
       </section>
     </div>
   </sc-if></sc-if>
+  <sc-if value="{{inbox.mailReview}}">
+    <div ref="{{inbox.mailSelectionModal}}" class="inbox-review-modal" style="position:absolute;inset:0;z-index:8;display:flex;align-items:flex-end;padding:16px 16px 72px;box-sizing:border-box">
+      <button aria-hidden="true" tabindex="-1" onClick="{{inbox.mailReview.close}}" style="position:absolute;inset:0;background:rgba(0,0,0,.45)"></button>
+      <section role="dialog" aria-modal="true" aria-label="{{inbox.mailReview.title}}" style="position:relative;width:100%;max-height:100%;overflow:auto;padding:20px;background:var(--bg);border-radius:22px;box-sizing:border-box">
+        <h2 style="margin:0;font-size:20px">{{inbox.mailReview.title}}</h2>
+        <sc-if value="{{inbox.mailBatchStatus}}"><p role="status">{{inbox.mailBatchStatus}}</p></sc-if>
+        <div style="display:flex;gap:8px;margin-top:16px"><button onClick="{{inbox.mailReview.close}}" style="min-height:44px;padding:10px 16px;border-radius:18px;background:var(--s2)">No</button><button onClick="{{inbox.mailReview.confirm}}" style="min-height:44px;padding:10px 16px;border-radius:18px;background:var(--fg);color:var(--bg)">Yes</button></div>
+      </section>
+    </div>
+  </sc-if>
   <sc-if value="{{inbox.attachmentOpen}}">
     <div ref="{{inbox.attachmentModal}}" class="inbox-attachment-review inbox-review-modal" role="dialog" aria-modal="true" aria-label="Review attachment">
       <div class="inbox-attachment-actions"><button class="ib" aria-label="Back to message" onClick="{{inbox.attachment.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button><button aria-label="{{inbox.attachment.saveLabel}}" onClick="{{inbox.attachment.save}}" disabled="{{inbox.attachment.saveDisabled}}" style="display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.filesDown}}"></path></svg>{{inbox.attachment.saveButtonText}}</button><sc-if value="{{inbox.attachment.external}}"><button aria-label="Open file" onClick="{{inbox.attachment.open}}" style="display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.phoneOut}}"></path></svg>Open</button></sc-if></div>
