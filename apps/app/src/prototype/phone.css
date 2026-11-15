@@ -1,14 +1,14 @@
 html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;background:var(--alpha-white)}
-/* Touch draws no highlight and no focus ring. The WebView's default tap highlight paints a blue box
- * over the whole control, and a tap (or Android's keyboard) can leave a ring behind. Rings appear only
- * while the person navigates by keyboard: view-focus.ts sets the flag on Tab or an arrow key and
- * clears it on the next pointer down. */
+/* Remove the WebView tap flash. Keep native keyboard and form focus indicators, including when a
+ * dialog focuses its first field. Suppress pointer focus rings on launcher and MapLibre buttons. */
 html{-webkit-tap-highlight-color:transparent}
-html:not([data-alpha-keyboard-navigation]) :focus{outline:none!important}
-html:not([data-alpha-keyboard-navigation]) .maplibregl-ctrl :focus{box-shadow:none!important}
+html :is([data-mobile-shell-tile],[data-launcher-app]>button,.maplibregl-ctrl :is(button,.maplibregl-ctrl-attrib-button)):focus:not(:focus-visible){outline:none}
+html .maplibregl-ctrl :is(button,.maplibregl-ctrl-attrib-button):focus:not(:focus-visible){box-shadow:none}
 /* Pressing a launcher tile (Home or the Apps library) fades its icon; the tile itself stays as it is. */
 html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:var(--surface)}
-html :is([data-mobile-shell-tile-face],[data-launcher-app]>button>:first-child){transition:opacity .12s ease-out}
+@media(prefers-reduced-motion:no-preference){
+  html :is([data-mobile-shell-tile-face],[data-launcher-app]>button>:first-child){transition:opacity .12s ease-out}
+}
 html :is([data-mobile-shell-tile]:active [data-mobile-shell-tile-face],[data-launcher-app]>button:active>:first-child){opacity:.55}
 .alpha-phone{position:absolute!important;left:var(--phone-left,0px)!important;top:var(--phone-top,0px)!important;width:var(--phone-width,412px)!important;height:var(--phone-height,915px)!important;padding:0!important;display:block!important;transform-origin:top left;transform:scale(var(--phone-scale,1));background:var(--bg)!important}
 .browser-desktop body{background:var(--alpha-desktop-backdrop)}
