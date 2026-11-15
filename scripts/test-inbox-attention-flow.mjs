@@ -213,7 +213,7 @@ deq(t.prepared.at(-1).attachments.map(a=>a.name),['c.txt','a.txt']);assert.equal
   t.shell.componentWillUnmount();
  }finally{inboxPage[2].fromEmail=original;}
 }
-// 7e. Back confirms discarding. Cancelling keeps the exact reviewed destination and content.
+// 7e. Explicit discard asks first. Cancelling keeps the exact reviewed destination and content.
 // A suggestion still belongs to the original draft when another message is selected.
 {
  const t=await boot();t.mount();t.setActive(true);t.render();await t.tick();
@@ -224,7 +224,7 @@ deq(t.prepared.at(-1).attachments.map(a=>a.name),['c.txt','a.txt']);assert.equal
  t.render().rows[1].open();await t.tick();
  const m2=target();assert.equal(inbox.useInEmail('For m2.',{token:m2.token}),true);
  const shown=target();deq({kind:shown.kind,aside:shown.aside,elsewhere:shown.elsewhere},{kind:'draft',aside:false,elsewhere:false});
- assert.equal(inbox.back(t.shell.st,t.api),true);
+ t.render().c.discard();
  assert.equal(t.render().composing,true);assert.equal(t.render().c.confirm,true);
  assert.equal(t.render().c.body,'For m2.');deq(target(),shown,'opening the discard confirmation preserves the destination');
  t.render().c.cancelDiscard();assert.equal(t.render().c.confirm,false);

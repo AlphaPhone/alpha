@@ -13,6 +13,7 @@ async function bundle() {
     "connection-ui": "export const connectionController=globalThis.ports.controller; export const agentPendingText=()=>'';",
     "native-connection": "export const secureConnectionStore=globalThis.ports.store;",
     "platform-plugins": "export const registerPlugin=()=>globalThis.ports.attachment;",
+    "native-adapter": "export const watchReturnToApp=()=>{throw Error('Contacts screen lifecycle is outside the Inbox fixture');};",
     "daily": "export const DailyApps=globalThis.ports.daily;",
     "dev-profile": "export const browserDevProfile=false;",
     "json-domain-document": "export class BrowserJsonDomainDocument { constructor(){throw Error('Unexpected browser storage in native fixture');} }",

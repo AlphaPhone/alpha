@@ -3430,7 +3430,7 @@ async function ctPickPhoto(api, id) {
     var scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height)), canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     var context = canvas.getContext("2d"); if (!context) throw Error("This photo could not open.");
-    context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    context.fillStyle = alphaPaletteColor("--alpha-white"); context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     var photo = canvas.toDataURL("image/jpeg", 0.85);
     if (!current()) return;
     if (editing) api.set({ form: Object.assign({}, ctForm(state, ctList(api)), { photo: photo }) });

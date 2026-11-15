@@ -114,6 +114,8 @@ module NativeSmsDispatch {
       else {
         val starting=project({ ...noRecord,binding:review.binding,dispatching:true,boot:s.boot },s.recipients*s.parts)
         if (mode=="begin-after-and-deny-before") s' = response({ ...state,disk:starting },"unavailable",0)
+        // A default SMS app must persist its history before any radio call; a refusal retains a denied ID.
+        else if (s.role and s.refuseOutbox) s' = decide(state,review.binding,"denied")
         else {
           val attempted=if (mode.in(Set("guard-change","throw-before","throw-after"))) 1 else s.recipients
           val accepted=if (mode=="throw-before") 0 else attempted

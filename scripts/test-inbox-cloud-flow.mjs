@@ -1,3 +1,4 @@
+import {aospImage} from '../apps/app/src/runtime/aosp-image.ts';
 import {applyMailSelection} from '../apps/app/src/runtime/mail-selection.ts';
 import {openContentLink} from '../apps/app/src/prototype/content-links.tsx';
 import React from 'react';
@@ -29,7 +30,7 @@ import { presentHomeInboxStatus } from '../apps/app/src/prototype/home-cards.ts'
 import { formatTime } from '../apps/app/src/prototype/locale-time.ts';
 import { whenLabel } from '../apps/app/src/prototype/home-cards.ts';
 import {createMailReviewController} from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/review-controller.ts';
-import {createMailDraftsController} from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
+import {createMailDraftsController,literalMailAddress} from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
 import * as mailboxList from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts';
 let session='account-a',agent='remote-a',releaseSearch,releaseAccounts,delayAccounts=true,delay=false,failNext=null,connected=true,readGrant=true,confirmAnswer=true;
 const slots=new Map(),reads=[],searches=[],disconnects=[],toasts=[],events=[],initiates=[],handoffs=[];
@@ -59,7 +60,7 @@ const windowFixture={addEventListener:(name,fn)=>events.push({name,fn}),removeEv
 class CustomEvent{constructor(type,init){this.type=type;this.detail=init?.detail;}}
 let latestDraftEdit=null;
 const inboxUnsaved=()=>({ready:Promise.resolve(),available:false,conflict:false,error:false,status:'',peek:()=>null,edit(record){latestDraftEdit=structuredClone(record);},clear:async()=>{},retire(){},resume(){}});
-const sandbox={applyMailSelection,openContentLink,...mailboxList,formatMonthDay,formatTime,formatFullDateTime,weekdayName,formatBytes,createMailReviewController,createMailDraftsController,reviewMailAttachment,cloudServiceName,linkifyMailText,linkTextMismatch,React,MailFolderPicker,mailSenderImage,serviceReadCache:async()=>null,decodeMailPreview,cachedDevicePreferences:()=>({autoLoadMailImages:true}),initializeDevicePreferences:()=>{},configureGmailBackground:async selection=>{backgroundSelections.push(selection);},withdrawGmailBackground:async()=>{},pendingGmailNotice:async()=>null,consumeGmailNotice:async()=>{},onGmailNotice:async()=>({remove:async()=>{}}),prepareMailHtml:()=>{throw Error("HTML uses the rendered browser test");},readGmailAccountChoice:()=> 'grant-a',saveGmailAccountChoice,GmailReadAhead,URL,presentHomeInboxStatus,inboxUnsaved,InboxOperation,composerKind,composerContent,reviewBinding,reviewBindingRefusal,safeMailLink,reviewOpaqueAttachment,checkOutgoingAttachments,outgoingAttachmentLimits, attachmentBytes,reviewMailAttachment,reviewMailContext,validateMailContext,...mailbox,...googleAccounts,...grants,Event,googleConnectionController:{open(){throw Error('Explicit Google authorization not exercised by this read fixture');}},registerPlugin:()=>({cancel:async()=>{}}),crypto:globalThis.crypto,TextEncoder,structuredClone,secureConnectionStore:{read:async key=>slots.get(key)??null,compareExchange:async(key,prior,next)=>{if(JSON.stringify(slots.get(key)??null)!==JSON.stringify(prior))return {status:'conflict'};if(next===null)slots.delete(key);else slots.set(key,next);return {status:'saved'};}},connectionController:controller,DailyApps:{addListener:async()=>({remove:async()=>{}})},openConnectionBrowser:async(url,signal)=>{handoffs.push(url);if(!oauthUrl)throw new Error('No automatic OAuth');if(handoff)await new Promise((resolve,reject)=>{handoff.resolve=resolve;signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});},queueMicrotask,setTimeout,AbortController,DOMException,Date,console,window:windowFixture,CustomEvent,document:{querySelector(){return null;},addEventListener(){},removeEventListener(){},documentElement:{dataset:{connectionMode:'live'}}}};
+const sandbox={applyMailSelection,openContentLink,...mailboxList,formatMonthDay,formatTime,formatFullDateTime,weekdayName,formatBytes,createMailReviewController,createMailDraftsController,literalMailAddress,aospImage,reviewMailAttachment,cloudServiceName,linkifyMailText,linkTextMismatch,React,MailFolderPicker,mailSenderImage,serviceReadCache:async()=>null,decodeMailPreview,cachedDevicePreferences:()=>({autoLoadMailImages:true}),initializeDevicePreferences:()=>{},configureGmailBackground:async selection=>{backgroundSelections.push(selection);},withdrawGmailBackground:async()=>{},pendingGmailNotice:async()=>null,consumeGmailNotice:async()=>{},onGmailNotice:async()=>({remove:async()=>{}}),prepareMailHtml:()=>{throw Error("HTML uses the rendered browser test");},readGmailAccountChoice:()=> 'grant-a',saveGmailAccountChoice,GmailReadAhead,URL,presentHomeInboxStatus,inboxUnsaved,InboxOperation,composerKind,composerContent,reviewBinding,reviewBindingRefusal,safeMailLink,reviewOpaqueAttachment,checkOutgoingAttachments,outgoingAttachmentLimits, attachmentBytes,reviewMailAttachment,reviewMailContext,validateMailContext,...mailbox,...googleAccounts,...grants,Event,googleConnectionController:{open(){throw Error('Explicit Google authorization not exercised by this read fixture');}},registerPlugin:()=>({cancel:async()=>{}}),crypto:globalThis.crypto,TextEncoder,structuredClone,secureConnectionStore:{read:async key=>slots.get(key)??null,compareExchange:async(key,prior,next)=>{if(JSON.stringify(slots.get(key)??null)!==JSON.stringify(prior))return {status:'conflict'};if(next===null)slots.delete(key);else slots.set(key,next);return {status:'saved'};}},connectionController:controller,DailyApps:{addListener:async()=>({remove:async()=>{}})},openConnectionBrowser:async(url,signal)=>{handoffs.push(url);if(!oauthUrl)throw new Error('No automatic OAuth');if(handoff)await new Promise((resolve,reject)=>{handoff.resolve=resolve;signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});},queueMicrotask,setTimeout,clearTimeout,AbortController,DOMException,Date,console,window:windowFixture,CustomEvent,document:{querySelector(){return null;},addEventListener(){},removeEventListener(){},documentElement:{dataset:{connectionMode:'live'}}}};
 sandbox.inboxLocalStore=sandbox.secureConnectionStore;vm.createContext(sandbox);
 for(const [file,name] of [['inbox-provider-controls.ts','inboxProviderControls'],['inbox-drafts.ts','inboxDrafts'],['inbox-cloud-adapter.ts',['installInboxCloudAdapter','inboxAttention','openInbox','linkifyMailText','linkTextMismatch']]])vm.runInContext(await strip(file,name),sandbox);
 // Home's mail card is the shared overview presenter, read when Home renders.
@@ -134,12 +135,20 @@ assert.deepEqual(local(composed.c.chips),[],'non-address recipients are not gues
 assert.equal(composed.c.attachLabel,'Attach file');assert.equal(composed.c.showRecipientDetails,false);composed.c.toggleRecipientDetails();assert.equal(render().c.showRecipientDetails,true);
 assert.equal(composed.c.multi,false,'From switcher only appears with more than one account');
 assert.deepEqual(local(views.inbox.suggestions(shell.st)),['Help me write this email']);
-views.inbox.back(shell.st,api);composed.c.discard();render().c.confirmDiscard();await tick();
+const savedBeforeBack=local(latestDraftEdit);
+assert.equal(views.inbox.back(shell.st,api),true);await tick();
+assert.equal(render().composing,false,'Back quietly saves and closes the local draft');
+const savedAfterBack=[...slots.entries()].find(([key])=>key.startsWith('inbox-drafts:v1:shelf:'))?.[1];
+assert.ok(savedAfterBack.items.some(item=>item.draft.id===savedBeforeBack.draft.id&&item.draft.body==='· line one'),'Back retains the exact authored draft');
+chip('Drafts').pick();await tick();render().rows.find(row=>row.label==='Draft, Shared note').open();await tick();
+assert.equal(render().c.body,'· line one','the same draft reopens through Drafts');
+render().c.discard();render().c.confirmDiscard();await tick();
+chip('Inbox').pick();await tick();
 assert.deepEqual(local(views.inbox.suggestions(shell.st)),['Help me write an email'],'no unwired inbox automation chips (organize-inbox removed)');
 assert.equal(render().composing,false,'discarded shared draft is gone');
 shell.st.compose={subject:'Photo',body:'',attach:['photo-1']};render();await tick();render();await tick();
 assert.equal(render().c.subject,'Photo');assert.deepEqual(local(render().c.atts),[],'prototype item ids are never turned into attachments');assert.match(render().c.status,/Shared items aren't attached/);
-views.inbox.back(shell.st,api);render().c.discard();render().c.confirmDiscard();await tick();
+render().c.discard();render().c.confirmDiscard();await tick();
 shell.st.compose={to:'second@example.invalid',subject:'Second share',body:'Earlier shared text'};render();await tick();render();await tick();assert.equal(render().c.subject,'Second share');
 const secondShare=local(latestDraftEdit);assert.deepEqual(secondShare.draft.to,['second@example.invalid']);assert.equal(secondShare.draft.body,'Earlier shared text');
 shell.st.compose={subject:'Third share',body:'New shared text'};render();await tick();render();await tick();assert.equal(render().c.subject,'Third share','a share opens a separate draft after preserving the open email');assert.equal(render().c.body,'New shared text');assert.match(render().c.status,/nothing has been sent/);
@@ -147,7 +156,7 @@ const preservedShelf=[...slots.entries()].find(([key])=>key.startsWith('inbox-dr
 assert.ok(preservedShelf,'the previous email is stored on the account-bound shelf');assert.equal(preservedShelf.owner,secondShare.owner);
 assert.deepEqual(local(preservedShelf.items),[{draft:secondShare.draft,toQ:secondShare.toQ}],'the entire previous draft, including id, revision, recipients and text, survives unchanged');
 assert.notEqual(latestDraftEdit.draft.id,secondShare.draft.id,'the newly shared email has its own draft identity');
-views.inbox.back(shell.st,api);render().c.discard();render().c.confirmDiscard();await tick();
+render().c.discard();render().c.confirmDiscard();await tick();
 
 // A removed message repeats no row, so only the mailbox revision shows that the later page came
 // from a changed mailbox: the list offers Load newer mail. Same revision: no change is claimed.

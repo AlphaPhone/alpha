@@ -185,9 +185,15 @@ test("native boundary: image-only plugin methods, immutable explicit callbacks, 
   assert.ok(begin > 0 && begin < first && begin < sms.indexOf("manager.sendMultipartTextMessage("), "journaled before the first platform call");
   // Holding the SMS role, Alpha writes its own sent rows (Android writes none for the default SMS app):
   // each recipient's outbox row precedes its platform call, and only that recipient's sent callbacks settle it.
-  const own = sms.indexOf("if (ownsRows) storeOwnRow(");
-  assert.ok(own > begin && own < first, "the default SMS app stores its own row before the platform call");
-  assert.match(sms, /final boolean ownsRows = MmsStore\.isDefaultSmsApp\(context\);/);
+  const own = sms.indexOf("if (!prepareOwnRows(context, journal, record, body)) return record;");
+  assert.ok(own > begin && own < first, "every default-app outbox row is stored before any platform send");
+  const prepare = sms.slice(sms.indexOf("static boolean prepareOwnRows("), sms.indexOf("static void checkPreparedRole("));
+  assert.match(prepare, /if \(!MmsStore\.checkedDefaultSmsApp\(context\)\) return true;/);
+  assert.match(prepare, /for \(int i = 0; i < record\.recipients\.length; i\+\+\)/);
+  assert.match(prepare, /MmsStore\.persistOutgoingSms\(context, record\.recipients\[i\]/);
+  assert.match(prepare, /journal\.providerRow\(record\.operationId, i, row\);/);
+  assert.match(prepare, /discardUnattemptedRows\(context, record, 0\);/);
+  assert.match(prepare, /journal\.denyUnstartedDispatch\(/);
   assert.match(sms, /if \(sent\) settleOwnRow\(app, journal, operation, index\);/);
   const store = readFileSync(join(SHARED, "MmsStore.java"), "utf8");
   assert.match(store, /Telephony\.Sms\.TYPE \+ " = \? AND " \+ Telephony\.Sms\.CREATOR \+ " = \?"/, "only outbox rows Alpha created are settled");

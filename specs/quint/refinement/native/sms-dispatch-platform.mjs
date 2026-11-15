@@ -35,6 +35,7 @@ public abstract class TelephonyPlugin extends Plugin {
 import android.content.*;
 import android.net.Uri;
 import android.provider.Telephony;
+import android.app.role.RoleManager;
 import java.io.File;
 import java.util.List;
 public final class MmsStore {
@@ -56,6 +57,14 @@ final class SmsProviderReader {
 }
 
 export const smsPlatform={
+  'android/app/role/RoleManager.java': `package android.app.role;
+public final class RoleManager {
+ public static final String ROLE_SMS="android.app.role.SMS";
+ private final android.content.Context context;
+ public RoleManager(android.content.Context context){this.context=context;}
+ public boolean isRoleAvailable(String role){return ROLE_SMS.equals(role);}
+ public boolean isRoleHeld(String role){return ROLE_SMS.equals(role)&&context.role;}
+}`,
   'android/Manifest.java': `package android;
 public final class Manifest {public static final class permission {
  public static final String SEND_SMS="sendSms",READ_PHONE_STATE="phoneState",READ_SMS="sms",READ_CONTACTS="contacts",READ_CALL_LOG="callLog";
@@ -280,6 +289,14 @@ public final class ContentResolver {
   long id=++sequence;value.put(Sms._ID,id);value.put(Sms.CREATOR,context.getPackageName());value.put(Sms.STATUS,-1);rows.put(id,value);
   return ContentUris.withAppendedId(Sms.CONTENT_URI,id);
  }
+ public int delete(Uri uri,String where,String[] args){
+  if(!uri.equals(Sms.CONTENT_URI)||!where.equals(Sms._ID+" = ? AND "+Sms.TYPE+" = ? AND "+Sms.CREATOR+" = ?")||args.length!=3)
+   throw new AssertionError("Only exact app-owned unattempted outbox row may be removed");
+  if(!context.role)throw new SecurityException("SMS role no longer held");
+  long id=Long.parseLong(args[0]);ContentValues row=rows.get(id);
+  if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[1])||!Objects.equals(row.get(Sms.CREATOR),args[2]))return 0;
+  rows.remove(id);return 1;
+ }
  public int update(Uri uri,ContentValues value,String where,String[] args){
   if(!where.equals(Sms.TYPE+" = ? AND "+Sms.CREATOR+" = ?")||args.length!=2||!args[0].equals("4")||!context.role)
    throw new AssertionError("Only exact app-owned outbox row may settle");
@@ -330,6 +347,7 @@ public final class Context {
  public final Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
  public final KeyguardManager lock=new KeyguardManager();
  public final UserManager users=new UserManager();
+ public final android.app.role.RoleManager roles=new android.app.role.RoleManager(this);
  public final SubscriptionManager subscriptions=new SubscriptionManager();
  public final TelephonyManager telephony=new TelephonyManager();
  public final SmsManager radio=new SmsManager(this);
@@ -348,7 +366,7 @@ public final class Context {
  }
  public <T>T getSystemService(Class<T> type){
   Object value=type==KeyguardManager.class?lock:type==UserManager.class?users:type==SubscriptionManager.class?subscriptions:
-   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:null;
+   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:type==android.app.role.RoleManager.class?roles:null;
   return type.cast(value);
  }
  public void unregisterReceiver(BroadcastReceiver receiver){dynamicReceivers.remove(receiver);}

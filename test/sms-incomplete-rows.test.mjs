@@ -17,7 +17,7 @@ const bundled=await build({
     builder.onResolve({filter:/^(\.\.\/platform-plugins|\.\.\/runtime\/aosp-image|\.\/native-adapter)$/},args=>({path:args.path,namespace:'fixture'}));
     builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:
       args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__incompleteSmsPlugin;':
-      args.path.includes('aosp-image')?'export const aospImage=true;':
+      args.path.includes('aosp-image')?"export const aospImage=true;export const admittedAospViews=()=>['phone','messages','contacts'];":
       'export const watchReturnToApp=()=>()=>{};'}));
   }}],
 });
@@ -51,7 +51,7 @@ async function mount(messages=[]){
     throw Error('Unexpected native effect: '+String(method));
   }});
   class Component{S(){return {view:'messages'};}setState(){}}
-  const views={messages:{}};installSmsAdapter(Component,views);
+  const views={messages:{}};installSmsAdapter(Component,views,{load:async()=>[],save:async()=>{throw Error('Unexpected local draft write');},remove:async()=>{throw Error('Unexpected local draft removal');}});
   const owner=new Component();owner.componentDidMount();await tick();
   return {calls,model:()=>views.messages.render({},{}),async close(){owner.componentWillUnmount();await tick();globalThis.document=previousDocument;globalThis.__incompleteSmsPlugin=previousPlugin;}};
 }

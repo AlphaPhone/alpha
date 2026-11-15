@@ -120,8 +120,9 @@ public final class SmsDispatchTraces {
      callbackShape(call.delivery().get(p),config.deliveredAction,index*parts+p);
     }
     if(context.role&&!context.provider.refuseInsert)
-     check(disk.providerRow[index]>0&&context.provider.rows.get(disk.providerRow[index]).get(Sms.TYPE).equals(4),
-      "Default app's exact outbox row precedes radio");
+     for(int recipient=0;recipient<recipients;recipient++)
+      check(disk.providerRow[recipient]>0&&context.provider.rows.get(disk.providerRow[recipient]).get(Sms.TYPE).equals(4),
+       "Every default-app outbox row and journal link precedes the first radio call");
    }catch(Exception failure){throw new AssertionError(failure);}
   }
 
@@ -364,7 +365,7 @@ public final class SmsDispatchTraces {
 
  public static void main(String[] args)throws Exception{
   String mode=args[0];
-  int recipients=mode.equals("per-recipient-sim-change")||mode.equals("partial-radio-throw")?2:1;
+  int recipients=mode.equals("per-recipient-sim-change")||mode.equals("partial-radio-throw")||mode.equals("default-role-outbox")?2:1;
   int parts=mode.equals("multipart-provider-cannot-prove-delivery")||mode.equals("default-role-outbox")?2:1;
   boolean role=Set.of("default-role-outbox","provider-insert-refused","retired-role-outbox").contains(mode);
   Fixture f=new Fixture(mode,recipients,parts,role);
@@ -484,7 +485,9 @@ public final class SmsDispatchTraces {
      break;
     case "provider-insert-refused":
      f.refuseProviderInsert(true);f.request(1,1,"complete");f.approve(1,"complete");
-     f.callback(1,"sent",true,"complete");f.readback(2);
+     check(f.context.radio.attempts==0&&f.context.radio.accepted.isEmpty()&&f.context.provider.rows.isEmpty()
+       &&f.readDisk().decision.equals("denied"),"History refusal denies before radio and retains the reviewed operation ID");
+     f.readback(2);
      break;
     case "retired-role-outbox":
      f.request(1,1,"complete");f.approve(1,"complete");f.access("role",false);
