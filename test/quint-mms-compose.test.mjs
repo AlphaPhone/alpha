@@ -13,7 +13,8 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 const MODEL = {path: 'specs/quint/services/MmsCompose.qnt', module: 'MmsCompose'};
 const SCENARIOS = ['pictureChooserKeepsVisitTest', 'hideWithoutChooserEndsVisitTest', 'retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest',
   'pickedPicturesResetIdTest', 'pageHideEndsPickTest', 'sixthPictureRefusedTest', 'carrierAnswerReadBackTest',
-  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'lateJournalReceiptRetiresDraftTest'];
+  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'lateJournalReceiptRetiresDraftTest',
+  'staleCancelledAnswerReleasesIdOnShowTest', 'staleDeniedAnswerReleasesIdOnShowTest'];
 const WITNESSES = ['VisitKeptBehindChooserWitness', 'PicturesAddedWhileHiddenWitness', 'RetryAfterCancelledWitness', 'RepeatedIdAnsweredFromJournalWitness',
   'LatePicturesDroppedWitness', 'PickedPicturesResetIdWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;

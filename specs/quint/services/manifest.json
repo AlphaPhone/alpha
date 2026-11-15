@@ -4817,7 +4817,9 @@
       "carrierAnswerReadBackTest",
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
-      "lateJournalReceiptRetiresDraftTest"
+      "lateJournalReceiptRetiresDraftTest",
+      "staleCancelledAnswerReleasesIdOnShowTest",
+      "staleDeniedAnswerReleasesIdOnShowTest"
     ],
     "invariants": [
       "TypeOK",

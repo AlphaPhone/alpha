@@ -32,11 +32,13 @@ module MmsCompose {
     if (not(v.journalReadable) or v.hidden or id == 0) v
     else {
       val status = v.journal.get(id)
-      val accepted = id == v.operationId and not(v.busy) and status.in(Set("submitted", "sent"))
+      val current = v.active and id == v.operationId and not(v.busy)
+      val accepted = current and status.in(Set("submitted", "sent"))
+      val closed = current and status.in(CLOSED)
       if (status == "none") v
       else { ...v, shown: status, shownFrom: "read-back", shownLifecycle: v.lifecycle,
-        draftRevision: if (accepted) v.draftRevision + 1 else v.draftRevision,
-        operationId: if (accepted) 0 else v.operationId, lastSent: if (accepted) id else v.lastSent,
+        draftRevision: if (accepted or closed) v.draftRevision + 1 else v.draftRevision,
+        operationId: if (accepted or closed) 0 else v.operationId, lastSent: if (accepted) id else v.lastSent,
         draftReady: v.draftReady and not(accepted), pictures: if (accepted) 0 else v.pictures }
     }
   /// A retired visit loses review/send/publication authority. Its unfinished owner draft and
@@ -146,7 +148,7 @@ module MmsCompose {
     s.journal.get(id) == "submitted", status.in(Set("sent", "failed", "unknown")),
     s' = { ...s, journal: s.journal.set(id, status) }
   }
-  /// A native read-back can retire the idle draft and its pictures after finding acceptance.
+  /// Read-back retires an idle accepted draft, or releases a declined ID while preserving its draft.
   action reconcile = all {
     s.active, not(s.hidden),
     val id = if (s.operationId != 0) s.operationId else s.lastSent
@@ -168,8 +170,8 @@ module MmsCompose {
   val AtMostOneDispatchPerOperation = IDS.forall(id => s.dispatches.get(id) <= 1)
   val DispatchJournaled = IDS.forall(id =>
     (s.dispatches.get(id) == 1) == s.journal.get(id).in(Set("submitted", "sent", "failed", "unknown")))
-  /// Once a send has answered that nothing was dispatched, the idle draft holds no ID.
-  val ClosedAnswerReleasesId = (s.shownFrom == "send" and not(s.busy) and s.shown.in(CLOSED)) implies s.operationId == 0
+  /// A current send answer or read-back proving no dispatch releases the idle draft's ID.
+  val ClosedAnswerReleasesId = (s.shownFrom.in(Set("send", "read-back")) and not(s.busy) and s.shown.in(CLOSED)) implies s.operationId == 0
   val HeldIdWasMinted = s.operationId <= s.minted and s.call <= s.minted
   val InactiveHasNoAuthority = not(s.active) implies not(s.busy) and s.shown == "none" and
     (s.call == 0 or s.callLifecycle != s.lifecycle)
@@ -248,4 +250,20 @@ module MmsCompose {
     .then(journalAdvance(1, "sent")).then(journalReadsAvailable(true)).then(reconcile)
     .expect(s.pictures == 0 and s.operationId == 0 and not(s.draftReady) and s.lastSent == 1
       and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
+  /// A declined answer delivered to a retired visit is reconciled on show. Keep its pictures,
+  /// authored draft and prior accepted receipt; only a new trusted Send can mint the next ID.
+  run staleCancelledAnswerReleasesIdOnShowTest = init.then(openView).then(send).then(nativeDecide(true)).then(deliver)
+    .then(edit(false)).then(attach).then(chooserAnswers(1, true)).then(send).then(nativeDecide(false))
+    .then(hide).then(deliver).expect(s.operationId == 2 and s.pictures == 1 and s.lastSent == 1 and safety)
+    .then(show).expect(s.shown == "cancelled" and s.operationId == 0 and s.pictures == 1 and s.draftReady
+      and s.lastSent == 1 and s.minted == 2 and s.dispatches.get(2) == 0 and safety)
+    .then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.minted == 3 and s.lastSent == 3 and s.dispatches.get(2) == 0 and s.dispatches.get(3) == 1 and safety)
+  run staleDeniedAnswerReleasesIdOnShowTest = init.then(openView).then(send).then(nativeDecide(true)).then(deliver)
+    .then(edit(false)).then(attach).then(chooserAnswers(1, true)).then(accessChanged).then(send).then(nativeDecide(true))
+    .then(hide).then(deliver).expect(s.operationId == 2 and s.pictures == 1 and s.lastSent == 1 and safety)
+    .then(show).expect(s.shown == "denied" and s.operationId == 0 and s.pictures == 1 and s.draftReady
+      and s.lastSent == 1 and s.minted == 2 and s.dispatches.get(2) == 0 and safety)
+    .then(accessChanged).then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.minted == 3 and s.lastSent == 3 and s.dispatches.get(2) == 0 and s.dispatches.get(3) == 1 and safety)
 }
