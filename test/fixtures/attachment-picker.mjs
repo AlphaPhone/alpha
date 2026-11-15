@@ -47,6 +47,7 @@ export function attachmentPickerFixture({holdRead=false,holdSelect=false}={}) {
   const scope=()=>JSON.stringify([owner,conversation]);
   return {
     picker,leases,results,
+    createPicker(changed){picker=new context.Picker(changed,storage);return picker;},
     async open(maximum=2){const captured=scope(),result={files:undefined,scope:captured};results.push(result);void picker.choose(new AbortController().signal,maximum,()=>scope()===captured).then(files=>{result.files=files;if(files.length){result.ticket=lastCompleted;result.epoch=ticketEpochs.get(lastCompleted);}});await flush();},
     async files(){picker.view().filesTab();await flush();},
     select(index=0){picker.view().rows[index].choose();},
