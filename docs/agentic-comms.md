@@ -127,8 +127,8 @@ Change existing code; no flags or parallel versions (CONTRIBUTING.md).
 
 ## Formal models
 
-Update before merging, and run `npm run quint:check`, `npm run quint:tests` and
-`npm run lemma:check`:
+An AP-16 implementation updates the related models and runs `bun run quint:check`,
+`bun run quint:tests` and `bun run lemma:check` before merging.
 
 - `specs/quint/application/ChatDock.qnt`: the fitted open height and stage view under drags.
 - `specs/quint/application/DockClearanceOwnership.qnt`: stage ownership of clearance.
@@ -142,8 +142,8 @@ Update before merging, and run `npm run quint:check`, `npm run quint:tests` and
 Keep the layers separate (AGENTS.md); none proves another:
 
 1. Dev UI browser specs in `test/browser`: update `dev-phone-messages.spec.ts`, `home-chat-anchor.spec.ts`, `full-chat-grabber.spec.ts` and `aosp-telephony-views.spec.ts` for AC-01 to AC-24, including the long-draft fit (AC-13) and a light and dark contrast audit (AC-28).
-2. `npm run verify` and the production bundle audit (AC-32).
-3. `npm run android:build:local`, both distribution variants.
+2. `bun run verify` and the production bundle audit (AC-32).
+3. Build the launcher with `bun run android:build:local -- --release` and verify the packaged debug and release APKs with `bun run android:verify`.
 4. Emulator HOME-role test of the three apps.
 5. Full AOSP image boot with real dialer and SMS roles.
 6. Physical device and owner acceptance: real calls, SMS, emergency layout.
