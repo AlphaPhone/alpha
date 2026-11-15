@@ -949,9 +949,11 @@ function errorMessage(error: unknown): string {
 }
 /** A resident start that does not open the dialog: Home shows the starting state (P-43). */
 let residentStartInBackground = false;
+let homePresentationRevision = 0;
 /** `openOnError`: a background check (the quiet Cloud account restore) that opens the dialog only to report a failure. */
 async function work(message: string, action: (signal: AbortSignal) => Promise<void>, background = false, openOnError = false, preserveError = false) {
   if (operation) return;
+  const presentationRevision = homePresentationRevision;
   // An owner step never waits behind a background plan read: the read stops and the next return checks again.
   planRecheck?.abort();
   const controller = new AbortController(); cancelStoppedVoiceRead(); signInReadinessOwner = null; operation = controller; residentStartInBackground = background;
@@ -959,15 +961,16 @@ async function work(message: string, action: (signal: AbortSignal) => Promise<vo
   try { await action(controller.signal); }
   catch (error) {
     if(operation!==controller)return;
+    const showError = () => state.open || presentationRevision === homePresentationRevision;
     const recovery=residentRecoveryReason(error);if(recovery&&!active)update({residentRecoveryReason:recovery});
     if(controller.signal.aborted&&(!state.open||error===controller.signal.reason)){update({error:'',message:''});return;}
     if(background&&!openOnError&&!state.open){update({error:errorMessage(error),errorKind:errorKindOf(error),message:''});return;}
     if (testMocksEnabled && expired(error) && active?.kind === 'cloud' && active.cloud.environment === cloud.environment) {
       const previous = active; retire('Sign-in required'); detachService();
       try { await previous.cloud.disconnect(); }
-      catch { update({ error: 'Couldn’t clear sign-in', open: true, message: '' }); return; }
+      catch { update({ error: 'Couldn’t clear sign-in', open: showError(), message: '' }); return; }
     }
-    update({ error: errorMessage(error), errorKind: errorKindOf(error), ...(background&&!state.open?{purpose:residentCloudFlow()?'agent' as const:'cloud-account' as const}:{}), open: true, message: '' });
+    update({ error: errorMessage(error), errorKind: errorKindOf(error), ...(background&&!state.open?{purpose:residentCloudFlow()?'agent' as const:'cloud-account' as const}:{}), open: showError(), message: '' });
   }
   // A resident start ends with its operation, in one update: setup shown behind the start never
   // sees a still-busy connection that is no longer starting.
@@ -3177,6 +3180,7 @@ export const connectionController = {
    */
   async residentRedeem(code:string):Promise<boolean> {
     if(operation)return false;
+    const presentationRevision = homePresentationRevision;
     let redeemed=false;
     const idempotencyKey=crypto.randomUUID();
     update({redeemError:'',redeemNotice:''});
@@ -3206,7 +3210,7 @@ export const connectionController = {
       // The restart re-verifies the account into a new connection object: compare the account, not the object.
       if(known&&service?.identity.environment===account.identity.environment&&service.identity.credentialId===account.identity.credentialId){recordEnd();update({planEndsAt:endsAt});}
       // The code was redeemed from the plan panel: show its outcome there beside the running agent.
-      if(!state.error)update({open:true,purpose:'plan',redeemNotice:notice,message:''});
+      if(!state.error && presentationRevision === homePresentationRevision)update({open:true,purpose:'plan',redeemNotice:notice,message:''});
     });
     return redeemed;
   },
@@ -3833,8 +3837,26 @@ export function ConnectionChooser() {
     const previous = document.activeElement as HTMLElement | null;
     const phone = document.querySelector<HTMLElement>('.os');
     const releaseInert = holdPhoneInert(phone);
-    return () => { releaseInert(); previous?.focus(); };
+    const presentationRevision = homePresentationRevision;
+    return () => {
+      releaseInert();
+      if (presentationRevision === homePresentationRevision) previous?.focus();
+    };
   }, [visible]);
+  useEffect(() => {
+    const home = () => {
+      homePresentationRevision++;
+      if (signInEntryPage(state)) return;
+      if (state.signIn || explicitSignedOutCloudEntry(state)) {
+        connectionController.close();
+      } else if (state.open) {
+        // A submitted account operation can finish after Home leaves its panel.
+        update({ open: false, purpose: 'agent', membershipDismissed: true });
+      }
+    };
+    window.addEventListener('launcher-home', home);
+    return () => window.removeEventListener('launcher-home', home);
+  }, []);
   // Escape, Android Back and the own-key form's Cancel during a check share one dispatch.
   const dismiss = () => {
     if (connectionController.getSnapshot().signIn) connectionController.cancelSignIn();

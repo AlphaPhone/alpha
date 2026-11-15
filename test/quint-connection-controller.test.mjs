@@ -54,7 +54,7 @@ function create() {
   let held = null, notices = 0, rebinds = 0, returns = 0;
   const box = {AbortController, DOMException, Error, Promise, setTimeout, ResidentRebindQueue, cancelStoppedVoiceRead(){},
     operation: null, sending: null, epoch: 1, active: null, planRecheck: null, signInReadinessOwner: null, providerStatusGeneration: 0,
-    residentStartInBackground: false, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true, returned: [],
+    residentStartInBackground: false, homePresentationRevision: 0, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true, returned: [],
     state: {open: false, signIn: null, message: '', error: '', busy: false, startupResolved: false},
     // A notice opens its recovery message even when no sign-in form is active.
     // A rebind preserving an earlier error writes the error alone.
