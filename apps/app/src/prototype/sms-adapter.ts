@@ -308,7 +308,30 @@ export function installSmsAdapter(Component:any,views:Bag){
  const accepted=(status:string)=>status==='submitted'||status==='sent'||status==='delivered';
  const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
  const dismissSuggestion=()=>{if(busy||!drafted())return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';notice='';changed();};
- async function reconcile(id=operationId||sent?.id){const review=id===operationId?smsReview:id===sent?.id?sent?.review:id?outgoing.get(id)?.review:null;if(!inFront()||!id||!review)return;const token=lifecycle,draft=draftRevision;try{const value=await client.smsSendResult(review,id);if(active&&token===lifecycle){outgoingResult(value);if(draft===draftRevision&&(id===operationId||id===sent?.id)){receipt=value;notice=receiptLabel(value.status);}changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
+ function confirmSms(review:ReviewedSms,result:SmsSendResult,roleHeld:boolean){
+  finished(result.status);
+  sent={id:result.operationId,review};
+  operationId='';smsReview=null;draftRevision++;
+  if(outgoing.get(result.operationId)?.createdAt!==undefined&&session.state.thread===null&&roleHeld)composing=true;
+ }
+ async function reconcile(id=operationId||sent?.id){
+  if(!inFront()||!id)return;
+  const review=id===operationId?smsReview:id===sent?.id?sent.review:outgoing.get(id)?.review;
+  if(!review)return;
+  const token=lifecycle,draft=draftRevision;
+  try{
+   const value=await client.smsSendResult(review,id);
+   if(!active||token!==lifecycle)return;
+   outgoingResult(value);
+   if(draft===draftRevision&&(id===operationId||id===sent?.id)){
+    receipt=value;notice=receiptLabel(value.status);
+    // A late journal receipt can settle the original draft after the composer times out.
+    if(!busy&&id===operationId&&accepted(value.status))
+     confirmSms(review,value,session.state.status?.roles?.sms?.held===true);
+   }
+   changed();
+  }catch{/* No record or unavailable is never evidence of not sent. */}
+ }
  async function send(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
   const status=session.state.status;if(!status){notice='Refresh Messages, then review the text again.';return;}
   /* The shared review normalizes and dedupes numbers and takes the only active SIM; a SIM that is no longer active is refused. */
@@ -324,25 +347,52 @@ export function installSmsAdapter(Component:any,views:Bag){
   const result=await sender.sendSms(review,id);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);
   outgoingResult(result,id);
   /* Cancelled and denied prove nothing was sent: the next Send opens a new review. */
-  if(result.status==='cancelled'||result.status==='denied'){operationId='';draftRevision++;}else{finished(result.status);if(accepted(result.status)){
-   sent={id,review};operationId='';smsReview=null;draftRevision++;
-   if(outgoing.get(id)?.createdAt!==undefined&&session.state.thread===null&&status.roles?.sms?.held===true)composing=true;
-  }}
+  if(result.status==='cancelled'||result.status==='denied'){operationId='';draftRevision++;}
+  else if(accepted(result.status))confirmSms(review,result,status.roles?.sms?.held===true);
+  else finished(result.status);
   changed();await session.refresh();
   if(status.roles?.sms?.held===false)outgoing.delete(id);
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision){const code=(error as {code?:string})?.code,message=error instanceof Error?error.message:'';
   if(operationId)outgoing.delete(operationId);
   if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';notice=message;}else if(operationId&&code==='expired'&&message)notice=message;
-  else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;changed();}}}
- async function reconcileMms(id=mmsOperationId||mmsSent?.id){const review=id===mmsOperationId?mmsReview:id===mmsSent?.id?mmsSent?.review:null;if(!inFront()||!id||!review)return;const token=lifecycle,draft=draftRevision;try{const value=await client.mmsSendResult(review,id);if(active&&token===lifecycle&&draft===draftRevision){notice=mmsReceiptLabel(value.status);changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
+  else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;changed();if(operationId)void reconcile(operationId);}}}
+ function confirmMms(id:string,review:MmsReview,status:'submitted'|'sent'){
+  finished(status);
+  mmsSent={id,review};resetMms(true);draftRevision++;
+ }
+ async function reconcileMms(id=mmsOperationId||mmsSent?.id){
+  if(!inFront()||!id)return;
+  const review=id===mmsOperationId?mmsReview:id===mmsSent?.id?mmsSent.review:null;
+  if(!review)return;
+  const token=lifecycle,draft=draftRevision;
+  try{
+   const value=await client.mmsSendResult(review,id);
+   if(!active||token!==lifecycle||draft!==draftRevision||(id!==mmsOperationId&&id!==mmsSent?.id))return;
+   notice=mmsReceiptLabel(value.status);
+   if(!busy&&id===mmsOperationId&&(value.status==='submitted'||value.status==='sent')){
+    confirmMms(id,review,value.status);
+    void session.refresh();
+   }
+   changed();
+  }catch{/* No record or unavailable is never evidence of not sent. */}
+ }
  /** One MMS to every recipient, with the text and the picked pictures. A repeated operation ID never sends twice. */
  async function sendMms(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;let dispatched=false;busy=true;changed();try{
   const status=session.state.status;if(!status)throw Error('Refresh Messages, then review the MMS again.');
   const checked=reviewMms({recipients:draftRecipients(),body,attachments,subscriptionId:sim?Number(sim):undefined},status);
   if('problem' in checked)throw Error(mmsProblemLabel(checked.problem));
   if(!mmsOperationId){mmsOperationId=crypto.randomUUID();mmsReview=checked.review;}
-  dispatched=true;const result=await sender.sendMms(mmsReview??checked.review,mmsOperationId);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=null;notice=mmsReceiptLabel(result.status);const sentMms=mmsReview??checked.review;finished(result.status);if(result.status==='cancelled'||result.status==='denied'){resetMms(false);draftRevision++;}else if(accepted(result.status)){mmsSent={id:mmsOperationId,review:sentMms};resetMms(true);draftRevision++;}await session.refresh();
- }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':error instanceof Error?error.message:'Couldn’t open';}finally{if(token===lifecycle){busy=false;changed();}}}
+  const id=mmsOperationId,review=mmsReview??checked.review;
+  dispatched=true;
+  const result=await sender.sendMms(review,id);
+  if(!active||token!==lifecycle||draft!==draftRevision)return;
+  receipt=null;notice=mmsReceiptLabel(result.status);
+  if(result.status==='cancelled'||result.status==='denied'){resetMms(false);draftRevision++;}
+  else if(result.status==='submitted'||result.status==='sent')confirmMms(id,review,result.status);
+  else finished(result.status);
+  await session.refresh();
+ }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':error instanceof Error?error.message:'Couldn’t open';}
+ finally{if(token===lifecycle){busy=false;changed();if(mmsOperationId&&dispatched)void reconcileMms(mmsOperationId);}}}
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
  function attach(){if(!active||busy)return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
   /* A result that arrives while the page is still hidden waits for it to show again; pagehide always ends the pick. */
