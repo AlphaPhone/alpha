@@ -7,7 +7,7 @@ test.beforeAll(async()=>{composition=await startNativeCloudSignInFixture();});
 test.afterAll(async()=>{await composition?.close();});
 const boot=async(...args:Parameters<typeof composition.boot>)=>{await fenceNetwork(args[0]);return composition.boot(...args);};
 
-type Call={refreshNegative?:boolean;plugin:string;method:string;path?:string;email?:string;phone?:string;environment?:string};
+type Call={refreshNegative?:boolean;plugin:string;method:string;path?:string;email?:string;phone?:string;environment?:string;page?:string};
 const calls=(page:Page)=>page.evaluate(()=>(window as any).signInFixture.calls as Call[]);
 const snapshot=(page:Page)=>page.evaluate(()=>(window as any).planController.getSnapshot());
 const fixture=(page:Page)=>page.evaluate(()=>{const f=(window as any).signInFixture;return {saved:f.saved,bound:f.bound,running:f.running};});
@@ -85,8 +85,10 @@ test('a required page shown before startup stays rendered while its owner retrie
  }finally{await held.close();}
 });
 
-/** Email and text message share one field; the method follows what was typed. */
-const entry=(page:Page)=>signInDialog(page).getByRole('textbox',{name:/^Email( or phone)?$/});
+/** The email and SMS methods each have an input with the corresponding keyboard. */
+const entry=(page:Page)=>signInDialog(page).getByRole('textbox',{name:'Email',exact:true});
+const phoneEntry=(page:Page)=>signInDialog(page).getByRole('textbox',{name:'Phone number',exact:true});
+const googleButton=(page:Page)=>signInDialog(page).getByRole('button',{name:'Continue with Google',exact:true});
 
 test.describe('in-app Eliza Cloud sign-in on the production Android composition',()=>{
  test('email code sign-in stays in Alpha, retries a wrong code, waits out resend and binds Cloud AI',async({page},info)=>{
@@ -97,10 +99,8 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   const dialog=signInDialog(page);await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toBeVisible();
   await expect(dialog.getByText(/in your browser/)).toHaveCount(0);
-  // Google, then one field for email or phone (no "Other sign-in methods" disclosure, no method switch).
-  await expect(dialog.getByRole('button',{name:'Other sign-in methods',exact:true})).toHaveCount(0);
   await expect(entry(page)).toBeVisible();
-  await expect(dialog.getByRole('button',{name:/^Use (phone number|email) instead$/})).toHaveCount(0);
+  await expect(dialog.getByRole('button',{name:'Continue with phone number',exact:true})).toBeEnabled();
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('sign-in-choose.png'),animations:'disabled'});
   await entry(page).fill('not-an-address');await dialog.getByRole('button',{name:'Send code',exact:true}).click();
   expect((await calls(page)).filter(c=>c.method==='startEmail')).toHaveLength(0);
@@ -147,15 +147,108 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await agent(page,'unavailable');
   await readySignIn(page);
   const dialog=signInDialog(page);
-  // An unavailable Google entry is not a dead button; a quiet retry re-checks it.
-  await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
-  const retry=dialog.getByRole('button',{name:'Retry Google sign-in',exact:true});
+  // The method is discoverable before the device can use it.
+  await expect(googleButton(page)).toBeDisabled();
+  await expect(dialog.getByText(/compatible browser and a verified link/)).toBeVisible();
+  const retry=dialog.getByRole('button',{name:'Check sign-in options',exact:true});
   await expect(retry).toBeEnabled();
   await page.evaluate(()=>{(window as any).signInFixture.methods.google=true;});
   await retry.click();
   await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toBeEnabled();
   expect((await calls(page)).filter(c=>c.plugin==='AlphaCloudSignIn'&&c.method==='status').at(-1)?.refreshNegative).toBe(true);
   await noHandOff(page);
+ });
+
+ test('checking sign-in options preserves an explicit switch from Own keys to Cloud',async({page})=>{
+  await boot(page,{...await entitlements(),ownProvider:true,methods:{email:true,phone:false,google:true}});
+  await expect.poll(async()=>{
+   const current=await snapshot(page);
+   return {ready:current.startupResolved,busy:current.busy,mode:current.providerStatus?.mode};
+  }).toEqual({ready:true,busy:false,mode:'own'});
+  await page.evaluate(()=>(window as any).planController.selectCloudProvider());
+  await readySignIn(page);
+  const dialog=signInDialog(page);
+  await expect(googleButton(page)).toBeEnabled();
+  await expect(dialog.getByRole('button',{name:'Continue with phone number',exact:true})).toBeDisabled();
+  const statusReads=async()=>(await calls(page)).filter(call=>call.plugin==='AlphaCloudSignIn'&&call.method==='status');
+  const before=(await statusReads()).length;
+  await dialog.getByRole('button',{name:'Check sign-in options',exact:true}).click();
+  await expect.poll(async()=>(await statusReads()).length).toBe(before+1);
+  expect((await statusReads()).at(-1)?.refreshNegative).toBe(true);
+  expect((await calls(page)).filter(call=>call.method==='selectProvider')).toHaveLength(0);
+  await googleButton(page).click();
+  await expect.poll(async()=>{
+   const current=await snapshot(page);
+   return {userId:current.cloudAccount?.userId,provider:current.providerStatus};
+  }).toMatchObject({userId:USER,provider:{mode:'cloud',keys:{text:{configured:true},voice:{configured:true}}}});
+  expect((await calls(page)).filter(call=>call.method==='selectProvider')).toHaveLength(1);
+  await noHandOff(page);
+ });
+
+ test('a native App Link readiness event enables Google without interrupting the email draft',async({page})=>{
+  await boot(page,{...await entitlements(),methods:{email:true,phone:true,google:false}});
+  await readySignIn(page);
+  await expect(googleButton(page)).toBeDisabled();
+  await entry(page).fill('draft@example.invalid');
+  await page.evaluate(()=>{
+   const f=(window as any).signInFixture;
+   f.emit('AlphaCloudSignIn','signInReadinessChanged',{environment:'production',methodsKnown:true,inApp:true,email:true,phone:true,google:true});
+  });
+  await expect(googleButton(page)).toBeEnabled();
+  await expect(entry(page)).toHaveValue('draft@example.invalid');
+  await expect(entry(page)).toBeFocused();
+  expect((await calls(page)).some(call=>call.method==='startGoogle')).toBe(false);
+ });
+
+ test('offline sign-in gives an Android Wi-Fi shortcut and resumes on a validated connection',async({page})=>{
+  await boot(page,{...await entitlements(),network:{connected:false,wifiActive:false}});
+  const dialog=signInDialog(page);
+  await expect(dialog.getByText('You’re offline. Connect to Wi-Fi to sign in.')).toBeVisible();
+  await expect(googleButton(page)).toBeDisabled();
+  await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toBeDisabled();
+  await dialog.getByRole('button',{name:'Open Wi-Fi settings',exact:true}).click();
+  expect((await calls(page)).filter(call=>call.method==='openSettings')).toEqual([expect.objectContaining({plugin:'AlphaDevice',page:'wifi'})]);
+  expect((await calls(page)).some(call=>call.plugin==='AlphaCloudSignIn'&&call.method==='status')).toBe(false);
+  const changeNetwork=(wifiActive:boolean,internetValidated=true)=>page.evaluate(({wifiActive,internetValidated})=>{
+   const f=(window as any).signInFixture;
+   f.network={connected:true,wifiActive,internetValidated};
+   f.emit('ElizaSystem','networkStatusChanged',{});
+  },{wifiActive,internetValidated});
+  await changeNetwork(false);
+  await readySignIn(page);
+  expect((await calls(page)).find(call=>call.plugin==='AlphaCloudSignIn'&&call.method==='status')?.refreshNegative).toBe(true);
+  await expect(dialog.getByText('Sign-in isn’t using Wi-Fi. You can use mobile data or connect to Wi-Fi.')).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toBeEnabled();
+  await changeNetwork(false,false);
+  await expect(dialog.getByText('Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access.')).toBeVisible();
+  await changeNetwork(true);
+  await expect(dialog.getByRole('button',{name:'Open Wi-Fi settings',exact:true})).toHaveCount(0);
+  await expect(googleButton(page)).toBeEnabled();
+ });
+
+ test('validated Wi-Fi refreshes sign-in options after captive Wi-Fi without resetting a draft',async({page})=>{
+  await boot(page,{...await entitlements(),network:{connected:true,wifiActive:true,internetValidated:false},
+   methods:{email:true,phone:false,google:false}});
+  await readySignIn(page);
+  const dialog=signInDialog(page);
+  const phone=dialog.getByRole('button',{name:'Continue with phone number',exact:true});
+  await expect(dialog.getByText(/couldn’t verify internet access/)).toBeVisible();
+  await expect(googleButton(page)).toBeDisabled();
+  await expect(phone).toBeDisabled();
+  await entry(page).fill('draft@example.invalid');
+  await page.evaluate(()=>{
+   const f=(window as any).signInFixture;
+   f.methods={email:true,phone:true,google:true};
+   f.network.internetValidated=true;
+   f.emit('DailyApps','appResumed',{});
+  });
+  await expect(googleButton(page)).toBeEnabled();
+  await expect(phone).toBeEnabled();
+  await expect(dialog.getByRole('button',{name:'Open Wi-Fi settings',exact:true})).toHaveCount(0);
+  await expect(entry(page)).toHaveValue('draft@example.invalid');
+  const signInCalls=(await calls(page)).filter(call=>call.plugin==='AlphaCloudSignIn');
+  expect(signInCalls.filter(call=>call.method==='status').at(-1)?.refreshNegative).toBe(true);
+  expect(signInCalls.some(call=>call.method.startsWith('start'))).toBe(false);
  });
 
  test('a slow sign-in readiness check keeps the screen white until the chooser is ready',async({page})=>{
@@ -170,7 +263,7 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await expect(welcome.getByRole('heading')).toHaveCount(0);
   await expect(welcome.getByText(/Checking.*sign-in/)).toHaveCount(0);
   await expect(google).toHaveCount(0);
-  await expect(welcome.getByRole('form',{name:'Sign in with email or phone',exact:true})).toHaveCount(0);
+  await expect(welcome.getByRole('form',{name:'Sign in with email',exact:true})).toHaveCount(0);
   // The required page's own readiness check is not an attempt the owner started: nothing to go Back from.
   await expect(welcome.getByRole('button',{name:/^(Back|Cancel sign-in)$/})).toHaveCount(0);
   const ownKeys=welcome.getByRole('button',{name:'Use my own keys',exact:true});
@@ -224,14 +317,14 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
    await readySignIn(page);
    const dialog=signInDialog(page);
    await expect(dialog).toBeVisible();
-   // Google is not offered as a dead button while readiness is unknown; email stays usable.
-   await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
+   // Google stays visible with its requirements while email is usable.
+   await expect(googleButton(page)).toBeDisabled();
    expect(await fixture(page)).toMatchObject({saved:false,bound:false,running:true});
    if(mode==='readiness-hold'){
     // A validated late answer updates only the same still-current chooser (cloud-sign-in-late-readiness).
     await page.evaluate(()=>(window as any).signInFixture.releaseReadiness());
     await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toBeEnabled();
-   }else await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
+   }else await expect(googleButton(page)).toBeDisabled();
    await entry(page).fill('synthetic-signin@example.invalid');
    await dialog.getByRole('button',{name:'Send code',exact:true}).click();
    await dialog.getByLabel('Code',{exact:true}).fill('123456');
@@ -296,7 +389,7 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   const dialog=signInDialog(page);
   await entry(page).fill('synthetic-signin@example.invalid');await dialog.getByRole('button',{name:'Send code',exact:true}).click();
   await expect(dialog.getByRole('alert')).toContainText('Alpha could not reach Eliza Cloud');
-  await expect(dialog.getByRole('form',{name:'Sign in with email or phone',exact:true})).toBeVisible();
+  await expect(dialog.getByRole('form',{name:'Sign in with email',exact:true})).toBeVisible();
   expect(await fixture(page)).toMatchObject({saved:false,bound:false});
   await noHandOff(page);
  });
@@ -309,7 +402,8 @@ for (const mode of ['ok','mfa'] as const) test(`phone code stays inside Alpha th
  await agent(page,'unavailable');
  await readySignIn(page);
  const dialog=signInDialog(page);
- await entry(page).fill('+14155550100');
+ await dialog.getByRole('button',{name:'Continue with phone number',exact:true}).click();
+ await phoneEntry(page).fill('+1 (415) 555-0100');
  await dialog.getByRole('button',{name:'Send code',exact:true}).click();
  await expect(dialog.getByRole('form',{name:'Enter your phone code'})).toBeVisible();
  await expect(dialog.getByRole('button',{name:/^Resend · \d+s$/})).toBeDisabled();
@@ -333,13 +427,14 @@ test('phone code cancellation discards the in-app step without a credential',asy
  await boot(page,await entitlements());await agent(page,'unavailable');
  await readySignIn(page);
  const dialog=signInDialog(page);
- await entry(page).fill('+14155550100');
+ await dialog.getByRole('button',{name:'Continue with phone number',exact:true}).click();
+ await phoneEntry(page).fill('+1 (415) 555-0100');
  await dialog.getByRole('button',{name:'Send code',exact:true}).click();
  await expect(dialog.getByRole('form',{name:'Enter your phone code'})).toBeVisible();
  await dialog.getByRole('button',{name:'Back',exact:true}).click();
  await expect(dialog.getByRole('form',{name:'Enter your phone code'})).toHaveCount(0);
  // Back returns to the phone entry with the number kept, so a typo is a one-field fix.
- await expect(entry(page)).toHaveValue('+14155550100');
+ await expect(phoneEntry(page)).toHaveValue('+1 (415) 555-0100');
  await expect(dialog.getByRole('heading',{name:'Alpha',exact:true})).toBeVisible();
  expect((await fixture(page)).saved).toBe(false);
  expect((await calls(page)).some(c=>c.plugin==='AlphaCloudSignIn'&&c.method==='cancel')).toBe(true);
@@ -351,11 +446,11 @@ for(const phone of [true,false]) test(`tenant method discovery ${phone?'offers p
  await readySignIn(page);
  const dialog=signInDialog(page);await expect(dialog).toBeVisible();
  await expect(dialog.getByLabel(/Email/)).toHaveCount(0);
- await expect(dialog.getByRole('textbox',{name:'Phone',exact:true})).toHaveCount(phone?1:0);
- await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
+ await expect(dialog.getByRole('textbox',{name:'Phone number',exact:true})).toHaveCount(phone?1:0);
+ await expect(googleButton(page)).toBeDisabled();
  await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toHaveCount(phone?1:0);
- if(!phone)await expect(dialog.getByRole('button',{name:'Try again',exact:true})).toBeVisible();
- if(!phone)await expect(dialog.getByText('Unavailable')).toBeVisible();
+ if(!phone)await expect(dialog.getByRole('button',{name:'Check sign-in options',exact:true})).toBeVisible();
+ if(!phone)await expect(dialog.getByText('Sign-in unavailable',{exact:true})).toBeVisible();
  expect((await calls(page)).filter(c=>['startPhone','startEmail','startGoogle'].includes(c.method))).toEqual([]);
  await noHandOff(page);
 });
@@ -368,7 +463,8 @@ test('sign-in has no provider documents or explainer and keeps phone entry and t
  await expect(dialog.getByRole('button',{name:/Terms of Service|Privacy Policy/})).toHaveCount(0);
  await expect(dialog.locator('details,.alpha-cloud-legal,[role="note"]')).toHaveCount(0);
  await expect(dialog).not.toContainText('Example Service');
- await entry(page).fill('+14155550100');
+ await dialog.getByRole('button',{name:'Continue with phone number',exact:true}).click();
+ await phoneEntry(page).fill('+1 (415) 555-0100');
  await dialog.getByRole('button',{name:'Send code',exact:true}).click();
  await expect(dialog.getByText('+14155550100',{exact:true})).toBeVisible();
  await dialog.getByLabel('Code',{exact:true}).fill('123');
@@ -396,7 +492,7 @@ test('sign-in screens keep one button hierarchy and even spacing at each step',a
  await boot(page,await entitlements());await agent(page,'unavailable');await readySignIn(page);
  const dialog=signInDialog(page);
  await expectButtonSystem(page);await shot('01-choose');
- await expect(dialog.getByRole('button',{name:/^Use (phone number|email) instead$/})).toHaveCount(0);
+ await expect(dialog.getByRole('button',{name:'Continue with phone number',exact:true})).toBeEnabled();
  await dialog.getByRole('button',{name:'Use my own keys',exact:true}).click();
  await expect(dialog.getByLabel('Text key',{exact:true})).toBeFocused();await expectButtonSystem(page);await shot('03-own-keys');
  await dialog.getByRole('button',{name:'Back',exact:true}).click();

@@ -30,11 +30,15 @@ ${exact(launcher, '    public static boolean malformedText(', '    /** Why the c
     'ai/eliza/plugins/system/SystemPlugin.java':`package ai.eliza.plugins.system;
 import android.content.Context;
 import android.content.Intent;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 public class SystemPlugin {
  private Context context;
  public void attach(Context value){context=value;}
  public Context getContext(){return context;}
+ public void load(){throw new AssertionError("Plugin lifecycle outside App info fixture");}
+ protected void handleOnDestroy(){throw new AssertionError("Plugin lifecycle outside App info fixture");}
+ protected void notifyListeners(String event,JSObject data){throw new AssertionError("Listener notification outside App info fixture");}
  public void requestPermissions(PluginCall call){throw new AssertionError("permission request outside fixture");}
  public void requestRole(PluginCall call){throw new AssertionError("role request outside fixture");}
  public void setFlashlight(PluginCall call){throw new AssertionError("flashlight request outside fixture");}
@@ -68,13 +72,23 @@ public final class Settings {
     // campaign accidentally invokes any network operation instead of its owned handoff.
     'android/net/Network.java':'package android.net;public final class Network {}',
     'android/net/ConnectivityManager.java':`package android.net;
+import android.os.Handler;
 public final class ConnectivityManager {
+ public static class NetworkCallback {
+  public void onAvailable(Network network){throw new AssertionError("Connectivity outside App info fixture");}
+  public void onLost(Network network){throw new AssertionError("Connectivity outside App info fixture");}
+  public void onCapabilitiesChanged(Network network,NetworkCapabilities capabilities){throw new AssertionError("Connectivity outside App info fixture");}
+ }
+ public void registerDefaultNetworkCallback(NetworkCallback callback,Handler handler){throw new AssertionError("Connectivity outside App info fixture");}
+ public void unregisterNetworkCallback(NetworkCallback callback){throw new AssertionError("Connectivity outside App info fixture");}
  public Network getActiveNetwork(){throw new AssertionError("Connectivity outside App info fixture");}
  public NetworkCapabilities getNetworkCapabilities(Network network){throw new AssertionError("Connectivity outside App info fixture");}
 }`,
     'android/net/NetworkCapabilities.java':`package android.net;
 public final class NetworkCapabilities {
  public static final int NET_CAPABILITY_VALIDATED=16;
+ public static final int TRANSPORT_WIFI=1;
+ public boolean hasTransport(int transport){throw new AssertionError("Connectivity outside App info fixture");}
  public boolean hasCapability(int capability){throw new AssertionError("Connectivity outside App info fixture");}
 }`,
     'android/net/Uri.java':`package android.net;
@@ -95,6 +109,14 @@ public final class Intent {
     'android/content/ComponentName.java':`package android.content;
 public record ComponentName(String packageName,String className) {
  public String flattened(){return packageName+"/"+className;}
+}`,
+    'android/os/Handler.java':`package android.os;
+public final class Handler {
+ public Handler(Looper looper){throw new AssertionError("Plugin lifecycle outside App info fixture");}
+}`,
+    'android/os/Looper.java':`package android.os;
+public final class Looper {
+ public static Looper getMainLooper(){throw new AssertionError("Plugin lifecycle outside App info fixture");}
 }`,
     'android/os/UserHandle.java':`package android.os;
 public record UserHandle(int id) {}`,

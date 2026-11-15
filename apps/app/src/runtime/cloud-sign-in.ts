@@ -6,6 +6,7 @@ import {
   nativeSignInCodeStarted,
   nativeSignInGoogleOutcome,
   nativeSignInReadiness,
+  nativeSignInReadinessChanged,
   nativeSignInVerified,
   normalizeNativeSignInCode,
   validNativeSignInEmail,
@@ -32,8 +33,8 @@ import {
  * upstream in `@elizaos/auth/auth/native-cloud-sign-in`, projected from the pinned checkout. Alpha
  * supplies only its product name and its two deployment names.
  *
- * Email remains in Alpha when readiness is unavailable. The readiness probe gates Google;
- * it never selects hosted login as a fallback.
+ * Email remains in Alpha when readiness is unknown. Google and SMS require their own
+ * readiness results.
  */
 export type CloudSignInFailureCode = NativeCloudSignInFailureCode;
 export type CloudSignInAuthenticated = NativeCloudSignInAuthenticated<CloudEnvironment>;
@@ -56,7 +57,7 @@ export type CloudSignInError = NativeCloudSignInError;
  * carries the next step (a Try again button, Resend under the code), Alpha states only the fact. */
 export function signInFailureMessage(code: CloudSignInFailureCode, serviceName: string): string {
   if (code === 'invalid-code') return 'Wrong code';
-  if (code === 'app-link-unverified') return 'Didn’t finish';
+  if (code === 'app-link-unverified') return 'Google sign-in didn’t return to Alpha. Check that Android opens Alpha’s supported links.';
   if (code === 'activation-pending') return 'Not confirmed yet';
   const message = nativeCloudSignInFailureMessage(code, { serviceName, productName: 'Alpha' });
   return message === `${serviceName} sign-in is unavailable right now. Try again.` ? 'Unavailable' : message;
@@ -68,7 +69,7 @@ export const verified = (value: unknown, environment: CloudEnvironment): CloudSi
 export const googleOutcome = (value: unknown, environment: CloudEnvironment): CloudSignInGoogleOutcome => nativeSignInGoogleOutcome(value, environment);
 export const normalizeSignInCode = normalizeNativeSignInCode;
 export const validSignInEmail = validNativeSignInEmail;
-/** Explicit provider capabilities from the host. Unknown readiness keeps the existing email error/retry
- * surface; known disabled methods stay hidden. Optional SMS is never inferred from an older host. */
+/** Explicit provider capabilities from the host. Optional SMS is never inferred from an older host. */
 export const signInReadiness = nativeSignInReadiness;
+export const signInReadinessChanged = nativeSignInReadinessChanged;
 export const validSignInPhone = validNativeSignInPhone;
