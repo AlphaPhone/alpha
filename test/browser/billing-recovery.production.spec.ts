@@ -104,17 +104,33 @@ for (const failRestart of [false, true]) {
     await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
     await page.evaluate(fail => {
       const fixture = (window as any).residentStub;
-      if (fail) fixture.start = 'reject-once';
+      if (fail) {
+        const w = window as any;
+        const nativePromise = w.Capacitor.nativePromise;
+        fixture.start = 'reject-once';
+        w.Capacitor.nativePromise = async (plugin: string, method: string, input: unknown) => {
+          const transient = plugin === 'Agent' && method === 'start' && fixture.start === 'reject-once';
+          try {
+            return await nativePromise(plugin, method, input);
+          } catch (error) {
+            if (!transient) throw error;
+            fixture.order.push('restart temporarily unavailable');
+            throw Object.assign(new Error('Local agent failed to start.'), { code: 'start-failed' });
+          }
+        };
+      }
       fixture.releaseRedeem();
     }, failRestart);
     await expect.poll(() => stub(page, s => s.order.filter((entry: string) => entry === 'Agent.start').length)).toBeGreaterThan(startsBefore);
     if (failRestart) {
-      await expect(page.getByRole('status', { name: 'Assistant draft status', exact: true })).toBeVisible();
-    } else {
-      await button(page, 'Open conversation').click();
-      await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
-      await button(page, 'Minimize chat').click();
+      await expect.poll(() => stub(page, s => s.order.filter((entry: string) => entry === 'restart temporarily unavailable'))).toEqual(['restart temporarily unavailable']);
+      await expect(sheet(page)).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+      await expect.poll(() => stub(page, s => s.order.filter((entry: string) => entry === 'Agent.start').length), { timeout: 30_000 }).toBe(startsBefore + 2);
     }
+    await button(page, 'Open conversation').click();
+    await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
+    await button(page, 'Minimize chat').click();
     await expect(sheet(page)).toHaveCount(0);
     await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
     await button(page, 'Settings').click();
