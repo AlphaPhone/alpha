@@ -307,7 +307,7 @@ export function installSmsAdapter(Component:any,views:Bag){
  const finished=(status:string)=>{const result=status==='cancelled'||status==='denied'?null:status==='failed'?'failed' as const:status==='unknown'?'unknown' as const:'sent' as const;if(!result)return;draft=reviewFinished(draft,result);if(result==='sent'){body='';attachments=[];pictureSeq=0;composing=false;}};
  const accepted=(status:string)=>status==='submitted'||status==='sent'||status==='delivered';
  const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
- const dismissSuggestion=()=>{if(busy||!drafted())return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';notice='';changed();};
+ const dismissSuggestion=()=>{if(busy||!drafted())return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;changed();};
  function confirmSms(review:ReviewedSms,result:SmsSendResult,roleHeld:boolean){
   finished(result.status);
   sent={id:result.operationId,review};
@@ -419,7 +419,7 @@ export function installSmsAdapter(Component:any,views:Bag){
  views.messages.reply=()=>null;views.messages.suggestions=()=>[];
  /* The orb in the conversation bar is Alpha. Text the owner typed there goes with it as the request,
   * so "tell her I'm running late" can be typed in place and is sent to Alpha by the same tap; a draft Alpha wrote stays where it is. */
- const askAlpha=()=>{if(busy)return;const request=draft.draft==='owner'?body.trim():'';if(request){draft=typed(draft,'');body='';draftRevision++;operationId='';notice='';paint();api?.send?.(request);}else api?.chat?.();};
+ const askAlpha=()=>{if(busy)return;const request=draft.draft==='owner'?body.trim():'';if(request){draft=typed(draft,'');body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;paint();api?.send?.(request);}else api?.chat?.();};
  /* People to address a new message to: contacts matching what is typed in To, by name or number. */
  const picks=()=>{const typedTo=inputRecipients(),last=recipients.trim().endsWith(',')?'':(typedTo[typedTo.length-1]||''),query=last.toLowerCase(),digits=last.replace(/\D/g,''),chosen=new Set(typedTo.map(numberKey));
   return people.filter(person=>!chosen.has(numberKey(person.number))&&(!query||person.name.toLowerCase().includes(query)||(digits.length>=3&&person.number.replace(/\D/g,'').includes(digits)))).slice(0,30)
