@@ -119,6 +119,47 @@ test('fresh Alpha Home shows core apps and loads installed apps only in Apps', a
   expect((await calls(page, 'launch'))[1]).toEqual({packageName: SETTINGS.packageName, activityName: SETTINGS.activityName});
 });
 
+test('Home and Apps icons fade on pointer press while keyboard focus stays visible', async ({page}) => {
+  const time=new Date('2026-11-15T00:00:00Z');
+  await page.clock.install({time});
+  await page.clock.pauseAt(new Date(time.getTime()+1000));
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await nativeStub(page, ALL, {}, false);
+  await page.goto('/');
+
+  async function pressIcon(tile: ReturnType<Page['locator']>, face: ReturnType<Page['locator']>) {
+    const icon=face.locator(':scope > :first-child');
+    await expect(tile).toBeVisible();
+    await expect(icon).toHaveCSS('opacity', '1');
+    await expect(icon).toHaveCSS('transition-duration', '0s');
+    const background=await face.evaluate(node=>getComputedStyle(node).backgroundColor);
+    const bounds=(await icon.boundingBox())!;
+    await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+    await page.mouse.down();
+    try {
+      await expect(icon).toHaveCSS('opacity', '0.55');
+      await expect(face).toHaveCSS('background-color', background);
+      await expect(face).toHaveCSS('opacity', '1');
+      await expect(tile).toHaveCSS('outline-style', 'none');
+    } finally {
+      await page.mouse.move(0, 0);
+      await page.mouse.up();
+    }
+    await expect(icon).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Tab');
+    await tile.focus();
+    await expect(tile).toBeFocused();
+    await expect(tile).not.toHaveCSS('outline-style', 'none');
+  }
+
+  const homeTile=page.getByRole('region',{name:'Home',exact:true}).getByRole('button',{name:'Notes',exact:true});
+  await pressIcon(homeTile,homeTile.locator('[data-mobile-shell-tile-face]'));
+  const drawer=await openDrawer(page);
+  const drawerTile=drawer.getByRole('button',{name:'Open Clock',exact:true});
+  await pressIcon(drawerTile,drawerTile.locator(':scope > :first-child'));
+  expect(await calls(page, 'launch')).toEqual([]);
+});
+
 test('Home reuses its launcher projection during composer edits and refreshes changed apps', async ({ page }, info) => {
   const inventory: App[] = Array.from({ length: 60 }, (_, index) => ({
     packageName: `org.example.app${index}`, label: `Installed app ${index}`,

@@ -203,41 +203,6 @@ test('Android Back lowers chat above Apps before closing the drawer', async ({ p
   await expect(drawer).toHaveCount(0);
 });
 
-test('pressed launcher tiles fade their icons and keep the tile backgrounds', async ({ page }) => {
-  await nativeStub(page, { apps: [{ packageName: 'org.example.phone', label: 'Example Phone' }] });
-  await page.clock.install();
-  await page.goto('/');
-  const homeApp = page.getByRole('button', { name: 'Calendar', exact: true });
-  await expect(homeApp).toBeVisible();
-  await page.addStyleTag({ content: '[data-mobile-shell-tile] *, [data-launcher-app] * { transition: none !important; }' });
-  await page.clock.pauseAt(new Date(Date.now() + 5_000));
-
-  async function checkPress(button: ReturnType<Page['getByRole']>, faceSelector: string) {
-    const face = button.locator(faceSelector);
-    const icon = face.locator(':scope > :first-child');
-    const background = await face.evaluate(element => getComputedStyle(element).backgroundColor);
-    await expect(icon).toHaveCSS('opacity', '1');
-    await button.hover();
-    await page.mouse.down();
-    try {
-      await expect(face).toHaveCSS('background-color', background);
-      await expect(face).toHaveCSS('opacity', '1');
-      await expect(icon).toHaveCSS('opacity', '0.55');
-      await expect(button).toHaveCSS('outline-style', 'none');
-    } finally {
-      await page.mouse.move(0, 0);
-      await page.mouse.up();
-    }
-    await expect(icon).toHaveCSS('opacity', '1');
-  }
-
-  await checkPress(homeApp, '[data-mobile-shell-tile-face]');
-  await page.getByRole('button', { name: 'Apps', exact: true }).click();
-  const drawer = page.getByRole('dialog', { name: 'Apps', exact: true });
-  await checkPress(drawer.getByRole('button', { name: 'Open Example Phone', exact: true }), ':scope > :first-child');
-  expect(await calls(page, 'ElizaSystem', 'launchApp')).toEqual([]);
-});
-
 test('Apps lists Android entries with icons and launches by package', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await nativeStub(page, {
