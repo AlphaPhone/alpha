@@ -33,6 +33,7 @@ let askedDraftWriter:((text:string,number?:string)=>AskedDraft)|null=null;
 export const placeAskedSmsDraft=(text:string,number?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number):'none-selected';
 const THREAD_TAIL=20;
 const SMS_NOTICE_OPEN='alpha:sms-notice-open';
+const COMPOSER_REPLY_TIMEOUT_MS=30_000;
 type SmsComposeRequest=Parameters<AlphaTelephonyPlugin['sendSms']>[0];
 type MmsComposeRequest=Parameters<NonNullable<AlphaTelephonyPlugin['sendMms']>>[0];
 type MessagesBridge=AlphaTelephonyPlugin&{
@@ -105,6 +106,7 @@ export function installSmsAdapter(Component:any,views:Bag){
    const requestId=crypto.randomUUID();
    return new Promise<unknown>((resolve,reject)=>{
     const cleanup=()=>{
+     window.clearTimeout(timer);
      port.removeEventListener('message',receive);
      signal.removeEventListener('abort',abort);
     };
@@ -119,6 +121,11 @@ export function installSmsAdapter(Component:any,views:Bag){
      if(reply.error)reject(Object.assign(new Error(reply.error.message),{code:reply.error.code}));
      else resolve(reply.result);
     };
+    const timer=window.setTimeout(()=>{
+     cleanup();
+     // A missing reply leaves the send outcome unknown. Keep the operation ID for journaled retry.
+     reject(new Error('Messages composer did not reply.'));
+    },COMPOSER_REPLY_TIMEOUT_MS);
     port.addEventListener('message',receive);
     signal.addEventListener('abort',abort,{once:true});
     try{port.postMessage(JSON.stringify({requestId,kind,draft}));}

@@ -250,6 +250,40 @@ test('an outgoing SMS bubble appears on Send and an exact provider row replaces 
   expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
+test('a missing composer reply releases Send and a retry retains its operation identity', async ({page}) => {
+  await page.clock.install();
+  await setupTelephony(page, {controlledSms: true});
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator('[data-alpha-messages-body]');
+  const send = page.locator('[data-alpha-messages-send]');
+  const body = 'Keep this exact draft if the composer does not reply.';
+  await draft.fill(body);
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(1);
+  const [first] = await inputs(page, 'sendComposedSms');
+  await expect(send).toBeDisabled();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.firstComposerReply = w.smsReview;
+  });
+
+  await page.clock.fastForward(30_001);
+  await expect(send).toBeEnabled();
+  await expect(draft).toHaveValue(body);
+  await expect(page.locator('[data-alpha-messages-notice]')).toHaveText('May have sent');
+  expect(await inputs(page, 'sendComposedSms')).toEqual([first]);
+
+  await send.click();
+  await expect.poll(() => inputs(page, 'sendComposedSms')).toEqual([first, first]);
+  await page.evaluate(async () => (window as any).firstComposerReply.finish('sent'));
+  await expect(send).toBeDisabled();
+  await expect(draft).toHaveValue(body);
+  await page.evaluate(async () => (window as any).smsReview.finish('sent'));
+  await expect(draft).toHaveValue('');
+  expect(await inputs(page, 'sendSms')).toEqual([]);
+});
+
 test('the registered telephony profile still chooses native review', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
