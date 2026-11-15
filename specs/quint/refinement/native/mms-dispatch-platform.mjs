@@ -13,7 +13,7 @@ function replace(source, first, replacement) {
 }
 
 export function mmsPlatform(plugin, store, provider, {historical=false}={}) {
-  const files={...smsPlatform,...smsMembers(plugin,store,provider)};
+  const files={...smsPlatform,...smsMembers(plugin,store,provider,{includeMms:true})};
   const pkg='ai/eliza/plugins/messages/';
   const product='ai/alphacompute/alphaphone/';
   function edit(path, from, to) {files[path]=replace(files[path],from,to);}
@@ -162,12 +162,12 @@ import java.io.*;`);
  }
  public int delete(Uri uri,String where,String[] args){
   if(uri.equals(Mms.CONTENT_URI)){
-   String selection=Mms._ID+" = ? AND "+Mms.MESSAGE_BOX+" = ? AND "+Mms.CREATOR+" = ? AND "+Mms.TRANSACTION_ID+" = ?";
-   if(!context.role||!selection.equals(where)||args.length!=4||!args[1].equals("4")||!args[2].equals(context.getPackageName()))
-    throw new AssertionError("Only the exact app-owned MMS outbox row may be discarded");
+   String scoped=Mms._ID+" = ? AND "+Mms.MESSAGE_BOX+" = ? AND "+Mms.CREATOR+" = ? AND "+Mms.TRANSACTION_ID+" = ?";
+   if(!context.role||!scoped.equals(where)||args.length!=4||!args[1].equals("4")||!args[2].equals(context.getPackageName()))
+    throw new AssertionError("Only this operation's exact MMS outbox row may be discarded");
    long id=Long.parseLong(args[0]);
    ContentValues row=mms.get(id);
-   if(row==null||!Objects.equals(row.get(Mms.MESSAGE_BOX),Mms.MESSAGE_BOX_OUTBOX)||!Objects.equals(row.get(Mms.CREATOR),args[2])||
+   if(row==null||!Objects.equals(row.get(Mms.MESSAGE_BOX),4)||!Objects.equals(row.get(Mms.CREATOR),args[2])||
     !Objects.equals(row.get(Mms.TRANSACTION_ID),args[3]))return 0;
    return deleteMms(id);
   }

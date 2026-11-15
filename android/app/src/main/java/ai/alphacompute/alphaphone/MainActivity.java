@@ -41,6 +41,15 @@ public class MainActivity extends BridgeActivity {
   if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface())
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
  }
+ private boolean captureSmsNoticeOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
+  if (SmsNoticeOpenRequest.ACTION.equals(intent.getAction())) {
+   intent.setAction(Intent.ACTION_MAIN);
+   return SmsNoticeOpenRequest.current() != null;
+  }
+  if (isHomeIntent(intent)) SmsNoticeOpenRequest.clear();
+  return false;
+ }
  public int getTopInsetDp() { return topInsetDp; }
  public int getBottomInsetDp() { return bottomInsetDp; }
  static void refreshKeyboardInsets() {
@@ -237,7 +246,18 @@ public class MainActivity extends BridgeActivity {
   try { return FRONT_START_TOKEN.equals(intent.getStringExtra(EXTRA_FRONT_START)); }
   catch (RuntimeException foreign) { return false; }
  }
- @Override protected void load() { if (!handedOff) super.load(); }
+ private boolean telephonyAdmitted;
+ @Override protected void load() {
+  if (handedOff) return;
+  if (telephonyAdmitted && !isAssistantSurface()) {
+   WebView webView = findViewById(com.getcapacitor.android.R.id.webview);
+   if (webView != null) {
+    webView.setFilterTouchesWhenObscured(true);
+    AlphaMessagesComposerPort.install(this, webView);
+   }
+  }
+  super.load();
+ }
  private void handOff(MainActivity live) {
   boolean home = isHomeIntent(getIntent());
   boolean sameTask = live.getTaskId() == getTaskId();
@@ -358,8 +378,10 @@ public class MainActivity extends BridgeActivity {
   // The native image gate is checked again by every telephony operation.
   // Reconcile the role components with the verified image before registering telephony.
   AlphaTelephonyRoles.sync(this);
-  if (AlphaImageCapability.verified(this)) registerPlugin(AlphaTelephonyPlugin.class);
+  telephonyAdmitted = AlphaImageCapability.verified(this);
+  if (telephonyAdmitted) registerPlugin(AlphaTelephonyPlugin.class);
   captureNavigationOpen(getIntent());
+  captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());
   rendererDeathsAtCreate = recoveryBudget.deaths();
   super.onCreate(state);
@@ -428,6 +450,7 @@ public class MainActivity extends BridgeActivity {
  }
  @Override public void onNewIntent(Intent intent) {
   boolean showMaps = captureNavigationOpen(intent);
+  boolean showSmsNotice = captureSmsNoticeOpen(intent);
   AlphaCanonicalNotifications.captureTap(this,intent);
   super.onNewIntent(intent);
   // Our own bring-to-front start (see handOff) carries nothing: the real intent was delivered first.
@@ -438,6 +461,8 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (showMaps) signalNavigationOpen();
+  if (showSmsNotice && getBridge() != null && getBridge().getWebView() != null)
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:sms-notice-open'))", null);
   if (getBridge() != null && !isAssistantSurface() && isHomeIntent(intent))
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('launcher-home'))", null);
  }
