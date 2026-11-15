@@ -7,7 +7,7 @@
 // deployed shapes (billing snapshot v2, subscription redeem, the agent's `done` frame for a Cloud
 // 402). It is not the native Agent plugin, the resident runtime, Eliza Cloud or a device.
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, seedCompletedAccessSetup } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, openYourAgent, residentHome, seedCompletedAccessSetup } from './flag-off-android';
 import { residentStub, stub, setStub, type StubAccount } from './resident-stub';
 import { openCloudPlanFromSettings } from './helpers/cloud-plan-settings';
 
@@ -109,7 +109,13 @@ for (const failRestart of [false, true]) {
     }, failRestart);
     await expect.poll(() => stub(page, s => s.order.filter((entry: string) => entry === 'Agent.start').length)).toBeGreaterThan(startsBefore);
     if (failRestart) {
-      await expect(page.getByRole('status', { name: 'Assistant draft status', exact: true })).toBeVisible();
+      // Automatic recovery is quiet on Home. Agent activity still reports that
+      // its data is unavailable while waiting for the resident.
+      await expect(sheet(page)).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+      const activity = await openYourAgent(page);
+      await expect(activity.getByText('Loads when your agent is ready', { exact: true })).toBeVisible();
+      await pressHome(page);
     } else {
       await button(page, 'Open conversation').click();
       await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();

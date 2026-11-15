@@ -9,6 +9,7 @@ import {developmentCloudVoiceEnabled} from './development-cloud-voice';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import {ownerRouteAllowed, ownerRouteGroup} from './owner-route-policy.ts';
 import { registerPlugin } from '../platform-plugins';
+import { privateLocalPreviewEnabled } from '../build-flags';
 import { Capacitor } from '@capacitor/core';
 import type { VerifiedSession, ChatChannel } from './alpha-client';
 import { conversationViewHeaders, conversationRoomId, messagePageQuery, turnAbortOutcome, turnAbortPath, type MessagePage, type RemoteChatReply, type RemoteConversation, type TurnAbortOutcome } from './remote-protocol';
@@ -110,7 +111,15 @@ const browserBridge: LocalAgentBridge | null = developmentBridgeAllowed ? {
       method:'POST', headers:{'Content-Type':'application/json','X-Alpha-Local-Agent':'1'},
       body:JSON.stringify(input), signal:signal ? anyAbortSignal([signal,AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs), redirect:'error',
     });
-    if (!response.ok) throw Object.assign(new Error('Local agent development bridge unavailable. Check the development server.'),{status:response.status});
+    if (!response.ok) {
+      let message='Local agent development bridge unavailable. Check the development server.';
+      if (privateLocalPreviewEnabled&&response.status===409) {
+        const refusal=await response.json().catch(()=>null);
+        if (refusal?.code==='local-owner-unconfirmed')
+          message='Alpha couldn’t confirm the local owner. Restart the local agent, then try again.';
+      }
+      throw Object.assign(new Error(message),{status:response.status});
+    }
     return response.json();
   },
   async speechAudio(input,signal){

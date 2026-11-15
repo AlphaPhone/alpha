@@ -16,7 +16,7 @@ const snapshot=(page:Page)=>page.evaluate(async()=>{
  return {busy,kind,ownerId:session?.ownerId??null,startupResolved};
 });
 
-for(const unavailable of ['/api/auth/me','/api/agents','owner-refused'] as const){
+for(const unavailable of ['/api/auth/me','/api/agents','owner-refused','enrollment-unconfirmed'] as const){
  test(`private preview recovers only a temporary host bootstrap failure at ${unavailable}`,async({page})=>{
   const profile=await mkdtemp(join(tmpdir(),'alpha-preview-recovery-'));
   try{
@@ -29,6 +29,8 @@ for(const unavailable of ['/api/auth/me','/api/agents','owner-refused'] as const
     calls.push({path:input.path,method:input.method});
     if(!available&&input.path===unavailable)
      return route.fulfill({status:503,body:'Local runtime unavailable. Check the private host log.'});
+    if(input.path==='/api/auth/me'&&unavailable==='enrollment-unconfirmed')
+     return route.fulfill({status:409,json:{code:'local-owner-unconfirmed'}});
     let body:unknown;
     if(input.path==='/api/auth/me')body={identity:{kind:'owner',id:'fixture-owner'},access:{role:unavailable==='owner-refused'?'MEMBER':'OWNER',mode:'session'}};
     else if(input.path==='/api/agents')body={agents:[{id:'fixture-agent',name:'Browser fixture',status:'running'}]};
@@ -45,7 +47,7 @@ for(const unavailable of ['/api/auth/me','/api/agents','owner-refused'] as const
    expect(authReads()).toBe(1);
    available=true;
    await page.clock.fastForward(3050);
-   if(unavailable==='owner-refused'){
+   if(unavailable==='owner-refused'||unavailable==='enrollment-unconfirmed'){
     expect(await snapshot(page)).toMatchObject({kind:'recovering',ownerId:null});
     expect(authReads()).toBe(1);
    }else{
@@ -54,6 +56,15 @@ for(const unavailable of ['/api/auth/me','/api/agents','owner-refused'] as const
    }
    expect(calls.filter(call=>call.method==='POST'&&call.path.includes('/messages'))).toEqual([]);
    await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
+   if(unavailable==='enrollment-unconfirmed'){
+    await page.evaluate(async()=>{
+     const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+     connectionController.open();
+    });
+    const panel=page.getByRole('dialog',{name:'Alpha connection',exact:true});
+    await expect(panel.getByRole('alert')).toHaveText('Alpha couldn’t confirm the local owner. Restart the local agent, then try again.');
+    await expect(panel.getByRole('button',{name:'Try again',exact:true})).toBeEnabled();
+   }
   }finally{
    await page.close();
    await rm(profile,{recursive:true,force:true});

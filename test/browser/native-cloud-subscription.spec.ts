@@ -1,6 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openCloudPlanFromSettings} from './helpers/cloud-plan-settings';
-import {fenceNetwork,seedCompletedAccessSetup} from './flag-off-android';
+import {fenceNetwork,openYourAgent,seedCompletedAccessSetup} from './flag-off-android';
 import {observeCloudNotices} from './helpers/cloud-connection-notices';
 import {test,expect,type Page} from '@playwright/test';
 import {CREDENTIAL,entitlements,installNativeCloudPlanPorts,USER,type NativePlanFixture} from './helpers/native-cloud-plan-fixture';
@@ -657,11 +657,7 @@ test.describe('account, plan and sign-in expiry',()=>{
 test('failed native provider binding reports unconfirmed inference and exposes the error before history',async({page})=>{
  const pageErrors:string[]=[];page.on('pageerror',error=>pageErrors.push(error.message));
  await boot(page,{...await entitlements(),holdProvider:false,providerFailure:'Synthetic account verification failure',fullApp:true});await started(page);await idle(page);
- await page.getByRole('button',{name:'Settings',exact:true}).click();
- await page.getByRole('button',{name:'About',exact:true}).click();
- await page.getByRole('button',{name:/^Status/}).click();
- const settings=page.getByRole('region',{name:'Settings',exact:true});
- await expect(settings.getByText('—',{exact:true})).toBeVisible();
+ const settings=await openYourAgent(page);
  const error=settings.getByText(/Synthetic account verification failure/);await expect(error).toBeVisible();
  await expect(error).toContainText('AI state unknown');
  const history=settings.getByRole('button',{name:'New conversation',exact:true});await expect(history).toBeVisible();
