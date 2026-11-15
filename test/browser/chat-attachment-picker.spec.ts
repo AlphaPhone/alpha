@@ -98,3 +98,34 @@ test('a same-name replacement cannot borrow the reviewed file identity',async({p
  expect(await page.evaluate(()=>{const {reads,sends}=(window as any).attachmentFixture;return {reads,sends};})).toEqual({reads:1,sends:[]});
  expect(outbound).toEqual([]);
 });
+
+test('Search chat opens the selected historical message without sending or reading attachments',async({page})=>{
+ const {picker,outbound}=await setup(page);
+ await picker.getByRole('button',{name:'Close attachments',exact:true}).click();
+ const target=await page.evaluate(async()=>{
+  const {LocalAgentProtocol}=await import('/src/runtime/local-agent.ts');
+  const f=(window as any).attachmentFixture,messageId=crypto.randomUUID();
+  f.searches=[];f.around=[];
+  LocalAgentProtocol.prototype.listConversations=async()=>[{id:f.room,title:'History search fixture'}];
+  LocalAgentProtocol.prototype.searchMessages=async(query,_signal,offset)=>{
+   f.searches.push({query,offset});
+   return [{messageId,conversationId:f.room,roomId:f.room,role:'assistant' as const,text:'A historical needle message',snippet:'A historical needle message',createdAt:1,score:1}];
+  };
+  LocalAgentProtocol.prototype.messagesAround=async(id,message)=>{
+   if(id!==f.room||message!==messageId)throw Error('Wrong historical message');
+   f.around.push({id,message});
+   return {messages:[{id:messageId,role:'assistant',text:'A historical needle message',createdAt:1}]};
+  };
+  return {messageId,room:f.room};
+ });
+ await page.getByRole('button',{name:'Chat actions',exact:true}).click();
+ await page.getByRole('button',{name:'Search chat',exact:true}).click();
+ const search=page.getByRole('dialog',{name:'Search chats',exact:true});
+ await search.getByRole('textbox',{name:'Search messages',exact:true}).fill('needle');
+ await search.getByRole('button',{name:/A historical needle message/}).click();
+ await expect(search).toHaveCount(0);
+ await expect(page.locator(`[data-alpha-layer="conversation"] [data-alpha-message-id="${target.messageId}"]`)).toContainText('A historical needle message');
+ const result=await page.evaluate(()=>{const f=(window as any).attachmentFixture;return {reads:f.reads,sends:f.sends,searches:f.searches,around:f.around};});
+ expect(result).toEqual({reads:0,sends:[],searches:[{query:'needle',offset:0}],around:[{id:target.room,message:target.messageId}]});
+ expect(outbound).toEqual([]);
+});
