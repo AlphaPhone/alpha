@@ -650,7 +650,7 @@ native journal and carrier dispatch guards. It retires a staged MMS if Android
 never receives it ([eliza#39660](https://github.com/elizaOS/eliza/pull/39660)).
 Assistant and external compose sends still use their existing confirmation.
 The current pin `a81d7059045f9b96b8c85ffa79b731d3ba574159` keeps the Android
-resident watchdog retrying with capped backoff after repeated crashes
+resident watchdog retrying with capped backoff after repeated crashes and retires stale startup probes
 ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
