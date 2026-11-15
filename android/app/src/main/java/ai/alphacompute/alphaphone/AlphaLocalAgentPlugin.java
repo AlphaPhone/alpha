@@ -841,12 +841,16 @@ private static final class ResidentAttachDiagnostic {
       // A launch the service already reports as ended fails now, not at the deadline. The first
       // seconds may still show the previous process's state.
       if(android.os.SystemClock.elapsedRealtime()-launched>=3000&&startFailed(boot)){android.util.Log.w("AlphaLocalAgent","start-failed "+boot.optString("reason"));rejectStartFailed(call,epoch);return;}
-      // Once the request socket listens, readiness is close: poll it closely.
-      if(boot.optBoolean("socketListening"))pause=200;
-      String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;
+      requireCurrent(epoch);
+      // The socket can still accept while the watchdog waits to replace its process.
+      if(!"restarting".equals(boot.optString("state"))){
+       if(boot.optBoolean("socketListening"))pause=200;
+       String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;
+      }
      }
      catch(Superseded stale){rejectSuperseded(call);return;}
-     catch(Exception unavailable){try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}}
+     catch(Exception unavailable){ /* Wait for the resident to accept requests. */ }
+     try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
     }
     if(ready){
      // Never poll enrollment: a failed response may follow a committed pairing POST.
