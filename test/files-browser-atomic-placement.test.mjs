@@ -17,6 +17,7 @@ test('Browser Files placement preserves exact rows and Trash markers on IndexedD
       globalThis.placementFixture = {BrowserFiles, BrowserStorageVolume};
     `},
     bundle: true, write: false, platform: 'browser', format: 'iife',
+    alias: {'@elizaos/core/protocol': resolve(root, '.eliza/client-features/alpha-voice-core-protocol.ts')},
     external: ['pdfjs-dist'],
   });
   const browser = await chromium.launch({headless: true, args: ['--no-sandbox'],

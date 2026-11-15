@@ -315,6 +315,7 @@ export const featureParityAllowlist = {
     "apps/app/src/prototype/agent-adapter.ts",
     "apps/app/src/prototype/agent-calendar-adapter.ts",
     "apps/app/src/prototype/assistant-draft-controller.ts",
+    "apps/app/src/prototype/attachment-picker.ts",
     "apps/app/src/prototype/automations-adapter.ts",
     "apps/app/src/prototype/browser-adapter.ts",
     "apps/app/src/prototype/browser-camera.ts",
