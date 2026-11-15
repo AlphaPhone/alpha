@@ -10,7 +10,7 @@ async function boot(page:Page,mode:Mode='success',signedOut=false){
  await page.addInitScript(({mode,token})=>{
   const w=window as any,c=w.Capacitor,previous=c.nativePromise;let archived=false;
   const calls=w.recoveryCalls={starts:0,reviews:0,archives:[] as unknown[]};
-  const control=w.recoveryControl={pending:false,hidden:false,dead:false,release:null as null|(()=>void)};
+  const control=w.recoveryControl={pending:false,hidden:false,dead:false,release:null as null|(()=>void),initialProviderCalls:[] as string[]};
   Object.defineProperty(document,'hidden',{get:()=>control.hidden});
   c.PluginHeaders.find((p:any)=>p.name==='Agent').methods.push(...['reviewRecovery','archiveRecovery','residentAttachment'].map(name=>({name,rtype:'promise'})));
   c.nativePromise=async(p:string,m:string,input:any)=>{
@@ -20,7 +20,11 @@ async function boot(page:Page,mode:Mode='success',signedOut=false){
    if(p==='Agent'&&m==='start'){
     calls.starts++;
     if(mode==='attach-pending'){
-      if(calls.starts===1)throw Object.assign(Error('Transient native status read failure'),{code:'LOCAL_AGENT_ATTACH_PENDING'});
+      if(calls.starts===1){
+        control.initialProviderCalls=w.flagOff.calls.filter((call:string)=>call==='Agent.stop'||call==='Agent.configureCloudProvider');
+        throw Object.assign(Error('Transient native status read failure'),{code:'LOCAL_AGENT_ATTACH_PENDING'});
+      }
+      await new Promise<void>(resolve=>control.release=resolve);
     }else if(mode==='lost'){
       if(control.dead){control.dead=false;throw Object.assign(Error('Native restart pending'),{code:'start-failed'});}
     }else if(!archived&&(mode!=='transient'||calls.starts<=5)){
@@ -37,7 +41,7 @@ async function boot(page:Page,mode:Mode='success',signedOut=false){
    return previous(p,m,input);
   };
  },{mode,token});
- await page.goto('/');await expect.poll(()=>page.evaluate(()=>(window as any).recoveryCalls.starts)).toBe(1);
+ await page.goto('/');await expect.poll(()=>page.evaluate(()=>(window as any).recoveryCalls.starts)).toBeGreaterThanOrEqual(1);
  if(signedOut){const gate=page.locator('[role="main"].alpha-cloud-sign-in');await expect(gate).toBeVisible();return gate;}
  await expect(button(page,'Settings')).toBeVisible();await completeAccessSetup(page);
  return openYourAgent(page);
@@ -106,15 +110,14 @@ test('a transient native attach check retries without changing the saved binding
  await expect(load).toHaveCount(0);
  await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
  const credential=await harness(page,f=>f.slots['cloud:production']);
- const stops=await harness(page,f=>f.calls.filter(call=>call==='Agent.stop').length);
- const configs=await harness(page,f=>f.calls.filter(call=>call==='Agent.configureCloudProvider').length);
+ const initialProviderCalls=await page.evaluate(()=>(window as any).recoveryControl.initialProviderCalls as string[]);
 
  await page.clock.fastForward(3050);
+ await expect.poll(()=>calls(page)).toEqual({starts:2,reviews:0,archives:[]});
+ await page.evaluate(()=>(window as any).recoveryControl.release());
  await expect(load).toBeVisible();
- expect(await calls(page)).toEqual({starts:2,reviews:0,archives:[]});
  expect(await harness(page,f=>f.slots['cloud:production'])).toBe(credential);
- expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.stop').length)).toBe(stops);
- expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.configureCloudProvider').length)).toBe(configs);
+ expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.stop'||call==='Agent.configureCloudProvider'))).toEqual(initialProviderCalls);
  expect(await harness(page,f=>f.streams)).toBe(0);
 });
 

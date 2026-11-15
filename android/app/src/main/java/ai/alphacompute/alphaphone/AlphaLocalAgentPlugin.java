@@ -865,7 +865,7 @@ private static final class ResidentAttachDiagnostic {
    }
    PluginWorkers.submit(workers,()->{
     long launched=android.os.SystemClock.elapsedRealtime(),deadline=launched+START_DEADLINE_MS;
-    boolean ready=false;
+    String readyRoot=null;
     while(android.os.SystemClock.elapsedRealtime()<deadline){
      long pause=1000;
      try{
@@ -878,17 +878,18 @@ private static final class ResidentAttachDiagnostic {
       // A socket can still accept during the watchdog's replacement backoff.
       if(!"restarting".equals(boot.optString("state"))){
        if(boot.optBoolean("socketListening"))pause=200;
-       String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);ready=true;break;
+       String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);readyRoot=root;break;
       }
      }
      catch(Superseded stale){rejectSuperseded(call);return;}
      catch(Exception unavailable){ /* Wait for the resident to accept requests. */ }
      try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
     }
-    if(ready){
-     // Never poll enrollment: a failed response may follow a committed pairing POST.
-     try{enroll(epoch);resolveCurrent(call,epoch,new JSObject().put("state","ready"));return;}
+    if(readyRoot!=null){
+     // Never repeat uncertain enrollment on this boot. A new boot has its own root and pairing code.
+     try{enroll(epoch,readyRoot);resolveCurrent(call,epoch,new JSObject().put("state","ready"));return;}
      catch(Superseded stale){rejectSuperseded(call);return;}
+     catch(RuntimeRootChanged changed){rejectStartFailed(call,epoch);return;}
      catch(Exception uncertain){rejectStartup(call,epoch,"Alpha couldn’t confirm local enrollment.","runtime-identity-unavailable");return;}
     }
     rejectStartFailed(call,epoch);
@@ -1210,7 +1211,11 @@ private static final class ResidentAttachDiagnostic {
  private JSONObject enrollmentJson(long epoch,String path,String method,JSONObject body,String token,String root,java.util.function.IntConsumer observedStatus) throws Exception {
   requireEnrollmentRoot(epoch,root);
   // Admission precedes dispatch. In-flight native requests are not claimed cancelled.
-  JSONObject result=json(path,method,body,token,observedStatus);requireEnrollmentRoot(epoch,root);return result;
+  final JSONObject result;
+  try{result=json(path,method,body,token,observedStatus);}
+  catch(Exception failed){requireEnrollmentRoot(epoch,root);throw failed;}
+  requireEnrollmentRoot(epoch,root);
+  return result;
  }
  private JSONObject authenticatedStatus(long epoch,String root) throws Exception {return authenticatedStatus(epoch,root,status->{});}
  private JSONObject authenticatedStatus(long epoch,String root,java.util.function.IntConsumer observedStatus) throws Exception {
@@ -1220,10 +1225,12 @@ private static final class ResidentAttachDiagnostic {
   return status;
  }
  private String enroll(long epoch) throws Exception {
+  return enroll(epoch,null);
+ }
+ private String enroll(long epoch,String expectedRoot) throws Exception {
   synchronized(enrollmentLock){
   requireCurrent(epoch);
-  String root=ElizaAgentService.localAgentToken();
-  if(root==null||root.isEmpty())throw new IllegalStateException();
+  String root=expectedRoot==null?ElizaAgentService.localAgentToken():expectedRoot;
   synchronized(lifecycleLock){requireEnrollmentRoot(epoch,root);if(root.equals(rootToken)&&ownerToken!=null&&expiresAt>System.currentTimeMillis()+30000){AlphaCanonicalNotifications.ensure(getContext());return ownerToken;}}
   JSONObject status=authenticatedStatus(epoch,root);
   JSONObject code=enrollmentJson(epoch,"/api/auth/pair-code","GET",null,root,root);
