@@ -308,7 +308,30 @@ export function installSmsAdapter(Component:any,views:Bag){
  const accepted=(status:string)=>status==='submitted'||status==='sent'||status==='delivered';
  const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
  const dismissSuggestion=()=>{if(busy||!drafted())return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';notice='';changed();};
- async function reconcile(id=operationId||sent?.id){const review=id===operationId?smsReview:id===sent?.id?sent?.review:id?outgoing.get(id)?.review:null;if(!inFront()||!id||!review)return;const token=lifecycle,draft=draftRevision;try{const value=await client.smsSendResult(review,id);if(active&&token===lifecycle){outgoingResult(value);if(draft===draftRevision&&(id===operationId||id===sent?.id)){receipt=value;notice=receiptLabel(value.status);}changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
+ function confirmSms(review:ReviewedSms,result:SmsSendResult,roleHeld:boolean){
+  finished(result.status);
+  sent={id:result.operationId,review};
+  operationId='';smsReview=null;draftRevision++;
+  if(outgoing.get(result.operationId)?.createdAt!==undefined&&session.state.thread===null&&roleHeld)composing=true;
+ }
+ async function reconcile(id=operationId||sent?.id){
+  if(!inFront()||!id)return;
+  const review=id===operationId?smsReview:id===sent?.id?sent.review:outgoing.get(id)?.review;
+  if(!review)return;
+  const token=lifecycle,draft=draftRevision;
+  try{
+   const value=await client.smsSendResult(review,id);
+   if(!active||token!==lifecycle)return;
+   outgoingResult(value);
+   if(draft===draftRevision&&(id===operationId||id===sent?.id)){
+    receipt=value;notice=receiptLabel(value.status);
+    // A late journal receipt can settle the original draft after the composer times out.
+    if(!busy&&id===operationId&&accepted(value.status))
+     confirmSms(review,value,session.state.status?.roles?.sms?.held===true);
+   }
+   changed();
+  }catch{/* No record or unavailable is never evidence of not sent. */}
+ }
  async function send(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
   const status=session.state.status;if(!status){notice='Refresh Messages, then review the text again.';return;}
   /* The shared review normalizes and dedupes numbers and takes the only active SIM; a SIM that is no longer active is refused. */
@@ -324,16 +347,15 @@ export function installSmsAdapter(Component:any,views:Bag){
   const result=await sender.sendSms(review,id);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);
   outgoingResult(result,id);
   /* Cancelled and denied prove nothing was sent: the next Send opens a new review. */
-  if(result.status==='cancelled'||result.status==='denied'){operationId='';draftRevision++;}else{finished(result.status);if(accepted(result.status)){
-   sent={id,review};operationId='';smsReview=null;draftRevision++;
-   if(outgoing.get(id)?.createdAt!==undefined&&session.state.thread===null&&status.roles?.sms?.held===true)composing=true;
-  }}
+  if(result.status==='cancelled'||result.status==='denied'){operationId='';draftRevision++;}
+  else if(accepted(result.status))confirmSms(review,result,status.roles?.sms?.held===true);
+  else finished(result.status);
   changed();await session.refresh();
   if(status.roles?.sms?.held===false)outgoing.delete(id);
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision){const code=(error as {code?:string})?.code,message=error instanceof Error?error.message:'';
   if(operationId)outgoing.delete(operationId);
   if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';notice=message;}else if(operationId&&code==='expired'&&message)notice=message;
-  else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;changed();}}}
+  else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;changed();if(operationId)void reconcile(operationId);}}}
  async function reconcileMms(id=mmsOperationId||mmsSent?.id){const review=id===mmsOperationId?mmsReview:id===mmsSent?.id?mmsSent?.review:null;if(!inFront()||!id||!review)return;const token=lifecycle,draft=draftRevision;try{const value=await client.mmsSendResult(review,id);if(active&&token===lifecycle&&draft===draftRevision){notice=mmsReceiptLabel(value.status);changed();}}catch{/* No record or unavailable is never evidence of not sent. */}}
  /** One MMS to every recipient, with the text and the picked pictures. A repeated operation ID never sends twice. */
  async function sendMms(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;let dispatched=false;busy=true;changed();try{

@@ -25,6 +25,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.telephonyCalls = [];
     w.telephonyInputs = [];
     const messageListeners = new Map<string, {eventName: string; callback: (data: unknown) => void}>();
+    const smsResults = new Map<string, unknown>();
     let listenerSequence = 0;
     w.smsProviderChanged = () => {
       for (const listener of messageListeners.values()) {
@@ -145,17 +146,25 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
                 const row = {...message(id, threadId, false, 0, body, recipients[0]), date: createdAt, subscriptionId};
                 w.messages[threadId] = [...(w.messages[threadId] || []), row];
               },
-              async finish(status: 'sent' | 'submitted' | 'cancelled' | 'denied' | 'failed') {
+              async finish(status: 'sent' | 'submitted' | 'cancelled' | 'denied' | 'failed', publish = false) {
                 const bytes = new TextEncoder().encode(JSON.stringify({body, recipients, subscriptionId, type: 'sms_send'}));
                 const hash = await crypto.subtle.digest('SHA-256', bytes);
                 const bindingHash = [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('');
                 const parts = status === 'cancelled' || status === 'denied' ? []
                   : [{index: 0, recipientIndex: 0, partIndex: 0, sent: status === 'sent' ? 'success' : status === 'failed' ? 'failed' : 'unknown', delivery: 'unknown'}];
-                resolve({kind: 'sms-send', operationId, subscriptionId, bindingHash, status, parts, createdAt});
+                const receipt = {kind: 'sms-send', operationId, subscriptionId, bindingHash, status, parts, createdAt};
+                if (publish) {
+                  smsResults.set(operationId, receipt);
+                  for (const listener of messageListeners.values()) {
+                    if (listener.eventName === 'smsSendUpdated') listener.callback({operationId});
+                  }
+                }
+                resolve(receipt);
               },
             };
           });
         }
+        if (method === 'smsSendResult') return smsResults.get(input.operationId) ?? {};
         if (method === 'smsSendHistory') return {receipts: []};
         if (method === 'phoneInfo') return {access: {phoneState: true, phoneNumbers: true, deviceIdentifiers: false}, lines: [{subscriptionId: 1, slot: 0, displayName: 'Synthetic SIM', carrierName: 'Synthetic Carrier', number: '+15550100100', countryIso: 'us', networkType: '5g', roaming: false, signalLevel: 3, embedded: false, iccid: null, imei: null}]};
         if (method === 'callState') return w.callState || {calls: []};

@@ -284,6 +284,33 @@ test('a missing composer reply releases Send and a retry retains its operation i
   expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
+test('the journal clears a sent draft after the composer reply times out', async ({page}) => {
+  await page.clock.install();
+  await setupTelephony(page, {controlledSms: true});
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator('[data-alpha-messages-body]');
+  const send = page.locator('[data-alpha-messages-send]');
+  const body = 'A late journal receipt settles this draft.';
+  await draft.fill(body);
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(1);
+
+  await page.clock.fastForward(30_001);
+  await expect(send).toBeEnabled();
+  await expect(draft).toHaveValue(body);
+  await expect(page.locator('[data-alpha-messages-notice]')).toHaveText('May have sent');
+
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.smsReview.addProviderRow(42, 'thread:101');
+    await w.smsReview.finish('sent', true);
+  });
+  await expect(draft).toHaveValue('');
+  await expect(page.locator('[data-alpha-message-id="sms:42"]')).toHaveText(body);
+  expect(await inputs(page, 'sendComposedSms')).toHaveLength(1);
+});
+
 test('the registered telephony profile still chooses native review', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
