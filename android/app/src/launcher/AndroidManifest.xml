@@ -87,6 +87,7 @@
    <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
   </service>
   <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+  <activity android:name=".AlphaSmsNoticeActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoDisplay" />
   <!-- SMS role surfaces (shared plugin-native-messages), declared disabled and enabled only on the
        verified image. Incoming texts and MMS are stored before their notice; quick replies and SENDTO
        open the compose review, whose Send press is the only send. -->
