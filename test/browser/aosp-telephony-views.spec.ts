@@ -344,6 +344,29 @@ test('the owner Send button routes a group text through the manual MMS port', as
   expect(await inputs(page, 'sendMms')).toEqual([]);
 });
 
+test('the journal clears a sent group draft after the MMS composer reply times out', async ({page}) => {
+  await page.clock.install();
+  await setupTelephony(page, {mms: true, controlledMms: true});
+  await open(page, 'Messages');
+  await page.locator('[data-alpha-messages-new]').click();
+  const draft = page.locator('[data-alpha-messages-body]');
+  const send = page.locator('[data-alpha-messages-send]');
+  await page.locator('[data-alpha-messages-recipients]').fill('+15550100101, +15550100102');
+  await draft.fill('Group text settles without a second send.');
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedMms')).length).toBe(1);
+
+  await page.clock.fastForward(30_001);
+  await expect(send).toBeEnabled();
+  await expect(draft).toHaveValue('Group text settles without a second send.');
+  await expect(page.locator('[data-alpha-messages-notice]')).toHaveText('May have sent');
+
+  await page.evaluate(() => (window as any).finishMms());
+  await expect(page.locator('[data-alpha-messages-threads]')).toBeVisible();
+  await expect(draft).toHaveCount(0);
+  expect(await inputs(page, 'sendComposedMms')).toHaveLength(1);
+});
+
 test('a refused or failed manual SMS removes the provisional bubble and keeps the draft', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
