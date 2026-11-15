@@ -501,7 +501,13 @@ export function installSmsAdapter(Component:any,views:Bag){
   ...designed(nativeThreads)};};
  p.componentDidMount=function(){
   mount?.call(this);owner=this;lifecycle++;
-  this.smsSelection=()=>{const selected=session.state.status?.subscriptions?.find(row=>String(row.id)===sim);return inFront()&&selected?{kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)}:undefined;};
+  this.smsSelection=()=>{
+   if(owner!==this||!inFront())return;
+   const subscriptions=session.state.status?.subscriptions??[];
+   const soleSubscription=subscriptions.length===1?subscriptions[0]:undefined;
+   const selected=sim?subscriptions.find(row=>String(row.id)===sim):soleSubscription;
+   if(selected)return {kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)};
+  };
   this.smsNoticeWake=()=>{if(owner===this)wakeSmsNotice();};
   this.smsReturn=watchReturnToApp(()=>{void session.refresh();this.smsNoticeWake();});
   this.smsHide=()=>{if(!document.hidden)picking=false;sync();};
