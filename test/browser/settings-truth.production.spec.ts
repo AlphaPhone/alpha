@@ -219,6 +219,13 @@ test('every Settings row is a control backed by real state, with no fixture valu
  expect((await callNames(page)).filter(name=>name!=='Agent.setGoogleAgentAccess'&&/\.set(?!Flashlight)|\.perform$/i.test(name))).toEqual([]);
 });
 
+test('Android settings opens the system Settings page from Alpha Settings',async({page})=>{
+ await nativeStub(page);
+ await openSettings(page);
+ await current(page).getByRole('button',{name:'Android settings',exact:true}).click();
+ await expect.poll(()=>opened(page)).toEqual(['system']);
+});
+
 
 
 

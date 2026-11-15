@@ -78,9 +78,8 @@ test('browser restores an existing host Cloud account, uses canonical voice and 
   await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.beginSignIn('production'));
   const signIn=page.getByRole('dialog',{name:'Alpha',exact:true});
   await expect(signIn.getByRole('form',{name:'Sign in with email'})).toBeVisible();
-  // Google is not configured here: no dead Google button, only a quiet retry.
-  await expect(signIn.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
-  await expect(signIn.getByRole('button',{name:'Retry Google sign-in',exact:true})).toBeVisible();
+  await expect(signIn.getByRole('button',{name:'Continue with Google',exact:true})).toBeDisabled();
+  await expect(signIn.getByRole('button',{name:'Check sign-in options',exact:true})).toBeVisible();
   await signIn.getByRole('button',{name:'Browser sign-in (diagnostic)',exact:true}).click();
   await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().cloudAccount?.userId)).toBe(owner);
   await expect(page.getByRole('dialog',{name:'Eliza Cloud',exact:true})).toHaveCount(0);
