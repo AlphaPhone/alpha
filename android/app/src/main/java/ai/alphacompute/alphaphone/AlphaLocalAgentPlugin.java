@@ -215,6 +215,9 @@ private static final class ResidentAttachDiagnostic {
 
  private static final class Superseded extends Exception {}
  private static final class RuntimeRootChanged extends Exception {}
+ private static final class EnrollmentReadUnavailable extends Exception {
+  EnrollmentReadUnavailable(java.io.IOException cause){super(cause);}
+ }
  // Owner, provider and account changes retire shade notices first (AlphaCanonicalNotifications.forget);
  // start, cancel, 401 and destroy keep the same owner, so its posted notices stay.
  private static void clearEnrollment(){AlphaCanonicalNotifications.suspendForRestart();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;}
@@ -889,7 +892,7 @@ private static final class ResidentAttachDiagnostic {
      // Never repeat uncertain enrollment on this boot. A new boot has its own root and pairing code.
      try{enroll(epoch,readyRoot);resolveCurrent(call,epoch,new JSObject().put("state","ready"));return;}
      catch(Superseded stale){rejectSuperseded(call);return;}
-     catch(RuntimeRootChanged changed){rejectStartFailed(call,epoch);return;}
+     catch(RuntimeRootChanged|EnrollmentReadUnavailable retry){rejectStartFailed(call,epoch);return;}
      catch(Exception uncertain){rejectStartup(call,epoch,"Alpha couldn’t confirm local enrollment.","runtime-identity-unavailable");return;}
     }
     rejectStartFailed(call,epoch);
@@ -1199,8 +1202,10 @@ private static final class ResidentAttachDiagnostic {
  private static JSONObject json(String path,String method,JSONObject body,String token) throws Exception {return json(path,method,body,token,status->{});}
  private static JSONObject json(String path,String method,JSONObject body,String token,java.util.function.IntConsumer observedStatus) throws Exception {
   JSONObject response=raw(path,method,body==null?null:body.toString(),token,null,120000);
-  observedStatus.accept(response.getInt("status"));
-  if(response.getInt("status")!=200)throw new IllegalStateException("Local enrollment unavailable");
+  int status=response.getInt("status");
+  observedStatus.accept(status);
+  if(status>=500&&status<=599)throw new java.io.IOException("Local enrollment service unavailable");
+  if(status!=200)throw new IllegalStateException("Local enrollment unavailable");
   return new JSONObject(response.getString("body"));
  }
  private void requireEnrollmentRoot(long epoch,String root) throws Exception {
@@ -1232,8 +1237,14 @@ private static final class ResidentAttachDiagnostic {
   requireCurrent(epoch);
   String root=expectedRoot==null?ElizaAgentService.localAgentToken():expectedRoot;
   synchronized(lifecycleLock){requireEnrollmentRoot(epoch,root);if(root.equals(rootToken)&&ownerToken!=null&&expiresAt>System.currentTimeMillis()+30000){AlphaCanonicalNotifications.ensure(getContext());return ownerToken;}}
-  JSONObject status=authenticatedStatus(epoch,root);
-  JSONObject code=enrollmentJson(epoch,"/api/auth/pair-code","GET",null,root,root);
+  final JSONObject status,code;
+  try{
+   status=authenticatedStatus(epoch,root);
+   code=enrollmentJson(epoch,"/api/auth/pair-code","GET",null,root,root);
+  }catch(java.io.IOException unavailable){
+   // No pairing POST was dispatched. The same boot can be checked again.
+   throw new EnrollmentReadUnavailable(unavailable);
+  }
   JSONObject paired=enrollmentJson(epoch,"/api/auth/pair","POST",new JSONObject().put("code",code.getString("code")).put("instanceId",status.getString("instanceId")),root,root);
   if(!"owner".equals(paired.getString("access"))||!status.getString("instanceId").equals(paired.getString("instanceId")))throw new IllegalStateException();
   String token=paired.getString("token");JSONObject who=enrollmentJson(epoch,"/api/auth/me","GET",null,token,root);
@@ -1291,7 +1302,11 @@ private static final class ResidentAttachDiagnostic {
    deadline=localRequestDeadline(call.getData(),entered);
    remainingLocalRequestTimeout(deadline);
   }catch(IllegalArgumentException invalid){call.reject("Invalid local agent request timeout.");return;}
-  catch(RequestDeadlineExpired expired){call.reject(REQUEST_DEADLINE_MESSAGE);return;}
+  catch(RequestDeadlineExpired expired){
+   if(startupRead)call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");
+   else call.reject(REQUEST_DEADLINE_MESSAGE);
+   return;
+  }
   JSONObject headers=call.getObject("headers");
   final String cancelId=call.getString("cancelId");
   if(cancelId!=null&&!cancelId.matches("[A-Za-z0-9-]{16,64}")){logRequestFailure(group==null?"other":group,method,0,"cancel-id");call.reject("Unsupported local agent request.");return;}
@@ -1333,15 +1348,21 @@ private static final class ResidentAttachDiagnostic {
    }
    if(path.equals("/api/auth/me")&&status==200){JSONObject who=new JSONObject(result.getString("body"));who.getJSONObject("session").put("id","native-owned-session");result.put("body",who.toString());result.remove("bodyBase64");}
    resolveCurrent(call,epoch,new JSObject(result.toString()));
-  }catch(RequestDeadlineExpired expired){rejectPending(call,REQUEST_DEADLINE_MESSAGE);}
+  }catch(RequestDeadlineExpired expired){
+   if(startupRead)rejectStartupReadPending(call);
+   else rejectPending(call,REQUEST_DEADLINE_MESSAGE);
+  }
   catch(Superseded stale){rejectSuperseded(call);}
   catch(Exception error){
    logRequestFailure(group==null?"other":group,method,0,"transport");
    if(startupRead&&(error instanceof RuntimeRootChanged||error instanceof java.io.IOException)){
-    synchronized(lifecycleLock){if(pending.remove(call))call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");}
+    rejectStartupReadPending(call);
    }else rejectPending(call,"Local agent request failed. No automatic retry was made.");
   }
   finally{forgetWithdrawable(cancelId,call);}},()->{forgetWithdrawable(cancelId,call);rejectPending(call,"Local agent bridge is closed.");});
+ }
+ private void rejectStartupReadPending(PluginCall call){
+  synchronized(lifecycleLock){if(pending.remove(call))call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");}
  }
  private void forgetWithdrawable(String cancelId,PluginCall call){if(cancelId!=null)synchronized(lifecycleLock){withdrawable.remove(cancelId,call);}}
  /**
