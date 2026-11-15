@@ -115,13 +115,17 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
 
 test('a reviewed MMS carries the picked pictures, keeps its operation ID when uncertain and reads back only its reviewed content',async()=>{
  const {mkdtempSync,rmSync,writeFileSync}=await import('node:fs');const {join,resolve}=await import('node:path');const {tmpdir}=await import('node:os');const {pathToFileURL}=await import('node:url');
- const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'mms-adapter-'));const priorDocument=globalThis.document;const pending=[],calls=[],reads=[],inputs=[];let mmsUpdated;
+ const {build}=await import('esbuild');const dir=mkdtempSync(join(tmpdir(),'mms-adapter-'));const priorDocument=globalThis.document;const pending=[],calls=[],reads=[],inputs=[];let mmsUpdated,confirmed=false;
  const restoreWindow=installTestWindow();
  globalThis.document={hidden:false,addEventListener(){},removeEventListener(){},createElement(){const input={files:[],value:'',click(){inputs.push(input);}};return input;}};
  const file=(type,bytes)=>({type,size:bytes.length,arrayBuffer:async()=>new Uint8Array(bytes).buffer});
  globalThis.__mmsFixture={
   profiles:[],
-  port:{smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},mmsSend:true,subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[],next:null}),observeMessages:async(_change,_sms,mms)=>{mmsUpdated=mms;return async()=>{};},sendMms:(review,operationId)=>{calls.push({review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));},mmsSendResult:async(review,operationId)=>{reads.push({review,operationId});return {status:'sent'};}},
+  port:{smsSendHistory:async()=>[],status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},mmsSend:true,subscriptions:[{id:3,slot:0,displayName:'SIM'}]}),threadPage:async()=>({rows:[],next:null}),observeMessages:async(_change,_sms,mms)=>{mmsUpdated=mms;return async()=>{};},sendMms:(review,operationId)=>{calls.push({review,operationId});return new Promise((resolve,reject)=>pending.push({resolve,reject}));},mmsSendResult:async(review,operationId)=>{
+   reads.push({review,operationId});
+   if(!confirmed)throw Error('No receipt yet');
+   return {status:'sent'};
+  }},
  };
  try{
   globalThis.__mmsFixture.port.smsNoticePending=noSmsNotice;
@@ -142,10 +146,17 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   model().nativeSendMms();await tick();await tick();assert.equal(calls.length,1);
   assert.deepEqual(calls[0].review.recipients,['+15555550100','+15555550101']);assert.deepEqual(calls[0].review.attachments.map(a=>[a.name,a.contentType,[...a.bytes]]),[['picture-1.jpg','image/jpeg',[1,2,3]],['picture-2.png','image/png',[4,5]]]);
   pending[0].reject(Error('transport lost'));await tick();await tick();assert.match(model().nativeNotice,/May have sent/);
+  assert.deepEqual(reads,[calls[0]],'a missing receipt is checked against the original operation');
+  assert.equal(model().nativeBody,'hi all','a missing receipt keeps the draft');
+  assert.equal(model().nativeAttachments.length,2,'a missing receipt keeps the pictures');
   model().nativeSendMms();await tick();await tick();assert.equal(calls[1].operationId,calls[0].operationId,'an uncertain MMS is never given a fresh ID');
   pending[1].resolve({status:'submitted'});await tick();await tick();assert.equal(model().nativeNotice,'','submission shows no status text');
-  mmsUpdated('someone-else');await tick();assert.equal(reads.length,0,'another operation is not read');
-  mmsUpdated(calls[0].operationId);await tick();await tick();assert.equal(reads.length,1);assert.equal(reads[0].review,calls[0].review,'the result is bound to the reviewed content');assert.equal(model().nativeNotice,'','successful read-back shows no status text');
+  confirmed=true;
+  mmsUpdated('someone-else');await tick();assert.equal(reads.length,1,'another operation is not read');
+  mmsUpdated(calls[0].operationId);await tick();await tick();
+  assert.equal(reads.length,2);assert.equal(reads[1].operationId,calls[0].operationId);
+  assert.equal(reads[1].review,calls[0].review,'the result is bound to the reviewed content');
+  assert.equal(model().nativeNotice,'','successful read-back shows no status text');
   assert.equal(model().nativeAttachments.length,0,'a sent MMS clears the composer and its pictures');assert.equal(model().nativeBody,'');
   model().nativeOnBody({target:{value:'one more'}});model().nativeAttach();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
   pending[2].resolve({status:'cancelled'});await tick();await tick();assert.equal(model().nativeNotice,'','cancellation shows no status text');
