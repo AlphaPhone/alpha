@@ -127,16 +127,20 @@ test('Home and Apps icons fade on pointer press while keyboard focus stays visib
   await nativeStub(page, ALL, {}, false);
   await page.goto('/');
 
-  async function pressIcon(tile: ReturnType<Page['locator']>, icon: ReturnType<Page['locator']>) {
+  async function pressIcon(tile: ReturnType<Page['locator']>, face: ReturnType<Page['locator']>) {
+    const icon=face.locator(':scope > :first-child');
     await expect(tile).toBeVisible();
     await expect(icon).toHaveCSS('opacity', '1');
-    const background=await icon.evaluate(node=>getComputedStyle(node).backgroundColor);
+    // Alpha's shared reduced-motion rule leaves a negligible 0.01 ms transition.
+    expect(await icon.evaluate(node=>Number.parseFloat(getComputedStyle(node).transitionDuration))).toBeLessThan(0.001);
+    const background=await face.evaluate(node=>getComputedStyle(node).backgroundColor);
     const bounds=(await icon.boundingBox())!;
     await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
     await page.mouse.down();
     try {
       await expect(icon).toHaveCSS('opacity', '0.55');
-      await expect(icon).toHaveCSS('background-color', background);
+      await expect(face).toHaveCSS('background-color', background);
+      await expect(face).toHaveCSS('opacity', '1');
       await expect(tile).toHaveCSS('outline-style', 'none');
     } finally {
       await page.mouse.move(0, 0);
@@ -154,6 +158,7 @@ test('Home and Apps icons fade on pointer press while keyboard focus stays visib
   const drawer=await openDrawer(page);
   const drawerTile=drawer.getByRole('button',{name:'Open Clock',exact:true});
   await pressIcon(drawerTile,drawerTile.locator(':scope > :first-child'));
+  expect(await calls(page, 'launch')).toEqual([]);
 });
 
 test('Home reuses its launcher projection during composer edits and refreshes changed apps', async ({ page }, info) => {
