@@ -250,7 +250,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    const {threadId,token}=await native.smsNoticePending();
    if(typeof token!=='string'||!/^\d+$/.test(token)||typeof threadId!=='string'||!/^thread:[1-9]\d{0,18}$/.test(threadId)||!canContinue())return;
    const acknowledge=()=>{
-    if(current()&&canOpenNotice(shell)&&inFront()&&session.state.thread===threadId)
+    // The old draft only gates navigation. The opened thread can now load a draft of its own.
+    if(current()&&!shell.props?.assistantSurface&&shell.S().screen==='home'&&inFront()&&openRow()?.id===threadId)
      void native.acknowledgeSmsNotice({token}).catch(()=>{});
    };
    if(inFront()&&selected===threadId){void session.refresh();acknowledge();return;}
