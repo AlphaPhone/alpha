@@ -67,7 +67,7 @@ async function nativeStub(page:Page,fixture:Fixture={}){
     if(plugin==='AlphaVoiceCloud')return {microphone:'granted'};
     if(plugin==='Agent'){
      const owned=resident.answer(method,input);if(owned)return owned;
-     if(agentStartFailure&&method==='start')throw Error('Synthetic resident startup failure');
+     if(agentStartFailure&&method==='start')throw Object.assign(Error('Synthetic resident startup failure'),{code:'start-failed'});
      if(method==='request'){const id=residentId;return {status:200,body:JSON.stringify(input.path==='/api/auth/me'?{identity:{id,kind:'owner'},access:{role:'OWNER',mode:'local'}}:input.path==='/api/agents'?{agents:[{id,name:'Alpha',status:'running'}]}:input.path==='/api/conversations'?{conversations:[]}:{} )};}
      return method==='providerStatus'?state.provider:{packaged:true,state:'stopped',serviceActive:false,socketListening:false};
     }
@@ -311,23 +311,33 @@ for(const subscription of ['credits','active','canceled'] as const)test(`Setting
 
 
 
-// Rendered production Settings; only native transport and Cloud responses are finite fixtures.
-for(const scenario of ['unbound','recovering','connected'] as const)test(`Agent status is truthful: ${scenario}`,async({page})=>{
- await nativeStub(page,scenario==='unbound'?{subscription:'canceled'}:{subscription:'credits',agentStartFailure:scenario==='recovering'});
+// Rendered production Settings over the finite native and Cloud fixtures.
+for(const scenario of ['unbound','recovering','connected'] as const)test(`Agent activity and account controls in Settings: ${scenario}`,async({page})=>{
+ await nativeStub(page,{subscription:scenario==='unbound'?'canceled':'active',agentStartFailure:scenario==='recovering'});
  await page.goto('/');
- if(scenario==='recovering'){
-  await expect.poll(()=>page.evaluate(()=>(window as any).truth.calls.some((call:any)=>call.plugin==='Agent'&&call.method==='start'))).toBe(true);
-  const close=page.getByRole('button',{name:'Close connection settings',exact:true});if(await close.isVisible())await close.click();
- }
+ await expect.poll(()=>callNames(page)).toContain('Agent.start');
  await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
+ if(scenario!=='recovering'){
+  const plan=await openCloudPlanFromSettings(page);
+  await expect(plan.getByText('synthetic-settings@example.invalid',{exact:true})).toBeVisible();
+  await expect(plan.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+  await plan.getByRole('button',{name:'Close Account',exact:true}).click();
+  await expect(plan).toHaveCount(0);
+ }
  await current(page).getByRole('button',{name:'About',exact:true}).click();
- await current(page).getByRole('button',{name:'Status',exact:true}).click();
- const account=current(page);await expect(account.getByRole('heading',{name:'Status',exact:true})).toBeVisible();
- await expect(account).not.toContainText('On this computer');
- await expect(account).not.toContainText('Running on this phone');
- if(scenario==='recovering')await expect(account).not.toContainText('Running');
- if(scenario==='connected')await expect(account).toContainText('Eliza Cloud');
+ await expect(current(page).getByRole('button',{name:'Status',exact:true})).toHaveCount(0);
+ await current(page).getByRole('button',{name:'Agent activity',exact:true}).click();
+ const activity=current(page);
+ await expect(activity.getByRole('heading',{name:'Agent activity',exact:true})).toBeVisible();
+ await expect(activity.getByRole('button',{name:/^(Retry|Reconnect agent|Restart Alpha)$/})).toHaveCount(0);
+ if(scenario==='recovering'){
+  await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
+  await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toHaveCount(0);
+ }else{
+  await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
+  expect((await callNames(page)).includes('Agent.configureCloudProvider')).toBe(scenario==='connected');
+ }
 });
 
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
