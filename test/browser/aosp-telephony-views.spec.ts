@@ -495,6 +495,33 @@ test('a new message offers matching contacts and addresses the one tapped', asyn
   await expect(page.locator('[data-alpha-messages-picks]').getByRole('button', {name: /Carmen Ruiz/})).toHaveCount(0);
 });
 
+test('Messages adds a selected contact number and keeps its unsent draft', async ({page}) => {
+  await setupTelephony(page);
+  await open(page, 'Messages');
+  const compose = page.locator('[data-alpha-messages-new]');
+  const recipients = page.getByRole('textbox', {name: 'To', exact: true});
+  const body = page.locator('[data-alpha-messages-body]');
+  await compose.click();
+  await recipients.fill('+15550100101');
+  await body.fill('Keep this message unsent.');
+  await page.getByRole('button', {name: 'Choose contacts'}).click();
+  const picker = page.getByRole('region', {name: 'Choose a contact'});
+  await expect(picker).toBeVisible();
+  await picker.getByRole('searchbox', {name: 'Search contacts'}).fill('Bao');
+  await picker.getByRole('button', {name: 'Search', exact: true}).click();
+  await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('Bao');
+  await picker.getByRole('button', {name: 'Bao Tran, (555) 010-0112'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(recipients).toHaveValue('+15550100101, +15550100112');
+  await expect(body).toHaveValue('Keep this message unsent.');
+  await page.locator('[data-alpha-messages]').getByRole('button', {name: 'Back', exact: true}).click();
+  await compose.click();
+  await expect(recipients).toHaveValue('+15550100101, +15550100112');
+  await expect(body).toHaveValue('Keep this message unsent.');
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
+  expect(await inputs(page, 'sendComposedMms')).toEqual([]);
+});
+
 test('Contacts searches in place, edits in the app with the version it read, and deletes after confirmation', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Contacts');

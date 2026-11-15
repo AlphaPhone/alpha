@@ -33,6 +33,8 @@ final class AlphaCredentialStore {
  }
  static int slotLimit(String name){
   if("sms-send-ledger:v1:device".equals(name))return 1024*1024;
+  // Up to five individually valid pictures with base64 overhead before the owner's MMS review.
+  if(name!=null&&name.matches("sms-draft:v1:(new|thread:[1-9][0-9]{0,18})"))return 8*1024*1024;
   if("gmail-background:v1".equals(name))return 2*1024*1024;
   if("native-delete-journal:v1".equals(name)||"native-calendar-sync:v1".equals(name))return 4*1024*1024;
   if("notes-audio-deletions:v1:device".equals(name))return 1024*1024;

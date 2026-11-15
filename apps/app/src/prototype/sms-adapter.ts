@@ -1,12 +1,15 @@
 import {isIncompleteSmsRow,normalizePhoneNumber} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {createAddressBookClient,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createSmsSession,mmsProblemLabel,mmsReceiptLabel,receiptLabel} from '../runtime/image-sms';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
-import {createAospTelephony,registerTelephonyProfile,MMS_MAX_ATTACHMENTS,reviewMms,reviewSms,type AlphaTelephonyPlugin,type MmsAttachmentDraft,type MmsReview,type SmsMessage,type SmsReview,type SmsReviewProblem,type SmsSendResult} from '../runtime/aosp-telephony';
+import {createAospTelephony,registerTelephonyProfile,MMS_MAX_ATTACHMENTS,reviewMms,reviewSms,type AlphaTelephonyPlugin,type MmsAttachmentDraft,type MmsReview,type SmsMessage,type SmsReviewProblem,type SmsSendResult} from '../runtime/aosp-telephony';
+import {createNativeSmsDraftShelf,reviewedDraft,type ReviewedSms,type SmsDraft,type SmsDraftStore} from '../runtime/native-sms-drafts';
 import {watchReturnToApp} from './native-adapter';
 import {formatDateTime} from './locale-time';
 import {displayNumber,initials,numberKey,shortWhen,threadTitle} from './telephony-presenters';
+import {createSmsRecipientPicker} from './sms-recipient-picker';
 import {askedDraftPlaced,canSuggest,emptyDraft,readinessLost,reviewFinished,suggestionDismissed,suggestionReplied,suggestionRequested,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 /** The open thread's visible tail, handed to the reply suggester and to the agent's selected-thread read. */
 export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
@@ -42,7 +45,6 @@ type MessagesBridge=AlphaTelephonyPlugin&{
 };
 type ComposerPort=Pick<EventTarget,'addEventListener'|'removeEventListener'>&{postMessage(value:string):void};
 type Bag=Record<string,any>;
-type ReviewedSms=SmsReview&{subscriptionId:number};
 type OutgoingSms={id:string;threadId:string|null;review:ReviewedSms;startedAt:number;createdAt?:number;seen:Set<string>};
 const quietNotices=new Set([
  receiptLabel('submitted'),receiptLabel('sent'),receiptLabel('delivered'),receiptLabel('cancelled'),receiptLabel('denied'),receiptLabel('failed'),receiptLabel('unknown'),
@@ -57,8 +59,11 @@ const SMS_NOT_SENT=new Set(['too-long','invalid','busy','unavailable']);
 function smsProblemLabel(problem:SmsReviewProblem,mode:'direct'|'handoff',chosen:boolean,length=0){
  return {'no-recipient':'Add a number','invalid-recipient':'Invalid number','too-many-recipients':mode==='direct'?'Max 5':'Max 10','empty-body':'Enter a message.','body-too-long':`${length.toLocaleString('en-US')}/${mode==='direct'?'1,600':'5,000'}`,'invalid-body':'Unsupported characters','sim-unknown':chosen?'SIM inactive':'No SIM','sim-required':'Pick a SIM','sim-not-selectable':'Pick SIM in Messages'}[problem];
 }
-export function installSmsAdapter(Component:any,views:Bag){
+export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftStore){
  if(!aospImage)return;
+ const shelf=draftStore?createNativeSmsDraftShelf(draftStore):null;
+ let retained:Awaited<ReturnType<NonNullable<typeof shelf>['open']>>|null=null,draftLoading=false,draftTicket=0;
+ let storageNotice='';
  const native=registerPlugin<MessagesBridge>('AlphaTelephony');
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
@@ -84,10 +89,8 @@ export function installSmsAdapter(Component:any,views:Bag){
  /* Android's picture chooser covers the WebView and reports it hidden; the draft stays while it is open. */
  const sync=()=>{const next=!!owner&&owner.S().view==='messages'&&(!document.hidden||picking);if(next===active)return;active=next;lifecycle++;
   if(next)composerAbort=new AbortController();else composerAbort.abort();
-  session.setActive(next);if(!next){busy=false;suggestConfirm=false;draftRevision++;
-  // Provider rows and observation are cleared by the inactive session. Keep the
-  // owner's unfinished draft in memory across navigation/backgrounding. Preserve
-  // its operation identity so returning cannot replay an uncertain send.
+  session.setActive(next);if(!next){recipientPicker.close();busy=false;suggestConfirm=false;draftRevision++;
+  // Provider rows are visit-only. The owner's draft and its operation identity are stored separately.
   // Contact names, a suggestion in flight and an untouched automatic suggestion are for the visit only.
   suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId){body='';draft=emptyDraft();}else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;
   outgoing.clear();matchedProviderRows.clear();
@@ -140,7 +143,13 @@ export function installSmsAdapter(Component:any,views:Bag){
    },
   }),true);
  }
- const ready=()=>inFront()&&!busy&&session.state.status?.permissions.sms==='granted';
+ const editable=()=>!busy&&!draftLoading;
+ const recipientPicker=createSmsRecipientPicker(
+  createAddressBookClient(registerPlugin<AddressBookNativePlugin>('AlphaContacts')),
+  ()=>inFront()&&editable()&&!owner?.props?.assistantSurface&&composing&&draftThread===null&&!session.state.thread,
+  paint,
+ );
+ const ready=()=>inFront()&&editable()&&session.state.status?.permissions.sms==='granted';
  const normalizeRecipients=(addresses:readonly string[])=>{
   const normalized=addresses.map(normalizePhoneNumber);
   return normalized.every((number):number is string=>number!==null)?[...new Set(normalized)]:[];
@@ -153,22 +162,76 @@ export function installSmsAdapter(Component:any,views:Bag){
   const addresses=normalizeRecipients(selected.addresses);
   return sameRecipients(inputRecipients(),addresses)?addresses:[];
  };
+ function snapshotDraft():SmsDraft|null{
+  const operation=operationId&&smsReview?{kind:'sms' as const,id:operationId,recipients:smsReview.recipients,subscriptionId:smsReview.subscriptionId}
+   :mmsOperationId&&mmsReview?{kind:'mms' as const,id:mmsOperationId,recipients:mmsReview.recipients,subscriptionId:mmsReview.subscriptionId}:null;
+  const ownedBody=draft.draft==='agent'&&!operation?'':body;
+  if(!ownedBody&&!attachments.length&&!operation&&(draftThread!==null||!recipients||sent||mmsSent))return null;
+  return {recipients,body:ownedBody,origin:draft.draft==='asked'?'asked':'owner',sim,pictures:[...attachments],operation};
+ }
+ async function persistDraft(){
+  if(!shelf)return;
+  if(owner?.props?.assistantSurface)throw Error('Message drafts are available in Messages.');
+  const opened=retained;
+  if(!opened)throw Error('Couldn’t open the saved message draft. Reopen the composer to retry.');
+  await opened.save(snapshotDraft());
+ }
+ function retainDraft(){
+  if(!shelf)return;
+  const ticket=draftTicket;
+  void persistDraft().then(()=>{
+   if(ticket===draftTicket&&storageNotice){storageNotice='';paint();}
+  },()=>{
+   if(ticket===draftTicket){storageNotice='Message draft couldn’t be saved.';paint();}
+  });
+ }
+ function loadDraft(thread:string|null,addresses:readonly string[]=[]){
+  if(!shelf||owner?.props?.assistantSurface)return;
+  retained=null;storageNotice='';draftLoading=true;
+  const ticket=++draftTicket;
+  void shelf.open(thread).then(opened=>{
+   if(ticket!==draftTicket)return;
+   retained=opened;
+   const saved=opened.draft;
+   if(!saved){if(thread===null&&recipients)retainDraft();return;}
+   const actual=normalizeRecipients(saved.recipients.split(',').map(value=>value.trim()).filter(Boolean));
+   if(thread!==null&&!sameRecipients(actual,addresses))return;
+   if(saved.operation&&!sameRecipients(actual,saved.operation.recipients))throw Error('Saved Messages operation recipients changed');
+   recipients=saved.recipients;body=saved.body;sim=saved.sim;attachments=saved.pictures;
+   pictureSeq=Math.max(0,...attachments.map(picture=>Number(picture.name.split('.')[0].slice(8))));
+   draft=saved.origin==='asked'?askedDraftPlaced(emptyDraft(),body,true):typed(emptyDraft(),body);
+   const reviewed=reviewedDraft(saved);
+   if(reviewed?.kind==='sms'){operationId=reviewed.id;smsReview=reviewed.review;}
+   if(reviewed?.kind==='mms'){mmsOperationId=reviewed.id;mmsReview=reviewed.review;}
+   draftRevision++;
+  }).catch(()=>{
+   if(ticket===draftTicket){retained=null;storageNotice='Saved message draft couldn’t be opened.';}
+  }).finally(()=>{
+   if(ticket!==draftTicket)return;
+   draftLoading=false;changed();void reconcile();void reconcileMms();
+  });
+ }
  const clearDraft=()=>{
+  recipientPicker.close();
   suggesting?.abort();suggesting=null;draft=emptyDraft();body='';draftRevision++;
   operationId='';smsReview=null;resetMms(true);notice='';receipt=null;sent=null;mmsSent=null;
  };
  const chooseThread=(id:string,addresses:readonly string[])=>{
-  if(busy||!inFront())return;
+  if(!editable()||!inFront())return;
+  recipientPicker.close();
   const normalized=normalizeRecipients(addresses);
-  if(!normalized.length||!sameRecipients(normalizeRecipients(inputRecipients()),normalized)||(draftThread&&draftThread!==id))clearDraft();
-  selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;suggestConfirm=false;session.openThread(id);
+  const switching=(shelf?draftThread!==id:!!draftThread&&draftThread!==id)||!sameRecipients(normalizeRecipients(inputRecipients()),normalized);
+  if(switching||!normalized.length)clearDraft();
+  selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;suggestConfirm=false;
+  if(normalized.length&&(switching||!retained))loadDraft(id,normalized);
+  session.openThread(id);
  };
  let noticeRequested=false,noticeOpening=false,noticeSignal=0;
  const canOpenNotice=(shell:any)=>{
   const state=shell.S();
   return owner===shell&&!shell.props?.assistantSurface&&!document.hidden&&state.screen==='home'
    &&!state.typing&&!state.recording&&!state.draft&&(!state.voice||state.voice==='off')
-   &&!busy&&!picking&&!suggestConfirm&&!body&&!attachments.length&&!operationId&&!mmsOperationId
+   &&editable()&&!picking&&!recipientPicker.snapshot()&&!suggestConfirm&&!body&&!attachments.length&&!operationId&&!mmsOperationId
    &&!(draftThread===null&&recipients&&!sent&&!mmsSent);
  };
  async function drainSmsNotice(){
@@ -187,7 +250,8 @@ export function installSmsAdapter(Component:any,views:Bag){
    const {threadId,token}=await native.smsNoticePending();
    if(typeof token!=='string'||!/^\d+$/.test(token)||typeof threadId!=='string'||!/^thread:[1-9]\d{0,18}$/.test(threadId)||!canContinue())return;
    const acknowledge=()=>{
-    if(current()&&canOpenNotice(shell)&&inFront()&&session.state.thread===threadId)
+    // The old draft only gates navigation. The opened thread can now load a draft of its own.
+    if(current()&&!shell.props?.assistantSurface&&shell.S().screen==='home'&&inFront()&&openRow()?.id===threadId)
      void native.acknowledgeSmsNotice({token}).catch(()=>{});
    };
    if(inFront()&&selected===threadId){void session.refresh();acknowledge();return;}
@@ -220,9 +284,13 @@ export function installSmsAdapter(Component:any,views:Bag){
  const wakeSmsNotice=()=>{noticeSignal++;noticeRequested=true;void drainSmsNotice();};
  const closeThread=()=>{if(!busy){selectedThread=null;suggestConfirm=false;session.openThread(null);}};
  const compose=(prefill?:string)=>{
-  if(busy)return;
-  if(draftThread!==null||(prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
+  if(!editable())return;
+  recipientPicker.close();
+  const switching=draftThread!==null;
+  if(switching||(!shelf&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
+  if(shelf&&prefill&&!recipients)recipients=prefill;
   draftThread=null;composing=true;selectedThread=null;suggestConfirm=false;
+  if(switching||!retained)loadDraft(null);
   if(session.state.thread)session.openThread(null);else changed();
  };
  const threadRows=()=>session.state.thread?session.state.rows.filter((row):row is SmsMessage=>!isIncompleteSmsRow(row)&&row.threadId===session.state.thread).sort((a,b)=>a.date-b.date):[];
@@ -244,7 +312,7 @@ export function installSmsAdapter(Component:any,views:Bag){
    const target=targets.length===1?targets[0]:null;
    if(entry&&target&&!isIncompleteSmsRow(target)){
     entry.threadId=target.id;selectedThread={id:target.id,addresses:[...target.addresses]};
-    draftThread=target.id;recipients=entry.review.recipients.join(', ');composing=false;session.openThread(target.id);
+    draftThread=target.id;recipients=entry.review.recipients.join(', ');composing=false;loadDraft(target.id,entry.review.recipients);session.openThread(target.id);
    }
   }
   for(const entry of outgoing.values()){
@@ -282,7 +350,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   if(!ready())return 'unavailable';
   if(draft.draft==='owner'||(body&&!drafted())||attachments.length||operationId||mmsOperationId)return 'occupied';
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
-  suggesting?.abort();suggesting=null;draft=next;body=next.text;draftRevision++;operationId='';resetMms(false);notice='';receipt=null;paint();return 'drafted';
+  suggesting?.abort();suggesting=null;draft=next;body=next.text;draftRevision++;operationId='';resetMms(false);notice='';receipt=null;retainDraft();paint();return 'drafted';
  };
  function loadNames(){if(namesLoaded||!active||session.state.status?.permissions.contacts!=='granted')return;namesLoaded=true;const token=lifecycle;
   void client.searchContacts('',100).then(cards=>{if(token!==lifecycle)return;for(const card of cards)for(const number of card.phoneNumbers){const key=numberKey(number);if(!key||!card.displayName)continue;if(!names.has(key))names.set(key,card.displayName);people.push({name:card.displayName,number});}paint();}).catch(()=>{namesLoaded=false;});}
@@ -307,11 +375,11 @@ export function installSmsAdapter(Component:any,views:Bag){
  const finished=(status:string)=>{const result=status==='cancelled'||status==='denied'?null:status==='failed'?'failed' as const:status==='unknown'?'unknown' as const:'sent' as const;if(!result)return;draft=reviewFinished(draft,result);if(result==='sent'){body='';attachments=[];pictureSeq=0;composing=false;}};
  const accepted=(status:string)=>status==='submitted'||status==='sent'||status==='delivered';
  const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
- const dismissSuggestion=()=>{if(busy||!drafted())return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;changed();};
+ const dismissSuggestion=()=>{if(!editable()||!drafted()||operationId||mmsOperationId)return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;retainDraft();changed();};
  function confirmSms(review:ReviewedSms,result:SmsSendResult,roleHeld:boolean){
   finished(result.status);
   sent={id:result.operationId,review};
-  operationId='';smsReview=null;draftRevision++;
+  operationId='';smsReview=null;draftRevision++;retainDraft();
   if(outgoing.get(result.operationId)?.createdAt!==undefined&&session.state.thread===null&&roleHeld)composing=true;
  }
  async function reconcile(id=operationId||sent?.id){
@@ -326,13 +394,15 @@ export function installSmsAdapter(Component:any,views:Bag){
    if(draft===draftRevision&&(id===operationId||id===sent?.id)){
     receipt=value;notice=receiptLabel(value.status);
     // A late journal receipt can settle the original draft after the composer times out.
-    if(!busy&&id===operationId&&accepted(value.status))
-     confirmSms(review,value,session.state.status?.roles?.sms?.held===true);
+    if(!busy&&id===operationId){
+     if(accepted(value.status))confirmSms(review,value,session.state.status?.roles?.sms?.held===true);
+     else if(value.status==='cancelled'||value.status==='denied'){operationId='';smsReview=null;draftRevision++;retainDraft();}
+    }
    }
    changed();
   }catch{/* No record or unavailable is never evidence of not sent. */}
  }
- async function send(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
+ async function send(sender=client){if(!inFront()||!editable())return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
   const status=session.state.status;if(!status){notice='Refresh Messages, then review the text again.';return;}
   /* The shared review normalizes and dedupes numbers and takes the only active SIM; a SIM that is no longer active is refused. */
   const checked=reviewSms({recipients:draftRecipients(),body,subscriptionId:sim?Number(sim):undefined},status,'direct');
@@ -340,6 +410,11 @@ export function installSmsAdapter(Component:any,views:Bag){
   const firstAttempt=!operationId||!smsReview;
   if(firstAttempt){operationId=crypto.randomUUID();smsReview={...checked.review,subscriptionId:checked.review.subscriptionId as number};}
   const id=operationId,review=smsReview!;
+  if(shelf){
+   try{await persistDraft();storageNotice='';}
+   catch{if(firstAttempt&&id===operationId){operationId='';smsReview=null;retainDraft();}if(token===lifecycle)storageNotice='Save the message draft before sending. Try again.';return;}
+   if(!inFront()||token!==lifecycle||draft!==draftRevision)return;
+  }
   if(firstAttempt&&review.recipients.length===1){
    outgoing.set(id,{id,threadId:session.state.thread,review,startedAt:Date.now(),seen:new Set(threadRows().map(row=>row.id))});
    paint();showLatest();
@@ -347,18 +422,18 @@ export function installSmsAdapter(Component:any,views:Bag){
   const result=await sender.sendSms(review,id);if(!active||token!==lifecycle||draft!==draftRevision)return;receipt=result;notice=receiptLabel(result.status);
   outgoingResult(result,id);
   /* Cancelled and denied prove nothing was sent: the next Send opens a new review. */
-  if(result.status==='cancelled'||result.status==='denied'){operationId='';draftRevision++;}
+  if(result.status==='cancelled'||result.status==='denied'){operationId='';smsReview=null;draftRevision++;retainDraft();}
   else if(accepted(result.status))confirmSms(review,result,status.roles?.sms?.held===true);
   else finished(result.status);
   changed();await session.refresh();
   if(status.roles?.sms?.held===false)outgoing.delete(id);
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision){const code=(error as {code?:string})?.code,message=error instanceof Error?error.message:'';
   if(operationId)outgoing.delete(operationId);
-  if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';notice=message;}else if(operationId&&code==='expired'&&message)notice=message;
+  if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';smsReview=null;notice=message;retainDraft();}else if(operationId&&code==='expired'&&message)notice=message;
   else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;changed();if(operationId)void reconcile(operationId);}}}
  function confirmMms(id:string,review:MmsReview,status:'submitted'|'sent'){
   finished(status);
-  mmsSent={id,review};resetMms(true);draftRevision++;
+  mmsSent={id,review};resetMms(true);draftRevision++;retainDraft();
  }
  async function reconcileMms(id=mmsOperationId||mmsSent?.id){
   if(!inFront()||!id)return;
@@ -369,45 +444,55 @@ export function installSmsAdapter(Component:any,views:Bag){
    const value=await client.mmsSendResult(review,id);
    if(!active||token!==lifecycle||draft!==draftRevision||(id!==mmsOperationId&&id!==mmsSent?.id))return;
    notice=mmsReceiptLabel(value.status);
-   if(!busy&&id===mmsOperationId&&(value.status==='submitted'||value.status==='sent')){
-    confirmMms(id,review,value.status);
-    void session.refresh();
+   if(!busy&&id===mmsOperationId){
+    if(value.status==='submitted'||value.status==='sent'){confirmMms(id,review,value.status);void session.refresh();}
+    else if(value.status==='cancelled'||value.status==='denied'){resetMms(false);draftRevision++;retainDraft();}
    }
    changed();
   }catch{/* No record or unavailable is never evidence of not sent. */}
  }
  /** One MMS to every recipient, with the text and the picked pictures. A repeated operation ID never sends twice. */
- async function sendMms(sender=client){if(!inFront()||busy)return;const token=lifecycle,draft=draftRevision;let dispatched=false;busy=true;changed();try{
+ async function sendMms(sender=client){if(!inFront()||!editable())return;const token=lifecycle,draft=draftRevision;let dispatched=false;busy=true;changed();try{
   const status=session.state.status;if(!status)throw Error('Refresh Messages, then review the MMS again.');
   const checked=reviewMms({recipients:draftRecipients(),body,attachments,subscriptionId:sim?Number(sim):undefined},status);
   if('problem' in checked)throw Error(mmsProblemLabel(checked.problem));
-  if(!mmsOperationId){mmsOperationId=crypto.randomUUID();mmsReview=checked.review;}
+  const firstAttempt=!mmsOperationId;
+  if(firstAttempt){mmsOperationId=crypto.randomUUID();mmsReview=checked.review;}
   const id=mmsOperationId,review=mmsReview??checked.review;
+  if(shelf){
+   try{await persistDraft();storageNotice='';}
+   catch{if(firstAttempt&&id===mmsOperationId){resetMms(false);retainDraft();}if(token===lifecycle)storageNotice='Save the message draft before sending. Try again.';return;}
+   if(!inFront()||token!==lifecycle||draft!==draftRevision)return;
+  }
   dispatched=true;
   const result=await sender.sendMms(review,id);
   if(!active||token!==lifecycle||draft!==draftRevision)return;
   receipt=null;notice=mmsReceiptLabel(result.status);
-  if(result.status==='cancelled'||result.status==='denied'){resetMms(false);draftRevision++;}
+  if(result.status==='cancelled'||result.status==='denied'){resetMms(false);draftRevision++;retainDraft();}
   else if(result.status==='submitted'||result.status==='sent')confirmMms(id,review,result.status);
   else finished(result.status);
   await session.refresh();
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':error instanceof Error?error.message:'Couldn’t open';}
  finally{if(token===lifecycle){busy=false;changed();if(mmsOperationId&&dispatched)void reconcileMms(mmsOperationId);}}}
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
- function attach(){if(!active||busy)return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
+ function attach(){if(!active||!editable())return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
   /* A result that arrives while the page is still hidden waits for it to show again; pagehide always ends the pick. */
   const done=(event?:Event)=>{if(document.hidden&&event?.type!=='pagehide')return;window.removeEventListener('pagehide',done);if(!picking)return;picking=false;sync();};input.oncancel=()=>done();window.addEventListener('pagehide',done);
   input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files){if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');if(!file.size||file.size>1024*1024)throw Error('Each picture must be smaller than 1 MB.');picked.push({contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())});}
    if(!active||token!==lifecycle||draft!==draftRevision||busy)return;if(attachments.length+picked.length>MMS_MAX_ATTACHMENTS)throw Error('Max 5 pictures');
-   for(const item of picked)attachments.push({...item,name:`picture-${++pictureSeq}.${MMS_PICTURES[item.contentType]}`});draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();
+   for(const item of picked)attachments.push({...item,name:`picture-${++pictureSeq}.${MMS_PICTURES[item.contentType]}`});draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();
   }catch(error){if(active&&token===lifecycle){notice=error instanceof Error?error.message:'Unreadable pictures';changed();}}};
   picking=true;input.click();}
- async function handoff(){if(!inFront()||busy||operationId||mmsOperationId||attachments.length)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
+ async function handoff(){if(!inFront()||!editable()||operationId||mmsOperationId||attachments.length)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
   /* The messaging app chooses the SIM, so a handoff never carries one. */
   const status=session.state.status;if(!status){notice='Refresh needed';return;}
   const checked=reviewSms({recipients:draftRecipients(),body},status,'handoff');if('problem' in checked){notice=smsProblemLabel(checked.problem,'handoff',false,body.length);return;}
   const result=await client.composeSms(checked.review);if(active&&token===lifecycle&&draft===draftRevision)notice=result.message;}catch{if(active&&token===lifecycle)notice='Couldn’t open';}finally{if(token===lifecycle){busy=false;changed();}}}
- const edit=(setter:(value:string)=>void)=>(event:Event)=>{if(busy)return;setter((event.target as HTMLInputElement).value);draftRevision++;operationId='';resetMms(false);notice='';receipt=null;changed();};
+ const changeDraft=(mutate:()=>void)=>{
+  if(!editable())return;
+  mutate();draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;retainDraft();changed();
+ };
+ const edit=(setter:(value:string)=>void)=>(event:Event)=>changeDraft(()=>setter((event.target as HTMLInputElement).value));
  async function permission(access:'sms'|'sendSms'|'phoneState'){
   if(!inFront()||busy)return;const token=lifecycle;busy=true;changed();
   try{await session.request(access);}
@@ -415,18 +500,23 @@ export function installSmsAdapter(Component:any,views:Bag){
   finally{if(token===lifecycle){busy=false;changed();}}
  }
  /* Back returns to the list and keeps the draft bound to its recipients. */
- const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){if(suggestConfirm){suggestConfirm=false;paint();}else closeThread();return true;}if(composing){if(!busy){composing=false;changed();}return true;}return back?back(st,api):false;};
+ const closeNew=()=>{
+  if(busy)return;
+  if(!recipientPicker.close())composing=false;
+  changed();
+ };
+ const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){if(suggestConfirm){suggestConfirm=false;paint();}else closeThread();return true;}if(composing){closeNew();return true;}return back?back(st,api):false;};
  views.messages.reply=()=>null;views.messages.suggestions=()=>[];
  /* The orb in the conversation bar is Alpha. Text the owner typed there goes with it as the request,
   * so "tell her I'm running late" can be typed in place and is sent to Alpha by the same tap; a draft Alpha wrote stays where it is. */
- const askAlpha=()=>{if(busy)return;const request=draft.draft==='owner'?body.trim():'';if(request){draft=typed(draft,'');body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;paint();api?.send?.(request);}else api?.chat?.();};
+ const askAlpha=()=>{if(!editable())return;const request=draft.draft==='owner'?body.trim():'';if(request){draft=typed(draft,'');body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;retainDraft();paint();api?.send?.(request);}else api?.chat?.();};
  /* People to address a new message to: contacts matching what is typed in To, by name or number. */
  const picks=()=>{const typedTo=inputRecipients(),last=recipients.trim().endsWith(',')?'':(typedTo[typedTo.length-1]||''),query=last.toLowerCase(),digits=last.replace(/\D/g,''),chosen=new Set(typedTo.map(numberKey));
   return people.filter(person=>!chosen.has(numberKey(person.number))&&(!query||person.name.toLowerCase().includes(query)||(digits.length>=3&&person.number.replace(/\D/g,'').includes(digits)))).slice(0,30)
-   .map(person=>({name:person.name,number:displayNumber(person.number),ini:initials(person.name),label:`${person.name}, ${displayNumber(person.number)}`,pick:()=>{if(busy)return;const kept=recipients.trim().endsWith(',')?typedTo:typedTo.slice(0,-1);recipients=[...kept,person.number].join(', ');draftRevision++;operationId='';resetMms(false);notice='';paint();}}));};
+   .map(person=>({name:person.name,number:displayNumber(person.number),ini:initials(person.name),label:`${person.name}, ${displayNumber(person.number)}`,pick:()=>{if(!inFront()||!composing||session.state.thread)return;const kept=recipients.trim().endsWith(',')?typedTo:typedTo.slice(0,-1);changeDraft(()=>{recipients=[...kept,person.number].join(', ');});}}));};
  /* One trusted Send tap approves the current visible draft, including its recipient set and SIM. */
  const submit=(event:MouseEvent&{nativeEvent?:MouseEvent})=>{
-  if(!inFront()||busy||owner?.props?.assistantSurface||!(event.nativeEvent??event).isTrusted
+  if(!inFront()||!editable()||recipientPicker.snapshot()||owner?.props?.assistantSurface||!(event.nativeEvent??event).isTrusted
    ||!(event.currentTarget instanceof HTMLButtonElement)||!event.currentTarget.hasAttribute('data-alpha-messages-send'))return;
   const sender=composerClient(lifecycle);
   if(attachments.length||draftRecipients().length>1)void sendMms(sender);else void send(sender);
@@ -436,6 +526,15 @@ export function installSmsAdapter(Component:any,views:Bag){
   const state=session.state,now=Date.now(),status=state.status,access=!!status&&status.permissions.sms!=='granted',thread=openRow();
   const sims=status?.subscriptions||[],sole=thread?.addresses.length===1?normalizePhoneNumber(thread.addresses[0]):null,title=thread?threadTitle(thread.addresses,names):'';
   const sendingTo=draftRecipients(),showThread=!access&&!!state.thread,showNew=!state.thread&&composing,showComposer=showThread||showNew;
+  const picker=showNew?recipientPicker.snapshot():null;
+  const addRecipient=(number:string)=>{
+   const existing=inputRecipients();
+   if(existing.some(value=>numberKey(value)===numberKey(number)))return;
+   const next=[...existing,number].join(', ');
+   if(next.length>230)return;
+   recipientPicker.close();
+   changeDraft(()=>{recipients=next;});
+  };
   const direct=!!status&&status.sendMode==='direct'&&sims.length>0&&(sendingTo.length<=1||status.mmsSend);
   const hasBody=!!body.trim(),hasDraft=hasBody||attachments.length>0;
   const claimed=new Set(matchedProviderRows);
@@ -449,9 +548,22 @@ export function installSmsAdapter(Component:any,views:Bag){
   }).map(entry=>({id:entry.id,text:entry.review.body,hasText:true,side:'flex-end',bg:'var(--fg)',fg:'var(--bg)',
    failed:false,picture:false,opacity:entry.createdAt===undefined?0.68:1,date:entry.createdAt??entry.startedAt}));
   return {
-   needsAccess:access&&!showNew,showList:!access&&!state.thread&&!composing,showThread,showNew,showComposer,
+   needsAccess:access&&!showNew,showList:!access&&!state.thread&&!composing,showThread,showNew,showComposer:showComposer&&!picker,
    showNewButton:!state.thread&&!composing,readFailed:!status&&!state.busy,showEmpty:!!status&&!state.busy&&state.threads.length===0,
-   compose:()=>compose(),closeNew:()=>{if(!busy){composing=false;changed();}},
+   compose:()=>compose(),closeNew,
+   contactsOpen:!!picker,
+   contactsLabel:picker?'Close contact picker':'Choose contacts',
+   toggleContacts:()=>{if(recipientPicker.close())paint();else recipientPicker.open();},
+   contacts:picker&&{
+    ...picker,onQuery:(event:Event)=>recipientPicker.setQuery((event.target as HTMLInputElement).value),
+    onKey:(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();void recipientPicker.search();}},
+    search:()=>void recipientPicker.search(),allow:()=>void recipientPicker.allow(),loadMore:()=>void recipientPicker.more(),
+    choices:picker.rows.filter(row=>!sendingTo.some(value=>numberKey(value)===numberKey(row.number))).map(row=>({
+     key:row.key,name:row.name,number:displayNumber(row.number),ini:initials(row.name),
+     label:`${row.name}, ${displayNumber(row.number)}`,
+     pick:()=>{const number=recipientPicker.selected(row);if(number)addRecipient(number);},
+    })),
+   },
    needsSendAccess:!!status&&status.permissions.sendSms!=='granted',needsSimAccess:!!status&&status.permissions.phoneState!=='granted',
    canHandoff:!!status&&!direct&&!attachments.length&&!operationId&&!mmsOperationId&&hasBody&&sendingTo.length>0,
    threads:state.threads.map((row,index)=>{const incomplete=isIncompleteSmsRow(row),full=row as any,name=incomplete?'Conversation content unavailable':threadTitle(full.addresses,names),unread=!incomplete&&full.unread===true,when=shortWhen(row.date,now);
@@ -462,7 +574,7 @@ export function installSmsAdapter(Component:any,views:Bag){
     const mine=row.direction!=='incoming';return {id:row.id,text:String(row.body||''),hasText:!!row.body,side:mine?'flex-end':'flex-start',bg:mine?'var(--fg)':'var(--s2)',fg:mine?'var(--bg)':'var(--fg)',
     failed:mine&&row.status==='failed',picture:row.attachments>0,pictureLabel:row.attachments>1?`${row.attachments} pictures`:'Picture',opacity:1,date:row.date};}),
     ...(showThread?local:[])].sort((a,b)=>a.date-b.date),
-   suggested:drafted(),dismissSuggestion,ownsDock:showComposer,askAlpha,picks:composing&&!state.thread&&!local.length?picks():[],
+   suggested:drafted(),dismissSuggestion,ownsDock:showComposer,askAlpha,picks:composing&&!picker&&!state.thread&&!local.length?picks():[],
    canSuggest:!!suggester,suggesting:suggestOn(),suggestLabel:suggestOn()?'Suggested replies on':'Suggested replies off',suggestBg:suggestOn()?'var(--s2)':'transparent',suggestFill:suggestOn()?'var(--acct)':'var(--mut)',
    suggestConfirm,enableSuggest:()=>{if(!suggestConfirm||!inFront()||!openRow())return;suggestConfirm=false;setSuggest(true);changed();},
    cancelSuggest:()=>{suggestConfirm=false;paint();},
@@ -473,11 +585,11 @@ export function installSmsAdapter(Component:any,views:Bag){
     if(draft.draft==='agent'&&!operationId&&!mmsOperationId)dismissSuggestion();
     changed();
    },
-   cannotSend:busy||!direct||!hasDraft||!sendingTo.length,submit,
+   cannotSend:!editable()||!direct||!hasDraft||!sendingTo.length,submit,
    pickSim:sims.length>1,sims:sims.map(row=>{const on=String(row.id)===sim;return {label:row.displayName||`SIM ${row.slot+1}`,on,bg:on?'var(--fg)':'var(--s2)',fg:on?'var(--bg)':'var(--fg)',
-    pick:()=>{if(busy)return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);changed();}};}),
-   pictures:attachments.map((item,index)=>({label:item.name,remove:()=>{if(busy)return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();}})),hasPictures:attachments.length>0,
-   nativeNotice:quietNotices.has(notice)?'':notice,hasNotice:!!notice&&!quietNotices.has(notice),sendFailed:failureNotices.has(notice)};
+    pick:()=>{if(!editable())return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);retainDraft();changed();}};}),
+   pictures:attachments.map((item,index)=>({label:item.name,remove:()=>{if(!editable())return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();}})),hasPictures:attachments.length>0,
+   nativeNotice:storageNotice||(quietNotices.has(notice)?'':notice),hasNotice:!!storageNotice||!!notice&&!quietNotices.has(notice),sendFailed:failureNotices.has(notice)};
  }
  const simLabel=(id:number)=>{const row=session.state.status?.subscriptions?.find(value=>value.id===id);return row?`SIM ${row.slot+1}`:'SIM';};
  views.messages.render=(st:Bag,viewApi:Bag)=>{api=viewApi;
@@ -497,8 +609,14 @@ export function installSmsAdapter(Component:any,views:Bag){
  const nativeThreads=session.state.threads.map(row=>isIncompleteSmsRow(row)
   ? {id:row.id,label:'Conversation content unavailable',snippet:'Use the system messaging app to view this conversation.',open:()=>{notice='Content unavailable. Use the system messaging app to view this conversation.';changed();}}
   : {...row,label:row.addresses.join(', ')||'Conversation',open:()=>chooseThread(row.id,row.addresses)});
- return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeReceipts:session.state.receipts.map(row=>({id:row.operationId,label:`${formatDateTime(new Date(row.createdAt))} · Subscription ${row.subscriptionId} · ${receiptLabel(row.status)}`})),nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:busy||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:()=>{if(busy)return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);changed();}})),nativeSim:sim?`Selected subscription ${sim}`:session.state.status?.permissions.phoneState!=='granted'?'Grant SIM access to select a SIM.':session.state.status?.subscriptions?.length===0?'No active SIM is available.':'Select a SIM below',nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:edit(value=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);}),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttach:()=>attach(),nativeMmsAvailable:!!session.state.status?.mmsSend,nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:()=>{if(busy)return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();}})),nativeHandoff:()=>void handoff(),nativeClear:()=>{if(busy)return;clearDraft();if(draftThread===null)recipients='';changed();},
+ return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeReceipts:session.state.receipts.map(row=>({id:row.operationId,label:`${formatDateTime(new Date(row.createdAt))} · Subscription ${row.subscriptionId} · ${receiptLabel(row.status)}`})),nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:!editable()||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:()=>{if(!editable())return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);retainDraft();changed();}})),nativeSim:sim?`Selected subscription ${sim}`:session.state.status?.permissions.phoneState!=='granted'?'Grant SIM access to select a SIM.':session.state.status?.subscriptions?.length===0?'No active SIM is available.':'Select a SIM below',nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:edit(value=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);}),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttach:()=>attach(),nativeMmsAvailable:!!session.state.status?.mmsSend,nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:()=>{if(!editable())return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();}})),nativeHandoff:()=>void handoff(),nativeClear:()=>{if(!editable())return;clearDraft();if(draftThread===null)recipients='';retainDraft();changed();},
   ...designed(nativeThreads)};};
+ if(shelf)p.flushMessagesForAppUpdate=async function(current:()=>boolean){
+  if(owner!==this||!current()||busy||picking||draftLoading)throw Error('Finish the current Messages activity before updating');
+  const revision=draftRevision;
+  await shelf.flush();
+  if(owner!==this||!current()||busy||picking||draftLoading||revision!==draftRevision)throw Error('Messages draft changed');
+ };
  p.componentDidMount=function(){
   mount?.call(this);owner=this;lifecycle++;
   this.smsSelection=()=>{
@@ -520,7 +638,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   this.smsSelection=undefined;this.smsReturn?.();
   document.removeEventListener('visibilitychange',this.smsHide);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
-  if(owner===this){owner=null;active=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);clearDraft();recipients='';draftThread=null;composing=false;suggestConfirm=false;api=null;names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
+  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;composing=false;suggestConfirm=false;api=null;names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
   unmount?.call(this);
  };
 }

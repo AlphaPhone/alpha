@@ -27,6 +27,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.telephonyInputs = [];
     const messageListeners = new Map<string, {eventName: string; callback: (data: unknown) => void}>();
     const sendResults = new Map<string, unknown>();
+    const smsDrafts = new Map<string, string>();
     let listenerSequence = 0;
     w.smsProviderChanged = () => {
       for (const listener of messageListeners.values()) {
@@ -106,7 +107,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
       return {mimeType: 'audio/wav', sampleRateHz: 16000, durationSeconds: seconds, data: btoa(binary)};
     };
     const names = ['AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
-    const methods = ['addListener', 'removeListener', 'surfaceInfo', 'readPending', 'readPendingResult', 'readDelegationCallback', 'readSecret', 'secureRead', 'secureWrite', 'secureRemove', 'get', 'save', 'remove', 'status', 'getStatus', 'getState', 'state', 'permissionState', 'permissions', 'list', 'listCalendars', 'listEvents', 'listReminders', 'listBookmarks', 'getBookmarks', 'bookmarks', 'settings', 'getSettings', 'buildInfo', 'platformCapabilities', 'capabilities', 'query', 'read', 'readJournal', 'getPending', 'readSelection', 'requestPermissions', 'create', 'edit',
+    const methods = ['addListener', 'removeListener', 'surfaceInfo', 'readPending', 'readPendingResult', 'readDelegationCallback', 'readSecret', 'secureRead', 'secureWrite', 'secureRemove', 'secureCompareExchange', 'get', 'save', 'remove', 'status', 'getStatus', 'getState', 'state', 'permissionState', 'permissions', 'list', 'listCalendars', 'listEvents', 'listReminders', 'listBookmarks', 'getBookmarks', 'bookmarks', 'settings', 'getSettings', 'buildInfo', 'platformCapabilities', 'capabilities', 'query', 'read', 'readJournal', 'getPending', 'readSelection', 'requestPermissions', 'create', 'edit',
       'imageCapability', 'requestAccess', 'requestRole', 'searchContacts', 'listRecentCalls', 'dial', 'placeCall', 'composeSms', 'listThreads', 'listMessages', 'observeMessages', 'markThreadRead', 'sendSms', 'cancelSmsReview', 'smsSendHistory', 'smsSendResult',
       'smsNoticePending', 'acknowledgeSmsNotice', 'mmsSendResult',
       'voicemailStatus', 'listVoicemail', 'fetchVoicemailAudio', 'voicemailAudio', 'voicemailPcm', 'markVoicemailHeard', 'deleteVoicemail', 'observeVoicemail', 'callState', 'answerCall', 'endCall', 'setCallAudio', 'observeCalls', 'sendCallTone', 'setGoogleAgentAccess', 'phoneInfo', 'openSettings'];
@@ -192,10 +193,19 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
         w.telephonyInputs.push([`contacts.${method}`, input]);
         if (method === 'requestPermissions') w.access.contacts = true;
         if (['status', 'requestPermissions'].includes(method)) return {available: true, readable: w.access.contacts, writable: w.access.contacts};
-        if (method === 'list') { const query = String(input?.query || '').toLowerCase(); return {contacts: people.filter(p => !query || p.name.toLowerCase().includes(query)).map(p => ({id: p.id, lookup: `lookup-${p.id}`, revision: '1', name: p.name, phones: p.phones, emails: p.emails})), more: false}; }
+        if (method === 'list') { const query = String(input?.query || '').toLowerCase(); return {contacts: people.filter(p => !query || p.name.toLowerCase().includes(query)).map(p => ({id: p.id, lookup: `lookup-${p.id}`, revision: '1', name: p.name, starred: false, phones: p.phones, emails: p.emails})), more: false}; }
         if (method === 'get') { const p = people.find(row => row.id === input.id); if (!p) throw Error('missing'); return {id: p.id, lookup: `lookup-${p.id}`, displayName: p.name, starred: false, phoneNumbers: p.phones.map(number => ({number, type: 'mobile'})), emailAddresses: p.emails.map(address => ({address, type: 'home'})), version: version(p.id)}; }
         if (method === 'save') { if (w.contactAnswers?.save) return w.contactAnswers.save(input); return {status: 'saved', id: input.id || '99', version: 'b'.repeat(64)}; }
         if (method === 'remove') return {status: 'deleted'};
+      }
+      if (plugin === 'AlphaConnection' && /^sms-draft:v1:(new|thread:[1-9]\d{0,18})$/.test(input?.slot)) {
+        if (method === 'secureRead') return {value: smsDrafts.get(input.slot) ?? null};
+        if (method === 'secureCompareExchange') {
+          if ((smsDrafts.get(input.slot) ?? null) !== input.expectedValue) return {status: 'conflict'};
+          if (input.value === null) smsDrafts.delete(input.slot);
+          else smsDrafts.set(input.slot, input.value);
+          return {status: 'saved'};
+        }
       }
       if (method === 'openSettings') { w.telephonyInputs.push(['openSettings', input]); return {opened: input.page}; }
       if (method === 'surfaceInfo') return {topInset: 0, bottomInset: 0}; if (method === 'buildInfo') return {launcher: false};

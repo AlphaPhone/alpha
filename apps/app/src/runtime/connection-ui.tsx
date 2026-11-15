@@ -69,7 +69,7 @@ import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSig
 import { DevelopmentCloudAgentProtocol, type CloudPhoneTarget } from './development-cloud-agents';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
-import { phoneContextMessage, selectDeviceCapabilities } from './phone-context';
+import { phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
 import {calendarSource,calendarTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import { CloudSignInPanel, SIGN_IN_SENDING } from './cloud-sign-in-ui';
 import { useCloudSignInNetwork } from './cloud-sign-in-network';
@@ -3478,7 +3478,9 @@ export const connectionController = {
     if (operation) throw new Error('Finish the connection or history operation before sending.');
     if(replyTo&&!this.messageTargetCurrent(replyTo))throw Error('The reply target belongs to a different conversation.');
     const authoredRequestText=text;
-    let message = phoneContextMessage(text,{...context,calendarDay:undefined});
+    const attachmentOnly=channelType==='DM'&&!!images?.length&&!text.trim();
+    const turnMessage=(input:ContextEnvelope)=>attachmentOnly?{text:'',context:sanitizePhoneContext(input)}:phoneContextMessage(text,input);
+    let message = turnMessage({...context,calendarDay:undefined});
     if (sending) throw new Error('Wait for the current reply before sending another message.');
     const selected = active, session = state.session, generation = epoch;
     requestedCameraContinuation=undefined;
@@ -3512,7 +3514,7 @@ export const connectionController = {
       // Legacy text/alphaPhone projections remain day-free; plain-v1 alone never admits the field.
       if(context.calendarDay&&selected.userTextFormatVersion===1&&observationSession){
         const admitted=await observationSession.context(context,requestSignal);assertCurrent();
-        message=phoneContextMessage(text,admitted);
+        message=turnMessage(admitted);
       }
       const id=await ensureSelectedConversation(selected,session,requestSignal,assertCurrent);
       if(expectedConversationId!==undefined&&id!==expectedConversationId)throw Error('The voice conversation changed.');
@@ -3523,7 +3525,7 @@ export const connectionController = {
       // only test-mocks builds send it to an unnegotiated peer. A product build sends the authored
       // text; the observation travels only in metadata, never as a client-authored banner.
       const canonicalProse=selected.userTextFormatVersion===1;
-      const wireText=canonicalProse||!testMocksEnabled?text:message.text;
+      const wireText=attachmentOnly?'':canonicalProse||!testMocksEnabled?text:message.text;
       const actionPreferences=await readDevicePreferences(requestSignal).catch(()=>{requestSignal.throwIfAborted();return {askBeforeAgentActions:true};});assertCurrent();
       const directRequestedActions=!actionPreferences.askBeforeAgentActions;
       const calendarAgendaSource=!message.context.sensitive&&selected.actions?await calendarAgendaObservation(selected.actions,message.context,assertCurrent):undefined;

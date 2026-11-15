@@ -33,10 +33,11 @@ module MmsCompose {
     else {
       val status = v.journal.get(id)
       val accepted = id == v.operationId and not(v.busy) and status.in(Set("submitted", "sent"))
+      val closed = id == v.operationId and not(v.busy) and status.in(CLOSED)
       if (status == "none") v
       else { ...v, shown: status, shownFrom: "read-back", shownLifecycle: v.lifecycle,
-        draftRevision: if (accepted) v.draftRevision + 1 else v.draftRevision,
-        operationId: if (accepted) 0 else v.operationId, lastSent: if (accepted) id else v.lastSent,
+        draftRevision: if (closed or accepted) v.draftRevision + 1 else v.draftRevision,
+        operationId: if (closed or accepted) 0 else v.operationId, lastSent: if (accepted) id else v.lastSent,
         draftReady: v.draftReady and not(accepted), pictures: if (accepted) 0 else v.pictures }
     }
   /// A retired visit loses review/send/publication authority. Its unfinished owner draft and
@@ -146,7 +147,7 @@ module MmsCompose {
     s.journal.get(id) == "submitted", status.in(Set("sent", "failed", "unknown")),
     s' = { ...s, journal: s.journal.set(id, status) }
   }
-  /// A native read-back can retire the idle draft and its pictures after finding acceptance.
+  /// A native read-back clears a closed operation or retires the draft after finding acceptance.
   action reconcile = all {
     s.active, not(s.hidden),
     val id = if (s.operationId != 0) s.operationId else s.lastSent
@@ -168,8 +169,8 @@ module MmsCompose {
   val AtMostOneDispatchPerOperation = IDS.forall(id => s.dispatches.get(id) <= 1)
   val DispatchJournaled = IDS.forall(id =>
     (s.dispatches.get(id) == 1) == s.journal.get(id).in(Set("submitted", "sent", "failed", "unknown")))
-  /// Once a send has answered that nothing was dispatched, the idle draft holds no ID.
-  val ClosedAnswerReleasesId = (s.shownFrom == "send" and not(s.busy) and s.shown.in(CLOSED)) implies s.operationId == 0
+  /// A current send answer or journal read-back can prove that nothing was dispatched.
+  val ClosedAnswerReleasesId = (s.shownFrom.in(Set("send", "read-back")) and not(s.busy) and s.shown.in(CLOSED)) implies s.operationId == 0
   val HeldIdWasMinted = s.operationId <= s.minted and s.call <= s.minted
   val InactiveHasNoAuthority = not(s.active) implies not(s.busy) and s.shown == "none" and
     (s.call == 0 or s.callLifecycle != s.lifecycle)
@@ -242,6 +243,12 @@ module MmsCompose {
     .then(send).then(nativeDecide(true)).then(journalReadsAvailable(false)).then(callRejected).then(hide)
     .expect(s.pictures == 1 and s.operationId == 1 and not(s.busy) and safety)
     .then(show).expect(s.pictures == 1 and s.operationId == 1 and s.call == 0 and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
+  run cancelledJournalReceiptReleasesIdOnReturnTest = init.then(openView).then(attach).then(chooserAnswers(1, true))
+    .then(send).then(nativeDecide(false)).then(hide).then(deliver)
+    .expect(s.operationId == 1 and s.pictures == 1 and s.dispatches.get(1) == 0 and safety)
+    .then(show).expect(s.operationId == 0 and s.pictures == 1 and s.shown == "cancelled" and s.shownFrom == "read-back" and safety)
+    .then(send).then(nativeDecide(true)).then(deliver)
+    .expect(s.lastSent == 2 and s.dispatches.get(1) == 0 and s.dispatches.get(2) == 1 and safety)
   run lateJournalReceiptRetiresDraftTest = init.then(openView).then(attach).then(chooserAnswers(1, true))
     .then(send).then(nativeDecide(true)).then(journalReadsAvailable(false)).then(callRejected)
     .expect(s.pictures == 1 and s.operationId == 1 and s.shown == "outcome-unknown")

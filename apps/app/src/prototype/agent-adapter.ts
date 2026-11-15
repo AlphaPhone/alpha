@@ -1,4 +1,7 @@
 import {createImagePreview} from '../runtime/image-preview';
+import {ChatAttachmentPicker,encodeChatAttachment} from './attachment-picker';
+import {storedChatFiles,type ChatFile} from './chat-attachment-files';
+import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
 import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
@@ -198,10 +201,12 @@ async function restoreAttachments(messages:Shell[],session:VerifiedSession,conve
     const transcript=attachment?.transcriptAttachment;
     const photo=attachment?.cameraAttachment;
     const mail=attachment?.mailAttachment;
+    const files=storedChatFiles(attachment?.fileAttachments);
     return {...message,
       ...(typeof attachment.displayText==='string'&&attachment.requestText===message.text?{text:attachment.displayText}:{}),
       ...(typeof transcript?.title==='string'?{transcriptAttachment:transcript}:{}),
       ...(typeof mail?.title==='string'?{mailAttachment:mail}:{}),
+      ...(files.length?{fileAttachments:files}:{}),
       ...(typeof photo?.image==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo.image)?{cameraAttachment:photo}:{}),
     };
   }));
@@ -721,6 +726,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.startupDraft=this.connectionSession?null:undefined;
     this.connectionUnsubscribe = connectionController.subscribe(() => {
       const connection=connectionController.getSnapshot(),session=connection.session?.sessionId;
+      if(this.fileAttachments?.length&&this.fileAttachmentScope!==attachmentBinding()){
+        this.fileAttachments=[];this.fileAttachmentScope=undefined;
+        if(this.live)this.setState({});
+      }
       let draftBindingAfterPaint=false;
       if (session !== this.connectionSession) {
         const preserveStartupDraft=!this.connectionSession&&!!session&&!connection.startupResolved&&typeof this.startupDraft==='string'&&this.startupDraft===String(this.S().draft||'');
@@ -730,7 +739,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.startupDraft=null;
         cancelMessageContext(this);
         this.cancelVoiceScrollFollow();
-        this.closeSummaryReview?.();this.chatImagePreview=null;this.cameraAttachment=null;this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.mailAttachment=null;
+        this.closeSummaryReview?.();this.chatImagePreview=null;this.cameraAttachment=null;this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.mailAttachment=null;this.fileAttachments=[];
         clearMapsSelection();
         this.connectionSession = session;
         alphaClient.disconnect();
@@ -741,14 +750,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const history = connectionController.getSnapshot().history;
       if (history && history.sessionId === session && this.restoredHistory !== history) {
-        if(!history.automatic){this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;}
+        if(!history.automatic){this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
         this.restoredHistory = history;
         const attachmentSession=connectionController.getSnapshot().session;
         if(attachmentSession)void restoreAttachments(history.messages,attachmentSession,history.conversationId).then(messages=>{
           if(!this.live||connectionController.getSnapshot().history!==history)return;
           this.setState((previous:Shell)=>({msgs:previous.msgs.map((message:Shell)=>{
             const saved=messages.find(item=>item.id===message.id);
-            return saved?{...message,...(message.text===history.messages.find(item=>item.id===message.id)?.text?{text:saved.text}:{}),transcriptAttachment:saved.transcriptAttachment,cameraAttachment:saved.cameraAttachment,mailAttachment:saved.mailAttachment}:message;
+            return saved?{...message,...(message.text===history.messages.find(item=>item.id===message.id)?.text?{text:saved.text}:{}),transcriptAttachment:saved.transcriptAttachment,cameraAttachment:saved.cameraAttachment,mailAttachment:saved.mailAttachment,fileAttachments:saved.fileAttachments}:message;
           })}));
         }).catch(()=>this.toast('Saved attachments could not load. Try reopening this conversation.'));
 
@@ -1255,6 +1264,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   p.componentDidUpdate = function (prev: Shell) { originalUpdate.call(this, prev); const notesView=this.S().view==='notes';if(notesView&&!this.wasCanonicalNotesView&&this.notesSourceMode==='canonical')void this.canonicalNotesUi?.refresh().catch(()=>{});this.wasCanonicalNotesView=notesView; context(this); void connectionController.observeCommittedView(); sizeComposer();this.composerDraft?.edit(String(this.S().draft||''));const shade=!!this.S().shade;if(shade&&!this.shadeWasOpen)this.refreshTileFacts();this.shadeWasOpen=shade;const chatOpen=this.S().chat==='sheet'||this.S().chat==='full',drafting=!!String(this.S().draft||'').trim();if((chatOpen&&!this.chatWasOpen)||(drafting&&!this.wasDrafting))connectionController.warmInference();this.chatWasOpen=chatOpen;this.wasDrafting=drafting;const selected=this.messageReplyTarget||this.messageEditTarget;if(selected&&(JSON.stringify(selected.session)!==JSON.stringify(connectionController.getSnapshot().session)||!this.S().msgs.some((m:Shell)=>m.id===selected.messageId&&m.text===selected.text))){cancelMessageContext(this);this.setState({});} };
   p.componentWillUnmount = function () {
     this.chatImageModal?.ref(null);
+    this.chatAttachmentAbort?.abort();this.chatAttachmentPicker?.dispose();
     const notes=this.canonicalNotesUi;this.canonicalNotesUi=null;notes?.retire();this.notesSourceEpoch=(this.notesSourceEpoch??0)+1;
     this.cancelReadReplyCompletions?.();
     cancelMessageContext(this);connectionController.cancelViewNavigation();
@@ -1393,6 +1403,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     };
     api.openReviewedWebSource=(url:string,signal:AbortSignal)=>this.browserNavigateApproved(url,signal);
     api.attachCameraPhoto=(id:string,image:string)=>{
+      if(this.fileAttachments?.length>=MAX_CHAT_UPLOAD_ATTACHMENTS||
+        !attachmentBatchFits(this.fileAttachments??[],image)){
+        this.toast('Remove an attachment before adding another.');return;
+      }
       this.cameraAttachment={id,image};
       this.setState({chat:'sheet',shade:false});
     };
@@ -1440,6 +1454,43 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   p.replyToMessage=function(message:Shell){if(!this.canReplyMessage(message))return;this.messageEditTarget=undefined;this.messageReplyTarget=messageTarget(message);this.setState({chat:'full'},()=>document.querySelector<HTMLTextAreaElement>('[data-alpha-layer="conversation"] textarea[data-alpha-composer]')?.focus());};
   p.editMessage=function(message:Shell){if(!this.canEditMessage(message))return;if(this.S().draft.trim()){this.toast('Finish or clear your current draft before editing a message.');return;}this.messageReplyTarget=undefined;this.messageEditTarget=messageTarget(message);this.setState({draft:message.text,chat:'full'},()=>document.querySelector<HTMLTextAreaElement>('[data-alpha-layer="conversation"] textarea[data-alpha-composer]')?.focus());};
   function typedSendBinding(){return JSON.stringify([connectionController.getSnapshot().session,connectionController.getSnapshot().history?.conversationId,connectionController.getCloudEnvironment?.(),connectionController.getCloudClient()?.sessionId,connectionController.getCloudClient()?.credentialId]);}
+  function attachmentBinding(){return JSON.stringify([typedSendBinding(),connectionController.getSelectedConversationId()]);}
+  function attachmentBatchFits(files:ReadonlyArray<Pick<ChatFile,'data'>>,cameraImage?:string){
+    // The pinned conversation ingress caps the whole body at 20 MiB. Leave room
+    // for the authored text, escaped filenames and the bounded phone observation.
+    return files.reduce((sum,file)=>sum+file.data.length,0)+(cameraImage?.length??0)<=19*1024*1024;
+  }
+  async function pickChatAttachments(shell:Shell){
+    const binding=attachmentBinding(),view=shell.S().view;
+    const existing:ChatFile[]=shell.fileAttachments??=[];
+    const camera=shell.cameraAttachment;
+    const maximum=MAX_CHAT_UPLOAD_ATTACHMENTS-existing.length-(camera?1:0);
+    if(maximum<1){shell.toast('Remove an attachment before adding another.');return;}
+    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding)return;
+    const abort=shell.chatAttachmentAbort=new AbortController();
+    const current=()=>!abort.signal.aborted&&shell.live&&!document.hidden&&shell.S().view===view&&
+      attachmentBinding()===binding&&shell.fileAttachments===existing&&shell.cameraAttachment===camera&&
+      !connectionController.getSnapshot().open&&!shell.S().typing&&!shell.messageEditTarget&&!shell.draftSendPending&&!shell.composerDraft?.holding;
+    shell.chatAttachmentPicker??=new ChatAttachmentPicker(()=>shell.live&&shell.setState({}));
+    const retire=()=>abort.abort();
+    for(const event of ['pagehide','launcher-home','alpha:device-state'])window.addEventListener(event,retire,{signal:abort.signal});
+    const unsubscribe=connectionController.subscribe(()=>{if(!current())abort.abort();});
+    try{
+      const files:File[]=await shell.chatAttachmentPicker.choose(abort.signal,maximum,current);
+      if(!current()||!files.length)return;
+      const encoded=await Promise.all(files.map(encodeChatAttachment));
+      if(!current())return;
+      if(!attachmentBatchFits([...existing,...encoded],camera?.image)){shell.toast('Choose fewer or smaller files.');return;}
+      shell.fileAttachmentScope=binding;
+      shell.fileAttachments=[...existing,...encoded.map(file=>({...file,id:crypto.randomUUID()}))];
+      if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
+    }catch(error){
+      if(current())shell.toast(errorNotice(error,'The attachment could not open.'),ERROR_TOAST);
+    }finally{
+      abort.abort();unsubscribe();
+      if(shell.chatAttachmentAbort===abort){shell.chatAttachmentAbort=undefined;if(shell.live)shell.setState({});}
+    }
+  }
   function sendFromComposer(shell:Shell){
     const origin=document.querySelector<HTMLTextAreaElement>('textarea[data-alpha-composer]:not([disabled])');
     if(!origin){void shell.send();return;}
@@ -1506,6 +1557,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     };
     out.composerPointer=(event:PointerEvent)=>event.stopPropagation();
     out.sendNow=()=>sendFromComposer(this);
+    out.attachmentPicker=this.chatAttachmentPicker?.view(out.ic)??{open:false};
+    out.attachFiles=()=>void pickChatAttachments(this);
+    out.attachFilesDisabled=!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding||this.messageEditTarget);
+    out.hasPendingFiles=!!this.fileAttachments?.length;
+    out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>({
+      id:file.id,name:file.name,removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
+        if(this.S().typing||this.draftSendPending||this.composerDraft?.holding)return;
+        this.fileAttachments=(this.fileAttachments??[]).filter((item:ChatFile)=>item!==file);
+        this.setState({});
+      },
+    }));
     // New chat and history sit in the chat header once an agent is connected; the same two
     // controls stay in Settings. Neither sends anything, and a reply in flight is never cut off.
     const toolsSession=connectionController.getSnapshot();
@@ -1535,7 +1597,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(shownNotices!==live){const kept=new Set(shownNotices.map(item=>item.id)),hidden=new Set(live.filter(item=>item.systemNotice&&!kept.has(item.id)).map(item=>item.id));out.msgs=(out.msgs||[]).filter((m:Shell)=>!hidden.has(m.id));}
     out.msgs=(out.msgs||[]).map((m:Shell)=>{
       const sent=live.find(item=>item.id===m.id);
-      m={...m,sentMail:sent?.mailAttachment?.title||'',sentTranscript:sent?.transcriptAttachment?.title||'',sentPhoto:sent?.cameraAttachment?.image||'',openPhotoPreview:()=>{if(sent?.cameraAttachment?.image){this.chatImagePreview=sent.cameraAttachment.image;this.setState({});}}};
+      m={...m,sentMail:sent?.mailAttachment?.title||'',sentTranscript:sent?.transcriptAttachment?.title||'',sentPhoto:sent?.cameraAttachment?.image||'',sentFiles:storedChatFiles(sent?.fileAttachments).map(file=>({id:file.id,name:file.name,document:!CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType),previewLabel:'Preview sent '+file.name,image:CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:'',open:()=>{if(CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)){this.chatImagePreview=`data:${file.mimeType};base64,${file.data}`;this.setState({});}}})),openPhotoPreview:()=>{if(sent?.cameraAttachment?.image){this.chatImagePreview=sent.cameraAttachment.image;this.setState({});}}};
       const c=m.c||{};
       // A system notice is a status block, never a button: it carries its text once, with no
       // title repeated as the detail and no second copy printed above it.
@@ -1561,7 +1623,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.canStopReply=!!this.S().typing&&alphaClient.getState().pending;
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
     const turn=!!this.S().typing;
-    out.sendVisible=!!out.hasDraft&&!turn;out.talkVisible=!!out.noDraft&&!turn;out.replyIdle=!turn;
+    const hasBinaryAttachment=!this.messageEditTarget&&!!(this.cameraAttachment||this.fileAttachments?.length);
+    out.sendVisible=(!!out.hasDraft||hasBinaryAttachment)&&!turn;out.talkVisible=!!out.noDraft&&!hasBinaryAttachment&&!turn;out.replyIdle=!turn;
     out.stopReply=()=>{connectionController.cancelViewNavigation();alphaClient.cancel();};
     if (isAndroid) {
       out.showStatus = false; out.showIndicator = false;
@@ -1725,21 +1788,25 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   };
   p.send = async function (argument?: string, expectedSession?: {sessionId:string;agentId:string;ownerId:string;origin:string}, focusAfterCommit?:()=>void) {
     const before=this.S(),reply=this.messageReplyTarget,edit=this.messageEditTarget;
+    const filesAtStart:ChatFile[]|undefined=argument===undefined?this.fileAttachments:undefined;
+    const selectedConversation=connectionController.getSelectedConversationId()||undefined;
+    const filesCurrent=()=>!filesAtStart?.length||(this.fileAttachments===filesAtStart&&this.fileAttachmentScope===attachmentBinding());
     const sendBinding=()=>JSON.stringify([connectionController.getSnapshot().session,connectionController.getSnapshot().history?.conversationId,connectionController.getCloudEnvironment?.(),connectionController.getCloudClient()?.sessionId,connectionController.getCloudClient()?.credentialId]);
     if(this.stopVoiceConversation)context(this);const expectedContext=JSON.stringify(alphaClient.getState().context);
     const binding=this.stopVoiceConversation?sendBinding():undefined,draft=String(before.draft||''),view=before.view;
     // A typed message first stops the voice surface and waits for its media to stop. Text needs
     // no microphone: a stop that could not be confirmed keeps voice closed (the voice surface says so)
     // but never withholds the message.
-    const retiring=this.stopVoiceConversation?.();if(retiring){try{await retiring;}catch{}context(this);const now=this.S();if(JSON.stringify(alphaClient.getState().context)!==expectedContext||!this.live||document.hidden||connectionController.getSnapshot().open||sendBinding()!==binding||now.view!==view||String(now.draft||'')!==draft||this.messageReplyTarget!==reply||this.messageEditTarget!==edit)return;}
+    const retiring=this.stopVoiceConversation?.();if(retiring){try{await retiring;}catch{}context(this);const now=this.S();if(JSON.stringify(alphaClient.getState().context)!==expectedContext||!this.live||document.hidden||connectionController.getSnapshot().open||sendBinding()!==binding||now.view!==view||String(now.draft||'')!==draft||this.messageReplyTarget!==reply||this.messageEditTarget!==edit||!filesCurrent())return;}
     let s = this.S(); const text = String(argument ?? s.draft);
-    if (!text.trim() || s.typing || this.draftSendPending || this.composerDraft?.holding) return;
+    const hasBinaryAttachment=argument===undefined&&!edit&&!!(this.cameraAttachment||filesAtStart?.length);
+    if ((!text.trim()&&!hasBinaryAttachment) || s.typing || this.chatAttachmentAbort || this.draftSendPending || this.composerDraft?.holding || !filesCurrent()) return;
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
     // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
-    if(!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
-    if(!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
+    if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
+    if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
     const editTarget:ConversationMessageTarget|undefined=this.messageEditTarget,replyTarget:ConversationMessageTarget|undefined=fromComposer?this.messageReplyTarget:undefined,editView=s.view;
     if(editTarget){
       // An app action must not replace or abandon the user's open edit.
@@ -1761,7 +1828,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     let mailText='';
     try{if(mail)mailText=await mail.validate();}catch(error){this.toast(errorNotice(error,'Reopen the email before sending.'),ERROR_TOAST);return;}
     if(mail&&(this.mailAttachment??null)!==mail)return;
-    const requestText=mail?mailText+'\n\nQuestion: '+text:transcript?'Use the transcript of the selected voice note to answer this question.\n\n'+text:text;
+    const requestText=mail?mailText+'\n\nQuestion: '+text:transcript?'Use the transcript of the selected voice note to answer this question.\n\n'+text:!text.trim()&&hasBinaryAttachment?'':text;
     const transcriptCurrent=()=>!transcript||(this.S().view==='notes'&&JSON.stringify(this.notesSelection)===transcript.selection&&this.transcriptAttachment===transcript);
     if(!transcriptCurrent()){this.toast('The recording changed. Remove the transcript or attach it again.');return;}
     if(transcript){
@@ -1775,7 +1842,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }catch{this.toast('The recording changed. Remove the transcript or attach it again.');return;}
     }
     const revision=alphaClient.getState().context.revision,connection=connectionController.getSnapshot(),sessionId=connection.session?.sessionId,conversationId=connection.history?.conversationId;
-    const current=()=>{const selected=connectionController.getSnapshot();return this.live&&!document.hidden&&(!selected.busy||selected.backgroundWork===true)&&!selected.open&&!document.querySelector('[data-alpha-chat-recorder],[data-alpha-pill-voice]')&&selected.session?.sessionId===sessionId&&selected.history?.conversationId===conversationId&&alphaClient.getState().context.revision===revision;};
+    const current=()=>{const selected=connectionController.getSnapshot();return this.live&&!document.hidden&&(!selected.busy||selected.backgroundWork===true)&&!selected.open&&!document.querySelector('[data-alpha-chat-recorder],[data-alpha-pill-voice]')&&selected.session?.sessionId===sessionId&&selected.history?.conversationId===conversationId&&alphaClient.getState().context.revision===revision&&filesCurrent();};
     const heldText=String(s.draft||'');let heldKey:string|undefined;
     if(fromComposer){
       this.draftSendPending=true;
@@ -1786,10 +1853,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // Everything this send later shows belongs to the agent connection it was sent on.
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
-    const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,displayText:text,requestText}:null;
+    const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:filesAtStart as ChatFile[]|undefined,displayText:text,requestText}:null;
     let stagedAttachmentKey:string|undefined;
     const rememberSentAttachment=async (identity:NonNullable<AgentReply['messageBinding']>,recordedId:string)=>{
-      if(!sentAttachment||!(mail||transcript||sentAttachment.cameraAttachment))return;
+      if(!sentAttachment||!(mail||transcript||sentAttachment.cameraAttachment||sentAttachment.fileAttachments?.length))return;
       // First send can create the conversation after pre-dispatch storage was skipped.
       // History prefers the request ID and falls back to the recorded ID only if absent.
       if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
@@ -1797,14 +1864,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(recordedId!==userId)await saveAttachment(identity.session,identity.conversationId,recordedId,sentAttachment);
     };
-    if(sentAttachment&&(mail||transcript||this.cameraAttachment)&&connection.session&&conversationId){
+    if(sentAttachment&&(mail||transcript||this.cameraAttachment||sentAttachment.fileAttachments?.length)&&connection.session&&conversationId){
       try{
         await saveAttachment(connection.session,conversationId,userId,sentAttachment);
         stagedAttachmentKey=attachmentKey(connection.session,conversationId,userId);
       }
       catch{if(fromComposer)releaseComposerSend(this,heldKey,heldText);this.toast('Attachment could not be saved. Try again.');return;}
       // The local write may settle after the composer, attachment or conversation has been replaced.
-      if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment){
+      if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment||this.fileAttachments!==sentAttachment.fileAttachments){
         if(this.live)releaseComposerSend(this,heldKey,heldText);else this.composerDraft?.release();
         return;
       }
@@ -1821,7 +1888,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     try {
       // A refused send can settle immediately. Commit the cleared composer before
       // dispatch so its late paint cannot overwrite the restored, unsent draft.
-      await new Promise<void>(resolve=>this.setState((previous:Shell)=>({ msgs: [...previous.msgs, { id: userId, from: 'user', text, ...(fromComposer?{mailAttachment:sentAttachment?.mailAttachment,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment}:{} ) }], ...(fromComposer?{draft:''}:{}), typing: true, chat: previous.chat === 'full' ? 'full' : 'sheet', shade: false }),()=>{focusAfterCommit?.();resolve();}));
+      await new Promise<void>(resolve=>this.setState((previous:Shell)=>({ msgs: [...previous.msgs, { id: userId, from: 'user', text, ...(fromComposer?{mailAttachment:sentAttachment?.mailAttachment,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:sentAttachment?.fileAttachments}:{} ) }], ...(fromComposer?{draft:''}:{}), typing: true, chat: previous.chat === 'full' ? 'full' : 'sheet', shade: false }),()=>{focusAfterCommit?.();resolve();}));
       try{
         await this.connectAgent(); context(this);
         if (alphaClient.getState().context.revision !== revision) throw new NotDispatched(fromComposer?'The active screen changed. Your message is back in the composer.':'The active screen changed. Nothing was sent.');
@@ -1833,6 +1900,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       queueMicrotask(()=>{if(this.live&&alphaClient.getState().pending)this.setState({});});
       if(!transcriptCurrent())throw new NotDispatched('The recording changed. Attach the transcript again.');
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
+      if(sentAttachment?.fileAttachments?.length&&(!sameChat()||!filesCurrent()||!this.live||document.hidden))
+        throw new NotDispatched('The chat attachment changed. Nothing was sent.');
       // The planning label shows only until the first reply text; it is never kept as a message.
       const showStatus=(event:Event)=>{if(this.live&&!streamed&&this.sendAttempt===attempt)this.setState({turnStatus:(event as CustomEvent<string>).detail});};
       localTurnStatus.addEventListener('label',showStatus);
@@ -1847,7 +1916,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!streamFrame&&!document.hidden)streamFrame=requestAnimationFrame(()=>{streamFrame=0;if(this.live)flushStream();});
         }
         else{streamed=true;this.setState((previous:Shell)=>({turnStatus:'',msgs:[...previous.msgs,{id:streamedId,from:'agent',text:value,card:null,streaming:true}]}));}
-      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,images:sentAttachment?.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:undefined});}
+      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images:sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)?[...(sentAttachment.fileAttachments??[]).map(({data,mimeType,name})=>({data,mimeType,name})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]:undefined});}
       // Before settlement, stop, or failure renders: a late frame must not overwrite the final text.
       finally{localTurnStatus.removeEventListener('label',showStatus);flushStream();}
       // Only the composer's own send holds its draft; a prompt from elsewhere never settles it.
@@ -1860,7 +1929,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const settlementCurrent=()=>this.live&&sameChat()&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(sourceSession)&&(!identity||connectionController.getSelectedConversationId()===identity.conversationId);
       if(!settlementCurrent())return;
       // The agent chose not to reply: no empty bubble, the sent message keeps its saved identity.
-      if(fromComposer&&this.cameraAttachment){this.cameraAttachment=null;this.setState({});}
+      if(fromComposer&&this.cameraAttachment===sentAttachment?.cameraAttachment&&this.cameraAttachment){this.cameraAttachment=null;this.setState({});}
+      if(fromComposer&&sentAttachment?.fileAttachments?.length&&this.fileAttachments===sentAttachment.fileAttachments){this.fileAttachments=[];this.setState({});}
       if(mail&&this.mailAttachment===mail){this.mailAttachment=null;this.setState({});}
       if(transcript && this.transcriptAttachment===transcript){this.transcriptAttachment=null;this.setState({});}
       if(reply.ignored&&!reply.proposals?.length&&!reply.completedActions?.length&&!reply.completedReads?.length){
@@ -1930,6 +2000,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // The owner and recorded message are verified even though the reply failed.
           // A storage failure must not replace the original reply error.
           try{await rememberSentAttachment(binding,recorded.userMessageId);}catch{}
+          if(sentAttachment?.fileAttachments?.length&&this.fileAttachments===sentAttachment.fileAttachments){this.fileAttachments=[];this.setState({});}
         }
         if(this.live&&sameChat()&&typeof recorded.userMessageId==='string'&&recorded.messageBinding&&typeof recorded.messageBinding==='object')this.setState((previous:Shell)=>({msgs:previous.msgs.map((item:Shell)=>item.id===userId?{...item,id:recorded.userMessageId,messageBinding:recorded.messageBinding}:item)}));
         // After Stop the controller cancels, announces and reconciles once; its notice is the one shown.

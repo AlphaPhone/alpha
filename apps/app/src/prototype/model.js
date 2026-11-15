@@ -817,8 +817,9 @@ function inboxFind(api, word) {
 }
 function inboxClock(d) { return formatTime(d); }
 function inboxLive(st) { return (st.mails || []).filter(function (m) { return !m.arch && !m.del; }); }
-function inboxMail(st, id) {
-  var l = (st.mails || []).concat(st.sent || []);
+function inboxMail(st, id, source) {
+  var received = st.mails || [], sent = st.sent || [];
+  var l = source === "sent" ? sent : source === "received" ? received : received.concat(sent);
   for (var i = 0; i < l.length; i++) if (String(l[i].id) === String(id)) return l[i];
   return null;
 }
@@ -877,11 +878,11 @@ registerView("inbox", {
       api.set({ compose: null, toQ: "" }); inboxUndo(api, inboxDraftLabel(api, st.compose), { compose: st.compose, composeLocal: true });
       return !!st.composeLocal;
     }
-    if (st.open != null) { inboxMarkRead(api, st.open); api.set({ open: null }); return !!st.openLocal; }
+    if (st.open != null) { if (st.openSource !== "sent") inboxMarkRead(api, st.open); api.set({ open: null, openSource: null }); return !!st.openLocal; }
     if (st.q != null) { api.set({ q: null }); return true; }
     return false;
   },
-  onLeave: function (api) { if (api.st.open != null) inboxMarkRead(api, api.st.open); },
+  onLeave: function (api) { if (api.st.open != null && api.st.openSource !== "sent") inboxMarkRead(api, api.st.open); },
   suggestions: function (st) {
     if (st.compose) return ["Write this for me", "Make it shorter"];
     var sg = copy("inbox").suggestions || {};
@@ -892,7 +893,7 @@ registerView("inbox", {
   reply: function (t, raw, api) {
     var st = api.st; var here = api.active;
     var live = inboxLive(st);
-    var cur = st.open != null ? inboxMail(st, st.open) : null;
+    var cur = st.open != null ? inboxMail(st, st.open, st.openSource) : null;
     var m;
 
     // inside an open email
@@ -960,7 +961,7 @@ registerView("inbox", {
         return (x.subj + " " + x.body + " " + w.name).toLowerCase().indexOf(q) >= 0;
       });
       if (!res.length) return { text: "No email matches “" + q + "”." };
-      if (res.length === 1) return { text: "Found it.", card: { type: "generic", icon: "mail", title: res[0].subj, sub: inboxWho(api, res[0]).name + " · " + res[0].time, go: { view: "inbox", patch: { open: res[0].id } } } };
+      if (res.length === 1) return { text: "Found it.", card: { type: "generic", icon: "mail", title: res[0].subj, sub: inboxWho(api, res[0]).name + " · " + res[0].time, go: { view: "inbox", patch: { open: res[0].id, openSource: "received" } } } };
       return { text: res.length + " emails.", card: { type: "digest", rows: res.map(function (x) { var w = inboxWho(api, x); return { ini: w.ini, who: w.name, text: x.subj }; }), go: { view: "inbox" } } };
     }
     return scriptedReply("inbox", t);
@@ -987,7 +988,10 @@ registerView("inbox", {
     var searching = st.q != null; var sq = (st.q || "").trim().toLowerCase();
 
     var list;
-    if (isSent) list = (st.sent || []).slice();
+    if (st.localMailFolder) list = (st.mails || []).concat(st.sent || []).filter(function (m) {
+      return st.localMailFolder === "trash" ? m.del : m.arch && !m.del;
+    });
+    else if (isSent) list = (st.sent || []).filter(function (m) { return !m.arch && !m.del; });
     else {
       list = inboxLive(st).filter(function (m) { return st.acct === "all" || inboxAcctOf(accts, m.acct).id === st.acct; });
       list.sort(function (a, b) { return (b.unread ? 1 : 0) - (a.unread ? 1 : 0) || b.k - a.k; });
@@ -1000,7 +1004,7 @@ registerView("inbox", {
       var w = m.sent ? { name: inboxRecips(m.to).map(function (r) { return inboxRecipName(api, r); }).join(", ") || "No recipient", ini: "" } : inboxWho(api, m);
       if (m.sent) { var r0 = inboxRecips(m.to)[0]; var p0 = r0 ? inboxPerson(api, r0) : null; w.ini = p0 ? p0.ini : (r0 ? r0.charAt(0).toUpperCase() : "?"); }
       var s = api.sw(function (dx, dy) {
-        if (m.sent || Math.abs(dx) < Math.abs(dy)) return false;
+        if (st.localMailFolder || m.sent || Math.abs(dx) < Math.abs(dy)) return false;
         if (dx < 0) {
           api.set({ slide: { id: m.id, x: -412 } });
           api.later(function () {
@@ -1014,49 +1018,56 @@ registerView("inbox", {
       });
       var unread = !!m.unread;
       return {
-        ini: w.ini, name: w.name, subj: m.subj, snip: String(m.body).replace(/\s+/g, " ").slice(0, 90), time: m.time,
+        id: m.id, sent: !!m.sent, ini: w.ini, name: w.name, subj: m.subj, snip: String(m.body).replace(/\s+/g, " ").slice(0, 90), time: m.time,
         nameW: unread ? "700" : "500", subjCss: unread ? "color:var(--fg);font-weight:600" : "color:var(--fg)",
         dot: unread ? "var(--acct)" : "transparent", clip: !!(m.atts && m.atts.length),
         label: (unread ? "Unread, " : "") + w.name + ", " + m.subj,
         down: s.down, up: s.up,
-        tx: st.slide && st.slide.id === m.id ? st.slide.x : 0, current: st.open === m.id ? "true" : "false",
+        tx: st.slide && st.slide.id === m.id ? st.slide.x : 0, current: st.open === m.id && (!st.openSource || st.openSource === (m.sent ? "sent" : "received")) ? "true" : "false",
         // On a split canvas (#411) another message opens beside the list; the one it replaces is
         // left read, as Back leaves it.
-        open: function () { if (api.swallowed()) return; var prev = api.get("inbox").open; if (prev != null && prev !== m.id) inboxMarkRead(api, prev); api.set({ open: m.id, openLocal: true }); }
+        open: function () { if (api.swallowed()) return; var prev = api.get("inbox"); if (prev.open != null && prev.openSource !== "sent" && (prev.open !== m.id || m.sent)) inboxMarkRead(api, prev.open); api.set({ open: m.id, openSource: m.sent ? "sent" : "received", openLocal: true }); }
       };
     });
 
     // detail
-    var cur = st.open != null ? inboxMail(st, st.open) : null;
+    var cur = st.open != null ? inboxMail(st, st.open, st.openSource) : null;
     var det = null;
     if (cur) {
       var cw = cur.sent ? { name: inboxRecips(cur.to).map(function (r) { return inboxRecipName(api, r); }).join(", "), ini: "" } : inboxWho(api, cur);
       if (cur.sent) { var cr = inboxRecips(cur.to)[0]; var cp = cr ? inboxPerson(api, cr) : null; cw.ini = cp ? cp.ini : "?"; }
       var ca = inboxAcctOf(accts, cur.acct);
-      var close = function () { inboxMarkRead(api, cur.id); api.set({ open: null }); };
+      var close = function () { if (!cur.sent) inboxMarkRead(api, cur.id); api.set({ open: null, openSource: null }); };
       var remove = function (flag, msg) {
         var s2 = api.get("inbox"); var key = cur.sent ? "sent" : "mails";
         var at = (s2[key] || []).map(function (x) { return x.id; }).indexOf(cur.id); var was = at >= 0 ? Object.assign({}, s2[key][at], cur.sent ? {} : { unread: false }) : null;
-        var snap = function (now) { var p = { open: cur.id, openLocal: true }; if (was) p[key] = restoreById(now[key], was, at); return p; };
-        if (cur.sent) api.set({ open: null, sent: (s2.sent || []).filter(function (x) { return x.id !== cur.id; }) });
-        else api.set({ open: null, mails: s2.mails.map(function (x) { if (x.id !== cur.id) return x; var y = Object.assign({}, x, { unread: false }); y[flag] = true; return y; }) });
+        var source = cur.sent ? "sent" : "received";
+        var snap = function (now) { var p = { open: cur.id, openSource: source, openLocal: true }; if (was) p[key] = restoreById(now[key], was, at); return p; };
+        var patch = { open: null, openSource: null };
+        patch[key] = (s2[key] || []).map(function (x) {
+          if (x.id !== cur.id) return x;
+          var y = Object.assign({}, x, cur.sent ? {} : { unread: false });
+          y[flag] = true;
+          return y;
+        });
+        api.set(patch);
         inboxUndo(api, msg, snap);
       };
       det = {
         actionsAvailable: true,
         closeMenu: function (event) { event.currentTarget.closest("details").removeAttribute("open"); },
         menuKey: function (event) { if (event.key === "Escape") { var menu = event.currentTarget; menu.open = false; menu.querySelector("summary").focus(); event.stopPropagation(); } },
-        noHtml: true, canTrash: true, subj: cur.subj, name: cw.name, ini: cw.ini, body: cur.body, time: cur.time,
+        noHtml: true, canTrash: st.localMailFolder !== "trash", subj: cur.subj, name: cw.name, ini: cw.ini, body: cur.body, time: cur.time,
         meta: (cur.sent ? "From " : "To ") + (multi ? inboxAcctLabel(ca) : ca.address) + " · " + cur.time,
         hasAtt: !!(cur.atts && cur.atts.length), atts: (cur.atts || []).map(function (a) { return { name: a.name, size: a.size, open: function () { inboxOpenFile(api, a); } }; }),
-        canArchive: !cur.sent, hasPerson: !!cur.pid, noPerson: !cur.pid,
+        canArchive: !cur.sent && !st.localMailFolder, hasPerson: !!cur.pid, noPerson: !cur.pid,
         close: close,
         archive: function () { remove("arch", cur.subj + " archived"); },
         del: function () { remove("del", cur.subj + " deleted"); },
         canAsk: !cur.sent,
         who: function () { if (cur.pid) api.open("contacts", { open: cur.pid }); },
         reply: function () {
-          inboxMarkRead(api, cur.id);
+          if (!cur.sent) inboxMarkRead(api, cur.id);
           var to = cur.sent ? inboxRecips(cur.to) : [cur.pid || cur.email];
           api.set({ compose: { to: to, subject: /^re: /i.test(cur.subj) ? cur.subj : "Re: " + cur.subj, body: "", acct: cur.acct, replyTo: cur.sent ? null : cur.id }, composeLocal: true, toQ: "" });
         },

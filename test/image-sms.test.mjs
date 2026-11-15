@@ -197,3 +197,97 @@ test('direct SMS and the handoff go through the shared SMS review',async()=>{
   owner.view='home';owner.componentDidUpdate();owner.componentWillUnmount();
  }finally{globalThis.document=priorDocument;restoreWindow();delete globalThis.__smsReviewPort;rmSync(dir,{recursive:true,force:true});}
 });
+
+test('durable native drafts survive remount and settle a late receipt for the exact saved review',async()=>{
+ const {mkdtempSync,rmSync,writeFileSync}=await import('node:fs');
+ const {join,resolve}=await import('node:path');
+ const {tmpdir}=await import('node:os');
+ const {pathToFileURL}=await import('node:url');
+ const {build}=await import('esbuild');
+ const dir=mkdtempSync(join(tmpdir(),'sms-durable-')),priorDocument=globalThis.document,restoreWindow=installTestWindow();
+ const records=new Map(),sends=[],readbacks=[],inputs=[],pending=[];
+ const first='sms-draft:v1:thread:1',second='sms-draft:v1:thread:2';
+ let accepted=false;
+ const store={
+  async readRaw(slot){return records.get(slot)??null;},
+  async compareExchangeRaw(slot,expected,value){
+   if((records.get(slot)??null)!==expected)return {status:'conflict'};
+   if(value===null)records.delete(slot);else records.set(slot,value);
+   return {status:'saved'};
+  },
+ };
+ globalThis.document={hidden:false,addEventListener(){},removeEventListener(){},createElement(){return {files:[],value:'',click(){inputs.push(this);}};}};
+ globalThis.__smsDurablePort={
+  smsNoticePending:noSmsNotice,smsSendHistory:async()=>[],observeMessages:async()=>async()=>{},
+  status:async()=>({permissions:{sms:'granted',sendSms:'granted',phoneState:'granted'},subscriptions:[{id:3,slot:0,displayName:'SIM'}],mmsSend:true}),
+  threadPage:async()=>({rows:[{id:'thread:1',addresses:['+15555550100']},{id:'thread:2',addresses:['+15555550101']}],next:null}),
+  messagePage:async()=>({rows:[],next:null}),
+  async sendSms(review,id){
+   sends.push({review,id});
+   assert.equal(JSON.parse(records.get(first)).operation.id,id,'the operation is durable before transport');
+   return new Promise((_resolve,reject)=>pending.push(reject));
+  },
+  async smsSendResult(review,id){
+   readbacks.push({review,id});
+   if(!accepted)throw Error('native journal unavailable');
+   return {status:'sent',operationId:id};
+  },
+ };
+ try{
+  const contract=resolve('.eliza/client-features/packages/contracts/src/native-telephony.ts');
+  const result=await build({entryPoints:[resolve('apps/app/src/prototype/sms-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'native-fixture',setup(builder){
+   builder.onResolve({filter:/platform-plugins|aosp-image|aosp-telephony|native-adapter$/},args=>({path:args.path,namespace:'fixture'}));
+   builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({resolveDir:process.cwd(),contents:args.path.includes('aosp-telephony')?`export const MMS_MAX_ATTACHMENTS=5;export {reviewMms,reviewSms} from ${JSON.stringify(contract)};export const createAospTelephony=()=>globalThis.__smsDurablePort;export const registerTelephonyProfile=()=>{};`:args.path.includes('platform-plugins')?'export const registerPlugin=()=>globalThis.__smsDurablePort;':args.path.includes('aosp-image')?'export const aospImage=true;':'export const watchReturnToApp=()=>()=>{};'}));
+  }}]});
+  const filename=join(dir,'adapter.mjs');writeFileSync(filename,result.outputFiles[0].text);
+  const {installSmsAdapter}=await import(pathToFileURL(filename));
+  class Component{S(){return {screen:'home',view:'messages'};}setState(){}}
+  const views={messages:{}};installSmsAdapter(Component,views,store);
+  const model=()=>views.messages.render();
+  const settle=async()=>{await tick();await tick();};
+  const mount=async()=>{const owner=new Component();owner.componentDidMount();await settle();return owner;};
+  const open=async index=>{model().nativeThreads[index].open();await settle();};
+  const type=value=>model().nativeOnBody({target:{value}});
+  const flush=owner=>owner.flushMessagesForAppUpdate(()=>true);
+  let owner=await mount();
+  await open(0);type('first draft');await flush(owner);
+  model().nativeBack();await settle();await open(1);type('picture draft');
+  model().nativeAttach();inputs[0].files=[{type:'image/png',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];
+  await inputs[0].onchange();await flush(owner);
+  owner.componentWillUnmount();
+
+  owner=await mount();
+  assert.equal(model().nativeBody,'','mounting does not open a conversation');
+  await open(1);
+  assert.equal(model().nativeBody,'picture draft');
+  assert.deepEqual(model().pictures.map(picture=>picture.label),['picture-1.png']);
+  assert.equal(JSON.parse(records.get(second)).pictures[0].bytes,'AQID');
+  model().nativeBack();await settle();await open(0);
+  assert.equal(model().nativeBody,'first draft');
+  model().nativeSend();await settle();
+  assert.equal(sends.length,1);assert.equal(model().nativeBody,'first draft');
+  owner.componentWillUnmount();
+
+  owner=await mount();await open(0);
+  assert.equal(model().nativeBody,'first draft','an unsettled native call does not lock the next mount');
+  assert.deepEqual(readbacks.at(-1),sends[0]);
+  assert.equal(sends.length,1,'restoring an unknown send only checks the journal');
+  model().nativeSend();await settle();
+  assert.deepEqual(sends,[sends[0],sends[0]],'an explicit retry reuses the exact original operation');
+  owner.componentWillUnmount();
+
+  accepted=true;
+  owner=await mount();await open(0);await flush(owner);
+  assert.equal(sends.length,2,'a remount only reads the journal');
+  assert.deepEqual(readbacks.at(-1),sends[0],'the late receipt is bound to the original ID, recipient, body and SIM');
+  assert.equal(model().nativeBody,'');
+  assert.equal(records.has(first),false,'the accepted receipt removes only its exact draft');
+  assert.equal(records.has(second),true,'other conversations keep their drafts');
+  for(const reject of pending)reject(Error('native reply not returned'));
+  await settle();
+  assert.equal(model().nativeBody,'','stale completions leave the settled composer clear');
+  owner.componentWillUnmount();
+ }finally{
+  globalThis.document=priorDocument;restoreWindow();delete globalThis.__smsDurablePort;rmSync(dir,{recursive:true,force:true});
+ }
+});

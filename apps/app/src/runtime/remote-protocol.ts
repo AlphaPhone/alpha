@@ -280,7 +280,7 @@ export class RemoteProtocol {
    * key instead of running a second turn. Cancellation is never retried. */
   async send(id: string, text: string, options: { images?:Array<{data:string;mimeType:string;name:string}>;metadata?: Record<string, unknown>; clientMessageId?: string; channelType?:ChatChannel; signal?: AbortSignal } = {}): Promise<RemoteChatReply> {
     const path = `/api/conversations/${encodeURIComponent(string(id))}/messages`;
-    const body = { text: string(text), images:options.images, channelType: options.channelType ?? "DM", ...(options.metadata ? { metadata: options.metadata } : {}), ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}) };
+    const body = { text: text===''&&(options.channelType??'DM')==='DM'&&options.images?.length?text:string(text), images:options.images, channelType: options.channelType ?? "DM", ...(options.metadata ? { metadata: options.metadata } : {}), ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}) };
     const headers = conversationViewHeaders(options.metadata);
     let raw: unknown;
     try { raw = await this.authorized(path, "POST", body, options.signal, headers); }

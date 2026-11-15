@@ -43,7 +43,7 @@ async function load() {
   const result = await build({
     absWorkingDir: repositoryRoot, bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
     stdin: {resolveDir: repositoryRoot, loader: 'ts', contents: `
-      import {initializeCloudMaps, cloudMapsDiagnostics} from './apps/app/src/maps/cloud-maps.ts';
+      import {initializeCloudMaps, cloudMapsCoverage, cloudMapsDiagnostics} from './apps/app/src/maps/cloud-maps.ts';
       import {keepCloudMapsCoverage} from './apps/app/src/maps/agent-navigation.ts';
       import {mapsConnection, onMapsConnectionChange} from './apps/app/src/maps/runtime.ts';
       ${guard[0]}

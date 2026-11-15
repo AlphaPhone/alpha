@@ -98,6 +98,7 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-notes/src/workspace.ts',
 
   'packages/ui/src/api/transport.ts',
+  'packages/core/src/chat-upload-limits.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
   'plugins/plugin-native-system/src/client/shade.ts',
   'plugins/plugin-native-system/src/sense.ts',
