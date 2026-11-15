@@ -5,23 +5,24 @@ import {inputFiles} from '../browser/file-picker';
 import type {NativeResult} from '../daily';
 import {library,libraryAvailable,type SavedPhoto} from './camera-adapter';
 import {compareFilesEntries} from './files-index';
+import {intakeAttachmentFiles} from '../../../../.eliza/client-features/packages/ui/src/utils/image-attachment.ts';
 import type {FilesStoragePort} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
 import {formatSize,parentOf,type StorageEntry,type StorageVolume} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts';
 import {
   CHAT_IMAGE_MIME_TYPE_SET,CHAT_UPLOAD_MIME_TYPES,MAX_CHAT_ATTACHMENT_NAME_LENGTH,
-  MAX_CHAT_IMAGE_RAW_BYTES,MAX_CHAT_MEDIA_RAW_BYTES,
+  MAX_CHAT_IMAGE_INTAKE_BYTES,MAX_CHAT_MEDIA_RAW_BYTES,
 } from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
 
 const uploadTypes=new Set<string>(CHAT_UPLOAD_MIME_TYPES.filter(type=>!/^(audio|video)\//.test(type)));
 const uploadAccept=[...uploadTypes].join(',');
-const fileLimit=(mime:string)=>CHAT_IMAGE_MIME_TYPE_SET.has(mime)?MAX_CHAT_IMAGE_RAW_BYTES:MAX_CHAT_MEDIA_RAW_BYTES;
-export async function encodeChatAttachment(file:File):Promise<{data:string;mimeType:string;name:string}> {
-  if(!accepts(file.name,file.type)||!file.size||file.size>fileLimit(file.type))
+const fileLimit=(mime:string)=>CHAT_IMAGE_MIME_TYPE_SET.has(mime)?MAX_CHAT_IMAGE_INTAKE_BYTES:MAX_CHAT_MEDIA_RAW_BYTES;
+export async function encodeChatAttachments(files:File[]):Promise<Array<{data:string;mimeType:string;name:string}>> {
+  if(files.some(file=>!accepts(file.name,file.type)||!file.size||file.size>fileLimit(file.type)))
     throw Error('Choose a smaller supported photo or document.');
-  const bytes=new Uint8Array(await file.arrayBuffer());
-  let raw='';
-  for(let offset=0;offset<bytes.length;offset+=16384)raw+=String.fromCharCode(...bytes.subarray(offset,offset+16384));
-  return {data:btoa(raw),mimeType:file.type,name:file.name};
+  const result=await intakeAttachmentFiles(files);
+  if(result.droppedTooLarge.length||result.droppedOverCount.length||result.attachments.length!==files.length)
+    throw Error('Choose fewer or smaller files.');
+  return result.attachments.map(({data,mimeType,name})=>({data,mimeType,name}));
 }
 
 type AttachmentBytes={name:string;mimeType:string;dataBase64:string};

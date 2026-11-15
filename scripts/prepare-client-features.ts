@@ -98,6 +98,8 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-notes/src/workspace.ts',
 
   'packages/ui/src/api/transport.ts',
+  'packages/ui/src/utils/image-attachment.ts',
+  'packages/ui/src/utils/chat-attachment-types.ts',
   'packages/core/src/chat-upload-limits.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
   'plugins/plugin-native-system/src/client/shade.ts',
@@ -400,7 +402,7 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     project(name, content.replace(specifier, '} from "../../../../packages/contracts/src/calendar-linked-sync.ts";'));
   }
 
-  project('alpha-voice-core-protocol.ts','export {ElizaError} from "./packages/core/src/errors";\nexport {redactTrailingArgs} from "./packages/core/src/security/log-redaction";\nexport {parseViewInteractionClientId, AGENT_SURFACE_CAPABILITY_IDS} from "./packages/core/src/views/view-interact-protocol";\nexport {findViewActionHandoff, type ViewActionHandoff} from "./packages/core/src/views/view-action-handoff";\nexport type {PermissionState} from "./packages/core/src/types/permissions";\n');
+  project('alpha-voice-core-protocol.ts','export * from "./packages/core/src/chat-upload-limits";\nexport {ElizaError} from "./packages/core/src/errors";\nexport {redactTrailingArgs} from "./packages/core/src/security/log-redaction";\nexport {parseViewInteractionClientId, AGENT_SURFACE_CAPABILITY_IDS} from "./packages/core/src/views/view-interact-protocol";\nexport {findViewActionHandoff, type ViewActionHandoff} from "./packages/core/src/views/view-action-handoff";\nexport type {PermissionState} from "./packages/core/src/types/permissions";\n');
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {

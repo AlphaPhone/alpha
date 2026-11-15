@@ -663,9 +663,10 @@ Assistant and external compose sends still require confirmation.
 The pin `a81d7059045f9b96b8c85ffa79b731d3ba574159` keeps retrying unexpected
 Android resident crashes with capped backoff and retires stale startup
 probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
-The current pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
+The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
 Shell from browser-based Google sign-in and checks for an eligible browser
 when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
+The candidate pin `aee57131613d6758dbe007e53cdb791f109bdb1c` adds the reviewed MIME preflight, private-action restoration and native-media repairs. Files adds its Core workspace binding; the engine, voice assets and UUID inputs are unchanged. Full corrected-source model qualification is in progress. New native receipts and signed retained-data qualification remain required.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
