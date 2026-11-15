@@ -62,7 +62,7 @@ async function android(page: Page, options: AndroidOptions) {
         if (method === 'clearProvider') { if (w.holdStop) await new Promise<void>(resolve => { w.releaseStop = resolve; }); return { configured: false }; }
         if (method === 'providerStatus') return { provider: 'elizacloud', configured: false };
         // A packaged runtime whose start fails, or that answers but is not running yet.
-        if (method === 'start' && options.start === 'reject') throw Error('Local agent failed to start.');
+        if (method === 'start' && options.start === 'reject') throw Object.assign(Error('Local agent failed to start.'), {code:'start-failed'});
         if (method === 'request') {
           const body = input.path === '/api/auth/me' ? { identity: { id, kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } }
             : input.path === '/api/agents' ? { agents: [{ id, name: 'Alpha', status: options.start === 'starting' ? 'starting' : 'running' }] }
@@ -180,44 +180,34 @@ test('production Android without a packaged agent says so and does not advertise
   await android(page, { cloudCredential: true, balance: 5, packaged: false });
   await page.goto('/');
   await completeAccessSetup(page);
-  // A developer build without the runtime opens no gate; Your agent says so, with Retry, never an offline mode.
+  // A developer build without the packaged runtime has no startup to retry.
   await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
   const dialog = await openYourAgent(page);
   const alert = dialog.getByText('No on-device agent',{exact:true});
   await expect(alert).toHaveText('No on-device agent');
   await expect(alert).not.toContainText(/remote agent|pair/i);
-  await expect(dialog.getByText('Off', { exact: true }).last()).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Use local apps without AI', exact: true })).toHaveCount(0);
   expect((await nativeCalls(page)).filter(call => call.plugin === 'Agent').map(call => call.method)).not.toContain('start');
 });
 
-for (const [start, text] of [['reject', 'Local agent failed to start.'], ['starting', 'The local agent is still starting. Try again when it is ready.']] as const) {
-  test(`production Android with credits whose resident ${start === 'reject' ? 'fails to start' : 'is still starting'} recovers with a retry, never "no agent"`, async ({ page }) => {
+for (const start of ['reject','starting'] as const) {
+  test(`production Android automatically reattaches when the resident reports ${start}`, async ({ page }) => {
     const foreign = await fenceNetwork(page);
+    await page.clock.install();
     await android(page, { cloudCredential: true, balance: 5, start });
     await page.goto('/');
     await completeAccessSetup(page);
-    await expect.poll(async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent').map(call => call.method), {timeout:30_000}).toContain('start');
-    // P-43: a failed start opens no gate; Status shows Agent Off with Retry and the failure.
     await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-    const dialog = await openYourAgent(page);
-    await expect(dialog.getByText('Off', { exact: true }).last()).toBeVisible();
-    await expect(dialog.getByText(text,{exact:true})).toContainText(text);
-    await expect(dialog.getByText(text,{exact:true})).not.toContainText(/pair/i);
-    await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled();
-    await expect(dialog.getByRole('button', { name: 'Use local apps without AI', exact: true })).toHaveCount(0);
-    const calls = await nativeCalls(page);
-    // The resident is the only selection, and no conversation was created or read.
+    const activity = await openYourAgent(page);
+    await expect(activity.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+    await expect(activity.getByText('Loads when your agent is ready', { exact: true })).toBeVisible();
     expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), SELECTION)).toEqual({ kind: 'resident' });
-    expect(calls.filter(call => call.path?.startsWith('/api/conversations'))).toEqual([]);
-    // Retry starts once more, on the owner's tap; it fails the same way.
-    const starts = calls.filter(call => call.plugin === 'Agent' && call.method === 'start').length;
-    await dialog.getByRole('button', { name: 'Retry', exact: true }).click();
-    // P-43 may run one scheduled recovery while this explicit retry settles.
-    await expect.poll(async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length).toBeGreaterThan(starts);
-    expect((await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length).toBeLessThanOrEqual(starts + 2);
-    await expect(dialog.getByText(text,{exact:true})).toContainText(text);
+    const starts = async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length;
+    await expect.poll(starts).toBeGreaterThanOrEqual(1);
+    const previous=await starts();
+    await page.clock.fastForward(60_050);
+    await expect.poll(starts).toBeGreaterThan(previous);
     expect((await nativeCalls(page)).filter(call => call.path?.startsWith('/api/conversations'))).toEqual([]);
     expect(foreign).toEqual([]);
   });

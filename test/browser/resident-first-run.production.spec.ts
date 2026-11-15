@@ -172,7 +172,7 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   await expect(page.getByRole('button', { name: 'Message actions: Resident reply 1', exact: true })).toHaveCount(1);
   expect(await harness(page, f => f.streams)).toBe(1);
   const settings=await openYourAgent(page);
-  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toBeVisible();
+  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toHaveCount(0);
   await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();
   expect(await page.locator('body').innerText()).not.toContain(account.token);
   await expectNoDevelopmentSurface(page);

@@ -3,12 +3,13 @@ import {subscribeNativeViewEvents,type NativeViewEventPort} from "./native-view-
 import {browserCloudResidentEnabled,browserResidentCall,browserProviderCall} from './browser-cloud-resident';
 import type {AppRecordMethod} from './app-record-route-policy';
 import {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
-import {parseRecoveryReview,parseRecoveryArchive} from './resident-recovery';
+import {isResidentRetryable,parseRecoveryReview,parseRecoveryArchive} from './resident-recovery';
 import {anyAbortSignal,runProviderConfiguration} from './abort-signal';
 import {developmentCloudVoiceEnabled} from './development-cloud-voice';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import {ownerRouteAllowed, ownerRouteGroup} from './owner-route-policy.ts';
 import { registerPlugin } from '../platform-plugins';
+import { privateLocalPreviewEnabled } from '../build-flags';
 import { Capacitor } from '@capacitor/core';
 import type { VerifiedSession, ChatChannel } from './alpha-client';
 import { conversationViewHeaders, conversationRoomId, messagePageQuery, turnAbortOutcome, turnAbortPath, type MessagePage, type RemoteChatReply, type RemoteConversation, type TurnAbortOutcome } from './remote-protocol';
@@ -52,7 +53,7 @@ export interface LocalAgentBridge {
   clearProvider?(input?:{onlyIfPresent?:true;requestId?:string}):Promise<{configured?:unknown}>;
   clearProviderIfCurrent?(input:{bindingGuard:string}):Promise<{outcome?:unknown}>;
   /** Read-only native query; see residentAttachable. */
-  residentAttachment?(input:{credentialId?:string}):Promise<{attachable?:unknown;reason?:unknown;bindingGuard?:unknown}>;
+  residentAttachment?(input:{credentialId?:string}):Promise<{attachable?:unknown;bindingRetained?:unknown;reason?:unknown;bindingGuard?:unknown}>;
   configureCloudProvider?(input:{credentialId:string;model:string}):Promise<unknown>;
   /** Owner switches enforced by the native Google host before agent writes. */
   setGoogleAgentAccess?(input:{gmailChanges:boolean;calendarEdits:boolean}):Promise<void>;
@@ -110,7 +111,15 @@ const browserBridge: LocalAgentBridge | null = developmentBridgeAllowed ? {
       method:'POST', headers:{'Content-Type':'application/json','X-Alpha-Local-Agent':'1'},
       body:JSON.stringify(input), signal:signal ? anyAbortSignal([signal,AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs), redirect:'error',
     });
-    if (!response.ok) throw Object.assign(new Error('Local agent development bridge unavailable. Check the development server.'),{status:response.status});
+    if (!response.ok) {
+      let message='Local agent development bridge unavailable. Check the development server.';
+      if (privateLocalPreviewEnabled&&response.status===409) {
+        const refusal=await response.json().catch(()=>null);
+        if (refusal?.code==='local-owner-unconfirmed')
+          message='Alpha couldn’t confirm the local owner. Restart the local agent, then try again.';
+      }
+      throw Object.assign(new Error(message),{status:response.status});
+    }
     return response.json();
   },
   async speechAudio(input,signal){
@@ -280,7 +289,7 @@ export class LocalAgentProtocol {
     signal.throwIfAborted();
     const generation=this.generation,requestId=crypto.randomUUID();
     let cancel:()=>void=()=>{};
-    let dispatched=false,cancellationSent=false,attached=false;
+    let dispatched=false,cancellationSent=false,startupResolved=false,attached=false;
     const cancelOwned=()=>{if(dispatched&&!cancellationSent){cancellationSent=true;void this.bridge.cancelStart?.({requestId}).catch(()=>{});}};
     const cancelled=new Promise<never>((_,reject)=>{cancel=()=>{cancelOwned();reject(signal.reason||new DOMException('Cancelled','AbortError'));};});
     signal.addEventListener('abort',cancel,{once:true});
@@ -289,6 +298,7 @@ export class LocalAgentProtocol {
     const started=this.bridge.start({requestId});
     if(signal.aborted)cancel();
     const startup=await Promise.race([started,cancelled]);
+    startupResolved=true;
     // Native reports when it attached this surface to the already admitted running resident
     // instead of starting it: no epoch change, no new enrollment, other surfaces' work untouched.
     attached=Boolean(startup)&&typeof startup==='object'&&(startup as {attached?:unknown}).attached===true;
@@ -303,17 +313,22 @@ export class LocalAgentProtocol {
     signal.throwIfAborted();
     if(!Array.isArray(result.agents)||result.agents.length!==1)throw new Error('The local runtime must expose exactly one agent.');
     const agent=record(result.agents[0]);
-    if(agent.status!=='running')throw Error('The local agent is still starting. Try again when it is ready.');
+    if (agent.status !== 'running')
+      throw Object.assign(Error('The local agent is still starting.'), {code: 'LOCAL_AGENT_NOT_READY'});
     if(generation!==this.generation)throw Error('Local agent connection changed.');
     this.session={ownerId:identifier(identity.id),agentId:identifier(agent.id),sessionId:crypto.randomUUID(),origin:this.origin};
     attachDistrusted=false;
     return {session:this.session,name:typeof agent.name==='string'?agent.name:'Local agent',attached};
     }catch(error){
       // The runtime answered the attach but not as a usable owner session. A cancelled or
-      // superseded connect says nothing about the runtime and changes nothing; neither does a
-      // lifecycle change made by another surface, which native reports on the next attach query.
-      if(attached&&!signal.aborted&&generation===this.generation&&(error as {code?:unknown}|null)?.code!=='LOCAL_AGENT_EPOCH_CHANGED')attachDistrusted=true;
-      cancelOwned();throw error;
+      // superseded connect says nothing about the runtime. Leave supervised process recovery
+      // alone when the runtime is still starting or native reports a replaced process.
+      if(!isResidentRetryable(error)){
+        if(attached&&!signal.aborted&&generation===this.generation)attachDistrusted=true;
+        // Native already settled rejected starts. Cancelling them would leave a pre-start tombstone.
+        if(startupResolved)cancelOwned();
+      }
+      throw error;
     }
     finally{signal.removeEventListener('abort',cancel);}
   }
@@ -671,17 +686,14 @@ export async function clearLocalProvider(onlyIfPresent=false,signal?:AbortSignal
   return status;
 }
 
-/** True only when native confirms an admitted, running, enrolled resident whose stored provider
- * admission is this Cloud credential and is the one the running process launched with. Read-only:
- * it never starts, stops, pairs or rebinds. Any error or doubt reports false, which keeps the
- * ordinary stop → bind → start path; so does an earlier attach by this surface that failed its
- * owner-session verification. */
-async function residentAttachmentStatus(credentialId:string,bridge:Pick<LocalAgentBridge,'residentAttachment'>=native,nativePlatform:boolean=Capacitor.isNativePlatform()):Promise<{attachable:boolean;bindingGuard?:string}> {
+/** Read-only native admission for this Cloud credential. A matching provider can stay
+ * bound while the watchdog starts the process or a surface completes owner enrollment. */
+async function residentAttachmentStatus(credentialId:string,bridge:Pick<LocalAgentBridge,'residentAttachment'>=native,nativePlatform:boolean=Capacitor.isNativePlatform()):Promise<{attachable:boolean;bindingRetained?:boolean;bindingGuard?:string}> {
   if(attachDistrusted||!nativePlatform&&!browserCloudResidentEnabled||typeof credentialId!=='string'||!credentialId)return {attachable:false};
   try{
     const result=browserCloudResidentEnabled?await browserResidentCall('residentStatus',credentialId):await bridge.residentAttachment?.({credentialId});
     const guard=result&&typeof result.bindingGuard==='string'&&/^[a-f0-9]{64}$/.test(result.bindingGuard)?result.bindingGuard:undefined;
-    return {attachable:result?.attachable===true,...(guard?{bindingGuard:guard}:{})};
+    return {attachable:result?.attachable===true,...(guard?{bindingGuard:guard,bindingRetained:result?.bindingRetained===true}:{})};
   }catch{return {attachable:false};}
 }
 export async function residentAttachable(credentialId:string,bridge:Pick<LocalAgentBridge,'residentAttachment'>=native,nativePlatform:boolean=Capacitor.isNativePlatform()):Promise<boolean> {
@@ -690,7 +702,7 @@ export async function residentAttachable(credentialId:string,bridge:Pick<LocalAg
 /** A returned guard identifies this call's exact attachment or newly applied binding. */
 export async function bindResidentCloudProvider(credentialId:string,ports?:{attachable:(credentialId:string)=>Promise<boolean>;configure:(credentialId:string)=>Promise<void|string>}):Promise<string|undefined> {
   const attachment=ports?{attachable:await ports.attachable(credentialId)}:await residentAttachmentStatus(credentialId);
-  if(attachment.attachable)return 'bindingGuard' in attachment?attachment.bindingGuard:undefined;
+  if(attachment.attachable||'bindingRetained' in attachment&&attachment.bindingRetained)return 'bindingGuard' in attachment?attachment.bindingGuard:undefined;
   const bindingGuard=await (ports?.configure??configureLocalCloudProvider)(credentialId);
   return typeof bindingGuard==='string'?bindingGuard:undefined;
 }

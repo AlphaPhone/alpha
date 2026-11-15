@@ -439,7 +439,7 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
   }
   await expect(dialog).toBeVisible();
   if(mode==='unpackaged'){
-   // A developer build without the runtime says so and offers Retry; it never offers an offline mode.
+   // A developer build without the runtime still allows sign-in.
    await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toBeVisible();
    await expect(dialog.getByRole('status').filter({hasText:'No on-device agent'})).toHaveText('No on-device agent');
   }else if(needsPlan)await expect(dialog.getByRole('region',{name:'Balance and membership',exact:true})).toBeVisible();
@@ -518,7 +518,7 @@ test('resident always present (P-43): a kept local-apps choice and a saved sign-
  await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
  // Owner, 2026-11-03: Cloud being unreachable shows no banner or status text, and asks for no sign-in.
  const settings=await openYourAgent(page);
- await expect(settings).toContainText('Running');
+ await expect(settings.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
  await expect(settings).not.toContainText('Sign in required');
  await expect(page.getByRole('region',{name:'Eliza Cloud plan notice',exact:true})).toHaveCount(0);
  await expect(page.getByText(/Cloud cannot be reached/)).toHaveCount(0);

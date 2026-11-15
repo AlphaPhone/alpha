@@ -21,6 +21,7 @@ async function responseDrained(res: ServerResponse,signal: AbortSignal): Promise
 export const LOCAL_AGENT_BRIDGE_PATH='/__alpha-local-agent';
 export const LOCAL_RENDERER_WS_PATH='/__alpha-local-renderer/ws';
 export const LOCAL_VOICE_WS_PATH='/__alpha-local-voice/ws';
+class LocalOwnerUnconfirmed extends Error {}
 const LIMIT=2*1024*1024;
 const AUDIO_ENVELOPE_LIMIT=3*1024*1024;
 const ASR_PATH='/api/asr/libelizainference';
@@ -89,28 +90,44 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
   const request=options.request||fetch;
   const tickets=new Map<string,{root:string;ownerId:string;expiresAt:number;claimed:boolean;clientId?:string;close?:()=>void}>();
   let pairing:Promise<{root:string;token:string;ownerId:string;expiresAt:number}>|undefined;
+  let unconfirmedOwnerInstance:string|undefined;
   async function session(root:string) {
-    if(pairing){const saved=await pairing;if(saved.root===root&&saved.expiresAt>Date.now()+30000)return saved;pairing=undefined;}
-    pairing=(async()=>{
+    while(pairing){
+      const previous=pairing,saved=await previous;
+      if(saved.root===root&&saved.expiresAt>Date.now()+30000)return {credential:saved,enrollment:previous};
+      if(pairing===previous)pairing=undefined;
+    }
+    const current=(async()=>{
       const headers={Authorization:`Bearer ${root}`,'Content-Type':'application/json'};
       const json=async(path:string,body?:unknown)=>{
         const result=await request(origin.origin+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});
         if(!result.ok)throw Error('Local owner enrollment failed');return result.json();
       };
       const status=await json('/api/auth/status');
+      const instanceId=status.instanceId;
+      if(typeof instanceId!=='string'||!instanceId)throw Error('Invalid local runtime instance');
+      if(unconfirmedOwnerInstance===instanceId)throw new LocalOwnerUnconfirmed();
       const code=await json('/api/auth/pair-code');
-      const paired=await json('/api/auth/pair',{code:code.code,instanceId:status.instanceId});
-      if(paired.access!=='owner'||typeof paired.token!=='string'||paired.instanceId!==status.instanceId)throw Error('Invalid local owner enrollment');
-      const verified=await request(origin.origin+'/api/auth/me',{headers:{Authorization:`Bearer ${paired.token}`},redirect:'error',signal:AbortSignal.timeout(15000)});
-      if(!verified.ok)throw Error('Local owner verification failed');
-      const who=await verified.json();
-      if(who.identity?.id!==paired.identityId||who.access?.role!=='OWNER'||who.session?.id!==paired.token||!Number.isFinite(who.session?.expiresAt)||who.session.expiresAt<=Date.now())throw Error('Invalid local owner identity');
-      return {root,token:paired.token,ownerId:paired.identityId,expiresAt:who.session.expiresAt};
+      // A lost pairing response can follow a committed owner session. The profile's
+      // bearer survives a restart, so only a fresh runtime instance admits a new POST.
+      unconfirmedOwnerInstance=instanceId;
+      try{
+        const paired=await json('/api/auth/pair',{code:code.code,instanceId});
+        if(paired.access!=='owner'||typeof paired.token!=='string'||paired.instanceId!==instanceId)throw Error('Invalid local owner enrollment');
+        const verified=await request(origin.origin+'/api/auth/me',{headers:{Authorization:`Bearer ${paired.token}`},redirect:'error',signal:AbortSignal.timeout(15000)});
+        if(!verified.ok)throw Error('Local owner verification failed');
+        const who=await verified.json();
+        if(who.identity?.id!==paired.identityId||who.access?.role!=='OWNER'||who.session?.id!==paired.token||!Number.isFinite(who.session?.expiresAt)||who.session.expiresAt<=Date.now())throw Error('Invalid local owner identity');
+        unconfirmedOwnerInstance=undefined;
+        return {root,token:paired.token,ownerId:paired.identityId,expiresAt:who.session.expiresAt};
+      }catch{throw new LocalOwnerUnconfirmed();}
     })();
-    try{return await pairing;}catch(error){pairing=undefined;throw error;}
+    pairing=current;
+    try{return {credential:await current,enrollment:current};}
+    catch(error){if(pairing===current)pairing=undefined;throw error;}
   }
   const handler=async(req:IncomingMessage,res:ServerResponse)=>{
-    const fail=(status:number,message:string)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:message}));};
+    const fail=(status:number,message:string,code?:string)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:message,...(code?{code}:{})}));};
     const host=req.headers.host;
     if(!host||!/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)||req.headers.origin!==`http://${host}`||
        req.headers['x-alpha-local-agent']!=='1'||req.method!=='POST'||req.headers['content-type']!=='application/json'){
@@ -179,7 +196,7 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       const token=readFileSync(options.tokenFile,'utf8').trim();
       if(!/^[a-f0-9]{64}$/.test(token))throw new Error('Invalid runtime credential');
       for(const [id,ticket]of tickets)if(ticket.root!==token||ticket.expiresAt<=Date.now()){ticket.close?.();tickets.delete(id);}
-      const credential=await session(token);
+      const {credential,enrollment}=await session(token);
       if(input.ownerId!==undefined&&input.ownerId!==credential.ownerId){fail(409,'Local owner changed; reconnect before continuing');return;}
       if(rendererId){if(tickets.size>=32){fail(429,'Voice capacity reached');return;}const id=randomUUID(),expiresAt=Math.min(credential.expiresAt,Date.now()+120000);tickets.set(id,{root:token,ownerId:credential.ownerId,expiresAt,claimed:false,clientId:rendererId});res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({status:200,body:JSON.stringify({wsUrl:`ws://${host}${LOCAL_RENDERER_WS_PATH}?sessionId=${id}`,expiresAt})}));return;}
       const headers:Record<string,string>={Accept:input.stream===true?'text/event-stream':'application/json','Content-Type':'application/json',Authorization:`Bearer ${credential.token}`};
@@ -194,13 +211,14 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       // stays under it until its last chunk is sent.
       const upstream=AbortSignal.any([abort.signal,AbortSignal.timeout(voice?10000:120000)]);
       const result=await request(origin.origin+input.path,{method:input.method,headers,body:audio??input.body,redirect:'error',signal:upstream});
+      // Forget only the enrollment that sent this request. Never replay it.
+      if(result.status===401&&pairing===enrollment)pairing=undefined;
       if(directAsr&&!result.ok){await result.body?.cancel();res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({status:result.status,body:JSON.stringify({code:'direct_transcription_unavailable'})}));return;}
       if(cloudSpeech&&!result.ok){await result.body?.cancel();res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({status:result.status,body:JSON.stringify({code:'cloud_voice_unavailable'})}));return;}
       if(cloudSpeech&&(result.headers.get('x-eliza-speech-provider')!=='cartesia'||result.headers.get('x-eliza-speech-route')!=='cloud'||(cloudTts&&result.headers.get('content-type')?.split(';')[0]!=='audio/mpeg'))){await result.body?.cancel();fail(502,'Cloud speech provider was not verified');return;}
       if(directTts&&result.ok&&(result.headers.get('x-eliza-speech-provider')!=='cartesia'||result.headers.get('x-eliza-speech-route')!=='direct')){await result.body?.cancel();fail(502,'Direct speech provider was not verified');return;}
       if(ttsAudio&&!cloudTts&&result.ok&&(result.headers.get('content-type')!=='audio/wav'||result.headers.get('x-request-id')!==input.requestId||result.headers.get('x-eliza-speech-provider')!==(directTts?'cartesia':'libelizainference-paradee'))){await result.body?.cancel();fail(502,'Invalid local speech response');return;}
       if(input.stream===true){
-        if(result.status===401)pairing=undefined;
         if(!result.ok||!result.body||!result.headers.get('content-type')?.startsWith('text/event-stream')){
           await result.body?.cancel();fail(result.ok?502:result.status,'Local agent stream unavailable. No automatic retry was made.');return;
         }
@@ -253,12 +271,17 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       if(voice){try{if(readFileSync(options.tokenFile,'utf8').trim()!==token||credential.expiresAt<=Date.now())throw Error('Voice owner changed');const projected=voiceControlResponse(voice,input,result.status,body,origin,options.cloudRealtimeEnabled===true,options.selectableProvider===true);
         if(result.ok&&voice==='mint'){for(const [id,ticket]of tickets)if(ticket.expiresAt<=Date.now()){ticket.close?.();tickets.delete(id);}if(tickets.size>=32)throw Error('Voice capacity reached');tickets.set(projected.sessionId,{root:token,ownerId:credential.ownerId,expiresAt:projected.expiresAt,claimed:false});projected.wsUrl=`ws://${host}${LOCAL_VOICE_WS_PATH}?sessionId=${projected.sessionId}`;}
         if(result.ok&&voice==='revoke'){const id=input.path.split('/')[5];tickets.get(id)?.close?.();tickets.delete(id);}
-        body=JSON.stringify(projected);}catch{if(result.status===401)pairing=undefined;throw Error('Invalid development voice response');}}
+        body=JSON.stringify(projected);}catch{throw Error('Invalid development voice response');}}
       if(input.path==='/api/auth/me'&&result.status===200){const who=JSON.parse(body);if(who.session)who.session.id='host-owned-session';body=JSON.stringify(who);}
-      if(result.status===401)pairing=undefined; // Never replay the failed request.
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
       res.end(JSON.stringify({status:result.status,body,...(timings.length?{timings}:{})}));
-    }catch{if(!abort.signal.aborted){if(!res.headersSent)fail(503,'Local runtime unavailable. Check the private host log.');else res.destroy();}}
+    }catch(error){
+      if(!abort.signal.aborted){
+        if(res.headersSent)res.destroy();
+        else if(error instanceof LocalOwnerUnconfirmed)fail(409,'Local owner enrollment could not be confirmed.','local-owner-unconfirmed');
+        else fail(503,'Local runtime unavailable. Check the private host log.');
+      }
+    }
     finally{res.off('close',onClose);}
   };
   const upgrade=async(req:IncomingMessage,socket:Duplex,head:Buffer)=>{
@@ -269,7 +292,7 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       if((!realtimeEnabled&&!ticket?.clientId)||!host||!/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)||req.headers.origin!==`http://${host}`||req.method!=='GET'||url.pathname!==(ticket?.clientId?LOCAL_RENDERER_WS_PATH:LOCAL_VOICE_WS_PATH)||url.search!==`?sessionId=${id}`||!id||!VOICE_UUID.test(id)||!ticket||ticket.claimed||ticket.expiresAt<=Date.now()||req.headers.upgrade?.toLowerCase()!=='websocket'||req.headers['sec-websocket-version']!=='13'||typeof req.headers['sec-websocket-key']!=='string'||!/^[A-Za-z0-9+/]{22}==$/.test(req.headers['sec-websocket-key'])){reject();return true;}
       const stat=statSync(options.tokenFile);if(!stat.isFile()||(stat.mode&0o077)!==0)throw Error('Private runtime credential required');
       const currentRoot=readFileSync(options.tokenFile,'utf8').trim();for(const [key,entry]of tickets)if(entry.root!==currentRoot||entry.expiresAt<=Date.now()){entry.close?.();tickets.delete(key);}
-      const credential=await session(currentRoot);
+      const {credential}=await session(currentRoot);
       if(ticket.root!==currentRoot||ticket.ownerId!==credential.ownerId||ticket.expiresAt<=Date.now()||tickets.get(id)!==ticket||ticket.claimed){reject();return true;}
       ticket.claimed=true;
       const request=httpRequest(new URL(ticket.clientId?`/ws?clientId=${ticket.clientId}`:`${VOICE_PATH}/ws?sessionId=${id}`,origin),{headers:{...(ticket.clientId?{Authorization:`Bearer ${credential.token}`} :{}),Host:origin.host,Origin:origin.origin,Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Version':'13','Sec-WebSocket-Key':req.headers['sec-websocket-key']}});

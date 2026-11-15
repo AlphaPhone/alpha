@@ -22,7 +22,7 @@ test.describe('mandatory production sign-in page',()=>{
   await expect(gate.getByRole('button',{name:'Send code',exact:true})).toBeEnabled();
   expect(await harness(page,f=>f.slots['cloud:production']??null)).toBeNull();
  });
- test('successful sign-in removes the gate; agent controls open as a Settings page',async({page})=>{const{gate,foreign}=await start(page);await enterNativeEmailCode(page);await expect(gate).toHaveCount(0,{timeout:30000});await completeAccessSetup(page);await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));const settings=await openYourAgent(page);await expect(settings.getByRole('heading',{name:'Status',exact:true})).toBeVisible();await expect(page.getByRole('dialog',{name:'Your agent',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Reconnect agent',exact:true})).toBeVisible();expect(await harness(page,f=>f.streams)).toBe(0);expect(foreign).toEqual([]);});
+ test('successful sign-in removes the gate; agent controls open as a Settings page',async({page})=>{const{gate,foreign}=await start(page);await enterNativeEmailCode(page);await expect(gate).toHaveCount(0,{timeout:30000});await completeAccessSetup(page);await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));const settings=await openYourAgent(page);await expect(settings.getByRole('heading',{name:'Agent activity',exact:true})).toBeVisible();await expect(page.getByRole('dialog',{name:'Your agent',exact:true})).toHaveCount(0);await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();expect(await harness(page,f=>f.streams)).toBe(0);expect(foreign).toEqual([]);});
 });
 
 // UI progress only: this feature fixture does not manufacture OS/provider grants.

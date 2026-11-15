@@ -122,7 +122,7 @@
     ],
     "notification": {
       "smallIcon": "notification_icon",
-      "primaryAction": "stop",
+      "primaryAction": "none",
       "color": "0xff0000ff",
       "channelLabel": "Alpha",
       "strings": {
