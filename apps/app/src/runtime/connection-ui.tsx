@@ -48,7 +48,7 @@ import { PersonalProtocolError, type CloudPersonalProtocol, type PersonalView, t
 import { holdPhoneInert } from './modal-inert';
 import { pauseHostedBackground } from './hosted-background';
 import {developmentDeviceStore,developmentActionJournal} from './local-agent-storage';
-import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,removeLocalProviderKey,revealLocalProviderKey,type LocalProviderKey,type LocalProviderReveal,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
+import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentRefusal, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,removeLocalProviderKey,revealLocalProviderKey,type LocalProviderKey,type LocalProviderReveal,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
 import { presentDeviceRecordOperation } from './device-record-presentation';
 import {checkinDisplayText, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
 import type { MessagePage } from './remote-protocol';
@@ -1504,7 +1504,10 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
   const client = new LocalAgentProtocol();
   const startEpoch = epoch;
   const { session, name } = await client.connect(signal).catch(error => {
-    if (isResidentRetryable(error) && !signal.aborted && epoch === startEpoch) {
+    // The private preview can open before its supervised resident can answer the bootstrap reads.
+    const privateHostUnavailable = privateLocalPreviewEnabled && !isAndroid &&
+      error instanceof Error && 'status' in error && error.status === 503 && !localAgentRefusal(error);
+    if ((isResidentRetryable(error) || privateHostUnavailable) && !signal.aborted && epoch === startEpoch) {
       residentAutoRetryEpoch = epoch;
       residentStartFailure = 'Agent restarting';
       throw new Error(residentStartFailure, {cause: error});
