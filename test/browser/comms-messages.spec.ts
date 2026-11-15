@@ -8,7 +8,7 @@ import {setTextScale} from './accessibility-states';
 const personField = '[data-alpha-bar-field="person"]', filterField = '[data-alpha-bar-field="filter"]', alphaField = '[data-alpha-bar-field="alpha"]';
 const bubble = '[data-alpha-draft-bubble]';
 const barSend = (page: Page) => page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Send', exact: true});
-const openAlpha = (page: Page) => page.locator('[data-alpha-bar-left]').click();
+const openAlpha = (page: Page) => page.getByRole('button', {name: 'Open Alpha', exact: true}).click();
 const inputs = (page: Page, method: string) => page.evaluate(method => ((window as any).telephonyInputs as [string, any][]).filter(row => row[0] === method).map(row => row[1]), method);
 const sms = (page: Page, call: string, ...args: unknown[]) => page.evaluate(async ([call, args]) => ((await import('/src/prototype/sms-adapter.ts' as string)) as any)[call as string](...(args as unknown[])), [call, args] as const);
 /** Requests the page makes while `act` runs, other than the development server's own modules. */
@@ -126,9 +126,9 @@ test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA
     await page.locator(filterField).fill('find texts about the prototype');
     await page.waitForTimeout(400);
     await expect(page.getByRole('button', {name: /^(Unread, )?Jordan Park$/}), 'a sentence is a question, not a filter').toBeVisible();
-    await expect(page.getByText('find texts about the prototype', {exact: true}), 'nothing is sent while typing').toHaveCount(0);
+    await expect(page.locator('[data-alpha-layer="conversation"]').getByText('find texts about the prototype', {exact: true}), 'nothing is sent while typing').toHaveCount(0);
     await page.locator(filterField).press('Enter');
-    await expect(page.getByText('find texts about the prototype', {exact: true})).toBeVisible();
+    await expect(page.locator('[data-alpha-layer="conversation"]').getByText('find texts about the prototype', {exact: true})).toBeVisible();
     const chip = page.locator('[data-alpha-list-filter-chip]');
     await expect(chip).toContainText('the prototype');
     await expect(page.getByRole('button', {name: /^(Unread, )?Jordan Park$/})).toHaveCount(0);

@@ -104,10 +104,10 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await expect(page.locator('[data-alpha-call-card]')).toBeVisible();
     await expect(page.locator('[data-alpha-stage-return]')).toContainText('Messages');
     expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-screen]')!).getPropertyValue('--alpha-sheet-height'))).toBe(sheet);
-    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable: true})));
+    await page.evaluate(() => (window as any).alphaShell().back());
     await expect(page.locator('[data-alpha-call-card]')).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).alphaShell().S())).toMatchObject({view: 'messages', chat: 'sheet'});
-    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable: true})));
+    await page.evaluate(() => (window as any).alphaShell().back());
     expect(await page.evaluate(() => (window as any).alphaShell().S().chat)).toBe('input');
     expect((await recents(page)).length).toBe(before);
   });
