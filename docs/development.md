@@ -652,9 +652,12 @@ Assistant and external compose sends still require confirmation.
 The pin `a81d7059045f9b96b8c85ffa79b731d3ba574159` keeps retrying unexpected
 Android resident crashes with capped backoff and retires stale startup
 probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
-The current pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
+The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
 Shell from browser-based Google sign-in and checks for an eligible browser
 when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
+The current pin `33c5ab4c004a396324994784c4bd76e8c8679286` matches the
+MMS receiver's MIME type when checking eligibility for the Android SMS role
+([eliza#39686](https://github.com/elizaOS/eliza/pull/39686)).
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
