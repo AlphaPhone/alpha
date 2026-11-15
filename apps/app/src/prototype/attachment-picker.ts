@@ -158,7 +158,10 @@ export class ChatAttachmentPicker {
       if(photo.trashed||revision(photo)!==revision(row.photo))throw Error('This photo changed. Select it again.');
       const match=/^data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)$/.exec(photo.image);
       if(!match)throw Error('This photo could not be read. Try another photo.');
-      return decodedFile({name:photo.name||row.name,mimeType:match[1],dataBase64:match[2]});
+      const mime=match[1].toLowerCase(),extension=({ 'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','image/avif':'avif' } as Record<string,string>)[mime];
+      if(!extension)throw Error('This photo format cannot be attached.');
+      const original=photo.name||row.name,name=new RegExp('\\.'+(extension==='jpg'?'jpe?g':extension)+'$','i').test(original)?original:original.replace(/\.(?:jpe?g|png|webp|gif|avif)$/i,'')+'.'+extension;
+      return decodedFile({name,mimeType:mime,dataBase64:match[2]});
     }
     const selected=await this.storage.storageSelect({path:row.entry.path,...(row.volume?{volume:row.volume}:{})});
     if(selected.status!=='selected'||!selected.selectionId)throw Error('This file changed. Select it again.');
@@ -213,7 +216,8 @@ export class ChatAttachmentPicker {
       emptyLabel:this.query?'No matching files':this.tab==='photos'?'No photos yet':'This folder is empty',
       photoAccess:this.photoAccess,allowPhotos:async()=>{try{await library.requestLibraryAccess();if(this.active())await this.load();}catch{if(this.active()){this.error='Photo access could not open. Try again.';this.changed();}}},
       fileAccess:this.fileAccess,allowFiles:()=>void this.storage.storageRequestAccess(),
-      backFolder:this.tab==='files'&&!!this.path&&!this.query,folderName:this.path.split('/').filter(Boolean).at(-1)||'Internal storage',
+      locationVisible:this.tab==='files'&&((!!this.path&&!this.query)||this.volumes.length>1),
+      backFolder:this.tab==='files'&&!!this.path&&!this.query,folderName:this.path.split('/').filter(Boolean).at(-1)||'',
       up:()=>{if(this.reading)return;this.path=parentOf(this.path);this.query='';void this.load();},
       locations:this.tab==='files'&&this.volumes.length>1?this.volumes.map(volume=>({id:volume.id,label:volume.name,selected:(this.volume||'primary')===volume.id,choose:()=>{if(this.reading)return;this.volume=volume.id;this.path='';this.query='';void this.load();}})):[],
       rows:this.rows.map(row=>({key:row.key,name:row.name,image:row.image||'',hasImage:!!row.image,imageMissing:!row.image,photo:row.kind==='photo',folder:row.kind==='file'&&row.entry.directory,selectable:!(row.kind==='file'&&row.entry.directory),

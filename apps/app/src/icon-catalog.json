@@ -67,7 +67,7 @@
     "pill": "rectangle-ellipsis",
     "half": "panel-top",
     "spark": "sparkles",
-    "dial": "grid-3x3",
+    "dial": "dialpad",
     "phoneIn": "arrow-down-left",
     "phoneOut": "arrow-up-right",
     "phoneVm": "voicemail",
@@ -161,7 +161,8 @@
     "send",
     "star",
     "shield-alert",
-    "log-out"
+    "log-out",
+    "grid-3x3"
   ],
   "filled": [
     "heart",
@@ -171,5 +172,12 @@
     "circle",
     "square",
     "mic"
-  ]
+  ],
+  "custom": {
+    "dialpad": {
+      "path": "/icons/alpha/dialpad.svg",
+      "sha256": "5b1fd200622417873dee62c48e2575bbe9695c42e649f15016e0ec9f727cce72",
+      "source": "Alpha product-owned vector; ten telephone keys"
+    }
+  }
 }

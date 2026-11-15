@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "head": "e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
+  "baseCommit": "a81d7059045f9b96b8c85ffa79b731d3ba574159",
+  "head": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
   "recordedAt": "2026-11-15",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...66138a513aa6ffabfb35146c5ae8de2ea76906df",
   "status": "diverged",
-  "aheadBy": 107,
-  "behindBy": 1295,
+  "aheadBy": 111,
+  "behindBy": 1304,
   "mergeBase": "0c8d6868ae05a6100a3ed0246a5d078e783cc802",
   "pinOnlyCommits": [
     {
@@ -434,6 +434,22 @@
     {
       "sha": "e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
       "subject": "fix(files): declare the shared chat upload contract dependency"
+    },
+    {
+      "sha": "2230ef05e9519b74a42c2f34b60d76c2a9b895ff",
+      "subject": "fix(messages): backport reviewed outgoing SMS history ownership"
+    },
+    {
+      "sha": "5ba79c19b73a768b306a89a789a2aa98bcc25c37",
+      "subject": "fix(native): expose contact photos and clarify initial Maps sign-in"
+    },
+    {
+      "sha": "517537f64d63a41a7ff0f6f339e689feae2af63c",
+      "subject": "fix(inbox): expose durable local save on composer back"
+    },
+    {
+      "sha": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
+      "subject": "fix(native-phone): preserve caller identity and retire stale contact reads"
     }
   ],
   "pullRequests": []

@@ -1,8 +1,20 @@
+import {Capacitor} from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
 import { watchReturnToApp } from './native-adapter';
 import { isMvpView } from './mvp-features';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
+/** One read-only address-book port for Contacts and explicit recipient pickers. Callers fence their own active draft. */
+export async function readRecipientContacts(query:string,limit=50,request=false,current:()=>boolean=()=>true,cursor?:string):Promise<{readable:boolean;contacts:Bag[];more:boolean;next?:string}>{
+ if(!current())throw new DOMException('Contact selection changed','AbortError');
+ const access=request?await contacts.requestPermissions():await contacts.status();
+ if(!current())throw new DOMException('Contact selection changed','AbortError');
+ if(access.available!==true||access.readable!==true)return {readable:false,contacts:[],more:false};
+ const value=await contacts.list({query,limit,...(cursor?{cursor}:{})});
+ if(!current())throw new DOMException('Contact selection changed','AbortError');
+ if(!Array.isArray(value.contacts))throw Error('Contacts could not be read.');
+ return {readable:true,contacts:value.contacts,more:value.more===true,...(typeof value.next==='string'?{next:value.next}:{})};
+}
 const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z';
 /** Per-number Call and Message open Phone or Messages with the number filled in; nothing dials or sends until the owner does it there. */
 export function contactActs(phones:readonly string[],api:Bag){
@@ -21,13 +33,11 @@ export function installContactsAdapter(Component:any,views:Bag){
  async function refresh(request=false,queryOverride?:string){
   const target=owner,token=++epoch;if(!available()){return;}loading=true;rows=[];changed();
   try{
-   const access=request?await contacts.requestPermissions():await contacts.status();
+   const value=await readRecipientContacts(queryOverride??String(target.vget('contacts').q||''),limit,request,()=>token===epoch&&target===owner&&available());
    if(token!==epoch||target!==owner||!available())return;
-   readable=access.available===true&&access.readable===true;
+   readable=value.readable;
    if(!readable){status='Choose Contacts access to see this profile’s address book.';return;}
-   const value=await contacts.list({query:queryOverride??String(target.vget('contacts').q||''),limit});
-   if(token!==epoch||target!==owner||!available())return;
-   if(!Array.isArray(value.contacts))throw Error();rows=value.contacts;more=value.more===true;
+   rows=value.contacts;more=value.more;
    status=more&&limit>=200?'200 shown. Search to find other contacts.':rows.length?`${rows.length} contacts${more?' · more available':''}`:'No contacts found.';
   }catch{if(token===epoch){rows=[];status='Contacts could not be read. Check access and refresh.';}}
   finally{if(token===epoch){loading=false;changed();}}
@@ -50,7 +60,8 @@ export function installContactsAdapter(Component:any,views:Bag){
   model.closeSearch=()=>{api.set({q:'',searching:false,open:null});limit=50;void refresh(false,'');};
   if(model.d){const selected=rows.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
    model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v})),...(selected.emails||[]).map((v:string)=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v}))]:[];
-   model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void editor(selected);model.d.del=()=>{};model.d.toggleFav=()=>{};
+   model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void editor(selected);model.d.editPhoto=model.d.edit;
+   model.d.image=selected&&typeof selected.photoUri==='string'&&/^content:\/\//.test(selected.photoUri)?Capacitor.convertFileSrc(selected.photoUri)+'?revision='+encodeURIComponent(selected.revision||''):'';model.d.hasImage=!!model.d.image;model.d.del=()=>{};model.d.toggleFav=()=>{};
   }
   return model;
  };

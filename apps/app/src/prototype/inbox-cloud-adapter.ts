@@ -1,3 +1,6 @@
+import {aospImage} from '../runtime/aosp-image';
+import {readRecipientContacts} from './contacts-adapter';
+import {literalMailAddress} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
 import {applyMailSelection, type MailSelectionAction} from '../runtime/mail-selection';
 import {inboxLocalStore} from '../runtime/inbox-local-store';
 import {openContentLink} from './content-links';
@@ -445,6 +448,42 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   const publish = (patch: Bag = {}) => shell?.vset('inbox', { nativeMailTick: Date.now(), ...patch });
   const provider = inboxProviderControls(() => publish(), text => api?.toast(text));
   const drafts = inboxDrafts(() => publish(), text => api?.toast(text), provider);
+  type Recipient={name:string;email:string};
+  let recipientVisit='',recipientEpoch=0,recipientAll=false,recipientRows:Recipient[]=[],recipientNext:string|undefined,recipientReading=false,recipientStatus='',recipientTimer:ReturnType<typeof setTimeout>|undefined;
+  const recipientBinding=()=>JSON.stringify([homeOwnerKey(),selected,drafts.email()?.draftId]);
+  const retireRecipients=()=>{recipientEpoch++;clearTimeout(recipientTimer);recipientAll=false;recipientRows=[];recipientNext=undefined;recipientReading=false;recipientStatus='';};
+  function recentRecipients():Recipient[]{
+    const self=String(provider.capabilities()?.from||'').toLowerCase(),seen=new Map<string,Recipient>();
+    for(const message of [...messages].sort((a,b)=>Date.parse(b.receivedAt)-Date.parse(a.receivedAt))){
+      for(const email of [message.fromEmail,...message.to])if(typeof email==='string'&&literalMailAddress(email)&&email.toLowerCase()!==self&&!seen.has(email.toLowerCase()))seen.set(email.toLowerCase(),{name:email===message.fromEmail?message.from||email:email,email});
+    }
+    return [...seen.values()];
+  }
+  async function readMailRecipients(query:string,request=false,append=false){
+    if(append&&(recipientReading||!recipientNext))return;const cursor=append?recipientNext:undefined;
+    const token=++recipientEpoch,binding=recipientBinding();recipientStatus='';
+    const current=()=>token===recipientEpoch&&binding===recipientBinding()&&!!api?.isActive()&&!document.hidden&&drafts.render().composing;
+    if(!aospImage||!current())return;if(query.length>128){recipientRows=[];recipientNext=undefined;recipientStatus=literalMailAddress(query)?'':'Contact search is limited to 128 characters.';publish();return;}recipientReading=true;
+    try{
+      const result=await readRecipientContacts(query,50,request,current,cursor);if(!current())return;
+      recipientNext=result.next;const rows=result.contacts.flatMap(row=>(row.emails||[]).filter((email:unknown):email is string=>typeof email==='string'&&literalMailAddress(email)).map((email:string)=>({name:row.name||email,email})));
+      recipientRows=append?[...recipientRows,...rows]:rows;
+      if(!result.readable)recipientStatus='Allow Contacts access to choose an address.';
+    }catch(error){if(current()&&!(error instanceof DOMException&&error.name==='AbortError'))recipientStatus='Contacts could not load. Try again.';}
+    finally{if(current()){recipientReading=false;publish();}}
+  }
+  function recipientView(value:Bag):Bag{
+    const binding=recipientBinding();if(binding!==recipientVisit){retireRecipients();recipientVisit=binding;}
+    const c=value.c;if(!c)return value;
+    const query=String(c.toQ||'').trim(),matches=new Map<string,Recipient>();
+    for(const row of [...recentRecipients(),...recipientRows])if(!query||(row.name+' '+row.email).toLowerCase().includes(query.toLowerCase()))matches.set(row.email.toLowerCase(),row);
+    const shown=(recipientAll||query?[...matches.values()]:c.chips?.length?[]:[...matches.values()].slice(0,3));
+    return {...value,c:{...c,contactsAvailable:aospImage||matches.size>0,contactsExpanded:recipientAll,recipientStatus,
+      openContacts:()=>{recipientAll=!recipientAll;recipientNext=undefined;if(recipientAll)void readMailRecipients(query,true);else{recipientEpoch++;clearTimeout(recipientTimer);}publish();},
+      moreContacts:recipientAll&&!!recipientNext,contactsBusy:recipientReading,loadMoreContacts:()=>void readMailRecipients(query,false,true),
+      onTo:(event:Event)=>{c.onTo(event);recipientAll=false;recipientNext=undefined;recipientReading=false;clearTimeout(recipientTimer);const text=(event.target as HTMLInputElement).value;recipientEpoch++;recipientTimer=setTimeout(()=>void readMailRecipients(text),180);},
+      hasSugg:shown.length>0,sugg:shown.map(row=>({...row,ini:row.name.slice(0,1).toUpperCase(),pick:()=>{if(binding!==recipientBinding()||!api?.isActive()||document.hidden)return;const latest=drafts.render().c;if(!latest)return;recipientEpoch++;recipientAll=false;recipientRows=[];latest.onTo({target:{value:row.email}});latest.addRaw();publish();}}))}};
+  }
   p.flushInboxForAppUpdate=async function(current:()=>boolean){
     const exact=()=>current()&&(!shell||shell===this)&&!pendingCompose&&!api?.get('inbox')?.compose&&
       !provider.render().providerReview&&!mailBatch&&!attachmentView&&!this.mailAttachment;
@@ -846,7 +885,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     if (provider.close()) return true;
     const composer = drafts.render();
     if (composer.composing && composer.c) {
-      composer.c.discard();
+      void drafts.saveAndClose();
       return true;
     }
     if (drafts.close()) return true;
@@ -937,6 +976,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       status: attached ? "Shared items aren't attached. Use Attach to add a file." : '' };
   }
   view.onLeave = () => {
+    retireRecipients();
     resetMailSelection();
     rememberList();readAhead.pause();stopBodyReads();cachedListShown=false;
     // Home retains only header metadata already read, never bodies.
@@ -1049,13 +1089,14 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       ...(!draftsView()&&!provider.capabilities()?.mailboxMutations?[{label:'Allow Gmail changes',icon:'mail',disabled:!!mailBatch,run:()=>googleConnectionController.open()}]:[]),
       {label:'Refresh',icon:'rotate-cw',disabled:!!mailBatch||!!operation,run:refreshInbox},
     ].map(item=>({...item,icon:'/icons/lucide/'+item.icon+'.svg',pick:(event:Event)=>{(event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open');item.run();}}));
+    const composeView=recipientView(drafts.render());
     return {mailOptions,mailSelecting,mailBatchStatus,mailBatchBusy:!!mailBatch,mailReview:mailReview?{title:`${mailReview.title} ${mailReview.ids.length} ${mailReview.action==='discard-local'?(mailReview.ids.length===1?'draft':'drafts'):(mailReview.ids.length===1?'email':'emails')}?`,confirm:()=>void confirmMailSelection(),close:()=>{mailReview=null;publish();}}:null,folderTitle:mailSelecting?`${selectedMailIds.size} selected`:folder==='inbox'?'Inbox':folder==='sent'?'Sent':folder==='archive'?'Archive':extraFolders.find(row=>row.value===folder)?.label||'Inbox',folderChips:chips.filter(row=>['Inbox','Sent','Archive'].includes(row.label)),actionChips:chips.filter(row=>!['Inbox','Sent','Archive'].includes(row.label)),hasActionChips:chips.some(row=>!['Inbox','Sent','Archive'].includes(row.label)),extraFolders,hasExtraFolders:!!extraFolders.length,extraFolderCss:extraFolders.some(row=>row.on)?'width:112px;background:var(--fg);color:var(--bg)':'',extraFolderLabel:extraFolders.find(row=>row.on)?.label||'More',folderPicker:extraFolders.length?React.createElement(MailFolderPicker,{folders:extraFolders,menuId:'alpha-mail-folders',themeTokens:MAIL_MENU_TOKENS,selectedStyle:MAIL_MENU_SELECTED}):null, attachmentOpen:!!attachmentView,attachment:attachmentView?{...attachmentView,close:()=>{void attachmentNative.cancel().catch(()=>{});attachmentView=null;publish();}}:null,chips, rows, searching: st.q != null, notSearching: st.q == null, q: st.q || '', hasQ: false,
       openSearch: () => changeQuery(''), closeSearch: () => changeQuery(null), clearSearch:()=>{changeQuery('');queueMicrotask(()=>document.querySelector<HTMLInputElement>('.mail-search-input')?.focus());}, onQ: (e: Bag) => changeQuery(e.target.value), submitSearch:(event:Event)=>{event.preventDefault();const input=(event.currentTarget as HTMLFormElement).querySelector<HTMLInputElement>('input');if(!input?.value.trim())return;input.blur();void load();},
       compose: () => void drafts.newEmail(), empty: rows.length === 0, emptyIcon: 'M4 6h16v12H4zM4 6l8 6 8-6', emptyText: restoringCloud ? 'Loading Inbox…' : pendingCompose && !selected && binding && !failure ? needsGmailConnection ? 'Shared content is ready for a new email. Connect Gmail to continue.' : 'Checking Gmail connection…' : status,
       hasMore: rows.length > 0 && (!!nextPageToken || (!!operation && loadingMore)), loadingMore: !!operation && loadingMore, loadMoreDisabled: !!operation, loadMoreLabel: operation && loadingMore ? 'Loading more…' : 'Load more', loadMore: () => void load(true),
       canRefresh: !!binding, refreshDisabled: !!operation, refresh:refreshInbox,
       cachedListShown,
-      emptyAdd: needsGmailConnection, addAccountLabel: 'Connect Gmail', addAcct: () => googleConnectionController.open(), detail: !!activeBody, ...drafts.render(), ...provider.render(),
+      emptyAdd: needsGmailConnection, addAccountLabel: 'Connect Gmail', addAcct: () => googleConnectionController.open(), detail: !!activeBody, ...composeView, ...provider.render(),
       d: activeBody ? { closeMenu:(event:Event)=>{(event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open');},menuKey:(event:KeyboardEvent)=>{if(event.key==='Escape'){const menu=event.currentTarget as HTMLDetailsElement;menu.open=false;menu.querySelector<HTMLElement>('summary')?.focus();event.stopPropagation();}},hasThread:!!thread&&thread.total>1,threadRows:thread?thread.messages.filter(row=>row.message.id!==activeBody.message.id).map(row=>({name:row.message.from,date:date(row.message.receivedAt),preview:row.message.snippet,pick:()=>{body=row;publish({open:row.message.id,nativeMailSelection:mailSelection(row.message.id)});}})):[], hasPreviousThread:!!thread&&thread.previousOffsets.length>0,previousThread:()=>void nextThreadPage(true),hasNextThread:thread?.nextOffset!=null, nextThread:()=>void nextThreadPage(), subj: activeBody.message.subject || '(no subject)', name: activeBody.message.from,
         fullFrom:activeBody.message.fromEmail?`${activeBody.message.from} <${activeBody.message.fromEmail}>`:'Sender address unavailable',fullTo:activeBody.message.to.join(', ')||'Undisclosed recipients',fullCc:(activeBody.message.cc||[]).join(', '),hasCc:!!activeBody.message.cc?.length,fullReplyTo:activeBody.message.replyTo||'',hasReplyTo:!!activeBody.message.replyTo&&activeBody.message.replyTo!==activeBody.message.fromEmail,fullDate:formatFullDateTime(new Date(activeBody.message.receivedAt)),ini: activeBody.message.from.slice(0, 1).toUpperCase(), senderImage:mailSenderImage(activeBody.message.fromEmail,true),hideSenderImage:(event:Event)=>{(event.currentTarget as HTMLImageElement).style.display='none';}, meta: `To ${activeBody.message.to.join(', ')} · ${date(activeBody.message.receivedAt)}`,
         hasHtml:!!formatted,noHtml:!formatted,htmlDocument:formatted?.document||'',htmlLoaded,failed:!!activeBody.failed,retry:()=>void open(activeBody.message),

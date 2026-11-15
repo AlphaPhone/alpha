@@ -18,3 +18,26 @@ test('an opened contact is never an agent selection',async({page})=>{
  const context=await page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context);
  expect(context.view).toBe('contacts');expect(context.selectedObject??null).toBeNull();
 });
+
+test('contact details return directly to Phone and Messages callers',async({page})=>{
+ await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await page.getByRole('button',{name:'Phone',exact:true}).click();
+ await page.getByRole('button',{name:'Maya Chen info',exact:true}).first().click();
+ await expect(page.getByRole('button',{name:'Back to Phone',exact:true})).toBeVisible();await page.getByRole('button',{name:'Back to Phone',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Keypad',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await page.getByRole('button',{name:'Messages',exact:true}).click();
+ await page.getByText('Maya Chen',{exact:true}).first().click();await page.getByRole('button',{name:'Contact Maya Chen',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Back to Messages',exact:true})).toBeVisible();await page.getByRole('button',{name:'Back to Messages',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toBeVisible();
+});
+
+test('a chosen local contact photo remains a durable avatar after reload',async({page})=>{
+ await add(page,'Photo Contact');await page.getByRole('button',{name:'Edit contact photo',exact:true}).click();
+ const picker=page.getByRole('dialog',{name:'Attach files',exact:true}),chooser=page.waitForEvent('filechooser');
+ await picker.getByRole('button',{name:'From computer',exact:true}).click();
+ const original=Buffer.from(await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=16;canvas.height=16;const context=canvas.getContext('2d')!;context.fillStyle='#369';context.fillRect(0,0,16,16);return canvas.toDataURL('image/png').split(',')[1];}),'base64');
+ await(await chooser).setFiles({name:'avatar-source.png',mimeType:'image/png',buffer:original});await picker.getByRole('button',{name:'Attach selected files',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Edit contact photo',exact:true}).locator('img')).toHaveAttribute('src',/^data:image\/jpeg;base64,/);
+ const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.contacts')!).list.find((row:any)=>row.first==='Photo Contact').photo);expect(saved).toMatch(/^data:image\/jpeg;base64,/);
+ await page.reload();await page.getByRole('button',{name:'Contacts',exact:true}).click();await page.getByText('Photo Contact',{exact:true}).last().click();
+ await expect(page.getByRole('button',{name:'Edit contact photo',exact:true}).locator('img')).toHaveAttribute('src',saved);
+});

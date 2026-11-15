@@ -11,6 +11,17 @@ export function installChatTools(Component: {prototype: Shell}) {
   const prototype = Component.prototype;
   const render = prototype.renderVals;
   const unmount = prototype.componentWillUnmount;
+  const api=prototype.api;
+  prototype.api=function(key:string){
+    const value=api.call(this,key),shell=this;
+    value.pickAttachmentFiles=(maximum:number,current:()=>boolean)=>shell.pickAttachmentFiles(maximum,current);
+    value.captureAttachmentPhoto=(current:()=>boolean)=>shell.captureAttachmentPhoto(current);
+    return value;
+  };
+  prototype.pickAttachmentFiles = function(maximum:number,current:()=>boolean) {
+    const shell=this;shell.chatAttachmentPicker??=new ChatAttachmentPicker(()=>shell.setState({}));
+    return runFilePicker<File[]>(signal=>shell.chatAttachmentPicker.choose(signal,maximum,()=>shell.live&&current()),[],{nativeBack:false});
+  };
   const binding = () => JSON.stringify([
     connectionController.getSnapshot().session,
     connectionController.getSelectedConversationId(),
@@ -18,7 +29,10 @@ export function installChatTools(Component: {prototype: Shell}) {
 
   prototype.renderVals = function() {
     const output = render.call(this);
+    if(output.messages){output.messages.cleanConversation??=output.messages.nativePrototype;output.messages.searchAvailable??=true;}
     const shell = this;
+    if(output.inbox?.c)output.inbox.c.contactsAvailable??=typeof output.inbox.c.openContacts==='function';
+    if(output.contacts){output.contacts.eNoImage=!output.contacts.eHasImage;if(output.contacts.d)output.contacts.d={...output.contacts.d,noImage:!output.contacts.d.hasImage};}
     this.chatAttachmentPicker ??= new ChatAttachmentPicker(()=>shell.setState({}));
     const owner = JSON.stringify(connectionController.getSnapshot().session);
     if (this.chatToolsOwner !== owner) {
@@ -41,8 +55,11 @@ export function installChatTools(Component: {prototype: Shell}) {
     };
     this.chatToolsModal ??= createInlineModal(closeMenu);
     this.chatSearchModal ??= createInlineModal(closeSearch);
+    const messageMenu=this.chatToolsContext==='messages'&&this.S().view==='messages';
+    if(this.chatToolsContext==='messages'&&!messageMenu)this.chatToolsOpen=false;
     const upload = async () => {
       closeMenu();
+      if(messageMenu){await output.messages?.t?.attachFile?.();return;}
       if (shell.draftSendPending || shell.composerDraft?.holding || shell.messageEditTarget) return;
       const owner = binding();
       shell.chatFileBusy = true;
@@ -122,13 +139,22 @@ export function installChatTools(Component: {prototype: Shell}) {
       }));
     };
     const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
-    if(turning)this.chatToolsOpen=false;
+    if(turning&&!messageMenu)this.chatToolsOpen=false;
+    let positionCss='';
+    if(messageMenu){
+      const anchor:HTMLElement|null=this.messageAttachmentAnchor?.isConnected?this.messageAttachmentAnchor:document.querySelector('[data-alpha-message-composer] button[aria-label="Attach"]');
+      const phone=anchor?.closest<HTMLElement>('[data-screen]');
+      if(anchor&&phone){const rect=anchor.getBoundingClientRect(),frame=phone.getBoundingClientRect(),scale=frame.width/phone.clientWidth;if(scale>0)positionCss=`left:${Math.max(12,Math.min(phone.clientWidth-248,(rect.left-frame.left)/scale))}px;bottom:${Math.max(12,phone.clientHeight-(rect.top-frame.top)/scale+8)}px`;}
+    }
     output.chatTools = {
+      positionCss,label:messageMenu?'Message attachments':'Chat actions',
+      cameraVisible:messageMenu,searchable:!messageMenu,
+      camera:()=>{closeMenu();output.messages?.t?.camera?.();},
       visible:!turning,
       open: !!this.chatToolsOpen,
       disabled: !!this.draftSendPending || !!this.composerDraft?.holding || !!this.S().typing || !!this.chatFileBusy,
       fileBusy:!!this.chatFileBusy,
-      toggle: () => {shell.chatToolsOpen = !shell.chatToolsOpen;shell.setState({});},
+      toggle: () => {shell.chatToolsContext='chat';shell.chatToolsOpen = !shell.chatToolsOpen;shell.setState({});},
       close: closeMenu,
       pointer:(event:Event)=>event.stopPropagation(),
       inside:(event:Event)=>event.stopPropagation(),
@@ -136,6 +162,7 @@ export function installChatTools(Component: {prototype: Shell}) {
       upload: () => void upload(),
       search: () => {closeMenu();shell.chatSearchOpen = true;shell.chatSearchQuery = '';shell.chatSearchResults = [];shell.chatSearchMore = false;shell.chatSearchBusy = false;shell.chatSearchError = '';shell.setState({chat:'full'});},
     };
+    if(output.messages?.t)output.messages.t={...output.messages.t,showContact:!output.messages.t.composing,hasInitials:!!output.messages.t.ini&&output.messages.t.ini!=='#',unknown:!output.messages.t.ini||output.messages.t.ini==='#',atts:(output.messages.t.atts||[]).map((item:Shell)=>({...item,document:!item.hasImage})),toggleTray:(event:Event)=>{if(output.messages.t.busy)return;shell.messageAttachmentAnchor=event?.currentTarget as HTMLElement|null;shell.chatToolsContext='messages';shell.chatToolsOpen=true;shell.setState({});}};
     output.attachmentPicker=this.chatAttachmentPicker.view(output.ic);
     output.chatSearch = {
       open: !!this.chatSearchOpen,

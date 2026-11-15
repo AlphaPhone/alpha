@@ -32,3 +32,13 @@ test('leaving replaced voicemail does not stop another consumer',async({page})=>
  await page.getByRole('button',{name:'Read voicemail',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).voiceFixture.spoken.length)).toBe(1);
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const voice=registerPlugin<any>('AlphaVoiceCloud');await voice.play(await voice.synthesizeLocal({text:'Other consumer'}));});const before=await page.evaluate(()=>(window as any).voiceFixture.cancels);await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));expect(await page.evaluate(()=>(window as any).voiceFixture.cancels)).toBe(before);
 });
+
+test('voicemail delete reviews first; Cancel keeps it and confirmed Undo restores the same voicemail row',async({page})=>{
+ const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).vms);
+ await page.getByRole('button',{name:'Delete voicemail',exact:true}).click();const review=page.getByRole('dialog',{name:'Delete voicemail?',exact:true});await expect(review).toBeVisible();
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).vms)).toEqual(before);
+ await review.getByRole('button',{name:'Cancel',exact:true}).click();expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).vms)).toEqual(before);
+ await page.getByRole('button',{name:'Delete voicemail',exact:true}).click();await page.getByRole('dialog',{name:'Delete voicemail?',exact:true}).getByRole('button',{name:'Delete',exact:true}).click();
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).vms.length)).toBe(before.length-1);
+ await page.getByRole('button',{name:'Undo',exact:true}).click();expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).vms)).toEqual(before);
+});

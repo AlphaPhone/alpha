@@ -3986,5 +3986,66 @@
       "Native selection and read callbacks return fairly; cancel does not claim to synchronously stop an already executing read. No network/model send occurs in this component.",
       "Shared MIME/byte limits and platform document authorization are separate SelectedChatAttachment/native-host obligations. Search, directory presentation and actual device permission UI are checked in browser/device evidence."
     ]
+  },
+  {
+    "path": "specs/quint/application/MessageCameraReturn.qnt",
+    "module": "MessageCameraReturn",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "returnToDraftTest",
+      "cancelBeforeShutterTest",
+      "lateWriteKeepsGalleryTest",
+      "lateCommitKeepsSuccessorTest",
+      "returnedIdentityDoesNotReviveTest",
+      "explicitKnownFailureRetryTest"
+    ],
+    "invariants": [
+      "NoAutomaticSend",
+      "SavedOnlyAfterShutter",
+      "AttachmentOwner",
+      "CaptureQueuedOnlyForHeldDraft"
+    ],
+    "sources": [
+      "apps/app/src/prototype/camera-adapter.ts",
+      "apps/app/src/prototype/chat-tools-adapter.ts",
+      "apps/app/src/browser/simulated-messages.ts",
+      "apps/app/src/prototype/sms-adapter.ts",
+      "test/browser/dev-message-attachments.spec.ts"
+    ],
+    "abstractions": [
+      "Two recipient/owner classes, four retirement epochs and two explicit shutter commands. Attachment values distinguish no attachment, the captured photo and a successor file. Sensor/encoding failures remain existing Camera model obligations.",
+      "Native write and React commit callbacks are weakly fair only after dispatch. No liveness assumes that a user who opens Camera must take a photo. Gallery completion after retirement is retained without draft adoption.",
+      "The real browser Camera-return/cancel/late-commit tests execute the full application with a synthetic sensor and actual JPEG/IndexedDB. Exhaustive source-adapter refinement is a separate recorded obligation; Android/carrier/device acceptance is separate."
+    ]
+  },
+  {
+    "path": "specs/quint/application/NativeMessageDraft.qnt",
+    "module": "NativeMessageDraft",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "refusedBackTest",
+      "savedBackTest",
+      "restoredReviewTest",
+      "lateWriteTest",
+      "competingWriterTest",
+      "storageRefusalTest"
+    ],
+    "sources": [
+      "apps/app/src/runtime/native-sms-drafts.ts",
+      "apps/app/src/prototype/sms-adapter.ts",
+      "test/native-sms-drafts.test.mjs",
+      "test/image-sms.test.mjs"
+    ],
+    "temporal": [
+      "Settles"
+    ],
+    "abstractions": [
+      "Two authored draft identities, three storage revisions, two view epochs and one pending reviewed operation. Byte, recipient, attachment and Android permission contracts are validated by implementation checks.",
+      "The Chromium store refusal trace checks the final stored draft identity against storageRefusalTest. Adapter tests cover save-on-Back and native operation ID reuse with controlled ports; this is bounded evidence, not exhaustive implementation refinement or physical carrier proof."
+    ]
   }
 ]

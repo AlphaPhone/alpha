@@ -386,8 +386,11 @@ registerView("phone", {
 
     /* call screen */
     var inCall = !!want;
-    var cp = inCall ? pnWho(api, st.call) : null;
+    var cp = inCall ? (pnWho(api, st.call) || pnByNum(api, st.num || "")) : null;
     var cnum = cp ? "" : (st.num || "");
+    var cImage = cp && (cp.photo || cp.photoUri || cp.image) || "";
+    if (!/^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(cImage)) cImage = "";
+    var cInitials = cp ? (cp.ini || (cp.name || "").trim().split(/\s+/).slice(0, 2).map(function (part) { return part.charAt(0); }).join("").toUpperCase()) : "";
     var live = !!st.liveAt;
     var el = live ? (Date.now() - st.liveAt) / 1000 : 0;
     var status = !live ? "Calling…" : (st.hold ? "On hold · " : "") + pnClock(el);
@@ -401,9 +404,7 @@ registerView("phone", {
     var controls = inCall ? [
       ctrl("mute", IC.phoneMute, st.mute ? "Unmute" : "Mute", st.mute),
       ctrl("kp", IC.dial, st.kp ? "Hide keypad" : "Show keypad", st.kp),
-      ctrl("spk", IC.phoneSpk, "Speaker", st.spk),
-      ctrl("hold", IC.pause, st.hold ? "Resume" : "Hold", st.hold),
-      ctrl("ai", null, st.ai ? api.name + " notes off" : api.name + " takes notes", st.ai)
+      ctrl("spk", IC.phoneSpk, "Speaker", st.spk)
     ] : [];
 
     /* incoming */
@@ -434,7 +435,7 @@ registerView("phone", {
       vms: vms, noVms: vms.length === 0,
 
       inCall: inCall, callFull: inCall && !st.min, banner: inCall && !!st.min,
-      cName: cp ? cp.name : cnum, cIni: cp ? cp.ini : "#", cStatus: status, calling: inCall && !live,
+      cName: cp ? cp.name : cnum, cIni: cInitials, cImage: cImage, cHasImage: !!cImage, cHasInitials: !cImage && !!cInitials, cUnknown: !cImage && !cInitials, cStatus: status, calling: inCall && !live,
       showAvatar: inCall && !st.kp && !(st.ai && lines.length), showLines: inCall && !st.kp && st.ai && lines.length > 0, lines: lines,
       aiOn: inCall && st.ai, aiWait: inCall && st.ai && !lines.length && !st.kp,
       showDkp: inCall && !!st.kp, kpd: st.kpd || "", controls: controls,
@@ -717,6 +718,11 @@ registerView("messages", {
       var digits = q.replace(/[^0-9]/g, "");
       var numOnly = /^[0-9()+\-\s.]+$/.test(q) && digits.length >= 3;
       var ppl = msgPeople(api).filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || (digits && String(p.phone || "").replace(/[^0-9]/g, "").indexOf(digits) >= 0); });
+      if (!q && !st.allContacts) {
+        var recent = Object.keys(threads).sort(function (a, b) { var ar = threads[a] || [], br = threads[b] || []; return (br.length ? br[br.length - 1].k : -Infinity) - (ar.length ? ar[ar.length - 1].k : -Infinity); });
+        ppl.sort(function (a, b) { var ai = recent.indexOf(a.id), bi = recent.indexOf(b.id); return (ai < 0 ? 1000000 : ai) - (bi < 0 ? 1000000 : bi); });
+        ppl = ppl.slice(0, 3);
+      }
       var goNum = function () {
         if (!numOnly) return;
         var id = "n:" + digits; var s2 = api.get("messages");
@@ -726,9 +732,10 @@ registerView("messages", {
       };
       pick = {
         q: st.q || "",
+        openContacts: function () { api.set({ allContacts: true }); },
         onQ: function (e) { api.set({ q: e.target.value }); },
         onKey: function (e) { if (e.key === "Enter") { e.preventDefault(); if (numOnly) goNum(); else if (ppl[0]) msgOpenThread(api, ppl[0].id, st.local); } },
-        people: ppl.map(function (p) { return { ini: p.ini, name: p.name, phone: p.phone, go: function () { msgOpenThread(api, p.id, st.local); } }; }),
+        people: ppl.map(function (p) { return { ini: p.ini, name: p.name, phone: p.phone, go: function () { api.set({ allContacts: false }); msgOpenThread(api, p.id, st.local); } }; }),
         isNum: numOnly, num: (st.q || "").trim(), goNum: goNum
       };
     }
@@ -736,7 +743,7 @@ registerView("messages", {
     return {
       nativePrototype: true,
       convos: convos,
-      newMsg: function () { api.set({ compose: true, q: "", local: true }); },
+      newMsg: function () { api.set({ compose: true, q: "", allContacts: false, local: true }); },
       searching: st.sq != null, notSearching: st.sq == null, sq: st.sq || "", hasSq: !!sq, empty: convos.length === 0,
       emptyIcon: sq ? IC.search : IC.bubble, emptyText: sq ? "No results" : "No messages",
       openSearch: function () { api.set({ sq: "" }); },
@@ -1041,19 +1048,23 @@ registerView("inbox", {
       var fa = inboxAcctOf(accts, acctId);
       var upd = function (p) { var cc = api.get("inbox").compose; cc = cc === true ? {} : (cc || {}); api.set({ compose: Object.assign({}, cc, { to: inboxRecips(cc.to) }, p) }); };
       var q = (st.toQ || "").trim().toLowerCase();
-      var sugg = inboxPeople(api).filter(function (p) {
+      var recentRecipients = [];
+      (st.sent || []).slice().sort(function (a, b) { return b.k - a.k; }).forEach(function (mail) { inboxRecips(mail.to).forEach(function (id) { if (recentRecipients.indexOf(id) < 0) recentRecipients.push(id); }); });
+      var candidates = inboxPeople(api).filter(function (p) {
         if (!p.email || to.indexOf(p.id) >= 0) return false;
-        if (!q) return to.length === 0;
-        return p.name.toLowerCase().indexOf(q) >= 0 || p.email.toLowerCase().indexOf(q) >= 0;
-      }).slice(0, 6).map(function (p) {
-        return { ini: p.ini, name: p.name, email: p.email, pick: function () { upd({ to: inboxRecips((api.get("inbox").compose || {}).to).concat([p.id]) }); api.set({ toQ: "" }); } };
+        return !q || p.name.toLowerCase().indexOf(q) >= 0 || p.email.toLowerCase().indexOf(q) >= 0;
+      });
+      if (!q && !st.toAll) candidates.sort(function (a, b) { var ai = recentRecipients.indexOf(a.id), bi = recentRecipients.indexOf(b.id); return (ai < 0 ? 1000000 : ai) - (bi < 0 ? 1000000 : bi); });
+      var sugg = (!q && !st.toAll && to.length ? [] : q || st.toAll ? candidates : candidates.slice(0, 3)).map(function (p) {
+        return { ini: p.ini, name: p.name, email: p.email, pick: function () { upd({ to: inboxRecips((api.get("inbox").compose || {}).to).concat([p.id]) }); api.set({ toQ: "", toAll: false }); } };
       });
       var rawAddr = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q) ? q : "";
-      var addRaw = function () { if (!rawAddr) return; upd({ to: to.concat([rawAddr]) }); api.set({ toQ: "" }); };
+      var addRaw = function () { if (!rawAddr) return; upd({ to: to.concat([rawAddr]) }); api.set({ toQ: "", toAll: false }); };
       cmp = {
         chips: to.map(function (r, i) { return { name: inboxRecipName(api, r), rm: function () { var n = to.slice(); n.splice(i, 1); upd({ to: n }); } }; }),
         toQ: st.toQ || "", toPh: to.length ? "Add" : "To",
         onTo: function (e) { api.set({ toQ: e.target.value }); },
+        openContacts: function () { api.set({ toAll: true }); },
         toKey: function (e) { if (e.key === "Enter") { e.preventDefault(); if (rawAddr) addRaw(); else if (sugg[0]) sugg[0].pick(); } },
         sugg: sugg, hasSugg: sugg.length > 0, rawAddr: rawAddr, hasRaw: !!rawAddr, addRaw: addRaw,
         subject: c0.subject || "", body: c0.body || "",
@@ -3338,7 +3349,7 @@ IC.contactsNote = IC.contactsNote || "M5 6h14M5 10h14M5 14h9M5 18h6";
 function ctIni(first, last) { var s = ((first || "").charAt(0) + (last || "").charAt(0)).toUpperCase(); return s || "#"; }
 function ctMake(p) { var name = ((p.first || "") + " " + (p.last || "")).trim(); return Object.assign({}, p, { name: name || p.phone || "No name", ini: ctIni(p.first, p.last) }); }
 
-var CT_FIELDS = ["first", "last", "phone", "email", "address", "birthday", "note"];
+var CT_FIELDS = ["first", "last", "phone", "email", "address", "birthday", "note", "photo"];
 function ctList(api) { return api.get("contacts").list || CT_SEED; }
 function ctGet(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 function ctFind(t, list) {
@@ -3401,6 +3412,32 @@ function ctSave(api) {
   api.toast("Saved");
   return true;
 }
+/** A small local avatar copy; the native adapter delegates writes to Android's checked editor. */
+async function ctPickPhoto(api, id) {
+  var state = api.get("contacts"), editing = !!(state.edit || state.add), form = state.form;
+  var original = id ? ctGet(ctList(api), id) : null;
+  var current = function () {
+    var next = api.get("contacts");
+    return api.isActive() && (editing ? next.edit === state.edit && next.add === state.add && next.form === form : next.open === id && ctGet(ctList(api), id) === original);
+  };
+  var bitmap;
+  try {
+    var files = await api.pickAttachmentFiles(1, current);
+    if (!files.length || !current()) return;
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(files[0].type)) throw Error("Choose a photo.");
+    bitmap = await createImageBitmap(files[0]);
+    if (!current()) return;
+    var scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height)), canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    var context = canvas.getContext("2d"); if (!context) throw Error("This photo could not open.");
+    context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    var photo = canvas.toDataURL("image/jpeg", 0.85);
+    if (!current()) return;
+    if (editing) api.set({ form: Object.assign({}, ctForm(state, ctList(api)), { photo: photo }) });
+    else api.set({ list: ctList(api).map(function (item) { return item.id === id ? Object.assign({}, item, { photo: photo }) : item; }) });
+  } catch (error) { if (current()) api.toast(error instanceof Error ? error.message : "Photo could not be saved. Try again."); }
+  finally { if (bitmap) bitmap.close(); }
+}
 function ctDeleted(api, p, idx) {
   var restore = function () {
     var l = ctList(api).slice();
@@ -3424,6 +3461,8 @@ registerView("contacts", {
   },
   back: function (st, api) {
     if (st.edit || st.add) { api.set({ edit: null, add: null, form: null, open: st.edit || st.open }); return true; }
+    var stack = (api.S && api.S.stack) || [];
+    if (stack.length && stack[stack.length - 1] !== "contacts") return false;
     if (st.open) { api.set({ open: null }); return true; }
     if (st.searching || st.q) { api.set({ q: "", searching: false }); return true; }
     return false;
@@ -3518,8 +3557,9 @@ registerView("contacts", {
       if (p.note) fields.push({ d: IC.contactsNote, v: p.note });
       var ctx = ctContext(api, p);
       d = {
-        ini: p.ini, name: p.name, acts: acts, hasActs: acts.length > 0, fields: fields, hasFields: fields.length > 0,
+        ini: p.ini, name: p.name, image: p.photo || "", hasImage: !!p.photo, editPhoto: function () { return ctPickPhoto(api, p.id); }, acts: acts, hasActs: acts.length > 0, fields: fields, hasFields: fields.length > 0,
         ctx: ctx, hasCtx: !!ctx && ctx !== p.note,
+        backLabel: ((api.S && api.S.stack) || []).length ? "Back to " + ((VIEWS[api.S.stack[api.S.stack.length - 1]] || {}).title || "previous app") : "Back to Contacts",
         ask: function () { api.send("Catch me up on " + (p.first || p.name)); },
         fav: !!p.fav, favLabel: p.fav ? "Remove from favorites" : "Add to favorites", favCss: p.fav ? "color: var(--acct); fill: currentColor" : "",
         toggleFav: function () { api.set({ list: api.get("contacts").list.map(function (x) { return x.id === p.id ? Object.assign({}, x, { fav: !x.fav }) : x; }) }); },
@@ -3529,7 +3569,7 @@ registerView("contacts", {
           api.set({ list: l.filter(function (x) { return x.id !== p.id; }), open: null });
           ctDeleted(api, p, idx);
         },
-        close: function () { api.set({ open: null }); }
+        close: function () { api.back(); }
       };
     }
 
@@ -3553,6 +3593,7 @@ registerView("contacts", {
       addNew: function () { var s0 = api.get("contacts"); var qq = s0.searching ? (s0.q || "").trim() : ""; api.set({ add: !qq ? true : (/\d{3}/.test(qq) ? { phone: qq } : { first: qq.charAt(0).toUpperCase() + qq.slice(1) }), form: null, q: "", searching: false }); },
       detail: !!d, d: d,
       editing: editing,
+      eImage: form ? form.photo || "" : "", eHasImage: !!(form && form.photo), editPhoto: function () { return ctPickPhoto(api, st.edit || null); },
       eIni: form ? ctIni(form.first, form.last) : "", eHasIni: !!form && ctIni(form.first, form.last) !== "#", eNoIni: !!form && ctIni(form.first, form.last) === "#",
       nameInputs: form ? [input("first", "First name", IC.user), input("last", "Last name", "")] : [],
       inputs: form ? [input("phone", "Phone", IC.phone, "tel"), input("email", "Email", IC.mail, "email"), input("address", "Address", IC.pin), input("birthday", "Birthday", IC.contactsGift), input("note", "Note", IC.contactsNote)] : [],
@@ -5302,6 +5343,7 @@ class Component extends DCLogic {
       reopenStartupAccess: typeof (self.props || {}).onReopenStartupAccess === "function" ? function () { self.props.onReopenStartupAccess(); } : null,
       open: function (view, p, chat) { self.openView(view, p, chat, { push: self.S().view === k && view !== k }); },
       home: function () { self.goHome(); },
+      back: function () { self.backApp(); },
       toast: function (m, opts) { self.toast(m, opts); },
       everyBg: function (fn, ms) { return self.every(fn, ms, "bg_" + k); },
       laterBg: function (fn, ms) { return self.later(fn, ms, "bg_" + k); },
@@ -5421,6 +5463,11 @@ class Component extends DCLogic {
     if (S.chat === "full" || S.chat === "sheet") return this.setState(this.shellNavigate({ type: "back" }));
     // A bar raised from the pill lowers before Back leaves the view.
     if (S.chat === "input" && this.rest() === "hidden") return this.setState({ chat: "hidden" });
+    return this.backApp();
+  }
+  /** In-app headers and owned Camera returns leave the assistant/voice session alone. */
+  backApp() {
+    var S = this.S();
     if (S.view) {
       var m = this.mod(S.view);
       if (m.back && m.back(this.vget(S.view), this.api(S.view))) return;
@@ -5814,7 +5861,7 @@ class Component extends DCLogic {
         self.lastTap = now; clearTimeout(self.tapT); self.tapT = setTimeout(function () { self.lastTap = 0; self.power(); }, 380);
       },
       pCancel: function () { clearTimeout(self.pT); },
-      back: function () { self.back(); },
+      back: function () { self.backApp(); },
       gDown: function (e) { self.gDown(e); }, gUp: function (e) { self.gUp(e); }, gCancel: function () { self.g = null; },
       bootMark: S.bootStep >= 1 ? 1 : 0, bootMarkY: S.bootStep >= 1 ? 0 : 12, bootTag: S.bootStep >= 2 ? 1 : 0,
       jumps: jumps, subJumps: subJumps, hasSubJumps: subJumps.length > 0, modes: modes, legend: legend,
@@ -5832,5 +5879,5 @@ class Component extends DCLogic {
 
 
 // Preserve canonical path contracts; resolve display after every IC extension exists.
-var ICON_ASSETS = Object.fromEntries(Object.entries(iconCatalog.ic).map(function (entry) { return [IC[entry[0]], '/icons/lucide/' + entry[1] + '.svg']; }));
+var ICON_ASSETS = Object.fromEntries(Object.entries(iconCatalog.ic).map(function (entry) { return [IC[entry[0]], (iconCatalog.custom && iconCatalog.custom[entry[1]]) ? iconCatalog.custom[entry[1]].path : '/icons/lucide/' + entry[1] + '.svg']; }));
 export { Component, VIEWS, ORDER, mockAttentionRows, HOME_DEFAULTS };

@@ -2143,10 +2143,10 @@
     }
   ],
   "currentUpstream": {
-    "revision": "e94197a981c6a0bbdd32ee39be9b17cfec596dd1",
+    "revision": "66138a513aa6ffabfb35146c5ae8de2ea76906df",
     "classification": "current-upstream-formal-specifications",
     "models": [],
-    "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate.",
+    "note": "The current upstream tree has no tracked TLA modules or TLC configurations. Historical translations and source hashes above remain bound to revision 4787d51a142c63c98371c832997184c53f7218d3. The four DeletionOwnerAdmission Quint sidecars below catalogue the upstream partial owner-admission model and checker at this current revision; downstream model allocations, generated-trace equivalence, full coordinator refinement and Android/device qualification remain separate. Any future TLA/TLC source requires separate allocation. CloudSpeechSuccessor is retained as an upstream source-owned model; its separate semantic, scenario and transport tests do not constitute device or live-provider proof. PhotoCropReceipt source-owned sidecars are authenticated at this pin; native package conformance, Android bitmap cases and device acceptance remain separate. NativeSmsOutgoingHistory sidecars authenticate the selectively backported outgoing-history role/outbox/rollback model and checker; native carrier round trip, default roles and agent cellular audio remain separate. Optional native contact-photo metadata and initial Maps sign-in wording preserve the existing scope and session fences; Android editor/photo persistence and provider/device acceptance remain separate. Inbox saveAndClose reuses the existing durable owner-bound set-aside operation; it does not save or send through a provider.",
     "quintSidecars": [
       {
         "path": "plugins/plugin-native-action-journal/quint/DeletionOwnerAdmission.cases.json",
@@ -2262,6 +2262,26 @@
         "path": "plugins/plugin-files/quint/check-selected-chat-attachment.mjs",
         "gitObject": "689e5d26145a11a1d889667edcf2c454d86fa4eb",
         "sha256": "aedf4c15d27cf37ddb900185a5d37071cc76e06bdc167aec8fbddf45e17a7ae7"
+      },
+      {
+        "path": "plugins/plugin-native-messages/quint/NativeSmsOutgoingHistory.cases.json",
+        "gitObject": "e6bf24ea0d50a3953c9e8e5b999c985016ea75ec",
+        "sha256": "6d5733cf70f7be87bd2fd5521fb0d2172948c0515c40f968058b64a07c4f3bd7"
+      },
+      {
+        "path": "plugins/plugin-native-messages/quint/NativeSmsOutgoingHistory.qnt",
+        "gitObject": "68f95629aebd5746da5c53623ead35cd02f4b7d3",
+        "sha256": "52ae339300c9d18ffb373082a9bdd5a8302307b64ba37ec6727e90dd0288fb19"
+      },
+      {
+        "path": "plugins/plugin-native-messages/quint/check-native-sms-outgoing-history.ts",
+        "gitObject": "186f4373367f2d921ecc0eb55d1b400c4fa74df2",
+        "sha256": "8ccc8226f461023aace47d3f8c1b3967e1183f762c1b14bc56b9e2cd8bda82b1"
+      },
+      {
+        "path": "plugins/plugin-native-messages/quint/native-sms-outgoing-history-conformance.json",
+        "gitObject": "3eb9cdafa84cdb8f7306690c8e37eb9563d3688f",
+        "sha256": "d2deaae3c122818e126cf3367e0886579d9b47794f1f8d0ce2723138645dff78"
       }
     ]
   }

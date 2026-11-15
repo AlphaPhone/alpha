@@ -19,8 +19,8 @@ test('published assets retain their recorded provenance',()=>{
  const extensions=[...model.matchAll(/IC\.([A-Za-z0-9_]+)\s*=\s*IC\.\1\s*\|\|\s*"([^"\n]+)";/g)].map(match=>match[0]).join('\n');
  const box={};vm.runInNewContext(initial+'\n'+extensions+'\nglobalThis.icons=IC;',box);
  assert.deepEqual(Object.keys(catalog.ic).sort(),Object.keys(box.icons).sort());
- const paths=new Map();for(const [key,asset] of Object.entries(catalog.ic)){assert.ok(source.assets[asset+'.svg'],asset);if(paths.has(box.icons[key]))assert.equal(paths.get(box.icons[key]),asset);paths.set(box.icons[key],asset);}
- const expectedAssets=new Set([...Object.values(catalog.ic),...catalog.extra].map(name=>name+'.svg'));for(const name of catalog.filled)expectedAssets.add(name+'-filled.svg');assert.deepEqual(Object.keys(source.assets).sort(),[...expectedAssets].sort());
+ const paths=new Map();for(const [key,asset] of Object.entries(catalog.ic)){if(catalog.custom?.[asset]){const entry=catalog.custom[asset],svg=readFileSync(new URL('../apps/app/public'+entry.path,import.meta.url));assert.equal(sha(svg),entry.sha256);assert.equal((svg.toString().match(/<circle /g)||[]).length,10);assert.match(svg.toString(),/cx="12" cy="19"/);}else assert.ok(source.assets[asset+'.svg'],asset);if(paths.has(box.icons[key]))assert.equal(paths.get(box.icons[key]),asset);paths.set(box.icons[key],asset);}
+ const expectedAssets=new Set([...Object.values(catalog.ic),...catalog.extra].filter(name=>!catalog.custom?.[name]).map(name=>name+'.svg'));for(const name of catalog.filled)expectedAssets.add(name+'-filled.svg');assert.deepEqual(Object.keys(source.assets).sort(),[...expectedAssets].sort());
  for(const [name,entry] of Object.entries(source.assets)){const svg=readFileSync(new URL(name,root),'utf8');for(const part of ['viewBox="0 0 24 24"','stroke-width="2"','stroke-linecap="round"','stroke-linejoin="round"',entry.fill?'fill="currentColor"':'fill="none"'])assert.ok(svg.includes(part),name+' has '+part);}
  const template=readFileSync(new URL('../apps/app/src/prototype/template.html',import.meta.url),'utf8');assert.equal(template.match(/<svg[^>]*class="i"[^>]*style="[^"]*stroke-width/g),null);
 });

@@ -14,7 +14,7 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const escape=value=>String(value).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;');
 const attributes=value=>Object.entries(value).filter(([key])=>key!=='key').map(([key,value])=>`${({strokeWidth:'stroke-width',strokeLinecap:'stroke-linecap',strokeLinejoin:'stroke-linejoin'}[key]||key)}="${escape(value)}"`).join(' ');
 const sourceFiles={},assets={};
-for(const name of new Set([...Object.values(catalog.ic),...catalog.extra])){
+for(const name of new Set([...Object.values(catalog.ic),...catalog.extra].filter(name=>!catalog.custom?.[name]))){
  const file=(catalog.aliases[name]||name)+'.mjs',sourcePath=path.join(source,'dist/esm/icons',file);
  const {__iconNode}=await import(pathToFileURL(sourcePath).href);sourceFiles[file]=hash(fs.readFileSync(sourcePath));
  for(const filled of [false,...(catalog.filled.includes(name)?[true]:[])]){

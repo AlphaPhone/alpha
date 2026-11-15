@@ -24,3 +24,9 @@ export async function retainedMailDraft(page:Page,operation:'save'|'discard'|'st
   throw Error('Open Inbox first');
  },operation);
 }
+
+/** Open the same Drafts folder the owner uses, without hidden recovery controls. */
+export async function openSavedMailDraft(page:Page,subject?:string){
+ await page.getByRole('button',{name:'Drafts',exact:true}).click();
+ await page.getByRole('button',{name:subject?'Draft, '+subject:/^Draft, /,exact:!!subject}).click();
+}

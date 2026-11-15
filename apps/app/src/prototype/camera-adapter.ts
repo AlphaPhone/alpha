@@ -183,6 +183,20 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   const render = module.render, leave = module.onLeave, cameraBack = module.back;
   const photosRender = views.photos?.render, photosBack = views.photos?.back, photosLeave = views.photos?.onLeave;
   const prototype=(_Component as any)?.prototype, originalApi=prototype?.api;
+  let messagePhotoCapture:{current:()=>boolean;resolve:(file:File|undefined)=>void;returning:boolean;returnTo:(file:File)=>void}|undefined;
+  const cancelMessagePhoto=()=>{const request=messagePhotoCapture;messagePhotoCapture=undefined;request?.resolve(undefined);};
+  const originalAttachmentCapture=prototype?.captureAttachmentPhoto;
+  const captureMessagePhoto=function(this:Bag,current:()=>boolean):Promise<File|undefined>{
+    if(messagePhotoCapture||!current())return Promise.resolve(undefined);
+    return new Promise(resolve=>{
+      const request:NonNullable<typeof messagePhotoCapture>={current,resolve,returning:false,returnTo:(file:File)=>{
+        this.backApp();this.setState({},()=>{if(messagePhotoCapture!==request)return;messagePhotoCapture=undefined;resolve(this.live&&this.S().view==='messages'&&!document.hidden&&current()?file:undefined);});
+      }};messagePhotoCapture=request;
+      try{this.openView('camera',{mode:'photo'},undefined,{push:true});}
+      catch(error){if(messagePhotoCapture===request)cancelMessagePhoto();throw error;}
+    });
+  };
+  if(prototype)prototype.captureAttachmentPhoto=captureMessagePhoto;
   const scanApi=typeof originalApi==='function'?function(this:Bag,key:string){
     const value=originalApi.call(this,key);
     if(key==='camera')value.reviewScannedCalendarDraft=(draft:Bag)=>this.reviewScannedCalendarDraft?.(draft)??false;
@@ -1036,7 +1050,15 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const alpha=owner.get('camera').mode==='alpha';
       const attachmentBinding=JSON.stringify([connectionController.getSnapshot().session,connectionController.getSelectedConversationId()]);
       try {
-        const photo=await writePhoto(owner,!alpha);
+        const destination=messagePhotoCapture;
+        if(destination&&!destination.current()){cancelMessagePhoto();return;}
+        const photo=await writePhoto(owner,!alpha&&!destination);
+        if(destination&&messagePhotoCapture===destination&&session.current(token)&&owner.isActive()&&destination.current()){
+          if(!/^data:image\/jpeg;base64,/.test(photo.image))throw Error('Photo data is unavailable.');
+          const bytes=Uint8Array.from(atob(photo.image.slice(photo.image.indexOf(',')+1)),c=>c.charCodeAt(0));
+          const file=new File([bytes],'Photo.jpg',{type:'image/jpeg'});
+          destination.returning=true;destination.returnTo(file);return;
+        }
         if(alpha&&photo.id&&session.current(token)&&owner.isActive()&&owner.get('camera').mode==='alpha'&&attachmentBinding===JSON.stringify([connectionController.getSnapshot().session,connectionController.getSelectedConversationId()])){
           owner.open('photos',{tab:'lib',album:null,open:photo.id,nativePhotoSelection:captureSelection(photo),chrome:true});
           owner.attachCameraPhoto(photo.id,photo.image,"What's this?");
@@ -1250,6 +1272,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   module.actions = { ...(cameraActions || {}), scan: () => { if (api) void scanFrame(api); } };
   module.back = () => { if (session.recording || session.recordingStarting || session.finalizing) { void stop(); return true; } return false; };
   module.onLeave = () => {
+    if(!messagePhotoCapture?.returning)cancelMessagePhoto();
     // Stop can schedule before the shell commits the next view.
     previewReleased = true;
     void stop();
@@ -1640,7 +1663,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   // not from observing every DOM mutation in the document.
   const removePresence = installViewPresence(_Component, schedule);
   const resize = () => { if (session.phase === 'ready') mask(true); schedule(); };
-  const visibility = () => { if (document.hidden) { retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);watchLibrary(false);cancelEdit();closeVideo();if(!browserMode){++libraryEpoch;captures=[];albumRows=[];trash=[];trashLoaded=false;albumNext='';trashNext='';albumKey='';counts=undefined;++countsEpoch;countsBusy=false;++albumsEpoch;albumsBusy=false;albumsLoaded=false;customAlbums=[];++albumEpoch;++trashEpoch;preview=undefined;shareReview=undefined;albumReview=undefined;selection=undefined;next='';loaded=false;photosApi?.set({open:null,nativePhotoSelection:null,nativeCaptureRevision:Date.now()});}void stop(); } else { loaded = false; if (photosApi?.isActive()) { void refresh(); if (!trashLoaded && libraryAvailable()) void loadTrash(photosApi); } schedule(); } };
+  const visibility = () => { if (document.hidden) { cancelMessagePhoto();retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);watchLibrary(false);cancelEdit();closeVideo();if(!browserMode){++libraryEpoch;captures=[];albumRows=[];trash=[];trashLoaded=false;albumNext='';trashNext='';albumKey='';counts=undefined;++countsEpoch;countsBusy=false;++albumsEpoch;albumsBusy=false;albumsLoaded=false;customAlbums=[];++albumEpoch;++trashEpoch;preview=undefined;shareReview=undefined;albumReview=undefined;selection=undefined;next='';loaded=false;photosApi?.set({open:null,nativePhotoSelection:null,nativeCaptureRevision:Date.now()});}void stop(); } else { loaded = false; if (photosApi?.isActive()) { void refresh(); if (!trashLoaded && libraryAvailable()) void loadTrash(photosApi); } schedule(); } };
   let libraryChangeHandle:{remove():Promise<void>}|undefined;
   /** A MediaStore change: re-read what is loaded and patch it (FixPatch). The selection keeps rows that
    * still exist and the viewer stays open unless its item is gone. `hard` (the edited source changed
@@ -1678,12 +1701,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }).then(handle=>{if(disposed)void handle.remove();else libraryChangeHandle=handle;}).catch(()=>{});
   const albumsChanged=()=>{if(!browserMode||disposed)return;albumsLoaded=false;albumsBusy=false;++albumsEpoch;albumKey='';albumBusy=false;++albumEpoch;if(photosApi?.isActive()){void loadCustomAlbums(photosApi);const key=photosApi.get('photos').album;if(typeof key==='string'&&key.startsWith('custom:'))void loadAlbum(key,photosApi);}};
   window.addEventListener('alpha:albums-document-changed',albumsChanged);
-  const pageHide=()=>{retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);cancelEdit();closeVideo();void stop();};
+  const pageHide=()=>{cancelMessagePhoto();retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);cancelEdit();closeVideo();void stop();};
   document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', pageHide); window.addEventListener('resize', resize); schedule();
   // Returning from Android settings: a camera grant restarts the preview without another tap.
   const resumed=()=>{void restartAfterResume(()=>({denied:session.denied,phase:session.phase,disposed}),()=>cameraAccess.checkPermissions()).then(restart=>{if(restart){session.rearm();schedule();}});};
   let resumeHandle:{remove():Promise<void>}|undefined;
   void DailyApps.addListener('appResumed',resumed).then(handle=>{if(disposed)void handle.remove();else resumeHandle=handle;}).catch(()=>{});
-  return () => { releaseHost();if(requestedPhoto===takeRequestedPhoto)requestedPhoto=undefined;window.clearTimeout(noticeTimer);window.clearTimeout(thumbTimer);noticeGeneration++;watchLibrary(false);deviceLibrary.dispose();captureQuestion=undefined;frameQuestion=undefined;void libraryChangeHandle?.remove();hideAccess();void resumeHandle?.remove();window.removeEventListener('alpha:albums-document-changed',albumsChanged);if(scanApi&&prototype.api===scanApi)prototype.api=originalApi;disposed = true;cancelEdit();endHold();selection=undefined; clearInterval(timer); window.clearTimeout(chatTimer); closeVideo(); removePresence(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pageHide); window.removeEventListener('resize', resize); void stop(); style.remove(); captures = []; module.render = render; module.onLeave = leave; module.back = cameraBack; module.actions = cameraActions; if (scanRequest) scanRequest = undefined; if (views.photos) { views.photos.render = photosRender; views.photos.back = photosBack; views.photos.onLeave = photosLeave; } };
+  return () => { cancelMessagePhoto();if(prototype?.captureAttachmentPhoto===captureMessagePhoto)prototype.captureAttachmentPhoto=originalAttachmentCapture;releaseHost();if(requestedPhoto===takeRequestedPhoto)requestedPhoto=undefined;window.clearTimeout(noticeTimer);window.clearTimeout(thumbTimer);noticeGeneration++;watchLibrary(false);deviceLibrary.dispose();captureQuestion=undefined;frameQuestion=undefined;void libraryChangeHandle?.remove();hideAccess();void resumeHandle?.remove();window.removeEventListener('alpha:albums-document-changed',albumsChanged);if(scanApi&&prototype.api===scanApi)prototype.api=originalApi;disposed = true;cancelEdit();endHold();selection=undefined; clearInterval(timer); window.clearTimeout(chatTimer); closeVideo(); removePresence(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pageHide); window.removeEventListener('resize', resize); void stop(); style.remove(); captures = []; module.render = render; module.onLeave = leave; module.back = cameraBack; module.actions = cameraActions; if (scanRequest) scanRequest = undefined; if (views.photos) { views.photos.render = photosRender; views.photos.back = photosBack; views.photos.onLeave = photosLeave; } };
 
 }
