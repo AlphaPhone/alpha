@@ -27,6 +27,11 @@ private static final class ResidentAttachDiagnostic {
 
   void response(int value) { status = value >= 100 && value <= 599 ? value : 0; }
 
+  boolean retryable(Throwable error) {
+    return error instanceof RuntimeRootChanged
+      || stage == Stage.STATUS && (error instanceof java.io.IOException || status >= 500);
+  }
+
   String failure(Throwable error) {
     String kind = error instanceof java.net.SocketTimeoutException ? "SocketTimeoutException"
       : error instanceof java.io.IOException ? "IOException"
@@ -209,6 +214,7 @@ private static final class ResidentAttachDiagnostic {
  private void rejectPending(PluginCall call,String message){synchronized(lifecycleLock){if(pending.remove(call))call.reject(message);}}
 
  private static final class Superseded extends Exception {}
+ private static final class RuntimeRootChanged extends Exception {}
  // Owner, provider and account changes retire shade notices first (AlphaCanonicalNotifications.forget);
  // start, cancel, 401 and destroy keep the same owner, so its posted notices stay.
  private static void clearEnrollment(){AlphaCanonicalNotifications.suspendForRestart();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;}
@@ -833,16 +839,27 @@ private static final class ResidentAttachDiagnostic {
     PluginWorkers.submit(workers,()->{
      ResidentAttachDiagnostic diagnostic=new ResidentAttachDiagnostic();
      try{
-      String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();
+      String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new RuntimeRootChanged();
       diagnostic.stage=ResidentAttachDiagnostic.Stage.STATUS;
       authenticatedStatus(epoch,root,diagnostic::response);
       diagnostic.stage=ResidentAttachDiagnostic.Stage.ENROLLMENT;
       // Attach never pairs: the enrollment it was admitted against must still be the current one.
-      synchronized(lifecycleLock){requireCurrent(epoch);if(!root.equals(rootToken)||ownerToken==null)throw new IllegalStateException();}
+      synchronized(lifecycleLock){requireEnrollmentRoot(epoch,root);if(!root.equals(rootToken)||ownerToken==null)throw new RuntimeRootChanged();}
       resolveCurrent(call,epoch,new JSObject().put("state","ready").put("attached",true));
      }
      catch(Superseded stale){rejectSuperseded(call);}
-     catch(Exception unverified){android.util.Log.w("AlphaAgentRequest",diagnostic.failure(unverified));synchronized(lifecycleLock){attachUnverified=true;}rejectPending(call,"The running local agent did not answer. Start again to restart it; no chat was sent.");}
+     catch(Exception unverified){
+      android.util.Log.w("AlphaAgentRequest",diagnostic.failure(unverified));
+      synchronized(lifecycleLock){
+       try{requireOwned(call,epoch);}catch(Superseded stale){rejectSuperseded(call);return;}
+       pending.remove(call);
+       if(diagnostic.retryable(unverified))call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");
+       else{
+        attachUnverified=true;
+        call.reject("Alpha couldn’t verify the local agent.","runtime-identity-unavailable");
+       }
+      }
+     }
     },()->rejectPending(call,"Local agent bridge is closed."));
     return;
    }
@@ -872,7 +889,7 @@ private static final class ResidentAttachDiagnostic {
      // Never poll enrollment: a failed response may follow a committed pairing POST.
      try{enroll(epoch);resolveCurrent(call,epoch,new JSObject().put("state","ready"));return;}
      catch(Superseded stale){rejectSuperseded(call);return;}
-     catch(Exception uncertain){rejectStartFailed(call,epoch);return;}
+     catch(Exception uncertain){rejectStartup(call,epoch,"Alpha couldn’t confirm local enrollment.","runtime-identity-unavailable");return;}
     }
     rejectStartFailed(call,epoch);
    },()->rejectPending(call,"Local agent bridge is closed."));
@@ -894,9 +911,12 @@ private static final class ResidentAttachDiagnostic {
  }
  /** This launch ended or timed out: cancelStart no longer owns it. */
  private void rejectStartFailed(PluginCall call,long epoch){
+  rejectStartup(call,epoch,START_FAILED,"start-failed");
+ }
+ private void rejectStartup(PluginCall call,long epoch,String message,String code){
   synchronized(lifecycleLock){
    if(startRequestEpoch==epoch){startRequestId=null;startOwnsLaunch=false;}
-   if(pending.remove(call))call.reject(START_FAILED,"start-failed");
+   if(pending.remove(call))call.reject(message,code);
   }
  }
  /** Only the current startup caller may retire a launch it created; reused services are never stopped here. */
@@ -1184,7 +1204,7 @@ private static final class ResidentAttachDiagnostic {
  }
  private void requireEnrollmentRoot(long epoch,String root) throws Exception {
   requireCurrent(epoch);
-  if(root==null||root.isEmpty()||!root.equals(ElizaAgentService.localAgentToken()))throw new IllegalStateException("Local runtime token changed");
+  if(root==null||root.isEmpty()||!root.equals(ElizaAgentService.localAgentToken()))throw new RuntimeRootChanged();
  }
  private JSONObject enrollmentJson(long epoch,String path,String method,JSONObject body,String token,String root) throws Exception {return enrollmentJson(epoch,path,method,body,token,root,status->{});}
  private JSONObject enrollmentJson(long epoch,String path,String method,JSONObject body,String token,String root,java.util.function.IntConsumer observedStatus) throws Exception {

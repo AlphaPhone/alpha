@@ -4,7 +4,7 @@ import {flagOffAndroid,fenceNetwork,harness,button,completeAccessSetup,openYourA
 import {residentStub} from './resident-stub';
 // Actual flag-off UI/CSS with closed native boundary fixtures. These tests do not archive real files.
 const token='d32f7f34-962b-47b7-8f0d-f2fe7f12610a';
-type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost';
+type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost'|'attach-pending';
 async function boot(page:Page,mode:Mode='success',signedOut=false){
  await fenceNetwork(page);await flagOffAndroid(page);await residentStub(page,{nativeSignIn:true,emptyKeystore:signedOut,accounts:[{token:'synthetic-cloud-key',userId:'9f1dc45a-4011-4e44-947a-30d999d24fa5',email:'owner@example.invalid',balance:5}]});
  await page.addInitScript(({mode,token})=>{
@@ -15,11 +15,13 @@ async function boot(page:Page,mode:Mode='success',signedOut=false){
   c.PluginHeaders.find((p:any)=>p.name==='Agent').methods.push(...['reviewRecovery','archiveRecovery','residentAttachment'].map(name=>({name,rtype:'promise'})));
   c.nativePromise=async(p:string,m:string,input:any)=>{
    if(p==='Agent'&&m==='getStatus'&&control.dead)return {packaged:true,state:'restarting',reason:'agent exited: 137'};
-   if(p==='Agent'&&m==='residentAttachment'&&(mode==='lost'||mode==='transient')&&calls.starts>0)
+   if(p==='Agent'&&m==='residentAttachment'&&(mode==='lost'||mode==='transient'||mode==='attach-pending')&&calls.starts>0)
      return {attachable:false,bindingRetained:true,bindingGuard:'a'.repeat(64)};
    if(p==='Agent'&&m==='start'){
     calls.starts++;
-    if(mode==='lost'){
+    if(mode==='attach-pending'){
+      if(calls.starts===1)throw Object.assign(Error('Transient native status read failure'),{code:'LOCAL_AGENT_ATTACH_PENDING'});
+    }else if(mode==='lost'){
       if(control.dead){control.dead=false;throw Object.assign(Error('Native restart pending'),{code:'start-failed'});}
     }else if(!archived&&(mode!=='transient'||calls.starts<=5)){
       throw Object.assign(Error('Native startup refused'),{code:mode==='transient'?'start-failed':'ipc-recovery-retention-limit'});
@@ -94,6 +96,25 @@ test('automatic recovery continues past the old retry limit without a Status pag
  await activity.getByRole('button',{name:'Back to About',exact:true}).click();
  await expect(activity.getByRole('heading',{name:'About',exact:true})).toBeVisible();
  await expect(activity.getByRole('button',{name:'Status',exact:true})).toHaveCount(0);
+ expect(await harness(page,f=>f.streams)).toBe(0);
+});
+
+test('a transient native attach check retries without changing the saved binding',async({page})=>{
+ await page.clock.install();
+ const activity=await boot(page,'attach-pending');
+ const load=activity.getByRole('button',{name:'Load conversations',exact:true});
+ await expect(load).toHaveCount(0);
+ await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
+ const credential=await harness(page,f=>f.slots['cloud:production']);
+ const stops=await harness(page,f=>f.calls.filter(call=>call==='Agent.stop').length);
+ const configs=await harness(page,f=>f.calls.filter(call=>call==='Agent.configureCloudProvider').length);
+
+ await page.clock.fastForward(3050);
+ await expect(load).toBeVisible();
+ expect(await calls(page)).toEqual({starts:2,reviews:0,archives:[]});
+ expect(await harness(page,f=>f.slots['cloud:production'])).toBe(credential);
+ expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.stop').length)).toBe(stops);
+ expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.configureCloudProvider').length)).toBe(configs);
  expect(await harness(page,f=>f.streams)).toBe(0);
 });
 

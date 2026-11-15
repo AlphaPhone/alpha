@@ -7,7 +7,7 @@ export function residentRecoveryReason(error:unknown):ResidentRecoveryReason|und
 }
 export function isResidentRetryable(error:unknown):boolean {
  const code=(error as {code?:unknown}|null)?.code;
- return code==='start-failed'||code==='LOCAL_AGENT_NOT_READY'||code==='LOCAL_AGENT_EPOCH_CHANGED';
+ return code==='start-failed'||code==='LOCAL_AGENT_NOT_READY'||code==='LOCAL_AGENT_EPOCH_CHANGED'||code==='LOCAL_AGENT_ATTACH_PENDING';
 }
 export function residentRecoveryMessage(reason:ResidentRecoveryReason):string {
  if(reason==='runtime-identity-unavailable')return 'Startup check failed';
