@@ -12,7 +12,7 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 
 const MODEL = {path: 'specs/quint/services/SmsSend.qnt', module: 'SmsSend'};
 const SCENARIOS = ['retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest', 'staleAnswerDroppedTest', 'editResetsOperationTest',
-  'deliveryEvidenceTest', 'readBackKeepsIdUntilSendAnswersTest', 'refusedBeforeJournalTest',
+  'deliveryEvidenceTest', 'cancelledJournalReceiptReleasesIdTest', 'refusedBeforeJournalTest',
   'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest',
   'lateJournalReceiptRetiresDraftTest'];
 const WITNESSES = ['RetryAfterClosedRecordWitness', 'RepeatedIdAnsweredFromJournalWitness', 'StaleAnswerDroppedWitness', 'SentEvidenceWitness', 'RefusedBeforeJournalWitness'];

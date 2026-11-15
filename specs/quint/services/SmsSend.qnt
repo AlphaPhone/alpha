@@ -31,10 +31,11 @@ module SmsSend {
     else {
       val status = v.journal.get(id)
       val accepted = id == v.operationId and not(v.busy) and status.in(Set("submitted", "sent", "delivered"))
-      val revision = if (accepted) v.draftRevision + 1 else v.draftRevision
+      val closed = id == v.operationId and not(v.busy) and status.in(CLOSED)
+      val revision = if (closed or accepted) v.draftRevision + 1 else v.draftRevision
       if (status == "none") v
       else { ...v, shown: status, shownFrom: "read-back", shownLifecycle: v.lifecycle, shownDraft: revision,
-        draftRevision: revision, operationId: if (accepted) 0 else v.operationId,
+        draftRevision: revision, operationId: if (closed or accepted) 0 else v.operationId,
         lastSent: if (accepted) id else v.lastSent, draftReady: v.draftReady and not(accepted) }
     }
   action open = all {
@@ -140,8 +141,8 @@ module SmsSend {
   val AtMostOneDispatchPerOperation = IDS.forall(id => s.dispatches.get(id) <= 1)
   val DispatchJournaled = IDS.forall(id =>
     (s.dispatches.get(id) == 1) == s.journal.get(id).in(Set("submitted", "sent", "delivered", "failed", "unknown")))
-  /// Once a send has answered that nothing was dispatched, the idle draft holds no ID.
-  val ClosedAnswerReleasesId = (s.shownFrom == "send" and not(s.busy) and s.shown.in(CLOSED.union(Set("refused")))) implies
+  /// A current send answer or journal read-back can prove that nothing was dispatched.
+  val ClosedAnswerReleasesId = (s.shownFrom.in(Set("send", "read-back")) and not(s.busy) and s.shown.in(CLOSED.union(Set("refused")))) implies
     s.operationId == 0
   /// An ID the draft holds while idle was minted for it and never refused before journaling.
   val HeldIdWasMinted = s.operationId <= s.minted and s.call <= s.minted
@@ -191,14 +192,11 @@ module SmsSend {
   run deliveryEvidenceTest = init.then(open).then(send).then(nativeDecide(true)).then(deliver)
     .then(journalAdvance(1, "sent")).then(journalAdvance(1, "delivered")).then(reconcile)
     .expect(s.shown == "delivered" and s.shownFrom == "read-back" and s.operationId == 0 and s.lastSent == 1 and safety)
-  /// A cancelled record learned only through a read-back keeps the ID; the next Send is answered
-  /// from that record, which releases it, and the Send after that dispatches under a new ID.
-  run readBackKeepsIdUntilSendAnswersTest = init.then(open).then(send).then(nativeDecide(false))
+  /// A read-back of the cancelled operation releases its ID while retaining the owner's text.
+  run cancelledJournalReceiptReleasesIdTest = init.then(open).then(send).then(nativeDecide(false))
     .then(journalReadsAvailable(false)).then(callRejected(false))
     .expect(s.operationId == 1 and s.shown == "outcome-unknown").then(journalReadsAvailable(true)).then(reconcile)
-    .expect(s.shown == "cancelled" and s.shownFrom == "read-back" and s.operationId == 1 and safety)
-    .then(send).then(nativeDecide(true)).then(deliver)
-    .expect(s.shown == "cancelled" and s.operationId == 0 and s.dispatches.get(1) == 0 and safety)
+    .expect(s.shown == "cancelled" and s.shownFrom == "read-back" and s.operationId == 0 and s.draftReady and s.dispatches.get(1) == 0 and safety)
     .then(send).then(nativeDecide(true)).then(deliver)
     .expect(s.shown == "submitted" and s.operationId == 0 and s.lastSent == 2 and s.dispatches.get(2) == 1 and s.edits == 0 and safety)
   /// A refusal before anything is journaled releases the ID without a new draft revision.
