@@ -961,7 +961,7 @@ registerView("inbox", {
     var searching = st.q != null; var sq = (st.q || "").trim().toLowerCase();
 
     var list;
-    if (isSent) list = (st.sent || []).slice();
+    if (isSent) list = (st.sent || []).filter(function (m) { return !m.arch && !m.del; });
     else {
       list = inboxLive(st).filter(function (m) { return st.acct === "all" || inboxAcctOf(accts, m.acct).id === st.acct; });
       list.sort(function (a, b) { return (b.unread ? 1 : 0) - (a.unread ? 1 : 0) || b.k - a.k; });
@@ -988,7 +988,7 @@ registerView("inbox", {
       });
       var unread = !!m.unread;
       return {
-        ini: w.ini, name: w.name, subj: m.subj, snip: String(m.body).replace(/\s+/g, " ").slice(0, 90), time: m.time,
+        id: m.id, sent: !!m.sent, ini: w.ini, name: w.name, subj: m.subj, snip: String(m.body).replace(/\s+/g, " ").slice(0, 90), time: m.time,
         nameW: unread ? "700" : "500", subjCss: unread ? "color:var(--fg);font-weight:600" : "color:var(--fg)",
         dot: unread ? "var(--acct)" : "transparent", clip: !!(m.atts && m.atts.length),
         label: (unread ? "Unread, " : "") + w.name + ", " + m.subj,
