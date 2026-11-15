@@ -48,6 +48,7 @@ public final class MmsStore {
  static Uri fileUri(String authority,String name){throw new AssertionError("MMS outside SMS fixture");}
  static void delete(Context c,String name){throw new AssertionError("MMS outside SMS fixture");}
  static long persistOutgoingMms(Context c,String[] to,List<MmsPdu.Part> parts,String txn,int sim,long at){throw new AssertionError("MMS outside SMS fixture");}
+ static void discardOutgoingMms(Context c,long row,String transaction){throw new AssertionError("MMS outside SMS fixture");}
  static void settleOutgoingMms(Context c,long row,boolean success){throw new AssertionError("MMS outside SMS fixture");}
 }`,
     'ai/eliza/plugins/messages/SmsProviderReader.java': `package ai.eliza.plugins.messages;

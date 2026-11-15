@@ -38,7 +38,7 @@ async function campaign(scenarios, extraSources, check, {historicalProbe=false} 
     const history=historicalProbe?materializeHistoricalSources(root,paths.map(path=>'vendor/eliza/'+path),historicalInventory):null;
     const resolveSource=path=>history?history.resolveSource('vendor/eliza/'+path):join(staged.root,path);
     const read=name=>readFileSync(resolveSource(shared+name+'.java'),'utf8');
-    const files=Object.entries(mmsPlatform(...extracted.map(read))).map(([path,contents])=>{
+    const files=Object.entries(mmsPlatform(...extracted.map(read),{historical:historicalProbe})).map(([path,contents])=>{
       const target=join(temporary,'driver',path);
       mkdirSync(dirname(target),{recursive:true});writeFileSync(target,contents);return target;
     });

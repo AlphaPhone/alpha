@@ -644,9 +644,10 @@ outgoing message persistence on the Alpha image
 ([eliza#39658](https://github.com/elizaOS/eliza/pull/39658)). Outgoing SMS is stored in the Android provider
 before dispatch. Incoming SMS is stored before its notification. A send result
 and a carrier delivery receipt remain separate.
-The current pin `b8526fd56c9aa683889fdc00c286e2db0280f12e` lets Alpha Messages authorize an owner-composed
-SMS or MMS when the owner taps Send. The native SMS journal and carrier
-dispatch guards remain in the shared SDK ([eliza#39660](https://github.com/elizaOS/eliza/pull/39660)).
+The current pin `b8526fd56c9aa683889fdc00c286e2db0280f12e` lets Alpha Messages authorize an
+owner-composed SMS or MMS when the owner taps Send. The shared SDK owns the
+native journal and carrier dispatch guards. It retires a staged MMS if Android
+never receives it ([eliza#39660](https://github.com/elizaOS/eliza/pull/39660)).
 Assistant and external compose sends still use their existing confirmation.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
