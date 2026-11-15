@@ -246,7 +246,18 @@ public class MainActivity extends BridgeActivity {
   try { return FRONT_START_TOKEN.equals(intent.getStringExtra(EXTRA_FRONT_START)); }
   catch (RuntimeException foreign) { return false; }
  }
- @Override protected void load() { if (!handedOff) super.load(); }
+ private boolean telephonyAdmitted;
+ @Override protected void load() {
+  if (handedOff) return;
+  if (telephonyAdmitted && !isAssistantSurface()) {
+   WebView webView = findViewById(com.getcapacitor.android.R.id.webview);
+   if (webView != null) {
+    webView.setFilterTouchesWhenObscured(true);
+    AlphaMessagesComposerPort.install(this, webView);
+   }
+  }
+  super.load();
+ }
  private void handOff(MainActivity live) {
   boolean home = isHomeIntent(getIntent());
   boolean sameTask = live.getTaskId() == getTaskId();
@@ -367,7 +378,8 @@ public class MainActivity extends BridgeActivity {
   // The native image gate is checked again by every telephony operation.
   // Reconcile the role components with the verified image before registering telephony.
   AlphaTelephonyRoles.sync(this);
-  if (AlphaImageCapability.verified(this)) registerPlugin(AlphaTelephonyPlugin.class);
+  telephonyAdmitted = AlphaImageCapability.verified(this);
+  if (telephonyAdmitted) registerPlugin(AlphaTelephonyPlugin.class);
   captureNavigationOpen(getIntent());
   captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());

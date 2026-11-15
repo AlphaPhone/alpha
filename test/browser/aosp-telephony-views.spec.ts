@@ -44,7 +44,7 @@ test('an SMS notification opens only its thread on launch and waits for an unsen
   await expect.poll(() => inputs(page, 'acknowledgeSmsNotice')).toEqual([{token: '1'}, {token: '2'}]);
   expect(new Set((await inputs(page, 'listMessages')).map(input => input.threadId))).toEqual(new Set(['thread:102', 'thread:101']));
   await expect.poll(async () => new Set((await inputs(page, 'markThreadRead')).map(input => input.threadId))).toEqual(new Set(['thread:101']));
-  expect(await inputs(page, 'sendSms')).toEqual([]);
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
 test('recents call on the owner tap; the keypad fits above the assistant controls on a small phone', async ({page}) => {
@@ -152,7 +152,7 @@ test('a conversation has one bottom bar: its text field with the assistant in it
   await page.locator('[data-alpha-messages-body]').fill('tell her I am ten minutes away');
   await page.locator('[data-alpha-messages-alpha]').click();
   await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('');
-  expect(await inputs(page, 'sendSms')).toEqual([]);
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
 test('a draft Alpha was asked for lands in the open conversation and never replaces the owner text or sends', async ({page}) => {
@@ -174,7 +174,7 @@ test('a draft Alpha was asked for lands in the open conversation and never repla
   expect(await place('Ignored')).toBe('occupied');
   await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('My own words');
   await expect(page.locator('[data-alpha-messages-suggested]')).toHaveCount(0);
-  expect(await inputs(page, 'sendSms')).toEqual([]);
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
 test('suggested replies explain model-provider use before enabling the setting', async ({page}) => {
@@ -211,7 +211,7 @@ test('the open conversation owns its send target after a new-message draft', asy
   await expect(page.locator('[data-alpha-messages-body]')).toHaveValue('');
   await page.locator('[data-alpha-messages-body]').fill('Draft for Ada');
   await page.locator('[data-alpha-messages-send]').click();
-  await expect.poll(async () => (await inputs(page, 'sendSms')).map(input => [input.recipients, input.body])).toEqual([[['+15550100101'], 'Draft for Ada']]);
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).map(input => [input.recipients, input.body])).toEqual([[['+15550100101'], 'Draft for Ada']]);
 });
 
 test('an outgoing SMS bubble appears on Send and an exact provider row replaces it', async ({page}) => {
@@ -225,10 +225,13 @@ test('an outgoing SMS bubble appears on Send and an exact provider row replaces 
   const text = thread.getByText(body, {exact: true});
   await expect(text).toHaveCount(1);
   await draft.fill(body);
+  await send.evaluate(button => (button as HTMLButtonElement).click());
+  await expect(text).toHaveCount(1);
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   await send.click();
   await expect(text).toHaveCount(2);
   await expect(send).toBeDisabled();
-  const [request] = await inputs(page, 'sendSms');
+  const [request] = await inputs(page, 'sendComposedSms');
   const provisional = thread.locator(`[data-alpha-message-id="${request.operationId}"]`);
   await expect(provisional).toHaveCSS('opacity', '0.68');
   await page.evaluate(() => (window as any).smsReview.finish('sent'));
@@ -243,10 +246,44 @@ test('an outgoing SMS bubble appears on Send and an exact provider row replaces 
   await expect(thread.locator('[data-alpha-message-id="sms:41"]')).toHaveText(body);
   await expect(provisional).toHaveCount(0);
   await expect(text).toHaveCount(2);
-  expect(await inputs(page, 'sendSms')).toHaveLength(1);
+  expect(await inputs(page, 'sendComposedSms')).toHaveLength(1);
+  expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
-test('cancelling or failing the native SMS review removes the provisional bubble and keeps the draft', async ({page}) => {
+test('the registered telephony profile still chooses native review', async ({page}) => {
+  await setupTelephony(page, {controlledSms: true});
+  await open(page, 'Messages');
+  await page.evaluate(() => {
+    const w = window as any;
+    const client = w[Symbol.for('elizaos.native-telephony.profile')];
+    w.reviewedSend = client.sendSms({recipients: ['+15550100101'], body: 'Reviewed request', subscriptionId: 1}, 'reviewed-operation');
+  });
+  await expect.poll(() => inputs(page, 'sendSms')).toEqual([{
+    recipients: ['+15550100101'], body: 'Reviewed request', subscriptionId: 1, operationId: 'reviewed-operation',
+  }]);
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
+  const result = await page.evaluate(async () => {
+    const w = window as any;
+    await w.smsReview.finish('cancelled');
+    return w.reviewedSend;
+  });
+  expect(result.status).toBe('cancelled');
+});
+
+test('the owner Send button routes a group text through the manual MMS port', async ({page}) => {
+  await setupTelephony(page, {mms: true});
+  await open(page, 'Messages');
+  await page.locator('[data-alpha-messages-new]').click();
+  await page.locator('[data-alpha-messages-recipients]').fill('+15550100101, +15550100102');
+  await page.locator('[data-alpha-messages-body]').fill('Group text');
+  await page.locator('[data-alpha-messages-send]').click();
+  await expect.poll(() => inputs(page, 'sendComposedMms')).toEqual([expect.objectContaining({
+    recipients: ['+15550100101', '+15550100102'], body: 'Group text', subscriptionId: 1, attachments: [],
+  })]);
+  expect(await inputs(page, 'sendMms')).toEqual([]);
+});
+
+test('a refused or failed manual SMS removes the provisional bubble and keeps the draft', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
   await page.getByRole('button', {name: /^Ada Okafor/}).click();
@@ -256,20 +293,20 @@ test('cancelling or failing the native SMS review removes the provisional bubble
   await draft.fill(body);
   await page.locator('[data-alpha-messages-send]').click();
   await expect(bubble).toBeVisible();
-  await expect.poll(async () => (await inputs(page, 'sendSms')).length).toBe(1);
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(1);
   await page.evaluate(() => (window as any).smsReview.finish('cancelled'));
   await expect(bubble).toHaveCount(0);
   await expect(draft).toHaveValue(body);
   await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
   await page.locator('[data-alpha-messages-send]').click();
   await expect(bubble).toBeVisible();
-  await expect.poll(async () => (await inputs(page, 'sendSms')).length).toBe(2);
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(2);
   await page.evaluate(() => (window as any).smsReview.finish('failed'));
   await expect(bubble).toHaveCount(0);
   await expect(draft).toHaveValue(body);
   await expect(page.getByRole('img', {name: 'Message failed'})).toBeVisible();
   await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
-  expect(await inputs(page, 'sendSms')).toHaveLength(2);
+  expect(await inputs(page, 'sendComposedSms')).toHaveLength(2);
 });
 
 for (const smsRoleHeld of [true, false]) {
@@ -285,7 +322,7 @@ for (const smsRoleHeld of [true, false]) {
     await draft.fill(body);
     await page.locator('[data-alpha-messages-send]').click();
     await expect(bubbles).toBeVisible();
-    await expect.poll(async () => (await inputs(page, 'sendSms')).length).toBe(1);
+    await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(1);
     await page.evaluate(() => (window as any).smsReview.finish('submitted'));
     if (smsRoleHeld) {
       await expect(draft).toHaveValue('');
@@ -312,7 +349,7 @@ test('one unread thread opened from Home can send only to that conversation', as
   await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
   await page.locator('[data-alpha-messages-body]').fill('Draft for Ada');
   await page.locator('[data-alpha-messages-send]').click();
-  await expect.poll(async () => (await inputs(page, 'sendSms')).map(input => input.recipients)).toEqual([['+15550100101']]);
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).map(input => input.recipients)).toEqual([['+15550100101']]);
 });
 
 test('Messages can open a system review without SMS permissions and request each missing permission', async ({page}) => {
