@@ -36,12 +36,12 @@ const incompleteThread={id:'thread:2',date:1700000002000,incomplete:true,reason:
 const completeMessage={id:'sms:1',kind:'sms',threadId:'thread:1',direction:'incoming',status:'received',date:1700000001000,read:false,subscriptionId:3,addresses:['+15555550100'],body:'Known full text',deliveryReport:null,attachments:0};
 const incompleteMessage={id:'mms:2',kind:'mms',threadId:'thread:1',date:1700000002000,incomplete:true,reason:'text-as-attachment'};
 
-async function mount(messages=[]){
+async function mount(messages=[],nativeStatus=status){
   const calls=[],previousDocument=globalThis.document,previousPlugin=globalThis.__incompleteSmsPlugin;
   globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
   globalThis.__incompleteSmsPlugin=new Proxy({},{get:(_,method)=>method==='then'?undefined:async options=>{
     calls.push([method,options]);
-    if(method==='status')return status;
+    if(method==='status')return nativeStatus;
     if(method==='smsSendHistory')return {receipts:[]};
     if(method==='listThreads')return {threads:[incompleteThread,completeThread],next:null};
     if(method==='listMessages')return {messages,next:null};
@@ -50,10 +50,10 @@ async function mount(messages=[]){
     if(method==='observeMessages')return {};
     throw Error('Unexpected native effect: '+String(method));
   }});
-  class Component{S(){return {view:'messages'};}setState(){}}
+  class Component{view='messages';S(){return {view:this.view};}setState(){}}
   const views={messages:{}};installSmsAdapter(Component,views,{load:async()=>[],save:async()=>{throw Error('Unexpected local draft write');},remove:async()=>{throw Error('Unexpected local draft removal');}});
   const owner=new Component();owner.componentDidMount();await tick();
-  return {calls,model:()=>views.messages.render({},{}),async close(){owner.componentWillUnmount();await tick();globalThis.document=previousDocument;globalThis.__incompleteSmsPlugin=previousPlugin;}};
+  return {owner,calls,model:()=>views.messages.render({},{}),async close(){owner.componentWillUnmount();await tick();globalThis.document=previousDocument;globalThis.__incompleteSmsPlugin=previousPlugin;}};
 }
 const effects=calls=>calls.filter(([method])=>['markThreadRead','sendSms','sendMms','composeSms'].includes(method));
 
@@ -98,4 +98,25 @@ test('complete rows keep their content and reply numbers while incomplete rows c
     assert.deepEqual(effects(fixture.calls),[['markThreadRead',{threadId:'thread:1',throughDate:completeMessage.date}]],'only the actual complete message bounds the read marker');
     assert.equal(model.nativeBody,'','reading a thread never creates an outgoing text');
   }finally{await fixture.close();}
+});
+
+
+test('agent context uses the only SIM without a hidden chooser; multiple or stale choices stay explicit',async()=>{
+ const current=structuredClone(status),single=current.subscriptions[0];
+ const fixture=await mount([],current);
+ try{
+  assert.equal(fixture.model().nativeSims.length,1);
+  assert.equal(fixture.owner.smsSelection().id,String(single.id));
+  current.subscriptions=[single,{...single,id:4,slot:1,displayName:'Other SIM',defaultSms:false,defaultVoice:false}];
+  fixture.model().nativeRefresh();await tick();await tick();
+  assert.equal(fixture.owner.smsSelection(),undefined,'multiple SIMs are not guessed');
+  fixture.model().nativeSims.find(row=>row.id===4).pick();
+  assert.equal(fixture.owner.smsSelection().id,'4','the explicit choice is preserved');
+  current.subscriptions=[single];
+  fixture.model().nativeRefresh();await tick();await tick();
+  assert.equal(fixture.owner.smsSelection(),undefined,'an unavailable explicit choice never falls back to another SIM');
+  fixture.owner.view='home';fixture.owner.componentDidUpdate();await tick();
+  assert.equal(fixture.owner.smsSelection(),undefined,'a retired Messages view advertises no SIM context');
+  assert.deepEqual(effects(fixture.calls),[],'SIM context resolution neither sends nor marks a message read');
+ }finally{await fixture.close();}
 });
