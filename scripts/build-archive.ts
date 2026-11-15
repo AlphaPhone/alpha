@@ -1,3 +1,4 @@
+import {androidIdentity} from './android-identity.ts';
 /**
  * Verify, build the launcher APKs and retain immutable matching app/test artifacts.
  *
@@ -23,7 +24,7 @@ const sourceDir='artifacts';
 // Archives are always flag-off; build-android also strips these.
 const buildEnv=androidBuildEnv(process.env);
 const verifyEnv=androidBuildEnv(process.env);
-const updateChannel=publicUpdateChannel(JSON.parse(fs.readFileSync('app.config.json','utf8')).updateManifestUrl);
+const updateChannel=publicUpdateChannel(androidIdentity().updateManifestUrl);
 assert.ok(destination && path.resolve(destination).startsWith(path.resolve('test-results')+path.sep), 'Use a new archive beneath test-results');
 assert.ok(!fs.existsSync(destination), 'Archive already exists; preserve earlier evidence');
 fs.mkdirSync(destination,{recursive:true});
@@ -42,7 +43,10 @@ finally{fs.closeSync(nativeStageLog);}
 // Complete normal sync before freezing; the build repeats sync and equality
 // below still rejects drift in this file or any other captured input.
 const capacitorStageLog=fs.openSync(path.join(destination,'capacitor-prestage.log'),'wx');
-try{execFileSync('bun',['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});}
+try{
+ execFileSync('bun',['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
+ execFileSync(process.execPath,['scripts/android-host.ts'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
+}
 finally{fs.closeSync(capacitorStageLog);}
 const before=snapshot();
 fs.writeFileSync(path.join(destination,'inputs-before.json'),JSON.stringify(before,null,2));
