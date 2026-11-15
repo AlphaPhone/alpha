@@ -131,7 +131,8 @@ test('Home and Apps icons fade on pointer press while keyboard focus stays visib
     const icon=face.locator(':scope > :first-child');
     await expect(tile).toBeVisible();
     await expect(icon).toHaveCSS('opacity', '1');
-    await expect(icon).toHaveCSS('transition-duration', '0s');
+    // Alpha's shared reduced-motion rule leaves a negligible 0.01 ms transition.
+    expect(await icon.evaluate(node=>Number.parseFloat(getComputedStyle(node).transitionDuration))).toBeLessThan(0.001);
     const background=await face.evaluate(node=>getComputedStyle(node).backgroundColor);
     const bounds=(await icon.boundingBox())!;
     await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
