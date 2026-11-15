@@ -2,9 +2,9 @@
 // or Messages is involved: this proves the detail actions only open a prefilled view and the 200 cap.
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
 const dir=mkdtempSync(join(tmpdir(),'contacts-adapter-'));
-const output=await build({entryPoints:[resolve('apps/app/src/prototype/contacts-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':'export function registerPlugin(){return new Proxy({},{get:(_,method)=>method==="then"?undefined:options=>globalThis.contactsPlugin(method,options)});}',loader:'js'}));}}]});
+const output=await build({stdin:{contents:"export * from './apps/app/src/prototype/contacts-adapter.ts';export {applyListFilter,clearListFilter,currentListFilter} from './apps/app/src/runtime/comms-bar.ts';",resolveDir:resolve('.'),loader:'ts'},bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':'export function registerPlugin(){return new Proxy({},{get:(_,method)=>method==="then"?undefined:options=>globalThis.contactsPlugin(method,options)});}',loader:'js'}));}}]});
 writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
-const {installContactsAdapter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const {installContactsAdapter,applyListFilter,clearListFilter,currentListFilter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const settle=()=>new Promise(r=>setTimeout(r,5));
 function mount(list,editor=async()=>({})){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
@@ -214,4 +214,30 @@ test('a held refresh begun before terminal uncertainty cannot release the contac
  read.resolve({contacts:[ada],more:false});await settle();book.model({}).addNew();await settle();assert.equal(book.model({}).ed.open,false);
  assert.match(book.model({}).nativeStatus,/Outcome unknown/);held=false;book.model({}).nativeRefresh();await settle();book.model({}).addNew();await settle();assert.equal(book.model({}).ed.open,true);
  book.shell.componentWillUnmount();
+});
+
+// AP-16 (docs/agentic-comms.md AC-22): on the image the bar's list filter, typed or applied by Alpha,
+// is a query to the address book on the device, and the bar carries no briefing from its rows.
+test('the list filter is a provider query on the device and the bar carries no briefing',async()=>{
+ globalThis.mvpViews=['contacts'];const calls=[],local=[],barRows=[];
+ globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return {contacts:[ada,{id:'2',name:'Grace Hopper'}],more:false};return {};};
+ const views={contacts:{
+  render:()=>({filter:{apply:f=>{local.push(['apply',f]);return true;},clear:()=>local.push(['clear']),current:()=>({query:'gra',label:'Grace',by:'alpha'})}}),
+  bar:st=>{barRows.push(st.list);return {closed:{kind:'filter'},briefing:'Ada called at noon.'};}}};
+ class Shell{view='contacts';S(){return {view:this.view};}vget(){return {q:''};}setState(){}toast(){}}
+ installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();await settle();
+ const api={set(){},open(){}};views.contacts.render({},api);
+ const read=()=>calls.filter(([m])=>m==='list').at(-1)[1];
+ assert.equal(applyListFilter('contacts',{query:'gra',label:'Grace',by:'alpha'}),true);await settle();
+ assert.deepEqual(read(),{query:'gra',limit:50},'the filter is one provider read');
+ assert.deepEqual(local,[['apply',{query:'gra',label:'Grace',by:'alpha'}]],'the view keeps the filter and its chip');
+ assert.deepEqual(currentListFilter('contacts'),{query:'gra',label:'Grace',by:'alpha'});
+ clearListFilter('contacts');await settle();
+ assert.deepEqual(read(),{query:'',limit:50},'clearing the chip reads the whole list again');
+ assert.deepEqual(local.at(-1),['clear']);
+ assert.deepEqual(calls.filter(([m])=>!['status','list'].includes(m)),[],'filtering only reads');
+ const spec=views.contacts.bar({open:'2'},api);
+ assert.equal(spec.briefing,null,'no address-book row becomes a briefing');
+ assert.deepEqual(barRows.at(-1).map(row=>[row.id,row.name,row.first,row.ini]),[['1','Ada','Ada','A'],['2','Grace Hopper','Grace','GH']]);
+ shell.componentWillUnmount();
 });

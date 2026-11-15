@@ -217,6 +217,67 @@ test('contacts have one section per letter: accents fold, everything else is und
   same(h.log.toasts.map(row => row[0]), ['This contact was deleted']);
 });
 
+// AP-16 (docs/agentic-comms.md AC-22): the Contacts bar, its list filter and Alpha's list answer.
+test('Contacts: the bar searches the list or asks Alpha, and Alpha answers a list question with a chip filter', () => {
+  const filters = [];
+  const C = load(['ctGet', 'ctList', 'ctFind', 'ctLastCall', 'ctContext', 'ctHits', 'ctListAsk', 'ctFilterNow', 'ctFilterHandler', 'ctBar'], {
+    CT_SEED: [], applyListFilter: (view, filter) => { filters.push([view, filter]); return true; },
+  });
+  const maya = {id: 'maya', name: 'Maya Chen', first: 'Maya', ini: 'MC', phone: '(415) 555-0132', email: 'maya@lumen.example', note: 'Design lead at Lumen'};
+  const sam = {id: 'sam', name: 'Sam Okafor', first: 'Sam', ini: 'SO', phone: '(510) 555-0199', email: '', note: ''};
+  const list = [maya, sam], phone = {phone: {recents: [], vms: []}};
+  same(C.ctHits(list, 'lumen').map(p => p.id), ['maya'], 'email and note match');
+  same(C.ctHits(list, '0199').map(p => p.id), ['sam'], 'three or more digits match the number');
+  same(C.ctHits(list, '').map(p => p.id), ['maya', 'sam']);
+  same(['Who do I know at Lumen?', 'show people from Northpoint', 'lumen', 'What should I cook tonight for everyone?', ''].map(C.ctListAsk), ['Lumen', 'Northpoint', 'lumen', null, null]);
+
+  const h = queued('contacts', {list, q: '', chip: null, open: null}, phone);
+  h.api.now = new Date(0);
+  let bar = C.ctBar(h.state(), h.api);
+  same([bar.target.kind, bar.closed.kind, bar.closed.placeholder, bar.left.icon, bar.left.label, bar.context, bar.contextKey, bar.strip.title, bar.briefing],
+    ['list', 'filter', 'Search or ask', 'search', 'Back to search', 'Contacts', 'contacts:list:', 'Contacts', null]);
+  bar.closed.onText('ma');
+  same(filters.pop(), ['contacts', {query: 'ma', label: 'ma', by: 'owner'}], 'typing filters the list as the owner');
+
+  const handler = C.ctFilterHandler(h.api);
+  handler.apply({query: 'Lumen', label: 'Lumen', by: 'alpha'}); h.flush();
+  same([h.state().q, h.state().chip, h.state().open], ['Lumen', 'Lumen', null], 'Alpha\'s filter carries its chip');
+  same(handler.current(), {query: 'Lumen', label: 'Lumen', by: 'alpha'});
+  bar = C.ctBar(h.state(), h.api);
+  assert.equal(bar.closed.value, '', 'the chip, not the field, shows Alpha\'s filter');
+  bar.closed.onText('');
+  assert.equal(filters.length, 0, 'emptying the field keeps Alpha\'s filter');
+  handler.apply({query: 'sa', label: 'sa', by: 'owner'}); h.flush();
+  same([h.state().q, h.state().chip], ['sa', null], 'typing replaces it, without a chip');
+  handler.clear(); h.flush();
+  same([h.state().q, h.state().chip, handler.current()], ['', null, null]);
+
+  const card = queued('contacts', {list, q: '', chip: null, open: 'maya'}, phone);
+  card.api.now = new Date(0);
+  bar = C.ctBar(card.state(), card.api);
+  same([bar.target.kind, bar.target.first, bar.closed.kind, bar.closed.placeholder, bar.closed.onText, bar.left.icon, bar.left.label, bar.left.initials, bar.context, bar.contextKey, bar.strip.subtitle, bar.end, bar.fit],
+    ['contact', 'Maya', 'alpha', 'Ask about Maya', null, 'avatar', "Back to Maya's card", 'MC', 'Maya Chen · Contacts', 'contacts:contact:maya', 'Contacts', null, null]);
+  assert.equal(bar.briefing, 'Design lead at Lumen.', 'the briefing is the contact\'s own facts');
+
+  // Alpha's answer on the list on screen (registerView("contacts").reply) and Back.
+  const defs = {}, {ctx: _, ...helpers} = C;
+  const view = model.slice(model.indexOf('registerView("contacts"'), model.indexOf('/* ===== module: files'));
+  const ctx = vm.createContext({Object, String, RegExp, JSON, CT_SEED: [], IC: {}, copy: () => ({}), registerView: (key, def) => { defs[key] = def; }, ...helpers,
+    applyListFilter: (v, f) => { filters.push([v, f]); return true; }, clearListFilter: v => filters.push([v, null]), setListFilterHandler: () => {}});
+  vm.runInContext(view, ctx);
+  const ask = (raw, st = {list, open: null}) => defs.contacts.reply(raw.toLowerCase(), raw, {active: true, st, get: other => other === 'contacts' ? st : phone[other], now: new Date(0), setView() {}});
+  const answer = ask('Who do I know at Lumen?');
+  assert.equal(answer.text, '1 person matches “Lumen”. I filtered the list.');
+  assert.equal(filters.length, 0, 'nothing is filtered before the answer lands');
+  answer.then();
+  same(filters.pop(), ['contacts', {query: 'Lumen', label: 'Lumen', by: 'alpha'}]);
+  same(ask('Who do I know at Acme?'), {text: 'No one in Contacts matches “Acme”.'});
+  assert.equal(ask('Who do I know at Lumen?', {list, open: 'maya'}), null, 'a contact on screen is not a list');
+  assert.match(ask("What's Maya's number?").text, /415/, 'a question about a person is still answered about the person');
+  assert.equal(defs.contacts.back({list, q: 'Lumen', chip: 'Lumen'}, {set() {}}), true);
+  same(filters.pop(), ['contacts', null], 'Back clears the filter through the list handler');
+});
+
 function opener(state, views = {maps: {}, camera: {}, photos: {}, notes: {}}) {
   const ctx = vm.createContext({Object, isMvpView: () => true, VIEWS: views});
   vm.runInContext(`globalThis.shell={${method('secureAdmits')},\n${method('vpatch')},\n${method('openView')}};`, ctx);

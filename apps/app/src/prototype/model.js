@@ -25,6 +25,7 @@ import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWee
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
+import { applyListFilter, clearListFilter, setListFilterHandler } from "../runtime/comms-bar";
 
 
 var IC = {
@@ -3422,6 +3423,62 @@ function ctGroups(people) {
   });
   return groups;
 }
+/* AC-22: the contacts a list query matches, read on this device only: the name, email or note, or
+   three or more digits of the number. */
+function ctHits(list, query) {
+  var q = String(query || "").trim().toLowerCase(), qd = q.replace(/\D/g, "");
+  return (list || []).filter(function (p) {
+    if (!q) return true;
+    if ((p.name + " " + (p.email || "") + " " + (p.note || "")).toLowerCase().indexOf(q) >= 0) return true;
+    return qd.length >= 3 && String(p.phone || "").replace(/\D/g, "").indexOf(qd) >= 0;
+  });
+}
+/* AC-22: what a question sent from the Contacts list asks the list to show ("Who do I know at Lumen?"
+   is "Lumen"). A short query sent with Enter is the filter itself; anything else is null. */
+function ctListAsk(raw) {
+  var text = String(raw || "").trim();
+  var m = text.match(/\b(?:who|show|find|list|filter|people|contacts|anyone|everyone)\b.*?\b(?:at|from|in|named|called|with)\s+(.+?)[\s?.!]*$/i);
+  if (m) return m[1].trim();
+  return text && !/\?$/.test(text) && text.split(/\s+/).length <= 3 ? text : null;
+}
+/* The list filter as runtime/comms-bar.ts reports it: the owner's typed query shows no chip, Alpha's
+   filter shows its chip label. */
+function ctFilterNow(s) { return s && s.q ? { query: s.q, label: s.chip || s.q, by: s.chip ? "alpha" : "owner" } : null; }
+function ctFilterHandler(api) {
+  return {
+    apply: function (f) { var query = String(f.query || ""); api.set({ q: query, chip: f.by === "alpha" && query.trim() ? String(f.label || query) : null, open: null }); return true; },
+    clear: function () { api.set({ q: "", chip: null }); },
+    current: function () { return ctFilterNow(api.get("contacts")); }
+  };
+}
+/* AP-16 bar (runtime/comms-bar.ts): on the list the bar searches it or asks Alpha; on a contact it
+   asks Alpha about that person. Contacts never addresses a person from the bar. */
+function ctBar(st, api) {
+  var p = st.open ? ctGet(st.list || CT_SEED, st.open) : null;
+  var field = { value: "", onText: null, submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null };
+  var rest = { end: null, incoming: null, emergency: false, fit: null };
+  if (p) {
+    var first = p.first || String(p.name || "").split(/\s+/)[0];
+    return Object.assign({
+      target: { kind: "contact", app: "Contacts", name: p.name, first: first, initials: p.ini },
+      closed: Object.assign({ kind: "alpha", placeholder: "Ask about " + first }, field),
+      left: { icon: "avatar", label: "Back to " + first + "'s card", initials: p.ini, run: null },
+      context: p.name + " · Contacts", contextKey: "contacts:contact:" + p.id,
+      strip: { title: p.name, subtitle: "Contacts", initials: p.ini, live: false, actions: [] },
+      briefing: ctContext(api, p) || null
+    }, rest);
+  }
+  return Object.assign({
+    target: { kind: "list", app: "Contacts", name: null, first: null, initials: null },
+    closed: Object.assign({}, field, { kind: "filter", placeholder: "Search or ask", value: st.chip ? "" : st.q || "",
+      // Emptying the field keeps a filter Alpha applied; its chip clears it.
+      onText: function (text) { if (!text && api.get("contacts").chip) return; applyListFilter("contacts", { query: text, label: text, by: "owner" }); } }),
+    left: { icon: "search", label: "Back to search", initials: null, run: null },
+    context: "Contacts", contextKey: "contacts:list:",
+    strip: { title: "Contacts", subtitle: "", initials: null, live: false, actions: [] },
+    briefing: null
+  }, rest);
+}
 function ctSave(api) {
   var s = api.get("contacts"); var l = s.list || CT_SEED;
   /* the contact being edited was deleted meanwhile: nothing is saved and the editor closes */
@@ -3434,7 +3491,7 @@ function ctSave(api) {
     api.set({ list: l.map(function (x) { return x.id === s.edit ? ctMake(Object.assign({}, x, clean)) : x; }), edit: null, add: null, form: null, open: s.edit });
   } else {
     var np = ctMake(Object.assign({ id: "contact-" + crypto.randomUUID(), fav: false }, clean));
-    api.set({ list: l.concat([np]), edit: null, add: null, form: null, open: np.id, q: "" });
+    api.set({ list: l.concat([np]), edit: null, add: null, form: null, open: np.id, q: "", chip: null });
   }
   api.toast("Saved");
   return true;
@@ -3452,7 +3509,7 @@ function ctDeleted(api, p, idx) {
 
 registerView("contacts", {
   title: "Contacts", icon: "user", aliases: ["people", "address book"],
-  state: { list: CT_SEED, q: "", searching: false, open: null, edit: null, add: null, form: null },
+  state: { list: CT_SEED, q: "", chip: null, open: null, edit: null, add: null, form: null },
   persist: ["list"],
   jumps: [[null, "Contacts"], ["detail", "Contact"], ["edit", "Edit contact"]],
   preset: function (sub) {
@@ -3463,18 +3520,27 @@ registerView("contacts", {
   back: function (st, api) {
     if (st.edit || st.add) { api.set({ edit: null, add: null, form: null, open: st.edit || st.open }); return true; }
     if (st.open) { api.set({ open: null }); return true; }
-    if (st.searching || st.q) { api.set({ q: "", searching: false }); return true; }
+    if (st.q || st.chip) { clearListFilter("contacts"); return true; }
     return false;
   },
+  bar: ctBar,
   suggestions: function (st, api) {
     var p = st.open ? ctGet(st.list || CT_SEED, st.open) : null;
     if (st.edit || st.add) return ["Save it", "Discard changes"];
     if (p) return ["Catch me up on " + p.first, "Text " + p.first, "Edit " + p.first + "'s email"];
-    return copy("contacts").suggestions || ["Add a contact"];
+    return copy("contacts").suggestions || [];
   },
   voicePhrase: copy("contacts").voicePhrase,
   reply: function (t, raw, api) {
     var st = api.st; var list = ctList(api);
+    /* AC-22: on the list Alpha answers a list question by filtering the list on screen. */
+    var ask = api.active && !st.open && !st.edit && !st.add ? ctListAsk(raw) : null;
+    var listAnswer = ask ? (function () {
+      var n = ctHits(list, ask).length;
+      if (!n) return { text: "No one in Contacts matches \u201c" + ask + "\u201d." };
+      return { text: n + (n === 1 ? " person matches" : " people match") + " \u201c" + ask + "\u201d. I filtered the list.",
+        then: function () { applyListFilter("contacts", { query: ask, label: ask, by: "alpha" }); } };
+    })() : null;
     if (api.active && (st.edit || st.add)) {
       if (/^(save|done|save it|looks good)\b/.test(t)) return { text: "Saved.", then: function () { ctSave(api); } };
       if (/^(discard|cancel|never ?mind)\b/.test(t)) return { text: "Discarded.", then: function () { var s = api.get("contacts"); api.set({ edit: null, add: null, form: null, open: s.edit || s.open }); } };
@@ -3491,7 +3557,7 @@ registerView("contacts", {
         then: function () { api.setView("contacts", { list: ctList(api).concat([np]) }); } };
     }
     var p = ctFind(t, list);
-    if (!p) return null;
+    if (!p) return listAnswer;
     var f = p.first || p.name;
     /* edits */
     var ed = t.match(/\b(edit|change|update|set|fix)\b.*?\b(email|e-mail|number|phone|address|birthday|note)\b/);
@@ -3521,30 +3587,31 @@ registerView("contacts", {
       var ctx = ctContext(api, p);
       return { text: (p.note && ctx.indexOf(p.note) < 0 ? p.note + ". " : "") + (ctx || "Nothing new from " + f + ".") , card: card("user", p.phone || p.email) };
     }
-    return null;
+    return listAnswer;
   },
   render: function (st, api) {
     var list = st.list || CT_SEED;
     var now = api.now.getTime();
-    var q = (st.q || "").trim().toLowerCase(); var qd = q.replace(/\D/g, "");
-    var hits = list.filter(function (p) {
-      if (!q) return true;
-      if ((p.name + " " + (p.email || "") + " " + (p.note || "")).toLowerCase().indexOf(q) >= 0) return true;
-      return qd.length >= 3 && String(p.phone || "").replace(/\D/g, "").indexOf(qd) >= 0;
-    });
-    var groups = ctGroups(hits).map(function (g) {
-      return { letter: g.letter, head:true, rows: g.people.map(function (p) { return { ini: p.ini, name: p.name, open: function () { api.set({ open: p.id }); } }; }) };
-    });
-    var favs = (q || st.searching) ? [] : list.filter(function (p) { return p.fav; }).map(function (p) { return { ini: p.ini, first: p.first || p.name, label: p.name, open: function () { api.set({ open: p.id }); } }; });
-
+    var filter = ctFilterHandler(api);
+    setListFilterHandler("contacts", filter);
+    var q = (st.q || "").trim();
+    var hits = ctHits(list, q);
     var p = st.open ? ctGet(list, st.open) : null;
+    /* The first row on screen stays above the Alpha sheet (data-alpha-stage-last), while no contact covers the list. */
+    var listMark = p ? undefined : "true";
+    var favs = q ? [] : list.filter(function (p) { return p.fav; }).map(function (p) { return { ini: p.ini, first: p.first || p.name, label: p.name, open: function () { api.set({ open: p.id }); } }; });
+    var groups = ctGroups(hits).map(function (g, gi) {
+      return { letter: g.letter, head:true, rows: g.people.map(function (p, ri) { return { ini: p.ini, name: p.name, last: !favs.length && !gi && !ri ? listMark : undefined, open: function () { api.set({ open: p.id }); } }; }) };
+    });
+
     var d = null;
     if (p) {
       var acts = [];
-      if (p.phone) acts.push({ d: IC.phone, label: "Call " + p.name, go: function () { api.open("phone", { call: p.id, ret: { view: "contacts", patch: { open: p.id } } }); } });
-      if (p.phone) acts.push({ d: IC.bubble, label: "Message " + p.name, go: function () { api.open("messages", { thread: p.id }); } });
-      if (p.email) acts.push({ d: IC.mail, label: "Email " + p.name, go: function () { api.open("inbox", { compose: { to: p.id } }); } });
-      if (p.address) acts.push({ d: IC.pin, label: "Directions to " + p.name, go: function () { api.open("maps", { query: p.address }); } });
+      /* AC-03: call, text, mail, directions, each only with its field and an admitted view to handle it. */
+      if (p.phone && isMvpView("phone")) acts.push({ d: IC.phone, label: "Call " + p.name, go: function () { api.open("phone", { call: p.id, ret: { view: "contacts", patch: { open: p.id } } }); } });
+      if (p.phone && isMvpView("messages")) acts.push({ d: IC.bubble, label: "Message " + p.name, go: function () { api.open("messages", { thread: p.id }); } });
+      if (p.email && isMvpView("inbox")) acts.push({ d: IC.mail, label: "Email " + p.name, go: function () { api.open("inbox", { compose: { to: p.id } }); } });
+      if (p.address && isMvpView("maps")) acts.push({ d: IC.pin, label: "Directions to " + p.name, go: function () { api.open("maps", { query: p.address }); } });
       var fields = [];
       if (p.phone) fields.push({ d: IC.phone, v: p.phone });
       if (p.email) fields.push({ d: IC.mail, v: p.email });
@@ -3553,7 +3620,7 @@ registerView("contacts", {
       if (p.note) fields.push({ d: IC.contactsNote, v: p.note });
       var ctx = ctContext(api, p);
       d = {
-        ini: p.ini, name: p.name, acts: acts, hasActs: acts.length > 0, fields: fields, hasFields: fields.length > 0,
+        ini: p.ini, name: p.name, acts: acts, hasActs: acts.length > 0, fields: fields, hasFields: fields.length > 0, canFav: true, canDelete: true, busy: false,
         ctx: ctx, hasCtx: !!ctx && ctx !== p.note,
         ask: function () { api.send("Catch me up on " + (p.first || p.name)); },
         fav: !!p.fav, favLabel: p.fav ? "Remove from favorites" : "Add to favorites", favCss: p.fav ? "color: var(--acct); fill: currentColor" : "",
@@ -3576,16 +3643,11 @@ registerView("contacts", {
     };
     var canSave = editing && !!(form.first.trim() || form.last.trim() || form.phone.trim());
     return {
-      nativePrototype: true,
-      q: st.q || "", hasQ: !!q, qRaw: (st.q || "").trim(),
-      searching: !!st.searching, notSearching: !st.searching,
-      openSearch: function () { api.set({ searching: true }); },
-      closeSearch: function () { api.set({ searching: false, q: "" }); },
-      searchRef: function (el) { if (el && document.activeElement !== el && !el.dataset.f) { el.dataset.f = "1"; try { el.focus(); } catch (e) {} } },
-      onQ: function (e) { api.set({ q: e.target.value }); },
-      askQ: function () { api.send((api.get("contacts").q || "").trim()); },
+      q: st.q || "", qRaw: q, addQ: !!q && !st.chip,
+      filter: filter, listMark: listMark, favsLast: favs.length ? listMark : undefined,
+      chip: st.chip && q ? { label: st.chip, count: hits.length, clearLabel: "Clear filter " + st.chip, clear: function () { clearListFilter("contacts"); } } : null,
       favs: favs, hasFavs: favs.length > 0, groups: groups, noHits: hits.length === 0 && !!q,
-      addNew: function () { var s0 = api.get("contacts"); var qq = s0.searching ? (s0.q || "").trim() : ""; api.set({ add: !qq ? true : (/\d{3}/.test(qq) ? { phone: qq } : { first: qq.charAt(0).toUpperCase() + qq.slice(1) }), form: null, q: "", searching: false }); },
+      addNew: function () { var s0 = api.get("contacts"); var qq = s0.chip ? "" : (s0.q || "").trim(); api.set({ add: !qq ? true : (/\d{3}/.test(qq) ? { phone: qq } : { first: qq.charAt(0).toUpperCase() + qq.slice(1) }), form: null, q: "", chip: null }); },
       detail: !!d, d: d,
       editing: editing,
       eIni: form ? ctIni(form.first, form.last) : "", eHasIni: !!form && ctIni(form.first, form.last) !== "#", eNoIni: !!form && ctIni(form.first, form.last) === "#",

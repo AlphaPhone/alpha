@@ -2,6 +2,7 @@ import { registerPlugin } from '../platform-plugins';
 import { watchReturnToApp } from './native-adapter';
 import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
+import { setListFilterHandler } from '../runtime/comms-bar';
 import {contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
@@ -122,23 +123,30 @@ export function installContactsAdapter(Component:any,views:Bag){
  }
  views.contacts.reply=()=>null;
  views.contacts.suggestions=()=>[];
+ /* The rows the list and the bar show: names only, from the last read. */
+ const shown=()=>rows.map(row=>{const name=row.name||'Unnamed contact';return {id:row.id,name,first:name.split(/\s+/)[0],ini:initials(row.name||''),phone:'',email:'',fav:false};});
+ /* AP-16 bar: the model's Contacts bar over the rows read on the device. Alpha gets no briefing from
+    the address book: its rows never enter agent context. */
+ const bar=views.contacts.bar;
+ views.contacts.bar=(st:Bag,viewApi:Bag)=>({...bar({...st,list:shown()},viewApi),briefing:null});
  views.contacts.render=function(st:Bag,viewApi:Bag){
   const api=viewApi;setApi(viewApi);
   if(st.open&&st.open!==detailFor&&readable)void loadDetail(String(st.open));
   if(!st.open&&detailFor){detailFor='';detail=null;detailEpoch++;confirming=false;}
-  const list=rows.map(row=>({id:row.id,name:row.name||'Unnamed contact',first:row.name||'Unnamed contact',ini:initials(row.name||''),phone:'',email:'',fav:false}));
-  const model=render({...st,list,edit:null,add:null,form:null},api);
-  model.nativeManaged=true;model.nativePrototype=false;model.nativeStatus=uncertain?'Outcome unknown · refresh Contacts':pendingWrite?'Contact change pending':status;model.nativeStatusDot=!status?'':!readable?'warn':'';model.nativeBusy=loading||pendingWrite;model.nativeAccess=!readable;model.nativeMore=more&&limit<200;
+  const model=render({...st,list:shown(),edit:null,add:null,form:null},api);
+  /* AC-22: the list filter, typed in the bar or applied by Alpha, is the provider's own query: a
+     read on this device, never a network request. The model registered first; this one wins. */
+  const local=model.filter;
+  setListFilterHandler('contacts',{...local,apply:(filter:Bag)=>{const applied=local.apply(filter);limit=50;void refresh(false,String(filter.query||''));return applied;},clear:()=>{local.clear();limit=50;void refresh(false,'');}});
+  model.nativeManaged=true;model.nativeStatus=uncertain?'Outcome unknown · refresh Contacts':pendingWrite?'Contact change pending':status;model.nativeStatusDot=!status?'':!readable?'warn':'';model.nativeBusy=loading||pendingWrite;model.nativeAccess=!readable;model.nativeMore=more&&limit<200;
   model.nativeRefresh=()=>void refresh(false,undefined,true);model.nativeRequest=()=>void refresh(true);model.nativeLoadMore=()=>{limit=Math.min(200,limit+50);void refresh();};
-  model.hasQ=false;model.noHits=false;model.addNew=()=>void openEditor();model.notSearching=false;model.searching=false;model.hasQuery=!!String(st.q||'');
-  /* A short list needs no letter headings; the search field is always there. */
+  model.noHits=false;model.addNew=()=>void openEditor();
+  /* A short list needs no letter headings. */
   for(const group of model.groups||[])group.head=rows.length>=20;
-  model.onQ=(event:Event)=>{api.set({q:(event.target as HTMLInputElement).value,open:null});limit=50;void refresh(false,(event.target as HTMLInputElement).value);};
-  model.closeSearch=()=>{api.set({q:'',searching:false,open:null});limit=50;void refresh(false,'');};
   if(model.d){const selected=rows.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
    model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v}))]:[];
    if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:TYPE_LABEL(row.type)})),...detail.emailAddresses.map(row=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v:row.address,sub:TYPE_LABEL(row.type)}))];
-   model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void openEditor(selected);model.d.toggleFav=()=>{};
+   model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void openEditor(selected);model.d.canFav=false;
    model.d.canDelete=!pendingWrite&&!uncertain&&!!selected&&!!detail&&detail.id===selected.id&&writable;model.d.del=()=>{if(model.d.canDelete&&!saving&&!opening&&!form){confirming=true;changed();}};
    model.d.confirming=confirming;model.d.cancelDelete=()=>{if(!saving){confirming=false;changed();}};model.d.confirmDelete=()=>void remove();model.d.busy=saving;
   }
