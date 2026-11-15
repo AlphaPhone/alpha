@@ -22,7 +22,7 @@ test('Home shows one Messages card and one Phone card and keeps no telephony con
   expect(await page.evaluate(() => /Ada Okafor|Running ten minutes/.test(JSON.stringify({...localStorage})))).toBe(false);
 });
 
-test('recents call on the owner tap; the keypad fits above the assistant controls on a small phone', async ({page}) => {
+test('recents call on the owner tap; the keypad fits above the bar on a small phone', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Phone');
   await page.getByRole('button', {name: /^Call Carmen Ruiz, outgoing/}).click();
@@ -35,7 +35,7 @@ test('recents call on the owner tap; the keypad fits above the assistant control
   for (const size of [{width: 412, height: 915}, {width: 360, height: 640}]) {
     await page.setViewportSize(size);
     await expect(page.locator('[data-alpha-phone-call]')).toBeInViewport({ratio: 1});
-    expect(await overlaps(page, '[data-alpha-phone-call]', `${pill} > div`), `${size.width}x${size.height}`).toBe(false);
+    expect(await overlaps(page, '[data-alpha-phone-call]', '[data-alpha-input-bar]'), `${size.width}x${size.height}`).toBe(false);
     expect(await overlaps(page, '[data-alpha-phone-number]', '[data-alpha-phone-keypad] button[aria-label="1"]')).toBe(false);
   }
   await page.locator('[data-alpha-phone-call]').click();
