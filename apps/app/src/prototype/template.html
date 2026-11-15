@@ -550,8 +550,28 @@
    <div style="display:flex;align-items:center;gap:4px;padding:0 16px 8px 8px;flex-shrink:0">
     <button aria-label="Back" onClick="{{messages.closeNew}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.back}}"></path></svg></button>
     <input type="tel" data-alpha-messages-recipients aria-label="To" placeholder="To" disabled="{{messages.nativeBusy}}" value="{{messages.nativeRecipients}}" onChange="{{messages.nativeOnRecipients}}" maxlength="230" style="flex-grow:1;min-width:0;height:44px;padding:0 16px;border-radius:22px;background:var(--s2);font-size:16px;font-family:inherit;color:inherit;border:0;outline:0;box-sizing:border-box">
+    <button aria-label="{{messages.contactsLabel}}" aria-expanded="{{messages.contactsOpen}}" onClick="{{messages.toggleContacts}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.plus}}"></path></svg></button>
    </div>
    <div class="scr" data-alpha-messages-picks style="flex-grow:1;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
+    <sc-if value="{{messages.contactsOpen}}">
+     <section aria-label="Choose a contact" data-alpha-messages-contact-picker>
+      <div style="display:flex;gap:8px;padding:0 16px 8px;align-items:center">
+       <input type="search" aria-label="Search contacts" placeholder="Name or number" maxlength="128" value="{{messages.contacts.query}}" onChange="{{messages.contacts.onQuery}}" onKeyDown="{{messages.contacts.onKey}}" style="flex-grow:1;min-width:0;min-height:44px;padding:0 16px;border:0;border-radius:22px;background:var(--s2);font-size:16px;color:inherit;box-sizing:border-box">
+       <button onClick="{{messages.contacts.search}}" disabled="{{messages.contacts.busy}}" style="min-height:44px;padding:0 4px">Search</button>
+      </div>
+      <sc-if value="{{messages.contacts.busy}}"><p role="status" style="margin:8px 16px;color:var(--mut)">Checking Contacts</p></sc-if>
+      <sc-if value="{{messages.contacts.notice}}"><p role="status" style="margin:8px 16px;color:var(--mut)">{{messages.contacts.notice}}</p></sc-if>
+      <sc-if value="{{messages.contacts.needsAccess}}"><button disabled="{{messages.contacts.busy}}" onClick="{{messages.contacts.allow}}" style="min-height:44px;margin:0 16px;text-decoration:underline">Allow Contacts access</button></sc-if>
+      <sc-for list="{{messages.contacts.choices}}" as="c">
+       <button aria-label="{{c.label}}" onClick="{{c.pick}}" disabled="{{messages.contacts.busy}}" style="display:flex;align-items:center;gap:12px;width:100%;padding:6px 20px;min-height:60px;text-align:left;box-sizing:border-box">
+        <span aria-hidden="true" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex-shrink:0">{{c.ini}}</span>
+        <span style="flex-grow:1;min-width:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{c.name}}</span>
+        <span style="font-size:14px;color:var(--mut);font-variant-numeric:tabular-nums;flex-shrink:0">{{c.number}}</span>
+       </button>
+      </sc-for>
+      <sc-if value="{{messages.contacts.more}}"><button disabled="{{messages.contacts.busy}}" onClick="{{messages.contacts.loadMore}}" style="min-height:44px;margin:0 16px;text-decoration:underline">More contacts</button></sc-if>
+     </section>
+    </sc-if>
     <sc-for list="{{messages.newBubbles}}" as="m">
      <div data-alpha-message-id="{{m.id}}" style="width:fit-content;max-width:min(280px,calc(100% - 32px));margin:8px 16px 0 auto;background:{{m.bg}};color:{{m.fg}};opacity:{{m.opacity}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap">{{m.text}}</div>
     </sc-for>

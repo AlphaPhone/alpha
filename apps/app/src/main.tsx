@@ -18,6 +18,7 @@ import {installCalendarEditDraftAdapter} from './prototype/calendar-edit-draft-a
 import {installCalendarFormDraftAdapter} from './prototype/calendar-form-draft-adapter';
 import { browserApps } from './browser/apps';
 import { installSmsAdapter, setSmsReplySuggester } from './prototype/sms-adapter';
+import { secureConnectionStore } from './runtime/native-connection';
 import { installContactsAdapter } from './prototype/contacts-adapter';
 import { installPhoneAdapter } from './prototype/phone-adapter';
 import { installTelephonyAttention } from './prototype/telephony-attention';
@@ -128,7 +129,7 @@ if (!fixture) {
   installAgentAdapter(Component, VIEWS);
   installReminderAdapter(Component, VIEWS);
   installCalendarAdapter(Component, VIEWS, {active:deviceCalendarScope});
-  if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS);installPhoneAdapter(Component,VIEWS);}
+  if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS,secureConnectionStore);installPhoneAdapter(Component,VIEWS);}
   installCalendarFormDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installCalendarEditDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installNoteOriginAdapter(Component, VIEWS);
@@ -353,6 +354,7 @@ async function prepareMountedUpdate(activationCurrent: () => boolean, automatic 
     owner.flushComposerForAppUpdate, owner.flushCalendarForAppUpdate,
     owner.flushNotesForAppUpdate, owner.flushInboxForAppUpdate, owner.flushWorkflowsForAppUpdate,
   ];
+  if (owner.flushMessagesForAppUpdate) flush.push(owner.flushMessagesForAppUpdate);
   if (flush.some(draft => typeof draft !== 'function')) throw Error('A draft owner is unavailable');
   await Promise.all(flush.map(draft => draft.call(owner, current)));
   if (!current()) throw Error('App update changed');
