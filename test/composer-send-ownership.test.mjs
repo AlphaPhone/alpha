@@ -6,19 +6,17 @@ import {randomUUID} from 'node:crypto';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {systemNoticeKind,systemNoticeDisplayText,collapseSystemNotices} from '../apps/app/src/runtime/action-message-presentation.ts';
 
-// The shell's send (p.send in apps/app/src/prototype/agent-adapter.ts) and composer sizing, executed
+// The shell's send (p.send in apps/app/src/prototype/agent-adapter.ts), executed
 // from their source with the connection, client, draft and DOM replaced by ports. No app start,
 // transport, model or device.
 const adapter=fs.readFileSync(new URL('../apps/app/src/prototype/agent-adapter.ts',import.meta.url),'utf8');
 const between=(start,end)=>{const a=adapter.indexOf(start),b=adapter.indexOf(end,a);assert.ok(a>=0&&b>a,start);return adapter.slice(a,b);};
 const ts=source=>stripTypeScriptTypes(source,{mode:'strip'});
-const ownership=between('export function composerNeedsSizing(','export function installAgentAdapter(').replace(/^export /gm,'');
 const send=between('  p.send = async function','  p.agentSay = function');
 const say=between('  p.agentSay = function','  p.reply = function');
 const plan=between('function planActionCard(','/** Context notices');
 const notices=between('function replyNotices(','/** Decline one pending proposal');
-const sizing=between('  const sizedComposers=','  const notesDataset=');
-const compiled=ts(`${ownership}\n${plan}\n${notices}\nfunction methods(){const p={};\n${send}\n${say}\nreturn p;}\n${sizing}\nglobalThis.methods=methods();globalThis.exported={composerNeedsSizing,sizeComposer};`);
+const compiled=ts(`${plan}\n${notices}\nfunction methods(){const p={};\n${send}\n${say}\nreturn p;}\nglobalThis.methods=methods();`);
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});promise.catch(()=>{});return {promise,resolve,reject};};
 const flush=async()=>{for(let n=0;n<40;n++)await Promise.resolve();};
 const ROOM='a954925f-5698-4639-b1ea-6d1bb760a142';
@@ -26,7 +24,6 @@ const ROOM='a954925f-5698-4639-b1ea-6d1bb760a142';
 function fixture(){
   const session={sessionId:'session-a',agentId:'agent-a',ownerId:'owner-a',origin:'https://agent.invalid'};
   const context={view:'calendar',revision:7,sensitive:false},sent=[],holds=[];
-  let composers=[];
   const settled=new Map();
   class AlphaClientError extends Error{constructor(code,message){super(message);this.code=code;}}
   class NotDispatched extends Error{}
@@ -41,7 +38,7 @@ function fixture(){
   const box={
     systemNoticeKind,systemNoticeDisplayText,collapseSystemNotices,
     console,Error,DOMException,AbortController,Promise,JSON,Object,Date,Set,Map,WeakMap,Math,String,queueMicrotask,
-    crypto:{randomUUID},document:{hidden:false,querySelector:()=>null,querySelectorAll:()=>composers},
+    crypto:{randomUUID},document:{hidden:false,querySelector:()=>null,querySelectorAll:()=>[]},
     alphaClient:{getState:()=>({context,pending:false}),send(text){const reply=deferred(),entry={text,reply,attempt:shell.sendAttempt};sent.push(entry);return reply.promise;}},
     connectionController:{
       getSnapshot:()=>({session,history:{conversationId:ROOM},busy:false,open:false}),
@@ -60,11 +57,10 @@ function fixture(){
   vm.runInNewContext(compiled,box);
   Object.assign(shell,box.methods);
   return {
-    ...box.exported,shell,sent,holds,AlphaClientError,
+    shell,sent,holds,AlphaClientError,
     send(...args){const task=shell.send(...args);task.catch(()=>{});return task;},
     settleLater(attempt){const gate=deferred();settled.set(attempt,gate.promise);return gate;},
     answer(entry,text='Done.'){entry.reply.resolve({text,messageId:randomUUID(),userMessageId:randomUUID(),messageBinding:{conversationId:ROOM,session:{...session}}});},
-    setComposers(value){composers=value;},
   };
 }
 
@@ -129,24 +125,4 @@ test('a draft changed while an unconfirmed voice stop was pending is not sent',a
   const task=f.send();await flush();assert.equal(f.sent.length,0,'the send waits for the stop');
   f.shell.setState({draft:'Second wording'});stop.reject(Error('Could not confirm voice media stopped'));
   await task;assert.equal(f.sent.length,0);assert.equal(f.shell.S().draft,'Second wording');
-});
-test('the composer is measured only when its text, width or applied height changed',()=>{
-  const h=fixture();
-  let reads=0;
-  const style={height:'44px'};
-  const input={value:'hello',clientWidth:300,style,get scrollHeight(){reads++;return 66;}};
-  h.setComposers([input]);
-  h.sizeComposer();
-  assert.equal(reads,1);assert.equal(style.height,'66px');
-  h.sizeComposer();h.sizeComposer();
-  assert.equal(reads,1,'an unchanged composer is not laid out again');
-  input.value='hello there';h.sizeComposer();
-  assert.equal(reads,2);
-  input.clientWidth=280;h.sizeComposer();
-  assert.equal(reads,3);
-  style.height='44px';h.sizeComposer();
-  assert.equal(reads,4,'a render that put the base height back is corrected');
-  assert.equal(style.height,'66px');
-  assert.equal(h.composerNeedsSizing(undefined,'',0,''),true);
-  assert.equal(h.composerNeedsSizing({value:'a',width:1,height:'44px'},'a',1,'44px'),false);
 });
