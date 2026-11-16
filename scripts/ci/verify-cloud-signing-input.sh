@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 test "$GITHUB_REF" = refs/heads/main
-test "$GITHUB_REPOSITORY" = eliza-research/alpha
+test "$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" = alphacompute/alpha
 test "$GITHUB_REPOSITORY_ID" = 1396333361
 test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 directory=$(mktemp -d "$RUNNER_TEMP/alpha-cloud-input.XXXXXX")
@@ -19,8 +19,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path('scripts/ci').resolve()))
 admission = runpy.run_path('scripts/ci/admit-cloud-signing-input.py')
 plan = json.loads(Path(sys.argv[1]).read_text())
-if admission['input_contract'](plan)['packageName'] == admission['RETAINED_PACKAGE']:
-    admission['approved_retained_rotation'](plan, json.loads(Path('android/release-signer.json').read_text()))
+contract = admission['input_contract'](plan)
+if contract['runtimeProfile'] == 'cloud' or contract['packageName'] == admission['RETAINED_PACKAGE']:
+    admission['approved_launcher_rotation'](plan, json.loads(Path('android/release-signer.json').read_text()))
 PY
 fi
 gh api "repos/$GITHUB_REPOSITORY/compare/$source...$GITHUB_SHA" > "$directory/source-comparison.json"

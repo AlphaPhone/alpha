@@ -49,11 +49,11 @@ function code(value: number) {
   return value;
 }
 function identity(root: string, env: NodeJS.ProcessEnv) {
-  assert.equal(env.GITHUB_REPOSITORY, REPOSITORY, 'Candidates require the product repository');
+  assert.equal(env.GITHUB_REPOSITORY?.toLowerCase(), REPOSITORY, 'Candidates require the product repository');
   assert.equal(env.GITHUB_REPOSITORY_ID, String(REPOSITORY_ID), 'Candidate repository ID differs');
   assert.equal(env.GITHUB_EVENT_NAME, 'push', 'Candidates require a main push');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Candidates require main');
-  assert.equal(env.GITHUB_WORKFLOW_REF, `${REPOSITORY}/${WORKFLOW}@refs/heads/main`, 'Candidate workflow changed; review its version epoch');
+  assert.equal(env.GITHUB_WORKFLOW_REF, `${env.GITHUB_REPOSITORY}/${WORKFLOW}@refs/heads/main`, 'Candidate workflow changed; review its version epoch');
   assert.match(env.GITHUB_SHA || '', /^[0-9a-f]{40}$/, 'Exact source commit required');
   for (const name of ['GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_RUN_ATTEMPT']) {
     assert.match(env[name] || '', /^[1-9][0-9]{0,15}$/, `Exact ${name} required`);
@@ -64,7 +64,7 @@ function identity(root: string, env: NodeJS.ProcessEnv) {
   const sdkCommit = readUpstreamPin(root).commit;
   assert.match(sdkCommit || '', /^[0-9a-f]{40}$/);
   assert.equal(git(['-C', 'vendor/eliza', 'rev-parse', 'HEAD']), sdkCommit, 'Candidate SDK changed');
-  return {sourceCommit: env.GITHUB_SHA, sdkCommit, workflow: env.GITHUB_WORKFLOW_REF, workflowId: WORKFLOW_ID,
+  return {sourceCommit: env.GITHUB_SHA, sdkCommit, workflow: `${REPOSITORY}/${WORKFLOW}@refs/heads/main`, workflowId: WORKFLOW_ID,
     runId: env.GITHUB_RUN_ID, runNumber: env.GITHUB_RUN_NUMBER, runAttempt: env.GITHUB_RUN_ATTEMPT,
     versionCode: code(Number(env.GITHUB_RUN_NUMBER))};
 }
@@ -139,7 +139,7 @@ export async function candidateVersion({root = process.cwd(), env = process.env,
   assert.ok(run.id === Number(context.runId) && run.workflow_id === WORKFLOW_ID &&
     run.path === WORKFLOW && run.event === 'push' && run.head_branch === 'main' &&
     run.head_sha === context.sourceCommit && [run.repository, run.head_repository].every(repository =>
-      repository?.id === REPOSITORY_ID && repository.full_name === REPOSITORY) &&
+      repository?.id === REPOSITORY_ID && repository.full_name?.toLowerCase() === REPOSITORY) &&
     run.run_number === context.versionCode && run.run_attempt === Number(context.runAttempt),
   'Candidate run identity or workflow version epoch changed');
   const config = readJson<ProductConfig>(path.join(root, 'app.config.json'));
@@ -148,7 +148,7 @@ export async function candidateVersion({root = process.cwd(), env = process.env,
   const floors = [code(config.versionCode)];
   if (descriptor.lastRelease?.versionCode !== null) floors.push(code(descriptor.lastRelease?.versionCode as number));
   const repository = api([`repos/${REPOSITORY}`]) as RepositoryIdentity & {private: boolean};
-  assert.ok(repository.id === REPOSITORY_ID && repository.full_name === REPOSITORY && repository.private === false, 'Candidate inventory must be the public product repository');
+  assert.ok(repository.id === REPOSITORY_ID && repository.full_name?.toLowerCase() === REPOSITORY && repository.private === false, 'Candidate inventory must be the public product repository');
   let manifestSha256: string | null = null;
   for (const tag of [LEGACY_APP_UPDATE_TAG, APP_UPDATE_TAG] as const) {
     const url = appUpdateManifestUrl(tag);

@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 
-REPOSITORY = "eliza-research/alpha"
+REPOSITORY = "alphacompute/alpha"
 REPOSITORY_ID = 1396333361
 WORKFLOW = ".github/workflows/resident-android.yml"
 WORKFLOW_ID = 373209004
@@ -162,7 +162,7 @@ def verify_github_candidate(plan, api, artifact=None):
             run["event"] == "push" and run["head_branch"] == "main" and run["head_sha"] == source and
             run["workflow_id"] == WORKFLOW_ID and run["path"] == WORKFLOW and
             run["status"] == "completed" and run["conclusion"] == "success" and
-            all(run[key]["id"] == REPOSITORY_ID and run[key]["full_name"] == REPOSITORY
+            all(run[key]["id"] == REPOSITORY_ID and run[key]["full_name"].lower() == REPOSITORY
                 for key in ("repository", "head_repository")), "Candidate producer run attempt differs")
     artifact_id = plan["artifactId"]
     if artifact is None:

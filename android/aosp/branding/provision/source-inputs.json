@@ -76,9 +76,9 @@
   "homeRoleAuthority": "Pinned RoleManager.java 480,513 exposes privileged get/add holders as current user; Provision already holds WRITE_SECURE_SETTINGS and stages MANAGE_ROLE_HOLDERS",
   "productIcon": {
     "path": "android/app/src/main/res/drawable/app_icon.xml",
-    "sha256": "b3d0e893e82cb2ca66ba9c6647b78cd969e55de5dedb33f0ad21970f123b0b14",
-    "logoSource": "apps/app/public/logo-mark.svg",
-    "logoSourceSHA256": "cabe36effaf3ad843870fad70458ccf4411d095ac5c842ba7bce648eac206d2d",
+    "sha256": "02e6a54ddc755c2be6ed8fb43b2e53430957c45c473cd6ca340615e92eb817ac",
+    "logoSource": "apps/app/public/logo-symbol.svg",
+    "logoSourceSHA256": "38f8d45db5c244eb0cb0a7361f0801096edcc5efffdbce6ef8b328d5b3eb7173",
     "reuse": "Byte-exact existing Alpha setup/app icon, not a new renderer",
     "geometry": {
       "vector": {
@@ -90,10 +90,10 @@
       "group": {
         "translateX": "36",
         "translateY": "36",
-        "scaleX": "0.9",
-        "scaleY": "0.9"
+        "scaleX": "0.54",
+        "scaleY": "0.54"
       },
-      "clipPathSHA256": "e9002ca8b4ae714e35c05102e116f8bde4111d09c69eaed590a7426d59ba04b0"
+      "clipPathSHA256": "a76f78f2bfba67850a905faca3b988b030698138f7cb84f5cee1621fa23405fe"
     },
     "assetPreservation": "Boot animation remains the explicit owner-admitted asset input; this icon correction does not choose or regenerate it"
   }

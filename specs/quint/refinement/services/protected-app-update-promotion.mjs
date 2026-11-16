@@ -70,7 +70,7 @@ function checkWorkflows() {
   assert.equal(jobs.publish.steps.find(step => step.with?.path === 'qualified-product').with.ref,
     '$' + '{{ needs.admit-publication.outputs.source_commit }}');
   const reverify = jobs.publish.steps.find(runs('run android:verify --'));
-  assert.ok(reverify?.run.includes('cd qualified-product && bun run android:verify --'));
+  assert.match(reverify?.run ?? '', /application_id=\$\(jq -er '\.packageName'[\s\S]*export ALPHA_ANDROID_APPLICATION_ID="\$application_id"[\s\S]*cd qualified-product[\s\S]*bun scripts\/android-host\.ts[\s\S]*bun run android:verify --/);
   assert.ok(reverify?.run.includes('scripts/ci/verify-qualified-cloud-launcher.py'));
   assert.equal(JSON.parse(read('package.json')).scripts['android:verify'], 'bun scripts/verify-apks.ts');
   const qualifiedRow = jobs.publish.steps.find(step => step.name === 'Require the qualified launcher release row before publication');
@@ -125,9 +125,9 @@ function publicFixture(directory, launcherBytes, version) {
           wait: async () => {},
           run(args) {
             if (args[0] === 'api') {
-              assert.deepEqual(args, ['api', 'repos/eliza-research/alpha']);
+              assert.deepEqual(args, ['api', 'repos/alphacompute/alpha']);
               return JSON.stringify({id: 1396333361,
-                full_name: 'eliza-research/alpha', private: false});
+                full_name: 'alphacompute/alpha', private: false});
             }
             if (args[0] !== 'release') assert.fail('Unexpected command: ' + args.join(' '));
             if (args[1] === 'view' && args[2] === LEGACY_APP_UPDATE_TAG) {

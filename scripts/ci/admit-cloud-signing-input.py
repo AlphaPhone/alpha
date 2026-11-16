@@ -48,10 +48,11 @@ def reviewed_private_producer(plan, descriptor):
         descriptor.get("privateProducerApproval") == approval
 
 
-def approved_retained_rotation(plan, descriptor):
+def approved_launcher_rotation(plan, descriptor):
     """Refuse missing/changed launcher migration before any signing key access."""
-    require(input_contract(plan)["packageName"] == RETAINED_PACKAGE and reviewed_private_producer(plan, descriptor),
-            "Unreviewed retained installation producer")
+    contract = input_contract(plan)
+    require(contract["packageName"] == RETAINED_PACKAGE and
+            reviewed_private_producer(plan, descriptor), "Unreviewed retained installation producer")
     rotation, supplied = descriptor.get("apkSigningRotation"), plan.get("rotation")
     require(isinstance(rotation, dict) and rotation.get("schema") == 1 and rotation.get("approval") == "approved" and
             rotation.get("versionCode") == plan["versionCode"] and
@@ -219,8 +220,14 @@ def native_evidence(data, pin, candidate, source_root=None):
                        "scripts/embedding-native-contract.ts", "scripts/embedding-build-remap.ts",
                        "scripts/android-stage-voice-models.ts", "scripts/local-agent-source.ts",
                        "scripts/voice-host.ts", "scripts/paradee-runtime.ts", "scripts/android-abis.ts", "scripts/copy-file-clone.ts", "scripts/stage-embedding-host.ts"}
-    require(isinstance(recipe["productInputs"], dict) and expected_inputs == recipe["productInputs"].keys() and
-            all(matches(SHA, value) and value == files.get(name) for name, value in recipe["productInputs"].items()),
+    # Older canonical native producers bind the original 16 inputs. New producers
+    # add the complete identity bundle; retained-installation producers require it.
+    inputs = recipe["productInputs"]
+    identity_inputs = {"app.config.json", "android/consumer-host.json", "scripts/android-identity.ts"}
+    require(isinstance(inputs, dict) and
+            (inputs.keys() == expected_inputs or
+             package == CANDIDATE_PACKAGE and inputs.keys() == expected_inputs - identity_inputs) and
+            all(matches(SHA, value) and value == files.get(name) for name, value in inputs.items()),
             "Candidate native recipe differs from frozen product inputs")
     verify_native_source(native, files, pin, source_root)
     voice, embedding = native["voice"], native["embedding"]
