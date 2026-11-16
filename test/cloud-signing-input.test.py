@@ -278,7 +278,7 @@ class CloudSigningInputTest(unittest.TestCase):
         return {f"repos/{PRODUCER.REPOSITORY}/actions/runs/171/attempts/2": run,
                 f"repos/{PRODUCER.REPOSITORY}/actions/artifacts/202": artifact}
 
-    def write_retained_native(self, debug=None):
+    def write_retained_native(self, debug=None, change_native=None):
         self.prepare_native_source()
         source = Path(os.environ["ALPHA_NATIVE_SOURCE_ROOT"])
         url = "https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-update-stable.json"
@@ -301,6 +301,8 @@ class CloudSigningInputTest(unittest.TestCase):
         def identity(native):
             for key in ("voice", "embedding"):
                 native[key]["identity"] = PRODUCER.RETAINED_PACKAGE
+            if change_native:
+                change_native(native)
         self.write_candidate(debug, change_native=identity)
         with zipfile.ZipFile(self.archive) as bundle:
             candidate = json.loads(bundle.read("app-update-candidate.json"))
@@ -597,6 +599,30 @@ class CloudSigningInputTest(unittest.TestCase):
         self.verification["results"][0]["voiceHost"]["asr"] = False
         self.write_candidate()
         with self.assertRaisesRegex(ValueError, "on-device voice with ASR"):
+            ADMISSION.admit(self.archive, self.pin)
+
+    def test_canonical_native_recipe_preserves_legacy_and_complete_identity_inputs(self):
+        identity_inputs = ("app.config.json", "android/consumer-host.json", "scripts/android-identity.ts")
+        for removed in ((), identity_inputs, identity_inputs[:1], identity_inputs[:2]):
+            with self.subTest(removed=removed):
+                def change(native):
+                    for name in removed:
+                        native["recipe"]["productInputs"].pop(name)
+                    native["recipeSha256"] = ADMISSION.digest(json.dumps(native["recipe"], separators=(",", ":")).encode())
+                self.write_candidate(change_native=change)
+                if removed and removed != identity_inputs:
+                    with self.assertRaisesRegex(ValueError, "native recipe differs from frozen product inputs"):
+                        ADMISSION.admit(self.archive, self.pin)
+                else:
+                    self.assertTrue(ADMISSION.admit(self.archive, self.pin)["inputVerified"])
+
+    def test_retained_native_recipe_cannot_omit_the_identity_input_bundle(self):
+        def change(native):
+            for name in ("app.config.json", "android/consumer-host.json", "scripts/android-identity.ts"):
+                native["recipe"]["productInputs"].pop(name)
+            native["recipeSha256"] = ADMISSION.digest(json.dumps(native["recipe"], separators=(",", ":")).encode())
+        self.write_retained_native(change_native=change)
+        with self.assertRaisesRegex(ValueError, "native recipe differs from frozen product inputs"):
             ADMISSION.admit(self.archive, self.pin)
 
     def test_native_recipe_cannot_forge_self_consistent_source_or_model_pins(self):
