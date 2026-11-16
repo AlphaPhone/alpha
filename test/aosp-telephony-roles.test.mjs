@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {aospTelephonyRoleComponents} from '../scripts/aosp-telephony-roles.ts';
+import {aospTelephonyRoleComponents, writeAospTelephonyRoleOverrides} from '../scripts/aosp-telephony-roles.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const pkg = 'ai.alphacompute.alphaphone';
 const enabled = '(type 0x12)0xffffffff';
@@ -78,5 +81,34 @@ test('requires the private MMS provider to serve the application authority and g
   const noGrant = apkTree.replace(`grantUriPermissions(0x01010003)=${enabled}`, `grantUriPermissions(0x01010003)=${disabled}`);
   for (const manifest of [badAuthority, noGrant])
     assert.throws(() => aospTelephonyRoleComponents(manifest, pkg), /MmsFileProvider/);
+});
+
+test('the image enables every admitted role handler before Activity startup without assigning role holders', () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-image-role-defaults-'));
+  try {
+    fs.writeFileSync(path.join(output, 'product.mk'), '# existing image setup\n');
+    const expected = aospTelephonyRoleComponents(apkTree, pkg);
+    assert.deepEqual(writeAospTelephonyRoleOverrides(output, apkTree, pkg), expected);
+    const xml = fs.readFileSync(path.join(output, 'provisioning/alpha-telephony-components.xml'), 'utf8');
+    const actual = [...xml.matchAll(/<component class="([^"]+)" enabled="true" \/>/g)].map(match => match[1]);
+    assert.deepEqual(actual, expected);
+    assert.equal(actual.length, 9);
+    assert.ok(!xml.includes('MainActivity') && !xml.includes('role-holder'));
+    const makefile = fs.readFileSync(path.join(output, 'product.mk'), 'utf8');
+    assert.ok(makefile.startsWith('# existing image setup\n'));
+    assert.match(makefile, /TARGET_COPY_OUT_SYSTEM_EXT\)\/etc\/sysconfig\/alpha-telephony-components\.xml/);
+    assert.throws(() => writeAospTelephonyRoleOverrides(output, apkTree, pkg), /EEXIST/);
+    const refused = path.join(output, 'refused');
+    assert.throws(() => writeAospTelephonyRoleOverrides(refused, apkTree.replace('BIND_INCALL_SERVICE', 'UNRELATED'), pkg), /AlphaInCallService/);
+    assert.equal(fs.existsSync(refused), false);
+    const retained = 'ai.elizaresearch.alphaphone';
+    const retainedOutput = path.join(output, 'retained');
+    fs.mkdirSync(retainedOutput);
+    fs.writeFileSync(path.join(retainedOutput, 'product.mk'), '# retained image\n');
+    const retainedComponents = writeAospTelephonyRoleOverrides(retainedOutput, apkTree.replaceAll(pkg, retained), retained);
+    assert.equal(retainedComponents[0], `${retained}.AlphaInCallService`);
+    const retainedXml = fs.readFileSync(path.join(retainedOutput, 'provisioning/alpha-telephony-components.xml'), 'utf8');
+    assert.ok(retainedXml.includes(`package="${retained}"`) && !retainedXml.includes(pkg));
+  } finally { fs.rmSync(output, {recursive: true, force: true}); }
 });
 
