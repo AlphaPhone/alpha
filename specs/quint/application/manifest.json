@@ -4966,9 +4966,12 @@
     "tests": [
       "clientRouteRunsOnceTest",
       "recoveredRouteRefetchesTest",
-      "crossRouteRunsOnceTest",
+      "sameSessionUnconfirmedResultReusedTest",
+      "newSessionMayReviewPendingTest",
       "executedActionIsNotOfferedAgainTest",
       "abortedFetchSendsNothingTest",
+      "absentRefetchSendsNothingTest",
+      "withdrawnLiveCardCannotCompleteTest",
       "staleLiveCardSendsNothingTest"
     ],
     "invariants": [
@@ -4978,21 +4981,33 @@
       "RecoveredRouteRefetches",
       "RequestsNeedTaps",
       "CompletedMeansExecuted",
-      "DoneCardIsInert"
+      "SettledCardIsInert",
+      "TrackedResultPreventsRedispatch"
     ],
     "witnesses": [
       "RepeatedRequestWitness",
       "RecoveredFetchWitness",
-      "UnavailableAfterExecutionWitness",
+      "NoReviewAfterExecutionWitness",
+      "AbsentReviewHasNoEffectWitness",
       "ConsumedAfterReloadWitness",
-      "LostResponseWitness"
+      "UnconfirmedAfterFetchWitness"
     ],
     "sources": [
       "apps/app/src/prototype/agent-adapter.ts",
       "apps/app/src/runtime/alpha-client.ts",
-      "apps/app/src/runtime/connection-ui.tsx"
+      "apps/app/src/runtime/connection-ui.tsx",
+      "apps/app/src/runtime/device-actions.ts",
+      "vendor/eliza/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"
     ],
     "symbols": [
+      {
+        "path": "apps/app/src/runtime/connection-ui.tsx",
+        "name": "actionReceipts"
+      },
+      {
+        "path": "vendor/eliza/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts",
+        "name": "approve"
+      },
       {
         "path": "apps/app/src/prototype/agent-adapter.ts",
         "name": "cardAct"
@@ -5041,14 +5056,15 @@
     "stateMapping": {
       "server/executions/requests/inFlight": "The agent pending record of one proposal and the execute requests sent to it",
       "clientProposal/consumed/attachmentDispatches": "AlphaClient.proposals, consumed and the approvals it dispatched for one session",
-      "card": "The review card in the transcript: live, recovered, unavailable or done",
+      "card": "The review card in the transcript: live, recovered, unavailable, unconfirmed or done",
       "tap/taps": "Shell.pendingActionApproval and the approve taps",
+      "unconfirmedAt": "The count of decision requests when connectionController.actionReceipts retained an unconfirmed result for this session",
       "reattachments": "History restores and session changes that reattach the client"
     },
     "abstractions": [
       "One proposal identity, at most three taps and two reattachments. A history restore or session change removes the cards of the old transcript; recovery brings a pending proposal back as a recovered card.",
-      "Assumption: the agent journals each proposal identity and executes it once; a repeated execute request returns the journaled receipt. The client consumed set survives a reload of the same session, but the recovered route does not consult it, so one execution across routes rests on this assumption.",
-      "A live card whose client no longer holds the proposal sends nothing; awaiting an earlier tracked receipt on that path is omitted.",
+      "Assumption: the agent journals each proposal identity and executes it once. The consumed set and tracked unconfirmed result survive a settled same-session history restore; the recovered route refetches and reuses that result without a second device approval.",
+      "A live card whose client no longer holds the proposal sends nothing. An aborted refetch represents screen or visibility retirement that also drops the live proposal lease. An effect arriving after transport retirement, restore during an active approval, and receipt delivery after that restore are outside the model.",
       "Expiry, decline, the Home review destination and read-reply completion are outside this model (see PendingActionRecovery and ReadReplyLease)."
     ]
   },
