@@ -180,4 +180,28 @@ test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA
     await expect(page.locator(bubble)).toHaveCount(0);
     await expect(page.getByText('Sent to Maya Chen', {exact: true})).toBeVisible();
   });
+
+  test('a draft Alpha writes from outside Messages is in the thread it opens', async ({page}) => {
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-screen]') as any;
+      let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+      while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+      fiber.stateNode.goHome('sheet');
+    });
+    const composer = page.locator('[data-alpha-layer="conversation"] textarea[data-alpha-composer]');
+    await expect(composer).toBeVisible();
+    for (const ask of ["tell maya I'm running ten minutes late", 'reply to maya']) {
+      await composer.fill(ask);
+      await composer.press('Enter');
+      await expect(page.locator('[data-alpha-sheet-context]')).toHaveText('Maya Chen · Messages', {timeout: 10_000});
+      await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'alpha');
+      await expect(page.locator(bubble)).toContainText(ask.startsWith('tell') ? "I'm running ten minutes late." : '');
+      await page.evaluate(() => {
+        const el = document.querySelector('[data-screen]') as any;
+        let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+        while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+        fiber.stateNode.goHome('sheet');
+      });
+    }
+  });
 });
