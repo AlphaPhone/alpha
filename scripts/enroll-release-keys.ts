@@ -1,8 +1,8 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Record the public identities from Alpha's release key ceremony in its release records.
  *
- *   node scripts/enroll-release-keys.ts --fingerprints CEREMONY_DIR/fingerprints.json
+ *   bun scripts/enroll-release-keys.ts --fingerprints CEREMONY_DIR/fingerprints.json
  *     [--certificates CEREMONY_DIR] [--debug-fingerprint HEX ...] [--replace] [--write]
  *
  * The ceremony is the pinned upstream offline generator run with Alpha's key list:
@@ -33,7 +33,8 @@
  * Without --write it prints the planned changes and writes nothing. It never records lastRelease
  * (that follows the first signed release, H-10) and never reads or writes key material.
  */
-import { X509Certificate, createHash } from "node:crypto";
+import { X509Certificate } from "node:crypto";
+import {sha256} from "./sha256.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,7 +47,7 @@ export const APPLICATION_KEY = "alphaphone_app";
 export const IMAGE_CERTIFICATES = Object.freeze(["shared", "media", "networkstack", "sdk_sandbox", "bluetooth", "nfc", "apex"]);
 const HEX64 = /^[0-9a-f]{64}$/;
 const UNSET = new Set(["unset", "UNSET"]);
-const USAGE = "Usage: node scripts/enroll-release-keys.ts --fingerprints FILE [--certificates DIR] [--debug-fingerprint HEX ...] [--replace] [--write]";
+const USAGE = "Usage: bun scripts/enroll-release-keys.ts --fingerprints FILE [--certificates DIR] [--debug-fingerprint HEX ...] [--replace] [--write]";
 
 /** Each recorded field: the file, the path inside it and the fingerprints.json key and digest that fill it. */
 type DigestField = "certificateSha256" | "avbPublicKeySha256";
@@ -73,7 +74,6 @@ export const ENROLLMENT = Object.freeze<Enrollment[]>([
   { file: CHANNEL, field: ["avbPublicKeySha256"], key: "avb", digest: "avbPublicKeySha256" },
 ]);
 
-const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 export const normalizeDigest = (value: unknown) => String(value ?? "").replace(/:/g, "").toLowerCase();
 const readJson = <T>(root: string, file: string): T => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 const isRecord = (value: unknown): value is ReleaseRecord => value !== null && typeof value === "object";

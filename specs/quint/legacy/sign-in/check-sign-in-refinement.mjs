@@ -4,7 +4,8 @@ import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium, expect as baseExpect} from '@playwright/test';
 import {checkClientFeatures} from '../../../../scripts/prepare-client-features.ts';
-import {filesWithin, repositoryRoot as root, sha256} from '../../../../scripts/quint-lib.ts';
+import {filesWithin, repositoryRoot as root} from '../../../../scripts/quint-lib.ts';
+import {sha256} from '../../../../scripts/sha256.ts';
 import {fenceNetwork} from '../../../../test/browser/flag-off-android.ts';
 import {entitlements, startNativeCloudSignInFixture, USER} from '../../../../test/browser/helpers/native-cloud-signin.ts';
 import {captureInputs, checkTraces, qset} from '../../refinement/check-traces.mjs';
@@ -24,12 +25,13 @@ const state = page => page.evaluate(() => {
 
 async function chooser(page, google) {
   await expect(panel(page).getByRole('heading', {name: 'Alpha', exact: true})).toBeVisible();
-  await expect(panel(page).getByRole('textbox', {name: 'Email or phone', exact: true})).toBeVisible();
-  await expect(panel(page).getByRole('form',{name:'Sign in with email or phone',exact:true})).toBeVisible();
-  if (google) await expect(button(page, 'Continue with Google')).toBeVisible();
-  else await expect(button(page, 'Continue with Google')).toHaveCount(0);
+  await expect(panel(page).getByRole('textbox', {name: 'Email', exact: true})).toBeVisible();
+  await expect(panel(page).getByRole('form',{name:'Sign in with email',exact:true})).toBeVisible();
+  await expect(button(page, 'Continue with phone number')).toBeEnabled();
+  await expect(button(page, 'Continue with Google')).toBeVisible();
+  if (!google) await expect(button(page, 'Continue with Google')).toBeDisabled();
   const enabled = ['email', 'phone'];
-  if (await button(page, 'Continue with Google').count()) {
+  if (google) {
     await expect(button(page, 'Continue with Google')).toBeEnabled();
     enabled.push('google');
   }
@@ -38,7 +40,7 @@ async function chooser(page, google) {
 }
 
 async function emailCode(page, record) {
-  await panel(page).getByRole('textbox', {name: 'Email or phone', exact: true}).fill(address);
+  await panel(page).getByRole('textbox', {name: 'Email', exact: true}).fill(address);
   await button(page, 'Send code').click();
   await expect(panel(page).getByRole('form', {name: 'Enter your email code'})).toBeVisible();
   const offered = await state(page);
@@ -68,7 +70,8 @@ async function emailCode(page, record) {
 }
 
 async function phoneBack(page, record) {
-  await panel(page).getByRole('textbox',{name:'Email or phone',exact:true}).fill('+12025550101');
+  await button(page, 'Continue with phone number').click();
+  await panel(page).getByRole('textbox',{name:'Phone number',exact:true}).fill('+12025550101');
   await button(page, 'Send code').click();
   await expect(panel(page).getByRole('form', {name: 'Enter your phone code'})).toBeVisible();
   const offered = await state(page);
@@ -112,7 +115,7 @@ async function mounted(extraSources) {
     ...filesWithin(resolve(root, 'apps/app/src')), ...filesWithin(resolve(root, '.eliza/client-features')),
     ...filesWithin(resolve(root, 'vendor/eliza/plugins/plugin-native-passwords/src')),
     ...filesWithin(resolve(root, 'vendor/eliza/plugins/plugin-native-system/src')),
-    'vendor/eliza/packages/core/src/utils/uuid.ts', 'vite.config.ts', 'package.json', 'package-lock.json', 'upstream.lock.json',
+    'vendor/eliza/packages/core/src/utils/uuid.ts', 'vite.config.ts', 'package.json', 'bun.lock', 'upstream.lock.json',
     'scripts/prepare-client-features.ts', 'scripts/quint-lib.ts', fileURLToPath(import.meta.url),
     'test/browser/flag-off-android.ts', 'test/browser/helpers/native-navigation-protocol.ts',
     'test/browser/helpers/native-cloud-signin.ts', ...extraSources,

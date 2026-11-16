@@ -1,6 +1,5 @@
 import {fileURLToPath} from 'node:url';
-import {app, directory} from './java.mjs';
-import {mainActivityPlatform} from './main-activity-platform.mjs';
+import {mainActivityPlatform, mainActivitySources} from './main-activity-platform.mjs';
 import {modelTraces, replayJava} from './itf-replay.mjs';
 
 /** HomeInstanceHandoff traces replayed on the real MainActivity over the Android/Capacitor ports. */
@@ -10,7 +9,7 @@ export function checkHomeInstanceHandoff({traces = 60, maxSteps = 30} = {}) {
   try {
     return replayJava({
       harness: 'HomeInstanceHandoffReplay.java',
-      sources: [app + 'MainActivity.java', app + 'RendererRecoveryBudget.java', app + 'NavigationOpenRequest.java', `${directory}/MainActivityPorts.java`, ...fixture.paths],
+      sources: [...mainActivitySources, ...fixture.paths],
       traces: generated,
       required: ['externalStart', 'frontStartArrives', 'liveResumes', 'relaunch', 'destroyLive'],
       reached: {

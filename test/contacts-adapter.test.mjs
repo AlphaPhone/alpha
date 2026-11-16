@@ -7,8 +7,8 @@ writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('ex
 const {installContactsAdapter,applyListFilter,clearListFilter,currentListFilter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const settle=()=>new Promise(r=>setTimeout(r,5));
-function mount(list,editor=async()=>({})){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
- const views={contacts:{render:st=>({contactsRows:st.list,d:st.open?{}:null})}};
+function mount(list,editor=async()=>({}),base={render:st=>({contactsRows:st.list,d:st.open?{}:null})}){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
+ const views={contacts:{...base}};
  class Shell{view='contacts';S(){return {view:this.view};}vget(){return {q:''};}setState(){}toast(message){notices.push(message);}}
  installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();return {views,calls,shell,Shell,notices};}
 const ada={id:'1',name:'Ada',phones:['+15555550100','+15555550101'],emails:['ada@example.com']};
@@ -240,4 +240,42 @@ test('the list filter is a provider query on the device and the bar carries no b
  assert.equal(spec.briefing,null,'no address-book row becomes a briefing');
  assert.deepEqual(barRows.at(-1).map(row=>[row.id,row.name,row.first,row.ini]),[['1','Ada','Ada','A'],['2','Grace Hopper','Grace','GH']]);
  shell.componentWillUnmount();
+});
+
+// The rows on screen are the provider's answer to the query on screen: a provider-only match (an email
+// or number the display name lacks) stays, and another query shows nothing until its own read answers.
+test('the native list shows only the provider answer to the current query, with the Alpha chip over it',async()=>{
+ globalThis.mvpViews=['contacts'];const bob={id:'2',name:'Bob',phones:['+15555550200']};const older=Promise.withResolvers(),zoe=Promise.withResolvers();let zoeReads=0;
+ const state={q:'',chip:null,open:null},seen=[];
+ const base={render:st=>{seen.push(st);return {rows:st.list,filter:{apply:f=>{Object.assign(state,{q:f.query,chip:f.by==='alpha'?f.label:null,open:null});return true;},clear:()=>Object.assign(state,{q:'',chip:null}),current:()=>null}};}};
+ const fixture=mount(({query})=>query==='ada@example.com'?{contacts:[ada],more:true}:query==='555-0200'?{contacts:[bob],more:false}:query==='Zoe'?(++zoeReads===1?older.promise:zoe.promise):{contacts:[ada,bob],more:true},undefined,base);
+ fixture.shell.vget=()=>state;const api={set:patch=>Object.assign(state,patch),open(){}};
+ const model=()=>fixture.views.contacts.render(state,api);const names=()=>model().rows.map(row=>row.name);
+ const lastList=()=>fixture.calls.filter(([method])=>method==='list').at(-1)[1];
+ try{
+  await settle();assert.deepEqual(names(),['Ada','Bob']);
+  applyListFilter('contacts',{query:'  ada@example.com  ',label:'ada@example.com',by:'owner'});await settle();
+  assert.deepEqual(lastList(),{query:'ada@example.com',limit:50});
+  assert.deepEqual(names(),['Ada'],'an email match stays although the display name differs');
+  assert.equal(seen.at(-1).q,'','the shared renderer does not filter the provider answer again');
+  assert.equal(model().q,'  ada@example.com  ');assert.equal(model().nativeMore,true);assert.equal(model().chip,null);
+  model().nativeLoadMore();await settle();assert.deepEqual(lastList(),{query:'ada@example.com',limit:100},'more rows keep the query');
+  applyListFilter('contacts',{query:'Zoe',label:'Zoe',by:'alpha'});await settle();
+  assert.deepEqual(names(),[],'another query has no rows before the provider answers');
+  assert.equal(model().nativeStatus,'Searching contacts');assert.equal(model().nativeMore,false);
+  applyListFilter('contacts',{query:'555-0200',label:'555-0200',by:'owner'});await settle();
+  assert.deepEqual(names(),['Bob'],'a number match stays');
+  applyListFilter('contacts',{query:'Zoe',label:'Zoe',by:'alpha'});await settle();
+  older.resolve({contacts:[{id:'old',name:'Old query result'}],more:true});await settle();
+  assert.deepEqual(names(),[],'returning to a query cannot revive its older answer');
+  zoe.resolve({contacts:[{id:'3',name:'Zoë'}],more:false});await settle();
+  assert.deepEqual(names(),['Zoë']);assert.deepEqual({label:model().chip.label,count:model().chip.count},{label:'Zoe',count:1});
+  assert.equal(fixture.views.contacts.back(state,api),true);await settle();
+  assert.deepEqual([state.q,state.chip],['',null]);assert.deepEqual(lastList(),{query:'',limit:50});assert.deepEqual(names(),['Ada','Bob']);
+  const native=globalThis.contactsPlugin,priorList=lastList();
+  globalThis.contactsPlugin=(method,options)=>method==='status'?{available:true,readable:false}:native(method,options);
+  model().nativeRefresh();await settle();
+  assert.deepEqual(names(),[],'a revoked permission drops the last accepted rows');
+  assert.equal(model().nativeAccess,true);assert.equal(lastList(),priorList,'a revoked permission issues no new query');
+ }finally{older.resolve({contacts:[]});zoe.resolve({contacts:[]});fixture.shell.componentWillUnmount();}
 });

@@ -20,8 +20,8 @@ import org.junit.runner.RunWith;
  * nothing), Home in TalkBack order with the assistant controls read last, and the measured text
  * scale unchanged. Runs only where Alpha already holds the HOME role; on an owned emulator the
  * runner selects and restores it:
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN \
- *     --variants launcher --home-role --classes AccessibilityHomeRole
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN \
+ *     --home-role --classes AccessibilityHomeRole
  * Emulator evidence, not boot-time HOME, TalkBack itself or device acceptance.
  */
 @RunWith(AndroidJUnit4.class)
@@ -37,13 +37,12 @@ public final class AccessibilityHomeRoleInstrumentedTest {
  private static final String TEST_NAVIGATION_SETTLED = "window.__alphaTestNavigation?.status==='complete'";
  private static final String HOME_READY = AppNavigation.selected("Home") + "&&!document.querySelector('[data-alpha-layer=\"drawer\"]')&&!document.querySelector('.os')?.inert";
 
- /** P-43: the views need the test-mocks pair (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) or a phone its owner signed in. */
- private static void assumeViews(String journey) throws Exception { if (!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) AppNavigation.assumeNoRequiredSignIn(journey); }
+ /** P-43: the views need a phone its owner signed in. */
+ private static void assumeViews(String journey) throws Exception { AppNavigation.assumeNoRequiredSignIn(journey); }
 
  @Test public void homeKeyFromEveryViewLandsOnAnAccessibleAlphaHome() throws Exception {
   assumeViews("Repeated HOME with Alpha as HOME");
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-  Assume.assumeTrue("HOME qualification exists only in the launcher variant", BuildConfig.IS_LAUNCHER);
   Assume.assumeTrue("Alpha must already be the selected HOME app; this test never changes roles", ChatContinuityInstrumentedTest.alphaIsHome(context));
   String previous = AccessibilityViewsInstrumentedTest.fontScale(null);
   UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());

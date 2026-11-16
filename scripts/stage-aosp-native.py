@@ -60,7 +60,7 @@ def admission(root, apk):
     if not isinstance(pins.get(channel), dict):
         raise ValueError('No pinned ' + bun_target + ' Bun for channel: ' + str(channel))
     declarations = subprocess.check_output(
-        ['node', root / 'scripts/native-view-policy.ts'], timeout=30)
+        ['bun', root / 'scripts/native-view-policy.ts'], timeout=30)
     return {
         'schemaVersion': 1,
         'bunTarget': bun_target,
@@ -92,8 +92,11 @@ if __name__ == '__main__':
     parser.add_argument('--target', choices=tuple(TARGETS), default='stallion')
     parser.add_argument('--defer-soong', action='store_true')
     parser.add_argument('--finalize-soong', action='store_true')
+    parser.add_argument('--admission-only', action='store_true', help='Print only the Alpha-owned authenticated runtime contract')
     args = parser.parse_args()
-    if args.finalize_soong:
+    if args.admission_only:
+        print(json.dumps(admission(ROOT, args.apk), indent=2))
+    elif args.finalize_soong:
         report = json.loads((args.output / 'native-libraries.json').read_text())
         print(json.dumps(finalize_soong(args.output, args.module, report), indent=2))
     else:

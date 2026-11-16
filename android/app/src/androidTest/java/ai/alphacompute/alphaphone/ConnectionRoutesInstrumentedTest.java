@@ -21,8 +21,7 @@ import static org.junit.Assert.*;
  * the generic "Connection request failed"; a debuggable build records stage VALIDATE (never CONNECT)
  * in alpha-transport-diagnostics, and no credential slot file changes (measured against the slot
  * files once startup's own writes have settled). Nothing is sent to any host.
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --classes ConnectionRoutes
- * A test-mocks build admits every origin by design, so the runner refuses this class with --test-mocks. */
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --classes ConnectionRoutes */
 @RunWith(AndroidJUnit4.class)
 public class ConnectionRoutesInstrumentedTest {
  private static String eval(String js) throws Exception { return WebViewTestDriver.evaluate(js); }
@@ -77,7 +76,6 @@ public class ConnectionRoutesInstrumentedTest {
  }
 
  @Test public void flagOffTransportRefusesEveryNonCloudRouteBeforeConnecting() throws Exception {
-  Assume.assumeTrue("ConnectionRoutes admits every origin in a test-mocks build; this checks the flag-off policy", !BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   android.content.SharedPreferences diagnostics = context.getSharedPreferences("alpha-transport-diagnostics", Context.MODE_PRIVATE);
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {

@@ -34,7 +34,7 @@ import org.junit.runner.RunWith;
  *   AccessibilityHomeRoleInstrumentedTest checks that HOME lands on an accessible Alpha Home.)
  * - rotation: each view on its side and back keeps its screen, every control on screen
  *   (RotationInstrumentedTest.CLIPPED) and its reading order.
- * - process death: processRestartPhase, run by `node scripts/test-native-restart.ts
+ * - process death: processRestartPhase, run by `bun scripts/test-native-restart.ts
  *   accessibility`, leaves 200% font set, kills the process and reads the first screen of the new
  *   one (Home, or the required sign-in page of a signed-out flag-off build) in order.
  *
@@ -92,8 +92,8 @@ public final class AccessibilityLifecycleInstrumentedTest {
   assertTrue("The page measures the 200% text it is drawn at (measured " + js(SCALE) + ")", until("Math.abs(" + SCALE + "-2)<0.2", 100));
  }
 
- /** P-43: the views need the test-mocks pair (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) or a phone its owner signed in. */
- private static void assumeViews(String journey) throws Exception { if (!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) AppNavigation.assumeNoRequiredSignIn(journey); }
+ /** P-43: the views need a phone its owner signed in. */
+ private static void assumeViews(String journey) throws Exception { AppNavigation.assumeNoRequiredSignIn(journey); }
 
  /** Android's HOME key from every view, three times, with Alpha brought back by its launcher start each time. */
  @Test public void repeatedHomeAndReturnKeepEveryViewAccessible() throws Exception {
@@ -143,16 +143,17 @@ public final class AccessibilityLifecycleInstrumentedTest {
     start();
     for (String view : AccessibilityViewsInstrumentedTest.VIEWS) {
      open(view);
-     for (boolean landscape : BuildConfig.IS_LAUNCHER ? new boolean[]{false} : new boolean[]{true, false}) {
-      String side = landscape ? "landscape" : "portrait";
-      if (landscape) device.setOrientationLeft(); else device.setOrientationNatural();
-      try { RotationInstrumentedTest.awaitOrientation(landscape ? Configuration.ORIENTATION_LANDSCAPE : Configuration.ORIENTATION_PORTRAIT); }
-      catch (AssertionError error) { problems.add(view + ": did not reach " + side); continue; }
-      if (!until(AppNavigation.selected(view), 100)) { problems.add(view + ": not in front in " + side); continue; }
+     // The launcher is held portrait, so each view is checked upright.
+     device.setOrientationNatural();
+     boolean upright = true;
+     try { RotationInstrumentedTest.awaitOrientation(Configuration.ORIENTATION_PORTRAIT); }
+     catch (AssertionError error) { problems.add(view + ": did not reach portrait"); upright = false; }
+     if (upright && !until(AppNavigation.selected(view), 100)) { problems.add(view + ": not in front in portrait"); upright = false; }
+     if (upright) {
       SystemClock.sleep(400);
       String clipped = RotationInstrumentedTest.clipped();
-      if (!"[]".equals(clipped)) problems.add(view + " " + side + ": controls clipped " + clipped);
-      for (String problem : TalkBackOrder.read(device, view + " " + side, TalkBackOrder.Assistant.LAST_IF_PRESENT).problems) problems.add(view + " " + side + ": " + problem);
+      if (!"[]".equals(clipped)) problems.add(view + " portrait: controls clipped " + clipped);
+      for (String problem : TalkBackOrder.read(device, view + " portrait", TalkBackOrder.Assistant.LAST_IF_PRESENT).problems) problems.add(view + " portrait: " + problem);
      }
      js(AppNavigation.request("Home"));
      if (!until(AppNavigation.selected("Home"), 200)) problems.add(view + ": did not return Home");
@@ -167,7 +168,7 @@ public final class AccessibilityLifecycleInstrumentedTest {
 
  /**
   * Process death at 200% font, in phases each run by a new instrumentation process
-  * (`node scripts/test-native-restart.ts accessibility`): prepare sets the font scale and opens
+  * (`bun scripts/test-native-restart.ts accessibility`): prepare sets the font scale and opens
   * Settings; the runner force-stops the app; verify reads the first screen of the new process in
   * order at the persisted scale; cleanup restores the font scale. Never run without its runner.
   */
@@ -213,6 +214,6 @@ public final class AccessibilityLifecycleInstrumentedTest {
   } else fail("Unknown accessibility phase " + phase);
  }
  private static boolean requiredSignIn(Context context) throws Exception {
-  return !BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS && new AlphaCredentialStore(context).readCredentialSlot("cloud:production") == null;
+  return new AlphaCredentialStore(context).readCredentialSlot("cloud:production") == null;
  }
 }

@@ -87,7 +87,7 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
 async function nothingLeft(page: Page, welcome: ReturnType<Page['getByRole']>, untouched = false, codeKept = false) {
   await expect.poll(()=>harness(page,f=>f.calls.filter((call:string)=>call==='Agent.start').length)).toBeGreaterThan(0);
   await expect(welcome).toBeVisible();
-  // An expired code keeps the address on screen with a new code one tap away.
+  // An expired code retains its address and offers Resend once the native cooldown ends.
   await expect(welcome.getByRole('button', { name: codeKept ? 'Resend' : 'Send code', exact: true })).toBeEnabled();
   expect(await harness(page, f => f.slots['cloud:production'] ?? null)).toBeNull();
   expect(await stub(page, s => s.order.some((entry: string) => entry.startsWith('configureCloudProvider')))).toBe(false);
@@ -172,7 +172,7 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   await expect(page.getByRole('button', { name: 'Message actions: Resident reply 1', exact: true })).toHaveCount(1);
   expect(await harness(page, f => f.streams)).toBe(1);
   const settings=await openYourAgent(page);
-  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toBeVisible();
+  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toHaveCount(0);
   await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();
   expect(await page.locator('body').innerText()).not.toContain(account.token);
   await expectNoDevelopmentSurface(page);
@@ -201,10 +201,14 @@ test('first run: Cancel while verifying the email code keeps no key and the resi
 
 test('first run: an expired sign-in session keeps no key and the resident runs without AI', async ({ page }) => {
   test.setTimeout(90_000);
+  await page.clock.install();
   const { welcome } = await firstRun(page);
   await setStub(page, { login: 'expired' });
   await enterNativeEmailCode(page);
   await expect(page.getByRole('alert')).toContainText('expired');
+  // The native startEmail fixture supplies a one-minute cooldown even if verification expires.
+  await expect(welcome.getByRole('button', { name: /^Resend/ })).toBeDisabled();
+  await page.clock.fastForward(60_001);
   await nothingLeft(page, welcome, true, true);
 });
 

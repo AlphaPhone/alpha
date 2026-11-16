@@ -4,6 +4,7 @@ import {tmpdir, homedir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {captureReplayInputs} from '../observed-replay.mjs';
+import {scaledTimeout} from '../timeouts.mjs';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 export const directory = dirname(fileURLToPath(import.meta.url));
@@ -15,7 +16,7 @@ function executable(name) {
   for (const candidate of [process.env.JAVA_HOME && join(process.env.JAVA_HOME, 'bin', name),
     `/usr/lib/jvm/java-21-openjdk/bin/${name}`, name].filter(Boolean)) {
     if (candidate.includes('/') && !existsSync(candidate)) continue;
-    if (spawnSync(candidate, ['-version'], {encoding: 'utf8', timeout: 10000}).status === 0) return candidate;
+    if (spawnSync(candidate, ['-version'], {encoding: 'utf8', timeout: scaledTimeout(10000)}).status === 0) return candidate;
   }
   throw new Error(`A JDK is required for native refinement (${name})`);
 }
@@ -34,7 +35,7 @@ export function javaTraceCampaign(harness, sources, argumentSets, mainClass) {
   const temporary = mkdtempSync(join(tmpdir(), 'alpha-native-refinement-'));
   const jar = jsonJar();
   const run = (command, commandArgs) => {
-    const result = spawnSync(command, commandArgs, {cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 64 * 1024 * 1024});
+    const result = spawnSync(command, commandArgs, {cwd: root, encoding: 'utf8', timeout: scaledTimeout(120000), maxBuffer: 64 * 1024 * 1024});
     if (result.error || result.status !== 0) {
       const exit = result.signal || `status ${result.status}`;
       throw new Error(`${command} failed (${exit})\n${result.error || ''}\n${result.stdout}\n${result.stderr}`);

@@ -1,3 +1,4 @@
+import {createElement} from 'react';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createAospTelephony,normalizePhoneNumber,type AlphaTelephonyPlugin,type AospTelephony} from '../runtime/aosp-telephony';
@@ -39,6 +40,28 @@ const KEYS:[string,string][]=[['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5',
 const TAB_ICON={recents:'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 7v5l3 2',keypad:'M6 6h.01M12 6h.01M18 6h.01M6 12h.01M12 12h.01M18 12h.01M6 18h.01M12 18h.01M18 18h.01',
  voicemail:'M6.5 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM17.5 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM6.5 16h11',contacts:'M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0'};
 const ARROW={in:'M17 7L7 17M7 9v8h8',out:'M7 17L17 7M9 7h8v8',missed:'M17 7L7 17M7 9v8h8'};
+type PhoneTab = 'recents' | 'keypad' | 'voicemail';
+type PhoneTabKey = PhoneTab | 'contacts';
+const TAB_LABEL: Record<PhoneTabKey, string> = {
+  recents: 'Recents', keypad: 'Keypad', voicemail: 'Voicemail', contacts: 'Contacts',
+};
+function phoneTabs(selected: PhoneTabKey, showVoicemail: boolean, showContacts: boolean,
+  unreadVoicemail: boolean, select: (key: PhoneTabKey) => void) {
+  const keys: PhoneTabKey[] = ['recents', 'keypad'];
+  if (showVoicemail) keys.push('voicemail');
+  if (showContacts) keys.push('contacts');
+  return keys.map(key => ({key, label: TAB_LABEL[key], on: selected === key,
+    pick: () => select(key), dot: key === 'voicemail' && unreadVoicemail}));
+}
+function phoneTabSelector(tabs: ReturnType<typeof phoneTabs>) {
+  return createElement('div', {className: 'alpha-phone-tabs'},
+    createElement('div', {role: 'group', 'aria-label': 'Phone'}, tabs.map(tab =>
+      createElement('button', {key: tab.key, type: 'button', 'data-alpha-phone-tab': tab.key,
+        'aria-label': tab.label, 'aria-pressed': tab.on, onClick: tab.pick},
+      createElement('svg', {className: 'i', 'aria-hidden': true, viewBox: '0 0 24 24'},
+        createElement('path', {d: TAB_ICON[tab.key]})),
+      tab.dot ? createElement('span', {'aria-hidden': true}) : null))));
+}
 const bytesOf=(base64:string)=>Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
 const base64Of=(bytes:Uint8Array)=>{let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(binary);};
 /** Splits one mono 16 kHz PCM16 WAV into complete WAVs of at most fifty seconds each. */
@@ -64,7 +87,7 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
 export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true):null){
  if(!client)return;
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
- let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:'recents'|'keypad'|'voicemail'='recents';
+ let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:PhoneTab='recents';
  /* AC-22: the bar's query over Recents, held for the visit only; an Alpha filter also shows a chip. */
  let filter:CommsListFilter|null=null;
  let voicemails:Voicemail[]=[],carrier:'ready'|'unconfigured'|'unsupported'|null=null,vm:OpenVoicemail=closedVoicemail();
@@ -208,10 +231,35 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   return {target:{kind:'recents',app:'Phone',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Call or ask',value:filter?.by==='owner'?filter.query:'',submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null,
     onText:text=>{if(!text&&filter?.by==='alpha')return;filter=text?{query:text,label:'',by:'owner'}:null;changed();}},
-   left:{icon:'keypad',label:'Back to the keypad',initials:null,run:()=>{if(tab==='voicemail')closeVoicemail();tab='keypad';notice='';changed();}},
+   left:{icon:'keypad',label:'Back to the keypad',initials:null,run:()=>selectPhoneTab('keypad')},
    context:'Phone',contextKey:'phone:recents:',strip:{title:'Phone',subtitle:'',initials:null,live:false,actions:[]},
    end:null,incoming:null,emergency:false,fit:null,
    briefing:callsBriefing(missed,voicemails.filter(row=>row.isNew).map(row=>({name:who(row)})),now)};
+ };
+ function selectPhoneTab(next: PhoneTab) {
+   if (tab === next) return;
+   if (tab === 'voicemail') closeVoicemail();
+   tab = next;
+   notice = '';
+   changed();
+ }
+ function returnFromContacts(next: PhoneTab) {
+   const state = owner?.S();
+   if (state?.view !== 'contacts' || state.stack.at(-1) !== 'phone' || !isMvpView('phone')) return;
+   selectPhoneTab(next);
+   // Replace the Contacts tab with Phone, using the same history pop as the shell's Back.
+   owner.setState({stack: state.stack.slice(0, -1)});
+   owner.openView('phone', null, null, {restore: true, keepStack: true});
+ }
+ const renderContacts = views.contacts?.render;
+ if (renderContacts) views.contacts.render = function (state: Bag, viewApi: Bag) {
+   const model = renderContacts.call(this, state, viewApi);
+   if (state.fromPhoneTabs === true && viewApi.S?.stack?.at(-1) === 'phone' &&
+       !model.detail && !model.ed?.open) {
+     model.phoneTabSelector = phoneTabSelector(phoneTabs('contacts', state.phoneHasVoicemail === true,
+       true, false, key => { if (key !== 'contacts') returnFromContacts(key); }));
+   }
+   return model;
  };
  views.phone.render=(st:Bag,viewApi:Bag)=>{
  api=viewApi;
@@ -220,11 +268,12 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  /* Home's Phone card names the tab it leads to. */
  if(st?.tab==='recents'||st?.tab==='voicemail'){if(st.tab==='recents'||carrier==='ready')tab=st.tab;if(carrier!==null||st.tab==='recents')queueMicrotask(()=>viewApi.set?.({tab:null}));}
  const now=Date.now(),hasVoicemail=carrier==='ready',digits=number.replace(/\D/g,'');
- const pick=(next:typeof tab)=>()=>{if(tab===next)return;if(tab==='voicemail')closeVoicemail();tab=next;notice='';changed();};
- const tabs=[{key:'recents',label:'Recents',on:tab==='recents',pick:pick('recents'),dot:false},{key:'keypad',label:'Keypad',on:tab==='keypad',pick:pick('keypad'),dot:false},
-  ...(hasVoicemail?[{key:'voicemail',label:'Voicemail',on:tab==='voicemail',pick:pick('voicemail'),dot:voicemails.some(row=>row.isNew)}]:[]),
-  ...(isMvpView('contacts')?[{key:'contacts',label:'Contacts',on:false,pick:()=>viewApi.open?.('contacts'),dot:false}]:[])]
-  .map(item=>({...item,d:TAB_ICON[item.key as keyof typeof TAB_ICON],bg:item.on?'var(--fg)':'transparent',fg:item.on?'var(--bg)':'var(--fg)'}));
+ const showContacts = isMvpView('contacts');
+ const openContacts = () => showContacts
+   ? viewApi.open?.('contacts', {fromPhoneTabs: true, phoneHasVoicemail: hasVoicemail})
+   : viewApi.toast?.('Unavailable');
+ const tabs = phoneTabs(tab, hasVoicemail, showContacts, voicemails.some(row => row.isNew),
+   key => key === 'contacts' ? openContacts() : selectPhoneTab(key));
  setListFilterHandler('phone',{current:()=>filter,clear:()=>{filter=null;changed();},
   apply:next=>{filter=next;if(next.by==='alpha'&&tab!=='recents'){if(tab==='voicemail')closeVoicemail();tab='recents';}changed();return true;}});
  const rows=calls.map(entry=>({entry,row:callRow(entry,names,now)})).filter(({row})=>matchesCallQuery(row,filter?.query??''));
@@ -235,8 +284,8 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   nativeRows:phoneRows(calls,value=>void call(value)),
   nativeOnNumber:(event:Event)=>{if(busy())return;number=(event.target as HTMLInputElement).value;notice='';changed();},
   nativeDial:()=>void call(number),nativeRefresh:()=>void refresh(),nativeRequest:()=>void refresh(true),
-  nativeContacts:()=>isMvpView('contacts')?viewApi.open?.('contacts'):viewApi.toast?.('Unavailable'),
-  tabs,isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
+  nativeContacts:openContacts, tabs, phoneTabSelector:phoneTabSelector(tabs),
+  isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
   filterChip:chip?{label:chip,clearLabel:`Clear filter ${chip}`}:null,clearFilter:()=>clearListFilter('phone'),
   recents:rows.map(({entry,row},index)=>{return {...row,last:index===0||undefined,color:row.missed?'var(--alpha-call-red)':'var(--fg)',d:ARROW[row.kind],noCall:!row.canCall||busy(),call:()=>{if(entry.number)void call(entry.number);}};}),
   showRecentStatus:!!status&&!busy()&&!calls.length,retryRecents,

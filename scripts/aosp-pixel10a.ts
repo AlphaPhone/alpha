@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
-import {execFileSync} from 'node:child_process';
+import {sha256} from './sha256.ts';
 import {assertPixel10aSourceLayout, composePixel10aProduct} from '../vendor/eliza/packages/os/scripts/android/pixel10a-product.ts';
 import {placeholderFields, releaseDescriptorProblems} from '../vendor/eliza/packages/os/scripts/android/pixel10a-release.mjs';
 import {assertStockVendorApi} from '../vendor/eliza/packages/os/scripts/android/vendor-api.mjs';
+import type {SenseImageActivation} from './aosp-sense-image.ts';
+import {stageAndroidNative, finalizeAndroidNative} from '../vendor/eliza/packages/os/scripts/android/android-native-admission.mjs';
+import {alphaNativeOptions} from './aosp-native-admission.ts';
 
 export {placeholderFields};
 /** The production descriptor for Pixel 10a (stallion) on Android 17. */
@@ -28,7 +30,6 @@ export const PIXEL10A_RELEASE = Object.freeze({
   sourceLockPath: 'vendor/eliza/packages/os/android/sources/pixel10a-stallion.json',
   applicationSignerFile: 'android/release-signer.json',
 });
-const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 /**
  * Whether this run stages the physical Pixel 10a product. Development staging needs the exact
@@ -40,14 +41,8 @@ export interface AospSourceOptions {
   source?: string | null;
   factory?: string | null;
 }
-export function pixel10aOptions({target, development, production, source, factory}: AospSourceOptions & {development: boolean; production: boolean}) {
-  if (target != null && target !== 'pixel10a') throw Error('Only --target pixel10a is supported; omit --target for the existing product');
-  if (!target) {
-    if (factory) throw Error('--factory-image requires --target pixel10a');
-    return false;
-  }
-  if (development && production) throw Error('--production and --development are exclusive');
-  if (!development && !production) throw Error('Pixel 10a staging needs --development or --production');
+export function pixel10aOptions({target, source, factory}: AospSourceOptions) {
+  if (target !== 'pixel10a') throw Error('Staging requires --target pixel10a or --target cuttlefish');
   if (!source || !factory) throw Error('Pixel 10a staging requires --aosp-source and --factory-image');
   return true;
 }
@@ -92,19 +87,22 @@ type Pixel10aProductOptions = Omit<Pixel10aCompositionOptions, 'product' | 'nati
   identity: {moduleName: string};
   bootAnimation?: string | null;
   vendorApi?: Pixel10aCompositionOptions['vendorApi'];
+  senseActivation?: SenseImageActivation | null;
 };
-export function writePixel10aProduct({root, output, apk, identity, launcher, sourceEvidence, production = false, bootAnimation = null, vendorApi = null}: Pixel10aProductOptions) {
-  const nativeStagingEvidence = JSON.parse(execFileSync('python3', [path.join(root, 'scripts/stage-aosp-native.py'), '--apk', path.resolve(apk), '--output', output, '--module', identity.moduleName, '--target', 'stallion', '--defer-soong'], {encoding:'utf8'}));
+export function writePixel10aProduct({root, output, apk, identity, launcher, sourceEvidence, production = false, bootAnimation = null, vendorApi = null, senseActivation = null}: Pixel10aProductOptions) {
+  const nativeOptions = alphaNativeOptions({root, output, apk, moduleName:identity.moduleName, launcher, target:'stallion'});
+  const nativeStagingEvidence = stageAndroidNative(nativeOptions);
   const product = readPixel10aComposition(root);
   // A brand boot animation is staged only when the shared composition pins its bytes.
   const compose = composePixel10aProduct as unknown as (options: Pixel10aCompositionOptions) => ReturnType<typeof composePixel10aProduct>;
   const report = compose({output, product, launcher, sourceEvidence, nativeStagingEvidence, production, bootAnimation, vendorApi});
-  execFileSync('python3', [path.join(root, 'scripts/stage-aosp-native.py'), '--apk', path.resolve(apk), '--output', output, '--module', identity.moduleName, '--finalize-soong'], {stdio:'pipe'});
+  finalizeAndroidNative(nativeOptions);
   if (production) {
     const bytes = fs.readFileSync(path.join(root, PIXEL10A_PRODUCT));
     const descriptor = JSON.parse(bytes.toString('utf8'));
     Object.assign(report, {productDescriptor:{file:PIXEL10A_PRODUCT, sha256:sha256(bytes)}, sourceLockSha256:descriptor.sourceLock.sha256, platformCertificateSha256:descriptor.signer.platformCertificateSha256});
-    fs.writeFileSync(path.join(output, 'physical-product.json'), JSON.stringify(report, null, 2) + '\n');
   }
+  if (senseActivation) Object.assign(report, {senseListener:senseActivation});
+  if (production || senseActivation) fs.writeFileSync(path.join(output, 'physical-product.json'), JSON.stringify(report, null, 2) + '\n');
   return report;
 }

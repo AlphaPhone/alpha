@@ -141,7 +141,7 @@ async function android(page: Page, options: { clock?: 'opened' | 'unavailable' |
         }
         if (plugin === 'AlphaActionJournal') return method === 'list' ? { entries: [] } : { entry: null };
         if (plugin === 'DailyApps') {
-          if (method === 'surfaceInfo') return { developmentBuild: false, assistant: false, ...(options.voice ? { reminderTimingVersion: 2 } : {}) };
+          if (method === 'surfaceInfo') return { assistant: false, ...(options.voice ? { reminderTimingVersion: 2 } : {}) };
           if (method === 'listReminders') return { reminders: structuredClone(device.reminders) };
           if (method === 'pendingReminderTap') return {};
           // Android keeps the reminder and schedules its alert inexactly; one with no alert stays pending.
@@ -302,11 +302,10 @@ test('loop A on Android: the resident agent answers, the conversation follows ac
   for (const text of [...shown, 'Flag-off stopped request', 'Resident reply 4']) await expect(bubble(page, text)).toHaveCount(1, { timeout: 30_000 });
   // Restoring reads history; it posts nothing.
   expect(await native(page, f => f.streams)).toBe(0);
-  // The connection names the agent and where it runs, and no credential is rendered anywhere.
+  // Conversation controls stay reachable, and no credential is rendered anywhere.
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   const account = await openYourAgent(page);
-  await expect(account).toContainText('Running');
-  await expect(account.getByText('Eliza Cloud',{exact:true})).toBeVisible();
+  await expect(account.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
   await account.getByRole('button',{name:'Back to About',exact:true}).click();
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await button(page, 'Settings').click();
@@ -773,12 +772,10 @@ test('loop J05 on Android: a page navigation closes the open review, and an agen
   await button(page, 'Send').click();
   await expect(bubble(page, 'The ferry leaves at nine.')).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^Review summary note/ })).toHaveCount(1);
-  // The resident agent is reconnected (a new verified session) before the answer is saved.
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  const account = await openYourAgent(page);
-  await account.getByRole('button', { name: 'Reconnect agent', exact: true }).click();
+  // Reloading opens a new verified session before the answer is saved.
+  await page.reload();
+  await expect.poll(() => native(page, f => f.calls.filter((call: string) => call === 'Agent.start').length)).toBe(1);
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
-  expect(await native(page, f => f.calls.filter((call: string) => call === 'Agent.start').length)).toBe(2);
   await button(page, 'Open conversation').click();
   const card = page.getByRole('button', { name: /^Review summary note/ });
   // The restored conversation keeps the answer, but the review bound to the previous session is

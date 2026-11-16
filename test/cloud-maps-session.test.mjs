@@ -82,6 +82,51 @@ test('a reply that lands after the account changed is not delivered',async()=>{
  await assert.rejects(late,/The Maps account changed/);
 });
 
+test('Cloud Maps shares the pending coverage read and retires it on account change',async()=>{
+ const requests=[];
+ const client=sessionId=>({sessionId,credentialId:'credential',client:{
+  mapsRequest(route) {
+   assert.equal(route,'capabilities');
+   return new Promise(resolve=>requests.push({sessionId,resolve}));
+  },
+ }});
+ const listeners=[];
+ globalThis.cloudMapsTest={client:client('first'),listeners};
+ const maps=await load('apps/app/src/maps/cloud-maps.ts',{
+  '../runtime/connection-ui':'export const connectionController={getCloudClient:()=>globalThis.cloudMapsTest.client,subscribe:listener=>globalThis.cloudMapsTest.listeners.push(listener)};',
+  '../runtime/subscription-entitlement.ts':'export const readServiceLimit=()=>undefined;',
+ });
+ const update=sessionId=>{
+  globalThis.cloudMapsTest.client=client(sessionId);
+  for(const listener of listeners)listener();
+ };
+ const coverage=revision=>({
+  providerId:'test-maps',connectionId:'conn_0123456789abcdef',revision,attribution:'Fixture Maps',
+  regions:[{id:'fixture',name:'Fixture',bounds:[7.409,43.724,7.449,43.752]}],
+  capabilities:{search:true,placeDetails:true,modes:['walk'],traffic:'none',transit:'none'},
+ });
+ const first=maps.initializeCloudMaps();
+ await Promise.resolve();
+ assert.equal(maps.cloudMapsDiagnostics().configured,true);
+ assert.equal(maps.cloudMapsCoverage(),undefined);
+ update('first');
+ const joined=maps.initializeCloudMaps();
+ await Promise.resolve();
+ assert.deepEqual(requests.map(request=>request.sessionId),['first']);
+ update('second');
+ const second=maps.initializeCloudMaps();
+ assert.notEqual(first,second);
+ await Promise.resolve();
+ assert.deepEqual(requests.map(request=>request.sessionId),['first','second']);
+ requests[0].resolve(coverage('old'));
+ await Promise.all([first,joined]);
+ assert.equal(maps.cloudMapsCoverage(),undefined);
+ assert.equal(maps.initializeCloudMaps(),second);
+ requests[1].resolve(coverage('current'));
+ await second;
+ assert.equal(maps.cloudMapsCoverage()?.revision,'current');
+});
+
 async function share(copy){
  globalThis.mapShareTest={copy};
  const {shareMap}=await load('apps/app/src/maps/share.ts',{

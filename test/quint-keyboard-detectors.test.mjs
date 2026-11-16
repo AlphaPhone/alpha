@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -57,7 +68,7 @@ function fixture(overlay) {
   };
 }
 
-test('simulated KeyboardDetectors traces agree with the dock watch and the canvas estimator after every step', {timeout: 120000}, async () => {
+test("partial source contract: simulated KeyboardDetectors traces agree with the dock watch and the canvas estimator after every step", {timeout: scaledTimeout(120000)}, async () => {
   const traces = modelTraces({module: 'KeyboardDetectors', traces: 150, steps: 40});
   assert.ok(traces.some(trace => trace.some(step => step.state.releasedUnderBar)), 'the campaign swaps the full keyboard for the short bar');
   const result = await replay(traces, {

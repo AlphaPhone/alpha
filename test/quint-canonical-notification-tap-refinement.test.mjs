@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {checkCanonicalNotificationTap} from '../specs/quint/refinement/native/canonical-notification-tap.mjs';
 
-test('the actual native canonical tap slots and bridge refine custody and acknowledgement', async () => {
+test('partial source contract: the actual native canonical tap slots and bridge refine custody and acknowledgement', async () => {
   const {receipt} = await checkCanonicalNotificationTap([fileURLToPath(import.meta.url)]);
   assert.equal(receipt.passed, true);
   assert.equal(receipt.driverInputsBound, true);

@@ -22,7 +22,7 @@
       "Historical current/proposed design comparison at source ef9fbf7cd7, not a runtime conformance claim.",
       "All original state variables are fields of s; immutable Design selects behavior; record spreads preserve the original frame conditions.",
       "Finite domains and numeric constants are unchanged from the original model configuration.",
-      "Removed implementation links are retained as historicalSourceLinks at the original migration inventory revision. They are not current source owners; current behavior is mapped in the application/service/native families."
+      "The historical CloudSignInFlow.java implementation at revision 875f5a8550935c5ca1797cea4ea38e7c7759ca54 is Git blob 89458db1aa42652a7faca9623d0bde2044a10df6. Current behavior is mapped in the application, service and native families."
     ],
     "constants": {
       "MaxDetours": 2,
@@ -98,13 +98,7 @@
         "fairness": "Fairness",
         "sourceProperty": "ReachesHome"
       }
-    ],
-    "historicalSourceLinks": {
-      "revision": "875f5a8550935c5ca1797cea4ea38e7c7759ca54",
-      "paths": [
-        "android/app/src/main/java/ai/alphacompute/alphaphone/CloudSignInFlow.java"
-      ]
-    }
+    ]
   },
   {
     "path": "specs/quint/legacy/GoogleConnect.qnt",
@@ -662,6 +656,7 @@
   {
     "path": "specs/quint/legacy/SettingsNav.qnt",
     "module": "SettingsNav",
+    "verifyBackend": "tlc",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -868,6 +863,7 @@
   {
     "path": "specs/quint/legacy/PhotosLibrary.qnt",
     "module": "PhotosLibrary",
+    "verifyBackend": "tlc-bounded",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -973,6 +969,7 @@
   {
     "path": "specs/quint/legacy/NotesView.qnt",
     "module": "NotesView",
+    "verifyBackend": "tlc-bounded",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -1100,6 +1097,7 @@
   {
     "path": "specs/quint/legacy/FilesBrowser.qnt",
     "module": "FilesBrowser",
+    "verifyBackend": "tlc-bounded",
     "init": "checkerInit",
     "step": "step",
     "invariant": "safety",
@@ -1283,7 +1281,8 @@
     "tests": [
       "cancelledHeadSkippedTest",
       "cancellationListenerTest",
-      "preAbortedCallerTest"
+      "preAbortedCallerTest",
+      "consecutiveCancelledWaitersTest"
     ],
     "temporal": [
       "CheckedTemporal"
@@ -1316,7 +1315,8 @@
         "tests": [
           "cancelledHeadSkippedTest",
           "cancellationListenerTest",
-          "preAbortedCallerTest"
+          "preAbortedCallerTest",
+          "consecutiveCancelledWaitersTest"
         ]
       },
       {
@@ -1344,7 +1344,8 @@
           "N = 2"
         ],
         "tests": [
-          "twoOwnersTest"
+          "twoOwnersTest",
+          "twoCancelledWaitersTest"
         ]
       }
     ],
@@ -2310,6 +2311,7 @@
   {
     "path": "specs/quint/legacy/CoreServiceLifecycleDesign.qnt",
     "module": "CoreServiceLifecycleDesign",
+    "verifyBackend": "tlc-bounded",
     "init": "init",
     "step": "step",
     "invariant": "safety",

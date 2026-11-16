@@ -11,7 +11,7 @@ function member(source, regex) {
   return value;
 }
 
-export function smsMembers(plugin, mms, provider) {
+export function smsMembers(plugin, mms, provider, {includeMms=false}={}) {
   return {
     'ai/eliza/plugins/messages/TelephonyPlugin.java': `package ai.eliza.plugins.messages;
 import android.telephony.*;
@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 public abstract class TelephonyPlugin extends Plugin {
  ${between(plugin,' public static final Pattern NUMBER',' /** Runs a request that launches')}
  ${between(plugin,' private android.app.AlertDialog review;',' // ---- Reviewed native MMS')}
+ ${includeMms?'':'protected final void sendOwnerApprovedMms(PluginCall call,SmsTelephony.DispatchGuard guard){throw new AssertionError("MMS outside SMS fixture");}'}
  ${member(plugin,/^ @Override protected void handleOnDestroy\(\)[^\n]+/m)}
  private void stopObserving(){}
  private void resumeObserving(){}
@@ -34,6 +35,7 @@ public abstract class TelephonyPlugin extends Plugin {
  protected final void fencedRead(PluginCall call,String alias,String name,ReadTask work){throw new AssertionError("Unrelated Contacts read");}
 }`,
     'ai/eliza/plugins/messages/MmsStore.java': `package ai.eliza.plugins.messages;
+import android.app.role.RoleManager;
 import android.content.*;
 import android.net.Uri;
 import android.provider.Telephony;
@@ -47,6 +49,7 @@ public final class MmsStore {
  static Uri fileUri(String authority,String name){throw new AssertionError("MMS outside SMS fixture");}
  static void delete(Context c,String name){throw new AssertionError("MMS outside SMS fixture");}
  static long persistOutgoingMms(Context c,String[] to,List<MmsPdu.Part> parts,String txn,int sim,long at){throw new AssertionError("MMS outside SMS fixture");}
+ static void discardOutgoingMms(Context c,long row,String transactionId){throw new AssertionError("MMS outside SMS fixture");}
  static void settleOutgoingMms(Context c,long row,boolean success){throw new AssertionError("MMS outside SMS fixture");}
 }`,
     'ai/eliza/plugins/messages/SmsProviderReader.java': `package ai.eliza.plugins.messages;
@@ -57,6 +60,28 @@ final class SmsProviderReader {
   };
 }
 
+/** The authenticated historical SDK predates Alpha's manual composer. Keep its host on the
+ * original reviewed entry points with the same Alpha configuration and callback receiver. */
+export const historicalTelephonyHost={
+ 'ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java': `package ai.alphacompute.alphaphone;
+import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
+import ai.eliza.plugins.messages.TelephonyPlugin;
+import android.Manifest;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+@CapacitorPlugin(name="AlphaTelephony",permissions={
+ @Permission(alias="contacts",strings={Manifest.permission.READ_CONTACTS}),
+ @Permission(alias="phoneState",strings={Manifest.permission.READ_PHONE_STATE}),
+ @Permission(alias="sms",strings={Manifest.permission.READ_SMS}),
+ @Permission(alias="sendSms",strings={Manifest.permission.SEND_SMS}),
+ @Permission(alias="callLog",strings={Manifest.permission.READ_CALL_LOG})
+})
+public final class AlphaTelephonyPlugin extends TelephonyPlugin {
+ @Override protected SmsTelephonyConfiguration configuration(){return AlphaTelephony.CONFIGURATION;}
+ @Override protected String unavailableMessage(){return AlphaImageCapability.UNAVAILABLE;}
+}`,
+};
+
 export const smsPlatform={
   'android/Manifest.java': `package android;
 public final class Manifest {public static final class permission {
@@ -64,6 +89,19 @@ public final class Manifest {public static final class permission {
 }}`,
   'android/os/Build.java': `package android.os;
 public final class Build {public static final class VERSION {public static final int SDK_INT=35;}}`,
+  'android/os/SystemClock.java': `package android.os;
+public final class SystemClock {
+ public static long elapsedRealtime(){throw new AssertionError("Notification receipt clock outside dispatch fixture");}
+}`,
+  'android/app/role/RoleManager.java': `package android.app.role;
+import java.util.function.BooleanSupplier;
+public final class RoleManager {
+ public static final String ROLE_SMS="android.app.role.SMS";
+ private final BooleanSupplier held;
+ public RoleManager(BooleanSupplier held){this.held=held;}
+ public boolean isRoleAvailable(String role){return ROLE_SMS.equals(role);}
+ public boolean isRoleHeld(String role){return isRoleAvailable(role)&&held.getAsBoolean();}
+}`,
   'android/os/Looper.java': `package android.os;
 public final class Looper {
  private static final Looper main=new Looper();private static final ThreadLocal<Looper> active=new ThreadLocal<>();
@@ -146,14 +184,22 @@ public final class KeyguardManager {public boolean locked;public boolean isDevic
   'android/app/Activity.java': `package android.app;
 import java.util.*;
 import android.content.Context;
-public final class Activity {
+public class Activity {
  public static final int RESULT_OK=-1;
  public final Context context;
  public final List<AlertDialog> dialogs=new ArrayList<>();
  public boolean closing, destroyed;
  public Activity(Context context){this.context=context;}
+ public boolean hasWindowFocus(){return true;}
  public boolean isFinishing(){return closing;}
  public boolean isDestroyed(){return destroyed;}
+}`,
+  'ai/alphacompute/alphaphone/MainActivity.java': `package ai.alphacompute.alphaphone;
+import android.app.Activity;
+import android.content.Context;
+public final class MainActivity extends Activity {
+ public MainActivity(Context context){super(context);}
+ public boolean isAssistantSurface(){throw new AssertionError("Notification handoff outside dispatch fixture");}
 }`,
   'android/view/WindowManager.java': `package android.view;
 public interface WindowManager {final class LayoutParams{public static final int FLAG_SECURE=8192;}}`,
@@ -289,6 +335,15 @@ public final class ContentResolver {
   if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[0])||!Objects.equals(row.get(Sms.CREATOR),args[1]))return 0;
   row.putAll(value);return 1;
  }
+ public int delete(Uri uri,String where,String[] args){
+  if(!uri.equals(Sms.CONTENT_URI)||!context.role||
+   !(Sms._ID+" = ? AND "+Sms.TYPE+" = ? AND "+Sms.CREATOR+" = ?").equals(where)||
+   args.length!=3||!args[1].equals("4")||!args[2].equals(context.getPackageName()))
+   throw new AssertionError("Only exact app-owned outbox row may be discarded");
+  long id=Long.parseLong(args[0]);ContentValues row=rows.get(id);
+  if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[1])||!Objects.equals(row.get(Sms.CREATOR),args[2]))return 0;
+  rows.remove(id);return 1;
+ }
  public Cursor query(Uri uri,String[] fields,String where,String[] args,String order){
   List<ContentValues> result=new ArrayList<>();
   if(uri.equals(Sms.CONTENT_URI)){
@@ -322,6 +377,7 @@ public final class ContentResolver {
 }`,
   'android/content/Context.java': `package android.content;
 import android.app.KeyguardManager;
+import android.app.role.RoleManager;
 import android.os.UserManager;
 import android.telephony.*;
 import java.io.File;
@@ -331,6 +387,7 @@ public final class Context {
  public int boot=1;
  public final Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
  public final KeyguardManager lock=new KeyguardManager();
+ public final RoleManager roles=new RoleManager(()->role);
  public final UserManager users=new UserManager();
  public final SubscriptionManager subscriptions=new SubscriptionManager();
  public final TelephonyManager telephony=new TelephonyManager();
@@ -350,7 +407,7 @@ public final class Context {
  }
  public <T>T getSystemService(Class<T> type){
   Object value=type==KeyguardManager.class?lock:type==UserManager.class?users:type==SubscriptionManager.class?subscriptions:
-   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:null;
+   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:type==RoleManager.class?roles:null;
   return type.cast(value);
  }
  public void unregisterReceiver(BroadcastReceiver receiver){dynamicReceivers.remove(receiver);}
@@ -386,10 +443,18 @@ public abstract class Plugin {
   'com/getcapacitor/PluginMethod.java': `package com.getcapacitor;public @interface PluginMethod {}`,
   'com/getcapacitor/JSObject.java': `package com.getcapacitor;public class JSObject extends org.json.JSONObject {}`,
   'com/getcapacitor/JSArray.java': `package com.getcapacitor;public class JSArray extends org.json.JSONArray {}`,
+  'com/getcapacitor/MessageHandler.java': `package com.getcapacitor;public class MessageHandler {}`,
   'com/getcapacitor/PluginCall.java': `package com.getcapacitor;
-public final class PluginCall {
+public class PluginCall {
  private final JSObject data;public JSObject result;public String rejection;public boolean answered;
- public PluginCall(JSObject data){this.data=data;}
+ private final String pluginId,callbackId,methodName;
+ public PluginCall(JSObject data){this(null,"fixture-plugin","fixture-callback","fixture-method",data);}
+ public PluginCall(MessageHandler handler,String pluginId,String callbackId,String methodName,JSObject data){
+  this.data=data;this.pluginId=pluginId;this.callbackId=callbackId;this.methodName=methodName;
+ }
+ public String getPluginId(){return pluginId;}
+ public String getCallbackId(){return callbackId;}
+ public String getMethodName(){return methodName;}
  public JSObject getData(){return data;}
  public String getString(String key){return data.optString(key,null);}
  public String getString(String key,String fallback){return data.optString(key,fallback);}
@@ -397,8 +462,9 @@ public final class PluginCall {
  public JSArray getArray(String key){return data.opt(key) instanceof JSArray?(JSArray)data.opt(key):null;}
  public void resolve(){resolve(new JSObject());}
  public void resolve(JSObject value){answer();result=value;}
- public void reject(String text){reject(text,"closed");}
- public void reject(String text,String code){answer();rejection=code;}
+ public void reject(String text){reject(text,null,null,null);}
+ public void reject(String text,String code){reject(text,code,null,null);}
+ public void reject(String text,String code,Exception cause,JSObject detail){answer();rejection=code==null?"closed":code;}
  private void answer(){if(answered)throw new AssertionError("Duplicate plugin answer");answered=true;}
 }`,
   'com/getcapacitor/annotation/Permission.java': `package com.getcapacitor.annotation;

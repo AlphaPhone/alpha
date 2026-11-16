@@ -35,7 +35,9 @@ test('native Photos keeps the deep window after a catalog event and reloads evic
  await page.addInitScript(()=>{
   const w=window as any,c=w.Capacitor,original=c.nativePromise;
   const photos=c.PluginHeaders.find((plugin:any)=>plugin.name==='AlphaPhotos');photos.methods.push({name:'thumbnails',rtype:'promise'});
-  const image=w.mediaFixture.row.image,now=Date.now();
+  // Keep the synthetic six-minute gallery in one browser-local day, including midnight runs.
+  const noon=new Date();noon.setHours(12,0,0,0);
+  const image=w.mediaFixture.row.image,now=noon.getTime();
   const rows=Array.from({length:400},(_,index)=>({...w.mediaFixture.row,id:`m:external_primary:i:${1000+index}`,date:now-index*1000,image}));
   w.thumbnailReads=[];
   c.nativePromise=async(plugin:string,method:string,input:any)=>{

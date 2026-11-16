@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
+import {scaledTimeout} from '../timeouts.mjs';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const cli = join(root, 'node_modules/@informalsystems/quint/dist/src/cli.js');
@@ -41,7 +42,7 @@ export function modelWalks(model, {main, traces = 40, steps = 25, seed = 2026110
   try {
     const result = spawnSync(process.execPath, [cli, 'run', model, `--main=${main}`, '--backend=typescript', `--seed=${seed}`,
       `--max-samples=${traces}`, `--n-traces=${traces}`, `--max-steps=${steps}`, '--mbt', `--out-itf=${join(directory, 'walk-{seq}.itf.json')}`],
-    {cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024});
+    {cwd: root, encoding: 'utf8', timeout: scaledTimeout(120000), maxBuffer: 16 * 1024 * 1024});
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     const files = readdirSync(directory).filter(name => name.endsWith('.itf.json')).sort();
     assert.ok(files.length > 0, 'The interpreter wrote no walk');
@@ -100,7 +101,7 @@ export function modelScenario(model, scenario, {main, seed = 20261107, variable 
   try {
     const result = spawnSync(process.execPath, [cli, 'test', model, `--main=${main}`, '--backend=typescript', `--seed=${seed}`,
       '--max-samples=1', `--match=^${scenario}$`, `--out-itf=${join(directory, 'trace-{test}-{seq}.json')}`],
-    {cwd: root, encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024});
+    {cwd: root, encoding: 'utf8', timeout: scaledTimeout(60000), maxBuffer: 16 * 1024 * 1024});
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     const states = JSON.parse(readFileSync(join(directory, `trace-${scenario}-0.json`), 'utf8')).states;
     assert.equal(states.length, steps.length, `${scenario}: ${states.length} states for ${steps.length} written steps`);

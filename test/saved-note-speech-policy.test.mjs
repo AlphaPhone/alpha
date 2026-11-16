@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,8 +13,8 @@ test('actual saved-note native selector fences ownership, clips windows and remo
  try{
  const sources=[
  write('android/content/Context.java',`package android.content;public class Context{final java.io.File cache;public Context(java.io.File value){cache=value;cache.mkdirs();}public java.io.File getCacheDir(){return cache;}}`),
- write('org/json/JSONObject.java',`package org.json;public class JSONObject extends java.util.HashMap<String,Object>{public JSONObject put(String k,Object v){super.put(k,v);return this;}public boolean has(String k){return containsKey(k);}public String getString(String k){return (String)get(k);}public long getLong(String k){return ((Number)get(k)).longValue();}}`),
- write('com/getcapacitor/PluginCall.java',`package com.getcapacitor;public class PluginCall{public final org.json.JSONObject data=new org.json.JSONObject();public org.json.JSONObject getData(){return data;}public String getString(String k){return (String)data.get(k);}public Long getLong(String k){return (Long)data.get(k);}}`),
+ write('org/json/JSONObject.java',`package org.json;public class JSONObject extends java.util.HashMap<String,Object>{public static final Object NULL=new Object();public JSONObject put(String k,Object v){super.put(k,v);return this;}public boolean has(String k){return containsKey(k);}public Object opt(String k){return get(k);}public String getString(String k){return (String)get(k);}public long getLong(String k){return ((Number)get(k)).longValue();}}`),
+ write('com/getcapacitor/PluginCall.java',`package com.getcapacitor;public class PluginCall{public final org.json.JSONObject data=new org.json.JSONObject();public org.json.JSONObject getData(){return data;}public String getString(String k){return (String)data.get(k);}public Long getLong(String k){Object v=data.opt(k);return v instanceof Long?(Long)v:null;}}`),
  write('ai/eliza/plugins/media/RecordingStore.java',`package ai.eliza.plugins.media;public class RecordingStore{public org.json.JSONObject metadata;public java.io.File source;public static String id(String s){if(s==null||!s.matches("[A-Za-z0-9_-]{1,100}"))throw new IllegalArgumentException();return s;}public org.json.JSONObject describe(String s){id(s);return metadata;}public java.io.File playable(String s){id(s);return source;}}`),
  write('ai/alphacompute/alphaphone/AlphaNoteAudioPlugin.java',`package ai.alphacompute.alphaphone;public class AlphaNoteAudioPlugin{static final ai.eliza.plugins.media.RecordingStore store=new ai.eliza.plugins.media.RecordingStore();static ai.eliza.plugins.media.RecordingStore recordings(android.content.Context ignored){return store;}}`),
  write('android/os/SystemClock.java',`package android.os;public class SystemClock{public static long elapsedRealtime(){return 1;}}`),
@@ -22,20 +23,33 @@ test('actual saved-note native selector fences ownership, clips windows and remo
  write('android/media/MediaCodec.java',`package android.media;public class MediaCodec{public static class BufferInfo{public long presentationTimeUs;public int size;public void set(int offset,int count,long time,int flags){presentationTimeUs=time;size=count;}}}`),
  write('android/media/MediaMuxer.java',`package android.media;public class MediaMuxer{public static class OutputFormat{public static final int MUXER_OUTPUT_MPEG_4=0;}public static final java.util.List<Long> times=new java.util.ArrayList<>();final java.io.FileOutputStream out;public MediaMuxer(String s,int format)throws Exception{out=new java.io.FileOutputStream(s);times.clear();}public int addTrack(MediaFormat f){return 0;}public void start(){}public void writeSampleData(int track,java.nio.ByteBuffer b,MediaCodec.BufferInfo i)throws Exception{times.add(i.presentationTimeUs);out.write(1);}public void stop(){}public void release()throws Exception{out.close();}}`),
  write('ai/alphacompute/alphaphone/SavedNoteSpeechPolicyTest.java',`package ai.alphacompute.alphaphone;import java.io.*;import android.media.*;import com.getcapacitor.PluginCall;import ai.eliza.plugins.media.RecordingWindow;public class SavedNoteSpeechPolicyTest{
- static RecordingWindow open(android.content.Context context,PluginCall call,java.util.function.BooleanSupplier cancelled)throws Exception{return RecordingWindow.open(AlphaNoteAudioPlugin.store,context.getCacheDir(),"noteId",call.getString("recordingId"),call.getString("savedNoteId"),call.getLong("offsetMs"),call.getLong("savedDurationMs"),cancelled);}
- static PluginCall call(long offset,long duration){PluginCall c=new PluginCall();c.data.put("recordingId","audio").put("savedNoteId","note").put("offsetMs",offset).put("savedDurationMs",duration);return c;}
+ static PluginCall call(Object offset,Object duration){PluginCall c=new PluginCall();c.data.put("recordingId","audio").put("savedNoteId","note").put("offsetMs",offset).put("savedDurationMs",duration);return c;}
  static void metadata(long duration){AlphaNoteAudioPlugin.store.metadata=new org.json.JSONObject().put("audioId","audio").put("noteId","note").put("durationMs",duration);MediaExtractor.created=0;MediaExtractor.duration=60000000;MediaExtractor.onRead=null;}
  public static void main(String[] args)throws Exception{
   File root=new File(args[0]),cache=new File(root,"cache");android.content.Context context=new android.content.Context(cache);File original=new File(root,"original.audio");try(FileOutputStream o=new FileOutputStream(original)){o.write(7);}AlphaNoteAudioPlugin.store.source=original;
-  metadata(60000);File transientFile;try(RecordingWindow s=open(context,call(25000,60000),()->false)){transientFile=s.file;if(!s.file.isFile()||MediaMuxer.times.size()!=25||MediaMuxer.times.get(0)!=0||MediaMuxer.times.get(24)!=24000000)throw new AssertionError("Window order/bounds");}if(transientFile.exists()||!original.isFile())throw new AssertionError("Temporary ownership");
-  for(String mode:new String[]{"foreign","deleted","duration"}){metadata(60000);if(mode.equals("foreign"))AlphaNoteAudioPlugin.store.metadata.put("noteId","other");if(mode.equals("deleted"))AlphaNoteAudioPlugin.store.metadata.put("deletedAt",1L);if(mode.equals("duration"))AlphaNoteAudioPlugin.store.metadata.put("durationMs",1000L);try{open(context,call(0,60000),()->false);throw new AssertionError("Owner admitted");}catch(IOException expected){}if(MediaExtractor.created!=0||cache.list().length!=0)throw new AssertionError("Foreign audio accessed");}
-  metadata(60000);MediaExtractor.onRead=()->AlphaNoteAudioPlugin.store.metadata.put("deletedAt",1L);try{open(context,call(0,60000),()->false);throw new AssertionError("Deleted during extraction");}catch(IOException expected){}if(cache.list().length!=0)throw new AssertionError("Failed window kept");
-  metadata(60000);try{open(context,call(0,60000),()->true);throw new AssertionError("Cancelled extraction");}catch(IOException expected){}if(cache.list().length!=0)throw new AssertionError("Cancelled temporary kept");
-  metadata(50020);MediaExtractor.duration=50000000;try(RecordingWindow s=open(context,call(50000,50020),()->false)){if(!s.empty||s.file.length()!=0)throw new AssertionError("Trailing frame uploaded");}
+  metadata(60000);
+  if(SavedNoteRecordingWindow.open(context,new PluginCall(),()->false)!=null)throw new AssertionError("Regular recording selected a note window");
+  File transientFile;try(RecordingWindow s=SavedNoteRecordingWindow.open(context,call(25000,60000),()->false)){transientFile=s.file;if(!s.file.isFile()||MediaMuxer.times.size()!=25||MediaMuxer.times.get(0)!=0||MediaMuxer.times.get(24)!=24000000)throw new AssertionError("Window order/bounds");}if(transientFile.exists()||!original.isFile())throw new AssertionError("Temporary ownership");
+  try(RecordingWindow s=SavedNoteRecordingWindow.open(context,call(0L,60000L),()->false)){if(s.empty||MediaMuxer.times.size()!=25)throw new AssertionError("Long-valued milliseconds refused");}
+  metadata(60000);
+  for(String field:new String[]{"offsetMs","savedDurationMs"}){
+   for(Object invalid:new Object[]{0.5,0.0,"0",false,org.json.JSONObject.NULL}){
+    PluginCall c=call(0,60000);c.data.put(field,invalid);
+    try{SavedNoteRecordingWindow.open(context,c,()->false);throw new AssertionError("Invalid "+field+" accepted");}catch(IOException expected){}
+   }
+   PluginCall c=call(0,60000);c.data.remove(field);
+   try{SavedNoteRecordingWindow.open(context,c,()->false);throw new AssertionError("Missing "+field+" accepted");}catch(IOException expected){}
+  }
+  if(MediaExtractor.created!=0||cache.list().length!=0)throw new AssertionError("Invalid window accessed audio");
+  for(String mode:new String[]{"foreign","deleted","duration"}){metadata(60000);if(mode.equals("foreign"))AlphaNoteAudioPlugin.store.metadata.put("noteId","other");if(mode.equals("deleted"))AlphaNoteAudioPlugin.store.metadata.put("deletedAt",1L);if(mode.equals("duration"))AlphaNoteAudioPlugin.store.metadata.put("durationMs",1000L);try{SavedNoteRecordingWindow.open(context,call(0,60000),()->false);throw new AssertionError("Owner admitted");}catch(IOException expected){}if(MediaExtractor.created!=0||cache.list().length!=0)throw new AssertionError("Foreign audio accessed");}
+  metadata(60000);MediaExtractor.onRead=()->AlphaNoteAudioPlugin.store.metadata.put("deletedAt",1L);try{SavedNoteRecordingWindow.open(context,call(0,60000),()->false);throw new AssertionError("Deleted during extraction");}catch(IOException expected){}if(cache.list().length!=0)throw new AssertionError("Failed window kept");
+  metadata(60000);try{SavedNoteRecordingWindow.open(context,call(0,60000),()->true);throw new AssertionError("Cancelled extraction");}catch(IOException expected){}if(cache.list().length!=0)throw new AssertionError("Cancelled temporary kept");
+  metadata(50020);MediaExtractor.duration=50000000;try(RecordingWindow s=SavedNoteRecordingWindow.open(context,call(50000,50020),()->false)){if(!s.empty||s.file.length()!=0)throw new AssertionError("Trailing frame uploaded");}
   if(cache.list().length!=0||!original.isFile()||original.length()!=1)throw new AssertionError("Original changed");System.out.println("PASS actual native selector policy; media APIs are test doubles");
  }} `),
+ path.resolve('android/app/src/main/java/ai/alphacompute/alphaphone/SavedNoteRecordingWindow.java'),
  path.resolve('vendor/eliza/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/RecordingWindow.java')];
- execFileSync(javaBinary('javac'),['--release','11','-d',dir,...sources],{timeout:30000});
- const out=execFileSync(javaBinary('java'),['-cp',dir,'ai.alphacompute.alphaphone.SavedNoteSpeechPolicyTest',dir],{encoding:'utf8',timeout:30000});assert.match(out,/PASS actual native selector policy/);
+ execFileSync(javaBinary('javac'),['--release','11','-d',dir,...sources],{timeout:scaledTimeout(30000)});
+ const out=execFileSync(javaBinary('java'),['-cp',dir,'ai.alphacompute.alphaphone.SavedNoteSpeechPolicyTest',dir],{encoding:'utf8',timeout:scaledTimeout(30000)});assert.match(out,/PASS actual native selector policy/);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

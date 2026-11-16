@@ -5,6 +5,7 @@ import {test,expect} from '@playwright/test';
 // A synthetic canvas stream supplies only the camera permission boundary; encoding and IndexedDB are real.
 // No physical camera, model, native API, upload or external account is used.
 test('browser camera persists a real encoded frame, releases capture and restores Photos after reload',async({page},info)=>{
+ await page.clock.install();
  await page.addInitScript(()=>{
  const devices=navigator.mediaDevices;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:devices});
  localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
@@ -35,6 +36,8 @@ test('browser camera persists a real encoded frame, releases capture and restore
  await page.getByRole('button',{name:'Favorite',exact:true}).click();
  await expect(page.getByRole('button',{name:'Remove from favorites',exact:true})).toBeVisible();
  await page.screenshot({path:info.outputPath('saved-photo.png'),animations:'disabled'});
+ // Pause before the delete, so its real ten-second Undo window stays deterministic.
+ await page.clock.pauseAt(new Date(await page.evaluate(()=>Date.now()+1000)));
  await choosePhotoAction(page,'Delete photo');
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Albums',exact:true}).click();
@@ -42,7 +45,14 @@ test('browser camera persists a real encoded frame, releases capture and restore
  await page.getByRole('button',{name:/^Photo, /}).click();
  await page.getByLabel('Photo actions',{exact:true}).click();await expect(page.getByRole('button',{name:'Recover',exact:true})).toBeVisible();
  expect(await page.evaluate(async()=>{const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');return (await library.list({trashed:true})).items.length;})).toBe(1);
- await choosePhotoAction(page,'Recover');
+ await choosePhotoAction(page,'Recover');await page.mouse.move(0,0);
+ await expect.poll(()=>page.evaluate(async()=>{const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');return {trash:(await library.list({trashed:true})).items.length,live:(await library.list()).items.length};})).toEqual({trash:0,live:1});
+ // Restoration completed, but its notice must not replace the owner's retained Undo.
+ await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
+ await expect(page.getByText('Restored',{exact:true})).toHaveCount(0);
+ await page.clock.fastForward(9999);
+ await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
+ await page.clock.fastForward(1);
  await expect(page.getByText('Restored',{exact:true})).toBeVisible();
  const result=await page.evaluate(async()=>{
   const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');
@@ -100,4 +110,62 @@ test('leaving Camera while permission is pending stops a late stream without reo
  await page.evaluate(()=>(window as any).releaseCamera());
  await expect.poll(()=>page.evaluate(()=>(window as any).lateCameraStream.getTracks().every((t:MediaStreamTrack)=>t.readyState==='ended'))).toBe(true);
  await expect(page.locator('[data-alpha-camera="viewfinder"] video')).toHaveCount(0);
+});
+
+test('a pending photo read cannot attach to a replacement conversation',async({page})=>{
+ await page.addInitScript(()=>{
+  localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
+  const canvas=document.createElement('canvas');canvas.width=320;canvas.height=240;
+  const paint=()=>{const ctx=canvas.getContext('2d')!;ctx.fillStyle='green';ctx.fillRect(0,0,320,240);};
+  paint();
+  navigator.mediaDevices.getUserMedia=async()=>{const stream=canvas.captureStream(10);setInterval(paint,100);return stream;};
+ });
+ await page.goto('/?mode=dev');
+ const firstConversation=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  await connectionController.initialize();
+  await connectionController.startDevelopment('local');
+  await connectionController.newConversation();
+  return connectionController.getSelectedConversationId();
+ });
+ expect(firstConversation).toBeTruthy();
+ await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
+ await page.getByRole('button',{name:'Camera',exact:true}).click();
+ const video=page.locator('[data-alpha-camera="viewfinder"] video');
+ await expect.poll(()=>video.evaluate((element:HTMLVideoElement)=>element.readyState)).toBeGreaterThanOrEqual(2);
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await page.getByRole('button',{name:'Open last photo',exact:true}).click();
+ await expect(page.locator('[data-alpha-subview="photos-viewer"]')).toBeVisible();
+ await page.evaluate(async()=>{
+  const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');
+  const read=browserPhotoLibrary.read.bind(browserPhotoLibrary);
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  const fixture={started:false,finished:false,release};
+  (window as any).cameraAttachmentRead=fixture;
+  browserPhotoLibrary.read=async input=>{
+   const result=await read(input);
+   if(!fixture.started){fixture.started=true;await held;fixture.finished=true;}
+   return result;
+  };
+ });
+ await choosePhotoAction(page,'Ask Alpha');
+ await expect.poll(()=>page.evaluate(()=>(window as any).cameraAttachmentRead.started)).toBe(true);
+ const nextConversation=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  await connectionController.newConversation();
+  return connectionController.getSelectedConversationId();
+ });
+ expect(nextConversation).toBeTruthy();expect(nextConversation).not.toBe(firstConversation);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','photos');
+ await page.evaluate(()=>(window as any).cameraAttachmentRead.release());
+ await expect.poll(()=>page.evaluate(()=>(window as any).cameraAttachmentRead.finished)).toBe(true);
+ const attachment=page.getByRole('button',{name:'Preview attached photo',exact:true});
+ await expect(page.getByText('Chat changed. Choose the photo again.',{exact:true})).toBeVisible();
+ await expect(attachment).toHaveCount(0);
+
+ await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
+ await choosePhotoAction(page,'Ask Alpha');
+ await expect(attachment).toBeVisible();
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('');
 });

@@ -196,6 +196,10 @@ function pnClock(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) 
 function pnCallId(pid, num) { var d = pnDigits(num); return pid || (d ? "#" + d : null); }
 function pnWant(st) { return pnCallId(st.call, st.num); }
 
+/* Stopping the view's timers cancels an armed call start with them, so the latch that says a
+   start is armed is released too: the next render arms a handed-over call again. */
+function pnStop(api) { api.stop(); PN.boot = null; }
+
 function pnStart(api, pid, num, opt) {
   opt = opt || {};
   var id = pnCallId(pid, num);
@@ -205,7 +209,7 @@ function pnStart(api, pid, num, opt) {
   /* pnEnd's patch is queued, not applied yet: the ended call's return target is not read back below */
   var replaced = !!PN.live;
   if (replaced) pnEnd(api, { quiet: true });
-  api.stop(); api.stopBg();
+  pnStop(api); api.stopBg();
   PN.live = id;
   var now = Date.now();
   api.set({ call: pid || null, num: pid ? "" : pnFmt(num), callWho: id, callAt: now, liveAt: opt.live ? now : null, dir: opt.dir || "out",
@@ -299,7 +303,7 @@ registerView("phone", {
   back: function (st, api) {
     if (st.incoming) { if (st.rs) api.set({ rs: false }); return true; }
     if (pnWant(st) && !st.min) { if (st.kp) api.set({ kp: false }); else api.set({ min: true }); return true; }
-    if (st.vmOpen) { if (st.playing) api.stop(); api.set({ vmOpen: null, playing: null, vpos: 0 }); return true; }
+    if (st.vmOpen) { if (st.playing) pnStop(api); api.set({ vmOpen: null, playing: null, vpos: 0 }); return true; }
     return false;
   },
   /* calls and ringing keep going in the background: status-bar chip returns here */
@@ -418,7 +422,7 @@ registerView("phone", {
       target: { kind: "recents", app: "Phone", name: null, first: null, initials: null },
       closed: { kind: "filter", placeholder: "Call or ask", value: st.qBy === "alpha" ? "" : (st.q || ""), submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null,
         onText: function (text) { if (!text && api.get("phone").qBy === "alpha") return; api.set({ q: text, qBy: "owner", qLabel: "" }); } },
-      left: { icon: "keypad", label: "Back to the keypad", initials: null, run: function () { api.stop(); api.set({ tab: "keypad", vmOpen: null, playing: null, vpos: 0 }); } },
+      left: { icon: "keypad", label: "Back to the keypad", initials: null, run: function () { pnStop(api); api.set({ tab: "keypad", vmOpen: null, playing: null, vpos: 0 }); } },
       context: "Phone", contextKey: "phone:recents:",
       strip: { title: "Phone", subtitle: "", initials: null, live: false, actions: [] },
       briefing: callsBriefing(missed, fresh, now)
@@ -439,7 +443,7 @@ registerView("phone", {
     var tabs = tabDefs.map(function (d) {
       var on = tab === d[0];
       return { d: d[1], label: d[2], on: on, dot: d[0] === "voicemail" && unheard > 0 && !on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)",
-        pick: function () { api.stop(); api.set({ tab: d[0], vmOpen: null, playing: null, vpos: 0 }); } };
+        pick: function () { pnStop(api); api.set({ tab: d[0], vmOpen: null, playing: null, vpos: 0 }); } };
     });
 
     /* recents: the bar's query (AC-22) filters them in memory; Keypad and Voicemail only keep it */
@@ -486,15 +490,15 @@ registerView("phone", {
         ini: pnIni(p), who: p ? p.name : (v.label || v.num), time: pnRel(pnAt(v, now), now), dur: pnClock(v.dur), text: v.text,
         unheard: !v.heard, open: open, closed: !open, bgCss: open ? "background:var(--s2)" : "", avBg: open ? "var(--s3)" : "var(--s2)", textColor: open ? "var(--fg)" : "var(--mut)", nameCss: v.heard ? "" : "font-weight: 700",
         textCss: open ? "" : "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden",
-        toggle: function () { var s = api.get("phone"); if (s.playing) api.stop(); api.set({ vmOpen: open ? null : v.id, playing: null, vpos: 0, vms: s.vms.map(function (x) { return x.id === v.id ? Object.assign({}, x, { heard: true }) : x; }) }); },
+        toggle: function () { var s = api.get("phone"); if (s.playing) pnStop(api); api.set({ vmOpen: open ? null : v.id, playing: null, vpos: 0, vms: s.vms.map(function (x) { return x.id === v.id ? Object.assign({}, x, { heard: true }) : x; }) }); },
         playD: playing ? IC.pause : IC.play, playLabel: playing ? "Pause" : "Play",
         prog: Math.round(pos * 1000) / 10, posT: pnClock(pos * v.dur),
         play: function () {
           var s = api.get("phone");
-          if (s.playing === v.id) { api.stop(); api.set({ playing: null }); return; }
-          api.stop();
+          if (s.playing === v.id) { pnStop(api); api.set({ playing: null }); return; }
+          pnStop(api);
           api.set({ playing: v.id, vpos: (s.vpos || 0) >= 0.99 ? 0 : (s.vpos || 0) });
-          api.every(function () { var s2 = api.get("phone"); if (s2.playing !== v.id) return; var np = (s2.vpos || 0) + 0.25 / v.dur; if (np >= 1) { api.stop(); api.set({ playing: null, vpos: 1 }); } else api.set({ vpos: np }); }, 250);
+          api.every(function () { var s2 = api.get("phone"); if (s2.playing !== v.id) return; var np = (s2.vpos || 0) + 0.25 / v.dur; if (np >= 1) { pnStop(api); api.set({ playing: null, vpos: 1 }); } else api.set({ vpos: np }); }, 250);
         },
         call: callFrom(v.pid, v.num),
         msgLabel: "Message " + (p ? p.name : v.label || v.num), hasMsg: !!p, hasAdd: !p,
@@ -502,7 +506,7 @@ registerView("phone", {
         add: function () { var nm = String(v.label || "").split(" "); api.open("contacts", { add: { first: v.label ? v.label : "", phone: v.num } }); },
         msg: function () { if (p) api.open("messages", { thread: p.id }); },
         del: function () {
-          var s = api.get("phone"); api.stop();
+          var s = api.get("phone"); pnStop(api);
           api.set({ vms: s.vms.filter(function (x) { return x.id !== v.id; }), vmOpen: null, playing: null, vpos: 0 });
           var restore = function () {
             var l = (api.get("phone").vms || []).slice();
@@ -526,7 +530,7 @@ registerView("phone", {
     var themName = cp ? pnFirst(cp) : "Caller";
     var lines = sc.lines.slice(0, st.aiN || 0).map(function (l) { return { who: l[0] === "you" ? "You" : themName, text: l[1], css: l[0] === "you" ? "color:var(--mut)" : "color:var(--fg)" }; }).slice(-5);
     var toggle = function (key) {
-      return function () { var s = api.get("phone"); var p = {}; p[key] = !s[key]; if (key === "ai" && p.ai) p.kp = false; api.set(p); if (key === "ai" && p.ai) api.toast(api.name + " is taking notes"); };
+      return function () { var s = api.get("phone"); var p = {}; p[key] = !s[key]; if (key === "ai" && p.ai) p.kp = false; api.set(p); if (testMocksEnabled && key === "ai" && p.ai) api.toast(api.name + " is taking notes"); };
     };
     /* AC-03: mute, keypad, speaker, hold, then End as the right-most control (template) */
     var ctrl = function (key, d, label, text, on) {
@@ -1026,8 +1030,9 @@ function inboxFind(api, word) {
 }
 function inboxClock(d) { return formatTime(d); }
 function inboxLive(st) { return (st.mails || []).filter(function (m) { return !m.arch && !m.del; }); }
-function inboxMail(st, id) {
-  var l = (st.mails || []).concat(st.sent || []);
+function inboxMail(st, id, source) {
+  var received = st.mails || [], sent = st.sent || [];
+  var l = source === "sent" ? sent : source === "received" ? received : received.concat(sent);
   for (var i = 0; i < l.length; i++) if (String(l[i].id) === String(id)) return l[i];
   return null;
 }
@@ -1086,11 +1091,11 @@ registerView("inbox", {
       api.set({ compose: null, toQ: "" }); inboxUndo(api, inboxDraftLabel(api, st.compose), { compose: st.compose, composeLocal: true });
       return !!st.composeLocal;
     }
-    if (st.open != null) { inboxMarkRead(api, st.open); api.set({ open: null }); return !!st.openLocal; }
+    if (st.open != null) { if (st.openSource !== "sent") inboxMarkRead(api, st.open); api.set({ open: null, openSource: null }); return !!st.openLocal; }
     if (st.q != null) { api.set({ q: null }); return true; }
     return false;
   },
-  onLeave: function (api) { if (api.st.open != null) inboxMarkRead(api, api.st.open); },
+  onLeave: function (api) { if (api.st.open != null && api.st.openSource !== "sent") inboxMarkRead(api, api.st.open); },
   suggestions: function (st) {
     if (st.compose) return ["Write this for me", "Make it shorter"];
     var sg = copy("inbox").suggestions || {};
@@ -1101,7 +1106,7 @@ registerView("inbox", {
   reply: function (t, raw, api) {
     var st = api.st; var here = api.active;
     var live = inboxLive(st);
-    var cur = st.open != null ? inboxMail(st, st.open) : null;
+    var cur = st.open != null ? inboxMail(st, st.open, st.openSource) : null;
     var m;
 
     // inside an open email
@@ -1169,7 +1174,7 @@ registerView("inbox", {
         return (x.subj + " " + x.body + " " + w.name).toLowerCase().indexOf(q) >= 0;
       });
       if (!res.length) return { text: "No email matches “" + q + "”." };
-      if (res.length === 1) return { text: "Found it.", card: { type: "generic", icon: "mail", title: res[0].subj, sub: inboxWho(api, res[0]).name + " · " + res[0].time, go: { view: "inbox", patch: { open: res[0].id } } } };
+      if (res.length === 1) return { text: "Found it.", card: { type: "generic", icon: "mail", title: res[0].subj, sub: inboxWho(api, res[0]).name + " · " + res[0].time, go: { view: "inbox", patch: { open: res[0].id, openSource: "received" } } } };
       return { text: res.length + " emails.", card: { type: "digest", rows: res.map(function (x) { var w = inboxWho(api, x); return { ini: w.ini, who: w.name, text: x.subj }; }), go: { view: "inbox" } } };
     }
     return scriptedReply("inbox", t);
@@ -1196,7 +1201,10 @@ registerView("inbox", {
     var searching = st.q != null; var sq = (st.q || "").trim().toLowerCase();
 
     var list;
-    if (isSent) list = (st.sent || []).slice();
+    if (st.localMailFolder) list = (st.mails || []).concat(st.sent || []).filter(function (m) {
+      return st.localMailFolder === "trash" ? m.del : m.arch && !m.del;
+    });
+    else if (isSent) list = (st.sent || []).filter(function (m) { return !m.arch && !m.del; });
     else {
       list = inboxLive(st).filter(function (m) { return st.acct === "all" || inboxAcctOf(accts, m.acct).id === st.acct; });
       list.sort(function (a, b) { return (b.unread ? 1 : 0) - (a.unread ? 1 : 0) || b.k - a.k; });
@@ -1209,7 +1217,7 @@ registerView("inbox", {
       var w = m.sent ? { name: inboxRecips(m.to).map(function (r) { return inboxRecipName(api, r); }).join(", ") || "No recipient", ini: "" } : inboxWho(api, m);
       if (m.sent) { var r0 = inboxRecips(m.to)[0]; var p0 = r0 ? inboxPerson(api, r0) : null; w.ini = p0 ? p0.ini : (r0 ? r0.charAt(0).toUpperCase() : "?"); }
       var s = api.sw(function (dx, dy) {
-        if (m.sent || Math.abs(dx) < Math.abs(dy)) return false;
+        if (st.localMailFolder || m.sent || Math.abs(dx) < Math.abs(dy)) return false;
         if (dx < 0) {
           api.set({ slide: { id: m.id, x: -412 } });
           api.later(function () {
@@ -1223,46 +1231,56 @@ registerView("inbox", {
       });
       var unread = !!m.unread;
       return {
-        ini: w.ini, name: w.name, subj: m.subj, snip: String(m.body).replace(/\s+/g, " ").slice(0, 90), time: m.time,
+        id: m.id, sent: !!m.sent, ini: w.ini, name: w.name, subj: m.subj, snip: String(m.body).replace(/\s+/g, " ").slice(0, 90), time: m.time,
         nameW: unread ? "700" : "500", subjCss: unread ? "color:var(--fg);font-weight:600" : "color:var(--fg)",
         dot: unread ? "var(--acct)" : "transparent", clip: !!(m.atts && m.atts.length),
         label: (unread ? "Unread, " : "") + w.name + ", " + m.subj,
         down: s.down, up: s.up,
-        tx: st.slide && st.slide.id === m.id ? st.slide.x : 0, current: st.open === m.id ? "true" : "false",
+        tx: st.slide && st.slide.id === m.id ? st.slide.x : 0, current: st.open === m.id && (!st.openSource || st.openSource === (m.sent ? "sent" : "received")) ? "true" : "false",
         // On a split canvas (#411) another message opens beside the list; the one it replaces is
         // left read, as Back leaves it.
-        open: function () { if (api.swallowed()) return; var prev = api.get("inbox").open; if (prev != null && prev !== m.id) inboxMarkRead(api, prev); api.set({ open: m.id, openLocal: true }); }
+        open: function () { if (api.swallowed()) return; var prev = api.get("inbox"); if (prev.open != null && prev.openSource !== "sent" && (prev.open !== m.id || m.sent)) inboxMarkRead(api, prev.open); api.set({ open: m.id, openSource: m.sent ? "sent" : "received", openLocal: true }); }
       };
     });
 
     // detail
-    var cur = st.open != null ? inboxMail(st, st.open) : null;
+    var cur = st.open != null ? inboxMail(st, st.open, st.openSource) : null;
     var det = null;
     if (cur) {
       var cw = cur.sent ? { name: inboxRecips(cur.to).map(function (r) { return inboxRecipName(api, r); }).join(", "), ini: "" } : inboxWho(api, cur);
       if (cur.sent) { var cr = inboxRecips(cur.to)[0]; var cp = cr ? inboxPerson(api, cr) : null; cw.ini = cp ? cp.ini : "?"; }
       var ca = inboxAcctOf(accts, cur.acct);
-      var close = function () { inboxMarkRead(api, cur.id); api.set({ open: null }); };
+      var close = function () { if (!cur.sent) inboxMarkRead(api, cur.id); api.set({ open: null, openSource: null }); };
       var remove = function (flag, msg) {
         var s2 = api.get("inbox"); var key = cur.sent ? "sent" : "mails";
         var at = (s2[key] || []).map(function (x) { return x.id; }).indexOf(cur.id); var was = at >= 0 ? Object.assign({}, s2[key][at], cur.sent ? {} : { unread: false }) : null;
-        var snap = function (now) { var p = { open: cur.id, openLocal: true }; if (was) p[key] = restoreById(now[key], was, at); return p; };
-        if (cur.sent) api.set({ open: null, sent: (s2.sent || []).filter(function (x) { return x.id !== cur.id; }) });
-        else api.set({ open: null, mails: s2.mails.map(function (x) { if (x.id !== cur.id) return x; var y = Object.assign({}, x, { unread: false }); y[flag] = true; return y; }) });
+        var source = cur.sent ? "sent" : "received";
+        var snap = function (now) { var p = { open: cur.id, openSource: source, openLocal: true }; if (was) p[key] = restoreById(now[key], was, at); return p; };
+        var patch = { open: null, openSource: null };
+        patch[key] = (s2[key] || []).map(function (x) {
+          if (x.id !== cur.id) return x;
+          var y = Object.assign({}, x, cur.sent ? {} : { unread: false });
+          y[flag] = true;
+          return y;
+        });
+        api.set(patch);
         inboxUndo(api, msg, snap);
       };
       det = {
-        noHtml: true, canTrash: true, subj: cur.subj, name: cw.name, ini: cw.ini, body: cur.body, time: cur.time,
+        actionsAvailable: true,
+        closeMenu: function (event) { event.currentTarget.closest("details").removeAttribute("open"); },
+        menuKey: function (event) { if (event.key === "Escape") { var menu = event.currentTarget; menu.open = false; menu.querySelector("summary").focus(); event.stopPropagation(); } },
+        noHtml: true, canTrash: st.localMailFolder !== "trash", subj: cur.subj, name: cw.name, ini: cw.ini, body: cur.body, time: cur.time,
         meta: (cur.sent ? "From " : "To ") + (multi ? inboxAcctLabel(ca) : ca.address) + " · " + cur.time,
         hasAtt: !!(cur.atts && cur.atts.length), atts: (cur.atts || []).map(function (a) { return { name: a.name, size: a.size, open: function () { inboxOpenFile(api, a); } }; }),
-        canArchive: !cur.sent, hasPerson: !!cur.pid, noPerson: !cur.pid,
+        canArchive: !cur.sent && !st.localMailFolder, hasPerson: !!cur.pid, noPerson: !cur.pid,
         close: close,
         archive: function () { remove("arch", cur.subj + " archived"); },
         del: function () { remove("del", cur.subj + " deleted"); },
         canAsk: !cur.sent,
         who: function () { if (cur.pid) api.open("contacts", { open: cur.pid }); },
         reply: function () {
-          inboxMarkRead(api, cur.id);
+          if (!cur.sent) inboxMarkRead(api, cur.id);
           var to = cur.sent ? inboxRecips(cur.to) : [cur.pid || cur.email];
           api.set({ compose: { to: to, subject: /^re: /i.test(cur.subj) ? cur.subj : "Re: " + cur.subj, body: "", acct: cur.acct, replyTo: cur.sent ? null : cur.id }, composeLocal: true, toQ: "" });
         },
@@ -1684,7 +1702,7 @@ registerView("calendar", {
       var repeatLabel = ev.repeat && ev.repeat !== "none" ? CAL_REPEAT.filter(function (r) { return r[0] === ev.repeat; })[0][1] : "";
       var alertLabel = ev.alert == null ? "" : (ev.alert === 0 ? "Alert at start" : (ev.alert >= 60 ? ev.alert / 60 + " hour before" : ev.alert + " min before"));
       D = {
-        title: ev.title, deleteLabel:'Delete event',deleteText:'Delete',when: calRange(ev.t, ev.d), day: calDayName(api, evDay) + (repeatLabel ? " · " + repeatLabel : ""),
+        title: ev.title, deleteLabel:'Delete event',deleteText:'Delete',singleDelete:true,when: calRange(ev.t, ev.d), day: calDayName(api, evDay) + (repeatLabel ? " · " + repeatLabel : ""),
         dot: CAL_COLORS[c.color], calName: c.name, canModify: true,
         recurringReminder: false, reminderPolicy: "", reminderHistory: [], reminderDone: function () {}, reminderSnooze: function () {},
         hasWhere: !!ev.where, where: isPhone ? ((ev.who || [])[0] ? "Call " + calPerson(api, ev.who[0]).name.split(" ")[0] : "Phone call") : ev.where, whereIcon: isPhone ? IC.phone : IC.pin,
@@ -1740,7 +1758,7 @@ registerView("calendar", {
         eMinus: function () { fp({ d: Math.max(1/60, f.d - 0.25) }); }, ePlus: function () { fp({ d: f.d + 0.25 }); },
         video: f.video, vTrack: api.track(f.video), vKx: api.kx(f.video), toggleVideo: function () { fp({ video: !f.video }); },
         chosen: chosen, hasChosen: chosen.length > 0,
-        picking: f.pq != null, notPicking: f.pq == null, pq: f.pq || "", sugg: sugg, noSugg: f.pq != null && sugg.length === 0,
+        picking: f.pq != null, notPicking: f.pq == null, pq: f.pq || "", sugg: sugg, noSugg: !!q && sugg.length === 0 && !canAddEmail,
         openPick: function () { fp({ pq: "" }); }, closePick: function () { fp({ pq: null }); },
         canAddEmail:canAddEmail,typedEmail:typedEmail||'',addEmail:function(){if(canAddEmail)guestPatch(f.who.concat([typedEmail]));},
         onPq: function (e) { fp({ pq: e.target.value }); },
@@ -2040,7 +2058,7 @@ if (testMocksEnabled) registerView("browser", {
     /* library */
     var libRows = Array.from(new Set(st.lib === "history" ? st.visits : st.marks)).map(function (u) {
       var p = brPage(u);
-      return { id: u, title: p.title, host: p.host + p.path, ini: (p.host || "?").charAt(0).toUpperCase(), css: "background:" + (p.tile && p.tile.indexOf("var") < 0 ? p.tile + ";color:var(--alpha-white)" : "var(--s3)"), go: link(u),
+      return { id: u, title: p.title, name: p.title, host: p.host + p.path, ini: (p.host || "?").charAt(0).toUpperCase(), css: "background:" + (p.tile && p.tile.indexOf("var") < 0 ? p.tile + ";color:var(--alpha-white)" : "var(--s3)"), go: link(u),
         canRemove: st.lib !== "history", removeAria: "Remove bookmark " + p.title, remove: function () { var s = api.get("browser"); set({ marks: s.marks.filter(function (x) { return x !== u; }) }); } };
     });
 
@@ -2103,7 +2121,7 @@ if (testMocksEnabled) registerView("browser", {
 
 else registerView("browser", {
   title: "Browser", icon: "globe", aliases: ["web", "internet", "chrome"],
-  chat: "input", placeholder: "Ask about this page",
+  chat: "input",
   state: { tabs: [], cur: null, marks: [], visits: [], editing: false, addr: "", tabsOpen: false, menu: false, lib: null, share: false },
   persist: ["tabs", "cur", "marks", "visits"],
   render: function () { return {}; }
@@ -2143,8 +2161,10 @@ function camStopRec(api) {
 function camRecLabel(st) { var sec = Math.max(0, Math.floor((Date.now() - st.recAt) / 1000)); return Math.floor(sec / 60) + ":" + pad2(sec % 60); }
 function camDescribe(st) {
   var cc = copy("camera");
-  if (st.front) return cc.describeFront || "Scene description is not connected.";
-  return cc.describeBack || "Scene description is not connected.";
+  // Scripted fixture answer only; the product camera question goes through the reviewed capture flow.
+  var none = testMocksEnabled ? "Scene description is not connected." : "";
+  if (st.front) return cc.describeFront || none;
+  return cc.describeBack || none;
 }
 
 registerView("camera", {
@@ -3201,64 +3221,6 @@ async function notesDelete(api, id) {
 }
 /** The folder a note shows in: its folderId while that folder exists, else none (specs/notes-view FolderRefsValid). */
 function notesFolderOf(n, folders) { return n && typeof n.folderId === "string" && (folders || []).some(function (f) { return f.id === n.folderId; }) ? n.folderId : null; }
-/** Moves a note by the owner's own tap: folderId set, or removed for "No folder". */
-async function notesMove(api, id, folderId, name) {
-  if (api.canonicalNotes) {
-    api.set({ menu: null });
-    if (!await api.canonicalNotes.update(id, { folderId: folderId || null })) return;
-    api.toast(folderId ? "Moved to " + name : "Removed from folder");
-    return;
-  }
-  var s = api.get("notes");
-  var list = s.list.map(function (n) { if (n.id !== id) return n; var x = Object.assign({}, n); if (folderId) x.folderId = folderId; else delete x.folderId; return x; });
-  api.set({ list: list, menu: null });
-  api.toast(folderId ? "Moved to " + name : "Removed from folder");
-}
-/** Live Notes keep folders in their own encrypted slot (api.notesFolders); fixtures keep them in view state. */
-async function notesCreateFolder(api) {
-  var sheet = api.get("notes").folderSheet, name = sheet && sheet.kind === "new" ? String(sheet.name || "").replace(/\s+/g, " ").trim() : "";
-  if (!name) return;
-  if (name.length > 40) { api.toast("Use a shorter name."); return; }
-  var folders = api.get("notes").folders || [];
-  var existing = folders.filter(function (f) { return f.name.toLowerCase() === name.toLowerCase(); })[0];
-  if (existing) { api.set({ folderSheet: null, folder: existing.id, filter: null }); return; }
-  var created = api.notesFolders ? await api.notesFolders.create(name) : { id: "f-" + Date.now(), name: name, createdAt: Date.now() };
-  if (!created) return;
-  var patch = { folderSheet: null, folder: created.id, filter: null };
-  if (!api.notesFolders) patch.folders = folders.concat([created]);
-  api.set(patch);
-}
-/** Renaming keeps the folder's id, so every note stays in it. A name another folder uses is refused. */
-async function notesRenameFolder(api, id) {
-  var st = api.get("notes"), sheet = st.folderSheet, name = sheet && sheet.kind === "rename" && sheet.id === id ? String(sheet.name || "").replace(/\s+/g, " ").trim() : "";
-  if (!name) return;
-  if (name.length > 40) { api.toast("Use a shorter name."); return; }
-  var folders = st.folders || [], folder = folders.filter(function (f) { return f.id === id; })[0];
-  if (!folder) { api.set({ folderSheet: null }); return; }
-  if (folder.name === name) { api.set({ folderSheet: null }); return; }
-  if (folders.some(function (f) { return f.id !== id && f.name.toLowerCase() === name.toLowerCase(); })) { api.toast("A folder with that name exists."); return; }
-  if (api.notesFolders) { if (!await api.notesFolders.rename(id, name)) return; }
-  else api.set({ folders: folders.map(function (f) { return f.id === id ? Object.assign({}, f, { name: name }) : f; }) });
-  api.set({ folderSheet: null });
-}
-/** Long-press (or a context-menu click) on a folder chip opens its options. */
-function notesChipHold(api, id) {
-  return {
-    down: function () { clearTimeout(NT.holdT); NT.held = null; NT.holdT = setTimeout(function () { NT.holdT = null; NT.held = id; api.set({ folderSheet: { kind: "options", id: id } }); }, 450); },
-    up: function () { clearTimeout(NT.holdT); NT.holdT = null; },
-    context: function (e) { if (e && e.preventDefault) e.preventDefault(); clearTimeout(NT.holdT); NT.holdT = null; NT.held = id; api.set({ folderSheet: { kind: "options", id: id } }); }
-  };
-}
-/** Deleting a folder moves its notes to no folder; it never deletes a note. */
-async function notesDeleteFolder(api, id) {
-  if (api.notesFolders) { if (!await api.notesFolders.remove(id)) return; }
-  else {
-    var s = api.get("notes");
-    api.set({ folders: (s.folders || []).filter(function (f) { return f.id !== id; }), list: s.list.map(function (n) { if (n.folderId !== id) return n; var x = Object.assign({}, n); delete x.folderId; return x; }) });
-  }
-  var cur = api.get("notes");
-  api.set({ folderSheet: null, folder: cur.folder === id ? null : cur.folder });
-}
 function notesNew(api, kind) {
   var id = "n" + Date.now(), st0 = api.get("notes");
   var inFolder = notesFolderOf({ folderId: st0.folder }, st0.folders);
@@ -3271,24 +3233,11 @@ function notesNew(api, kind) {
   api.set(Object.assign(leave, { list: [n].concat(leave.list || api.get("notes").list), blankCreationId: id, blankCreationTitle: title, compose: false, q: null }));
 }
 function notesLast(list) { for (var i = 0; i < list.length; i++) if (list[i].kind === "voice") return list[i]; return null; }
-function notesShare(api, n, via) {
-  var parts = n.kind === "voice" ? n.summary.concat(n.actions.map(function (a) { return "Next: " + a.t; }))
-    : n.kind === "list" ? n.items.map(function (i) { return (i.done ? "Done: " : "") + i.t; })
-    : n.kind === "link" ? [n.url] : String(n.body || "").split("\n").filter(function (l) { return l.trim(); });
-  var body = parts.map(function (l) { return "· " + l; }).join("\n");
-  var line = (n.title ? n.title + ": " : "") + parts.join("; ");
-  var to = null;
-  if (n.kind === "voice") (n.lines || []).forEach(function (l) { if (!to && l.s !== "me") to = l.s; });
-  api.set({ sheet: null });
-  if (via === "mail" && VIEWS.inbox) return api.open("inbox", { compose: { to: to, subject: n.title || "Note", body: body } });
-  if (via === "msg" && VIEWS.messages) return api.open("messages", { compose: to || true, text: line });
-  api.toast(via === "mail" ? "Email is unavailable. No draft was created." : "Messages is unavailable. No draft was created.");
-}
 
 registerView("notes", {
   title: "Notes", icon: "notes", aliases: ["note", "recorder", "memos"],
   chat: "hidden",
-  state: { list: NOTES_SEED, open: null, blankCreationId: null, folders: [], folder: null, filter: null, menu: null, folderSheet: null, record: false, compose: false, proc: null, sheet: null, pos: 0, playing: false, newItem: "" },
+  state: { list: NOTES_SEED, open: null, blankCreationId: null, folders: [], folder: null, filter: null, menu: null, record: false, compose: false, proc: null, sheet: null, pos: 0, playing: false, newItem: "" },
   persist: ["list"],
   jumps: [[null, "Notes"], ["editor", "Note editor"], ["voice", "Voice note"]],
   preset: function (sub) {
@@ -3303,7 +3252,6 @@ registerView("notes", {
     if (st.sheet) { api.set({ sheet: null }); return true; }
     if (st.menu) { api.set({ menu: null }); return true; }
     if (st.open) { notesClose(api); return true; }
-    if (st.folderSheet) { api.set({ folderSheet: null }); return true; }
     if (st.filter) { api.set({ filter: null }); return true; }
     return false;
   },
@@ -3386,11 +3334,11 @@ registerView("notes", {
       NT.pend = true;
       // The Notes recorder is installed by the voice adapter, which consumes `record` first; only a
       // fixture preview without it gets here.
-      setTimeout(function () { NT.pend = false; var s = api.get("notes"); if (s.record) { api.set({ record: false }); api.toast("Recording isn’t available in this preview."); } else if (s.compose) notesNew(api, "text"); }, 0);
+      setTimeout(function () { NT.pend = false; var s = api.get("notes"); if (s.record) { api.set({ record: false }); if (testMocksEnabled) api.toast("Recording isn’t available in this preview."); } else if (s.compose) notesNew(api, "text"); }, 0);
     }
     var list = st.list || [];
-    /* One-column list (PLAN.md section 3, decision N3): the selected folder chip, then the agent's
-       read-only filter, pinned notes first. A note whose folder was deleted shows under All only. */
+    /* One flat list: the agent's read-only filter, pinned notes first. Folders saved earlier stay
+       stored (runtime/notes-folders) and can still narrow that filter; this view has no folder controls. */
     var folders = Array.isArray(st.folders) ? st.folders : [];
     var folder = st.folder && st.folder !== "deleted" && folders.some(function (f) { return f.id === st.folder; }) ? st.folder : null;
     var filter = st.filter && typeof st.filter === "object" ? st.filter : null;
@@ -3407,19 +3355,6 @@ registerView("notes", {
       };
     });
     var pinnedRows = rows.filter(function (r) { return r.pinned; }), otherRows = rows.filter(function (r) { return !r.pinned; });
-    var folderChips = folders.map(function (f) {
-      var on = folder === f.id, hold = notesChipHold(api, f.id);
-      return { id: f.id, name: f.name, pressed: on ? "true" : "false", label: on ? f.name + ", folder options" : f.name,
-        down: hold.down, up: hold.up, context: hold.context,
-        select: function () {
-          // The click that ends a long-press only opened the options.
-          if (NT.held === f.id) { NT.held = null; return; }
-          if (api.get("notes").folder === f.id) api.set({ folderSheet: { kind: "options", id: f.id } }); else api.set({ folder: f.id, filter: null, folderSheet: null });
-        } };
-    });
-    var sheet = st.folderSheet && typeof st.folderSheet === "object" ? st.folderSheet : null;
-    var sheetFolder = sheet && (sheet.kind === "options" || sheet.kind === "rename") ? folders.filter(function (f) { return f.id === sheet.id; })[0] || null : null;
-    var renaming = !!sheetFolder && sheet.kind === "rename";
 
     /* open note */
     var n = st.open ? notesFind(list, st.open) : null;
@@ -3431,15 +3366,10 @@ registerView("notes", {
       pin: async function () { api.set({ menu: null }); await notesUpd(api, n.id, { pinned: !n.pinned }); },
       share: function () { api.set({ sheet: "share", menu: null }); },
       del: function () { api.set({ menu: null }); notesDelete(api, n.id); },
-      /* ⋯ menu: Pin, Move to…, Delete (PLAN.md section 3). */
-      menuOpen: st.menu === "main", moveOpen: st.menu === "move", menuShown: !!st.menu,
+      /* ⋯ menu: Share, Pin, Delete. */
+      menuOpen: st.menu === "main", menuShown: !!st.menu,
       more: function () { api.set({ menu: api.get("notes").menu ? null : "main" }); },
       closeMenu: function () { api.set({ menu: null }); },
-      moveTo: function () { api.set({ menu: "move" }); },
-      moveRows: [{ id: null, name: "No folder" }].concat(folders).map(function (f) {
-        var on = (notesFolderOf(n, folders) || null) === f.id;
-        return { name: f.name, checked: on ? "true" : "false", mark: on ? "✓" : "", pick: function () { notesMove(api, n.id, f.id, f.name); } };
-      }),
       title: n.title || "",
       onTitle: function (e) { notesUpd(api, n.id, { title: e.target.value }); }
     } : null;
@@ -3531,28 +3461,11 @@ registerView("notes", {
       record: function () { api.set({ record: true }); },
       pinnedRows: pinnedRows, otherRows: otherRows, hasPinned: pinnedRows.length > 0, notesHead: pinnedRows.length > 0 && otherRows.length > 0,
       none: rows.length === 0, emptyTitle: filter ? "No matches" : "No notes", emptyMessage: "",
-      allPressed: folder ? "false" : "true", selectAll: function () { api.set({ folder: null, filter: null, folderSheet: null }); },
-      folderChips: folderChips,
-      newFolder: function () { api.set({ folderSheet: { kind: "new", name: "" } }); },
       filterOn: !!filter, filterLabel: filter ? notesFilterLabel(filter, folders) + " · " + shown.length : "",
       clearFilter: function () { api.set({ filter: null }); },
-      folderSheetOpen: !!sheet && (sheet.kind === "new" || !!sheetFolder),
-      folderNew: !!sheet && sheet.kind === "new" || renaming, folderOptions: !!sheetFolder && !renaming,
-      folderName: sheet && (sheet.kind === "new" || renaming) ? String(sheet.name || "") : "", folderOptionsTitle: sheetFolder ? sheetFolder.name : "",
-      folderSheetTitle: sheet && sheet.kind === "new" ? "New folder" : renaming ? "Rename folder" : sheetFolder ? sheetFolder.name : "",
-      folderSubmitLabel: renaming ? "Save" : "Create",
-      onFolderName: function (e) { var cur = api.get("notes").folderSheet; if (cur && (cur.kind === "new" || cur.kind === "rename")) api.set({ folderSheet: Object.assign({}, cur, { name: e.target.value }) }); },
-      folderNameKey: function (e) { if (e.key === "Enter") { e.preventDefault(); var cur = api.get("notes").folderSheet; if (cur && cur.kind === "rename") notesRenameFolder(api, cur.id); else notesCreateFolder(api); } },
-      createFolder: function () { var cur = api.get("notes").folderSheet; if (cur && cur.kind === "rename") notesRenameFolder(api, cur.id); else notesCreateFolder(api); },
-      folderSaveDisabled: !(sheet && (sheet.kind === "new" || renaming) && String(sheet.name || "").trim()),
-      renameFolder: function () { if (sheetFolder) api.set({ folderSheet: { kind: "rename", id: sheetFolder.id, name: sheetFolder.name } }); },
-      deleteFolder: function () { if (sheetFolder) notesDeleteFolder(api, sheetFolder.id); },
-      closeFolderSheet: function () { api.set({ folderSheet: null }); },
       isEdit: isEdit, ed: ed, isVoice: !!vo, vo: vo, isLink: !!lk, lk: lk,
       shareSheet: shareSheet,
-      closeSheet: function () { api.set({ sheet: null }); },
-      shareMsg: function () { notesShare(api, n, "msg"); },
-      shareMail: function () { notesShare(api, n, "mail"); }
+      closeSheet: function () { api.set({ sheet: null }); }
     };
   }
 });
@@ -5183,7 +5096,7 @@ registerView("settings", {
       }) }] });
       } else p1 = page("Connections", { groups: [] });
     } else if (P === "privacy") {
-      var logN = ST_LOG.length + (api.get("browser").booked && BR_LINKS.venue ? 1 : 0);
+      var logN = ST_LOG.length + (testMocksEnabled && api.get("browser").booked && BR_LINKS.venue ? 1 : 0);
       p1 = page("Privacy & data", {
         hero: { kBig: true, hasIcon: true, d: IC.shield, iconCss: "background:var(--acc);color:var(--alpha-white)", big: "Redaction on", sub: "Identifiers replaced before hosted requests" },
         groups: [
@@ -5373,7 +5286,7 @@ registerView("settings", {
         return stTog({ d: IC[ap[2]] || IC.grid, label: ap[1], aria: ap[1] + " " + pm[1].toLowerCase() }, on, function () { var ps = Object.assign({}, api.get("settings").perms); var one = Object.assign({}, ps[pm[0]]); one[ap[0]] = !on; ps[pm[0]] = one; set({ perms: ps }); });
       }) }] });
     } else if (P === "privacy" && st.log) {
-      var lg = ST_LOG.slice(); if (api.get("browser").booked && BR_LINKS.venue) lg.unshift(["now", "Booked " + BR_LINKS.venue + " for you (confirmed)", "globe"]);
+      var lg = ST_LOG.slice(); if (testMocksEnabled && api.get("browser").booked && BR_LINKS.venue) lg.unshift(["now", "Booked " + BR_LINKS.venue + " for you (confirmed)", "globe"]);
       p2 = page("Activity", { back: function () { set({ log: false }); }, groups: [
         { rows: lg.map(function (l) { return stNav({ d: IC[l[2]] || IC.check, label: l[1], val: l[0], noChev: true, go: function () {} }); }) }
       ] });
@@ -5610,7 +5523,7 @@ class Component extends DCLogic {
     // a provider or deletion deadline. Consecutive passive notices share the next slot.
     if (this.toastActive && this.undoFn) {
       var queue = this.toastQueue || (this.toastQueue = []), last = queue[queue.length - 1];
-      var next = { msg: msg, undo: opts.undo || null };
+      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind };
       if (last && !last.undo && !next.undo) queue[queue.length - 1] = next;
       else queue.push(next);
       return;
@@ -5624,8 +5537,10 @@ class Component extends DCLogic {
     if (!inside) this.toastOrigin = active;
     this.toastHeld = inside; this.toastActive = true;
     this.toastSequence = (this.toastSequence || 0) + 1;
-    this.toastDuration = Math.max(opts.undo ? 5000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * accessibilityTimeoutScale();
+    // Undo stays as long as the reviewed-deletion notice (10 s) so the two restore offers match.
+    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * accessibilityTimeoutScale();
     this.undoFn = opts.undo || null;
+    this.toastKind = opts.kind === "error" ? "error" : "";
     this.setState({ toast: msg, toastUndo: !!opts.undo }); this.scheduleToast();
   }
   scheduleToast() {
@@ -5640,7 +5555,7 @@ class Component extends DCLogic {
     var heldFocus = !!doc?.activeElement?.closest?.("[data-alpha-toast]");
     this.toastActive = false; this.toastHeld = false; this.toastSequence = (this.toastSequence || 0) + 1;
     var closingSequence = this.toastSequence;
-    this.undoFn = null; this.clear("t");
+    this.undoFn = null; this.toastKind = ""; this.clear("t");
     this.setState({ toast: "", toastUndo: false }, function () {
       // Another offer can arrive before React commits this close (including a failed Undo retry).
       // It owns its focus and timer; its later close will drain the retained queue.
@@ -5648,7 +5563,7 @@ class Component extends DCLogic {
       if (heldFocus && doc?.activeElement === doc.body && origin?.isConnected && !origin.closest("[inert],[hidden]")) origin.focus({ preventScroll: true });
       var next = self.toastQueue?.shift();
       if (next) {
-        self.showToast(next.msg, { undo: next.undo });
+        self.showToast(next.msg, { undo: next.undo, kind: next.kind });
         if (heldFocus) { self.toastHeld = false; self.scheduleToast(); }
       }
     });
@@ -6112,7 +6027,7 @@ class Component extends DCLogic {
     if (S.q.mic === false) return this.toast("Listening is off in quick settings");
     // The typed-out phrase and spoken answer are a scripted demo (VOICE); without
     // it there is no simulated listening. Live voice adapters replace this method.
-    if (!VOICE) return this.toast("Voice input is not connected");
+    if (!VOICE) { if (testMocksEnabled) this.toast("Voice input is not connected"); return; }
     this.clear("v"); clearInterval(this.vI);
     var locked = S.screen === "off" || S.screen === "lock";
     var m = S.view ? this.mod(S.view) : null;
@@ -6363,6 +6278,8 @@ class Component extends DCLogic {
       showStatus: !P.nativeSystemChrome && S.screen !== "boot" && S.screen !== "off" && !imm.noStatus, micLive: S.voice === "listening",
       showIndicator: !P.nativeSystemChrome && (isOn || S.screen === "lock") && !(isOn && !S.view && !S.drawer && !S.shade && S.chat !== "sheet" && S.chat !== "full"),
       toast: S.toast, toastOn: !!S.toast, toastUndo: !!S.toastUndo, toastPadR: S.toastUndo ? 5 : 18,
+      // A failure interrupts the screen reader (assertive); routine notices stay polite.
+      toastLive: S.toast && self.toastKind === "error" ? "assertive" : "polite",
       toastFocus: function () { self.holdToast(); },
       toastBlur: function (event) { if (!event.currentTarget.contains(event.relatedTarget)) self.resumeToast(); },
       toastRole: S.toastUndo ? undefined : "button", toastTabIndex: S.toastUndo ? undefined : 0,
@@ -6393,7 +6310,7 @@ class Component extends DCLogic {
       barAlphaControls: barTarget === "alpha", barPersonSend: barTarget === "person" && barFilled,
       barSendDisabled: barTarget === "person" && !closed.canSubmit, barSubmit: function () { if (closed && closed.submit) closed.submit(); },
       barDictate: barDictate, barDictateLabel: barTarget === "person" ? "Dictate a text to " + (spec.target.first || spec.target.name || "them") : "Dictate a search or question",
-      barMic: function () { if (typeof self.startTranscription === "function") self.startTranscription({ commsTarget: barTarget }); else self.toast("Voice input is not connected"); },
+      barMic: function () { if (typeof self.startTranscription === "function") self.startTranscription({ commsTarget: barTarget }); else if (testMocksEnabled) self.toast("Voice input is not connected"); },
       barLeft: left ? { label: left.label, initials: left.initials || "", avatar: left.icon === "avatar", glyph: left.icon === "avatar" ? null : LEFT_ICONS[left.icon] || IC.back,
         // The left slot swaps the target: the chat closes onto the bar, then the view's own step runs.
         tap: function () { var run = left.run; self.setState({ chat: "input", stageFrom: [] }, function () { if (run) run(); }); } } : null,

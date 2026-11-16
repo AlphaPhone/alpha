@@ -3,7 +3,7 @@ import test from 'node:test';
 import {verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
 import {checkNativeDigestConsent} from '../specs/quint/refinement/native/native-digest.mjs';
 
-test('native digest consent and readback refine the exact selected-source host', async () => {
+test('partial source contract: native digest consent and readback refine the exact selected-source host', async () => {
   const {receipt}=await checkNativeDigestConsent();
   assert.equal(receipt.passed,true);
   assert.equal(receipt.traces,18);

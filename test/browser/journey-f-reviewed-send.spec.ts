@@ -23,6 +23,7 @@ import {localDraftRow} from './inbox-draft-navigation';
 //        unknown send (no automatic retry, no second confirmation, no second operation).
 import {createHash} from 'node:crypto';
 import {test, expect, type Page} from '@playwright/test';
+import {preloadPageModules} from './helpers/page-modules';
 
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
 async function messageAction(page:Page,name:string){
@@ -34,6 +35,13 @@ type Options = {inbox?: string[]; pageSize?: number; strictCursors?: boolean; fo
 
 /** Synthetic managed provider. Re-installed after every load; its state lives in localStorage. */
 async function installProvider(page: Page, options: Options = {}) {
+  await preloadPageModules(page, ['/src/runtime/connection-ui.tsx']);
+  // A late startup notification would see the installed fixture as a new mailbox session.
+  await page.waitForFunction(() => {
+    const {connectionController} = (window as any).__alphaModules['/src/runtime/connection-ui.tsx'];
+    const state = connectionController.getSnapshot();
+    return state.startupResolved && !state.busy;
+  });
   await page.evaluate(async ([KEY, options]) => {
     const {connectionController: c} = await import('/src/runtime/connection-ui.tsx');
     const {inboxLocalStore: s} = await import('/src/runtime/inbox-local-store.ts');

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { upstreamNativeSource, sha as hash } from './upstream-native-source.ts';
+import { upstreamNativeSource } from './upstream-native-source.ts';
+import { sha256 as hash } from './sha256.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +50,8 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/contracts/src/browser-request-grounding.ts',
   // Generated IANA TLD data imported by browser-request-grounding; this leaf has no imports.
   'packages/contracts/src/iana-tlds.ts',
+  // Import-free leaf of browser-request-grounding.
+  'packages/contracts/src/strip-trailing-punctuation.ts',
   'packages/contracts/src/stated-clock-time.ts',
   'packages/contracts/src/phone-dial.ts',
   'packages/contracts/src/device-action-execution.ts',
@@ -95,6 +98,7 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-notes/src/workspace.ts',
 
   'packages/ui/src/api/transport.ts',
+  'packages/core/src/chat-upload-limits.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
   'plugins/plugin-native-system/src/client/shade.ts',
   'plugins/plugin-native-system/src/sense.ts',
@@ -321,14 +325,8 @@ export const CLIENT_FEATURE_PATCHES = [];
 /** Copy authenticated upstream source outside the immutable vendor checkout. With check, only
  * confirm the prepared copy is current and throw instead of rebuilding it. */
 export function prepareClientFeatures({ root = projectRoot, projectVoice = true, check = false }: PrepareOptions = {}) {
-  for (const prefix of ['app-update-resume-client', 'managed-google-body-limit-client']) {
-    for (const suffix of ['.patch', '-manifest.json']) {
-      const retired = path.join(root, 'patches/eliza', prefix + suffix);
-      if (regularPath(retired)) throw Error('Retired client patch slot: ' + prefix);
-    }
-  }
   const upstream = upstreamNativeSource(root);
-  const source = new Map(CLIENT_FEATURE_PATHS.flatMap(prefix => [...upstream.read(prefix)]));
+  const source = new Map(upstream.readAll(CLIENT_FEATURE_PATHS).flatMap(files => [...files]));
   const sourceFiles = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   if(projectVoice){
   // Upstream publishes every renderer type as a leaf entry (@elizaos/core/schema-types,
@@ -433,7 +431,7 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     } catch (error) { if (errorCode(error) === 'ENOENT') return false; throw error; }
   };
   if (current()) return destination;
-  if (check) throw Error('Client feature source is missing or stale: run npm run upstream:prepare-client');
+  if (check) throw Error('Client feature source is missing or stale: run bun run upstream:prepare-client');
   fs.mkdirSync(parent, { recursive: true });
   const temporary = fs.mkdtempSync(path.join(parent, 'client-features-stage-'));
   try {

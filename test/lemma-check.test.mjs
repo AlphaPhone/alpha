@@ -5,15 +5,19 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {realNode} from '../scripts/run-node-only-tests.ts';
 
 const script = fileURLToPath(new URL('../scripts/check-lemma.ts', import.meta.url));
 const SOURCE = 'apps/app/src/sample.ts';
+const node = realNode();
+assert.ok(node, 'LemmaScript fixtures require genuine Node.js 24+');
 
 // Stand-in for lsc: no TypeScript project, no Dafny. It records each command, "generates" a
 // model that depends only on the source text, and reports a verifier summary for `check`.
 const STUB_LSC = `
 import fs from 'node:fs';
 import path from 'node:path';
+if (process.versions.bun) throw Error('LemmaScript must run on genuine Node.js');
 const [command, ...rest] = process.argv.slice(2);
 fs.appendFileSync(process.env.STUB_LOG, command + '\\n');
 if (command === 'version') { console.log('0.0.0-stub'); process.exit(0); }
@@ -41,9 +45,12 @@ function fixture(t, source = 'export function sample(x: number): number {\n  //@
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const write = (file, text, mode) => { fs.mkdirSync(path.dirname(path.join(root, file)), {recursive: true}); fs.writeFileSync(path.join(root, file), text, mode ? {mode} : undefined); };
   write('lemmascript.json', '{"proof-dir":"specs/lemma"}\n');
-  write('package-lock.json', '{}');
+  write('bun.lock', '{}');
   write('scripts/check-lemma.ts', fs.readFileSync(script));
   write('scripts/quint-lib.ts', fs.readFileSync(new URL('../scripts/quint-lib.ts', import.meta.url)));
+  for (const name of ['sha256.ts', 'upstream-pin.ts']) write('scripts/' + name, fs.readFileSync(new URL('../scripts/' + name, import.meta.url)));
+  write('scripts/run-node-only-tests.ts', fs.readFileSync(new URL('../scripts/run-node-only-tests.ts', import.meta.url)));
+  write('specs/quint/refinement/timeouts.mjs', fs.readFileSync(new URL('../specs/quint/refinement/timeouts.mjs', import.meta.url)));
   write('node_modules/lemmascript/package.json', '{"version":"0.6.6","type":"module"}');
   write('LemmaScript-files.txt', `# targets\n${SOURCE}\n`);
   write(SOURCE, source);
@@ -51,15 +58,16 @@ function fixture(t, source = 'export function sample(x: number): number {\n  //@
   write('specs/lemma/apps/app/src/sample.dfy.gen', generated);
   write('specs/lemma/apps/app/src/sample.dfy', `${generated}// proof additions\n`);
   write('node_modules/lemmascript/tools/dist/lsc.js', STUB_LSC);
-  write('empty-path/.keep', '');
+  fs.mkdirSync(path.join(root, 'node-path'));
+  fs.symlinkSync(node, path.join(root, 'node-path/node'));
   const log = path.join(root, 'lsc.log');
   fs.writeFileSync(log, '');
   /** A fake `dafny` that only answers --version. */
   const dafny = version => { write(`dafny-${version}/dafny`, `#!/bin/sh\necho "${version}"\n`, 0o755); return path.join(root, `dafny-${version}/dafny`); };
   const run = (env = {}, ...args) => {
-    // PATH holds nothing, so no real dafny on this machine can be picked up.
+    // PATH holds only Node (and the fake dafny), so no real dafny on this machine can be picked up.
     const result = spawnSync(process.execPath, [path.join(root, 'scripts/check-lemma.ts'), ...args], {cwd: root, encoding: 'utf8', env: {
-      PATH: env.DAFNY ? path.dirname(env.DAFNY) : path.join(root, 'empty-path'), STUB_LOG: log, ...env,
+      PATH: [...(env.DAFNY ? [path.dirname(env.DAFNY)] : []), path.join(root, 'node-path')].join(path.delimiter), STUB_LOG: log, ...env,
     }});
     const receiptFile = path.join(root, 'test-results/lemma/check.json');
     return {...result, receipt: fs.existsSync(receiptFile) ? JSON.parse(fs.readFileSync(receiptFile, 'utf8')) : null, commands: fs.readFileSync(log, 'utf8').split('\n').filter(Boolean)};
@@ -178,10 +186,12 @@ test('every source owns a generation check, verifier result, and manifest option
   let result = run({DAFNY: backend});
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.receipt.verifiedConditions, 4);
-  assert.deepEqual(commands(result, 'gen-check'), [['--backend=dafny', SOURCE], ['--backend=dafny', other]]);
+  const config = `--config=${path.join(root, 'lemmascript.json')}`;
+  assert.deepEqual(commands(result, 'extract'), [[config, SOURCE], [config, other]]);
+  assert.deepEqual(commands(result, 'gen-check'), [['--backend=dafny', config, SOURCE], ['--backend=dafny', config, other]]);
   assert.deepEqual(commands(result, 'check'), [
-    ['--backend=dafny', '--time-limit=30', SOURCE],
-    ['--backend=dafny', '--extra-flags=--verification-time-limit 20', other],
+    ['--backend=dafny', config, '--time-limit=30', SOURCE],
+    ['--backend=dafny', config, '--extra-flags=--verification-time-limit 20', other],
   ]);
 
   result = run({DAFNY: backend, STUB_EMPTY_PROOF: other});

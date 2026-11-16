@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import {sourceDirectory} from './local-agent-source.ts';
 import {prepareClientFeatures} from './prepare-client-features.ts';
 import {developmentSpeechEnvironment} from './dev-speech-settings.ts';
@@ -8,7 +8,7 @@ import {resolve,join} from 'node:path';
 import {homedir} from 'node:os';
 import {readFileSync,existsSync} from 'node:fs';
 import {createServer} from 'node:net';
-// This launcher invokes Vite directly, so it prepares the client features itself (npm run dev has no predev hook).
+// This launcher invokes Vite directly, so it prepares the client features itself.
 prepareClientFeatures();
 const profile=resolve(process.env.ALPHA_REMOTE_PROFILE||join(homedir(),'.local/share/alphaphone/browser-agent'));
 const configuredEnvironment=developmentSpeechEnvironment(profile);
@@ -28,22 +28,52 @@ const portAt=viteArgs.findIndex(arg=>arg==='--port'||arg.startsWith('--port='));
 const vitePort=portAt<0?5317:Number(viteArgs[portAt].includes('=')?viteArgs[portAt].split('=')[1]:viteArgs[portAt+1]);
 if(!Number.isInteger(vitePort)||vitePort<1024||vitePort>65535)throw Error('Invalid preview port');
 const env: NodeJS.ProcessEnv = {...configuredEnvironment,ALPHA_REMOTE_PROFILE:profile,ALPHA_REMOTE_PORT:String(port),ALPHA_ELIZA_SOURCE:source,ALPHA_BROWSER_GMAIL_READ_BROKER:`http://127.0.0.1:${vitePort}/__alpha-owner-gmail`};
-const children=new Set<ChildProcess>();let stopping=false;
-function stop(signal: NodeJS.Signals = 'SIGTERM'){if(stopping)return;stopping=true;for(const child of children)child.kill(signal);}
-function run(command: string,args: string[],childEnv: NodeJS.ProcessEnv){const child=spawn(command,args,{stdio:'inherit',env:childEnv});children.add(child);child.on('error',error=>{console.error(error.message);process.exitCode=1;stop();});child.on('exit',code=>{children.delete(child);if(!stopping){process.exitCode=code||0;stop();}});return child;}
-process.on('SIGINT',()=>stop('SIGINT'));process.on('SIGTERM',()=>stop());
-run(process.execPath,['scripts/start-local-remote.ts'],env);
-// Development server: explicitly opts into test mocks and developer surfaces. Its connection
-// sheet is the product one ("Alpha connection": connected, connecting or couldn't connect, Try
-// again, conversation history) and startup attaches to the agent in the background, so loading
-// the page while the agent restarts does not open the sheet. ALPHA_DEV_CONNECTION_TOOLS=1 restores
+const children = new Set<ChildProcess>();
+let stopping = false;
+let agentRetry: ReturnType<typeof setTimeout> | undefined;
+let retryDelay = 1000;
+function stop(signal: NodeJS.Signals = 'SIGTERM') {
+  if (stopping) return;
+  stopping = true;
+  clearTimeout(agentRetry);
+  for (const child of children) child.kill(signal);
+}
+function run(args: string[], childEnv: NodeJS.ProcessEnv, onExit: (code: number | null) => void) {
+  const child = spawn(process.execPath, args, {stdio: 'inherit', env: childEnv});
+  children.add(child);
+  child.on('error', error => console.error(error.message));
+  child.once('close', code => {
+    children.delete(child);
+    if (!stopping) onExit(code);
+  });
+}
+function startAgent() {
+  const startedAt = performance.now();
+  run(['scripts/start-local-remote.ts'], env, () => {
+    if (performance.now() - startedAt >= 60_000) retryDelay = 1000;
+    console.error(`Local agent exited. Restarting in ${retryDelay / 1000}s.`);
+    agentRetry = setTimeout(startAgent, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 30_000);
+  });
+}
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop());
+startAgent();
+// Development server: explicitly opts into test mocks and developer surfaces. The renderer
+// attaches to the agent in the background, so loading the page while the agent
+// restarts does not open a connection sheet. ALPHA_DEV_CONNECTION_TOOLS=1 restores
 // the development connection sheet: ?mode=dev profiles, mock mode, subscription gate QA,
-// development Cloud and pairing. build-flags.ts admits the flag on the development server only.
+// development Cloud and pairing. Vite always receives it as '1' or '0'; vite.config.ts turns the
+// renderer's preview flag on only for '0', so launchers that leave it unset keep the development
+// sheet, and build-flags.ts admits the flag on the development server only.
 const developmentConnectionTools=env.ALPHA_DEV_CONNECTION_TOOLS==='1';
-// Extra arguments (for example `npm run dev -- --port 5400`) go to Vite; the default port is 5317.
+// Extra arguments (for example `bun run dev -- --port 5400`) go to Vite; the default port is 5317.
 const portArgs=viteArgs.some(arg=>arg==='--port'||arg.startsWith('--port='))?[]:['--port','5317'];
 console.log(`Starting the local agent on 127.0.0.1:${port} (profile ${profile}) and the development server.`);
 console.log(developmentConnectionTools?'Connection sheet: development tools (ALPHA_DEV_CONNECTION_TOOLS=1).':'Connection sheet: Alpha connection. Set ALPHA_DEV_CONNECTION_TOOLS=1 for development profiles, mock mode and subscription gate QA.');
-run(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1',...portArgs,'--strictPort',...viteArgs],{
-  ...env,ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_LOCAL_AGENT:'1',VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:developmentConnectionTools?'':'1',VITE_ALPHA_DEV_CARTESIA:env.ALPHA_DEV_CARTESIA==='1'?'1':'',ALPHA_LOCAL_AGENT_ORIGIN:`http://127.0.0.1:${port}`,ALPHA_LOCAL_AGENT_TOKEN_FILE:join(profile,'owner-token'),
+run(['node_modules/vite/bin/vite.js','--host','127.0.0.1',...portArgs,'--strictPort',...viteArgs],{
+  ...env,ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_LOCAL_AGENT:'1',ALPHA_DEV_CONNECTION_TOOLS:developmentConnectionTools?'1':'0',VITE_ALPHA_DEV_CARTESIA:env.ALPHA_DEV_CARTESIA==='1'?'1':'',ALPHA_LOCAL_AGENT_ORIGIN:`http://127.0.0.1:${port}`,ALPHA_LOCAL_AGENT_TOKEN_FILE:join(profile,'owner-token'),
+}, code => {
+  process.exitCode = code ?? 1;
+  stop();
 });

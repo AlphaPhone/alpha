@@ -1,11 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Sign Alpha's unsigned release APKs with the application key held outside Gradle
  * through a reviewed signing ceremony.
  *
- *   node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
- *   node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
- *   node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
+ *   bun scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
+ *   bun scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
+ *   bun scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
  *   OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--no-verify] [--dry-run]
  *
  * Gradle signs a release only from a keystore file (ELIZAOS_KEYSTORE_*). Alpha's application key
@@ -14,7 +14,7 @@
  * vendor/eliza/packages/os/scripts/android/decrypt-release-keys.ts, or is held in an HSM or managed
  * key service that exposes PKCS#11 (decision P-16). Build without the ELIZAOS_KEYSTORE_* variables
  * (ELIZAOS_VERSION_CODE and ELIZAOS_VERSION_NAME still set), then run this. By default it signs
- * artifacts/standalone-release-unsigned.apk and artifacts/launcher-release-unsigned.apk into
+ * artifacts/launcher-release-unsigned.apk into
  * <variant>-release.apk, removes the unsigned files (verify-apks admits exactly one release name per
  * variant), and re-runs scripts/verify-apks.ts (with the runtime profile artifacts/build-config.json
  * records) and the SBOM so apk-manifest.json records the signed bytes. `--apk`/`--out` signs one other APK the same way, for example the preprocessed Sense
@@ -34,7 +34,7 @@
  * Its unsigned input, public lineage, SDK verifier and signed output are checked independently.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import {sha256File} from "./sha256.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 export const DEFAULT_KEY_NAME = "alphaphone_app";
 export const PIN_ENV = "ELIZAOS_PKCS11_PIN";
 export const KEYSTORE_PASSWORD_ENV = "ALPHA_APP_RELEASE_KEYSTORE_PASSWORD";
-export const VARIANTS = Object.freeze(["standalone", "launcher"]);
+export const VARIANTS = Object.freeze(["launcher"]);
 /**
  * JDK 9+ keeps sun.security.pkcs11 unexported, so apksigner cannot construct SunPKCS11 from
  * --provider-class without this export. apksigner's launcher script forwards "-J<x>" to java as
@@ -51,7 +51,8 @@ export const VARIANTS = Object.freeze(["standalone", "launcher"]);
 export const PKCS11_JVM_OPTION = "-J-add-exports=jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED";
 const HEX = /^[a-f0-9]{64}$/;
 const PLAIN = /^[A-Za-z0-9._/@:+=-]+$/;
-const PRESERVING_PILOT_PACKAGE = ["ai", "alphacompute", "alphaphone"].join(".");
+// The reviewed retained pilot rotation preserves the identity of already-installed Cloud APKs.
+const PRESERVING_PILOT_PACKAGE = "ai.alphacompute.alphaphone";
 type SigningKey =
   | {mode: "key-files"; keysDir: string; keyName?: string}
   | {mode: "pkcs11"; pkcs11Config: string; keyLabel: string}
@@ -88,9 +89,9 @@ interface SigningOptions {
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const USAGE = [
-  "Usage: node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]",
-  "       node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]",
-  "       node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]",
+  "Usage: bun scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]",
+  "       bun scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]",
+  "       bun scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]",
   "OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--rotation-lineage FILE] [--no-verify] [--dry-run]",
 ].join("\n");
 
@@ -132,6 +133,7 @@ export function signArguments(options: SigningKey & {pin?: boolean; input: strin
   const {mode, pin = false, input, output, rotationLineage} = options;
   const rotation = rotationLineage ? [
     "--lineage", rotationLineage, "--rotation-min-sdk-version", "28", "--min-sdk-version", "29",
+    "--alignment-preserved", "true",
     "--v1-signing-enabled", "false", "--v2-signing-enabled", "false", "--v3-signing-enabled", "true",
   ] : [];
   const tail = [...rotation, "--v4-signing-enabled", "false", "--out", output, input];
@@ -153,7 +155,7 @@ export function toolMessage({ stderr, stdout, error }: {stderr?: string; stdout?
   return lines.slice(-3).join(" ") || "no output";
 }
 
-/** The APKs to sign: the two unsigned releases in the artifacts directory, or one explicit pair. */
+/** The APKs to sign: the unsigned launcher release in the artifacts directory, or one explicit pair. */
 export function signingTargets({ artifacts = "artifacts", apk, out }: {artifacts?: string; apk?: string; out?: string}): SigningTarget[] {
   if (apk || out) {
     if (!apk || !out) throw new Error("--apk and --out go together");
@@ -164,7 +166,7 @@ export function signingTargets({ artifacts = "artifacts", apk, out }: {artifacts
   return VARIANTS.map(variant => {
     const input = path.join(artifacts, `${variant}-release-unsigned.apk`), output = path.join(artifacts, `${variant}-release.apk`);
     if (fs.existsSync(output)) throw new Error(`${output} already exists: that release is already signed (Gradle signing or an earlier run)`);
-    if (!fs.existsSync(input)) throw new Error(`${input} is missing; build the releases without ELIZAOS_KEYSTORE_* first (npm run android:build:local)`);
+    if (!fs.existsSync(input)) throw new Error(`${input} is missing; build the release without ELIZAOS_KEYSTORE_* first (bun run android:build:local -- --release)`);
     return { input, output, removeInput: true };
   });
 }
@@ -207,13 +209,7 @@ function parseArgs(argv: readonly string[]) {
 
 const verifier = fileURLToPath(new URL("./owner/VerifyApkRotation.java", import.meta.url));
 
-async function fileDigest(file: string) {
-  const hash = createHash("sha256");
-  for await (const bytes of fs.createReadStream(file)) hash.update(bytes);
-  return hash.digest("hex");
-}
-
-export async function approvedSigningRotation(signerRecord: SignerRecord, lineage: string, targets: readonly {input: string}[]) {
+export async function approvedSigningRotation(signerRecord: SignerRecord, lineage: string, targets: readonly {input: string}[], { allowSubset = false } = {}) {
   const record = signerRecord.apkSigningRotation;
   const unsigned = record?.unsignedApkSHA256;
   const lastReleaseVersion = signerRecord.lastRelease?.versionCode ?? 0;
@@ -224,7 +220,7 @@ export async function approvedSigningRotation(signerRecord: SignerRecord, lineag
       !Number.isSafeInteger(record.versionCode) ||
       !Number.isSafeInteger(record.fromVersionCode) || record.fromVersionCode < 1 ||
       record.versionCode <= Math.max(record.fromVersionCode, lastReleaseVersion) ||
-      !unsigned || Object.keys(unsigned).sort().join() !== "launcher,standalone" ||
+      !unsigned || !["launcher", "launcher,standalone"].includes(Object.keys(unsigned).sort().join()) ||
       [record.previousSignerSha256, record.lineageSha256, record.apksignerSha256, record.verifierJarSha256, ...Object.values(unsigned)]
         .some(value => typeof value !== "string" || !HEX.test(value)) ||
       record.previousSignerSha256 === signerRecord.signerSha256) {
@@ -232,11 +228,13 @@ export async function approvedSigningRotation(signerRecord: SignerRecord, lineag
   }
   const file = fs.lstatSync(lineage, { throwIfNoEntry: false });
   if (!file?.isFile() || file.size < 1 || file.size > 65536 ||
-      await fileDigest(lineage) !== record.lineageSha256)
+      sha256File(lineage) !== record.lineageSha256)
     throw new Error("Public rotation lineage differs from the reviewed digest");
   const allowed = new Set(Object.values(unsigned));
+  if (!targets.length || targets.length > Object.keys(unsigned).length || (!allowSubset && targets.length !== Object.keys(unsigned).length))
+    throw new Error("Unsigned APK is outside the reviewed rotation scope");
   for (const target of targets) {
-    if (!fs.lstatSync(target.input).isFile() || !allowed.delete(await fileDigest(target.input)))
+    if (!fs.lstatSync(target.input).isFile() || !allowed.delete(sha256File(target.input)))
       throw new Error("Unsigned APK is outside the reviewed rotation scope");
   }
   return record;
@@ -244,8 +242,8 @@ export async function approvedSigningRotation(signerRecord: SignerRecord, lineag
 
 async function reviewedRotationTool(apksigner: string, rotation: SigningRotation, toolEnv: NodeJS.ProcessEnv) {
   const jar = path.join(path.dirname(apksigner), "lib", "apksigner.jar");
-  if (!toolEnv.JAVA_HOME || await fileDigest(apksigner) !== rotation.apksignerSha256 ||
-      await fileDigest(jar) !== rotation.verifierJarSha256)
+  if (!toolEnv.JAVA_HOME || sha256File(apksigner) !== rotation.apksignerSha256 ||
+      sha256File(jar) !== rotation.verifierJarSha256)
     throw new Error("APK rotation signer or verifier differs from the reviewed tool");
   return {jar, javaHome: toolEnv.JAVA_HOME};
 }
@@ -253,7 +251,7 @@ async function reviewedRotationTool(apksigner: string, rotation: SigningRotation
 async function verifySignedRotation(file: string, lineage: string, rotation: SigningRotation, signer: string,
   {jar, javaHome}: Awaited<ReturnType<typeof reviewedRotationTool>>, toolEnv: NodeJS.ProcessEnv) {
   const result = JSON.parse(execFileSync(path.join(javaHome, "bin", "java"), [
-    "-cp", jar, verifier, "--signed-output", file, lineage, await fileDigest(file),
+    "-cp", jar, verifier, "--signed-output", file, lineage, sha256File(file),
     rotation.lineageSha256, rotation.previousSignerSha256, signer, PRESERVING_PILOT_PACKAGE, "29", "37",
     ...(rotation.preserveSignaturePermissions ? ["--preserve-signature-permissions"] : []),
   ], { env: { PATH: toolEnv.PATH, JAVA_HOME: toolEnv.JAVA_HOME }, encoding: "utf8", timeout: 120_000 }));
@@ -302,7 +300,7 @@ export async function main(argv: readonly string[], { root = process.cwd(), env 
     try {
       const committed = execFileSync("git", ["--no-replace-objects", "show", "HEAD:" + descriptorPath], { cwd: root });
       if (!committed.equals(descriptorBytes)) throw new Error("APK signing rotation requires the reviewed committed descriptor");
-      rotation = {lineage: rotationLineage, record: await approvedSigningRotation(signerRecord, rotationLineage, targets)};
+      rotation = {lineage: rotationLineage, record: await approvedSigningRotation(signerRecord, rotationLineage, targets, { allowSubset: Boolean(options.apk) })};
     } catch (problem) { error(message(problem)); return 1; }
   }
   const toolchain = options.apksigner === undefined ? await import("./toolchain.ts") : null;
@@ -350,7 +348,7 @@ export async function main(argv: readonly string[], { root = process.cwd(), env 
     log(`Signed ${path.relative(root, target.output)} with the release certificate ${signer}.`);
   }
   if (!options.verify || options.apk) {
-    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run node scripts/verify-apks.ts before using these APKs.");
+    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run bun scripts/verify-apks.ts before using these APKs.");
     return 0;
   }
   const runner = run ?? ((command, args) => execFileSync(command, args, { cwd: root, stdio: "inherit" }));

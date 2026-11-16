@@ -14,9 +14,36 @@ Read [README.md](README.md), [docs/development.md](docs/development.md) and [AGE
 7. Change existing code rather than adding a new conditional path, unless there is a strong
    reason for the branch; state that reason in the change.
 
+## Android packaging
+
+Alpha has one launcher product/flavor. Every APK packages the resident runtime,
+on-device voice and local embeddings. Run `bun run android:build:local` (debug and
+instrumentation APKs; add `-- --release` for the release APK, as CI does) and
+`bun run android:verify`; retain debug, release and instrumentation evidence
+separately. Browser test mocks do not define another APK lane.
+
 ## Formal models
 
 Run the Quint models and LemmaScript proofs locally before merging a PR:
-`npm run quint:check`, `npm run quint:tests` and `npm run lemma:check`. That is the only point
-at which running them is required. They are not part of `npm run verify` or of PR and push CI; CI runs them only
+`bun run quint:check`, `bun run quint:tests` and `bun run lemma:check`. That is the only point
+at which running them is required. They are not part of `bun run verify` or of PR and push CI; CI runs them only
 when `develop` is promoted to `main`. Proofs need Dafny 4.11.0 on `PATH`.
+
+`quint:check` typechecks, runs the scenarios of and simulates every model registered in
+`specs/quint/*/manifest.json`. `quint:tests` runs `test/quint-*`: owning tests compare product
+behavior with model transitions. New implementation refinement must import or compile the whole
+source file. Do not add new source slices, source-text assertions or JavaScript restatements of
+the model. Existing authenticated member-level tests with unique effect, refusal, ownership or
+recovery coverage remain explicitly scoped partial-source contract regressions. Retain those
+checks until a qualified whole-file test covers their behavior; do not describe them as whole-file
+refinement. Keep owning tests together where their product component is shared and remove duplicate
+aggregate runners. The evidence classes and retained partial-source inventory are documented in
+[specs/quint/README.md](specs/quint/README.md).
+
+## Browser tests
+
+Run `bun run test:browser` and `bun run test:browser:production` locally before finalising a PR,
+and state in the PR description that they were run and are final. PR CI runs only
+`bun run verify` and, when build inputs change, the Android build; the browser tests run in CI
+only when `develop` is promoted to `main`. The CI lanes are listed in
+[docs/development.md](docs/development.md).

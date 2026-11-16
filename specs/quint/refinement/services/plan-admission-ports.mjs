@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {readFileSync,existsSync} from 'node:fs';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import vm from 'node:vm';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -44,7 +44,7 @@ export function planAdmissionFixture(implementation,{credential=1,endDays=2}={})
   setTimeout:(callback,delay)=>{const id=++timerId;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id),
   PLAN_ADMISSION:'fixture-plan',cloudEnvironmentAllowed:value=>value==='production',
   localStorage:{getItem:key=>disk.get(key)??null,setItem:(key,value)=>{const record=JSON.parse(value);writes.push({record:structuredClone(record),at:now,background});disk.set(key,value);},removeItem:key=>{writes.push({record:null,at:now,background});disk.delete(key);}},
-  operation:null,entitlementRefresher:null,redeemedPlanEnd:null,membershipRead:null,appRequests:new Set(),
+  operation:null,homePresentationRevision:0,entitlementRefresher:null,redeemedPlanEnd:null,membershipRead:null,appRequests:new Set(),
   state:{session:{},cloudAccount:null,planEndsAt:null,residentPlanNotice:null,error:''},cloud:client,service:null,active:{kind:'resident'},
   CloudProtocolError,LocalCloudProviderStopUnconfirmed:class extends Error{},
   cloudCredentialStore:{read:async()=>{reads.push(['credential',saved]);return saved===null?null:{credentialId:`credential-${saved}`,credentialReference:`reference-${saved}`};}},
@@ -78,6 +78,9 @@ export function planAdmissionFixture(implementation,{credential=1,endDays=2}={})
   verifiedWrites+=writes.slice(before).filter(write=>write.record).length;
   return admission;
  }
+ async function refresh(){background=true;const refresher=box.entitlementRefresher;assert.ok(refresher);refresher.refreshNow();
+  for(let attempt=0;refresher.controller&&attempt<100;attempt++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(refresher.controller,null);background=false;}
  return {box,writes,reads,timers,observe,record,
   effects:()=>({binds,clears,redeemCalls}),
   signIn(next=credential){saved=next;box.detachService();admission=null;lastKind='none';},
@@ -86,9 +89,10 @@ export function planAdmissionFixture(implementation,{credential=1,endDays=2}={})
   windowPasses(){now+=7*DAY+1;},
   endPasses(){const values=[record()?.endsAt,box.state.planEndsAt,redeemed()?.endsAt].filter(value=>typeof value==='number'&&value>now);assert.ok(values.length);now=Math.max(...values)+1;},
   gates(value){identityGate=value.identity;planGate=value.plan;},
-  async refreshFailed(){mode='billing-outage';background=true;const refresher=box.entitlementRefresher;assert.ok(refresher);refresher.refreshNow();
-   for(let attempt=0;refresher.controller&&attempt<100;attempt++)await new Promise(resolve=>setImmediate(resolve));
-   assert.equal(refresher.controller,null);background=false;},
+  async refreshFailed(){mode='billing-outage';await refresh();},
+  // The background refresher of the admitted plan reads Cloud again and finds it verified.
+  async refreshVerified(kind,end){mode=kind;reported=end;const before=writes.length;await refresh();
+   verifiedWrites+=writes.slice(before).filter(write=>write.record).length;},
   close(){box.stopEntitlementRefresh();assert.equal(timers.size,0);},
  };
 }

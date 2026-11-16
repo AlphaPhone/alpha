@@ -91,6 +91,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       // Cloud's answer to the next code redemption: 'ok' grants Plus; 'invalid' is Cloud's one answer
       // for unknown, expired, disabled and used-up codes (400 invalid_subscription_code).
       redeem: 'ok' as 'ok' | 'invalid', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
+      holdRedeem: false, releaseRedeem: null as null | (() => void),
       maps: { requests: [] as Array<{ route: string; body: any; requestId: string }>, cancelled: [] as string[], hold: false, limit: null as null | string },
     };
     const persist = () => sessionStorage.setItem('resident-stub', JSON.stringify({ order: s.order, cloud: s.cloud, bodies: s.bodies, opened: s.opened, accounts: s.accounts, login: s.login, nextToken: s.nextToken, polls: s.polls, start: s.start, held: s.held }));
@@ -165,7 +166,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       // The harness still registers the device (it answers the committed-enrollment read from that
       // registration); only the capabilities the agent offers in its answer change.
       if (plugin === 'Agent' && method === 'request' && input.path === '/api/client-devices/register' && options.offered) { const registered = await base(plugin, method, input); return { ...registered, body: JSON.stringify({ ...JSON.parse(registered.body), capabilities: options.offered }) }; }
-      if (plugin === 'DailyApps' && method === 'surfaceInfo' && options.clockRepeatDaysVersion !== undefined) { f.calls.push('DailyApps.surfaceInfo'); return { developmentBuild: false, assistant: false, clockRepeatDaysVersion: options.clockRepeatDaysVersion }; }
+      if (plugin === 'DailyApps' && method === 'surfaceInfo' && options.clockRepeatDaysVersion !== undefined) { f.calls.push('DailyApps.surfaceInfo'); return { assistant: false, clockRepeatDaysVersion: options.clockRepeatDaysVersion }; }
       if (plugin === 'Agent' && method === 'request') {
         const answer = await conversations(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : {});
         // Anything else reaches the harness, which records it as unexpected.
@@ -220,6 +221,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           // harness), and carries the organization credit balance (the retired /api/v1/credits/balance is never read).
           if (path === '/api/v1/subscription/redeem' && input.method === 'POST') {
             const body = JSON.parse(input.body); s.redeemed.push({ code: body.code, idempotencyKey: body.idempotencyKey }); s.order.push('redeem ' + owner.email); persist();
+            if (s.holdRedeem) await new Promise<void>(resolve => { s.releaseRedeem = resolve; });
             if (s.redeem === 'invalid') return { status: 400, data: { success: false, error: 'This subscription code cannot be redeemed.', code: 'invalid_subscription_code' } };
             owner.plan = undefined; persist();
             return { status: 200, data: { success: true, replayed: false, grant: { id: 'synthetic-grant', planKey: 'plus_monthly', startsAt: '2026-10-30T00:00:00.000Z', endsAt: '2027-04-30T00:00:00.000Z', revoked: false, paidPlanTakesPrecedence: false }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'grant', effectiveUntil: '2027-04-30T00:00:00.000Z' } } };

@@ -1,11 +1,11 @@
 /**
  * Generate Alpha's Android build files with the upstream consumer-host generator.
  *
- *   node scripts/android-host.ts        write the generated host into android/
+ *   bun scripts/android-host.ts        write the generated host into android/
  *
  * android/consumer-host.json is the only authored Gradle setup: identity comes from
  * app.config.json; modules, dependencies, variants, signing and version environment
- * names, test-mocks sources, admission and installed-data compatibility names come
+ * names, admission and installed-data compatibility names come
  * from the descriptor. The generator at the pinned upstream commit owns the Gradle
  * scripts, toolchain, wrapper and variant policy; the generated files are build
  * outputs (git-ignored), regenerated before every Android build. android/app/product.gradle
@@ -109,7 +109,7 @@ export function generateAlphaAndroidHost(root = ROOT) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
  if (process.argv.length > 2) {
-  console.error('Usage: node scripts/android-host.ts');
+  console.error('Usage: bun scripts/android-host.ts');
   process.exit(2);
  }
  const result = generateAlphaAndroidHost();

@@ -2,7 +2,7 @@ import { registerPlugin } from '../platform-plugins';
 import { watchReturnToApp } from './native-adapter';
 import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
-import { applyListFilter, setListFilterHandler } from '../runtime/comms-bar';
+import { applyListFilter, clearListFilter, setListFilterHandler } from '../runtime/comms-bar';
 import {contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
@@ -22,26 +22,27 @@ export function installContactsAdapter(Component:any,views:Bag){
  const render=views.contacts.render,p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  // A dispatched provider write outlives the view; only a later explicit read clears uncertainty.
  let uncertain=false,pendingWrite=false,writeEpoch=0;
- let owner:any,rows:Bag[]=[],status='Off',readable=false,writable=false,loading=false,more=false,limit=50,epoch=0,visit=0,active=false;
+ let owner:any,rows:Bag[]=[],rowsQuery='',status='Off',readable=false,writable=false,loading=false,more=false,limit=50,epoch=0,visit=0,active=false;
  /* The open contact as the phone holds it now, the in-app editor and a pending delete confirmation. */
  let detail:ContactDetail|null=null,detailFor='',detailEpoch=0,form:Editor|null=null,confirming=false,saving=false,opening=false,api:Bag|null=null;
  const changed=()=>owner?.setState({contactsNativeRevision:Date.now()});
  const setApi=(next:Bag)=>{api=next;};
- const clear=()=>{epoch++;visit++;rows=[];readable=false;writable=false;more=false;loading=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
+ const clear=()=>{epoch++;visit++;rows=[];rowsQuery='';readable=false;writable=false;more=false;loading=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
  const available=()=>!!owner&&owner.S().view==='contacts'&&isMvpView('contacts')&&!document.hidden;
  const sync=()=>{const next=available();if(next===active)return;active=next;if(next)void refresh();else clear();};
  async function refresh(request=false,queryOverride?:string,confirmUnknown=false){
   const target=owner,token=++epoch,writeAtStart=writeEpoch,pendingAtStart=pendingWrite;if(!available()){return;}
-  // Rows already shown stay until this read answers; leaving the view or losing access clears them.
+  const query=String(queryOverride??target.vget('contacts').q??'').trim();
+  // A same-query refresh keeps its rows until this read answers.
   loading=true;changed();
   try{
    const access=request?await contacts.requestPermissions():await contacts.status();
    if(token!==epoch||target!==owner||!available())return;
    readable=access.available===true&&access.readable===true;writable=readable&&access.writable===true;
    if(!readable){rows=[];more=false;status='Off';return;}
-   const value=await contacts.list({query:queryOverride??String(target.vget('contacts').q||''),limit});
+   const value=await contacts.list({query,limit});
    if(token!==epoch||target!==owner||!available())return;
-   if(!Array.isArray(value.contacts))throw Error();rows=value.contacts;more=value.more===true;if(confirmUnknown&&!pendingAtStart&&!pendingWrite&&writeAtStart===writeEpoch)uncertain=false;
+   if(!Array.isArray(value.contacts))throw Error();rows=value.contacts;rowsQuery=query;more=value.more===true;if(confirmUnknown&&!pendingAtStart&&!pendingWrite&&writeAtStart===writeEpoch)uncertain=false;
    status=uncertain?'Outcome unknown · refresh Contacts':more&&limit>=200?'200 shown. Search to find other contacts.':rows.length?`${rows.length} contacts${more?' · more available':''}`:'No contacts found.';
   }catch{if(token===epoch){rows=[];more=false;status='Couldn’t load';}}
   finally{if(token===epoch){loading=false;changed();}}
@@ -123,13 +124,15 @@ export function installContactsAdapter(Component:any,views:Bag){
  }
  views.contacts.reply=()=>null;
  views.contacts.suggestions=()=>[];
- /* The rows the list and the bar show: names only, from the last read. */
- const shown=()=>rows.map(row=>{const name=row.name||'Unnamed contact';return {id:row.id,name,first:name.split(/\s+/)[0],ini:initials(row.name||''),phone:'',email:'',fav:false};});
+ /* The rows the list and the bar show: names only, from the last read, and only while that read
+    answered the query on screen. Another query shows no rows until the provider answers it. */
+ const visibleRows=(st:Bag)=>String(st.q??'').trim()===rowsQuery?rows:[];
+ const shown=(from:Bag[])=>from.map(row=>{const name=row.name||'Unnamed contact';return {id:row.id,name,first:name.split(/\s+/)[0],ini:initials(row.name||''),phone:'',email:'',fav:false};});
  /* AP-16 bar: the model's Contacts bar over the rows read on the device. Alpha gets no briefing from
     the address book: its rows never enter agent context. */
  const bar=views.contacts.bar;
  views.contacts.bar=(st:Bag,viewApi:Bag)=>{
-  const spec=bar({...st,list:shown()},viewApi);
+  const spec=bar({...st,list:shown(visibleRows(st))},viewApi);
   if(!spec)return spec;
   /* The prototype adapter leaves reference controls unavailable; on the image the list field is the
      provider query (setListFilterHandler below). Emptying it keeps a filter Alpha applied. */
@@ -138,19 +141,24 @@ export function installContactsAdapter(Component:any,views:Bag){
  };
  views.contacts.render=function(st:Bag,viewApi:Bag){
   const api=viewApi;setApi(viewApi);
-  if(st.open&&st.open!==detailFor&&readable)void loadDetail(String(st.open));
+  const search=String(st.q??''),query=search.trim(),matchesQuery=query===rowsQuery,visible=visibleRows(st);
+  if(st.open&&st.open!==detailFor&&readable&&visible.some(row=>row.id===st.open))void loadDetail(String(st.open));
   if(!st.open&&detailFor){detailFor='';detail=null;detailEpoch++;confirming=false;}
-  const model=render({...st,list:shown(),edit:null,add:null,form:null},api);
+  // The native provider already applied its query. Use the shared grouping without filtering by display name again.
+  const model=render({...st,list:shown(visible),q:'',chip:null,edit:null,add:null,form:null},api);
+  model.q=search;model.qRaw=query;
+  /* AC-22: an Alpha filter keeps its clearable chip, counted over the provider's answer. */
+  model.chip=st.chip&&query?{label:String(st.chip),count:visible.length,clearLabel:`Clear filter ${st.chip}`,clear:()=>clearListFilter('contacts')}:null;
   /* AC-22: the list filter, typed in the bar or applied by Alpha, is the provider's own query: a
      read on this device, never a network request. The model registered first; this one wins. */
   const local=model.filter;
-  setListFilterHandler('contacts',{...local,apply:(filter:Bag)=>{const applied=local.apply(filter);limit=50;void refresh(false,String(filter.query||''));return applied;},clear:()=>{local.clear();limit=50;void refresh(false,'');}});
-  model.nativeManaged=true;model.nativeStatus=uncertain?'Outcome unknown · refresh Contacts':pendingWrite?'Contact change pending':status;model.nativeStatusDot=!status?'':!readable?'warn':'';model.nativeBusy=loading||pendingWrite;model.nativeAccess=!readable;model.nativeMore=more&&limit<200;
+  setListFilterHandler('contacts',{...local,apply:(filter:Bag)=>{const applied=local?.apply?local.apply(filter):true;limit=50;void refresh(false,String(filter.query||''));return applied;},clear:()=>{local?.clear?.();limit=50;void refresh(false,'');}});
+  model.nativeManaged=true;model.nativeStatus=uncertain?'Outcome unknown · refresh Contacts':pendingWrite?'Contact change pending':loading&&!matchesQuery?'Searching contacts':status;model.nativeStatusDot=!status?'':!readable?'warn':'';model.nativeBusy=loading||pendingWrite;model.nativeAccess=!readable;model.nativeMore=matchesQuery&&more&&limit<200;
   model.nativeRefresh=()=>void refresh(false,undefined,true);model.nativeRequest=()=>void refresh(true);model.nativeLoadMore=()=>{limit=Math.min(200,limit+50);void refresh();};
   model.noHits=false;model.addNew=()=>void openEditor();
   /* A short list needs no letter headings. */
-  for(const group of model.groups||[])group.head=rows.length>=20;
-  if(model.d){const selected=rows.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
+  for(const group of model.groups||[])group.head=visible.length>=20;
+  if(model.d){const selected=visible.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
    model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v}))]:[];
    if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:TYPE_LABEL(row.type)})),...detail.emailAddresses.map(row=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v:row.address,sub:TYPE_LABEL(row.type)}))];
    model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void openEditor(selected);model.d.canFav=false;
@@ -167,7 +175,7 @@ export function installContactsAdapter(Component:any,views:Bag){
   return model;
  };
  /* Back closes the editor or the delete confirmation before it leaves the contact. */
- const back=views.contacts.back;views.contacts.back=(st:Bag,viewApi:Bag)=>{if(form){if(!saving){form=null;changed();}return true;}if(confirming){if(!saving){confirming=false;changed();}return true;}return back?back(st,viewApi):false;};
+ const back=views.contacts.back;views.contacts.back=(st:Bag,viewApi:Bag)=>{if(form){if(!saving){form=null;changed();}return true;}if(confirming){if(!saving){confirming=false;changed();}return true;}if(!st.open&&(st.q||st.chip)){clearListFilter('contacts');return true;}return back?back(st,viewApi):false;};
  p.componentDidMount=function(){mount?.call(this);owner=this;this.contactsReturn=watchReturnToApp(()=>void refresh());this.contactsHide=()=>sync();document.addEventListener('visibilitychange',this.contactsHide);sync();};
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();};
  p.componentWillUnmount=function(){this.contactsReturn?.();document.removeEventListener('visibilitychange',this.contactsHide);if(owner===this){owner=null;active=false;clear();}unmount?.call(this);};

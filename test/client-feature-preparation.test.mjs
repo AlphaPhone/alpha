@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
 import {buildSync} from 'esbuild';
@@ -48,7 +49,7 @@ test('concurrent preparers after a source change all succeed and leave one authe
  git(['add','.']);git(['-c','user.name=Source fixture','-c','user.email=fixture@example.invalid','commit','-qm','Change']);
  const commit=git(['rev-parse','HEAD']);fs.writeFileSync(path.join(root,'upstream.lock.json'),JSON.stringify({commit}));
  const script=`import {prepareClientFeatures} from ${JSON.stringify(path.resolve('scripts/prepare-client-features.ts'))};prepareClientFeatures({root:${JSON.stringify(root)},projectVoice:false});`;
- const run=()=>new Promise(resolve=>{const child=spawn(process.execPath,['--input-type=module','-e',script],{stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});child.on('close',status=>resolve({status,stderr}));});
+ const run=()=>new Promise(resolve=>{const child=spawn(process.execPath,['-e',script],{stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});child.on('close',status=>resolve({status,stderr}));});
  for(const result of await Promise.all(Array.from({length:12},run))) assert.equal(result.status,0,result.stderr);
  const source=path.join(root,'.eliza/client-features'),stamp=JSON.parse(fs.readFileSync(path.join(source,'.source.json')));
  assert.equal(stamp.baseCommit,commit);assert.match(fs.readFileSync(path.join(source,fixtureLeaf),'utf8'),/changed = 2/);
@@ -99,22 +100,25 @@ test('client feature publication retires once while a peer moves the winner',()=
   catch(error){writeControl('complete',{status:1,retire,publish,read,error:error.stack});process.exitCode=1;}
  `;
  const children=actors.map(actor=>{
-  const child=spawn(process.execPath,['--input-type=module','-e',worker,actor,root,control,pathToFileURL(path.resolve('scripts/prepare-client-features.ts')).href],{stdio:['ignore','ignore','pipe']});
+  const child=spawn(process.execPath,['-e',worker,actor,root,control,pathToFileURL(path.resolve('scripts/prepare-client-features.ts')).href],{stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});
   const closed=new Promise(resolve=>child.on('close',status=>resolve({actor,status,stderr})));
   return {actor,child,closed,diagnostic:()=>({status:child.exitCode,signal:child.signalCode,stderr})};
  });
  const marker=(actor,key)=>path.join(control,actor+'-'+key);
  async function ready(actor,key,timeout=20000){
-  const until=Date.now()+timeout;
-  while(!fs.existsSync(marker(actor,key+'.json'))){
+  const until=Date.now()+timeout,target=marker(actor,key+'.json');
+  while(!fs.existsSync(target)){
    const running=children.find(row=>row.actor===actor),state=running.diagnostic(),complete=marker(actor,'complete.json');
-   if(fs.existsSync(complete))throw Error('Worker completed before fixture event: '+actor+' '+key+'; '+fs.readFileSync(complete,'utf8')+'; '+JSON.stringify(state));
+   const finished=fs.existsSync(complete),expired=Date.now()>until;
+   // The child can publish the requested event between the first poll and the completion check.
+   if(fs.existsSync(target))break;
+   if(finished)throw Error('Worker completed before fixture event: '+actor+' '+key+'; '+fs.readFileSync(complete,'utf8')+'; '+JSON.stringify(state));
    if(state.status!==null||state.signal!==null)throw Error('Worker exited before fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
-   if(Date.now()>until)throw Error('Missing fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
+   if(expired)throw Error('Missing fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
    await new Promise(resolve=>setTimeout(resolve,5));
   }
-  const event=JSON.parse(fs.readFileSync(marker(actor,key+'.json')));locations[actor]={stage:event.stage,aside:event.aside};return event;
+  const event=JSON.parse(fs.readFileSync(target));locations[actor]={stage:event.stage,aside:event.aside};return event;
  }
  const allow=(actor,key)=>fs.writeFileSync(marker(actor,key+'.allow'),'');
  function inventoryAt(directory){
@@ -200,11 +204,11 @@ test('client source rejects committed symlinks and missing source groups',()=>fi
  fs.writeFileSync(path.join(root,'upstream.lock.json'),JSON.stringify({commit:git(['rev-parse','HEAD'])}));assert.throws(()=>prepareClientFeatures({root,projectVoice:false}),/Missing upstream source/);
 }));
 test('direct local development launcher prepares a clean client tree before starting services',()=>fixture(({root,commit})=>{
- for(const file of ['scripts/dev-local.ts','scripts/dev-speech-settings.ts','scripts/speech-env.ts','scripts/local-agent-source.ts','scripts/copy-file-clone.ts','scripts/prepare-client-features.ts','scripts/upstream-native-source.ts']){const target=path.join(root,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);}
+ for(const file of ['scripts/dev-local.ts','scripts/dev-speech-settings.ts','scripts/speech-env.ts','scripts/local-agent-source.ts','scripts/copy-file-clone.ts','scripts/prepare-client-features.ts','scripts/upstream-native-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts']){const target=path.join(root,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);}
  // The generic copier fixture explicitly tests the non-voice projection path.
  const prep=path.join(root,'scripts/prepare-client-features.ts');fs.writeFileSync(prep,fs.readFileSync(prep,'utf8').replace('projectVoice = true','projectVoice = false'));
  // Source hashing and materialization can exceed 20 seconds on a loaded build host.
- const result=spawnSync(process.execPath,[path.join(root,'scripts/dev-local.ts')],{cwd:root,env:{...process.env,ALPHA_REMOTE_PORT:'0',ALPHA_REMOTE_PROFILE:path.join(root,'empty-profile')},encoding:'utf8',timeout:120000});
+ const result=spawnSync(process.execPath,[path.join(root,'scripts/dev-local.ts')],{cwd:root,env:{...process.env,ALPHA_REMOTE_PORT:'0',ALPHA_REMOTE_PROFILE:path.join(root,'empty-profile')},encoding:'utf8',timeout:scaledTimeout(120000)});
  assert.equal(result.status,1);assert.match(result.stderr,/Invalid local agent port/);
  assert.equal(JSON.parse(fs.readFileSync(path.join(root,'.eliza/client-features/.source.json'))).baseCommit,commit);
  // Development uses authenticated upstream source without a patch cache.
@@ -227,7 +231,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.notEqual(stamp.sourceFiles[browserCommand],stamp.files[browserCommand]);
  // Run plain Node without tsx, aliases or a custom loader and exercise the imported
  // observation parser, rather than only checking the spelling of its specifier.
- const browserImport=spawnSync(process.execPath,['--input-type=module','-e',`
+ const browserImport=spawnSync(process.execPath,['-e',`
   import assert from 'node:assert/strict';
   import {observedNativeHistorySelection} from ${JSON.stringify(pathToFileURL(path.join(source,browserCommand)).href)};
   const message={content:{metadata:{clientDevice:{context:{view:'browser',revision:3,selectedObject:{kind:'browser-tab',id:'tab:7',revision:'document:2'}}}}}};
@@ -235,7 +239,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(observedNativeHistorySelection(message,'open'),undefined);
   message.content.metadata.clientDevice.context.view='notes';
   assert.equal(observedNativeHistorySelection(message,'back'),undefined);
- `],{encoding:'utf8',timeout:30000});
+ `],{encoding:'utf8',timeout:scaledTimeout(30000)});
  assert.equal(browserImport.status,0,browserImport.stderr);
  // Node consumers (the Vite config bundle and backend hosts) load linked-sync through cloud-protocol.
  for(const file of ['google-sync-port.ts','sync-controller.ts','linked-store.ts']){
@@ -277,7 +281,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
  assert.equal(stamp.managedGoogleBodyLimitPatch,undefined);
- assert.equal(stamp.files[googlePath],'45f81315269621657a84d1a67a4769405c3ef5cee8cfda44ee911bb4fa36d2a2');
+ assert.equal(stamp.files[googlePath],'e848c0e814caebd58eac087684a6020825aeda81e8af7c2cc66530c584003214');
  for(const name of Object.keys(stamp.sourceFiles).filter(name=>name.startsWith('packages/app/src/runtime/managed-google-agent/'))){
   assert.equal(stamp.sourceFiles[name],stamp.files[name],name+' is copied directly from upstream');
   assert.deepEqual(fs.readFileSync(path.join(source,name)),fs.readFileSync(path.join('vendor/eliza',name)),name+' has exact raw upstream bytes');
@@ -341,27 +345,18 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
 
 });
 
-test('retired client patch files and receipt slots cannot replace an admitted raw-source cache',()=>fixture(({root,vendor,commit})=>{
+test('a receipt with an unknown slot cannot replace an admitted raw-source cache',()=>fixture(({root,vendor})=>{
  const file='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
  const before='export const value = 1;\n';
  const projected=prepareClientFeatures({root,projectVoice:false});
  const stampFile=path.join(projected,'.source.json'),stamp=fs.readFileSync(stampFile);
  const unchanged=()=>{
-  assert.deepEqual(fs.readFileSync(stampFile),stamp,'retired slots preserve the admitted cache');
+  assert.deepEqual(fs.readFileSync(stampFile),stamp,'a rebuilt receipt is the admitted one');
   assert.equal(fs.readFileSync(path.join(projected,file),'utf8'),before);
  };
  assert.equal(fs.readFileSync(path.join(vendor,file),'utf8'),before);
- const patchRoot=path.join(root,'patches/eliza');fs.mkdirSync(patchRoot,{recursive:true});
- for(const prefix of ['managed-google-body-limit-client','app-update-resume-client']){
-  for(const suffix of ['.patch','-manifest.json']){
-   const retired=path.join(patchRoot,prefix+suffix);
-   fs.writeFileSync(retired,suffix==='.patch'?'unreviewed behavior':JSON.stringify({schema:1,baseCommit:commit,path:file}));
-   for(const check of [false,true]) assert.throws(()=>prepareClientFeatures({root,projectVoice:false,check}),/Retired client patch slot/);
-   unchanged();fs.unlinkSync(retired);
-  }
- }
- for(const key of ['managedGoogleBodyLimitPatch','appUpdateResumePatch','unknownPatch']){
-  const obsolete={...JSON.parse(stamp),[key]:{manifestSha256:'0'.repeat(64)}};
+ {
+  const obsolete={...JSON.parse(stamp),unknownPatch:{manifestSha256:'0'.repeat(64)}};
   fs.writeFileSync(stampFile,JSON.stringify(obsolete));
   assert.throws(()=>prepareClientFeatures({root,projectVoice:false,check:true}),/missing or stale/);
   assert.deepEqual(JSON.parse(fs.readFileSync(stampFile)),obsolete,'check mode never rewrites a stale receipt');

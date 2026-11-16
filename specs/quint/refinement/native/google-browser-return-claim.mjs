@@ -1,3 +1,5 @@
+// Partial source-contract regression: authenticated extracted production members execute
+// with controlled ports; this is not whole-file implementation refinement.
 import assert from 'node:assert/strict';
 import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -71,7 +73,7 @@ export async function checkGoogleBrowserReturnClaim(extraSources = []) {
   }
   return checkTraces({model, sources, driverHashes, traces, scope: 'bounded-orchestration', assumptions: [
     'Authenticated pinned CloudSignInPlugin callback, browser pause/resume, scoped cancel, retirement and completion methods execute in the same plain-JVM chain fixture used by the packaged source regression.',
-    'The scope starts with a prepared production browser attempt or a durable pending record without a live attempt. It bounds one owner, four FIFO worker entries and four main grace timers. Typed observations label actual enqueued Runnable instances and inspect actual attempt and port state.',
+    'The scope starts with a prepared browser attempt in the host task, or a stored pending record without a live attempt or an adoptable credential generation. It bounds one owner, four FIFO worker entries and four main grace timers. Typed observations label actual enqueued Runnable instances and inspect actual attempt and port state.',
     'A full worker dispatch is one transition. The campaign uses controlled queue, credential store and HTTPS ports, a valid success response, and fixed representative expiry classes. Actual Android lifecycle delivery, secure-store durability, intra-worker interleavings, new attempt setup and OAuth provider behavior remain outside this projection.',
   ]});
 }

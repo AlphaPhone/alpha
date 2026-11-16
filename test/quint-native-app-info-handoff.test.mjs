@@ -3,7 +3,7 @@ import test from 'node:test';
 import {verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
 import {checkNativeAppInfoHandoff} from '../specs/quint/refinement/native/app-info-handoff.mjs';
 
-test('native App info refines exact package and profile handoff without fallback', async () => {
+test('partial source contract: native App info refines exact package and profile handoff without fallback', async () => {
   const {receipt} = await checkNativeAppInfoHandoff();
   assert.equal(receipt.passed, true);
   assert.equal(receipt.traces, 12);

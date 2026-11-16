@@ -65,7 +65,7 @@ const nativeCamera = registerPlugin<{
 const cameraAccess = registerPlugin<{ checkPermissions(): Promise<{ camera?: string }> }>('ElizaCamera');
 export {restartAfterResume};
 type LibraryAccess = {scope:'full'|'partial'|'selected'|'denied';images:'full'|'selected'|'denied';videos:'full'|'selected'|'denied'};
-type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
+export type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
 const nativeLibrary = registerPlugin<{
   addListener(event:'libraryChanged',listener:()=>void):Promise<{remove():Promise<void>}>;
   libraryAccess():Promise<LibraryAccess>;
@@ -127,8 +127,8 @@ const browserMode=!Capacitor.isNativePlatform();
 const camera:typeof nativeCamera=browserMode?browserCamera:nativeCamera;
 // Check every implemented browser method against the native port contract.
 browserPhotoLibrary satisfies Pick<typeof nativeLibrary,Exclude<keyof typeof browserPhotoLibrary,'saveVideoCopy'|'forgetEdit'|'share'|'shareMany'>>;
-const library=browserMode?browserLibrary as unknown as typeof nativeLibrary:nativeLibrary;
-const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos');
+export const library=browserMode?browserLibrary as unknown as typeof nativeLibrary:nativeLibrary;
+export const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos');
 /** canReplace: the native edit pipeline can overwrite this original (owned, or Android allows a write request). */
 type EditPreview={sessionId:string;operationId:string;image:string;width:number;height:number;reduced:boolean;maxEdge:number;filter:string;canReplace?:boolean};
 type EditReceipt={status:string;operationId:string;id?:string;replaced?:boolean;revision?:string;message?:string};
@@ -765,6 +765,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   /** The one photo being written natively, if any; releasing the preview waits for it. */
   let photoWrite: Promise<unknown> | undefined;
   const RECORDING = { audio: true, saveToGallery: true, quality: 'medium', maxDuration: 300, maxFileSize: 104857600 } as const;
+  /** The next recording was started without sound, from the microphone notice. */
+  let soundless = false;
   let previewReceipt: PreviewReceipt | undefined;
   /** Bind VideoCapture only while Video mode is chosen. Builds without setCaptureMode bind it when recording starts. */
   let modeChange: Promise<void> = Promise.resolve();
@@ -783,7 +785,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const token = session.token();
       await modeChange;
       if (session.phase !== 'ready' || !session.current(token)) throw new Error('Camera preview unavailable');
-      return camera.startRecording(options);
+      return camera.startRecording(soundless ? { ...options, audio: false } : options);
     },
     stopRecording: () => camera.stopRecording(),
   };
@@ -821,12 +823,14 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const vf=document.querySelector<HTMLElement>(finder),screen=vf?.closest<HTMLElement>('[data-alpha-camera-root]')||vf?.closest<HTMLElement>('[data-alpha-layer]')||vf?.closest<HTMLElement>('[data-screen]');if(!screen)return;
     const label=kind==='unavailable'?'Can’t start camera':kind==='camera'?'Camera off':'Mic off';
     const panel=document.createElement('div');panel.setAttribute('role','alert');panel.setAttribute('aria-label',label);panel.dataset.alphaCameraAccess=kind;
-    panel.style.cssText='position:absolute;left:16px;right:16px;top:38%;z-index:50;padding:16px;border-radius:20px;background:#1c1c1e;color:#fff;font:inherit;display:flex;flex-direction:column;gap:12px;text-align:center';
+    panel.style.cssText='position:absolute;left:16px;right:16px;top:38%;z-index:50;padding:16px;border-radius:20px;background:#1c1c1e;color:var(--alpha-white);font:inherit;display:flex;flex-direction:column;gap:12px;text-align:center';
     const title=document.createElement('strong');title.textContent=label;
     const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;justify-content:center;flex-wrap:wrap';
-    const action=(text:string,go:()=>void)=>{const b=document.createElement('button');b.type='button';b.textContent=text;b.style.cssText='min-height:44px;padding:0 16px;border-radius:22px;background:rgba(255,255,255,.16);color:#fff;font:inherit';b.onclick=go;actions.append(b);return b;};
+    const action=(text:string,go:()=>void)=>{const b=document.createElement('button');b.type='button';b.textContent=text;b.style.cssText='min-height:44px;padding:0 16px;border-radius:22px;background:rgba(255,255,255,.16);color:var(--alpha-white);font:inherit';b.onclick=go;actions.append(b);return b;};
     if(!browserMode&&kind!=='unavailable')action('Allow',()=>{void device.openSettings({page:'privacy'}).catch(()=>message('Couldn’t open'));}).setAttribute('aria-label','Allow in Settings');
     action('Retry',()=>{hideAccess();if(kind==='camera'||kind==='unavailable')void start(true);else{session.clearDenied('microphone');message('');void record();}});
+    // A denied microphone still leaves the camera usable: record the picture alone.
+    if(kind==='microphone')action('No sound',()=>{hideAccess();session.clearDenied('microphone');message('');void record(true);}).setAttribute('aria-label','Record without sound');
     const glyph=document.createElement('span');glyph.setAttribute('aria-hidden','true');glyph.dataset.alphaCameraAccessGlyph='';
     glyph.style.cssText=`align-self:center;width:32px;height:32px;background:currentColor;-webkit-mask:url(/icons/lucide/${kind==='microphone'?'mic-off':'camera'}.svg) center/contain no-repeat;mask:url(/icons/lucide/${kind==='microphone'?'mic-off':'camera'}.svg) center/contain no-repeat`;
     const icon=document.createElement('span');icon.setAttribute('aria-hidden','true');icon.style.cssText='position:relative;align-self:center;display:flex';icon.append(glyph);
@@ -970,12 +974,15 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     }, browserMode);
   }
   const finishVideo=()=>session.finishRecording();
-  async function record() {
+  async function record(withoutSound = false) {
     if (session.recording || session.finalizing) { await finishVideo(); return; }
     if (session.busy || session.phase !== 'ready') return;
     // A queued agent photo would otherwise wait for as long as this recording runs.
     if(agentRequest?.queued)agentRequest.refused=true;
-    const outcome=await session.startRecording();
+    // Sound is left out only for the one recording asked for from the microphone notice.
+    soundless=withoutSound;
+    let outcome:Awaited<ReturnType<typeof session.startRecording>>;
+    try{outcome=await session.startRecording();}finally{soundless=false;}
     if(outcome==='recording'){duration=0;api?.set({ rec: true });message('');}
     else if(outcome==='denied')showAccess('microphone');
     else if(outcome==='failed')message('Didn’t start');
@@ -1200,14 +1207,21 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   function askCapture(selected:SavedPhoto,owner:Bag):boolean{
     if(selected.kind==='video'||selected.trashed)return false;
     closeQuestion?.();
+    const chatSession=connectionController.getSnapshot().session;
+    const conversation=connectionController.getSelectedConversationId();
+    const sameConversation=()=>connectionController.getSnapshot().session===chatSession&&connectionController.getSelectedConversationId()===conversation;
     const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
     void library.read({id:nativeId(selected.id)}).then(row=>{
       if(!current()||!captureUnchanged(selected,row)||row.kind==='video'||row.trashed){
         if(owner.isActive())owner.toast('Photo changed');
         return;
       }
+      if(!sameConversation()){
+        owner.toast('Chat changed. Choose the photo again.');
+        return;
+      }
       owner.attachCameraPhoto(selected.id,row.image);
-    }).catch(()=>{if(current())owner.toast('Couldn’t open');});
+    }).catch(()=>{if(current()&&sameConversation())owner.toast('Couldn’t open');});
     return true;
   }
 
@@ -1263,7 +1277,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     if(st.mode==='alpha'){
       data.shutterLabel='Ask about this';
       data.shutter=data.ask;
-      data.innerCss="width:62px;height:62px;border-radius:50%;background:white url('/logo-mark.svg') center/80% no-repeat";
+      data.innerCss="width:62px;height:62px;border-radius:50%;background:var(--alpha-white) url('/logo-mark.svg') center/80% no-repeat";
     }
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
@@ -1457,7 +1471,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     // Read canonical intent once per Photos entry, without replaying a save.
     if(currentApi.isActive()&&!edit&&!editRecoveryChecked){
       editRecoveryChecked=true;const token=editEpoch;
-      queueMicrotask(()=>{void readMediaCopyIntent().then(pending=>{if(!disposed&&currentApi.isActive()&&editEpoch===token&&pending&&automaticEditRecovery!==pending.token){automaticEditRecovery=pending.token;void recoverEdit(currentApi);}}).catch(()=>{if(!disposed&&currentApi.isActive()&&editEpoch===token){currentApi.set({nativeCopyRecovery:true});currentApi.toast(browserMode&&testMocksEnabled?'Saved-copy request needs recovery. No edit was repeated.':'Needs recovery');}});});
+      queueMicrotask(()=>{void readMediaCopyIntent().then(pending=>{if(!disposed&&currentApi.isActive()&&editEpoch===token&&pending&&automaticEditRecovery!==pending.token){automaticEditRecovery=pending.token;void recoverEdit(currentApi);}}).catch(()=>{if(!disposed&&currentApi.isActive()&&editEpoch===token){currentApi.set({nativeCopyRecovery:true});currentApi.toast(browserMode&&testMocksEnabled?'Saved-copy request needs recovery. No edit was repeated.':'Couldn’t check last save');}});});
     }
     if (!loaded && !loading) queueMicrotask(() => { void refresh(); });
     const data = photosRender(st, currentApi);data.normalSelecting=true;if(data.v)data.v.notDeleted=true;

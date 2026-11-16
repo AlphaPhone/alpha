@@ -1,6 +1,7 @@
+import {scaledTimeout} from '../timeouts.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {registerHooks} from 'node:module';
+import {registerHooks} from '../../../../test/support/module-hooks.mjs';
 import {resolve, join, dirname, basename} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {execFileSync, spawn} from 'node:child_process';
@@ -42,7 +43,7 @@ function createFixture(scratch, scenario) {
   write(join(frozen, 'packages/app/src/runtime/dev-server.ts'), 'throw Error("Frozen fixture entry must not execute");\n');
   json(join(frozen, 'tsconfig.json'), {});
   const git = (...args) => execFileSync('git', args, {
-    cwd: frozen, encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: frozen, encoding: 'utf8', timeout: scaledTimeout(15000), stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
   git('init'); git('add', '.');
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Synthetic frozen source');

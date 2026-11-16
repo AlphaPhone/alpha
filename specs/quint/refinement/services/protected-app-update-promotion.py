@@ -1,4 +1,5 @@
 """Drive the current release admission and private media helpers through closed ports."""
+import argparse
 import copy
 import hashlib
 import importlib.util
@@ -95,7 +96,7 @@ def blank():
             "candidateAttempt": 0, "protectedAttempt": 0, "privateReceipt": False, "review": False, "restored": False}
 
 
-def campaign(scratch, signing_commit, name, schedule):
+def campaign(scratch, signing_commit, name, schedule, signing_timeout):
     fixture = fixtures.QualifiedUpdateTest()
     fixture.setUp()
     if schedule[0][0] == "admitCandidate":
@@ -103,6 +104,8 @@ def campaign(scratch, signing_commit, name, schedule):
     elif schedule[0][1][0] == "dispatch":
         fixture.producer.write_archive()
         fixture.plan["archiveBytes"] = fixture.producer.archive.stat().st_size
+    native_source_root = (fixture.producer.source_directory.name
+                          if schedule[0][0] == "admitCandidate" else None)
     state = blank()
     trace = {"name": name, "expect": {"s": blank()}, "steps": []}
     plan = copy.deepcopy(fixture.plan)
@@ -121,15 +124,17 @@ def campaign(scratch, signing_commit, name, schedule):
     def candidate_metadata(fault):
         source = plan["alphaCommit"]
         attempt = 1 if fault == "attempt" else plan["producerRunAttempt"]
+        # Owner metadata may change; the immutable repository ID and current full name remain pinned.
+        metadata_identity = {**identity, "owner": {"id": 2 if fault in ("owner", "owner-repo") else 1}}
         return {
             f"{prefix}/actions/runs/{number}/attempts/{plan['producerRunAttempt']}": {
                 "id": int(number), "run_attempt": attempt, "run_number": plan["versionCode"],
                 "event": "push", "head_branch": "main", "head_sha": source,
                 "workflow_id": producer.WORKFLOW_ID, "path": producer.WORKFLOW,
                 "status": "completed", "conclusion": "cancelled" if fault == "cancelled" else "success",
-                "repository": identity,
-                "head_repository": {**identity, "id": 1} if fault == "repo" else
-                    {**identity, "owner": {"id": 1}} if fault == "owner" else identity,
+                "repository": metadata_identity,
+                "head_repository": {**metadata_identity, "id": 1}
+                    if fault in ("repo", "owner-repo") else metadata_identity,
             },
             f"{prefix}/actions/artifacts/{artifact}": {
                 "id": int(artifact), "expired": fault == "expired",
@@ -184,13 +189,17 @@ def campaign(scratch, signing_commit, name, schedule):
         args = ["bash", "scripts/ci/verify-cloud-signing-input.sh"]
         if stage_path:
             args.extend(["--stage", str(stage_path)])
-        result = subprocess.run(args, cwd=scratch, capture_output=True, timeout=30, env={
+        environment = {
             "PATH": str(scratch / "closed-bin") + os.pathsep + os.environ["PATH"],
             "GITHUB_SHA": signing_commit, "GITHUB_REPOSITORY": repo, "GITHUB_REF": "refs/heads/main",
             "GITHUB_REPOSITORY_ID": str(producer.REPOSITORY_ID),
             "RUNNER_TEMP": str(fixture.directory), "GITHUB_OUTPUT": str(output),
             "SIGNING_PLAN": plan_bytes.decode(), "GH_FIXTURE": str(endpoints_path),
-        })
+        }
+        if native_source_root is not None:
+            environment["ALPHA_NATIVE_SOURCE_ROOT"] = native_source_root
+        result = subprocess.run(args, cwd=scratch, capture_output=True, timeout=signing_timeout,
+                                env=environment)
         exact_plan = "plan_sha256=" + hashlib.sha256(plan_bytes).hexdigest() + "\n"
         if result.returncode:
             assert not output.exists()
@@ -224,7 +233,7 @@ def campaign(scratch, signing_commit, name, schedule):
                             producer.github_candidate(plan, candidate_metadata(fault).__getitem__)
                         with patch.object(storage, "connection", return_value=(port, {})):
                             storage.download(plan, archive)
-                        bridge.PRODUCER.admit(archive, plan, stage)
+                        bridge.PRODUCER.admit(archive, plan, stage, source_root=native_source_root)
                     except ValueError as error:
                         observation["refusal"] = str(error)
                 staged = {variant: bridge.file_sha(stage / f"{variant}-release-unsigned.apk")
@@ -282,7 +291,8 @@ def campaign(scratch, signing_commit, name, schedule):
                     with patch.object(storage, "connection", return_value=(port, {})):
                         storage.download(pins, target)
                 try:
-                    bridge.stage(record, reviewed_plan, work, product, fetch_unsigned, fetch_signed)
+                    bridge.stage(record, reviewed_plan, work, product, fetch_unsigned, fetch_signed,
+                                 source_root=native_source_root)
                 except ValueError as error:
                     observation["refusal"] = str(error)
                 staged = {variant: bridge.file_sha(product / f"artifacts/{variant}-release.apk")
@@ -302,7 +312,7 @@ def campaign(scratch, signing_commit, name, schedule):
         fixture.doCleanups()
 
 
-def main():
+def main(signing_timeout):
     with tempfile.TemporaryDirectory(prefix="alpha-promotion-refinement-") as directory:
         scratch = Path(directory)
         (scratch / "closed-bin").mkdir()
@@ -322,7 +332,7 @@ def main():
         review = ("readReview", [True], "ok")
         restore = ("restoreSigned", [True], "ok")
         schedules = [
-            ("protected private plan, exact receipt and restored pair", [plan, stage, upload, review, restore]),
+            ("protected private plan, exact receipt and restored launcher APK", [plan, stage, upload, review, restore]),
             ("dispatch archive stages exact Cloud APKs", [("admit", ["dispatch", True], "ok"), stage]),
             ("dispatch archive admission currently has no attempt pin", [("admit", ["dispatch", True], "attempt")]),
             ("private plan never stages changed downloaded bytes", [plan, ("restoreUnsigned", [False], "bytes")]),
@@ -335,7 +345,10 @@ def main():
         schedules.append(("exact main candidate and repeated protected attempt",
                           [candidate, ("restoreCandidate", [1, True], "attempt"),
                            ("restoreCandidate", [2, False], "bytes"), protected, upload, review, restore]))
-        for failure in ("attempt", "repo", "owner", "cancelled", "expired", "source", "download-bytes", "download-overflow"):
+        schedules.append(("owner metadata change retains the exact candidate and protected restore",
+                          [("admitCandidate", [2, True], "owner"),
+                           ("restoreCandidate", [2, True], "owner")]))
+        for failure in ("attempt", "repo", "owner-repo", "cancelled", "expired", "source", "download-bytes", "download-overflow"):
             schedules.append((f"{failure} refuses a main candidate",
                               [("admitCandidate", [1, True] if failure == "attempt" else [2, False], failure)]))
         schedules.append(("qualified candidate rejects changed private mirror",
@@ -349,7 +362,7 @@ def main():
         for failure in ("generation", "signed-bytes"):
             schedules.append((f"{failure} refuses exact signed restore",
                               [plan, stage, upload, review, ("restoreSigned", [False], failure)]))
-        results = [campaign(scratch, commit, name, schedule) for name, schedule in schedules]
+        results = [campaign(scratch, commit, name, schedule, signing_timeout) for name, schedule in schedules]
         candidate_index = next(i for i, (trace, _) in enumerate(results)
                                if trace["name"] == "exact main candidate and repeated protected attempt")
         print(json.dumps({"traces": [trace for trace, _ in results], "launcherBytes": results[0][1],
@@ -358,4 +371,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--signing-timeout-ms", type=int, default=30_000)
+    args = parser.parse_args()
+    if not 30_000 <= args.signing_timeout_ms <= 300_000:
+        parser.error("signing timeout must be between 30000 and 300000 milliseconds")
+    main(args.signing_timeout_ms / 1000)

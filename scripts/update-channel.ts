@@ -1,14 +1,11 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import {createHash} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
+import {sha256 as digest} from './sha256.ts';
 import type {ManifestNode} from './apk.ts';
 
 export const UPDATE_CHANNEL_META='ai.alphacompute.alphaphone.UPDATE_CHANNEL';
 export const UPDATE_DIGEST_META='ai.alphacompute.alphaphone.UPDATE_MANIFEST_SHA256';
 export const APP_UPDATE_REPOSITORY = 'alphacompute/alpha';
 export const APP_UPDATE_REPOSITORY_ID = 1396333361;
-const FORMER_APP_UPDATE_REPOSITORY = 'alphacompute/alphaphone';
+const APP_UPDATE_REPOSITORIES = [APP_UPDATE_REPOSITORY, 'alphacompute/alphaphone'] as const;
 export const APP_UPDATE_TAG = 'app-stable-alphacompute';
 export const LEGACY_APP_UPDATE_TAG = 'app-stable';
 export const APP_UPDATE_MANIFEST = 'alpha-update-stable.json';
@@ -17,70 +14,68 @@ export function appUpdateManifestUrl(tag: typeof APP_UPDATE_TAG | typeof LEGACY_
  return `https://github.com/${APP_UPDATE_REPOSITORY}/releases/download/${tag}/${APP_UPDATE_MANIFEST}`;
 }
 
-/** Already published pointers can still carry the previous repository URL. */
+/** Retained pointers may carry an earlier repository path. */
 export function isPublishedUpdateApkUrl(url: string, tag: typeof APP_UPDATE_TAG | typeof LEGACY_APP_UPDATE_TAG, versionCode: number) {
-  return [APP_UPDATE_REPOSITORY, FORMER_APP_UPDATE_REPOSITORY].some(repository =>
+  return APP_UPDATE_REPOSITORIES.some(repository =>
     url === `https://github.com/${repository}/releases/download/${tag}/alpha-phone-${versionCode}.apk`);
 }
 
-const digest=(bytes: string | Buffer)=>createHash('sha256').update(bytes).digest('hex');
 const refused=()=>new Error('Update channel input refused');
 
 export interface UpdateChannel {
- kind: 'public' | 'private-qa';
+ kind: 'public';
  manifestUrlSha256: string;
 }
 
-/** Private capability bytes never enter the returned build record or diagnostics. */
-export function readUpdateChannel(environment: NodeJS.ProcessEnv, publicUrl: string): UpdateChannel {
- const kind=environment.ALPHA_UPDATE_CHANNEL||'public';
- const file=environment.ALPHA_PRIVATE_UPDATE_MANIFEST_FILE;
- const expected=environment.ALPHA_PRIVATE_UPDATE_MANIFEST_SHA256;
- if(kind==='public'){
-  if(file||expected)throw refused();
-  return {kind,manifestUrlSha256:digest(publicUrl)};
- }
- if(kind!=='private-qa'||!file||!path.isAbsolute(file)||!expected||!/^[a-f0-9]{64}$/.test(expected))throw refused();
- let fd;
- try{
-  if(typeof process.getuid!=='function'||fs.lstatSync(file).isSymbolicLink())throw refused();
-  const checkout=fs.realpathSync(fileURLToPath(new URL('..',import.meta.url)));
-  if(fs.realpathSync(file).startsWith(checkout+path.sep))throw refused();
-  fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
-  const before=fs.fstatSync(fd);
-  if(!before.isFile()||before.uid!==process.getuid()||(before.mode&0o7777)!==0o600||before.size<1||before.size>2048)throw refused();
-  const bytes=fs.readFileSync(fd),after=fs.fstatSync(fd),named=fs.lstatSync(file);
-  if(before.dev!==after.dev||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs||before.ctimeMs!==after.ctimeMs||named.isSymbolicLink()||named.ino!==before.ino||named.dev!==before.dev||digest(bytes)!==expected)throw refused();
-  const text=bytes.toString('ascii');
-  if(bytes.some(byte=>byte<33||byte>126))throw refused();
-  const url=new URL(text);
-  if(url.href!==text||/["\\]/.test(text)||url.origin!=='https://storage.googleapis.com'||url.username||url.password||url.hash||!/^\/alpha-aosp-lab-20261024-private-apks\/update-qa\/[a-f0-9]{32}\/alpha-update\.json$/.test(url.pathname)||!url.search)throw refused();
-  // gcloud emits lowercase signing fields; older admitted URLs use X-Goog-*.
-  // Keep the signed bytes intact and reject aliases of the same parameter.
-  const parameters=new Map<string, string>();
-  for(const [name,value] of url.searchParams){const key=name.toLowerCase();if(parameters.has(key))throw refused();parameters.set(key,value);}
-  const expires=parameters.get('x-goog-expires');
-  if(parameters.get('x-goog-algorithm')!=='GOOG4-RSA-SHA256'||!/^\d+$/.test(expires||'')||Number(expires)<300||Number(expires)>86400)throw refused();
-  return {kind,manifestUrlSha256:expected};
- }catch{throw refused();}finally{if(fd!==undefined)fs.closeSync(fd);}
+/** The one update channel: the public manifest URL in app.config.json, recorded by digest. */
+export function publicUpdateChannel(publicUrl: string): UpdateChannel {
+ return {kind:'public',manifestUrlSha256:digest(publicUrl)};
 }
 
 export function validateUpdateChannel(value: unknown): UpdateChannel {
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='kind,manifestUrlSha256')throw refused();
  const {kind,manifestUrlSha256}=value as Record<string, unknown>;
- if((kind!=='public'&&kind!=='private-qa')||typeof manifestUrlSha256!=='string'||!/^[a-f0-9]{64}$/.test(manifestUrlSha256))throw refused();
+ if(kind!=='public'||typeof manifestUrlSha256!=='string'||!/^[a-f0-9]{64}$/.test(manifestUrlSha256))throw refused();
  return value as UpdateChannel;
 }
 
-/** Read the channel from compiled Android metadata, never from a renderer flag. */
-export function apkUpdateChannel(tree: ManifestNode){
+/**
+ * A legacy APK can lack both metadata fields. Partial or ambiguous metadata
+ * never qualifies for that exception.
+ */
+export function apkUpdateChannelOrLegacy(tree: ManifestNode): UpdateChannel | null {
  const application=tree.children.find(node=>node.name==='manifest')?.children.find(node=>node.name==='application');
+ if(!application)throw Error('APK application manifest is unavailable');
+ const metadata=application.children.filter(node=>node.name==='meta-data'&&
+  (node.attrs.name===UPDATE_CHANNEL_META||node.attrs.name===UPDATE_DIGEST_META));
+ if(!metadata.length)return null;
  const field=(name: string)=>{
-  const rows=application?.children.filter(node=>node.name==='meta-data'&&node.attrs.name===name)||[];
-  if(rows.length!==1)throw new Error('APK update channel metadata missing or duplicated');
+  const rows=metadata.filter(node=>node.attrs.name===name);
+  if(rows.length!==1)throw Error('APK update channel metadata missing or duplicated');
   return rows[0].attrs.value;
  };
  const sha=field(UPDATE_DIGEST_META);
  if(typeof sha!=='string'||!sha.startsWith('sha256:'))throw refused();
  return validateUpdateChannel({kind:field(UPDATE_CHANNEL_META),manifestUrlSha256:sha.slice(7)});
+}
+
+/** Read the channel from compiled Android metadata, never from a renderer flag. */
+export function apkUpdateChannel(tree: ManifestNode) {
+ const channel=apkUpdateChannelOrLegacy(tree);
+ if(!channel)throw Error('APK update channel metadata missing');
+ return channel;
+}
+
+/** Refuse conflicting release evidence before any provisioning effect. */
+export function recordedProvisioningUpdateChannel(...records: unknown[]): UpdateChannel | null {
+ const channels=records.filter(record=>record!==undefined).map(validateUpdateChannel);
+ const reviewed=channels[0]??null;
+ for(const channel of channels)assertProvisioningUpdateChannel(channel,reviewed);
+ return reviewed;
+}
+
+/** Require exact agreement between compiled and reviewed evidence, including legacy absence. */
+export function assertProvisioningUpdateChannel(compiled: UpdateChannel | null, reviewed: UpdateChannel | null) {
+ if(compiled?.kind!==reviewed?.kind||compiled?.manifestUrlSha256!==reviewed?.manifestUrlSha256)
+  throw Error('APK update channel differs from the reviewed release');
 }

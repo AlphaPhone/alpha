@@ -5,7 +5,8 @@ import {fileURLToPath} from 'node:url';
 import {chromium, expect as baseExpect} from '@playwright/test';
 import {createServer} from 'vite';
 import {checkClientFeatures} from '../../../../scripts/prepare-client-features.ts';
-import {filesWithin, sha256, repositoryRoot as root} from '../../../../scripts/quint-lib.ts';
+import {filesWithin, repositoryRoot as root} from '../../../../scripts/quint-lib.ts';
+import {sha256} from '../../../../scripts/sha256.ts';
 import {preloadPageModules} from '../../../../test/browser/helpers/page-modules.ts';
 import {captureInputs, checkTraces, qmap, qset} from '../../refinement/check-traces.mjs';
 
@@ -358,7 +359,7 @@ async function mounted(extraSources) {
     ...filesWithin(resolve(root, 'vendor/eliza/plugins/plugin-native-passwords/src')),
     ...filesWithin(resolve(root, 'vendor/eliza/plugins/plugin-native-system/src')),
     'vendor/eliza/packages/core/src/utils/uuid.ts',
-    'apps/app/index.html', 'vite.config.ts', 'package.json', 'package-lock.json', 'upstream.lock.json',
+    'apps/app/index.html', 'vite.config.ts', 'package.json', 'bun.lock', 'upstream.lock.json',
     'scripts/prepare-client-features.ts', 'scripts/quint-lib.ts', 'scripts/browser-full-reload.ts',
     modelPath, fileURLToPath(import.meta.url),
     'test/browser/helpers/page-modules.ts', ...extraSources,
@@ -368,7 +369,7 @@ async function mounted(extraSources) {
   let server, browser;
   try {
     process.env.ELIZA_DEV_ALLOW_TEST_MOCKS = '';
-    server = await createServer({configFile: resolve(root, 'vite.config.ts'), logLevel: 'error', cacheDir,
+    server = await createServer({configLoader: 'runner', configFile: resolve(root, 'vite.config.ts'), logLevel: 'error', cacheDir,
       server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null},
       define: {'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify('')},
       plugins: [{name: 'quint-legacy-photos-inputs', enforce: 'pre', transform(code, id) {
