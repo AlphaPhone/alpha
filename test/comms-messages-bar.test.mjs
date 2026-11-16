@@ -100,8 +100,12 @@ test('Alpha replaces the slot with one Undo; Send on the bubble is the same Send
 test('on the Alpha image the thread bar, the draft slot and the bubble send only on the owner tap', async () => {
   const {mkdtempSync, rmSync, writeFileSync} = await import('node:fs'), {join, resolve} = await import('node:path'), {tmpdir} = await import('node:os'), {pathToFileURL} = await import('node:url');
   const {build} = await import('esbuild');
-  const dir = mkdtempSync(join(tmpdir(), 'sms-bar-')), priorDocument = globalThis.document, sends = [];
+  const dir = mkdtempSync(join(tmpdir(), 'sms-bar-')), priorDocument = globalThis.document, priorWindow = globalThis.window, priorButton = globalThis.HTMLButtonElement, sends = [];
   globalThis.document = {hidden: false, addEventListener() {}, removeEventListener() {}};
+  // The trusted Send gate needs a real owner tap on a Send control: a trusted click on a button.
+  globalThis.window = Object.assign(new EventTarget(), {setTimeout, clearTimeout});
+  globalThis.HTMLButtonElement = class { constructor(attributes) { this.attributes = attributes; } hasAttribute(name) { return name in this.attributes; } getAttribute(name) { return this.attributes[name] ?? null; } };
+  const tap = attributes => ({isTrusted: true, currentTarget: new globalThis.HTMLButtonElement(attributes), stopPropagation() {}});
   const thread = {id: 'thread:1', addresses: ['+15550100101'], date: 1, snippet: 'Still on for 3?', unread: true};
   globalThis.__smsBarPort = {smsSendHistory: async () => [], status: async () => ({permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, sendMode: 'direct', subscriptions: [{id: 3, slot: 0, displayName: 'SIM'}]}),
     threadPage: async () => ({rows: [thread, {id: 'thread:2', addresses: ['+15550100102'], date: 0, snippet: 'Lunch?', unread: false}], next: null}),
@@ -159,11 +163,11 @@ test('on the Alpha image the thread bar, the draft slot and the bubble send only
     assert.deepEqual(sends, [], 'nothing is sent without the owner tap on Send');
     // Send on the bubble goes through the same review and journal, once, and is noted quietly.
     A.placeAskedSmsDraft('On my way');
-    render().draftBubble.send(); await settle();
+    render().draftBubble.send(tap({'data-alpha-draft-send': ''})); await settle();
     assert.equal(sends.length, 1);
     assert.equal(sends[0].review.body, 'On my way');
     assert.equal(bar().closed.value, '', 'an accepted send clears the slot');
     assert.match(notes.at(-1), /^Sent to /);
     owner.componentWillUnmount();
-  } finally { globalThis.document = priorDocument; delete globalThis.__smsBarPort; rmSync(dir, {recursive: true, force: true}); }
+  } finally { globalThis.document = priorDocument; globalThis.window = priorWindow; globalThis.HTMLButtonElement = priorButton; delete globalThis.__smsBarPort; rmSync(dir, {recursive: true, force: true}); }
 });

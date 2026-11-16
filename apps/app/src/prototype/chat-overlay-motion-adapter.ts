@@ -8,6 +8,7 @@ import {
 	TAP_SLOP,
 } from "../../../../.eliza/client-features/packages/ui/src/gestures/constants";
 import { isEditing, keyboardFreeHeight, stageMinimum } from "../runtime/canvas-geometry";
+import { sizeComposers } from "../runtime/composer-sizing";
 import { publishSheetHeight, visibleDocks } from "../runtime/dock-clearance";
 
 const SHEET_EASE = `cubic-bezier(${OVERLAY_EASE.join(",")})`;
@@ -344,20 +345,6 @@ function dockStyle(d: Drag): Record<string, string> {
 	if (d.mode === "input" || d.mode === "hidden")
 		return { ...still, transform: "none", opacity: d.height > 0 ? "0" : "1" };
 	return { ...still, transform: "none", opacity: String(collapseShare(d)) };
-}
-/** Composer heights last set, so an unchanged composer is not laid out again on every update. */
-const sizedComposers = new WeakMap<HTMLTextAreaElement, { value: string; width: number; height: string }>();
-/** AC-11: each bar field is as tall as its text, from 44px up to its CSS cap, then scrolls inside. */
-function sizeComposers() {
-	for (const input of document.querySelectorAll<HTMLTextAreaElement>("textarea[data-alpha-composer]")) {
-		const value = input.value,
-			width = input.clientWidth,
-			last = sizedComposers.get(input);
-		if (last && last.value === value && last.width === width && last.height === input.style.height) continue;
-		input.style.height = "44px";
-		input.style.height = `${Math.max(44, input.scrollHeight)}px`;
-		sizedComposers.set(input, { value, width, height: input.style.height });
-	}
 }
 /** The nearest ancestor that scrolls vertically and has somewhere to scroll to. */
 function scrollParent(element: HTMLElement): HTMLElement | null {

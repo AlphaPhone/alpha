@@ -6197,7 +6197,7 @@ class Component extends DCLogic {
       var text = String(barValue || "").trim(); if (!text) return;
       self.barFilter = null; self.send(text); if (closed.onText) closed.onText("");
     } : barTarget === "person" ? undefined : onKey;
-    var barDictate = isOn && (barTarget === "filter" || barTarget === "person" && !barFilled);
+    var barDictate = isOn && (barTarget === "filter" || barTarget === "person" && !barFilled && !closed.canSubmit);
     // AC-24: one faint suggestion inside the bar, only while its field is empty and no reply runs.
     var faint = null;
     if (isOn && !voiceOn && !S.typing && !S.secure) {
@@ -6307,8 +6307,8 @@ class Component extends DCLogic {
       barValue: barValue, barOnText: barOnText, barOnKey: barOnKey, barMaxLength: barTarget === "person" && closed.maxLength ? closed.maxLength : undefined,
       barPlaceholder: faint ? "" : comms ? closed.placeholder : (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,
       barAskHint: barTarget === "filter" && isAskSentence(barValue) ? "Enter asks " + name : "",
-      barAlphaControls: barTarget === "alpha", barPersonSend: barTarget === "person" && barFilled,
-      barSendDisabled: barTarget === "person" && !closed.canSubmit, barSubmit: function () { if (closed && closed.submit) closed.submit(); },
+      barAlphaControls: barTarget === "alpha", barPersonSend: barTarget === "person" && (barFilled || !!closed.canSubmit),
+      barSendDisabled: barTarget === "person" && !closed.canSubmit, barSubmit: function (e) { if (closed && closed.submit) closed.submit(e); },
       barDictate: barDictate, barDictateLabel: barTarget === "person" ? "Dictate a text to " + (spec.target.first || spec.target.name || "them") : "Dictate a search or question",
       barMic: function () { if (typeof self.startTranscription === "function") self.startTranscription({ commsTarget: barTarget }); else if (testMocksEnabled) self.toast("Voice input is not connected"); },
       barLeft: left ? { label: left.label, initials: left.initials || "", avatar: left.icon === "avatar", glyph: left.icon === "avatar" ? null : LEFT_ICONS[left.icon] || IC.back,
@@ -6327,7 +6327,7 @@ class Component extends DCLogic {
         tap: function () { if (self.swallowed()) return; self.setState({ chat: "sheet" }); },
         actions: (stripSpec.actions || []).map(function (a) {
           var tone = a.id === "end" || a.id === "decline" ? "alpha-strip-action alpha-end-button" : a.id === "answer" ? "alpha-strip-action alpha-answer-button" : a.id === "send" ? "alpha-strip-action alpha-strip-send" : "alpha-strip-action";
-          return { id: a.id, label: a.label, pressed: a.pressed === undefined ? undefined : !!a.pressed, cls: tone, glyph: STRIP_ICONS[a.id] || IC.right, run: function (e) { if (e) e.stopPropagation(); a.run(); } };
+          return { id: a.id, label: a.label, pressed: a.pressed === undefined ? undefined : !!a.pressed, cls: tone, glyph: STRIP_ICONS[a.id] || IC.right, run: function (e) { if (e) e.stopPropagation(); a.run(e); } };
         }) } : null,
       stageReturn: stageFrom.length && comms && chatMode === "sheet" ? { label: "‹ " + stageFrom[stageFrom.length - 1].title, aria: "Back to " + stageFrom[stageFrom.length - 1].title, go: function () { self.stageBack(); } } : null,
       stageEnter: stage.on && this.stageEnter && Date.now() - this.stageEnter.at < 450 ? this.stageEnter.side : undefined,

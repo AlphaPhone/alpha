@@ -32,7 +32,7 @@ export type CommsClosedField = {
 	/** person and filter: called with the field's whole text on every input. Null for 'alpha'. */
 	onText: ((text: string) => void) | null;
 	/** person: the view's own Send, the same path as its Send button. Null otherwise. */
-	submit: (() => void) | null;
+	submit: ((event?: MouseEvent) => void) | null;
 	canSubmit: boolean;
 	/** person: 1600 for SMS. Null: no limit. */
 	maxLength: number | null;
@@ -42,7 +42,7 @@ export type CommsClosedField = {
 	acceptSuggestion: (() => void) | null;
 };
 
-export type CommsStripAction = { id: CommsStripActionId; label: string; run: () => void; pressed?: boolean };
+export type CommsStripAction = { id: CommsStripActionId; label: string; run: (event?: MouseEvent) => void; pressed?: boolean };
 export type CommsStrip = { title: string; subtitle: string; initials: string | null; live: boolean; actions: CommsStripAction[] };
 export type CommsIncoming = { answer: () => void; decline: () => void; screen: (() => void) | null };
 
