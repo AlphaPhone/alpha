@@ -5096,6 +5096,9 @@
       "bindingChangeLeavesUnconfirmedTest",
       "failedActionCancelsLeaseTest",
       "staleReceiptRetiresLeaseTest",
+      "recoveryNeedsExactOriginalTest",
+      "settledRecoveryNeverRearmsTest",
+      "retiredRecoveryCannotRetainTest",
       "mismatchedHintNeverStartsCompletionTest",
       "failedCompletionRemainsUnconfirmedTest"
     ],
@@ -5120,6 +5123,14 @@
       "apps/app/src/runtime/connection-ui.tsx"
     ],
     "symbols": [
+      {
+        "path": "apps/app/src/prototype/agent-adapter.ts",
+        "name": "recoverPendingActions"
+      },
+      {
+        "path": "apps/app/src/runtime/connection-ui.tsx",
+        "name": "pendingActions"
+      },
       {
         "path": "apps/app/src/prototype/agent-adapter.ts",
         "name": "retainReadReply"
@@ -5168,7 +5179,8 @@
       "One rendered lease, an exact synthetic proposal and its original user message. The source replay supplies the local connection epoch and conversation, while expiry, account credential checks and the voice-media implementation have separate scopes.",
       "A successful approved read carries a hint. A mismatched digest or origin is refused before completion, and a failed approval without a hint cancels the lease.",
       "After the approval settles, the shell context refresh retires a stale lease and requests exact cancellation.",
-      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls."
+      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls.",
+      "The pending recovery replay uses the actual context refresh, pending action list and saved choice parser. Controlled inputs cover missing or mismatched original history, the exact original, repeated recovery, and a retired pending read."
     ]
   },
   {

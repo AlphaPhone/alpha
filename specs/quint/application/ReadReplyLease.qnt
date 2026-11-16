@@ -9,6 +9,10 @@ module ReadReplyLease {
     voiceResumed: 0, wasCancelled: false, cancelRequests: 0, taps: 0 }
   // A proposal with a read reply is retained once, from the chat reply or from pending-action recovery.
   action retain = all { s.bindingCurrent, s' = if (s.lease == "none") { ...s, lease: "pending" } else s }
+  // A recovered proposal may be available before its original question belongs to
+  // this conversation. It gets no completion lease until the exact turn is present.
+  action recover(originalCurrent: bool): bool =
+    if (originalCurrent) retain else all { s.bindingCurrent, s' = s }
   action approveTap = all { s.lease == "pending", s.approval == "none", s.taps < 3,
     s' = { ...s, approval: "running", taps: s.taps + 1 } }
   // The receipt of the approved read. Completion starts only from a pending lease whose binding,
@@ -43,7 +47,7 @@ module ReadReplyLease {
   action retireStaleLease = all { not(s.bindingCurrent), cancel }
   action step = {
     nondet flag = Set(false, true).oneOf()
-    any { retain, approveTap, receipt(flag), rejectHint, duplicateCompletion, completionSettles(flag), cancel, bindingChanged, retireStaleLease, s' = s }
+    any { retain, recover(flag), approveTap, receipt(flag), rejectHint, duplicateCompletion, completionSettles(flag), cancel, bindingChanged, retireStaleLease, s' = s }
   }
 
   val PhaseKnown = s.lease.in(Set("none", "pending", "completing", "done", "cancelled", "unconfirmed"))
@@ -84,4 +88,12 @@ module ReadReplyLease {
   run staleReceiptRetiresLeaseTest = init.then(retain).then(approveTap).then(bindingChanged).then(receipt(true))
     .expect(s.lease == "pending" and s.completions == 0 and s.approval == "none" and safety)
     .then(retireStaleLease).expect(s.lease == "cancelled" and s.cancelRequests == 1 and safety)
+  run recoveryNeedsExactOriginalTest = init.then(recover(false)).then(recover(false))
+    .expect(s.lease == "none" and s.completions == 0 and safety)
+    .then(recover(true)).expect(s.lease == "pending" and s.completions == 0 and safety)
+  run settledRecoveryNeverRearmsTest = init.then(recover(true)).then(approveTap).then(receipt(true))
+    .then(completionSettles(true)).then(recover(true))
+    .expect(s.lease == "done" and s.completions == 2 and s.answers == 1 and safety)
+  run retiredRecoveryCannotRetainTest = init.then(bindingChanged)
+    .expect(s.lease == "none" and safety).then(recover(true).fail())
 }
