@@ -58,7 +58,9 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
  const client=account.client;
 
  const load=useCallback(async(signal:AbortSignal)=>{
-  const [offered,current,mine]=await Promise.all([client.subscriptionPlans(signal),client.subscriptionState(signal),client.referral(signal).catch(()=>null)]);
+  // An unreadable subscription (a Cloud without the billing snapshot, or a refused read) leaves it unknown:
+  // the plans still show, but nothing that could buy twice or change the wrong plan is offered.
+  const [offered,current,mine]=await Promise.all([client.subscriptionPlans(signal),client.subscriptionState(signal).catch(()=>undefined),client.referral(signal).catch(()=>null)]);
   signal.throwIfAborted();
   setPlans(offered);setSubscription(current);setReferral(mine);
  },[client]);
@@ -170,6 +172,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
 
  const active=!!subscription&&(['active','grace','past_due'] as string[]).includes(subscription.state);
  const working=!!busy;
+ const unknownPlan=plans!==null&&subscription===undefined;
  return <section className="alpha-plans" aria-label="Plans" aria-busy={working||undefined}>
   <h2>Plans</h2>
   {plans===null?<p className="alpha-plans-loading">{working?<Busy label={busy}/>:'Plans unavailable'}</p>:
@@ -180,8 +183,9 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
     <p>${plan.allowanceUsd} of AI usage each month</p>
     {current?<p className="alpha-plan-state"><StatusDot tone={subscription?.cancelAtPeriodEnd||subscription?.state==='past_due'?'warn':'ok'}>{subscription?.state==='past_due'?'Payment due':subscription?.cancelAtPeriodEnd?`Ends ${dateLabel(subscription.currentPeriodEnd)}`:`Renews ${dateLabel(subscription!.currentPeriodEnd)}`}</StatusDot></p>
     :pending?<p className="alpha-plan-state"><StatusDot tone="warn">Starts {dateLabel(subscription!.currentPeriodEnd)}</StatusDot></p>
-    :<button type="button" disabled={working||(!!active&&(subscription?.revision===null||!!subscription?.pendingPlanKey))} onClick={()=>active?change(plan):subscribe(plan)}>{active?`Switch to ${plan.name}`:`Subscribe`}</button>}
+    :<button type="button" disabled={working||unknownPlan||(!!active&&(subscription?.revision===null||!!subscription?.pendingPlanKey))} onClick={()=>active?change(plan):subscribe(plan)}>{active?`Switch to ${plan.name}`:`Subscribe`}</button>}
    </li>;})}</ul>}
+  {unknownPlan&&!working&&<p className="alpha-plans-unknown">Couldn’t read your current plan. Refresh the account and try again.</p>}
   {active&&subscription?.control&&<div className="alpha-plans-actions">{subscription.control.action==='undo'
    ?<button type="button" disabled={working||!subscription.control.eligible} onClick={()=>cancelOrKeep('undo')}>Keep plan</button>
    :step.kind==='confirm-cancel'?<><p>Your plan stays until {dateLabel(subscription.currentPeriodEnd)}, then ends.</p><button type="button" className="alpha-plans-danger" disabled={working} onClick={()=>cancelOrKeep('cancel')}>Cancel plan</button><button type="button" disabled={working} onClick={()=>setStep({kind:'idle'})}>Not now</button></>

@@ -3179,6 +3179,8 @@ export const connectionController = {
     // An account sheet already showing (a funding prompt) keeps its purpose, so it still closes by itself
     // once a purchase activates the plan; otherwise the plan sheet opens.
     update({open:true,automaticRestore:false,purpose:state.open?state.purpose:'plan',membershipDismissed:false,planManager:true,message:'',error:''});
+    // A plan may change while the owner manages it (a Stripe page, another device): the next return rechecks at once.
+    planManagementReturn=true;
   },
   /** A plan action finished in the plan manager: read the account and plan again now. */
   planChanged() {
