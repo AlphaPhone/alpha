@@ -10,6 +10,9 @@ const checkTraces = options => check(boundInputs({...options, sources: [...optio
 export async function shellNavigation() {
   const path = 'apps/app/src/prototype/model.js', source = read(path);
   const methods = source.slice(source.indexOf('  goHome(chat) {'), source.indexOf('  /* ---- Android', source.indexOf('  goHome(chat) {')));
+  // AP-16: shellDetent consults the real comms-view predicate (a view with a bar keeps the input rest).
+  const commsStart = source.indexOf('  isCommsView(k) {'), commsMember = source.slice(commsStart, source.indexOf('\n', commsStart) + 1);
+  assert.ok(commsStart >= 0 && commsMember.trim().endsWith('}'), 'model.js isCommsView member');
   const {navigateMobileShell} = await sourceModule('.eliza/client-features/packages/ui/src/mobile-shell/core.ts');
   const traces = [];
   for (const view of ['notes', 'calendar', 'files', 'browser', 'settings']) {
@@ -19,6 +22,7 @@ export async function shellNavigation() {
       S(){return this.state;} setState(patch){Object.assign(this.state,patch);} clear(){} leave(){}
       mod(){return {};} vget(){return {};} vset(){} vreset(){} homeHint(){} toast(){}
       defaultChat(){return 'hidden';} rest(){return this.state.view?'hidden':'input';}
+      ${commsMember}
       ${methods}
     };globalThis.shell=new Shell();`, context);
     const shell = context.shell;
@@ -29,7 +33,7 @@ export async function shellNavigation() {
     shell.back(); checkpoint(t, 'actual shell returns home', call('back'), observe()); traces.push(t);
   }
   return checkTraces({model: 'ShellNavigation', sources: [path], traces, scope: 'bounded-component', assumptions: [
-    'Actual goHome/openView/back method bodies execute with synchronous React state commits and empty view-specific handlers.',
+    'Actual goHome/openView/back method bodies and the isCommsView predicate execute with synchronous React state commits and empty view-specific handlers.',
     'Collapsed input on Home and hidden chat inside app views remain distinct. Modal interception, focus, drawer gestures and asynchronous navigation claims remain untested here.']});
 }
 

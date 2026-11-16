@@ -23,7 +23,7 @@ import tempfile
 from urllib.parse import quote, urlencode
 import zipfile
 
-from app_update_producer import HOSTED_DISPATCH, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
+from app_update_producer import HOSTED_DISPATCH, RetiredSignerRecord, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "alphacompute/alpha"
@@ -287,10 +287,10 @@ def restore_file(root, name, source, size, digest, failure):
             temporary.unlink(missing_ok=True)
 
 
-def restore_producer_evidence(unsigned, product, kind, variants=VARIANTS):
+def restore_producer_evidence(unsigned, product, kind, variants=VARIANTS, *, contract=None):
     with zipfile.ZipFile(unsigned) as archive:
         verified = decode(archive.read("apk-verification.json"))
-        debug = PRODUCER.debug_apk_members(archive, verified, kind, variants)
+        debug = PRODUCER.debug_apk_members(archive, verified, kind, variants, contract=contract)
         producer = decode(archive.read("producer-evidence/manifest.json"))
         names = PRODUCER.archive_members(archive)
         for name, entry, expected in PRODUCER.producer_evidence_members(names, producer["files"]):
@@ -314,8 +314,6 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
     variants = release_contract(plan)["variants"]
     signed_apks = {variant + "-release.apk" for variant in variants}
     expected = signed_apks | {"signed.sha256", "signing-plan.json", "production-signer.sha256"}
-    if plan.get("rotation") is not None:
-        expected.add("rotation.lineage")
     with open_bounded(signed, STORAGE.MAX_BYTES) as (stream, size):
         require(size == receipt["bytes"] and hashlib.file_digest(stream, "sha256").hexdigest() == receipt["sha256"],
                 "Signed bundle bytes differ")
@@ -324,7 +322,7 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
             members = list(islice(archive, len(expected) + 1))
             # The exact uncompressed TAR receipt authenticates its member sizes.
             # APKs may fill that envelope. Metadata keeps the historical ceiling.
-            signed_limit = min(size, apk_member_limit(producer_kind(plan)))
+            signed_limit = min(size, apk_member_limit(producer_kind(plan), input_contract(plan)))
             metadata_limit = apk_member_limit(HOSTED_DISPATCH)
             require(len(members) == len(expected) and {item.name for item in members} == expected and
                     all(item.isfile() and 0 < item.size <= (signed_limit if item.name in signed_apks else metadata_limit)
@@ -336,7 +334,7 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
                 checksum = source.read(257)
             require(len(checksum) <= 256, "Signed checksum receipt differs")
             lines = checksum.decode("ascii").strip().splitlines()
-            matches = [re.fullmatch(r"([0-9a-f]{64})  (standalone|launcher)-release\.apk", line) for line in lines]
+            matches = [re.fullmatch(r"([0-9a-f]{64})  (launcher)-release\.apk", line) for line in lines]
             require(len(matches) == len(variants) and all(matches), "Signed checksum receipt differs")
             apks = {match[2]: match[1] for match in matches}
             require(set(apks) == set(variants), "Signed checksum receipt differs")
@@ -353,25 +351,12 @@ def stage(record, plan, work, product, fetch_unsigned=STORAGE.download, fetch_si
     plan_bytes = read_bounded(work / "signing-plan.json", PLAN_LIMIT)
     with signed_bundle(signed, record["signedBundle"], plan, plan_bytes) as (archive, entries, apks):
         require(apks == record["signedApkSHA256"], "Signed checksum receipt differs")
-        restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"])
-        # The historical verifier requires the complete unsigned pair. They are
-        # verification inputs, never signed/exported release outputs. Keep the
-        # signed launcher separate until its unchanged payload is verified.
-        legacy_cloud = inputs["runtimeProfile"] == "cloud"
-        if legacy_cloud:
-            with zipfile.ZipFile(unsigned) as producer:
-                for variant in inputs["variants"]:
-                    name = variant + "-release-unsigned.apk"
-                    member = producer.getinfo(name)
-                    with producer.open(member) as content:
-                        restore_file(product, "artifacts/" + name, content, member.file_size,
-                                     plan["unsignedApkSHA256"][variant], "Unsigned verifier input differs")
+        restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"], contract=inputs)
         for variant in variants:
             name = variant + "-release.apk"
             member = entries[name]
             with archive.extractfile(member) as content:
-                restore_file(work if legacy_cloud else product,
-                             ("signed/" if legacy_cloud else "artifacts/") + name, content, member.size, apks[variant],
+                restore_file(product, "artifacts/" + name, content, member.size, apks[variant],
                              "Signed APK bytes differ from qualification")
 
 
@@ -463,5 +448,8 @@ if __name__ == "__main__":
             prepare_cli(sys.argv[2:])
         else:
             main()
+    except RetiredSignerRecord as error:
+        # Repository policy, not provider output: name the edit it needs.
+        raise SystemExit(f"Qualified update refused: {error}")
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, zipfile.BadZipFile, tarfile.TarError):
         raise SystemExit("Qualified update refused; preserve exact input receipts for review. No publication was performed by admission.")

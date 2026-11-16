@@ -1904,34 +1904,30 @@
       "scripts/pilot-update.ts",
       "scripts/android-instrumentation.ts",
       "scripts/provision-unit.ts",
-      "scripts/owner/pilot-rotation-journal.ts",
-      "scripts/owner/pilot-rotation.ts",
-      "scripts/owner/VerifyApkRotation.java",
+      "scripts/owner/pilot-install-lock.ts",
       "vendor/eliza/packages/os/scripts/android/apk-release-record.mjs"
     ],
     "tests": [
       "normalUpdateRestoresHomeBeforeStartTest",
       "partialHandoffNeverDispatchesTest",
       "homeTakeoverBlocksDispatchTest",
-      "ambiguousRotationRetainsIntentTest",
-      "verifiedRotationSurvivesRestartRefusalTest",
+      "unknownInstallerResponseNeverStartsTest",
+      "verifiedUpdateFailsOnRestartRefusalTest",
       "runningIntegrityOrUnprovenHomePreventsStartTest",
       "packageOnlyReadbackCanVerifyOrdinaryUpdateTest"
     ],
     "invariants": [
       "LockOwnsUpdate",
       "DispatchHasReadback",
-      "RotationHasDurableInventory",
       "VerificationHasReturnedInstall",
-      "CompletedJournalHasEvidence",
       "RestoreOnlyOwnedHome",
       "RestartHasCleanBoundary",
       "PassedHasStartupEvidence"
     ],
     "abstractions": [
-      "One admitted APK replacement on one selected Android user, with ordinary and reviewed-rotation modes.",
-      "HOME is Alpha, selected stock or an unproven holder/activity pair. The installer reply, verification evidence, HOME cleanup, agent probe and rotation journal are distinct.",
-      "Model witnesses package-only or inventory readback, a lock and a one-shot journal. Actual Android effects, signing admission and host crashes remain separate boundaries."
+      "One admitted same-signer APK replacement on one selected Android user.",
+      "HOME is Alpha, selected stock or an unproven holder/activity pair. The installer reply, verification evidence, HOME cleanup and agent probe are distinct.",
+      "Model witnesses package-only or inventory readback under one device lock. Actual Android effects, signing admission and host crashes remain separate boundaries."
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -2723,6 +2719,7 @@
     ],
     "sources": [
       "scripts/stage-local-agent-sources.ts",
+      "scripts/android-identity.ts",
       "scripts/local-agent-source.ts",
       "android/consumer-host.json",
       "app.config.json",
@@ -2891,7 +2888,6 @@
       "scripts/ci/admit-cloud-signing-input.py",
       "scripts/ci/private-apk-storage.py",
       "scripts/ci/qualified-app-update.py",
-      "scripts/ci/verify-qualified-cloud-launcher.py",
       "scripts/sign-release-apks.ts",
       "scripts/verify-apks.ts",
       "scripts/deliver-app-update.ts",
@@ -3250,7 +3246,8 @@
       "dialRefusedDuringHandoffTest",
       "accessNeededTest",
       "supersededReadTest",
-      "typedNumberClearsNoticeTest"
+      "typedNumberClearsNoticeTest",
+      "emergencyCallRefusesEffectsTest"
     ],
     "invariants": [
       "TypeOK",
@@ -3267,12 +3264,17 @@
       "AccessNeededWitness",
       "DialNoticeWitness",
       "RowsKeptWhileReadingWitness",
-      "StaleHandoffBesideLaterDialWitness"
+      "StaleHandoffBesideLaterDialWitness",
+      "EmergencyRefusalWitness",
+      "UnknownCallRefusalWitness",
+      "BrokenBridgeRefusalWitness"
     ],
     "sources": [
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCallState.java",
       "apps/app/src/prototype/phone-adapter.ts",
+      "apps/app/src/runtime/aosp-image.ts",
       "apps/app/src/runtime/aosp-telephony.ts",
-      "apps/app/src/runtime/aosp-image.ts"
+      "apps/app/src/runtime/call-state.ts"
     ],
     "symbols": [
       {
@@ -3329,13 +3331,16 @@
       "epoch/reads/reading": "refresh() token, recent-call reads in flight and the read latch",
       "session/dials/dialing/handoffs": "the per-showing dial session, handoffs still in flight tagged with the session they started in, the dial latch and dial-screen handoffs issued",
       "calls/needsAccess": "recent-call rows and the call-log access request state",
-      "notice": "the dial notice"
+      "notice": "the dial notice",
+      "inCall/callKind/effects/refused": "AlphaCallState callState (inCall, emergency) as runtime/call-state.ts reads it, and the executor's side-effect ports run or refused behind guardTelephonyPorts",
+      "bridge": "whether the AlphaCallState bridge answers or throws"
     },
     "abstractions": [
       "Six epochs, three handoffs and one row class. busy() is the disjunction of the read and dial latches; a typed number clears the notice, a recent-call row does not.",
       "The shared telephony profile (status, requestAccess, recentCalls, dial) is a controlled port. No call is placed, simulated or reported by the view.",
       "Replayed against installPhoneAdapter with a held telephony plugin (test/quint-phone-session.test.mjs); no installed-image, Telecom or call-log claim.",
-      "The dial handoff branch after a role-required or permission-required refusal is modeled here. Direct Telecom placement is covered separately by PhoneCalls and the Phone adapter tests."
+      "The dial handoff branch after a role-required or permission-required refusal is modeled here. Direct Telecom placement is covered separately by PhoneCalls and the Phone adapter tests.",
+      "AC-19 gate: telecom stands for a Telephony call-state change; alphaEffect for an approved phone call or contact write run by the real telephony executor through the guarded image ports (SMS and dial handoff share the guard). The Java rule is checked separately on the JVM (test/call-state-native.test.mjs)."
     ],
     "sharedSources": [
       "packages/contracts/src/native-telephony.ts"
@@ -3443,7 +3448,8 @@
       "Two credentials; record age is fresh or old and a plan end is none, ahead or past. The seven-day window and the record parser are the shared controller.",
       "Admission reasons follow the shared CloudResidentBindingController; Alpha owns the plan-end choice, the record store, forgetting the record on a refused sign-in or ended plan, and the outcome mapping.",
       "Entitlement verification, the refresher's timers and provider binding are separate. A background refresh that verifies the plan rewrites the record from the end held in memory; signing out removes the record.",
-      "Replayed through admitCloudResident, the shared controller, the redeem step and the background refresher (specs/quint/refinement/services/plan-admission-grace.mjs, test/quint-plan-admission-grace.test.mjs): nine named scenarios including refreshRewritesRecordTest. signOutRemovesRecordTest is scenario and simulation evidence only; cloudSignOut is not driven."
+      "Nine named scenarios including refreshRewritesRecordTest replay through admitCloudResident, the shared controller, the redeem step and the background refresher (specs/quint/refinement/services/plan-admission-grace.mjs).",
+      "signOutRemovesRecordTest replays the whole flag-off connection controller in Chromium with synthetic native and Cloud ports (specs/quint/refinement/services/plan-admission-sign-out.mjs, test/quint-plan-admission-grace.test.mjs). It checks admission record removal, unbinding before exact credential revocation, and refusal to reuse offline grace when the same credential is presented again."
     ],
     "sharedSources": [
       "packages/auth/src/auth/cloud-resident-binding.ts"
@@ -4199,7 +4205,9 @@
       "ongoingRunBlocksRemovalTest",
       "unseenRunRefusedByAgentTest",
       "restartNeedsOpenWorkflowTest",
-      "abortBeforeDispatchReleasesTest"
+      "abortBeforeDispatchReleasesTest",
+      "accountSwitchRefusesUnsentRemovalTest",
+      "accountSwitchRetiresSentRemovalViewTest"
     ],
     "invariants": [
       "TypeOK",
@@ -4311,16 +4319,16 @@
       "busy/stage/reply": "the workflow operation in progress, how far it got (first send or resend), and the answer waiting for it",
       "wire/wireId/wireVersion/wireRemove": "copies of the newest request on the network, with the request, version and operation they name",
       "receipts": "the requests the agent applied and keeps a receipt for, by mutation identity",
-      "seen/sent/resends/admissions/applications": "whether this phone learned of the applied change, sends and reviewed resends per request (two stands for more), and totals",
+      "seen/sent/resends/admissions/applications": "whether the phone settled the exact applied change, sends and reviewed resends per request (two stands for more), and totals",
       "opened/knownOngoing/knownInterrupted": "whether the workflow is open on this phone, and the run history it last read: on opening, after a refusal and after a cancellation. The tap guards use this reading, not the agent's runs"
     },
     "abstractions": [
       "One workflow, three versions and three lifecycle requests. Name and description edits are modeled in WorkflowMetadataEdit.",
+      "Directed account-switch scenarios keep the same agent connection. The switch before durable admission refuses that request. An already-sent mutation can settle the exact agent-scoped journal receipt without publishing into the new account. Cross-account resend is outside the directed scenarios. The generated walks use one account.",
       "The agent applies a request once per mutation identity and only for the version it names, and refuses it while a run is unfinished; a change from elsewhere moves the version on. Whether an applied removal moves the version is not assumed, so a repeat is answered from the receipt alone.",
       "At most two copies of one request are in flight; a third send stands for the loss of one. Requests of an earlier change still in flight when a new one is sent are dropped: they name an older version or already have a receipt.",
       "The resend reads the receipt before posting and again after a refusal; both reads are folded into the resend and refusal steps.",
       "Pending trigger cleanup, which blocks a restore, and agents without reviewed removal are not modeled.",
-      "An account change resets the view; the retained request belongs to its account and is not modeled across accounts.",
       "The run history on screen is at most one run. A run that starts after the workflow was opened is unknown to the phone until the next read; the agent's refusal is what stops a change sent meanwhile."
     ],
     "sharedSources": [
@@ -4476,7 +4484,22 @@
       "startEndsPendingFixTest",
       "chosenOriginEndsLocationRequestTest",
       "submittedSearchEndsLocationRequestTest",
-      "lateFixReplacesUnsubmittedChoiceTest"
+      "lateFixReplacesUnsubmittedChoiceTest",
+      "debouncedDestinationTest",
+      "debouncedOriginTest",
+      "cancelledInputTimerTest",
+      "originAutomaticPendingReuseTest",
+      "originAutomaticReadyReuseTest",
+      "originAutomaticFailureRetryTest",
+      "originEmptyReuseTest",
+      "originSearchFailureRetryTest",
+      "destinationEmptyReuseTest",
+      "originNewEditRetiresReuseTest",
+      "originProviderChangeRetiresReuseTest",
+      "originAutomaticSearchPendingReuseTest",
+      "destinationFailureRetryTest",
+      "locatedOriginReuseTest",
+      "locatedOriginRetryTest"
     ],
     "invariants": [
       "TypeOK",
@@ -4562,14 +4585,17 @@
       "originText/origin/routeReady": "MapsScreenController.originText (empty, a typed name, coordinates, a chosen candidate's name or \"Your location\"), MapsController origin and a ready route",
       "screenOff/hidden": "BackgroundNavigation.active() without and with the screen's confirmed session, and document visibility as seen by screen.hidden",
       "lastChoice": "history only: the destination's most recent explicit choice, for the property outside safety",
-      "handoffQuery/handoffPending/requests/handoffs": "the Maps view's one-use query, the adapter's pendingHandoff and the searches screen.handoff ran"
+      "handoffQuery/handoffPending/requests/handoffs": "the Maps view's one-use query, the adapter's pendingHandoff and the searches screen.handoff ran",
+      "queryAccepted/originAccepted/queryFailed/originFailed": "the adapter's submitted query or origin epoch equals its current search epoch, and that input's search, route or located fix (then its route) failed",
+      "queryRequests/originRequests": "provider searches for destination text, and provider searches, route requests and location starts created by an origin input control"
     },
     "abstractions": [
       "One provider place, one saved place and one origin candidate. Place detail, travel modes, route choices, renaming, sharing, recentering, the map plane and the installed maps app hand-off are not modeled.",
       "openDirections is the route sheet opened without the location permission, or with a starting point typed before the permission read settles; openGrantedDirections is the granted read, which asks for one fix when the starting point is empty and no route exists.",
       "leave is another launcher view taking the screen with Maps coming straight back: settled places, the route sheet and guidance are kept, a pending location request and any request in flight are not. Guidance away from Maps is in MapsNavigationGuidanceReadback.",
       "A hidden page keeps guidance only while its screen-off session is reserved or running; otherwise guidance ends and the route sheet stays. A full release happens for a cross-app search and when the session ends or is refused on a hidden page. A location-permission prompt that keeps a hidden Maps screen is in NavigationProgress and NativeMapsLocation.",
-      "Enter on the located position's text, the fifteen-second location time limit, reroutes and arrival are not modeled. The route request is one outcome action; leaving and hiding abort it and the replay plans again before settling one.",
+      "submitLocatedOrigin is Enter on the located position's text: it asks for one new fix unless this input generation's fix, or the route planned from it, is pending or ready. Enter while a fix requested by another control is pending, and a route for an earlier origin settling while a submitted fix is pending, are not modeled. The fifteen-second location time limit, reroutes and arrival are not modeled. The route request is one outcome action; leaving and hiding abort it and the replay plans again before settling one.",
+      "The provider is a closed port: providerResponse sets how later searches answer (ready, empty, failed or never) and providerChanged replaces the provider, releasing the view and retiring inputs while keeping a cross-app search that has not run. Both are in step at a low rate, so sampled traces also reach hidden guidance. originSearch records the latest starting-point search's answer; a candidate pick is modeled only when that search, or the new one Enter would start, answers with rows.",
       "The hand-off microtask is an action that can be delayed. Every newer explicit action discards the pending hand-off, so a delayed one finds nothing to run.",
       "LateFixKeepsNewerChoiceDesired is outside safety: typing a search or picking a saved place does not end a pending location request, so its fix replaces that choice. lateFixReplacesUnsubmittedChoiceTest replays it."
     ],
@@ -4590,6 +4616,9 @@
     "tests": [
       "exportPickerKeepsDialogsTest",
       "correctionAlwaysClosesTest",
+      "captureAlwaysClosesTest",
+      "searchablePickerSettlementAndHideTest",
+      "pageHideClosesExemptDialogsUnderPickerTest",
       "realBackgroundUnderPickerTest",
       "lateFilePickerResultTest",
       "closedReviewClosesNestedDialogsTest",
@@ -4677,7 +4706,8 @@
     "abstractions": [
       "Three picker calls and three browser file pickers. pagehide closes every dialog and cancels the owned file picker.",
       "A picker that settles while the page stays hidden produces no further hidden event; the dialog then stays until the page is shown or unloaded.",
-      "Trace replay: test/quint-system-picker-visibility.test.mjs replays simulator traces step by step against duringSystemPicker, systemPickerActive and runFilePicker; the five scan dialogs are not mounted, so the hidden-page close rules are checked by the model only and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
+      "The sampled replay in test/quint-system-picker-visibility.test.mjs drives duringSystemPicker, systemPickerActive and the owned file chooser.",
+      "The directed dialog replay in the same suite compiles and mounts all five whole dialog sources. It drives actual scan controls and observes visibility and pagehide, nested close, and the ownership and cleanup of a late camera result. OCR, draft storage, PDF creation, native picker responses and Camera are closed ports. It does not establish Android Activity behavior."
     ],
     "bounds": {
       "pickers": 3,
@@ -4950,6 +4980,7 @@
       "partialListSettlesNothingTest",
       "runRequestNeedsOwnerTest",
       "refusedChangeReleasedTest",
+      "definiteRefusalBeforeReadbackTest",
       "unreadConnectionBlocksChangeTest",
       "lateEnableOverridesTest"
     ],
@@ -5364,5 +5395,45 @@
       "packages/contracts/src/workflow-client.ts",
       "packages/contracts/src/workflow-intents.ts"
     ]
+  },
+  {
+    "path": "specs/quint/services/AndroidInstallationIdentity.qnt",
+    "module": "AndroidInstallationIdentity",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "retainedInputChangeTest",
+      "corruptedViewRefusedTest",
+      "canonicalDefaultRetainedTest",
+      "unknownPackageKeepsProfileTest"
+    ],
+    "invariants": [
+      "AcceptedIdentityIsCurrent",
+      "CacheStatesAreBounded"
+    ],
+    "sources": [
+      "scripts/android-identity.ts",
+      "scripts/android-host.ts",
+      "android/consumer-host.json",
+      "android/app/product.gradle",
+      "capacitor.config.ts"
+    ],
+    "stateMapping": {
+      "selected/profile": "Configured canonical, retained or unsupported installation identity and the generated host identity",
+      "revision/profileRevision": "Two byte identities of the authored source and the projected receipt currently selected",
+      "cache0/cache1": "Absent, valid or tampered generated view for each input identity",
+      "accepted/result": "Actual generation or verification outcome"
+    },
+    "abstractions": [
+      "One authored Java input with two byte identities, canonical and retained package choices, and one unsupported package. Hashes stand for exact bytes.",
+      "Generation and verification are settled synchronous calls. The model does not claim concurrent generation, file-system crash recovery, full Gradle consumption, ELF/JNI/model compatibility, key custody, APK signing, UID/data retention or device acceptance.",
+      "Only safety is claimed; no temporal fairness or progress assumption is used."
+    ],
+    "bounds": {
+      "maxSamples": 1000,
+      "maxSteps": 60,
+      "maxVerifyDepth": 10
+    }
   }
 ]

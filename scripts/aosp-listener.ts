@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {readPixel10aComposition} from './aosp-pixel10a.ts';
 import {stageSenseApk, VOICE_HOST_RECORD} from '../vendor/eliza/packages/os/scripts/android/sense-listener.mjs';
 export {FORBIDDEN,INDICATOR_EXEMPT_ROLES,UNPRIVILEGED,VOICE_HOST_RECORD,LISTENER_BUNDLE_MANIFEST,apkPermissions,checkListenerDescriptor,checkListenerOverlay,checkListenerPermissions,checkListenerSpeechBundle,checkListenerSpeechNatives,listenerPackage,privappPermissions,verifyAospListener} from '../vendor/eliza/packages/os/scripts/android/sense-listener.mjs';
 
@@ -18,7 +19,8 @@ interface ListenerStageOptions {
 
 // The shared adapter verifies and stages a single private copy of the listener APK.
 export function stageListener({root,output,apk,launcherSigner,appId,descriptorFile,production,aapt,apksigner,env}: ListenerStageOptions) {
- const product=JSON.parse(fs.readFileSync(path.join(root,'android/aosp/pixel10a-composition.json'),'utf8'));
+ // The same composition reader the Pixel product and signer use.
+ const product=readPixel10aComposition(root);
  if(product.launcher.packageName!==appId)throw Error('Sense product differs from the admitted launcher');
  const voiceHost=JSON.parse(fs.readFileSync(path.join(root,VOICE_HOST_RECORD),'utf8'));
  const descriptor=descriptorFile ? JSON.parse(fs.readFileSync(descriptorFile,'utf8')) : undefined;

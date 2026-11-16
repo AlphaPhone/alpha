@@ -1,4 +1,7 @@
 import React from 'react';
+import {aospImage} from '../runtime/aosp-image';
+import {createAddressBookClient,isIncompleteAddressBookContact,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
+import {literalMailAddress} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
 import {MailFolderPicker} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
 import type {ServiceReadCache} from '../runtime/service-read-cache';
@@ -373,6 +376,59 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   const publish = (patch: Bag = {}) => shell?.vset('inbox', { nativeMailTick: Date.now(), ...patch });
   const provider = inboxProviderControls(() => publish(), text => api?.toast(text));
   const drafts = inboxDrafts(() => publish(), text => api?.toast(text), provider);
+  const recipientBook=createAddressBookClient(registerPlugin<AddressBookNativePlugin>('AlphaContacts'));
+  type Recipient={name:string;email:string};
+  let recipientVisit='',recipientEpoch=0,recipientAll=false,recipientRows:Recipient[]=[],recipientNext:string|undefined;
+  let recipientReading=false,recipientNeedsAccess=false,recipientStatus='',recipientTimer:ReturnType<typeof setTimeout>|undefined;
+  const recipientBinding=()=>JSON.stringify([homeOwnerKey(),selected,readKey(),composeAttempt,drafts.email()?.draftId]);
+  const retireRecipients=()=>{++recipientEpoch;clearTimeout(recipientTimer);recipientTimer=undefined;recipientAll=false;recipientRows=[];recipientNext=undefined;recipientReading=recipientNeedsAccess=false;recipientStatus='';};
+  function recentRecipients():Recipient[]{
+    const self=String(provider.capabilities()?.from||'').toLowerCase(),seen=new Map<string,Recipient>();
+    for(const message of [...messages].sort((a,b)=>Date.parse(b.receivedAt)-Date.parse(a.receivedAt))){
+      for(const email of [message.fromEmail,...message.to,...(message.cc||[])])
+        if(typeof email==='string'&&literalMailAddress(email)&&email.toLowerCase()!==self&&!seen.has(email.toLowerCase()))
+          seen.set(email.toLowerCase(),{name:email===message.fromEmail?message.from||email:email,email});
+    }
+    return [...seen.values()];
+  }
+  async function readRecipients(query:string,request=false,append=false){
+    if(append&&(recipientReading||!recipientNext))return;
+    const cursor=append?recipientNext:undefined,token=++recipientEpoch,binding=recipientBinding(),connection=connectionController.getCloudClient();
+    const current=()=>token===recipientEpoch&&binding===recipientBinding()&&!!connection&&connectionController.getCloudClient()?.client===connection.client&&!!api?.isActive()&&!document.hidden&&!switchingFrom&&drafts.render().composing&&!drafts.render().c?.busy&&String(drafts.render().c?.toQ||'').trim()===query;
+    if(!aospImage||!current())return;
+    if(query.length>128){recipientRows=[];recipientNext=undefined;recipientStatus=literalMailAddress(query)?'':'Search a shorter name.';publish();return;}
+    recipientReading=true;recipientStatus='';publish();
+    try{
+      const access=await(request?recipientBook.requestPermissions():recipientBook.status());if(!current())return;
+      recipientNeedsAccess=access.available&&!access.readable;
+      if(!access.readable){recipientRows=[];recipientNext=undefined;recipientStatus=recipientNeedsAccess?'Allow Contacts access to choose an address.':'Contacts unavailable';return;}
+      const page=await recipientBook.list(query,50,cursor);if(!current())return;
+      const after=await recipientBook.status();if(!current())return;
+      if(!after.readable){recipientRows=[];recipientNext=undefined;recipientNeedsAccess=after.available;recipientStatus='Contacts access changed. Choose the address again.';return;}
+      const rows=page.contacts.filter(row=>!isIncompleteAddressBookContact(row)).flatMap(row=>'emails' in row?row.emails.filter(literalMailAddress).map(email=>({name:row.name||email,email})):[]);
+      recipientRows=append?[...recipientRows,...rows]:rows;recipientNext=page.next||undefined;recipientNeedsAccess=false;
+    }catch{if(current())recipientStatus='Contacts could not load. Try again.';}
+    finally{if(current()){recipientReading=false;publish();}}
+  }
+  function recipientComposer(c:Bag|null):Bag|null{
+    const binding=recipientBinding();if(binding!==recipientVisit){retireRecipients();recipientVisit=binding;}
+    if(!c){retireRecipients();return null;}
+    if(c.busy||switchingFrom){retireRecipients();return {...c,hasRaw:false,hasSugg:false,sugg:[]};}
+    const query=String(c.toQ||'').trim(),chosen=new Set((c.chips||[]).map((row:Bag)=>String(row.name).toLowerCase())),matches=new Map<string,Recipient>();
+    for(const row of [...recentRecipients(),...recipientRows]){
+      const key=row.email.toLowerCase();
+      if(chosen.has(key)||query&&!(row.name+' '+row.email).toLowerCase().includes(query.toLowerCase()))continue;
+      if(query.toLowerCase()===key&&row.name.toLowerCase()===key)continue;
+      matches.set(key,row);
+    }
+    const shown=recipientAll||query?[...matches.values()]:c.chips?.length?[]:[...matches.values()].slice(0,3);
+    return {...c,hasRaw:false,contactsAvailable:aospImage||matches.size>0,contactsExpanded:recipientAll,contactsBusy:recipientReading,contactsNeedsAccess:recipientNeedsAccess,recipientStatus,
+      openContacts:()=>{if(binding!==recipientBinding()||!api?.isActive()||document.hidden||switchingFrom||drafts.render().c?.busy)return;recipientAll=!recipientAll;recipientRows=[];recipientNext=undefined;++recipientEpoch;clearTimeout(recipientTimer);recipientReading=false;if(recipientAll)void readRecipients(query);publish();},
+      allowContacts:()=>void readRecipients(query,true),moreContacts:!!recipientNext,loadMoreContacts:()=>void readRecipients(query,false,true),
+      onTo:(event:Event)=>{if(c.busy||switchingFrom)return;const text=(event.target as HTMLInputElement).value;retireRecipients();c.onTo(event);if(text.trim())recipientTimer=setTimeout(()=>void readRecipients(text.trim()),180);},
+      toKey:(event:KeyboardEvent)=>{if(event.key===' '&&!event.isComposing&&literalMailAddress(String(c.toQ||'').trim())){event.preventDefault();retireRecipients();c.addRaw();return;}if(event.key==='Enter')retireRecipients();c.toKey(event);},
+      hasSugg:shown.length>0,sugg:shown.map(row=>({...row,ini:row.name.slice(0,1).toUpperCase(),pick:()=>{if(binding!==recipientBinding()||!api?.isActive()||document.hidden||switchingFrom)return;const latest=drafts.render().c;if(!latest||latest.busy)return;retireRecipients();latest.onTo({target:{value:row.email}});latest.addRaw();}}))};
+  }
   p.flushInboxForAppUpdate=async function(current:()=>boolean){
     const exact=()=>current()&&(!shell||shell===this)&&!pendingCompose&&!api?.get('inbox')?.compose&&
       !provider.render().providerReview&&!attachmentView&&!this.mailAttachment;
@@ -418,6 +474,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   });
   provider.onRestored(() => { if (selected && !draftsView()) void load(); });
   function clear(preserveOffline=false) {
+    retireRecipients();
     composeAttempt++; noticeAttempt++; switchingFrom = null; retireHomeLoad();
     invalidateList(!preserveOffline);spamTrashSearch=false;
     providerDrafts = [];
@@ -934,6 +991,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       status: attached ? 'Not attached' : '' };
   }
   view.onLeave = () => {
+    retireRecipients();
     rememberList();readAhead.pause();stopBodyReads();cachedListShown=false;
     // Home retains only header metadata already read, never bodies.
     if (attention.state === 'ready' || attention.state === 'loading') setAttention({ state: 'stale' });
@@ -1046,7 +1104,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     };
 
     const needsGmailConnection=!!binding&&accountsChecked&&accountsSession===binding.sessionId&&!selected&&!operation&&phase!=='scheduled'&&!failure;
-    const draftView = drafts.render(), composer = draftView.c;
+    const draftView = drafts.render(), composer = recipientComposer(draftView.c);
     const fromAccounts = readable().map(account => ({id: account.connectionId, label: account.label}));
     const compose = composer ? {...composer, busy: composer.busy || !!switchingFrom, sendDisabled: composer.sendDisabled || !!switchingFrom,
       fromId: selected, fromAccounts, onFrom: (event: Event) => {
@@ -1095,13 +1153,14 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       restoreAndWarmHome();
     });
     this.gmailNoticeListener=onGmailNotice(()=>void openNotice());void openNotice();
-    this.inboxVisibility=()=>{if(document.hidden){readAhead.pause();stopBodyReads();if(homeLoad)retireHomeLoad();}else{void openNotice();restoreAndWarmHome(true);}};
+    this.inboxVisibility=()=>{if(document.hidden){retireRecipients();readAhead.pause();stopBodyReads();if(homeLoad)retireHomeLoad();}else{void openNotice();restoreAndWarmHome(true);}};
     document.addEventListener('visibilitychange',this.inboxVisibility);
     this.inboxResume = DailyApps.addListener('appResumed', () => { void openNotice(); if (api?.isActive()) { if (!operation) void refreshAccounts(true); }else restoreAndWarmHome(true); }).catch(() => null);
     // Settings can disconnect an account; re-check instead of showing a revoked mailbox.
     // Only a change to the selected account withdraws its notices and drops its saved mail; disconnecting
     // another account keeps both and the saved choice. An account list that cannot be read fails closed.
     this.inboxAccountsChanged = async () => {
+      retireRecipients();
       const binding = connectionController.getCloudClient(), cloudAccount = connectionController.getSnapshot().cloudAccount;
       const grant = selected || homePreview?.accountId || readGmailAccountChoice(cloudAccount) || '';
       retireHomeLoad();

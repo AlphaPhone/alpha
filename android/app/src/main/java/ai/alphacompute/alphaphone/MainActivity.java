@@ -20,6 +20,26 @@ import com.getcapacitor.WebViewListener;
  * Product shell: local assets, Eliza's system bridge, no cloud-auth or implicit kiosk policy.
  */
 public class MainActivity extends BridgeActivity {
+ private volatile String rendererStartupFailure;
+ @Override public void setContentView(int layout){
+  try{super.setContentView(layout);}
+  catch(RuntimeException failure){
+   if(layout==com.getcapacitor.android.R.layout.capacitor_bridge_layout_main){
+    try{rendererStartupFailure=RendererRecoveryBudget.startupFailure(layout,failure,id->getResources().getResourceName(id));}
+    catch(RuntimeException unavailable){rendererStartupFailure="layout=0x"+Integer.toHexString(layout)+"; cause="+failure.getClass().getName();}
+    android.util.Log.e("AlphaRendererStartup",rendererStartupFailure);
+   }
+   throw failure;
+  }
+ }
+ /** Android's existing DUMP permission protects this content-free startup diagnostic. */
+ @Override public void dump(String prefix,java.io.FileDescriptor descriptor,java.io.PrintWriter out,String[] args){
+  if(args!=null&&java.util.Arrays.asList(args).contains("--alpha-renderer-startup")){
+   out.println(prefix+"AlphaRendererStartup version="+BuildConfig.VERSION_CODE+" "+(rendererStartupFailure==null?"none observed":rendererStartupFailure));
+   return;
+  }
+  super.dump(prefix,descriptor,out,args);
+ }
  private volatile int bottomInsetDp = 0;
  private volatile int topInsetDp = 0;
  private boolean keyboardReturnPending;
@@ -361,6 +381,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaMailAttachmentsPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
+  // AP-16 AC-19: Telecom's call state, read-only.
+  registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaCloudSignInPlugin.class);
   registerPlugin(AlphaBillingAuthorityPlugin.class);

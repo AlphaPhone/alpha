@@ -36,7 +36,7 @@ const ports = new Map(Object.entries({
     export class NativeMapsLocation{
       constructor(){this.run=null;harness.locations.push(this);}
       awaitingPermission(){return false;}
-      start(oneShot,onFix,onError){this.run={oneShot,onFix,onError};return Promise.resolve();}
+      start(oneShot,onFix,onError){harness.locationStarts++;this.run={oneShot,onFix,onError};return Promise.resolve();}
       stop(){this.run=null;return Promise.resolve();}
     }
     export const locationPermissionGranted=async()=>harness.locationGranted;`,
@@ -76,8 +76,10 @@ export async function bundleMapsAdapter() {
         const source = readFileSync(args.path, 'utf8');
         assert.equal(source.split(latch).length, 2, 'one hand-off latch declaration to observe');
         return {loader: 'ts', contents: source
-          .replace(latch, latch + '\n  globalThis.mapsHarness.inspect = () => ({pendingHandoff, shell, disposed});')
-          .replaceAll('queueMicrotask(', 'globalThis.mapsHarness.microtask(')};
+          .replace(latch, latch + '\n  globalThis.mapsHarness.inspect = () => ({pendingHandoff, shell, disposed, queryDraft, originDraft, searchEpoch, submittedQueryEpoch, submittedOriginEpoch, submittedOriginKind});')
+          .replaceAll('queueMicrotask(', 'globalThis.mapsHarness.microtask(')
+          .replaceAll('setTimeout(', 'globalThis.mapsHarness.setTimeout(')
+          .replaceAll('clearTimeout(', 'globalThis.mapsHarness.clearTimeout(')};
       });
     }}],
   });
@@ -107,8 +109,12 @@ export async function mountMapsAdapter(code, {storage = {}, configure, view = 'm
   globalThis.localStorage = {getItem: key => stored.has(key) ? stored.get(key) : null, setItem: (key, value) => { stored.set(key, String(value)); }};
   const bridgeListeners = new Set();
   const harness = globalThis.mapsHarness = {
-    locations: [], locationGranted: true, handoffs: 0, screen: null, host: null, surface: null, inspect: null,
-    held: null,
+    locations: [], locationStarts: 0, locationGranted: true, handoffs: 0, screen: null, host: null, surface: null, inspect: null,
+    held: null, inputTimers: new Set(), retiredInputTimers: [],
+    setTimeout(run,delay) { if(delay!==350)return setTimeout(run,delay);const timer={run};this.inputTimers.add(timer);return timer; },
+    clearTimeout(timer) { if(this.inputTimers.delete(timer))this.retiredInputTimers.push(timer);else clearTimeout(timer); },
+    flushInputTimers() { for(const timer of [...this.inputTimers]){this.inputTimers.delete(timer);timer.run();} },
+    flushRetiredInputTimers() { for(const timer of this.retiredInputTimers.splice(0))timer.run(); },
     /** Runs the adapter's microtasks at once, or keeps them while `held` is a list. */
     microtask(run) { if (harness.held) harness.held.push(run); else queueMicrotask(run); },
     cloud: {coverage: undefined, diagnostics: {configured: true, error: ''}, initialize: async () => {}},

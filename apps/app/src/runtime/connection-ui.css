@@ -25,7 +25,7 @@
 .alpha-google-switch small{color:var(--connection-mut,#6b6b6b)}
 .alpha-google-switch input{flex:none;width:22px;height:22px;accent-color:var(--connection-acc,#0000ff)}
 
-/* Plan and sign-in notices share the space between the header and the dock. */
+/* The plan notice stack shares the space between the header and the dock. */
 .alpha-plan-notices {
   --alpha-plan-notices-top:max(calc(48px * var(--phone-scale,1)),calc((var(--alpha-header-clearance,0px) + 8px) * var(--phone-scale,1)),calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 12px));
   position:fixed;left:12px;right:12px;top:calc(var(--phone-top,0px) + var(--alpha-plan-notices-top));z-index:9000;

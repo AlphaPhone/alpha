@@ -64,8 +64,9 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       "--alpha-blue": "#0000FF",
       "--alpha-blue-deep": "#0000B8",
       "--alpha-blue-glow": "#3D47FF",
-      "--alpha-call-accent": "#8A93FF",
       "--alpha-call-green": "#1E9E4A",
+      // AC-28: call green behind white text (5.4:1); the lighter green is for icons and dots (3:1).
+      "--alpha-call-green-text": "#157A38",
       "--alpha-call-red": "#E5383B",
       "--alpha-desktop-backdrop": "#E9E9ED",
       "--alpha-gray-05": "#050505",

@@ -259,7 +259,7 @@ export async function startMountedCalendar({onSource = () => {}, observeCamera =
         if (observeCamera && path === cameraAdapter) {
           const anchor = '  function hideAccess(){';
           assert.ok(code.includes(anchor), 'The mounted camera session must remain observable');
-          return code.replace(anchor, 'window.quintMountedCamera=()=>({phase:session.phase,released:previewReleased,token:session.token(),lens:direction,flash,zoom:zoomRatio,chat:chatCovers(),capture:session.recording?"recording":session.capturing?"photo":"idle"});\n' + anchor);
+          return code.replace(anchor, 'window.quintMountedCamera=()=>({phase:session.phase,released:previewReleased,token:session.token(),lens:direction,flash,zoom:zoomRatio,chat:chatCovers(),capture:session.recording?"recording":session.capturing?"photo":"idle",recordingBusy:session.recording||session.recordingStarting||session.finalizing,capturing:session.capturing,agentQueued:agentRequest?.queued??null,agentRefused:agentRequest?.refused??false,captureHolds:requestedCaptureHolds});\n' + anchor);
         }
         if (path === adapter && code.includes('let retentionAttempt:')) {
           const anchors = ['this.agentCalendar=controller;', 'retain:async(ownerKey,fingerprint,signal,current)=>{',
@@ -287,8 +287,12 @@ export async function startMountedCalendar({onSource = () => {}, observeCamera =
   return {close, async page({legacyTitle = '', eventTitles = [], notes = []} = {}) {
     const page = await browser.newPage({viewport: {width: 412, height: 915}});
     page.setDefaultTimeout(scaledTimeout(60_000));
-    const errors = [], foreign = [];
+    const errors = [], foreign = [], startupFailures=[];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('requestfailed', request => {
+      if(request.resourceType()==='script'&&request.url().startsWith(origin+'/'))
+        startupFailures.push({url:request.url(),error:request.failure()?.errorText});
+    });
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:)/, route => {
       foreign.push(route.request().url());
       return route.abort();
@@ -296,7 +300,8 @@ export async function startMountedCalendar({onSource = () => {}, observeCamera =
     await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})));
     await page.goto(origin, {waitUntil: 'domcontentloaded', timeout: scaledTimeout(120_000)});
     const button = name => page.getByRole('button', {name, exact: true});
-    await button('Calendar').waitFor();
+    try { await button('Calendar').waitFor(); }
+    catch(cause) { throw new Error('Mounted renderer did not start: '+JSON.stringify({errors,startupFailures}),{cause}); }
     await page.evaluate(installCalendar, {legacyTitle, eventTitles, notes});
     const status = async (value, session) => page.waitForFunction(({value, session}) => {
       const s = window.quintCalendar.snapshot();

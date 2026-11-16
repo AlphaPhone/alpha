@@ -1,7 +1,6 @@
 """Read-only admission and signing handoff for Alpha application producer archives."""
 
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -18,7 +17,7 @@ from app_update_producer import (
     CANDIDATE, CANDIDATE_PACKAGE, MAX_ARCHIVE_BYTES, PRIVATE_APK_BUCKET, PRIVATE_RUNNER, REPOSITORY,
     WORKFLOW, WORKFLOW_ID, apk_member_limit, archive_pins, copy_verified, decode, download_github_archive,
     gh_json, github_candidate, github_candidate_download_pins, matches, positive_id, producer_kind,
-    validate_private_storage, input_contract, release_contract,
+    validate_private_storage, input_contract, release_contract, require_current_signer_record,
 )
 
 VARIANTS = ("launcher",)
@@ -42,27 +41,11 @@ def matches_profile(record, profile):
 def reviewed_private_producer(plan, descriptor):
     fields = ("alphaCommit", "sdkCommit", "versionCode", "updateChannel", "archiveBytes",
               "archiveSHA256", "producerManifestSHA256", "privateProducerReceiptSHA256", "unsignedApkSHA256")
+    fields += tuple(key for key in ("applicationId", "purpose") if key in plan)
     approval = {"approval": "approved", **{key: plan.get(key) for key in fields}}
+    require_current_signer_record(descriptor)
     return plan.get("producerKind") == PRIVATE_RUNNER and isinstance(plan.get("privateStorage"), dict) and \
         descriptor.get("privateProducerApproval") == approval
-
-
-def approved_cloud_rotation(plan, descriptor):
-    """Refuse missing/changed launcher migration before any signing key access."""
-    require(input_contract(plan)["runtimeProfile"] == "cloud" and reviewed_private_producer(plan, descriptor),
-            "Unreviewed private Cloud producer")
-    rotation, supplied = descriptor.get("apkSigningRotation"), plan.get("rotation")
-    require(isinstance(rotation, dict) and rotation.get("schema") == 1 and rotation.get("approval") == "approved" and
-            rotation.get("versionCode") == plan["versionCode"] and
-            rotation.get("unsignedApkSHA256") == {"launcher": plan["unsignedApkSHA256"]["launcher"]} and
-            isinstance(supplied, dict) and set(supplied) == {"lineageBase64", "lineageSHA256"},
-            "Reviewed launcher-only Cloud rotation is required")
-    require(isinstance(supplied["lineageBase64"], str) and len(supplied["lineageBase64"]) <= 90000,
-            "Bounded public lineage required")
-    lineage = base64.b64decode(supplied["lineageBase64"], validate=True)
-    require(0 < len(lineage) <= 65536 and digest(lineage) == supplied["lineageSHA256"] == rotation.get("lineageSha256"),
-            "Reviewed Cloud lineage differs")
-    return lineage
 
 
 def checked_source_bytes(root, commit, name, *, object_id=False):
@@ -86,9 +69,11 @@ def verify_native_source(native, files, pin, source_root=None):
     sdk = root / "vendor/eliza"
     product = lambda name: checked_source_bytes(root, pin["alphaCommit"], name)
     recipe = native["recipe"]
+    source_identity = json.loads(product("app.config.json"))["appId"]
+    package = input_contract(pin)["packageName"]
     require(json.loads(product("upstream.lock.json"))["commit"] == pin["sdkCommit"] and
             checked_source_bytes(root, pin["alphaCommit"], "vendor/eliza", object_id=True) == pin["sdkCommit"] and
-            json.loads(product("app.config.json"))["appId"] == recipe["identity"],
+            recipe["identity"] == package == source_identity,
             "Native recipe differs from the reviewed product source")
     for name, value in recipe["productInputs"].items():
         require(digest(product(name)) == value == files[name],
@@ -137,6 +122,12 @@ def candidate_evidence(data, pin, apk_manifest, source_root=None):
                 "Candidate receipt did not clear the observed version floor")
     for field in ("manifestSha256", "finalManifestSha256"):
         require(candidate[field] is None or matches(SHA, candidate[field]), "Invalid candidate manifest digest")
+    return native_evidence(data, pin, candidate, source_root)
+
+
+def native_evidence(data, pin, candidate, source_root=None):
+    """One complete frozen native-input check for hosted and reviewed private producers."""
+    package = input_contract(pin)["packageName"]
     before = data("inputs-before.json")
     require(data("inputs-after.json") == before, "Candidate source snapshots differ")
     snapshot = json.loads(before)
@@ -152,10 +143,10 @@ def candidate_evidence(data, pin, apk_manifest, source_root=None):
             files.get(".eliza/native-inputs/receipt.json"),
             "Candidate native input admission differs from frozen source")
     native = json.loads(native_bytes)
-    require(native["schema"] == "alpha-native-build/v1" and native["consumerSdkCommit"] == candidate["sdkCommit"],
+    require(native["schema"] == "alpha-native-build/v1" and native["consumerSdkCommit"] == pin["sdkCommit"],
             "Candidate native input schema or consumer source differs")
     recipe = native["recipe"]
-    require(recipe["schema"] == "alpha-native-recipe/v1" and recipe["identity"] == CANDIDATE_PACKAGE and
+    require(recipe["schema"] == "alpha-native-recipe/v1" and recipe["identity"] == package and
             matches(COMMIT, recipe["engineCommit"]) and
             digest(json.dumps(recipe, ensure_ascii=False, separators=(",", ":")).encode()) == native["recipeSha256"],
             "Candidate native input recipe differs")
@@ -168,7 +159,7 @@ def candidate_evidence(data, pin, apk_manifest, source_root=None):
             producer["cmake"] == recipe["toolchain"]["cmake"] and producer["python"] == recipe["python"],
             "Candidate native input producer toolchain differs")
     for component in (native["voice"], native["embedding"]):
-        require(component["identity"] == CANDIDATE_PACKAGE and component["forkPin"] == recipe["engineCommit"],
+        require(component["identity"] == package and component["forkPin"] == recipe["engineCommit"],
                 "Candidate native input component identity differs")
     expected_trees = {
         "packages/app/scripts", "plugins/plugin-native-inference/src/model-catalog", "bun.lock",
@@ -197,15 +188,21 @@ def candidate_evidence(data, pin, apk_manifest, source_root=None):
     require(set(recipe["sourceTrees"]) == expected_trees and
             all(matches(COMMIT, value) for value in recipe["sourceTrees"].values()),
             "Candidate native source trees differ")
-    expected_inputs = {"android/embedding-host/build-toolchain.json", "android/embedding-host/native-requirements.txt",
+    expected_inputs = {"app.config.json", "android/consumer-host.json", "android/embedding-host/build-toolchain.json", "android/embedding-host/native-requirements.txt",
                        "android/embedding-host/bootstrap-requirements.txt",
-                       "android/paradee-voice/asr-inputs.json", "scripts/native-build-inputs.ts",
+                       "android/paradee-voice/asr-inputs.json", "scripts/native-build-inputs.ts", "scripts/android-identity.ts",
                        "scripts/build-embedding-host.ts", "scripts/prepare-embedding-host.ts",
                        "scripts/embedding-native-contract.ts", "scripts/embedding-build-remap.ts",
                        "scripts/android-stage-voice-models.ts", "scripts/local-agent-source.ts",
                        "scripts/voice-host.ts", "scripts/paradee-runtime.ts", "scripts/android-abis.ts", "scripts/copy-file-clone.ts", "scripts/stage-embedding-host.ts"}
-    require(isinstance(recipe["productInputs"], dict) and expected_inputs == recipe["productInputs"].keys() and
-            all(matches(SHA, value) and value == files.get(name) for name, value in recipe["productInputs"].items()),
+    # Older canonical native producers bind the original 16 inputs. New producers
+    # add the complete identity bundle.
+    inputs = recipe["productInputs"]
+    identity_inputs = {"app.config.json", "android/consumer-host.json", "scripts/android-identity.ts"}
+    require(isinstance(inputs, dict) and
+            (inputs.keys() == expected_inputs or
+             package == CANDIDATE_PACKAGE and inputs.keys() == expected_inputs - identity_inputs) and
+            all(matches(SHA, value) and value == files.get(name) for name, value in inputs.items()),
             "Candidate native recipe differs from frozen product inputs")
     verify_native_source(native, files, pin, source_root)
     voice, embedding = native["voice"], native["embedding"]
@@ -271,14 +268,14 @@ def candidate_evidence(data, pin, apk_manifest, source_root=None):
     return candidate["apks"]
 
 
-def debug_apk_members(archive, verified, kind, variants=VARIANTS):
+def debug_apk_members(archive, verified, kind, variants=VARIANTS, *, contract=None):
     members = {}
     for variant in variants:
         name = f"{variant}-debug.apk"
         rows = [row for row in verified["results"] if row.get("mode") == "debug" and row.get("variant") == variant]
         require(len(rows) == 1, "Producer debug APK is required for full verification")
         entry = archive.getinfo(name)
-        require(0 < entry.file_size <= apk_member_limit(kind) and
+        require(0 < entry.file_size <= apk_member_limit(kind, contract) and
                 stat.S_IFMT(entry.external_attr >> 16) in (0, stat.S_IFREG) and not entry.flag_bits & 1,
                 "Invalid debug archive member")
         members[name] = (entry, rows[0]["sha256"])
@@ -333,7 +330,8 @@ def admit(archive, pin, stage=None, *, source_root=None):
     variants = contract["variants"]
     profile = contract["runtimeProfile"]
     package = contract["packageName"]
-    archive_json = decode if kind == CANDIDATE else json.loads
+    current_native = kind == CANDIDATE
+    archive_json = decode if current_native else json.loads
     for field in ("alphaCommit", "sdkCommit"):
         require(isinstance(pin.get(field), str) and COMMIT.fullmatch(pin[field]), f"Invalid {field} pin")
     require(type(pin.get("versionCode")) is int and pin["versionCode"] > 0, "Invalid version pin")
@@ -367,7 +365,7 @@ def admit(archive, pin, stage=None, *, source_root=None):
                 private_bytes = data("private-producer.json")
                 require(digest(private_bytes) == pin["privateProducerReceiptSHA256"],
                         "Private producer receipt differs from the reviewed digest")
-                private = json.loads(private_bytes)
+                private = archive_json(private_bytes)
                 require(private["schema"] == 1 and
                         private["producerKind"] == PRIVATE_RUNNER and
                         private["project"] == "alpha-aosp-lab-20261024" and
@@ -428,7 +426,7 @@ def admit(archive, pin, stage=None, *, source_root=None):
                         and row["releaseAdmission"]["blockers"] == ["unsigned release"],
                         f"{variant} is not the reviewed unsigned release")
                 require(row["sha256"] == name_map[name] == apks[variant], f"{variant} APK digests disagree")
-                apk_member = regular_member(names, name, apk_member_limit(kind))
+                apk_member = regular_member(names, name, apk_member_limit(kind, contract))
                 if candidate_apks is not None:
                     require(candidate_apks[variant] == {"file": name, "bytes": apk_member.file_size, "sha256": apks[variant]},
                             f"{variant} candidate receipt differs from the exact APK")
@@ -437,9 +435,9 @@ def admit(archive, pin, stage=None, *, source_root=None):
                             voice["asr"] is True and voice["differences"] == [],
                             f"{variant} candidate requires admitted on-device voice with ASR")
                 release_members[variant] = apk_member
-            if kind == CANDIDATE:
-                # Refuse archives that publication cannot restore before signing.
-                for entry, expected in debug_apk_members(bundle, verified, kind, variants).values():
+            if current_native:
+                # Refuse archives that qualification cannot restore before signing.
+                for entry, expected in debug_apk_members(bundle, verified, kind, variants, contract=contract).values():
                     with bundle.open(entry) as apk:
                         copy_verified(apk, entry.file_size, expected, "Producer debug APK bytes differ")
                 for _, entry, expected in producer_evidence_members(names, producer["files"]):

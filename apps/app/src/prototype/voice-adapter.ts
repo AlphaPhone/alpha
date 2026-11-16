@@ -188,7 +188,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   let transcription: AbortController | undefined;
   let readiness: AbortController | undefined;
   let playback: AbortController | undefined, playing = false;
-  type ChatDestination={mode?:'dictation';shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
+  // AP-16 AC-12: dictation from a comms bar fills the field that bar shows: the person's text, or a
+  // list question that is sent to Alpha when the owner confirms the transcript.
+  type ChatDestination={mode?:'dictation';comms?:'person'|'filter';shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
   let chatDestination:ChatDestination|undefined;
   let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;turnId:string;context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
   let conversationVoice:Pick<BatchVoiceConversation<Clip>,'start'|'stop'|'recheck'|'resume'>|Awaited<ReturnType<typeof developmentCartesiaConversation>>|undefined;
@@ -383,7 +385,17 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       if (!draft.trim()) return;
       if (chatDestination) {
         if(!chatCurrent()){cleanup(true,true,'foreground-check-failed');return;}
-        const { shell, chat, draft:previousDraft } = chatDestination;
+        const { shell, chat, draft:previousDraft, comms } = chatDestination;
+        if(comms){
+          // AC-12/AC-22: the transcript goes into the bar's own field (the text to the person, or the
+          // list filter) exactly as typing would; nothing is sent and the chat stays on the bar.
+          // cleanup() clears the reviewed text, so it is read first.
+          const text=draft;
+          cleanup();
+          shell.fillCommsBar?.(text);
+          shell.setState({chat:'input',voice:'off'});
+          return;
+        }
         const text=previousDraft?[previousDraft,draft].join('\n'):draft;
         cleanup();
         // If the dictated draft is sent exactly as placed, its turn is timed through the reply. The
@@ -456,7 +468,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     // Only the claimed destination may transition before its React callback pins the exact ACK context.
     if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
     return chat.shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open
-      &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden')&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
+      &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden'||!!chat.comms&&['input','hidden'].includes(state.chat))&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
       &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent;
   }
   function navigationContinuation(chat:ChatDestination,token:number,turnId:string):import('../runtime/alpha-client').VoiceNavigationContinuation{
@@ -914,18 +926,23 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   // The voice session speaks its own replies, so the screen-reader announcer stays quiet.
   Component.prototype.voiceConversationActive=function(){return retirement?.shell===this||chatDestination?.shell===this&&chatDestination?.mode!=='dictation'&&stage!=='closed';};
   function maybeStartDictation(){if(chatDestination?.mode==='dictation'&&chatCurrent()&&stage==='ready'&&onDeviceReady&&!busy)void primary();}
-  Component.prototype.startTranscription = function(){
+  Component.prototype.startTranscription = function(options?:{commsTarget?:string}){
     if(this.live===false||document.hidden||connectionController.getSnapshot().open||chatDestination?.shell===this)return;
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before transcribing.');return;}
     // While the retirement panel is shown it already says so; once it was put away, say it again.
     if(mediaUnconfirmed&&!retirement){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
     if(retirement||stage!=='closed'){this.toast('Finish or discard the current recording before transcribing.');return;}
-    const state=this.S(),chat:ChatDestination={mode:'dictation',shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
+    const target=options?.commsTarget,comms=target==='person'||target==='filter'?target:undefined;
+    const state=this.S(),chat:ChatDestination={mode:'dictation',...(comms?{comms}:{}),shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();enter(undefined,!Capacitor.isNativePlatform()&&connectionController.getSnapshot().residentInference==='direct'?'agent':'device',chat);
     stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
-    const token=generation;this.setState({chat:state.chat==='full'?'full':'sheet',voice:'off'},()=>{if(token!==generation||chatDestination!==chat)return;document.querySelector<HTMLElement>('[data-alpha-chat-recorder] button')?.focus({preventScroll:true});maybeStartDictation();});
+    // Dictation into a comms bar's own field records on the bar; the Alpha sheet does not open (AC-12).
+    const token=generation;this.setState({chat:comms?(state.chat==='hidden'?'hidden':'input'):state.chat==='full'?'full':'sheet',voice:'off'},()=>{if(token!==generation||chatDestination!==chat)return;document.querySelector<HTMLElement>(comms?'[data-alpha-bar-recorder] button':'[data-alpha-chat-recorder] button')?.focus({preventScroll:true});maybeStartDictation();});
   };
   Component.prototype.startVoice = async function () {
+    // AC-12: during a call the caller never hears Alpha: a voice turn is transcribed into the request only.
+    const callKind=this.commsSpec?.()?.target?.kind;
+    if(callKind==='call'||callKind==='incoming')return this.startTranscription();
     cancelSavedTranscription();
     if(this.live===false||document.hidden||connectionController.getSnapshot().open||chatDestination?.shell===this)return;
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before starting voice.');return;}
@@ -1213,6 +1230,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   };
   // Agent and direct controls use the same Stop-and-save operation.
   setNotesRecorderControl({
+    isOpen: () => noteRecorder.open,
     start: startNoteRecorder,
     stop: async () => {
       if (!noteRecorder.recordingId || !['recording', 'paused', 'stopped'].includes(noteRecorder.phase)) return 'none';
@@ -1466,19 +1484,22 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         if(!controllable){const capturing=!retiring&&recorder.state==='listening',unconfirmed=retiring||!!conversationVoice&&['error','starting','connecting','idle'].includes(recorder.state);recorder.canMute=true;recorder.muted=unconfirmed?'mixed':capturing?'false':'true';recorder.muteLabel=unconfirmed?'Microphone status unconfirmed':capturing?'Microphone control unavailable':'Microphone off';recorder.toggleMute=()=>{};}
       }
     }
-    out.legacyChatRecorder=!!recorder&&(chatDestination?.mode==='dictation'||recorder.review);
-    out.inlineChatRecorder=!!recorder&&!out.legacyChatRecorder;
+    // A comms bar's dictation shows its recorder on the bar itself, not in the sheet.
+    const onBar=!!recorder&&!retiring&&chatDestination?.mode==='dictation'&&!!chatDestination.comms;
+    out.barRecorder=onBar?{...recorder,status:recorder.review?(recorder.transcript||''):recorder.lines?.[0]?.t||(recorder.live?`Listening ${recorder.clock}`:recorder.state==='transcribing'?'Transcribing…':recorder.clock)}:null;
+    out.legacyChatRecorder=!onBar&&!!recorder&&(chatDestination?.mode==='dictation'||recorder.review);
+    out.inlineChatRecorder=!!recorder&&!out.legacyChatRecorder&&!onBar;
     out.voiceInterim=recorder?.interimTranscript&&!out.msgs?.some((message:Bag)=>message.isUser&&message.text===recorder.interimTranscript&&(!(ownBrowserVoiceActive()||developmentCloudRealtimeVoiceEnabled||(developmentCartesiaVoiceEnabled&&!developmentCloudVoiceEnabled))||!conversationInterimKnownMessages.has(String(message.id))))?recorder.interimTranscript:'';
     if(recorder){recorder.connecting=['starting','connecting'].includes(recorder.state);// A voice planning label shares the transcript's shimmer line above the composer, as typed chat does.
       if(recorder.progressText)out.turnStatus=recorder.progressText;
       const phase=recorder.muted==='true'&&!recorder.muteAutomatically?'paused':recorder.state==='starting'?'connecting':recorder.state==='preparing-speech'?'thinking':recorder.state==='awaiting-user-input'?'paused':recorder.state==='listening'&&recorder.muteAutomatically?'thinking':recorder.state==='stopping'?'interrupting':recorder.state;recorder.problem=recorder.state==='error'||recorder.failed===true;recorder.readinessLabel=recorder.problem?'Voice stopped':recorder.connecting?'Connecting…':phase==='listening'&&recorder.muted!=='mixed'?'Listening':phase==='paused'?'Muted':phase==='speaking'?'Speaking':phase==='thinking'?(recorder.state==='listening'?'Finishing…':'Thinking…'):phase==='transcribing'?'Transcribing…':'';recorder.statusClass=recorder.problem||recorder.readinessLabel?'alpha-voice-startup-status':'alpha-voice-status-hidden';recorder.statusLines=recorder.problem?[{t:'Voice stopped'}]:recorder.readinessLabel?[{t:recorder.readinessLabel}]:recorder.lines;if(recorder.problem){if(recorder.recoveryLabel&&recorder.recoveryLabel!==DENIED_SETTINGS_LABEL)recorder.recoveryLabel='Try again';recorder.progressText='';}recorder.activity=recorder.problem||recorder.connecting?null:React.createElement(VoiceActivity,{phase,theme:this.S().theme==='dark'?'dark':'light'});
       recorder.voiceDetails=false; // Voice failures stay internal; Settings owns service diagnostics.
       recorder.muteAsset=recorder.muted==='true'?'/icons/lucide/mic-off.svg':'/icons/lucide/mic.svg';}
-    const pillVoice=active&&this.S().chat==='hidden'&&(retiring?retirement?.panelChat==='hidden':chatDestination?.chat==='hidden')&&!out.legacyChatRecorder;
+    const pillVoice=active&&this.S().chat==='hidden'&&(retiring?retirement?.panelChat==='hidden':chatDestination?.chat==='hidden')&&!out.legacyChatRecorder&&!onBar;
     out.pillVoiceInactive=!pillVoice;out.pillVoice=pillVoice?{...recorder,activity:recorder.problem||recorder.connecting?null:React.createElement(VoiceActivity,{phase:recorder.connecting?'connecting':recorder.muted==='true'&&!recorder.muteAutomatically?'paused':recorder.state,theme:this.S().theme==='dark'?'dark':'light',compact:true}),controlDown:(event:PointerEvent)=>event.stopPropagation(),stop:()=>retiring?hold():cancelChat()}:null;
     if(retiring&&!pillVoice){out.conversationHidden=false;out.panelOp=1;out.panelPE='auto';if(!out.panelH)out.panelH=560;}
     if(active){
-      out.panelComposer=false;out.showSugg=false;out.showComposer=false;out.showPill=!!pillVoice;out.canStopReply=false;
+      out.panelComposer=false;out.showComposer=onBar;out.showPill=!!pillVoice;out.canStopReply=false;
       out.closeChat=()=>retiring?hold():cancelChat();
     }
     return out;

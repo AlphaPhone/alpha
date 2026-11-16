@@ -38,8 +38,9 @@ export type TelephonyPorts = {
   /** The native reviewed send of one SMS under `operationId`; a repeated id never sends twice. */
   sendSms(number: string, body: string, operationId: string, signal: AbortSignal): Promise<SmsComposeResult['status']>;
   /**
-   * Puts a draft in the text field of the conversation the owner has open (only the one with exactly
-   * `number`, when given). Nothing is sent: Send there stays the owner's tap.
+   * Puts a draft in the draft slot of the conversation the owner has open (only the one with exactly
+   * `number`, when given), replacing any unsent text, which is kept for one Undo. `occupied`: a
+   * message is being sent or has pictures attached there. Nothing is sent: Send stays the owner's tap.
    */
   draftInOpenThread(body: string, number?: string): 'drafted' | 'none-selected' | 'occupied' | 'unavailable';
   openThread(): {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean} | null;
@@ -49,14 +50,25 @@ export type TelephonyPorts = {
 export type TelephonyExecution = {status: 'succeeded' | 'failed' | 'unknown'; summary: string; telephonyResult: TelephonyActionResult};
 
 const LOOKUP_LIMIT = 10;
+export const CONTACT_CALL_LOOKUP_LIMIT = LOOKUP_LIMIT;
+/**
+ * AP-16 D5: an Alpha draft now replaces the owner's unsent text (kept for one Undo), so `occupied`
+ * means only that a message is being sent or has pictures attached. The shared contract's sentence
+ * still describes the old rule until ap16-alpha-sms-reply-occupied-text lands upstream.
+ */
+export const SMS_DRAFT_OCCUPIED_TEXT = 'A message is being sent or has pictures attached in that conversation. Nothing was changed.';
+const resultText = (result: TelephonyActionResult) => result.kind === 'sms-reply' && result.status === 'occupied' ? SMS_DRAFT_OCCUPIED_TEXT : telephonyActionResultText(result);
 const finish = (result: TelephonyActionResult): TelephonyExecution => {
   const outcome = result.kind === 'sms-compose' ? smsComposeReceiptOutcome(result) : telephonyActionReceiptOutcome(result);
-  return {status: outcome === 'applied' ? 'succeeded' : outcome === 'unknown' ? 'unknown' : 'failed', summary: telephonyActionResultText(result), telephonyResult: result};
+  return {status: outcome === 'applied' ? 'succeeded' : outcome === 'unknown' ? 'unknown' : 'failed', summary: resultText(result), telephonyResult: result};
 };
-/** Every dialable number of every matching contact, one option per number. */
+/** Every dialable number of every matching contact, one option per number: the choices the owner
+ * is shown before a call to a contact (and what the AC-20 approval card counts). */
+export function contactCallOptions(rows: {id: string; displayName: string; phoneNumbers: string[]}[], normalize: (number: string) => string | null): ContactMatch[] {
+  return contactLookupMatches(rows, normalize).flatMap(match => match.phoneNumbers.map(number => ({id: match.id, name: match.displayName, number})));
+}
 async function numbers(query: string, ports: TelephonyPorts): Promise<ContactMatch[]> {
-  const rows = await ports.searchContacts(query, LOOKUP_LIMIT);
-  return contactLookupMatches(rows, value => ports.normalize(value)).flatMap(match => match.phoneNumbers.map(number => ({id: match.id, name: match.displayName, number})));
+  return contactCallOptions(await ports.searchContacts(query, LOOKUP_LIMIT), value => ports.normalize(value));
 }
 
 async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal: AbortSignal): Promise<PhoneCallResult> {

@@ -173,8 +173,8 @@ public class AlphaFilesPlugin extends Plugin {
   try(java.io.FileInputStream source=new java.io.FileInputStream(descriptor)){
    StructStat opened=Os.fstat(descriptor);
    if(!reviewed.equals(attachmentIdentity(file,opened)))return result("changed","This file changed. Select it again.");
-   if(opened.st_size>DocumentBytes.MAX_BYTES)return result("failed","Choose a file up to 5 MiB.");
-   bytes=DocumentBytes.read(source);
+   if(opened.st_size>DocumentBytes.CHAT_MAX_BYTES)return result("failed","Choose a file up to 20 MiB.");
+   bytes=DocumentBytes.read(source,DocumentBytes.CHAT_MAX_BYTES);
    if(bytes.length!=opened.st_size||!reviewed.equals(attachmentIdentity(file,Os.fstat(descriptor))))
     return result("changed","This file changed. Select it again.");
   }finally{
