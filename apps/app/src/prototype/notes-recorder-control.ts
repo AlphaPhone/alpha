@@ -4,7 +4,7 @@
  */
 export type NotesRecordStart = 'started' | 'already' | 'failed';
 export type NotesRecordStop = 'saved' | 'retained' | 'none' | 'failed';
-export interface NotesRecorderControl { start(): Promise<NotesRecordStart>; stop(): Promise<NotesRecordStop> }
+export interface NotesRecorderControl { start(): Promise<NotesRecordStart>; stop(): Promise<NotesRecordStop>; isOpen(): boolean }
 let control: NotesRecorderControl | null = null;
 export function setNotesRecorderControl(next: NotesRecorderControl | null) { control = next; }
 export function notesRecorderControl(): NotesRecorderControl | null { return control; }

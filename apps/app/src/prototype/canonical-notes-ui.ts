@@ -114,6 +114,10 @@ export class CanonicalNotesUi {
  }
  get current():boolean{return this.controller.current;}
  get pending():boolean{return this.controller.pending;}
+ get listFilterRevision():string|undefined{
+  const revision=this.controller.revision;
+  if(this.current&&!this.pending&&!this.editing&&this.phase==='ready'&&revision!==null)return String(revision);
+ }
  private get defaultOnly():boolean{const draft=this.editor.draft;return !!draft&&!draft.id&&!!this.defaultTitle&&draft.token===this.defaultTitle.token&&draft.title===this.defaultTitle.title&&!draft.body.trim()&&!authoredNoteText(draft.format).trim();}
  get dirty():boolean{return !!this.editor.draft?.version&&!this.defaultOnly;}
  get editing():boolean{return !!this.editor.draft;}

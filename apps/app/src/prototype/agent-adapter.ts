@@ -40,6 +40,8 @@ import {formatDeviceRecordDateTime} from "../../../../.eliza/client-features/plu
 import {isNativeNotesQuery} from '../../../../.eliza/client-features/packages/contracts/src/native-notes-query.ts';
 import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
+import {notesRecorderControl} from './notes-recorder-control';
+import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../runtime/notes-organize-contract';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
 import {executeCalendarAvailability,type AvailabilityProvider} from '../runtime/calendar-availability';
@@ -581,13 +583,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   function canonicalNotesKey(port:ReturnType<typeof connectionController.getAppRecordClient>):string|null {
     return port?JSON.stringify([port.sessionId,port.scope??null,port.identity.ownerId,port.identity.agentId,port.identity.sessionId,port.identity.origin]):null;
   }
+  function canonicalNotesListObservation(shell:Shell, state:Shell, notes:Shell) {
+    const connection=connectionController.getSnapshot();
+    if(!shell.live||shell.notesSourceMode!=='canonical'||state.view!=='notes'||
+       state.shade||state.drawer||state.secure||state.screen==='lock'||state.screen==='off'||
+       document.hidden||shell.pageSuspended||connection.open||
+       notes.open||notes.folder||notes.compose||notes.record||notes.menu||notes.sheet||notes.folderSheet||notes.trashOpen||notes.previousNotesMenu||
+       notesRecorderControl()?.isOpen()||!connectionController.canonicalNotesFilterAvailable())return;
+    const revision=shell.canonicalNotesUi?.listFilterRevision;
+    const session=connection.session,port=connectionController.getAppRecordClient();
+    if(revision===undefined||!session||!port?.current()||shell.canonicalNotesKey!==canonicalNotesKey(port)||
+       port.sessionId!==session.sessionId||port.identity.sessionId!==session.sessionId||port.identity.ownerId!==session.ownerId||port.identity.agentId!==session.agentId||port.identity.origin!==session.origin)return;
+    return {kind:'canonical-note-source',id:'notes',revision};
+  }
   function syncCanonicalNotes(shell:Shell):void {
     if(!shell.live||shell.notesSourceMode==='legacy')return;
     const port=connectionController.getAppRecordClient(),key=canonicalNotesKey(port);
     if(shell.canonicalNotesKey===key&&(key===null||shell.canonicalNotesUi?.current))return;
     const previous=shell.canonicalNotesUi;shell.canonicalNotesUi=null;shell.canonicalNotesKey=key;previous?.retire();
     shell.notesSelectionKey=null;shell.notesSelection=null;shell.notesStorageFailed=true;shell.notesPending=0;
-    if(!port){shell.notesReady=Promise.resolve();originalSet.call(shell,'notes',{list:[],open:null,trash:[],trashOpen:false,storageStatus:agentAvailabilityNotice(undefined,'Notes unavailable')});return;}
+    if(!port){shell.notesReady=Promise.resolve();originalSet.call(shell,'notes',{list:[],open:null,filter:null,trash:[],trashOpen:false,storageStatus:agentAvailabilityNotice(undefined,'Notes unavailable')});return;}
+    if(previous)originalSet.call(shell,'notes',{filter:null});
     let binding:CanonicalNotesUi;
     const paint=()=>{if(shell.live&&shell.canonicalNotesUi===binding)shell.setState({},()=>context(shell));};
     binding=new CanonicalNotesUi(port,{paint,review:paint,committed:()=>paint(),dropped:title=>{if(shell.live)shell.toast(`Your unsaved edit to “${title}” was lost when the agent connection changed.`);}});
@@ -648,7 +664,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     shell.notesAgentRaw=null;shell.notesAgentBusy=false;clearTimeout(shell.notesAgentTimer);shell.notesLegacyAbsent=false;shell.notesOpenFailed=false;shell.notesLegacyOwnerKey=source==='legacy'?owner:null;
     // A later failed save merges with the draft slot instead of replacing an earlier session's draft.
     shell.notesDraftSaved=null;shell.notesDraftKept=null;shell.notesDraftUnreadable=false;shell.notesDraftDeferred=null;shell.notesDraftConflict=false;shell.notesStorageFull=false;shell.notesCommitUncertain=false;
-    originalSet.call(shell,'notes',{list:[],open:null,q:null,trashOpen:false,trashChecked:false,storageStatus:'Opening Notes…'});
+    originalSet.call(shell,'notes',{list:[],open:null,q:null,filter:null,trashOpen:false,trashChecked:false,storageStatus:'Opening Notes…'});
     if(source==='canonical'){syncCanonicalNotes(shell);context(shell);return true;}
     const epoch=shell.notesSourceEpoch,signal=shell.notesOpenAbort.signal,current=()=>shell.live&&shell.notesSourceMode==='legacy'&&shell.notesSourceEpoch===epoch&&previousNotesOwnerKey()===owner;
     shell.notesStorageFailed=true;shell.notesPending=0;
@@ -684,7 +700,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const selected = notes?.list?.find((note: Shell) => note.id === notes.open)?.id;
     const selectedRecord=notes?.list?.find((note:Shell)=>note.id===selected);
     const selectedKey=shell.notesSourceMode==='canonical'?null:selectedRecord?JSON.stringify(selectedRecord):null;
-    if(shell.notesSourceMode==='canonical'){shell.notesSelectionKey=null;shell.notesSelection=view==='notes'?shell.canonicalNotesUi?.selection()??null:null;}
+    if(shell.notesSourceMode==='canonical'){shell.notesSelectionKey=null;shell.notesSelection=notes?shell.canonicalNotesUi?.selection()??canonicalNotesListObservation(shell,s,notes)??null:null;}
     else if(shell.notesSelectionKey!==selectedKey||(selected&&!shell.notesSelection&&!shell.notesPending&&!shell.notesStorageFailed)){
       shell.notesSelectionKey=selectedKey;shell.notesSelection=null;
       if(selected&&shell.notesStore&&!shell.notesStorageFailed&&!shell.notesPending)void shell.notesStore.target(String(selected)).then((target:Shell)=>{
@@ -936,6 +952,34 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // recorded by the coordinator as an unknown outcome and its message never reaches the owner.
     connectionController.setDeviceExecutor(async (operation, operationId, expectedContext, signal, bindingHash, workflowRoute, journalIdentity, agendaSource) => {
       signal.throwIfAborted(); context(this);
+      if(operation.type==='notes_list_filter'){
+        const declined={status:'failed' as const,summary:'Open the Notes list and review the filter again.'};
+        const unconfirmed={status:'unknown' as const,summary:'Could not confirm the filter. Check the Notes list.'};
+        const reviewed=JSON.stringify(expectedContext),shell=this;
+        const current=(state:Shell=shell.S(),notes:Shell=shell.vget('notes'))=>{
+          const source=canonicalNotesListObservation(shell,state,notes);
+          return !signal.aborted&&!!source&&canonicalNotesListContextAllowed(expectedContext)&&
+            source.revision===expectedContext.selectedObject?.revision&&JSON.stringify(alphaClient.getState().context)===reviewed;
+        };
+        if(!current())return declined;
+        const filter={
+          ...(operation.text===undefined?{}:{text:operation.text}),
+          ...(operation.kind===undefined?{}:{kind:operation.kind}),
+        };
+        return new Promise<{status:'failed'|'unknown'|'succeeded';summary:string}>(resolve=>{
+          let admitted=false;
+          const abort=()=>resolve(admitted?unconfirmed:declined);
+          signal.addEventListener('abort',abort,{once:true});
+          this.vset('notes',{filter},{
+            when:(state:Shell,notes:Shell)=>{const allowed=current(state,notes);admitted||=allowed;return allowed;},
+            afterCommit:()=>{
+              signal.removeEventListener('abort',abort);
+              // A speculative React update is not a receipt. Require the exact filter on the still-owned list.
+              resolve(this.vget('notes').filter===filter&&current()?{status:'succeeded',summary:'Filtered'}:admitted?unconfirmed:declined);
+            },
+          });
+        });
+      }
       if (!this.live || JSON.stringify(alphaClient.getState().context) !== JSON.stringify(expectedContext)) throw new Error('Phone context changed');
       if(isCameraCapture(operation)){
         const ownerSession=connectionController.getSnapshot().session;
@@ -1311,7 +1355,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.live = false; alphaClient.disconnect(); window.removeEventListener('alpha-back', this.backHandler); window.removeEventListener('launcher-home', this.homeHandler); window.removeEventListener('alpha-selected-context', this.selectionHandler);
     void this.assistListener?.then((l: Shell) => l?.remove()); originalUnmount.call(this);
   };
-  p.vset = function (key: string, patch: Shell, options?: {exact?: boolean;keepSelection?: boolean;afterCommit?: () => void}) {
+  p.vset = function (key: string, patch: Shell, options?: {exact?: boolean;keepSelection?: boolean;when?: (state:Shell,view:Shell) => boolean;afterCommit?: () => void}) {
     if(key==='notes'&&Object.hasOwn(patch,'list')&&this.notesSourceMode!=='legacy'){originalSet.call(this,key,{compose:false,record:false});this.toast('That note change could not be saved. Your draft is still open.');return false;}
     if (key !== 'notes' || !patch.list) { originalSet.call(this,key,patch,options);return true; }
     if(this.notesLegacyAbsent){this.toast('There are no previous notes on this phone.');return false;}
