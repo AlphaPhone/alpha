@@ -11115,6 +11115,7 @@
     "invariant": "safety",
     "tests": [
       "readThenApplyTest",
+      "seriesAndGuestsRoundTripTest",
       "staleUpdateRefusedTest",
       "pendingDeletionBlocksTest",
       "deleteIsStagedTest",
@@ -11150,6 +11151,7 @@
       "apps/app/src/browser/calendar-store.ts",
       "apps/app/src/browser/calendar-deletions.ts",
       "apps/app/src/browser/calendar-records.ts",
+      "apps/app/src/browser/calendar-sync-fields.ts",
       "apps/app/src/runtime/deletion-owner.ts"
     ],
     "symbols": [
@@ -11225,6 +11227,7 @@
     "stateMapping": {
       "bound/sourceSame": "current() of the controller's binding, and the stored sourceRevision compared with the one the port was created for",
       "exists/revision/pending": "The event row in the stored calendar document, its revision, and calendarDeletionPending for it",
+      "series/guests/richUpdate/stagedScope": "Stored recurrence and attendee presence, the dedicated provider payload, and the most recent deletion scope staged by this port",
       "known/expected": "The revision the controller last received from get or applyProviderEvent, and the expectedRevision of the running call",
       "op/phase/result/wrote": "The running get, applyProviderEvent or delete: before the document step, or after it with only the closing check left; what the document step did and the revision it stored",
       "ownerCurrent": "browserDeletionOwnerCurrent for the owner captured when delete started",
@@ -11236,7 +11239,8 @@
     "abstractions": [
       "One stored event and one call at a time; the sync controller serializes its port calls. Revisions are counted; the stored ones are opaque strings.",
       "A provider event is valid or not; the checks behind that (title, dates, whole all-day dates, time zone) are one input. A stored event that needs recovery before syncing is not modeled.",
-      "Recurring series, attendees and the fields an update carries are not modeled; a deletion is staged for the event with the owner's Undo window and is undone or finished by the owner's steps.",
+      "A dedicated provider round trip tracks whether a supported series and a nonempty attendee list survive applying, reading, and staging a series deletion. The source replay checks literal recurrence, exclusions and optionality.",
+      "The generated schedules use single events without attendees. Unsupported recurrence and guest forms are outside this scenario. Deletion uses the owner's Undo window and is undone or finished by the owner's steps.",
       "The step weights its choices so sampled walks complete calls; every action stays enabled in every state its guard allows.",
       "CalendarLinkedSync (services) models the shared sync controller and assumes this port's contract."
     ]
