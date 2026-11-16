@@ -10506,6 +10506,7 @@
       "diagnosticLimitRetiresStatusTest",
       "unmountRetiresDiagnosticLogTest",
       "olderRefreshCannotHidePublishedFailureTest",
+      "freshRefreshShowsUnpublishedFailureTest",
       "refreshAfterPublishShowsTheLogTest"
     ],
     "invariants": [

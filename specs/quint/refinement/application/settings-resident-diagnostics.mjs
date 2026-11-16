@@ -16,7 +16,7 @@ const logImport = 'virtual:settings-diagnostic-log-port';
 
 function observePorts() {
   const statusReads = new Map(), logReads = new Map(), refreshes = new Map();
-  let issued = 0, nextLog, armedRefresh = 0;
+  let issued = 0, nextLog, armedRefresh = 0, refreshPublished = 0;
   // The page clock is paused, so yielding uses a message task, which the clock does not control.
   const yieldTask = () => new Promise(resolve => {
     const channel = new MessageChannel();
@@ -26,6 +26,20 @@ function observePorts() {
   return {
     // The next ordinary refresh() is held after all its reads (including its log snapshot) return.
     armRefresh(token) { armedRefresh = token; },
+    // refresh() reached its own publish (the nativeReadAt write) for the mounted owner.
+    refreshPublished() { refreshPublished++; },
+    refreshPublishes() { return refreshPublished; },
+    // Failure depths in the rendered Problem log, one per row text.
+    rendered() {
+      const page = document.querySelector('[data-settings-page="Problem log"]:not([inert])');
+      if (!page) return [];
+      const depths = [], walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const match = /Depth (\d+)$/.exec(walker.currentNode.textContent.trim());
+        if (match) depths.push(Number(match[1]));
+      }
+      return depths.sort((a, b) => a - b);
+    },
     holdRefresh(reads) {
       if (!armedRefresh) return reads;
       const token = armedRefresh;
@@ -59,13 +73,13 @@ function observePorts() {
       if (!nextLog) return;
       const {token, signal} = nextLog;
       nextLog = undefined;
-      return new Promise(settle => logReads.set(token, {signal, settle}));
+      return new Promise((settle, fail) => logReads.set(token, {signal, settle, fail}));
     },
-    async settleLog(token) {
+    async settleLog(token, ok = true) {
       const read = logReads.get(token);
       if (!read) throw Error('Missing log request: ' + JSON.stringify(this.observe()));
       logReads.delete(token);
-      read.settle();
+      if (ok) read.settle(); else read.fail(Error('Crash log unavailable'));
       await yieldTask();
     },
     observe() {
@@ -124,6 +138,8 @@ export async function checkSettingsResidentDiagnostics(extraSources = []) {
                 'let crashLog: CrashLog | null = null, crashBusy = false, diagnosticsBusy = false; globalThis.quintSettingsCrashLog = () => crashLog;'],
               ['storage] = await Promise.allSettled([', 'storage] = await globalThis.quintDiagnostics.holdRefresh(Promise.allSettled(['],
               ['connectionController.refreshProviderStatus() : Promise.resolve()]);', 'connectionController.refreshProviderStatus() : Promise.resolve()]));'],
+              ["instance.vset('settings', { nativeReadAt: Date.now() });",
+                "instance.vset('settings', { nativeReadAt: Date.now() }); globalThis.quintDiagnostics.refreshPublished();"],
             ];
             for (const [from, to] of patches) {
               if (code.split(from).length !== 2) throw Error('Settings adapter port anchor changed: ' + from);
@@ -197,16 +213,26 @@ export async function checkSettingsResidentDiagnostics(extraSources = []) {
             await page.evaluate(token => window.quintDiagnostics.settleStatus(token, true), token);
             await mark('Resident failure reaches the held status port', 'diagnosticStatusSettles', {token, instance: 1}, true);
           },
-          async log(token, visible = false) {
-            await page.evaluate(token => window.quintDiagnostics.settleLog(token), token);
+          async log(token, visible = false, ok = true) {
+            await page.evaluate(([token, ok]) => window.quintDiagnostics.settleLog(token, ok), [token, ok]);
             if (visible) await page.getByText(new RegExp(`Depth ${token}`)).waitFor();
-            await mark('Local log read returns at its asynchronous boundary', 'diagnosticLogSettles', {token, instance: 1}, true);
+            await mark(ok ? 'Local log read returns at its asynchronous boundary' : 'Local log reload fails',
+              'diagnosticLogSettles', {token, instance: 1}, ok);
           },
-          async refresh(token, visible) {
+          // `rendered` lists the failure depths the Problem log must show once this refresh has
+          // published and Settings has rendered it.
+          async refresh(token, rendered) {
+            const before = rendered && await page.evaluate(() => window.quintDiagnostics.refreshPublishes());
             await page.evaluate(token => window.quintDiagnostics.settleRefresh(token), token);
-            // The rendered Problem log still lists the failure the diagnostic published.
-            if (visible) await page.getByText(new RegExp(`Depth ${visible}`)).waitFor();
-            await mark('The tap\'s ordinary refresh returns with the log it read first', 'logRefreshSettles', token);
+            if (rendered) {
+              await page.waitForFunction(before => window.quintDiagnostics.refreshPublishes() > before, before);
+              // Render barrier: the page shows the adapter's crash log as it is after the refresh.
+              await page.waitForFunction(() => JSON.stringify(window.quintDiagnostics.rendered())
+                === JSON.stringify([...window.quintDiagnostics.observe().shown].sort((a, b) => a - b)));
+              assert.deepEqual(await page.evaluate(() => window.quintDiagnostics.rendered()), [...rendered].sort((a, b) => a - b),
+                'The rendered Problem log after the ordinary refresh');
+            }
+            await mark('The tap\'s ordinary refresh returns with the log it read', 'logRefreshSettles', token);
           },
           async limit(token) {
             await page.clock.fastForward(10_000);
@@ -232,7 +258,7 @@ export async function checkSettingsResidentDiagnostics(extraSources = []) {
       await c.status(2);
       await c.log(2, true);
       await c.refresh(1);
-      await c.refresh(2, 2);
+      await c.refresh(2, [2]);
     });
     await scenario('diagnostic deadline drops late status', async c => {
       await c.start(1);
@@ -251,7 +277,17 @@ export async function checkSettingsResidentDiagnostics(extraSources = []) {
       await c.start(1);
       await c.status(1);
       await c.log(1, true);
-      await c.refresh(1, 1);
+      await c.refresh(1, [1]);
+    });
+    await scenario('fresh ordinary refresh shows a failure the diagnostic could not publish', async c => {
+      await c.start(1);
+      await c.status(1);
+      await c.log(1, true);
+      await c.start(2);
+      await c.status(2);
+      await c.log(2, false, false);
+      await c.start(3);
+      await c.refresh(3, [1, 2]);
     });
   } finally {
     await browser?.close();
