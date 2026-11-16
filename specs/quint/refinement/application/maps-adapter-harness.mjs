@@ -76,7 +76,7 @@ export async function bundleMapsAdapter() {
         const source = readFileSync(args.path, 'utf8');
         assert.equal(source.split(latch).length, 2, 'one hand-off latch declaration to observe');
         return {loader: 'ts', contents: source
-          .replace(latch, latch + '\n  globalThis.mapsHarness.inspect = () => ({pendingHandoff, shell, disposed, queryDraft, originDraft});')
+          .replace(latch, latch + '\n  globalThis.mapsHarness.inspect = () => ({pendingHandoff, shell, disposed, queryDraft, originDraft, searchEpoch, submittedQueryEpoch, submittedOriginEpoch, submittedOriginKind});')
           .replaceAll('queueMicrotask(', 'globalThis.mapsHarness.microtask(')
           .replaceAll('setTimeout(', 'globalThis.mapsHarness.setTimeout(')
           .replaceAll('clearTimeout(', 'globalThis.mapsHarness.clearTimeout(')};

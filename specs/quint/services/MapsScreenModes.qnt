@@ -5,6 +5,10 @@ module MapsScreenModes {
     searching: bool, hasQuery: bool,
     // Whether the provider answered the submitted search; its rows are what a result pick needs.
     results: bool,
+    // Input-generation ownership and observable provider effects. A repeated Enter reuses only
+    // this generation; an error permits a new explicit attempt. Response mode is a closed port.
+    queryAccepted: bool, originAccepted: bool, queryFailed: bool, originFailed: bool,
+    queryRequests: int, originRequests: int, responseMode: str,
     // A rendered editing draft waits for its350ms timer; committed screen query stays unchanged.
     pendingInput: str,
     // The destination: a provider place, a saved place or the device's location.
@@ -32,14 +36,15 @@ module MapsScreenModes {
     else if (v.selected != "none") "place" else if (v.searching) "results" else "base"
   /// The destination search field is drawn outside the route sheet and guidance.
   pure def searchShown(v: Screen): bool = not(v.directions) and not(v.navigating)
-  pure def handoffDiscarded(v: Screen): Screen = { ...v, handoffPending: false, handoffQuery: false }
+  pure def inputsRetired(v: Screen): Screen = { ...v, queryAccepted: false, originAccepted: false, queryFailed: false, originFailed: false }
+  pure def handoffDiscarded(v: Screen): Screen = { ...inputsRetired(v), handoffPending: false, handoffQuery: false }
   pure def guidanceEnded(v: Screen): Screen = { ...v, navigating: false, screenOff: "none" }
   /// A newer choice ends a pending location request together with its watch.
   pure def locateCancelled(v: Screen): Screen = { ...v, locating: false, watch: false }
   /// Enter in the search field: a typed search replaces a pending hand-off and a pending
   /// location request. Every search the controller runs, the empty one included, retires its route.
   pure def submitted(v: Screen): Screen =
-    { ...locateCancelled(handoffDiscarded(v)), selected: "none", searching: true, results: true, pendingInput: "none", hasQuery: true,
+    { ...locateCancelled(handoffDiscarded(v)), selected: "none", searching: true, results: v.responseMode == "ready", queryAccepted: true, queryFailed: v.responseMode == "error", queryRequests: v.queryRequests + 1, pendingInput: "none", hasQuery: true,
       routeReady: false, lastChoice: "search" }
   /// Maps is released: only the search text, its open sheet and the origin text stay; the rows,
   /// the origin and the route go with the controller.
@@ -50,7 +55,7 @@ module MapsScreenModes {
   action init = s' = {
     searching: false, hasQuery: false, results: false, pendingInput: "none", selected: "none", directions: false, originMode: false,
     navigating: false, screenOff: "none", hidden: false, locating: false, watch: false,
-    originText: "empty", origin: false, routeReady: false,
+    originText: "empty", origin: false, routeReady: false, queryAccepted: false, originAccepted: false, queryFailed: false, originFailed: false, queryRequests: 0, originRequests: 0, responseMode: "ready",
     lastChoice: "none", handoffQuery: false, handoffPending: false, requests: 0, handoffs: 0
   }
   /// The shared controller commits input immediately. Alpha's host owns the
@@ -75,31 +80,32 @@ module MapsScreenModes {
   }
   action clearQuery = all {
     searchShown(s),
-    s' = { ...s, hasQuery: false, results: false, selected: "none", searching: true, routeReady: false, pendingInput: "none",
+    s' = { ...inputsRetired(s), hasQuery: false, results: false, selected: "none", searching: true, routeReady: false, pendingInput: "none",
       lastChoice: "typing" }
   }
-  action submitSearch = all { searchShown(s), s.hasQuery or s.pendingInput == "query", s' = submitted(s) }
+  action submitSearch = all { searchShown(s), s.hasQuery or s.pendingInput == "query",
+    s' = if(s.pendingInput == "none" and s.queryAccepted and not(s.queryFailed) and not(s.handoffQuery or s.handoffPending)) s else submitted(s) }
   action debounceInput = all {
     not(s.hidden), s.pendingInput != "none",
     s' = if(s.pendingInput == "query") submitted(s)
-      else if(s.originText == "coordinates") { ...locateCancelled(s), pendingInput: "none", originMode: false, origin: true, routeReady: false }
-      else { ...locateCancelled(s), pendingInput: "none", originMode: true }
+      else if(s.originText == "coordinates") { ...locateCancelled(s), pendingInput: "none", originMode: false, origin: true, routeReady: false, originAccepted: true, originFailed: false, originRequests: s.originRequests + 1 }
+      else { ...locateCancelled(s), pendingInput: "none", originMode: true, originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1 }
   }
   action lateInputTimer = all { s.pendingInput == "none", s' = s }
   action pickResult = all {
     mode(s) == "results", s.results, s.pendingInput == "none",
-    s' = { ...s, selected: "place", searching: false, routeReady: false, lastChoice: "place", pendingInput: "none" }
+    s' = { ...inputsRetired(s), selected: "place", searching: false, routeReady: false, lastChoice: "place", pendingInput: "none" }
   }
   /// A saved place is shown from its stored row; the controller's selection and route are untouched.
   action pickSaved = all {
     mode(s).in(Set("base", "results")),
     s' = { ...handoffDiscarded(s), selected: "saved", searching: false, lastChoice: "place", pendingInput: "none" }
   }
-  action closePlace = all { mode(s) == "place", s' = { ...s, selected: "none", pendingInput: "none" } }
+  action closePlace = all { mode(s) == "place", s' = { ...inputsRetired(s), selected: "none", pendingInput: "none" } }
   /// Only a provider place is already the controller's selection: any other destination is
   /// selected now, which retires the route planned for the previous one.
   pure def directionsOpened(v: Screen): Screen = {
-    val opened = { ...v, directions: true, pendingInput: "none", routeReady: v.routeReady and v.selected == "place" }
+    val opened = { ...inputsRetired(v), directions: true, pendingInput: "none", routeReady: v.routeReady and v.selected == "place" }
     if(opened.originText == "empty" and not(opened.routeReady) and not(v.locating))
       { ...handoffDiscarded(opened), locating: true, watch: true, searching: false }
     else opened
@@ -148,26 +154,32 @@ module MapsScreenModes {
   /// Enter on a name searches for starting points.
   action searchOrigin = all {
     mode(s).in(Set("dir", "origin")), s.originText.in(Set("typed", "chosen")),
-    s' = { ...locateCancelled(s), originMode: true, pendingInput: "none" }
+    s' = if(s.pendingInput == "none" and s.originAccepted and not(s.originFailed) and not(s.handoffQuery or s.handoffPending)) s
+      else { ...locateCancelled(s), originMode: true, pendingInput: "none", originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1 }
   }
   /// A chosen starting point, or Enter on coordinates, becomes the origin and ends a pending
   /// location request. Coordinates stay in the field; a candidate's name replaces a typed name.
   action chooseOrigin = all {
     (mode(s) == "origin" and s.originText.in(Set("typed", "chosen"))) or
       (mode(s).in(Set("dir", "origin")) and s.originText == "coordinates"),
-    s' = { ...locateCancelled(s), originMode: false, pendingInput: "none",
-      originText: if (s.originText == "coordinates") s.originText else "chosen",
-      origin: true, routeReady: false }
+    s' = if(s.originText == "coordinates" and s.pendingInput == "none" and s.originAccepted and not(s.originFailed) and not(s.handoffQuery or s.handoffPending)) s
+      else { ...inputsRetired(locateCancelled(s)), originMode: false, pendingInput: "none",
+        originText: if (s.originText == "coordinates") s.originText else "chosen",
+        originAccepted: s.originText == "coordinates", originFailed: false,
+        originRequests: s.originRequests + (if(s.originText == "coordinates") 1 else 0),
+        origin: true, routeReady: false }
   }
   /// The provider answers a route request. Leaving and hiding abort the request in flight.
   action routePlanned(ready: bool): bool = all {
-    s.directions, not(s.navigating), s.origin, not(s.hidden), s' = { ...s, routeReady: ready }
+    s.directions, not(s.navigating), s.origin, not(s.hidden),
+    s' = { ...if(s.routeReady or s.originFailed) inputsRetired(s) else s, routeReady: ready,
+      originFailed: s.originAccepted and not(s.routeReady or s.originFailed) and not(ready) }
   }
   /// Start ends a pending location request and reserves the native screen-off session at once;
   /// the session's confirmation comes later.
   action start = all {
     mode(s) == "dir", s.routeReady, not(s.hidden),
-    s' = { ...locateCancelled(s), navigating: true, screenOff: "starting" }
+    s' = { ...inputsRetired(locateCancelled(s)), navigating: true, screenOff: "starting" }
   }
   action screenOffStarted = all { s.screenOff == "starting", s' = { ...s, screenOff: "running" } }
   /// The session could not start, or ended by itself: guidance goes on in front and Maps is
@@ -179,7 +191,7 @@ module MapsScreenModes {
     s.screenOff == "running", s' = if (s.hidden) released(s) else { ...s, screenOff: "none" }
   }
   /// End on the sheet, or Stop on the notification.
-  action end = all { s.navigating, s' = guidanceEnded(s) }
+  action end = all { s.navigating, s' = inputsRetired(guidanceEnded(s)) }
   /// System Back unwinds one layer: origin search, route sheet or guidance, place, search.
   action back = {
     val base = { ...handoffDiscarded(s), pendingInput: "none" }
@@ -191,13 +203,13 @@ module MapsScreenModes {
   }
   /// Another launcher view takes the screen and Maps comes back: settled places, the route sheet
   /// and guidance are kept; a pending location request is not.
-  action leave = s' = { ...locateCancelled(s), pendingInput: "none" }
+  action leave = s' = { ...inputsRetired(locateCancelled(s)), pendingInput: "none" }
   /// A hidden page keeps guidance only while its screen-off session is reserved or running.
   /// Otherwise guidance ends and Maps is left as for another view.
   action hide = all {
     not(s.hidden),
-    s' = if (s.navigating and s.screenOff != "none") { ...s, hidden: true, pendingInput: "none" }
-      else { ...guidanceEnded(locateCancelled(s)), hidden: true, pendingInput: "none" }
+    s' = if (s.navigating and s.screenOff != "none") { ...inputsRetired(s), hidden: true, pendingInput: "none" }
+      else { ...inputsRetired(guidanceEnded(locateCancelled(s))), hidden: true, pendingInput: "none" }
   }
   action show = all { s.hidden, s' = { ...s, hidden: false } }
   /// Agent requests are refused while guidance is active.
@@ -214,7 +226,7 @@ module MapsScreenModes {
   }
   action agentPlanFrom = all {
     s.directions, not(s.navigating), not(s.hidden),
-    s' = { ...locateCancelled(s), originMode: false, pendingInput: "none", originText: "coordinates", origin: true, routeReady: false }
+    s' = { ...inputsRetired(locateCancelled(s)), originMode: false, pendingInput: "none", originText: "coordinates", origin: true, routeReady: false }
   }
   /// Another app opens Maps with a one-use search.
   action crossAppQuery = all {
@@ -229,8 +241,11 @@ module MapsScreenModes {
   action consumeHandoff = all {
     s.handoffPending,
     s' = if (not(s.handoffQuery)) { ...s, handoffPending: false }
-      else { ...submitted(released(s)), hasQuery: true, results: not(s.hidden), handoffs: s.handoffs + 1 }
+      else { ...inputsRetired(submitted(released(s))), hasQuery: true, results: not(s.hidden) and s.responseMode == "ready", queryRequests: s.queryRequests + (if(s.hidden) 0 else 1), handoffs: s.handoffs + 1 }
   }
+  // Closed provider outcomes: no live account or network request is created by these actions.
+  action providerResponse(outcome: str): bool = all { outcome.in(Set("ready", "empty", "error", "pending")), s' = { ...s, responseMode: outcome } }
+  action providerChanged = s' = released(s)
   action step = {
     nondet flag = Set(false, true).oneOf()
     // Events that close Maps layers are drawn less often, so sampled traces reach guidance.
@@ -253,7 +268,8 @@ module MapsScreenModes {
     s.originText.in(Set("empty", "location", "typed", "coordinates", "chosen")) and
     s.screenOff.in(Set("none", "starting", "running")) and
     s.lastChoice.in(Set("none", "typing", "search", "place", "locate")) and
-    s.requests.in(0.to(MaxRequests)) and s.handoffs.in(0.to(MaxRequests))
+    s.requests.in(0.to(MaxRequests)) and s.handoffs.in(0.to(MaxRequests)) and
+    s.queryRequests >= 0 and s.originRequests >= 0 and s.responseMode.in(Set("ready", "empty", "error", "pending"))
   val NavigationNeedsRouteSheet = s.navigating implies s.directions and s.selected != "none"
   val DirectionsNeedDestination = s.directions implies s.selected != "none"
   val OriginPickNeedsRouteSheet = s.originMode implies s.directions
@@ -337,7 +353,7 @@ module MapsScreenModes {
   run typedCoordinatesPlanWithoutSearchTest = init.then(typeQuery).then(submitSearch).then(pickResult)
     .then(openDirections).then(editOrigin(true))
     .then(chooseOrigin).expect(mode(s) == "dir" and s.origin and s.originText == "coordinates" and safety)
-    .then(routePlanned(true)).then(chooseOrigin).expect(not(s.routeReady) and s.origin and safety)
+    .then(routePlanned(true)).then(chooseOrigin).expect(s.routeReady and s.origin and safety)
     .then(searchOrigin.fail())
   run savedDestinationRetiresEarlierRouteTest = init.then(typeQuery).then(submitSearch).then(pickResult)
     .then(openDirections).then(editOrigin(true)).then(chooseOrigin).then(routePlanned(true))
@@ -387,4 +403,29 @@ module MapsScreenModes {
     .then(closePlace).then(locate).then(pickSaved).expect(s.selected == "saved" and s.locating)
     .then(fixArrives(true))
     .expect(s.selected == "location" and not(LateFixKeepsNewerChoiceDesired) and safety)
+
+  run originAutomaticPendingReuseTest = init.then(agentShowDirections).then(editOrigin(true)).then(debounceInput)
+    .expect(s.originRequests == 1 and s.originAccepted and not(s.routeReady))
+    .then(chooseOrigin).expect(s.originRequests == 1 and safety)
+  run originAutomaticReadyReuseTest = init.then(agentShowDirections).then(editOrigin(true)).then(debounceInput)
+    .then(routePlanned(true)).then(chooseOrigin).expect(s.originRequests == 1 and s.routeReady and safety)
+  run originAutomaticFailureRetryTest = init.then(agentShowDirections).then(editOrigin(true)).then(debounceInput)
+    .then(routePlanned(false)).then(chooseOrigin).expect(s.originRequests == 2 and not(s.originFailed) and safety)
+  run originEmptyReuseTest = init.then(agentShowDirections).then(providerResponse("empty"))
+    .then(editOrigin(false)).then(debounceInput).then(searchOrigin).expect(s.originRequests == 1 and safety)
+  run originSearchFailureRetryTest = init.then(agentShowDirections).then(providerResponse("error"))
+    .then(editOrigin(false)).then(debounceInput).expect(s.originFailed and s.originRequests == 1)
+    .then(providerResponse("ready")).then(searchOrigin).expect(not(s.originFailed) and s.originRequests == 2 and safety)
+  run destinationEmptyReuseTest = init.then(providerResponse("empty")).then(typeQuery).then(debounceInput)
+    .then(submitSearch).expect(s.queryRequests == 1 and not(s.results) and safety)
+  run originNewEditRetiresReuseTest = init.then(agentShowDirections).then(editOrigin(true)).then(debounceInput)
+    .then(routePlanned(true)).then(editOrigin(true)).then(chooseOrigin).expect(s.originRequests == 2 and not(s.routeReady) and safety)
+  run originProviderChangeRetiresReuseTest = init.then(agentShowDirections).then(editOrigin(true)).then(debounceInput)
+    .then(providerChanged).expect(not(s.originAccepted) and safety)
+
+  run originAutomaticSearchPendingReuseTest = init.then(agentShowDirections).then(providerResponse("pending"))
+    .then(editOrigin(false)).then(debounceInput).then(searchOrigin).expect(s.originRequests == 1 and safety)
+  run destinationFailureRetryTest = init.then(providerResponse("error")).then(typeQuery).then(debounceInput)
+    .expect(s.queryFailed and s.queryRequests == 1).then(providerResponse("ready")).then(submitSearch)
+    .expect(not(s.queryFailed) and s.queryRequests == 2 and s.results and safety)
 }

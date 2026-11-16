@@ -2863,9 +2863,9 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "simultaneousNoticesSuspendAndReturnTest",
-      "dismissPlanKeepsExactSignInTest",
-      "dismissSignInKeepsExactPlanTest"
+      "planNoticeSuspendsAndReturnsTest",
+      "dismissPlanKeepsAccountExpiryTest",
+      "compactPlanKeepsExpiryOutOfHomeTest"
     ],
     "invariants": [
       "ExactDismissal",
@@ -2877,8 +2877,8 @@
       "apps/app/src/browser/display.ts"
     ],
     "abstractions": [
-      "The mounted chooser projects a running resident with a needs-plan admission and a near-expiry sign-in. Each notice owns one dismissal and Settings suppresses publication while retaining its mounted card.",
-      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, scrolling and both dismissal orders. Account replacement, renewal, billing and installed WebView behavior remain separate."
+      "The mounted chooser projects a running resident with needs-plan admission and a near-expiry key. Only the plan owns a Home notice and dismissal; Account owns expiry and Renew. Settings, Account and foreground apps suppress publication while retaining dismissal state.",
+      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, overflow-driven scrolling, plan dismissal and Account expiry controls. Account replacement, renewal effects, billing and installed WebView behavior remain separate."
     ]
   },
   {
@@ -5096,6 +5096,9 @@
       "bindingChangeLeavesUnconfirmedTest",
       "failedActionCancelsLeaseTest",
       "staleReceiptRetiresLeaseTest",
+      "recoveryNeedsExactOriginalTest",
+      "settledRecoveryNeverRearmsTest",
+      "retiredRecoveryCannotRetainTest",
       "mismatchedHintNeverStartsCompletionTest",
       "failedCompletionRemainsUnconfirmedTest"
     ],
@@ -5120,6 +5123,14 @@
       "apps/app/src/runtime/connection-ui.tsx"
     ],
     "symbols": [
+      {
+        "path": "apps/app/src/prototype/agent-adapter.ts",
+        "name": "recoverPendingActions"
+      },
+      {
+        "path": "apps/app/src/runtime/connection-ui.tsx",
+        "name": "pendingActions"
+      },
       {
         "path": "apps/app/src/prototype/agent-adapter.ts",
         "name": "retainReadReply"
@@ -5168,7 +5179,8 @@
       "One rendered lease, an exact synthetic proposal and its original user message. The source replay supplies the local connection epoch and conversation, while expiry, account credential checks and the voice-media implementation have separate scopes.",
       "A successful approved read carries a hint. A mismatched digest or origin is refused before completion, and a failed approval without a hint cancels the lease.",
       "After the approval settles, the shell context refresh retires a stale lease and requests exact cancellation.",
-      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls."
+      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls.",
+      "The pending recovery replay uses the actual context refresh, pending action list and saved choice parser. Controlled inputs cover missing or mismatched original history, the exact original, repeated recovery, and a retired pending read."
     ]
   },
   {
