@@ -24,17 +24,17 @@ test('Files explains empty folders, categories and Trash in the mounted list',as
  });
  await page.getByRole('button',{name:'Files',exact:true}).click();
  const detail=page.locator('[data-alpha-subview="files-folder"]');
- const empty=detail.getByRole('status').filter({hasText:'No files to show'});
+ const empty=(text:string)=>detail.getByRole('status').filter({hasText:text});
  const back=detail.getByRole('button',{name:'Back',exact:true});
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open Empty folder',exact:true}).click();
- await expect(empty).toBeVisible();
+ await expect(empty('This folder is empty')).toBeVisible();
  await back.click();
  await back.click();
- for(const name of ['Documents','Trash']){
+ for(const [name,text] of [['Documents','No documents'],['Trash','Trash is empty. Items in Trash are deleted after']]){
   await page.getByRole('button',{name,exact:true}).click();
   await expect(detail.getByRole('heading',{name,exact:true})).toBeVisible();
-  await expect(empty).toBeVisible();
+  await expect(empty(text)).toBeVisible();
   await back.click();
  }
 });
@@ -47,7 +47,7 @@ test('Files does not report an empty folder after a failed read',async({page})=>
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  const detail=page.locator('[data-alpha-subview="files-folder"]');
  await expect(detail.getByRole('status').filter({hasText:'Files could not be read.'})).toBeVisible();
- await expect(detail.getByRole('status').filter({hasText:'No files to show'})).toHaveCount(0);
+ await expect(detail.getByRole('status').filter({hasText:'This folder is empty'})).toHaveCount(0);
 });
 test('mail attachment bridge preserves exact bytes and validates reviewed hashes',async({page})=>{
  const attachment=await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const files=registerPlugin<any>('AlphaFiles'),mail=registerPlugin<any>('AlphaMailAttachments');const selection=await files.importFile(new File(['Café\r\nExact bytes'],'letter.txt',{type:'text/plain'}));const result=await mail.readSelected(selection);let rejected=false;try{await mail.openReviewed({...result,reviewed:true,sha256:'0'.repeat(64)});}catch{rejected=true;}await mail.openReviewed({...result,reviewed:true});return {...result,rejected};});

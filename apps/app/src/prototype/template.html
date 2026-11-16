@@ -3014,7 +3014,7 @@
       <sc-if value="{{files.filterEmpty}}">
         <div class="files-empty-state" role="status">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 40px; height: 40px"><path d="{{ic.search}}"></path></svg>
-          <span>No results to show</span>
+          <span>{{files.filterEmptyText}}</span>
         </div>
       </sc-if>
     </sc-if>
@@ -3097,7 +3097,7 @@
         <sc-if value="{{files.fd.empty}}">
           <div class="files-empty-state" role="status">
             <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 44px; height: 44px"><path d="{{files.fd.emptyD}}"></path></svg>
-            <span>No files to show</span>
+            <span>{{files.fd.emptyText}}</span>
           </div>
         </sc-if>
         <sc-if value="{{files.isList}}">
