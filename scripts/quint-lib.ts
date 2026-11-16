@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto';
+import {sha256} from './sha256.ts';
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readUpstreamPin } from './upstream-pin.ts';
 
 export const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const quintRoot = join(repositoryRoot, 'specs/quint');
@@ -12,8 +13,7 @@ export const runtimeScriptPaths = ['scripts/stage-alpha-os-branding.py', 'script
   'scripts/cloud-email-code.ts', 'scripts/dev-cloud.ts', 'scripts/dev-local.ts',
   'scripts/start-local-voice-agent.ts', 'scripts/start-local-remote.ts',
   'scripts/core-state-patch.ts', 'scripts/core-state-preload.ts', 'scripts/build-policy-source.ts',
-  'scripts/start-reviewed-workflow-agent.ts',
-  'scripts/start-cloud-qa.ts', 'scripts/start-combined-agent.ts', 'scripts/launcher-child.ts',
+  'scripts/start-combined-agent.ts', 'scripts/launcher-child.ts',
   'scripts/private-runtime-launch.ts', 'scripts/host-speech-admission.ts',
   'scripts/local-agent-dev-bridge.ts', 'scripts/local-agent-dev-storage.ts',
   'scripts/prepare-local-agent.ts', 'scripts/local-agent-source.ts', 'scripts/copy-file-clone.ts',
@@ -31,7 +31,7 @@ export const runtimeScriptPaths = ['scripts/stage-alpha-os-branding.py', 'script
   'scripts/android-host.ts', 'scripts/android-gzip-assets.ts', 'scripts/stage-aosp.ts',
   'scripts/audit-production-bundle.ts', 'scripts/generate-licenses.ts',
   'scripts/cloud-deployment.ts', 'scripts/cloud-deployment-policy.ts', 'scripts/native-view-policy.ts',
-  'scripts/with-test-mocks.ts', 'scripts/child-command.ts', 'scripts/regular-files.ts', 'capacitor.config.ts', 'vite.config.ts',
+  'scripts/with-test-mocks.ts', 'scripts/child-command.ts', 'scripts/regular-files.ts', 'scripts/sha256.ts', 'scripts/upstream-pin.ts', 'capacitor.config.ts', 'vite.config.ts',
   'scripts/apk.ts', 'scripts/source-snapshot.ts', 'scripts/verify-apks.ts', 'scripts/verify-packaged-runtime.py',
   'scripts/provision-unit.ts', 'scripts/publish-update-manifest.ts', 'scripts/deliver-app-update.ts',
   'scripts/update-apk-admission.ts', 'scripts/update-artifact.ts', 'scripts/owner/InspectUpdateApk.java',
@@ -44,7 +44,7 @@ const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.java', '.kt', '.cpp', 
 const modelFamilies = ['application', 'services', 'native', 'legacy'] as const;
 type ModelFamily = (typeof modelFamilies)[number];
 type ExpectedCheck = 'pass' | 'violation';
-export type QuintProofBackend = 'apalache' | 'tlc';
+export type QuintProofBackend = 'apalache' | 'tlc' | 'tlc-bounded';
 interface ModelCheck {
   init: string;
   step: string;
@@ -81,7 +81,6 @@ export interface QuintModel extends ModelDefinition {
   family: ModelFamily;
   sources: string[];
 }
-interface UpstreamPin { commit: string; appSource?: unknown }
 export interface CheckerResult {
   status: number | null;
   signal: NodeJS.Signals | null;
@@ -92,10 +91,13 @@ export interface CheckerResult {
 type InterruptedAttempt = Pick<CheckerResult, 'signal'> & {exitCode: null};
 
 function readModelFamily(family: ModelFamily) {
-  const document = readJson<ModelDefinition[] | {models: ModelDefinition[]}>(join(quintRoot, family, 'manifest.json'));
-  const models = Array.isArray(document) ? document : document.models;
-  return models.map(model => ({...model, family,
+  return readJson<ModelDefinition[]>(join(quintRoot, family, 'manifest.json')).map(model => ({...model, family,
     sources: [...new Set([...(model.sources || []), ...(model.sharedSources || []).map(path => `vendor/eliza/${path}`)])]}));
+}
+
+/** Registry names for rejecting invalid selections before loading model/source bodies. */
+export function registeredQuintModelNames(): string[] {
+  return modelFamilies.flatMap(readModelFamily).map(model => model.module);
 }
 
 export function filesWithin(directory: string, accept: (path: string) => boolean = () => true): string[] {
@@ -110,10 +112,9 @@ export function filesWithin(directory: string, accept: (path: string) => boolean
 }
 
 export const relativePath = (path: string) => relative(repositoryRoot, path).split('\\').join('/');
-export const sha256 = (bytes: string | NodeJS.ArrayBufferView) => createHash('sha256').update(bytes).digest('hex');
 /** Discover the shared source consumed by this product from its authenticated inputs. */
 export function sharedSourcePaths() {
-  const pin = readJson<UpstreamPin>(join(repositoryRoot, 'upstream.lock.json'));
+  const pin = readUpstreamPin(repositoryRoot);
   // Minimal checker fixtures have no product source descriptor.
   if (!pin.appSource) return [];
   const client = readJson<{baseCommit: string; sourceFiles: Record<string, string>}>(join(repositoryRoot, '.eliza/client-features/.source.json'));
@@ -190,13 +191,14 @@ export function quintModelOptions(model: ModelDefinition, command: string = 'che
 }
 
 export function quintProofBackend(model: Pick<ModelDefinition, 'verifyBackend'>, command: string, override?: QuintProofBackend): QuintProofBackend {
+  if (override === 'tlc-bounded' && command !== 'verify') throw Error('tlc-bounded supports safety verification only');
   if (override) return override;
   if (command === 'temporal' || command === 'compare') return 'tlc';
   return command === 'verify' ? model.verifyBackend ?? 'apalache' : 'apalache';
 }
 
 export function validateQuintModelMetadata(model: ModelDefinition, text: string) {
-  if (model.verifyBackend !== undefined && model.verifyBackend !== 'apalache' && model.verifyBackend !== 'tlc') {
+  if (model.verifyBackend !== undefined && !['apalache', 'tlc', 'tlc-bounded'].includes(model.verifyBackend)) {
     throw Error(`Invalid verifyBackend in ${model.module}`);
   }
   for (const test of model.tests) if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(test)) throw Error(`Invalid scenario ${model.module}.${test}`);
@@ -228,6 +230,65 @@ export function validateQuintModelMetadata(model: ModelDefinition, text: string)
     && declaration.name === model.additionalProofInit && declaration.qualifier === 'action')) {
     throw Error(`Missing additional proof init ${model.module}.${model.additionalProofInit}`);
   }
+}
+
+export interface BoundedTlcEvidence {
+  scope: 'safety-through-transition-bound';
+  depth: number;
+  translatedSourceSha256: string;
+  instrumentedSourceSha256: string;
+  configurationSha256: string;
+}
+
+export interface FullTemporalTlcEvidence {
+  scope: 'full-temporal-state-graph';
+  livenessScheduling: 'final';
+  translatedSourceSha256: string;
+  configurationSha256: string;
+  jarSha256: string;
+  javaExecutable: string;
+  javaArgv: string[];
+}
+
+function completeTlaModule(source: string, aliases: readonly string[]) {
+  const endings = [...source.matchAll(/^={4,}[ \t]*\r?$/gm)];
+  if (endings.length !== 1 || source.slice(endings[0].index! + endings[0][0].length).trim()) {
+    throw Error('Expected one complete translated TLA module');
+  }
+  for (const name of aliases) {
+    if (!new RegExp(`^${name}[ \\t]*==`, 'm').test(source)) throw Error(`Missing translated ${name}`);
+  }
+  return endings[0].index!;
+}
+
+/** Full temporal checking keeps the translated relation and properties byte for byte. */
+export function fullTemporalTlcSpec(source: string) {
+  completeTlaModule(source, ['q_init', 'q_step', 'q_temporalProps']);
+  const configuration = 'INIT q_init\nNEXT q_step\nPROPERTY q_temporalProps\n';
+  return {source, configuration, evidence: {scope: 'full-temporal-state-graph' as const,
+    livenessScheduling: 'final' as const, translatedSourceSha256: sha256(source),
+    configurationSha256: sha256(configuration)}};
+}
+
+/** A tool error, deadlock or invariant failure is not a temporal counterexample. */
+export function fullTemporalTlcViolation(result: CheckerResult, output: string) {
+  return result.status === 13 && !result.error && !result.signal
+    && /^Error: Temporal (?:property q_temporalProps was|properties were) violated\.$/m.test(output)
+    && /^Error: The following behavior constitutes a counter-example:$/m.test(output);
+}
+
+/** Retain every original declaration and check all states at depths 0 through depth. */
+export function boundedTlcSpec(source: string, depth: number) {
+  if (!Number.isSafeInteger(depth) || depth < 1) throw Error('Bounded TLC depth must be a positive integer');
+  if (/\bq_bounded_(?:depth|init|next)\b/.test(source)) throw Error('Bounded TLC namespace collision');
+  const index = completeTlaModule(source, ['q_init', 'q_step', 'q_inv']);
+  const declarations = `\nVARIABLE q_bounded_depth\n\nq_bounded_init == q_init /\\ q_bounded_depth = 0\n\nq_bounded_next == /\\ q_bounded_depth < ${depth}\n                  /\\ q_step\n                  /\\ q_bounded_depth' = q_bounded_depth + 1\n\n`;
+  const instrumented = source.slice(0, index) + declarations + source.slice(index);
+  const configuration = 'INIT q_bounded_init\nNEXT q_bounded_next\nINVARIANT q_inv\n';
+  const evidence: BoundedTlcEvidence = {scope: 'safety-through-transition-bound', depth,
+    translatedSourceSha256: sha256(source), instrumentedSourceSha256: sha256(instrumented),
+    configurationSha256: sha256(configuration)};
+  return {source: instrumented, configuration, evidence};
 }
 
 export function loadModels(): QuintModel[] {

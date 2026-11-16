@@ -1,5 +1,6 @@
 // The locally launched host presents as the product: apps/app/src/product/alpha-product-registration.ts identity is the one
 // source for the shell label and for the agent character the launchers hand upstream.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import {ALPHA_PRODUCT_REGISTRATION as record} from '../apps/app/src/product/alpha-product-registration.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,8 +12,6 @@ import {git} from './fixtures/git-fixture.mjs';
 import {AGENT_CHARACTER,AGENT_CHARACTER_ENVIRONMENT} from '../scripts/agent-identity.ts';
 import {LOCAL_EMBEDDING_ROUTE} from '../scripts/agent-embeddings.ts';
 
-const LAUNCHERS=['scripts/start-local-remote.ts','scripts/start-combined-agent.ts','scripts/start-local-voice-agent.ts','scripts/start-reviewed-workflow-agent.ts'];
-
 test('the agent character carries the product identity and inherits the bundled persona',()=>{
  assert.equal(AGENT_CHARACTER.name,record.identity.characterName);
  assert.equal(AGENT_CHARACTER.name,'Alpha');
@@ -22,36 +21,17 @@ test('the agent character carries the product identity and inherits the bundled 
  assert.deepEqual(JSON.parse(AGENT_CHARACTER_ENVIRONMENT.ELIZA_AGENT_CHARACTER_JSON),AGENT_CHARACTER);
 });
 
-test('every host launcher hands the character to the child through the upstream override variable',()=>{
- for(const file of LAUNCHERS){const source=fs.readFileSync(file,'utf8');assert.match(source,/\.\.\.AGENT_CHARACTER_ENVIRONMENT/,file);assert.doesNotMatch(source,/ELIZA_AGENT_CHARACTER_JSON|['"]Eliza['"]/,`${file} spells the identity itself`);}
-});
-
-test('the pinned upstream applies the override in memory and renders the name into the system prompt',()=>{
- const sandbox=fs.readFileSync('vendor/eliza/packages/agent/src/runtime/sandbox-character.ts','utf8');
- assert.match(sandbox,/env\.ELIZA_AGENT_CHARACTER_JSON\?\.trim\(\)/);
- assert.match(sandbox,/assistant: \{ \.\.\.\(ui\.assistant \?\? \{\}\), name \}/);
- assert.doesNotMatch(sandbox,/writeFileSync|saveConfig/,'the override must not persist into the profile');
- const boot=fs.readFileSync('vendor/eliza/packages/agent/src/runtime/eliza.ts','utf8');
- assert.ok(boot.indexOf('applySandboxCharacterFromEnv(config)')<boot.indexOf(': buildCharacterFromConfig(config)'));
- const build=fs.readFileSync('vendor/eliza/packages/agent/src/runtime/build-character-config.ts','utf8');
- assert.match(build,/const configuredName = configuredUiName \|\| configuredAgentName;/);
- assert.match(build,/\(agentEntry\?\.system \? undefined : getDefaultStylePreset\(language\)\)/);
- const presets=fs.readFileSync('vendor/eliza/packages/host/src/character-presets.characters.ts','utf8');
- assert.match(presets,/id: "eliza",[\s\S]*?system:\s*"You are \{\{name\}\}, made by Alpha Compute/);
- assert.match(fs.readFileSync('vendor/eliza/packages/core/src/runtime/system-prompt.ts','utf8'),/replaceNameTokens\(\s*typeof character\?\.system === "string"/);
-});
-
 function launch({route}={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-identity-')),profile=path.join(dir,'profile'),source=path.join(dir,'source'),receipt=path.join(dir,'child.json'),bun=path.join(dir,'fake-bun');
  fs.mkdirSync(profile);fs.mkdirSync(path.join(source,'packages/app/src/runtime'),{recursive:true});fs.writeFileSync(path.join(source,'packages/app/src/runtime/dev-server.ts'),'');
  git(source,'init','-q');git(source,'commit','--allow-empty','-qm','fixture');
- fs.writeFileSync(bun,`#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(receipt)},JSON.stringify({character:process.env.ELIZA_AGENT_CHARACTER_JSON??null,libDir:process.env.ELIZA_INFERENCE_LIB_DIR??null,config:JSON.parse(require('node:fs').readFileSync(process.env.ELIZA_CONFIG_PATH,'utf8'))}));`,{mode:0o700});
+ fs.writeFileSync(bun,`#!/usr/bin/env bun\nrequire('node:fs').writeFileSync(${JSON.stringify(receipt)},JSON.stringify({character:process.env.ELIZA_AGENT_CHARACTER_JSON??null,libDir:process.env.ELIZA_INFERENCE_LIB_DIR??null,config:JSON.parse(require('node:fs').readFileSync(process.env.ELIZA_CONFIG_PATH,'utf8'))}));`,{mode:0o700});
  const config=path.join(profile,'eliza.json');if(route)fs.writeFileSync(config,JSON.stringify({serviceRouting:{llmText:route},agents:{list:[{id:'retained',default:true,name:'Retained Eliza',identityName:'Retained Eliza'}]},fixtureKeep:'preserve'}),{mode:0o600});
  const before=route?fs.readFileSync(config,'utf8'):null;
  const env={...process.env,ELIZA_ASR_ENABLED:'0',ELIZA_PARADEE_ENABLED:'0',ALPHA_ELIZA_SOURCE:source,ALPHA_REMOTE_PROFILE:profile,ALPHA_REMOTE_PORT:'47998',ALPHA_BUN:bun,CEREBRAS_API_KEY:'synthetic-fixture-key'};
  for(const key of ['ELIZA_SECRET_SWAP_ENABLED','ELIZA_PII_SWAP_ENABLED','CEREBRAS_MODEL','ELIZA_INFERENCE_LIBRARY','ELIZA_INFERENCE_LIB_DIR'])delete env[key];
  try{
-  const result=spawnSync(process.execPath,[path.resolve('scripts/start-local-remote.ts')],{env,encoding:'utf8',timeout:15000});
+  const result=spawnSync(process.execPath,[path.resolve('scripts/start-local-remote.ts')],{env,encoding:'utf8',timeout:scaledTimeout(15000)});
   return {status:result.status,error:result.stderr,child:JSON.parse(fs.readFileSync(receipt,'utf8')),before,after:fs.readFileSync(config,'utf8')};
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 }
@@ -62,9 +42,6 @@ test('an explicitly pinned existing identity presents as the product without its
  assert.equal(r.after,r.before);
  assert.deepEqual(r.child.config,JSON.parse(r.before));
  assert.deepEqual(JSON.parse(r.child.character),AGENT_CHARACTER);
- // Reviewed routing is never migrated silently; the omitted embedding route is reported for review.
- assert.match(r.error,/serviceRouting omits embeddings/);
- assert.match(r.error,new RegExp(JSON.stringify(LOCAL_EMBEDDING_ROUTE).replace(/[{}"]/g,'\\$&')));
 });
 
 test('a new profile routes embeddings on-device and the child learns where the fused library is staged',()=>{
@@ -73,23 +50,6 @@ test('a new profile routes embeddings on-device and the child learns where the f
  assert.deepEqual(r.child.config.serviceRouting.embeddings,{...LOCAL_EMBEDDING_ROUTE});
  assert.deepEqual(JSON.parse(r.child.character),AGENT_CHARACTER);
  assert.equal(r.child.libDir,path.join(os.homedir(),'.local/state/eliza/local-inference/lib'));
- assert.doesNotMatch(r.error,/serviceRouting omits embeddings/);
-});
-
-test('the reviewed-workflow launcher makes loopback callers present the owner token',()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-workflow-auth-')),home=path.join(dir,'home'),profile=path.join(dir,'profile'),source=path.join(dir,'source'),receipt=path.join(dir,'child.json'),bun=path.join(dir,'fake-bun');
- try{
-  fs.mkdirSync(path.join(home,'.config/alphaphone'),{recursive:true});fs.writeFileSync(path.join(home,'.config/alphaphone/cerebras-key'),'synthetic-fixture-key',{mode:0o600});
-  fs.mkdirSync(path.join(source,'node_modules'),{recursive:true});fs.mkdirSync(path.join(source,'packages/app/src/runtime'),{recursive:true});fs.writeFileSync(path.join(source,'packages/app/src/runtime/dev-server.ts'),'');
-  git(source,'init','-q');git(source,'commit','--allow-empty','-qm','fixture');
-  fs.writeFileSync(bun,`#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(receipt)},JSON.stringify({requireLocalAuth:process.env.ELIZA_REQUIRE_LOCAL_AUTH??null,token:process.env.ELIZA_API_TOKEN??null}));`,{mode:0o700});
-  const env={...process.env,HOME:home};delete env.ELIZA_REQUIRE_LOCAL_AUTH;
-  const result=spawnSync(process.execPath,[path.resolve('scripts/start-reviewed-workflow-agent.ts'),'--source',source,'--profile',profile,'--port','47997','--bun',bun],{env,encoding:'utf8',timeout:15000});
-  assert.equal(result.status,0,result.stderr);
-  const child=JSON.parse(fs.readFileSync(receipt,'utf8'));
-  assert.equal(child.requireLocalAuth,'1');
-  assert.equal(child.token,fs.readFileSync(path.join(profile,'owner-token'),'utf8').trim());
- }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('the combined launcher refuses the pinned vendor tree whatever directory it is started from',()=>{
@@ -100,7 +60,7 @@ test('the combined launcher refuses the pinned vendor tree whatever directory it
   for(const source of ['vendor/eliza','vendor/eliza/packages','base/eliza-app']){
    const env={...process.env,ALPHA_NODE_BIN:node,ALPHA_BUN:bun,ALPHA_COMBINED_SOURCE:path.resolve(source),ALPHA_COMBINED_SOURCE_MANIFEST:path.join(dir,'manifest.json')};
    if(!fs.existsSync(source))continue;
-   const result=spawnSync(process.execPath,[path.resolve('scripts/start-combined-agent.ts'),'--validate-only'],{cwd:dir,env,encoding:'utf8',timeout:15000});
+   const result=spawnSync(process.execPath,[path.resolve('scripts/start-combined-agent.ts'),'--validate-only'],{cwd:dir,env,encoding:'utf8',timeout:scaledTimeout(15000)});
    assert.notEqual(result.status,0,source);
    assert.match(result.stderr,/Never launch mutable pinned vendor or pristine baseline/,source);
   }

@@ -7,8 +7,8 @@ writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('ex
 const {installContactsAdapter,applyListFilter,clearListFilter,currentListFilter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const settle=()=>new Promise(r=>setTimeout(r,5));
-function mount(list,editor=async()=>({})){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
- const views={contacts:{render:st=>({contactsRows:st.list,d:st.open?{}:null})}};
+function mount(list,editor=async()=>({}),base={render:st=>({contactsRows:st.list,d:st.open?{}:null})}){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
+ const views={contacts:{...base}};
  class Shell{view='contacts';S(){return {view:this.view};}vget(){return {q:''};}setState(){}toast(message){notices.push(message);}}
  installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();return {views,calls,shell,Shell,notices};}
 const ada={id:'1',name:'Ada',phones:['+15555550100','+15555550101'],emails:['ada@example.com']};

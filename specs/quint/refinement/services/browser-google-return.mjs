@@ -13,7 +13,7 @@ const action = (name, ...args) => ({name, args});
 /** The actual loopback callback branch; provider verification is a separate boundary. */
 export async function checkBrowserGoogleReturn(extraSources = []) {
   const sources = [source, fileURLToPath(import.meta.url), join(root, 'test/support/strip-types.mjs'),
-    join(root, 'specs/quint/refinement/services/index.mjs'), ...extraSources];
+    ...extraSources];
   const driverHashes = captureInputs(sources);
   const code = readFileSync(source, 'utf8');
   const start = code.indexOf("  if(req.url?.startsWith('/google-return?')");

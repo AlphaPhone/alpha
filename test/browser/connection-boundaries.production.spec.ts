@@ -50,8 +50,8 @@ async function android(page: Page, options: AndroidOptions) {
       w.nativeCalls.push({ plugin, method, slot: input?.slot, url: input?.url, http: input?.method, authorization: input?.headers?.Authorization, path: input?.path });
       if (plugin === 'AlphaHostedResults') return {};
       if (plugin === 'ElizaSystem' && method === 'getBuildInfo') return { launcher: false, version: 'connection-boundaries' };
-      if (plugin === 'ElizaSense' && (method === 'status' || method === 'turnOff')) return { available: true, state: 'OFF', label: 'Listening off', consented: false, listening: false, microphoneOpen: false };
-      if (plugin === 'DailyApps') return method === 'listReminders' ? { reminders: [] } : method === 'surfaceInfo' ? { assistant: false, developmentBuild: false, topInset: 0, bottomInset: 0 } : {};
+      if (plugin === 'ElizaSense' && (method === 'status' || method === 'turnOff')) return { available: true, state: 'OFF', label: 'Listening off', consented: false, listening: false, microphoneOpen: false, ...(method === 'turnOff' ? { saved: true } : {}) };
+      if (plugin === 'DailyApps') return method === 'listReminders' ? { reminders: [] } : method === 'surfaceInfo' ? { assistant: false, topInset: 0, bottomInset: 0 } : {};
       if (plugin === 'AlphaNotifications') return { permissionGranted: true, appEnabled: true };
       if (plugin === 'AlphaVoiceCloud') return { microphone: 'granted' };
       if (plugin === 'AlphaHostedResults' && method === 'disableBackground') return {};
@@ -408,8 +408,8 @@ test('the web build\'s forced sign-out does not create a secret store in a brows
 });
 
 // Production no longer offers remote pairing. Protocol-level wrong-owner, expired-session,
-// revocation and history tests remain in scripts/test-remote-protocol.ts and
-// scripts/test-connection-history.ts as explicitly non-product development infrastructure.
+// revocation and history tests remain in scripts/test-remote-protocol.ts as explicitly
+// non-product development infrastructure.
 
 test('automatic agent startup stays quiet while local apps remain usable',async({page})=>{
   await android(page,{cloudCredential:true,balance:5});
@@ -432,7 +432,17 @@ test('automatic agent startup stays quiet while local apps remain usable',async(
   await completeAccessSetup(page);
 });
 
+// With no known deletion the shared notice polls every five seconds. Each clock jump
+// lets an actual scheduled read settle before advancing to the next idle interval.
+async function observeIdleDeletionReads(page: Page, count: () => Promise<number>) {
+  for (let reads = 1; reads <= 3; reads++) {
+    if (reads > 1) await page.clock.fastForward(5_000);
+    await expect.poll(count).toBeGreaterThanOrEqual(reads);
+  }
+}
+
 test('transient startup storage failures recover without flashing global notices',async({page})=>{
+  await page.clock.install();
   await android(page,{cloudCredential:true,balance:5});
   await page.addInitScript(()=>{
     const w=window as any,bridge=w.Capacitor,original=bridge.nativePromise;
@@ -450,12 +460,13 @@ test('transient startup storage failures recover without flashing global notices
   await page.goto('/');
   await completeAccessSetup(page);
   await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
-  await expect.poll(()=>page.evaluate(()=>(window as any).startupStorage.pending)).toBeGreaterThanOrEqual(3);
+  await observeIdleDeletionReads(page,()=>page.evaluate(()=>(window as any).startupStorage.pending));
   await expect.poll(()=>page.evaluate(()=>(window as any).startupStorage.drafts)).toBeGreaterThanOrEqual(2);
   expect(await page.evaluate(()=>(window as any).startupStorage.flashes)).toEqual([]);
 });
 
 test('passive deletion failures stay quiet; known pending failures preserve settings access', async ({ page }) => {
+  await page.clock.install();
   await android(page, { cloudCredential: true, balance: 5, revoke: 'revoked' });
   await page.goto('/');
   await completeAccessSetup(page);
@@ -474,7 +485,7 @@ test('passive deletion failures stay quiet; known pending failures preserve sett
     window.dispatchEvent(new Event('alpha:deletions-changed'));
   });
   const notice = page.getByRole('complementary', { name: 'Pending deletions' });
-  await expect.poll(()=>page.evaluate(()=>(window as any).deletionNoticeFixture.checks)).toBeGreaterThanOrEqual(3);
+  await observeIdleDeletionReads(page,()=>page.evaluate(()=>(window as any).deletionNoticeFixture.checks));
   await expect(notice).toHaveCount(0);
   await page.evaluate(()=>{(window as any).deletionNoticeFixture.known=true;window.dispatchEvent(new Event('alpha:deletions-changed'));});
   await expect(notice).toContainText('Known pending event');

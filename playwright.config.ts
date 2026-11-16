@@ -3,13 +3,15 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import { defineConfig, devices } from '@playwright/test';
 import { storageSpecPattern } from './scripts/storage-specs.ts';
+import { scaledTimeout } from './specs/quint/refinement/timeouts.mjs';
 const port=Number(process.env.ALPHA_BROWSER_TEST_PORT||5317);
 const productionPort=port+1;
 const productionOutput=`test-results/production-web-${productionPort}`;
+const webServerTimeout=scaledTimeout(180_000);
 // The production lane runs production-surface.spec.ts and every <name>.production.spec.ts.
 const productionSpec=/(production-surface|\.production)\.spec\.ts$/;
 // Live specs need a running local agent and real providers; only the live project runs them
-// (npm run test:browser:live).
+// (bun run test:browser:live).
 const liveSpec=/\.local\.spec\.ts$/;
 
 // The top-level webServer list is not per-project. Start only the servers that the
@@ -27,6 +29,7 @@ const selected=(()=>{
 const fakeAudio=process.env.ALPHA_LIVE_FAKE_AUDIO;
 const needsProduction=!selected.length||selected.includes('production');
 const needsDevelopment=!selected.length||selected.some(name=>name!=='production');
+const needsChromiumWarmup=!selected.length||selected.some(name=>name==='chromium'||name==='live');
 // Specs that start their own in-process Vite server (dev-hosted-journey, dev-reload,
 // reading-source) read the flag from the worker environment, so development lanes opt in
 // here too. The production web server below clears it explicitly.
@@ -36,23 +39,23 @@ if(needsDevelopment)process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='1';
 const browserTestCloudProfile=join(tmpdir(),`alpha-browser-cloud-test-${randomUUID()}`);
 const development={
   // The development server explicitly opts into test mocks, fixtures and device controls.
-  command: `npm run dev:ui -- --port ${port} --strictPort`, url: `http://127.0.0.1:${port}`, reuseExistingServer: false, timeout: 180_000,
+  command: `bun run dev:ui -- --port ${port} --strictPort`, url: `http://127.0.0.1:${port}`, reuseExistingServer: false, timeout: webServerTimeout,
   env: { ELIZA_DEV_ALLOW_TEST_MOCKS: '1', ALPHA_BROWSER_CLOUD_PROFILE: browserTestCloudProfile },
 };
 const production={
   // A flag-off production build served by vite preview: no mocks, fixtures or developer surfaces.
   // It is written outside web-dist so it never replaces a release or test-mocks build.
-  command: `npm run upstream:prepare-client && npx vite build --outDir ../../${productionOutput} && node scripts/audit-production-bundle.ts ${productionOutput} && npx vite preview --outDir ../../${productionOutput} --host 127.0.0.1 --port ${productionPort} --strictPort`,
-  url: `http://127.0.0.1:${productionPort}`, reuseExistingServer: false, timeout: 180_000,
-  env: { ELIZA_DEV_ALLOW_TEST_MOCKS: '', VITE_ELIZA_DEV_ALLOW_TEST_MOCKS: '', VITE_LOCAL_AGENT: '' },
+  command: `bun run upstream:prepare-client && bunx --bun vite build --outDir ../../${productionOutput} && bun scripts/audit-production-bundle.ts ${productionOutput} && node node_modules/vite/bin/vite.js preview --outDir ../../${productionOutput} --host 127.0.0.1 --port ${productionPort} --strictPort`,
+  url: `http://127.0.0.1:${productionPort}`, reuseExistingServer: false, timeout: webServerTimeout,
+  env: { ELIZA_DEV_ALLOW_TEST_MOCKS: '', VITE_LOCAL_AGENT: '' },
 };
 
 export default defineConfig({
   testDir: './test/browser',
   // A committed test.only would turn a shard green while skipping the rest.
   forbidOnly: true,
-  // Loads the app once on the development server before the workers start (see the file).
-  globalSetup: needsDevelopment ? './test/browser/warm-dev-server.ts' : undefined,
+  // Warm Chromium development runs before workers start. Storage jobs install their own browser only.
+  globalSetup: needsChromiumWarmup ? './test/browser/warm-dev-server.ts' : undefined,
   timeout: 30_000,
   workers: 2,
   fullyParallel: true,

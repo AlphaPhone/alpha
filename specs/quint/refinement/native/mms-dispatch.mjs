@@ -1,9 +1,11 @@
+// Partial source-contract regression: authenticated extracted production members execute
+// with controlled ports; this is not whole-file implementation refinement.
 import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {captureInputs, checkTraces} from '../check-traces.mjs';
+import {captureInputs, checkTraces, qmap, qset} from '../check-traces.mjs';
 import {app, directory, javaTraceCampaign, root} from './java.mjs';
 import {mmsPlatform} from './mms-dispatch-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
@@ -65,8 +67,12 @@ async function campaign(scenarios, extraSources, check, {historicalProbe=false} 
     assert.match(readFileSync(join(root,launcherManifest),'utf8'),/<receiver\s+android:name="\.AlphaSmsSendReceiver"\s+android:exported="false"/);
     const complete=compiled.map(name=>resolveSource(shared+name+'.java'));
     let traces;
-    try {traces=javaTraceCampaign(harness,[...product,...complete,...files],scenarios.map(name=>[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
+    try {traces=javaTraceCampaign(harness,[...product,...complete,...files],scenarios.map(name=>historicalProbe?[name,'historical']:[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
     finally {assert.deepEqual(captureInputs(sources),driverHashes,'MMS inputs changed during replay');}
+    for(const trace of traces)for(const {expect} of [trace,...trace.steps]){
+      const events=expect['s.events'];
+      expect['s.events']={listeners:qset(events.listeners),deliveries:qmap(events.deliveries)};
+    }
     return await check({model,sources,driverHashes,generatedSources,traces});
   } finally {rmSync(temporary,{recursive:true,force:true});}
 }
@@ -77,9 +83,10 @@ export function mmsSourceProbe(selected, options) {
 
 export function checkNativeMmsDispatch(extraSources=[]) {
   return campaign(scenarios,extraSources,async evidence=>{
-    const receipt=await checkTraces({...evidence,scope:'bounded-orchestration',assumptions:[
+    const receipt=await checkTraces({...evidence,scope: 'bounded-orchestration',assumptions:[
       'Actual product wrapper, staged SMS/MMS core, extracted native review and outbox members, and exact JVM PDU codec.',
       'One installed ID shared by two reviews. Synthetic Android telephony, provider, preview, and credential storage ports. Temporary PDU custody uses real file operations.',
+      'Both live bridge registrations and exact per-bridge operation-ID notification counts are observed. Process reconstruction replaces all old registrations; the immediate Handler port does not qualify arbitrary held UI-queue retirement races.',
     ]});
     return {receipt,obligations:[
       {model,obligation:'Installed MMS effect and callback authority',

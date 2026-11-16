@@ -10,6 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
 import { filesIndex } from './files-index';
 import { createInlineModal } from '../runtime/inline-modal';
+import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
 type Selection = { result: NativeResult; status: string; text?: string; pdf?: {page:number;count:number;image:string}; epoch: number; renames?: number; mediaFailed?:boolean };
@@ -30,7 +31,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   let epoch = 0;
   let current: Selection | undefined;
   let selectedApi: Bag | undefined;
-  let restoreAttempted = false;
+  let restoreAttempted = false, restoringPicker = false;
   let pdfBusySelection: string | undefined;
   let pdfRequest = 0;
   let renameBusy = false;
@@ -41,6 +42,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     if(element){element.controls=true;if(element instanceof HTMLVideoElement)element.playsInline=true;}
   };
   const marker = '__native_selected_document';
+  const rememberedPicker = (id:string) => filesIndex.list().some(row=>row.selectionId===id&&row.kind==='selected'&&row.status==='ready');
   let closeQuestion:(()=>void)|undefined;
   const release = (id: string) => { void DailyApps.forgetSelected({ selectionId: id }).catch(() => selectedApi?.toast('Reopen Files')); };
   /** Closing keeps a Recent selection's grant so Recent can reopen it; Forget
@@ -66,7 +68,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     if (!selectionId||!active()) return;
     try {
       const result=await (download?DailyApps.shareSelected({selectionId}):DailyApps.openSelected({selectionId}));
-      if(active()&&result.status!=='opened')api.toast(result.message||'Unavailable');
+      if(active()&&result.status!=='opened')api.toast(errorNotice(result.message,'Unavailable'),ERROR_TOAST);
     } catch { if(active())api.toast('Unavailable'); }
   };
   let sharing = false;
@@ -76,7 +78,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     sharing = true;
     try {
       const result = await DailyApps.shareSelected({ selectionId: id });
-      if (result.status !== 'opened') api.toast(result.message || 'Share failed');
+      if (result.status !== 'opened') api.toast(errorNotice(result.message, 'Share failed'), ERROR_TOAST);
     } catch { api.toast('Share failed'); }
     finally { sharing = false; }
   };
@@ -110,13 +112,14 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         current={result:response,status:response.message || 'Reselect file',epoch:++epoch};
         api.set({renaming:false});refresh();return;
       }
-      if(response.status !== 'selected'){api.toast(response.message || 'Rename unavailable');return;}
+      if(response.status !== 'selected'){api.toast(errorNotice(response.message, 'Rename unavailable'), ERROR_TOAST);return;}
       // A rename changes the selected object: publish it as a new revision so a turn or
       // approval prepared for the old name cannot be dispatched against the renamed file.
       // Keep Recent on the new name: same row, or the replacement capability when the provider issued one.
       const old=filesIndex.list().find(row=>row.selectionId===selected.result.selectionId);
       if(old&&response.selectionId){if(old.selectionId!==response.selectionId)filesIndex.remove(old.key);for(const evicted of filesIndex.record({kind:old.kind,...(old.treeId?{treeId:old.treeId}:{}),name:response.name||'Selected document',mimeType:response.mimeType||'application/octet-stream',selectionId:response.selectionId}))if(evicted!==response.selectionId)release(evicted);}
-      if(response.selectionId)filesIndex.setOpen(response.selectionId);
+      if(response.selectionId&&old?.kind==='selected'&&rememberedPicker(response.selectionId))filesIndex.setOpen(response.selectionId);
+      else if(filesIndex.open()===selected.result.selectionId)filesIndex.setOpen(null);
       current={...selected,result:response,pdf:undefined,renames:(selected.renames||0)+1};api.set({renaming:false});publish();refresh();
       if(response.mimeType==='application/pdf')await pdfPage(selected.pdf?.page || 0,api);
     } catch {if(current === selected)api.toast('Unconfirmed');}
@@ -128,12 +131,31 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     const render = definition.render;
     definition.render = (st: Bag, api: Bag) => {
       const data = render(st, api);
-      if(module === 'files' && api.active && !restoreAttempted && Capacitor.isNativePlatform()) {
-        restoreAttempted = true; const requestedEpoch = epoch;
-        const openId = filesIndex.open(); if (openId) void DailyApps.describeSelected({ selectionId: openId }).then(result => {if(epoch === requestedEpoch && !current && result.status === 'selected')void accept('files',result,api);}).catch(()=>{});
+      if(module === 'files') {
+        const browse = api.isActive()&&!document.hidden&&!st.open&&!st.folder;
+        if(!browse)restoringPicker=false;
+        else if(!restoreAttempted&&Capacitor.isNativePlatform()) {
+          restoreAttempted=true;
+          const requestedEpoch=epoch,openId=filesIndex.open();
+          if(openId&&!current){
+            // Earlier renderers also saved transient Files-browser selections here.
+            if(!rememberedPicker(openId))filesIndex.setOpen(null);
+            else {
+              restoringPicker=true;
+              void DailyApps.describeSelected({selectionId:openId}).then(result=>{
+                if(!restoringPicker||epoch!==requestedEpoch||current||!api.isActive()||document.hidden||api.get('files').open||api.get('files').folder||filesIndex.open()!==openId||!rememberedPicker(openId))return;
+                if(result.status==='selected'&&result.selectionId===openId&&result.action==='files')void accept('files',result,api,{kind:'selected'});
+                else if(result.status==='unavailable')filesIndex.setOpen(null);
+              }).catch(()=>{}).finally(()=>{restoringPicker=false;});
+            }
+          }
+        }
       }
       if (st.open !== marker || !current) return data;
       const selected = current;
+      // Text loading refreshes preview fields without changing the selected file.
+      const sameSelection=()=>current?.result===selected.result
+        &&current?.epoch===selected.epoch&&current?.pdf===selected.pdf;
       const name = selected.result.name || 'Selected document';
       const mime = selected.result.mimeType || 'application/octet-stream';
       const uri = selected.result.uri;
@@ -141,7 +163,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const close = () => { clear(); api.set({ open: null }); };
       const forget = () => { clear(true); api.set({ open: null }); };
       const canAsk=selected.result.status==='selected'&&(!!selected.text?.trim()||!!image||!!selected.pdf?.image);
-      const questionCurrent=()=>current===selected&&api.isActive()&&api.get(module).open===marker&&!document.hidden;
+      const questionCurrent=()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!document.hidden;
       const ask=()=>{
         if(!canAsk||!questionCurrent())return;
         closeQuestion?.();
@@ -151,7 +173,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         closeQuestion?.();
         closeQuestion=reviewFileEmail({
           read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw Error('Selected file changed. Select it again.');return file;},
-          current:()=>current===selected&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
+          current:()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
           target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>views.inbox.attachReviewedFile(file,token),
           inserted:()=>api.open('inbox'),
         });
@@ -165,12 +187,12 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         for (let i = 0; i < rows.length; i += 8) pages.push({ first: true, rest: false, heading: i ? name + ' (continued)' : name, rows: rows.slice(i, i + 8), lines: [], num: '' });
         data.isPreview = true;
         data.pv = {
-          needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(current===selected&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
+          needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: mime + ' · selected on this device', d: '',
           isPages: !!selected.pdf||rows.length>0, pages: selected.pdf ? [] : pages, isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
-          mediaError:()=>{if(current!==selected)return;current={...selected,mediaFailed:true,status:'Preview unavailable for this file.'};refresh();},
+          mediaError:()=>{if(!sameSelection()||!current)return;current={...current,mediaFailed:true,status:'Preview unavailable for this file.'};refresh();},
           previewStatus:!media&&!selected.pdf&&selected.text===undefined?selected.status:'',
           canOpenElsewhere:selected.result.status==='selected'&&!!selected.result.selectionId,
           openElsewhereLabel:Capacitor.isNativePlatform()?'Open in Android':'Download file',openElsewhere:()=>void open(api,selected,!Capacitor.isNativePlatform()),
@@ -188,6 +210,10 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       }
       return data;
     };
+    if(module==='files') {
+      const leave=definition.onLeave;
+      definition.onLeave=(...args:unknown[])=>{restoringPicker=false;return leave?.(...args);};
+    }
     const back = definition.back;
     definition.back = (st: Bag, api: Bag) => { if (st.open === marker) { clear(); api.set({ open: null }); return true; } return back?.(st, api); };
   }
@@ -196,7 +222,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     if (result.status !== 'selected' || !result.selectionId) return;
     clear();
     if (recent) for (const evicted of filesIndex.record({ ...recent, name: result.name || 'Selected document', mimeType: result.mimeType || 'application/octet-stream', selectionId: result.selectionId })) if (evicted !== result.selectionId) release(evicted);
-    filesIndex.setOpen(result.selectionId);
+    if(recent&&recent.kind==='selected'&&rememberedPicker(result.selectionId))filesIndex.setOpen(result.selectionId);
     const requestEpoch = epoch;
     current = { result, status: 'Reading selected document…', epoch: requestEpoch };
     publish();
@@ -226,11 +252,14 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   const renderFiles=views.files.render;
   views.files.render=(state:Bag,api:Bag)=>{
     const out=renderFiles(state,api),items=out.fd?.items;out.filePlacement=true;
+    const storageAccessible=!out.browse?.denied&&!out.browse?.unavailable;
+    out.filterVisible=!!out.chip&&storageAccessible;
     if(out.toolbar?.ready&&!out.toolbar.canCreate){const create=out.toolbar.newFolder;out.toolbar.canCreate=true;out.toolbar.newFolder=()=>{out.browse.allFiles();create();};}
     if(out.fd?.menuRows){
       const modes=[{mode:'name',icon:'type',up:'Name A–Z',down:'Name Z–A'},{mode:'date',icon:'calendar',up:'Newest first',down:'Oldest first'},{mode:'size',icon:'hard-drive',up:'Largest first',down:'Smallest first'}];
       out.fd.menuRows=[...modes.flatMap(choice=>[false,true].map(reverse=>({id:'sort:'+choice.mode+':'+reverse,label:reverse?choice.down:choice.up,on:(state.sort==='name'||state.sort==='size'?state.sort:'date')===choice.mode&&!!state.sortReverse===reverse,iconStyle:`mask:url('/icons/lucide/${choice.icon}.svg') center/contain no-repeat`,directionStyle:`mask:url('/icons/lucide/${reverse?'arrow-up':'arrow-down'}.svg') center/contain no-repeat`,go:()=>api.set({menu:false,sort:choice.mode,sortReverse:reverse})}))),...out.fd.menuRows.filter((row:Bag)=>!row.id.startsWith('sort:')&&row.id!=='reverse-order')];
     }out.shareAvailable=Capacitor.isNativePlatform()||(typeof navigator.share==='function'&&typeof navigator.canShare==='function');
+    out.fileReadNotice=storageAccessible&&!out.browse?.loading?(out.nativeTreeStatus||out.fd?.note):'';
     if(!Capacitor.isNativePlatform()&&Array.isArray(items)&&items.length&&items.every((row:Bag)=>{try{return /^Photos\/(Images|Videos)\//.test(JSON.parse(row.id)[1]);}catch{return false;}})){
       out.mediaCollection=true;out.filePlacement=false;out.canRename=false;
       out.selSaveLocally=()=>registerPlugin<{storageSaveMedia(input:{paths:string[]}):Promise<unknown>}>('AlphaFiles').storageSaveMedia({paths:items.filter((row:Bag)=>row.selOn).map((row:Bag)=>JSON.parse(row.id)[1])});

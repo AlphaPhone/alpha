@@ -1,4 +1,5 @@
 /** Host-only Kotlin compiler, using the Android build's reviewed dependency pins. */
+import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
@@ -20,7 +21,7 @@ const modules = [
 
 export function kotlinJars({prepare = false} = {}) {
   const metadata = readFileSync(join(root, 'android/gradle/verification-metadata.xml'), 'utf8');
-  const output = process.env.ALPHA_KOTLIN_HOME || join(process.env.RUNNER_TEMP || tmpdir(), 'alpha-host-kotlin');
+  const output = join(process.env.RUNNER_TEMP || tmpdir(), 'alpha-host-kotlin');
   return modules.map(([group, name, version]) => {
     const file = `${name}-${version}.jar`;
     const component = metadata.split(`<component group="${group}" name="${name}" version="${version}">`)[1]?.split('</component>')[0];
@@ -35,13 +36,13 @@ export function kotlinJars({prepare = false} = {}) {
       const temporary = join(output, `${file}.${process.pid}.part`);
       try {
         execFileSync('curl', ['--fail', '--location', '--retry', '3', '--max-time', '90', '--output', temporary,
-          `https://repo.maven.apache.org/maven2/${group.replaceAll('.', '/')}/${name}/${version}/${file}`], {stdio: 'inherit', timeout: 300000});
+          `https://repo.maven.apache.org/maven2/${group.replaceAll('.', '/')}/${name}/${version}/${file}`], {stdio: 'inherit', timeout: scaledTimeout(300000)});
         if (!valid(temporary)) throw Error(`Kotlin compiler dependency checksum differs: ${file}`);
         found = join(output, file);
         renameSync(temporary, found);
       } finally {rmSync(temporary, {force: true});}
     }
-    if (!found) throw Error(`Prepare the pinned host Kotlin compiler: node test/fixtures/kotlin-tools.mjs --prepare (${file})`);
+    if (!found) throw Error(`Prepare the pinned host Kotlin compiler: bun test/fixtures/kotlin-tools.mjs --prepare (${file})`);
     return found;
   });
 }
@@ -51,7 +52,7 @@ export function compileKotlin(sources, output) {
   const runtime = [jars[1], jars[6]].join(delimiter);
   execFileSync(javaBinary('java'), ['-cp', jars.join(delimiter), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
     '-no-stdlib', '-no-reflect', '-jvm-target', '11', '-classpath', runtime, '-d', output, ...sources],
-  {timeout: 120000, stdio: 'pipe'});
+  {timeout: scaledTimeout(120000), stdio: 'pipe'});
   return [output, runtime].join(delimiter);
 }
 

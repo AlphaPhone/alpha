@@ -129,7 +129,7 @@ GraphHopper setup is superseded for production.
 
 5. **Verify the real integration with a signed-in plan account.**
 
-   Use the existing private operator harness, or `npm run dev:cloud` with
+   Use the existing private operator harness, or `bun run dev:cloud` with
    `ALPHA_CLOUD_ENVIRONMENT=staging`, for staging service checks. Keep credentials
    in that harness's private store. Record HTTP status, bounded error code,
    provider identity, source/deployment version and pass/fail, without recording
@@ -165,14 +165,13 @@ GraphHopper setup is superseded for production.
 
 6. **Run the Pixel check on the reviewed APK.**
 
-   Complete `npm run verify` and `npm run android:build:local` with admitted native
-   inputs and inspect standalone and launcher outputs with
-   `npm run android:verify`. Record the variant and exact signed APK digest used
-   on the Pixel. A developer APK built with
-   `--allow-unpackaged-runtime` is non-distributable.
+   Complete `bun run verify` and `bun run android:build:local` with admitted native
+   inputs and inspect the launcher outputs with
+   `bun run android:verify`. Record the exact signed APK digest used
+   on the Pixel.
 
-   Install the intended variant through the owner-controlled installation
-   process. Both variants use `ai.alphacompute.alphaphone`. Start with a fresh
+   Install the launcher APK through the owner-controlled installation
+   process. Start with a fresh
    installation if the Pixel currently has the former package. Confirm
    the current package, signing and sign-in callback registration before testing.
    [Cloud registration and release steps](../../README.md#device-and-image-tooling).

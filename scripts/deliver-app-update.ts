@@ -1,10 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /** Publish an admitted release APK first, verify anonymous download, then move
- * the stable manifest. No keys, builds or private QA URLs enter this command.
+ * the stable manifest. No keys or builds enter this command.
  * GitHub asset replacement is not atomic: a manifest upload failure is reported
  * and must be repaired by retrying this same candidate, never by changing its APK.
  */
 import {createHash} from 'node:crypto';
+import {sha256 as sha} from './sha256.ts';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,7 +20,7 @@ import {
 
 interface UpdateOffer {
   schema: 'alpha-update/v1';
-  variant: 'launcher' | 'standalone';
+  variant: 'launcher';
   versionCode: number;
   signerSha256: string;
   sha256: string;
@@ -42,9 +43,9 @@ interface DeliveryPorts {
   read?: (url: string, options: PublicReadOptions) => Promise<PublicArtifact | null>;
   wait?: (ms: number) => Promise<void>;
 }
-interface ReleaseRecord {isDraft?: boolean; assets?: {name: string}[]}
+interface ReleaseAsset {name: string; id?: string; state?: string; size?: number; digest?: string | null}
+interface ReleaseRecord {isDraft?: boolean; assets?: ReleaseAsset[]}
 
-const sha = (bytes: NodeJS.ArrayBufferView) => createHash('sha256').update(bytes).digest('hex');
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 /** Anonymous HTTPS only, bounded redirects/body/time, streamed APK digest. */
@@ -81,9 +82,9 @@ export async function publicObject(url: string, {maxBytes, missing = false, fetc
   } finally {clearTimeout(timeout);}
 }
 
-function parseOffer(bytes: Buffer): UpdateOffer {
+export function parseOffer(bytes: Buffer): UpdateOffer {
   const value: UpdateOffer = JSON.parse(bytes.toString('utf8'));
-  if (value?.schema !== 'alpha-update/v1' || !['launcher','standalone'].includes(value.variant) ||
+  if (value?.schema !== 'alpha-update/v1' || value.variant !== 'launcher' ||
       !Number.isSafeInteger(value.versionCode) || value.versionCode < 1 || !/^[0-9a-f]{64}$/.test(value.signerSha256 || '') ||
       !/^[0-9a-f]{64}$/.test(value.sha256 || '') || !Number.isSafeInteger(value.sizeBytes) || value.sizeBytes < 1 || value.sizeBytes > 2**31) {
     throw Error('Publication requires a single complete alpha-update/v1 offer; an index needs its own reviewed transition');
@@ -142,6 +143,17 @@ function checkStableFloor(release: ReleaseRecord | null, versionCode: number) {
     throw Error('Candidate is below the retained stable APK version floor');
 }
 
+function unreadableManifestStarter(release: ReleaseRecord | null) {
+  const manifests = release?.assets?.filter(asset => asset.name === MANIFEST_NAME) ?? [];
+  if (!manifests.length) return null;
+  const [asset] = manifests;
+  // GitHub can leave an empty starter after a 502 on the mutable manifest upload.
+  // A completed or unclassified asset may merely be hidden from anonymous readback.
+  if (manifests.length === 1 && asset.state === 'starter' && asset.size === 0 &&
+      asset.digest === null && typeof asset.id === 'string' && asset.id.length > 0) return asset.id;
+  throw Error('Stable manifest exists but is not publicly readable; resolve visibility before publishing');
+}
+
 /** All inputs have already passed prepare's release and actual-APK admission.
  * Injected ports let failure tests exercise the real publication ordering.
  */
@@ -171,7 +183,7 @@ export async function deliver({directory, manifestUrl, source}: DeliveryInput, {
   }
   const release = stableRelease(run, APP_UPDATE_TAG);
   checkStableFloor(release, offer.versionCode);
-  if (!previous && release?.assets?.some(asset => asset.name === MANIFEST_NAME)) throw Error('Stable manifest exists but is not publicly readable; resolve visibility before publishing');
+  const previousStarter = previous ? null : unreadableManifestStarter(release);
   if (release === null) run(['release','create',APP_UPDATE_TAG,'--repo',repo,'--target',source,'--title','Alpha Phone app updates','--notes','Signed Alpha Compute application updates.','--latest=false']);
   // Never overwrite a versioned APK: even a failed delivery can be safely retried.
   if (!release?.assets?.some(asset => asset.name === apkName)) run(['release','upload',APP_UPDATE_TAG,apk,'--repo',repo]);
@@ -193,9 +205,9 @@ export async function deliver({directory, manifestUrl, source}: DeliveryInput, {
   if (!finalRelease?.assets?.some(asset => asset.name === apkName))
     throw Error('Verified APK is missing from the final stable release inventory');
   const current = await readManifest();
-  if (!current && finalRelease.assets?.some(asset => asset.name === MANIFEST_NAME))
-    throw Error('Stable manifest exists but is not publicly readable; resolve visibility before publishing');
-  if ((current ? current.sha256 : null) !== (previous ? previous.sha256 : null)) throw Error('Stable channel changed during publication; retry against its current state');
+  const currentStarter = current ? null : unreadableManifestStarter(finalRelease);
+  if (currentStarter !== previousStarter || (current?.sha256 ?? null) !== (previous?.sha256 ?? null))
+    throw Error('Stable channel changed during publication; retry against its current state');
   if (!previous || previous.sha256 !== sha(manifestBytes)) run(['release','upload',APP_UPDATE_TAG,manifestFile,'--repo',repo,'--clobber']);
   let visible = false;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -214,13 +226,13 @@ export async function main(argv: string[], {root = process.cwd(), log = console.
   let variant: string | undefined, apkManifest = 'artifacts/apk-manifest.json', notes: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i], value = argv[++i];
-    if (!value || value.startsWith('--')) throw Error('Usage: node scripts/deliver-app-update.ts --variant launcher|standalone [--apk-manifest FILE] [--notes TEXT]');
+    if (!value || value.startsWith('--')) throw Error('Usage: bun scripts/deliver-app-update.ts --variant launcher [--apk-manifest FILE] [--notes TEXT]');
     if (flag === '--variant') variant = value;
     else if (flag === '--apk-manifest') apkManifest = value;
     else if (flag === '--notes') notes = value;
     else throw Error(`Unknown argument ${flag}`);
   }
-  if (variant !== 'launcher' && variant !== 'standalone') throw Error('--variant launcher|standalone is required');
+  if (variant !== 'launcher') throw Error('--variant launcher is required');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-app-delivery-'));
   try {
     const args = ['--variant',variant,'--apk-manifest',apkManifest,'--out-dir',directory,...(notes === undefined ? [] : ['--notes',notes])];

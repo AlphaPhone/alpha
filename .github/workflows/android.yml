@@ -1,35 +1,44 @@
 name: Android foundation
 on:
-  # Main pushes rebuild both variants so a broken merge is visible on main itself.
-  push:
-    branches: [main, develop]
+  # The build's inputs: Android and renderer sources, the scripts and root configuration that
+  # produce the APKs, the lockfile and the upstream pin. Documentation-only changes do not run it.
   pull_request:
+    paths:
+      - 'android/**'
+      - 'apps/app/**'
+      - 'scripts/**'
+      - 'licenses/**'
+      - app.config.json
+      - capacitor.config.ts
+      - vite.config.ts
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - upstream.lock.json
+      - .gitmodules
+      - vendor/eliza
+      - .github/workflows/android.yml
   workflow_dispatch:
 permissions:
   contents: read
+  # The native input artifacts are read through the workflow token.
+  actions: read
 concurrency:
-  # Superseded PR runs are cancelled. Each main push gets its own group: a shared
-  # group would still cancel a queued main run when a third push arrives.
-  group: android-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  changes:
-    uses: ./.github/workflows/changes.yml
   build:
-    needs: changes
-    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
+      # The post-build owner checks run under node --test.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version-file: .nvmrc
-          cache: npm
+          node-version: "26.13.0"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: github.event_name == 'workflow_dispatch'
         with:
           bun-version: "1.4.2"
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -53,56 +62,52 @@ jobs:
           # Native engine wrappers (prepare-embedding-host) require the CMake release of the qualified build.
           python3 -m pip install cmake==4.0.3
           test "$(cmake --version | head -1)" = "cmake version 4.0.3"
-      - run: npm ci
-      # The host JVM tests in npm run verify and the Calendar bridge both need the pinned org.json jar.
+      - run: bun install --frozen-lockfile
+      # The Calendar bridge needs the pinned org.json jar.
       - name: Prepare normal host-test JSON
         timeout-minutes: 1
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
-        run: node test/fixtures/kotlin-tools.mjs --prepare
-      # npm run verify's prepared-SDK tests need the pinned Bun and SDK, as in browser.yml.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          bun-version: "1.4.2"
-      - name: Prepare pinned SDK for manual verification
-        if: github.event_name == 'workflow_dispatch'
-        shell: bash
-        run: |
-          export ALPHA_BUN="$(command -v bun)"
-          test "$("$ALPHA_BUN" --version)" = '1.4.2'
-          node scripts/prepare-local-agent.ts
-          prepared_source=$(node --input-type=module -e "import {sourceDirectory,verifySource} from './scripts/local-agent-source.ts'; import fs from 'node:fs'; const source=sourceDirectory(process.cwd()); verifySource(source,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit); process.stdout.write(source);")
-          echo "ALPHA_BUN=$ALPHA_BUN" >> "$GITHUB_ENV"
-          echo "ALPHA_CLOUD_COLLECTOR_SOURCE=$prepared_source" >> "$GITHUB_ENV"
-      - name: Verify standalone manual qualification
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          ALPHA_REQUIRE_PREPARED_SDK: '1'
-        run: npm run verify
-      - run: node --test vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
-      # On-device speech is the shared paradee-voice library on libelizainference (llama.cpp/ggml):
-      # Paradee-8M TTS with misaki G2P and the bundle's ASR slot. This lane stages no native voice
-      # outputs, so Gradle compiles the real Java API unpackaged and the APKs report speech unavailable.
-      - name: Prepare pinned native lifecycle sources
-        if: github.event_name != 'workflow_dispatch'
-        run: node scripts/prepare-local-agent.ts --source-only
-      # Distribution build: flag-off whatever the runner exports. This job stages no
-      # resident runtime, so releases are recorded distributable:false (APK-build
-      # evidence only); the resident workflow builds and verifies PACKAGED releases.
-      # This lane never runs instrumentation; manual build archives still include it.
-      - name: Record tracked source frame before normal Android build
+        run: bun test/fixtures/kotlin-tools.mjs --prepare
+      - run: bun test --timeout=600000 vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
+      # The normal chain builds and verifies its native source/model inputs.
+      - name: Record tracked source frame before the Android build
         timeout-minutes: 1
         env:
           ALPHA_CALENDAR_BRIDGE_EXPECTED_HEAD: ${{ github.sha }}
         run: python scripts/ci/calendar-bridge.py --source-frame
-      - name: Build flag-off distribution APKs
+      - name: Acquire hash-pinned Android Bun with step-only authentication
+        timeout-minutes: 12
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALPHA_LOCAL_AGENT_SOURCE_DIR: ${{ github.workspace }}/vendor/eliza
+        run: python3 scripts/ci/acquire-resident-bun.py
+      - name: Build the launcher APKs
         env:
           ELIZA_DEV_ALLOW_TEST_MOCKS: ""
-          VITE_ELIZA_DEV_ALLOW_TEST_MOCKS: ""
           # A clean release R8 pass exhausted the default 2 GiB heap on this runner.
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
-        run: npm run android:build -- --allow-unpackaged-runtime --skip-instrumentation
+        run: bun run android:build:local -- --release
+      - name: Qualify generated native admission and staged wallet exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .eliza/native-inputs/receipt.json
+          test -f android/app/src/main/assets/agent/agent-bundle-dependencies.json
+          node --test --test-concurrency=1 --test-reporter=tap test/voice-host-record.test.mjs test/wallet-disabled.test.mjs | tee artifacts/android-postbuild-owners.tap
+          python3 - <<'PY'
+          import hashlib, json, pathlib, re, subprocess
+          text = pathlib.Path('artifacts/android-postbuild-owners.tap').read_text()
+          for field in ('fail', 'skipped', 'cancelled'):
+              assert re.search(r'^# ' + field + r' 0\s*$', text, re.M), field + ' must be zero'
+          for name in ('generated native admission refuses a wrong consumer pin and changed output bytes', 'a staged resident runtime inventory lists no @metamask/*, wagmi or @rainbow-me/* package'):
+              assert re.search(r'^ok \d+ - ' + re.escape(name) + r'\s*$', text, re.M), name
+          digest = lambda file: hashlib.sha256(pathlib.Path(file).read_bytes()).hexdigest()
+          record = {'sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tests':int(re.search(r'^# tests (\d+)\s*$', text, re.M)[1]), 'skipped':0,
+                    'nativeReceiptSha256':digest('.eliza/native-inputs/receipt.json'), 'runtimeInventorySha256':digest('android/app/src/main/assets/agent/agent-bundle-dependencies.json'),
+                    'scope':'Actual normal producer receipt and staged runtime inventory; no device execution.'}
+          pathlib.Path('artifacts/android-postbuild-owners.json').write_text(json.dumps(record, indent=2) + '\n')
+          PY
       # Use actual normal JavaCompile outputs; this qualification assembles no extra APK.
       # It reads ALPHA_JSON_JAR from the host-test JSON step above.
       - name: Qualify actual Calendar bridge in normal Java compile context
@@ -110,17 +115,32 @@ jobs:
         env:
           ALPHA_CALENDAR_BRIDGE_EXPECTED_HEAD: ${{ github.sha }}
         run: python scripts/ci/calendar-bridge.py
-      - name: Require test-mock-free distribution
+      # The build prepared the pinned SDK and built the workflow worker; both are reused here.
+      - name: Verify digest recovery across independent runtime processes
+        timeout-minutes: 10
+        env:
+          TMPDIR: ${{ runner.temp }}/digest-restart
         run: |
-          node scripts/audit-production-bundle.ts web-dist
-          node - <<'NODE'
+          mkdir -p "$TMPDIR"
+          bun run agent:test-digest-restart
+      - name: Export the portable worker dependency proof
+        run: bun scripts/ci/export-browser-proof.ts worker
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-proof-worker-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/browser-proof/worker/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Require flag-off APKs
+        run: |
+          bun scripts/audit-production-bundle.ts web-dist
+          bun - <<'NODE'
           const fs = require('node:fs');
           const manifest = JSON.parse(fs.readFileSync('artifacts/apk-manifest.json', 'utf8'));
-          if (manifest.testMocks !== false || manifest.demoEntryPoints !== false) throw new Error('Distribution APKs must be testMocks:false and demoEntryPoints:false');
-          if (manifest.results.length !== 4 || manifest.results.some(row => row.testMocks !== false || row.bundleAudit !== 'passed')) throw new Error('Every distribution APK must pass the flag-off bundle audit');
+          if (manifest.testMocks !== false || manifest.demoEntryPoints !== false) throw new Error('APKs must be testMocks:false and demoEntryPoints:false');
+          if (manifest.results.length !== 2 || manifest.results.some(row => row.testMocks !== false || row.bundleAudit !== 'passed' || row.runtime !== 'PACKAGED')) throw new Error('Both launcher APKs must pass the flag-off bundle audit and package the runtime');
           console.log(JSON.stringify({ testMocks: manifest.testMocks, demoEntryPoints: manifest.demoEntryPoints, version: manifest.version, signing: manifest.signing.release }, null, 2));
           NODE
-      - run: npm run aosp:stage -- --apk artifacts/launcher-debug.apk --development
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-distribution-apks-${{ github.run_id }}-${{ github.run_attempt }}
@@ -139,9 +159,11 @@ jobs:
             artifacts/*.json
             # Written offline by the build beside the APKs it verified (scripts/generate-sbom.ts).
             artifacts/sbom/*.json
-            artifacts/aosp/
-            !artifacts/aosp/**/*.apk
+            artifacts/android-postbuild-owners.tap
             test-results/
+            ${{ runner.temp }}/digest-restart/alpha-digest-crash-*/*.log
+            ${{ runner.temp }}/digest-restart/alpha-digest-crash-*/*.json
+            ${{ runner.temp }}/digest-restart/alpha-digest-crash-*/*.jsonl
             android/app/build/reports/
             android/voice-host/qualified-voice-host.json
             ${{ runner.temp }}/alpha-calendar-bridge-${{ github.run_id }}-${{ github.run_attempt }}/receipt/inputs.json
@@ -151,21 +173,3 @@ jobs:
             ${{ runner.temp }}/alpha-calendar-bridge-${{ github.run_id }}-${{ github.run_attempt }}/gradle.log
             ${{ runner.temp }}/alpha-calendar-bridge-${{ github.run_id }}-${{ github.run_attempt }}/supervisor.json
           retention-days: 3
-  # Stable required check. The required-check ruleset requires this job:
-  # it passes when the change gate did not select Android and fails when the
-  # selected build failed, was cancelled or did not run.
-  result:
-    name: Android foundation result
-    needs: [changes, build]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/ci
-      - env:
-          SELECTED: ${{ needs.changes.outputs.android }}
-          CHANGES: ${{ needs.changes.result }}
-          BUILD: ${{ needs.build.result }}
-        run: node scripts/ci/required-result.ts "changes=$CHANGES" "build=$BUILD:$SELECTED"

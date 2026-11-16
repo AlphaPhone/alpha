@@ -1,7 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Audits a built web bundle (web-dist or an APK's extracted assets/public) for mock,
 // fixture and developer surfaces. Usage:
-//   node scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]
+//   bun scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]
 // The denylist is skipped only when the bundle's build-flags.json records testMocks:true.
 import {readFileSync,statSync,existsSync} from 'node:fs';
 import path from 'node:path';
@@ -10,6 +10,14 @@ import {fontLicenceFindings, fontLicenceLine} from './font-license-blockers.ts';
 import {licenceFlagLines} from './licence-policy.ts';
 import {assetLinksProblems} from './render-assetlinks.ts';
 import {regularFiles} from './regular-files.ts';
+import {SHIPPED_CLOUD_DEPLOYMENT,CLOUD_DEPLOYMENT_IS_CANDIDATE,CLOUD_SIGN_IN_REGISTRATION} from './cloud-deployment-policy.ts';
+import {STORAGE_NAMESPACES} from './cloud-deployment.ts';
+
+/** The staging Cloud's authorities, return page and tenant, from the deployment policy: test-mocks builds only. */
+export const STAGING_CLOUD_TEXT = Object.freeze([new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.api).host, new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.services).host,
+  new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.web).host + CLOUD_SIGN_IN_REGISTRATION.callbackPath.replace(/\/auth\/callback$/, ''),
+  // The former 'cloud-staging' entry also caught the staging tenant name.
+  SHIPPED_CLOUD_DEPLOYMENT.staging.tenant]);
 
 /** Decision P-43: production copy that offered or described a "no agent" state. */
 export const RETIRED_NO_AGENT_TEXT = Object.freeze(['without AI', 'Continue offline', 'continue offline', 'Connect an agent']);
@@ -21,11 +29,19 @@ export const RETIRED_REMOTE_AGENT_TEXT = Object.freeze(['Connect your remote age
 export const RETIRED_PAIRING_TEXT = Object.freeze(['pairing_identity_mismatch', 'This agent is not accepting pairing', 'The agent refused this pairing code']);
 /** AP-03/P-22: the Cloud sign-in hand-off (CloudProtocol.login). Product sign-in is the native in-app host. */
 export const RETIRED_SIGN_IN_HAND_OFF_TEXT = Object.freeze(['/api/auth/cli-session', '/auth/cli-login', 'Finish signing in to', 'Use the newly opened browser tab']);
+/** App review #855 (PROD-02/03/04): toasts and labels of the simulated prototype that answered a tap
+ * with a stand-in. They exist only behind the test-mocks build flag; a product bundle that holds one
+ * means a simulated handler stopped folding away. No entry may contain another denylist entry. */
+export const SIMULATED_STUB_TEXT = Object.freeze([
+  'in this preview', 'is taking notes', 'Voice input is not connected', 'Scene description is not connected',
+  'for you (confirmed)', 'Not booked.', 'Workflow execution is not connected', 'Booking is not connected',
+  'Read-aloud is not connected', 'Messages are not connected', 'Inbox is not connected',
+]);
 export const DENYLIST = Object.freeze([
   'Connect remote agent', 'Agent HTTPS address', 'Development Cloud agent infrastructure', 'Dedicated hosting requires a reviewed setup',
   'alpha:force-render-error', 'alpha:render-error-check', 'Forced render failure',
   'Enter mock mode', 'Try mock mode', 'Exit mock mode', 'mock-mode-banner', 'Mock mode ·',
-  '10.0.2.2:2138', 'cloud-staging', 'api-staging.eliza.app',
+  '10.0.2.2:2138', ...STAGING_CLOUD_TEXT,
   'alpha-dev-tools', 'Development connections', 'Development card', 'Device controls',
   'Browser development device', 'Development reply', '__alpha-local-agent', '__alpha-browser-cloud',
   'emulator development agent', 'Simulate Clock request',
@@ -40,6 +56,7 @@ export const DENYLIST = Object.freeze([
   'This page is a visual prototype', 'Pixel 11 Pro', 'Powered by elizaOS ·',
   'data-alpha-development-lock-screen', 'Booked · ', 'Agent booking',
   'Development vault secret', 'synthetic-dev-',
+  ...SIMULATED_STUB_TEXT,
   // The simulated password provider (browser/password-provider.ts) reaches a bundle only if
   // browserDevProfile stops constant-folding to false; these catch that regression.
   'demo-only-password', 'Development password provider', 'Add development provider', 'Proton Pass · development',
@@ -63,8 +80,11 @@ export const DENYLIST = Object.freeze([
   // In-app Eliza Cloud sign-in (owner directive 2026-10-14): the native host is the one product
   // sign-in path. The diagnostic button, the staging return host and the Cloud sign-in hand-off
   // (cli-session, the hosted cli-login page and its browser waiting copy) are test-mocks only.
-  'Browser sign-in (diagnostic)', 'staging.eliza.app/alphaphone',
+  'Browser sign-in (diagnostic)',
   ...RETIRED_SIGN_IN_HAND_OFF_TEXT,
+  // Upstream test sign-in (elizaOS/eliza#39519 moved it out of shipped code): the Playwright auth
+  // marker cookie, its synthetic user, the test session route and the local test account button.
+  'eliza-test-auth', 'local-live-test-user@agent.local', '/api/test/auth/session', 'Continue with local test account',
   'Browser calendar (development)',
   // The read-only OS update-channel check is registered off; its About row is development only.
   'Update channel (development)',
@@ -111,11 +131,11 @@ export function avatarInitials(text: string) {
 /** Reads {"testMocks": boolean}. A missing or malformed record is treated as a production bundle. */
 export function readBuildFlags(dir: string) {
   const file = path.join(dir, 'build-flags.json');
-  if (!existsSync(file)) return {present: false, testMocks: false};
+  if (!existsSync(file)) return {present: false, testMocks: false, candidateCloud: false};
   try {
     const value = JSON.parse(readFileSync(file, 'utf8'));
-    return {present: true, testMocks: value?.testMocks === true, valid: typeof value?.testMocks === 'boolean'};
-  } catch { return {present: true, testMocks: false, valid: false}; }
+    return {present: true, testMocks: value?.testMocks === true, candidateCloud: value?.candidateCloud === true, valid: typeof value?.testMocks === 'boolean' && (value.candidateCloud === undefined || typeof value.candidateCloud === 'boolean')};
+  } catch { return {present: true, testMocks: false, candidateCloud: false, valid: false}; }
 }
 
 interface BundleAuditOptions {
@@ -134,6 +154,8 @@ export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
   else if (flags.valid === false) errors.push('build-flags.json is malformed.');
   if (flags.present && flags.testMocks !== expected) errors.push(`build-flags.json records testMocks:${flags.testMocks}, expected ${expected}.`);
   if (!existsSync(path.join(dir, 'index.html'))) errors.push('index.html is missing.');
+  // A candidate Cloud (ALPHA_CLOUD_DEPLOYMENT_FILE) is for development and rehearsal; distributed builds use the shipped policy.
+  if (!expected && (flags.candidateCloud || CLOUD_DEPLOYMENT_IS_CANDIDATE)) errors.push('This build addresses a candidate Cloud deployment (ALPHA_CLOUD_DEPLOYMENT_FILE); a production bundle must use the shipped Cloud deployment policy.');
   let files = 0;
   // Only an explicitly requested and recorded mock build skips the denylist.
   const skip = expected && flags.testMocks;
@@ -146,6 +168,14 @@ export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
     if (file === 'img' || file.startsWith('img/')) policy.push({file, rule: 'fixture image directory img/'});
     if (file.endsWith('.map')) policy.push({file, rule: 'source map'});
     if (text === undefined) continue;
+    if (/\.[cm]?js$/i.test(file)) {
+      for (const [, fingerprint] of text.matchAll(/cloud-deployment:([a-f0-9]{64}):/g)) {
+        if (fingerprint !== STORAGE_NAMESPACES.at(-1)) {
+          policy.push({file, rule: 'candidate Cloud deployment credential namespace'});
+          break;
+        }
+      }
+    }
     for (const entry of DENYLIST) if (text.includes(entry)) policy.push({file, rule: entry});
     for (const initials of avatarInitials(text)) policy.push({file, rule: `hard-coded avatar initials "${initials}"`});
     if (path.posix.basename(file) === 'assetlinks.json')
@@ -160,7 +190,7 @@ function main(argv: string[]) {
   const flags = argv.filter(arg => arg.startsWith('--'));
   const unknown = flags.filter(flag => flag !== '--expect-test-mocks');
   if (args.length !== 1 || unknown.length) {
-    console.error('Usage: node scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]');
+    console.error('Usage: bun scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]');
     return 2;
   }
   const dir = path.resolve(args[0]);

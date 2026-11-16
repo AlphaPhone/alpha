@@ -86,7 +86,7 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     assert digest(report_path.read_bytes()) == report_hash, 'Asset report pin mismatch'
     report = json.loads(report_path.read_text())
     assert report['sourceLogoSha256'] == digest((REPO / 'apps/app/public/logo-mark.svg').read_bytes())
-    assert (report['width'],report['height'],report['accent'],report['wallpaperBackground']) == (1080,2424,'#0000FF','#050505')
+    assert (report['width'],report['height'],report['accent'],report['wallpaperBackground']) == (1080,2424,'#0000FF','#000000')
     for name,key in [('bootanimation.zip','bootAnimationSha256'),('default_wallpaper.png','wallpaperSha256')]:
         assert digest((assets/name).read_bytes()) == report[key], 'Asset payload drift: ' + name
     target = json.loads((BRAND/'core-launcher/manifest.json').read_text()).get('targetAppId')
@@ -136,6 +136,9 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     assert digest((REPO / LOCK['productIcon']['logoSource']).read_bytes()) == LOCK['productIcon']['logoSourceSHA256'], 'Product icon identity source drift'
     put(project+'/res/drawable/alpha_mark.xml',icon)
     put(project+'/res/drawable-nodpi/alpha_wallpaper.png',(assets/'default_wallpaper.png').read_bytes())
+    # The production product copies this feature only after the matching Provision sources are staged.
+    put('vendor/alphaphone/branding/provision/fresh-telephony.xml',
+        (BRAND/'provision/fresh-telephony.xml').read_bytes())
     product = safe(root,'vendor/alphaphone/product.mk'); current = product.read_bytes()
     include = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
     assert current.decode().count(include) <= 1, 'Duplicate branding inclusion'

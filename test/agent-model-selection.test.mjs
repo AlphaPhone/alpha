@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync} from 'node:fs';
@@ -12,7 +13,7 @@ function launch({route,override,swaps,existingToken=true,retainedIdentity=true,r
  const dir=mkdtempSync(join(tmpdir(),'alpha-model-')),profile=join(dir,'profile'),source=join(dir,'source'),receipt=join(dir,'models.json'),childReceipt=join(dir,'child.json'),bun=join(dir,'fake-bun');
  mkdirSync(profile);mkdirSync(join(source,'packages/app/src/runtime'),{recursive:true});writeFileSync(join(source,'packages/app/src/runtime/dev-server.ts'),'');
  git(source,'init','-q');git(source,'commit','--allow-empty','-qm','fixture');
- writeFileSync(bun,`#!/usr/bin/env node\nconst fs=require('node:fs');fs.writeFileSync(${JSON.stringify(childReceipt)},JSON.stringify({pid:process.pid,hostRevision:process.env.ELIZA_HOST_CONTEXT_REVISION,autoReset:process.env.ELIZA_PGLITE_AUTO_RESET??null,unexpected:process.env.ALPHA_UNRELATED_ENV??null,token:process.env.ELIZA_API_TOKEN,nativeViews:JSON.parse(process.env.ELIZA_NATIVE_VIEW_DECLARATIONS),swaps:{secret:process.env.ELIZA_SECRET_SWAP_ENABLED??null,pii:process.env.ELIZA_PII_SWAP_ENABLED??null},config:JSON.parse(fs.readFileSync(process.env.ELIZA_CONFIG_PATH,'utf8'))}));fs.writeFileSync(${JSON.stringify(receipt)},JSON.stringify(Object.fromEntries(['CEREBRAS_MODEL','CEREBRAS_SMALL_MODEL','CEREBRAS_LARGE_MODEL'].map(k=>[k,process.env[k]]))));${runtimeConfigUpdate?"fs.writeFileSync(process.env.ELIZA_CONFIG_PATH,JSON.stringify({...JSON.parse(fs.readFileSync(process.env.ELIZA_CONFIG_PATH,'utf8')),runtimeSelection:'retained'}));":''}`,{mode:0o700});
+ writeFileSync(bun,`#!/usr/bin/env bun\nconst fs=require('node:fs');fs.writeFileSync(${JSON.stringify(childReceipt)},JSON.stringify({pid:process.pid,hostRevision:process.env.ELIZA_HOST_CONTEXT_REVISION,autoReset:process.env.ELIZA_PGLITE_AUTO_RESET??null,unexpected:process.env.ALPHA_UNRELATED_ENV??null,token:process.env.ELIZA_API_TOKEN,nativeViews:JSON.parse(process.env.ELIZA_NATIVE_VIEW_DECLARATIONS),swaps:{secret:process.env.ELIZA_SECRET_SWAP_ENABLED??null,pii:process.env.ELIZA_PII_SWAP_ENABLED??null},config:JSON.parse(fs.readFileSync(process.env.ELIZA_CONFIG_PATH,'utf8'))}));fs.writeFileSync(${JSON.stringify(receipt)},JSON.stringify(Object.fromEntries(['CEREBRAS_MODEL','CEREBRAS_SMALL_MODEL','CEREBRAS_LARGE_MODEL'].map(k=>[k,process.env[k]]))));${runtimeConfigUpdate?"fs.writeFileSync(process.env.ELIZA_CONFIG_PATH,JSON.stringify({...JSON.parse(fs.readFileSync(process.env.ELIZA_CONFIG_PATH,'utf8')),runtimeSelection:'retained'}));":''}`,{mode:0o700});
  const tokenPath=join(profile,'owner-token'),retainedToken='a'.repeat(64);if(existingToken)writeFileSync(tokenPath,retainedToken,{mode:0o600});
  // An existing profile carries an explicitly retained agent identity; the launcher refuses ambiguous ones.
  const identity={agents:{list:[{id:'retained',default:true,name:'Retained Eliza',identityName:'Retained Eliza'}]}};
@@ -21,9 +22,9 @@ function launch({route,override,swaps,existingToken=true,retainedIdentity=true,r
  let ownedLivePid;
  const env={...process.env,ALPHA_UNRELATED_ENV:'must-stay-outside',ELIZA_ASR_ENABLED:'0',ELIZA_PARADEE_ENABLED:'0',ALPHA_ELIZA_SOURCE:source,ALPHA_REMOTE_PROFILE:profile,ALPHA_REMOTE_PORT:'47999',ALPHA_BUN:bun,CEREBRAS_API_KEY:'synthetic-fixture-key'};for(const key of ['ELIZA_SECRET_SWAP_ENABLED','ELIZA_PII_SWAP_ENABLED','CEREBRAS_MODEL','ELIZA_PGLITE_AUTO_RESET'])delete env[key];Object.assign(env,swaps||{});if(override!==undefined)env.CEREBRAS_MODEL=override;if(autoReset!==undefined)env.ELIZA_PGLITE_AUTO_RESET=autoReset;
  try {
-  let result=spawnSync(process.execPath,[resolve('scripts/start-local-remote.ts')],{env,encoding:'utf8',timeout:15000});
+  let result=spawnSync(process.execPath,[resolve('scripts/start-local-remote.ts')],{env,encoding:'utf8',timeout:scaledTimeout(15000)});
   const firstChild=existsSync(childReceipt)?JSON.parse(readFileSync(childReceipt,'utf8')):null;
-  if(repeat){assert.equal(result.status,0,result.stderr);result=spawnSync(process.execPath,[resolve('scripts/start-local-remote.ts')],{env,encoding:'utf8',timeout:15000});}
+  if(repeat){assert.equal(result.status,0,result.stderr);result=spawnSync(process.execPath,[resolve('scripts/start-local-remote.ts')],{env,encoding:'utf8',timeout:scaledTimeout(15000)});}
   const child=existsSync(childReceipt)?JSON.parse(readFileSync(childReceipt,'utf8')):null;let childAlive=false;if(child)try{process.kill(child.pid,0);childAlive=true;ownedLivePid=child.pid;}catch(error){if(error.code!=='ESRCH')throw error;}
   const launchRecord=join(profile,'process.json');
   return {status:result.status,error:result.stderr,firstChild,child,launch:existsSync(launchRecord)?JSON.parse(readFileSync(launchRecord,'utf8')):null,childAlive,retainedToken,token:readFileSync(tokenPath,'utf8'),models:existsSync(receipt)?JSON.parse(readFileSync(receipt,'utf8')):null,before,after:existsSync(config)?readFileSync(config,'utf8'):null};

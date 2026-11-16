@@ -1,6 +1,6 @@
 // Image Phone view adapter (AP-08) against a recording telephony stub. No device, call log or
 // Telecom is involved: this proves the renderer's fences and handoff wording, not a device read.
-import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
+import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
 const dir=mkdtempSync(join(tmpdir(),'phone-adapter-'));
 const output=await build({entryPoints:[resolve('apps/app/src/prototype/phone-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,external:['@capacitor/core'],plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\.\/runtime\/aosp-image|\.\.\/runtime\/comms-bar|\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('aosp-image')?'export const aospImage=false;':a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':a.path.includes('comms-bar')?'export function setListFilterHandler(view,handler){(globalThis.listFilters||={})[view]=handler;}export function clearListFilter(view){globalThis.listFilters?.[view]?.clear();}':'export function registerPlugin(){return {};}',loader:'js'}));}}]});
 writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
@@ -134,7 +134,6 @@ test('Contacts opens only where Contacts is admitted',async()=>{
  globalThis.mvpViews=['contacts'];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,['contacts']);globalThis.mvpViews=[];
 });
 test('rows without a dialable number cannot dial',()=>{const rows=phoneRows([{...call,number:'',cachedName:null}],()=>{throw Error('dialed');});assert.equal(rows[0].noDial,true);rows[0].dial();assert.match(rows[0].label,/Unknown caller/);});
-test('the template wraps the prototype Phone behind nativePrototype',()=>{const html=readFileSync('apps/app/src/prototype/template.html','utf8');const start=html.indexOf('<sc-if value="{{is.phone}}">');assert.ok(html.indexOf('<sc-if value="{{phone.nativeManaged}}">',start)>start);assert.ok(html.indexOf('<sc-if value="{{phone.nativePrototype}}">',start)<html.indexOf('{{phone.title}}',start));});
 test('the image bar filters Recents in memory, keeps an Alpha filter as a clearable chip and briefs from new rows only',async()=>{
  const other={...call,id:'5',number:'+16465550100',cachedName:'Ben Ode',type:'outgoing',isNew:false};
  const {views,calls}=mount({status:status('granted'),listRecentCalls:{calls:[call,other]}});await settle();

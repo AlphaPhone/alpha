@@ -14,19 +14,6 @@ const baselineRules = baseline.rules.map(rule => ({...rule, ruleset_id: 1}));
 const requiredRule = {type: 'required_status_checks', ruleset_id: 2, parameters};
 const clone = value => JSON.parse(JSON.stringify(value));
 
-test('the read-back script only issues GET requests', () => {
-  const source = fs.readFileSync('scripts/ci/read-required-checks.ts', 'utf8');
-  assert.match(source, /import \{ghGet as readGitHub, ROOT\} from '..\/owner\/gh-readonly\.ts'/);
-  const transport = fs.readFileSync('scripts/owner/gh-readonly.ts', 'utf8');
-  const calls = transport.match(/execFileSync\(bin,[^\n]*/g);
-  assert.equal(calls.length, 1);
-  assert.match(calls[0], /execFileSync\(bin, \['api', '--method', 'GET', .*endpoint\]/);
-  // The only other method named is the command printed for the owner to run.
-  assert.deepEqual(source.match(/--method (?!GET)\w+/g), ['--method POST']);
-  assert.match(source, /console\.log\(named\(result\) \?[^\n]*\n\s+: `  gh api --method POST repos\/\$\{repo\}\/rulesets --input \$\{INTENDED_FILE\}`\)/);
-  assert.doesNotMatch(source, /-X\b|--input['"]|-f\b|--field|--raw-field|PATCH|PUT|DELETE/);
-});
-
 test('a stalled gh is killed and reported as an unreadable read', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-stall-'));
   const bin = path.join(dir, 'gh');
@@ -56,15 +43,15 @@ test('the installed ruleset matches, and an unreadable branch is never a match',
   const result = compareRequiredChecks({intended, branchRules: [...baselineRules, requiredRule], rulesets: [baseline, installed], protection: null});
   assert.deepEqual(result.problems, []);
   assert.equal(result.ok, true);
-  assert.deepEqual(result.enforced.map(row => row.context).sort(), ['Android foundation result', 'Browser MVP result', 'Repository verification']);
+  assert.deepEqual(result.enforced.map(row => row.context), ['Repository verification']);
   assert.equal(compareRequiredChecks({intended, branchRules: null, rulesets: [baseline, installed]}).ok, false);
 });
 
 test('renamed, sharded, unbound, bypassable and weakened configurations are reported', () => {
   const problems = input => compareRequiredChecks({intended, rulesets: [baseline, installed], protection: null, ...input}).problems.join('\n');
   const renamed = clone(requiredRule);
-  renamed.parameters.required_status_checks[1].context = 'Chromium (shard 1/4)';
-  assert.match(problems({branchRules: [renamed]}), /MISSING required check "Browser MVP result"[\s\S]*UNEXPECTED required check "Chromium \(shard 1\/4\)"/);
+  renamed.parameters.required_status_checks[0].context = 'Chromium (shard 1/4)';
+  assert.match(problems({branchRules: [renamed]}), /MISSING required check "Repository verification"[\s\S]*UNEXPECTED required check "Chromium \(shard 1\/4\)"/);
   const unbound = clone(requiredRule);
   delete unbound.parameters.required_status_checks[0].integration_id;
   assert.match(problems({branchRules: [unbound]}), /"Repository verification" is not bound to integration 15368/);

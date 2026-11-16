@@ -1,24 +1,22 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
- * One dispatch-only emulator suite of .github/workflows/android-emulator.yml, run inside the
- * hosted runner's disposable emulator:
+ * One emulator suite of .github/workflows/android-emulator.yml (nightly and on dispatch), run
+ * inside the hosted runner's disposable emulator:
  *
- *   node scripts/ci/emulator-suite.ts instrumentation | browser-reading
+ *   bun scripts/ci/emulator-suite.ts instrumentation | browser-reading
  *
- * instrumentation   `npm run test:android:instrumentation` with its default classes on both
- *                   distributions of the flag-off developer APKs.
+ * instrumentation   `bun run test:android:instrumentation` with its default classes on the
+ *                   launcher APK.
  * browser-reading   the same runner after the pinned Chromium 157 WebView is installed
- *                   (scripts/prepare-ci-webview.ts): BrowserReadingNavigation and
- *                   BrowserPageQuestion on the flag-off pair, then BrowserReading,
- *                   BrowserSensitiveReading and BrowserIsolatedReading on the test-mocks pair,
- *                   which is the only build that admits their loopback speech route.
+ *                   (scripts/prepare-ci-webview.ts): BrowserReadingNavigation. The real
+ *                   page-question journey additionally needs independently admitted sign-in.
  *
  * A preparation step that fails stops the suite. Evidence steps are independent: each runs, and
  * the suite fails when any of them did not pass (a failed, skipped or missing class fails the
  * instrumentation runner). `test-results/emulator-suite/<suite>.json` records every step.
  *
- * Emulator-class evidence on developer-override APKs (unpackaged resident runtime) on an x86_64
- * SDK image. Not a distributable build, a device or acceptance.
+ * Emulator-class evidence for the launcher debug APK on an x86_64 SDK image. Not a distributable
+ * build, a device or acceptance.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -27,9 +25,8 @@ import { fileURLToPath } from "node:url";
 
 export const SERIAL = "emulator-5554";
 export const AVD = "test";
-/** Flag-off classes that need isolated-world injection, and the ones that also need the test-mocks build. */
-export const READING_CLASSES = ["BrowserReadingNavigation", "BrowserPageQuestion"];
-export const READING_TEST_MOCKS_CLASSES = ["BrowserReading", "BrowserSensitiveReading", "BrowserIsolatedReading"];
+/** Classes that need isolated-world injection. */
+export const READING_CLASSES = ["BrowserReadingNavigation"];
 
 type Command = string[];
 type SuiteStep = {name: string; command: Command; env?: NodeJS.ProcessEnv} & (
@@ -77,20 +74,23 @@ interface SuiteOptions {
 const node = (...args: string[]) => [process.execPath, ...args];
 const runner = (name: string, ...args: string[]): SuiteStep => ({
   name, kind: "evidence", results: `test-results/android-instrumentation/${name}/results.json`,
-  command: ["npm", "run", "test:android:instrumentation", "--", "--owned-emulator", "--avd", AVD, "--serial", SERIAL,
+  command: ["bun", "run", "test:android:instrumentation", "--", "--owned-emulator", "--avd", AVD, "--serial", SERIAL,
     "--output", `test-results/android-instrumentation/${name}`, ...args],
 });
 const prepareEmulator: SuiteStep = { name: "prepare-emulator", kind: "preparation", command: node("scripts/prepare-ci-emulator.ts"), env: { ANDROID_SERIAL: SERIAL } };
+// Replace the image's WebView with Chromium 157 on the hosted API 35 x86_64 fixture.
+const prepareWebView: SuiteStep = { name: "prepare-webview", kind: "preparation", command: node("scripts/prepare-ci-webview.ts"), env: { ANDROID_SERIAL: SERIAL, ALPHA_DISPOSABLE_WEBVIEW_FIXTURE: "api35-default-x86_64" } };
 
 /** The ordered steps of a suite. Pure: nothing is run. */
 export function suitePlan(suite: string): SuiteStep[] {
-  if (suite === "instrumentation") return [prepareEmulator, runner("ci-default")];
+  if (suite === "instrumentation") return [
+    prepareEmulator,
+    runner("ci-default"),
+  ];
   if (suite === "browser-reading") return [
     prepareEmulator,
-    // Replaces the image's WebView 124 with the pinned 157.0.8083.0 snapshot; hosted API 35 x86_64 fixture only.
-    { name: "prepare-webview", kind: "preparation", command: node("scripts/prepare-ci-webview.ts"), env: { ANDROID_SERIAL: SERIAL, ALPHA_DISPOSABLE_WEBVIEW_FIXTURE: "api35-default-x86_64" } },
+    prepareWebView,
     runner("ci-reading", "--classes", READING_CLASSES.join(",")),
-    runner("ci-reading-test-mocks", "--test-mocks", "--classes", READING_TEST_MOCKS_CLASSES.join(",")),
   ];
   throw new Error(`Unknown suite ${JSON.stringify(suite)}; use instrumentation or browser-reading`);
 }
@@ -146,7 +146,7 @@ export function runSuite(suite: string, {execute, record = () => {}, environment
 /** Markdown for the job summary: every step, and every class with its status. */
 export function summarize(report: SuiteReport) {
   const lines = [`### Emulator suite \`${report.suite}\`: ${report.passed ? "passed" : "FAILED"}`, "",
-    "Emulator-class evidence on developer-override APKs. Not a distributable build, a device or acceptance.", "", "| Step | Result |", "| --- | --- |",
+    "Emulator-class evidence for the launcher debug APK. Not a distributable build, a device or acceptance.", "", "| Step | Result |", "| --- | --- |",
     ...report.steps.map(row => `| ${row.name} | ${row.status}${row.error ? `: ${row.error.replace(/\|/g, "/").slice(0, 300)}` : ""} |`)];
   for (const row of report.steps) {
     if (!row.evidence) continue;
@@ -157,7 +157,7 @@ export function summarize(report: SuiteReport) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const suite = process.argv[2];
-  if (process.argv.length !== 3) throw new Error("Use: node scripts/ci/emulator-suite.ts instrumentation|browser-reading");
+  if (process.argv.length !== 3) throw new Error("Run bun scripts/ci/emulator-suite.ts instrumentation|browser-reading");
   suitePlan(suite); // Refuse an unknown suite before anything is written.
   requireHostedRunner();
   const output = path.resolve("test-results/emulator-suite", `${suite}.json`);

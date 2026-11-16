@@ -12,36 +12,83 @@ code. All checks execute models or isolated test adapters.
 | [Native](native/README.md) | Resident runtime, voice, speech resources, listener, reset, deletions, media, device actions and composed cross-domain behavior |
 | [Legacy](legacy/README.md) | Eleven translated historical current/proposed design comparisons, original properties, fairness and expected counterexamples |
 
-Each family's `manifest.json` names its executable modules, initial and next
-actions, invariants, scenarios, source files and abstractions.
+Each family's `manifest.json` is one array of model entries: the executable module, its initial
+and next actions, invariants, scenarios, source files and abstractions.
 
 ## Running checks
 
-Install the root lockfile with `npm ci`. The development tool is pinned to
-`@informalsystems/quint` 0.33.1. `npm run verify` and `npm test` leave out the default
-Quint gate and the `test/quint-*` tests; run them before merging. CI runs them only for
-pull requests into `main` and on manual dispatch (`.github/workflows/quint-model-check.yml`).
+Install the root lockfile with `bun install --frozen-lockfile`. The development tool is pinned to
+`@informalsystems/quint` 0.33.1. `bun run verify` and `bun run test` leave out the Quint gate and
+the `test/quint-*` tests; run them before merging. CI runs them only for pull requests into `main`
+and on manual dispatch (`.github/workflows/promotion.yml`).
 
 ```sh
-npm run quint:check
-npm run quint:tests
-npm run quint:typecheck
-npm run quint:test
-npm run quint:simulate -- --samples=1000 --steps=60 --seed=123
-npm run quint:conformance
+bun run quint:check
+bun run quint:tests
 ```
 
-The default gate parses/typechecks every model and runs every manifest scenario
-through an explicit matcher, including named setup scenarios. It requires a
-successful CLI execution record for each registration. Simulation uses each
+`quint:check` (`scripts/check-quint.ts`) parses and typechecks every model, runs every manifest
+scenario through an explicit matcher, including named setup scenarios, and simulates each model.
+It requires a successful CLI execution record for each registration. Simulation uses each
 model's `bounds.maxSamples`, `bounds.maxSteps` and `bounds.seed`, falling back to
-80 traces, 40 transitions and seed 20261107. Explicit CLI values override them.
+80 traces, 40 transitions and seed 20261107. `--samples`, `--steps` and `--seed` override them.
 The gate requires both a deliberately false invariant and a failing scenario
 assertion to be detected; a syntax/tooling error cannot satisfy either canary.
 Manifest invariant names must resolve to top-level values or imported instances.
 `additionalProofInit` runs an extra one-transition simulation and symbolic check
 when its corresponding command is selected. `bounds.maxVerifyDepth` sets the
 default symbolic depth for that model; explicit `--steps` overrides it.
+`verifyBackend: "tlc-bounded"` selects exhaustive safety checking through that
+transition bound. BrowserSession, PhotosWindow, LauncherFavorites, HomeGesture,
+NavigationProgress, AgentCalendarRefresh and TaskSchedulerRuntime use it with their unchanged
+six-transition defaults. TaskSchedulerRuntime retains its canonical 500-sample,
+40-transition simulation with seed 123. NativeNavigationOwnership and the historical
+PhotosLibrary, NotesView, FilesBrowser and CoreServiceLifecycleDesign models also
+retain their six-transition defaults with this backend. Their temporal properties
+and historical comparisons continue to use full `tlc` exploration.
+PreviousNotesSourceOpening retains its
+eight-transition default. These backend
+selections have separate exhaustive bounded qualifications; the original symbolic
+checker deadline receipts remain distinct from the passing bounded results.
+The checker appends a depth counter to the translated model, checks every state
+at depths zero through the bound, and records the scope, depth and translation
+hashes. It does not establish safety beyond that bound.
+
+SettingsNav uses full `tlc` exploration of its finite historical design model.
+Its original row inventories, initializer, transition relation and invariants are
+retained; this historical comparison does not establish current runtime behavior.
+
+NativeCrashJournal keeps its seven original initial states, raw timestamp values,
+actions and safety obligations. Its completion helper factors the installed disk
+and reply independently, and the row predicate checks the same ordered rows.
+The [six-step qualification](https://github.com/eliza-research/alpha/actions/runs/43537851333)
+completed all seven verification conditions at states zero through six with
+`NoError`. It used the pinned Z3 backend, a 4 GiB heap, `after` invariant scheduling
+and a three-hour phase deadline. The default model depth remains four. Its
+configuration is recorded in `scripts/ci/native-crash-completion-factor.json`.
+
+NotesView's selected Design proof requires the three history assertions on all
+paths. Its original fairness still guards progress. One stronger ASR obligation
+covers both recording and saved states: each original antecedent implies the
+combined antecedent, and the combined goal implies each original goal. It therefore
+proves both original progress properties, alongside unchanged review retirement.
+The individual historical properties remain available. Branch-local choices and
+history-relation evaluation preserve the original state transitions and domains.
+
+The [full qualification](https://github.com/eliza-research/alpha/actions/runs/43508291814)
+completed 8,398,068 states at depth 23 with an empty queue, two liveness branches,
+and the history assertions as an implied invariant. It retained the 1800-second,
+two-worker, 2 GiB limits and all original scenarios and sampling bounds. Separate
+negative controls detect false history, fair review without retirement, and fair
+ASR without progress. Full TLC output is retained in temporal receipts.
+
+BookmarksHydration also uses full `tlc`, retaining its finite queue, store-version
+and recovery domains. Its source replay remains a partial renderer contract with
+controlled browser ports, as described in its manifest.
+
+`quint:tests` prepares the explicitly inventoried historical source revisions and runs the
+`test/quint-*` owners. They compare product behavior with model transitions. Whole-file refinement
+and the retained partial-source contract regressions below have distinct evidence scopes.
 
 Model checking is separate and needs JDK 21 in this repository. Quint fetches its
 pinned Apalache 0.62.4 distribution when needed. The CLI also uses that
@@ -51,36 +98,114 @@ processes concurrently, since a single server does not isolate concurrent jobs.
 
 ```sh
 # Bounded symbolic safety checking
-npm run quint:verify -- --steps=4
+bun scripts/check-quint.ts verify --steps=4
 
 # Exhaustive finite-state safety checking
-npm run quint:verify -- --backend=tlc --models=ChatInput
+bun scripts/check-quint.ts verify --backend=tlc --models=ChatInput
 
 # Fairness-guarded temporal properties for the historical models
-npm run quint:temporal -- --backend=tlc --models=SignIn,GoogleConnect,Maps
+bun scripts/check-quint.ts temporal --backend=tlc --models=SignIn,GoogleConnect,Maps
 
 # Require the expected current-design passes and counterexamples
-npm run quint:compare -- --backend=tlc --models=ChatInput
+bun scripts/check-quint.ts compare --backend=tlc --models=ChatInput
 ```
 
 `--models` selects comma-separated module names. `--out` selects the JSON
-evidence file. `--timeout` sets the per-check timeout in seconds, with 1800 for
-model checking and 120 for the default gate. The checker saves parameters, model hashes, complete checker output, exit status and evidence class under
+evidence file. `--jobs` or `ALPHA_QUINT_JOBS` allows independent scenario,
+simulation and typecheck workers. The default is one worker. Each model keeps
+its ordered phases, and the receipt lists results in registry order. Use
+`ALPHA_QUINT_JOBS=3 bun run quint:check` to apply this to the standard gate. Model
+checking remains serial within one server endpoint.
+`--timeout` sets the per-check timeout in seconds. Defaults are 1800 for model
+checking and 120 for the default gate; the qualified six-step NativeCrashJournal
+Apalache phase receives 10800 seconds. An explicit `--timeout` overrides that
+exception too. Each phase records its actual `timeoutSeconds`. The checker saves parameters, model hashes,
+complete checker output, exit status and evidence class under
 `test-results/quint/` by default. Temporal/compare commands reject a selection
-that has no corresponding checks. TLC exploration ignores the symbolic
+that has no corresponding checks. Full `tlc` exploration ignores the symbolic
 transition bound and may take substantially longer on large finite models.
+`tlc-bounded` is restricted to safety verification; temporal and comparison
+commands retain full `tlc` exploration.
+
+For a full temporal check, `--tlc-liveness=final` asks the pinned TLC engine to
+check liveness once after constructing the complete state graph. It preserves
+the translated actions, initial states, fairness and temporal properties; it
+does not impose the symbolic transition bound. Bootstrap, compilation and TLC
+share the same phase deadline. The receipt records the translation/configuration
+hashes, JAR hash and actual JVM arguments. `--tlc-liveness=default` (or omitting
+the option) keeps the original Quint routine. This option is restricted to the
+`temporal` command with the full `tlc` backend.
 
 ## Source changes and review
 
-After changing implementation behavior, review the corresponding executable model,
-scenarios and source entry points in its family manifest. Conformance campaigns
-capture their actual model and implementation inputs for each invocation. Shared
-behavior stays pinned by `upstream.lock.json`; the vendor checkout is immutable.
+After changing implementation behavior, review the corresponding executable model, its scenarios
+and its source entry points in the family manifest, and run that model's `test/quint-*` file.
+Shared behavior stays pinned by `upstream.lock.json`; the vendor checkout is immutable.
+
+## Implementation refinement
+
+A refinement test runs product code with controlled environmental ports and maps its concrete
+state through an explicit abstraction. Every recorded implementation event must correspond to a
+named model transition or leave the abstract state unchanged; a rejected command must find the
+model transition disabled. New implementation refinement imports, bundles or compiles the whole
+product source file. Source-text assertions and JavaScript restatements of the model do not
+establish implementation correspondence.
+
+Some existing tests execute exact members extracted from authenticated source files. Their
+unique effect, refusal, ownership and recovery checks are retained as **partial-source contract
+regressions**, with their source hashes, original schedules and explicit exclusions. They do not
+qualify surrounding code, a reconstructed enclosing class or the full implementation. Do not add
+new source slicing or promote this evidence to whole-file refinement. Replace a retained partial
+test only after its behavior has qualified coverage in a whole-file test; preserve historical
+counterexample receipts and distinguish historical source from current source.
+
+The [retained partial-source inventory](partial-source-contracts.md) names the existing native,
+application and service owners, including individual owners for formerly aggregate-only checks.
+It records these exceptions without claiming that every other model has source coverage. Keep
+the inventory and each owner's scope current when replacing or retiring a partial contract.
+
+An adapter lives in its test file, `test/quint-<name>.test.mjs`, unless another module also uses
+it. Shared drivers, ports, fixtures and Java harnesses are in
+`specs/quint/refinement/<family>/`. Adapters that cover several models at once run from
+`test/quint-<family>-refinement.test.mjs`. A model has more than one test file only when each file
+drives a different product component through it: AgentCalendarRefresh (refresh and mutation
+controllers), CanonicalNotesController, CanonicalNotesDraft and CanonicalNotesFeedback (the
+controller, draft, mutation and view surfaces), CoreFactWriteDedupe (dedupe and write scope),
+HostedDigestRefresh (refresh, mutation and the renewal question), MapsScreenModes (model-trace
+replay and the explicit-schedule canaries), NativeCredentialMutation (credential leases and the
+native and service campaigns), NativeLiveCapture and SharedRecordingAdmission (frame, live and
+piped capture and shared recording), NativeStreamBridge (the bridge and forwarded receipts),
+PhotosWindow (window, trash, owned album and browser album storage) and ResidentRuntime (resident,
+scheduling admission, start cancellation and the native campaign).
+`specs/quint/refinement/check-traces.mjs` evaluates the
+generated checks with the pinned Quint interpreter, compares observations after every checkpoint
+and fails on a mismatch; `test/quint-refinement-harness.test.mjs` includes a deliberately wrong
+observation. A trace has this shape:
+
+```js
+{
+  name: 'two speech windows',
+  init: { name: 'init' },
+  expect: { 's.speaking': false },
+  steps: [
+    { action: { name: 'accept', args: [500] }, expect: { 's.speaking': false } },
+    { action: { name: 'accept', args: [500] }, expect: { 's.speaking': true } }
+  ]
+}
+```
+
+Keys in `expect` name model expressions under the imported namespace; values come from observed
+implementation state. A step with `action: null` checks an event that preserves abstract state.
+An action with `reject: true` also checks that the model transition is disabled. Native adapters
+need a JDK and the pinned org.json jar.
+
+A passing test covers its recorded finite traces. Controlled ports stand in for Android, providers,
+storage and scheduling; they are no evidence of device, provider or installed behavior.
 
 ## Interpretation of results
 
 Safety scenarios and random simulation are sampled evidence. Apalache results
-cover the recorded transition bound. TLC results cover the finite abstraction
+cover the recorded transition bound, as do `tlc-bounded` results. Full `tlc` results cover the finite abstraction
 and fairness assumptions supplied to that invocation. Temporal action
 properties use equivalent persistent transition monitors where the checker
 requires state predicates. The original action relations remain in the
@@ -91,9 +216,9 @@ identity, voice, resident execution, Calendar, Inbox and reset. It exercises
 coordinated account changes and reset and has a canary for omitted coordination.
 The full Cartesian product of all application details is not enumerated.
 
-Implementation correspondence is checked by selected ITF trace adapters and
-existing source tests. It remains a different obligation from proving all
-TypeScript/Java execution refines all models. APK build and audit results,
+Implementation correspondence is checked within the whole-file or partial-source scopes above. It
+remains a different obligation from proving all TypeScript/Java execution
+refines all models. APK build and audit results,
 installed emulator behavior, AOSP image boot, provider integrations and device
 acceptance retain their separate gates in the repository.
 
@@ -110,21 +235,13 @@ advancing. The models distinguish these contracts.
 
 ## Verification record
 
-The integrated check results and any remaining limits are recorded in
-`verification.md` after validation. Historical TLC tables remain under their
-original design directories and retain their original evidence dates.
+Current checks write their source-bound receipts to `test-results/quint/` and
+`test-results/quint-refinement/`. CI retains the corresponding run artifacts.
+[`verification.md`](verification.md) records the historical migration checks
+and their original scope.
 
 ## Registry review
 
-The November 10 registry has 259 models and 1,841 registered scenarios. Its
-per-family model and total scenario floors are checked in `quint-checker.test.mjs`;
-intentional retirements require an explicit review of that baseline. The model
-source lists, implementation adapters and run receipts bind each invocation's
-inputs. The retired coverage hash ledger is not an additional admission gate.
-Historical receipts retain their original source and model set and do not certify
-later additions.
-
-
-## Complementary audit models
-
-The integrated registry also retains the November audit models, witnesses and source symbols. Distinct admission/readback state shapes are registered separately from the current source-correspondence models. Manifest entries state their partial scope; new model execution is not Android, service or device acceptance. The manifests and new run receipts, rather than earlier registry totals, define current coverage.
+`quint-checker.test.mjs` checks per-family model floors and a total scenario floor; an intentional
+retirement requires an explicit review of that baseline. A model listed in a manifest without a
+`test/quint-*` file has model checks only.

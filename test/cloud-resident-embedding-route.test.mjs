@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -7,9 +8,9 @@ import {spawnSync} from 'node:child_process';
 import {createCloudResidentHost} from './fixtures/product-character-host.mjs';
 import {CLOUD_MODEL} from '../scripts/cloud-resident-host.ts';
 
-// npm test runs without the prepared SDK and skips. browser.yml's verify job prepares it, exports
+// bun run test runs without the prepared SDK and skips. verify.yml's job prepares it, exports
 // ALPHA_CLOUD_COLLECTOR_SOURCE and ALPHA_BUN, and sets ALPHA_REQUIRE_PREPARED_SDK=1 so a missing SDK fails there.
-const skipUnprepared=!(process.env.ALPHA_CLOUD_COLLECTOR_SOURCE&&process.env.ALPHA_BUN)&&process.env.ALPHA_REQUIRE_PREPARED_SDK!=='1'?'Prepared SDK unavailable; run npm run agent:prepare and export ALPHA_CLOUD_COLLECTOR_SOURCE and ALPHA_BUN (browser.yml verify)':false;
+const skipUnprepared=!(process.env.ALPHA_CLOUD_COLLECTOR_SOURCE&&process.env.ALPHA_BUN)&&process.env.ALPHA_REQUIRE_PREPARED_SDK!=='1'?'Prepared SDK unavailable; run bun run agent:prepare and export ALPHA_CLOUD_COLLECTOR_SOURCE and ALPHA_BUN (verify.yml)':false;
 
 function recordingLauncher(launches) {
  return async options=>{launches.push(options);let finish;return {completion:new Promise(done=>{finish=done;}),async stop(){finish({code:0});}};};
@@ -29,7 +30,7 @@ function selectEmbeddingRoute(config,env) {
  const settings=buildRuntimeSettingsProjection(config,{env});
  const disabled=isCanonicalModelCapabilityDisabled({getSetting:key=>settings[key]},'TEXT_EMBEDDING');
  console.log('EMBEDDING_ROUTE='+JSON.stringify({cloud:resolveElizaCloudTopology(config).services.embeddings,disabled,enabled:settings.ELIZA_CANONICAL_EMBEDDINGS_ENABLED,canonicalRoute:buildElizaCloudServiceRoute()}));`;
- const run=spawnSync(process.env.ALPHA_BUN,['--no-install','--conditions=eliza-source','--eval',code],{env:{...process.env},input:JSON.stringify({config,env}),encoding:'utf8',timeout:20000});
+ const run=spawnSync(process.env.ALPHA_BUN,['--no-install','--conditions=eliza-source','--eval',code],{env:{...process.env},input:JSON.stringify({config,env}),encoding:'utf8',timeout:scaledTimeout(20000)});
  assert.equal(run.status,0,run.stderr);
  const line=run.stdout.split('\n').find(row=>row.startsWith('EMBEDDING_ROUTE='));assert.ok(line,run.stdout);
  return JSON.parse(line.slice('EMBEDDING_ROUTE='.length));

@@ -1,16 +1,20 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import {VOICE_HOST_MANIFEST, voiceHostProblems, type readVoiceHost} from './voice-host.ts';
+import {readNativeBuildReceipt, verifyNativeBuildFiles} from './native-build-inputs.ts';
 import {HOST_DESCRIPTOR, generateAlphaAndroidHost, readHostDescriptor} from './android-host.ts';
 import {HOST_TEMPLATES, referencePath} from './gradle-verification.ts';
 import {readAgentBundleDependencies} from './agent-bundle-dependencies.ts';
+import {LOCKFILE, readBunLock, type PackageLock} from './bun-lock.ts';
+import {readUpstreamPin} from './upstream-pin.ts';
+export type {PackageLock};
 // Generates the third-party notices shipped in the web bundle and in every APK payload.
 //
-//   node scripts/generate-licenses.ts                    write apps/app/public/licenses/*
-//   node scripts/generate-licenses.ts --check            fail when outputs are stale or an input is broken
-//   node scripts/generate-licenses.ts --refresh-android  re-resolve the Gradle release/debug runtime
+//   bun scripts/generate-licenses.ts                    write apps/app/public/licenses/*
+//   bun scripts/generate-licenses.ts --check            fail when outputs are stale or an input is broken
+//   bun scripts/generate-licenses.ts --refresh-android  re-resolve the Gradle release/debug runtime
 //                                                         classpath into licenses/android-runtime-classpath.json
 //
-//   node scripts/generate-licenses.ts --packaged-runtime  also list Bun and every npm package bundled
+//   bun scripts/generate-licenses.ts --packaged-runtime  also list Bun and every npm package bundled
 //                                                         into the staged agent (from its hash-bound
 //                                                         inventory, verified in the prepared source)
 //                                                         and workflow worker (its dependencies.json)
@@ -29,7 +33,7 @@ import {readAgentBundleDependencies} from './agent-bundle-dependencies.ts';
 // Generation fails only on broken input: a package that is not installed or whose manifest
 // cannot be read, a pinned licence copy or core that drifted from its recorded hash, a stale
 // Android classpath snapshot, a malformed font licence record. A flag is not legal review.
-import {createHash} from 'node:crypto';
+import {sha256} from './sha256.ts';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -114,9 +118,6 @@ interface LockedPackage extends PackageMetadata {
   devOptional?: boolean;
   link?: boolean;
 }
-export interface PackageLock {
-  packages?: Record<string, LockedPackage>;
-}
 interface NoticeDraft {
   name: string;
   version: string;
@@ -141,7 +142,6 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 const read = (root: string, rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
 export const readJson = (root: string, rel: string) => JSON.parse(read(root, rel));
 export const exists = (root: string, rel: string) => fs.existsSync(path.join(root, rel));
-export const sha256 = (data: string | NodeJS.ArrayBufferView) => createHash('sha256').update(data).digest('hex');
 const normalizeText = (text: string) => text.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').replace(/^\n+|\n+$/g, '');
 
 /**
@@ -168,7 +168,7 @@ export function declarationOnlyPackage(dir: string) {
 }
 
 /**
- * Production packages in package-lock: not dev, not optional platform binaries, not links, and
+ * Production packages in bun.lock: not dev, not optional platform binaries, not links, and
  * not declaration-only type packages (which ship no code).
  */
 export function productionLockPackages(lock: PackageLock, root = ROOT) {
@@ -429,14 +429,14 @@ export function listFonts(root: string) {
 // ---------------------------------------------------------------- collectors
 
 function npmEntries(root: string, templates: Templates, errors: string[]): NoticeDraft[] {
-  const lock = readJson(root, 'package-lock.json');
+  const lock = readBunLock(root);
   const entries: NoticeDraft[] = [];
   for (const pkg of productionLockPackages(lock, root)) {
     const dir = path.join(root, pkg.key);
-    if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${pkg.name}@${pkg.version}: not installed at ${pkg.key}; run npm ci`); continue; }
+    if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${pkg.name}@${pkg.version}: not installed at ${pkg.key}; run bun install --frozen-lockfile`); continue; }
     const manifest = readManifest(dir, `${pkg.name}@${pkg.version}`, errors);
     if (!manifest) continue;
-    if (manifest.version !== pkg.version) errors.push(`${pkg.name}: installed ${manifest.version} differs from package-lock ${pkg.version}`);
+    if (manifest.version !== pkg.version) errors.push(`${pkg.name}: installed ${manifest.version} differs from ${LOCKFILE} ${pkg.version}`);
     const notice = packageNotice({declared: pkg.license || manifestLicense(manifest), text: licenseFilesText(dir), dir, manifest, templates});
     entries.push({name: pkg.name, version: pkg.version, source: pkg.resolved || `https://www.npmjs.com/package/${pkg.name}/v/${pkg.version}`, ...notice});
   }
@@ -477,7 +477,7 @@ function tesseractCoreEntries(root: string, errors: string[]): NoticeDraft[] {
     components: {name: string; version: string; license: string; source: string; preface?: string; files: {path: string; sha256: string}[]}[];
   } = readJson(root, TESSERACT_CORE_SOURCES);
   const dir = `node_modules/${pinned.package}`;
-  if (!exists(root, `${dir}/package.json`)) { errors.push(`${pinned.package}: not installed; run npm ci`); return []; }
+  if (!exists(root, `${dir}/package.json`)) { errors.push(`${pinned.package}: not installed; run bun install --frozen-lockfile`); return []; }
   const installed = readJson(root, `${dir}/package.json`).version;
   if (installed !== pinned.version)
     errors.push(`${pinned.package} ${installed} differs from ${TESSERACT_CORE_SOURCES} (${pinned.version}); re-review its statically linked libraries`);
@@ -560,7 +560,7 @@ function fontEntries(root: string, templates: Templates, errors: string[]) {
   const fontsource = Object.keys({...pkg.dependencies, ...pkg.devDependencies}).filter(name => name.startsWith('@fontsource/')).sort();
   for (const name of fontsource) {
     const dir = `node_modules/${name}`;
-    if (!exists(root, `${dir}/package.json`)) { errors.push(`${name}: not installed; run npm ci`); continue; }
+    if (!exists(root, `${dir}/package.json`)) { errors.push(`${name}: not installed; run bun install --frozen-lockfile`); continue; }
     const manifest = readManifest(path.join(root, dir), name, errors);
     if (!manifest) continue;
     const notice = packageNotice({declared: manifestLicense(manifest), text: licenseFilesText(path.join(root, dir)), dir: path.join(root, dir), manifest, templates});
@@ -570,7 +570,7 @@ function fontEntries(root: string, templates: Templates, errors: string[]) {
 }
 
 function elizaEntry(root: string): NoticeDraft {
-  const lock = readJson(root, 'upstream.lock.json');
+  const lock = readUpstreamPin(root);
   const version = exists(root, 'vendor/eliza/package.json') ? readJson(root, 'vendor/eliza/package.json').version : 'pinned';
   return {name: 'elizaOS', version: `${version} (${lock.commit})`, license: 'MIT', source: `${lock.url.replace(/\.git$/, '')}/tree/${lock.commit}`,
     text: normalizeText(read(root, 'vendor/eliza/LICENSE'))};
@@ -633,7 +633,7 @@ export function androidDependencyFingerprint(root: string) {
 }
 
 export function refreshAndroidClasspath(root: string, env: NodeJS.ProcessEnv) {
-  const configurations = ['standaloneReleaseRuntimeClasspath', 'launcherReleaseRuntimeClasspath', 'standaloneDebugRuntimeClasspath', 'launcherDebugRuntimeClasspath'];
+  const configurations = ['launcherReleaseRuntimeClasspath', 'launcherDebugRuntimeClasspath'];
   generateAlphaAndroidHost(root);
   const coords = new Set();
   for (const configuration of configurations) {
@@ -648,10 +648,10 @@ export function refreshAndroidClasspath(root: string, env: NodeJS.ProcessEnv) {
 }
 
 function androidEntries(root: string, templates: Templates, errors: string[]): NoticeDraft[] {
-  if (!exists(root, ANDROID_CLASSPATH)) { errors.push(`${ANDROID_CLASSPATH} missing; run node scripts/generate-licenses.ts --refresh-android`); return []; }
+  if (!exists(root, ANDROID_CLASSPATH)) { errors.push(`${ANDROID_CLASSPATH} missing; run bun scripts/generate-licenses.ts --refresh-android`); return []; }
   const snapshot = readJson(root, ANDROID_CLASSPATH);
   if (snapshot.inputFingerprint !== androidDependencyFingerprint(root))
-    errors.push(`${ANDROID_CLASSPATH} is stale: Android dependency declarations changed; run node scripts/generate-licenses.ts --refresh-android`);
+    errors.push(`${ANDROID_CLASSPATH} is stale: Android dependency declarations changed; run bun scripts/generate-licenses.ts --refresh-android`);
   const families = new Map<(typeof MAVEN_FAMILIES)[number], string[]>();
   const unknown: string[] = [];
   for (const coord of snapshot.coordinates) {
@@ -710,7 +710,9 @@ export function voiceHostLibraryLines(record: Pick<BaseVoiceRecord, 'abis'>) {
 
 function voiceHostEntries(root: string, templates: Templates, errors: string[]): NoticeDraft[] {
   if (!exists(root, VOICE_HOST)) return [];
-  const record: VoiceNoticeRecord = readJson(root, VOICE_HOST);
+  const generated = readNativeBuildReceipt(root);
+  if (generated) verifyNativeBuildFiles(root, generated);
+  const record: VoiceNoticeRecord = generated ? generated.voice as VoiceNoticeRecord : readJson(root, VOICE_HOST);
   const problems = voiceHostProblems(record);
   if (problems.length) { errors.push(...problems); return []; }
   const abis = record.abis.map(item => item.abi).join(', ');
@@ -761,7 +763,7 @@ export function packagedRuntimePresent(root = ROOT, agentDir = path.join(root, A
 }
 
 function runtimePackageEntry(dir: string, bundle: string, templates: Templates, errors: string[]): RuntimePackageNotice | null {
-  if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${bundle}: ${dir} is not in the prepared runtime source; run npm run agent:prepare`); return null; }
+  if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${bundle}: ${dir} is not in the prepared runtime source; run bun run agent:prepare`); return null; }
   const manifest = readManifest(dir, `${bundle}: ${dir}`, errors);
   if (!manifest) return null;
   if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') { errors.push(`${bundle}: ${dir}/package.json has no name and version`); return null; }
@@ -909,7 +911,7 @@ function applyReasons(root: string, entries: NoticeDraft[], warnings: string[], 
 export function collectNotices(root = ROOT, {packagedRuntime = false} = {}) {
   const errors: string[] = [], warnings: string[] = [];
   if (packagedRuntime && !packagedRuntimePresent(root))
-    errors.push(`--packaged-runtime needs a staged runtime in ${AGENT_ASSETS}; run npm run agent:stage-android first`);
+    errors.push(`--packaged-runtime needs a staged runtime in ${AGENT_ASSETS}; run bun run agent:stage-android first`);
   const templates = loadTemplates(root);
   const entries = [
     ...npmEntries(root, templates, errors),
@@ -957,7 +959,7 @@ export function renderText(entries: readonly Notice[]) {
     'Alpha Phone third-party notices',
     '',
     'This product includes the third-party software, fonts, models and data listed below.',
-    'Generated by scripts/generate-licenses.ts from package-lock.json, bundled font files,',
+    'Generated by scripts/generate-licenses.ts from bun.lock, bundled font files,',
     'the resolved Android runtime classpath, the qualified voice-host record and elizaOS.',
     `Entries: ${entries.length}. Flagged entries: ${flagged.length}.`,
     '',
@@ -1008,7 +1010,7 @@ async function main(argv: readonly string[]) {
     const staged = collectNotices(ROOT, {packagedRuntime: true});
     summarize(staged.entries, 'Staged runtime (not in the committed notices; use --packaged-runtime for a distribution)');
     for (const error of staged.errors) console.warn(`Staged runtime notice problem: ${error}`);
-  } else console.log('These notices list no on-device agent runtime. A PACKAGED distribution regenerates them after staging with node scripts/generate-licenses.ts --packaged-runtime (resident-android.yml).');
+  } else console.log('These notices list no on-device agent runtime. A PACKAGED distribution regenerates them after staging with bun scripts/generate-licenses.ts --packaged-runtime (resident-android.yml).');
   // Flags are warnings. Only broken input (errors) stops generation.
   for (const line of flagLines) console.warn(line);
   for (const warning of warnings) console.warn(`LICENCE NOTE ${warning}`);
@@ -1024,7 +1026,7 @@ async function main(argv: readonly string[]) {
   if (check) {
     const stale = outputs.filter(([file, content]) => !exists(ROOT, file) || read(ROOT, file) !== content).map(([file]) => file);
     if (stale.length) {
-      console.error(`Third-party notices are stale: ${stale.join(', ')}. Run node scripts/generate-licenses.ts`);
+      console.error(`Third-party notices are stale: ${stale.join(', ')}. Run bun scripts/generate-licenses.ts`);
       process.exit(1);
     }
     console.log(`Third-party notices are complete and current (${entries.length} entries).`);

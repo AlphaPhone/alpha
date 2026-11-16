@@ -96,7 +96,6 @@ export async function checkChatAttachments(extraSources = []) {
   const source = join(root, 'apps/app/src/prototype/agent-adapter.ts');
   const sources = [source, fileURLToPath(import.meta.url),
     join(root, 'test/support/strip-types.mjs'),
-    join(root, 'specs/quint/refinement/application/index.mjs'),
     join(root, 'test/quint-application-refinement.test.mjs'), ...chatAttachmentComposerSources, ...extraSources];
   const driverHashes = captureInputs(sources);
   const text = readFileSync(source, 'utf8');

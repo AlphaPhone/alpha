@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import {coreRuntimeArguments} from './core-state-patch.ts';
 // Runs the patched upstream host with explicit local voice assets in an isolated profile.
 import {admitSpeech} from './host-speech-admission.ts';
@@ -11,7 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {AGENT_MODEL,agentModelEnvironment} from './agent-model.ts';
 import {AGENT_CHARACTER_ENVIRONMENT,freshAgentProfile,prepareAgentIdentityConfig} from './agent-identity.ts';
-import {LOCAL_EMBEDDING_ROUTE,localEmbeddingEnvironment,reportMissingEmbeddingRoute} from './agent-embeddings.ts';
+import {LOCAL_EMBEDDING_ROUTE,localEmbeddingEnvironment} from './agent-embeddings.ts';
 import {sourceDirectory} from './local-agent-source.ts';
 // Inputs are flags, not product-specific environment names. The default source is the
 // prepared tree of the pinned commit (vendor/eliza itself has no installed dependencies and is
@@ -20,7 +20,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const {values:options} = parseArgs({options:{source:{type:'string'}, profile:{type:'string'}, port:{type:'string'}, bun:{type:'string'}}, strict:true});
 const source = path.resolve(options.source || sourceDirectory(root));
 if (!fs.existsSync(path.join(source,'node_modules'))) {
-  console.error(`No installed runtime source at ${source}. Run \`npm run agent:prepare\` (creates artifacts/local-agent-resident-<commit> from the pinned commit), or pass --source with another prepared checkout of it. Never install into vendor/eliza.`);
+  console.error(`No installed runtime source at ${source}. Run \`bun run agent:prepare\` (creates artifacts/local-agent-resident-<commit> from the pinned commit), or pass --source with another prepared checkout of it. Never install into vendor/eliza.`);
   process.exit(2);
 }
 const profile = path.resolve(options.profile || path.join(os.homedir(), '.local/share/alphaphone/local-voice'));
@@ -39,7 +39,6 @@ if (!fs.existsSync(entry)) throw new Error('Eliza app host source is missing');
 const config = path.join(profile,'eliza.json');
 if (!fs.existsSync(config)) fs.writeFileSync(config, JSON.stringify({cloud:{enabled:false}, serviceRouting:{llmText:{backend:'cerebras',transport:'direct',smallModel:AGENT_MODEL,largeModel:AGENT_MODEL},embeddings:{...LOCAL_EMBEDDING_ROUTE}},plugins:{entries:{scheduling:{enabled:false},'personal-assistant':{enabled:false}}}})+'\n', {mode:0o600, flag:'wx'});
 const savedConfig=await prepareAgentIdentityConfig(config,JSON.parse(fs.readFileSync(config,'utf8')),{freshProfile}), modelEnvironment=agentModelEnvironment(savedConfig);
-reportMissingEmbeddingRoute(savedConfig,config);
 const log = fs.openSync(path.join(profile,'server.log'), 'a', 0o600);
 fs.fchmodSync(log, 0o600);
 const baseEnv = Object.fromEntries(['PATH','TMPDIR','LANG','SHELL','USER','LOGNAME','HOME'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));

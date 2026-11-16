@@ -1,4 +1,4 @@
-import {selectedAndroidAbis, abiArguments, type AndroidAbi} from './android-abis.ts';
+import {ANDROID_ABIS, selectedAndroidAbis, abiArguments, type AndroidAbi} from './android-abis.ts';
 /**
  * On-device voice host record (android/voice-host/qualified-voice-host.json, schema 2).
  *
@@ -13,13 +13,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASR_BACKEND_ROLES, PARADEE_NATIVE, PARADEE_SOURCE, asrSlotFiles, verifyParadeeRuntime, type AsrBackend, type AsrSlot, type ParadeeBuildRecord, type ParadeeVoiceManifest} from './paradee-runtime.ts';
+import {readNativeBuildReceipt} from './native-build-inputs.ts';
 
 export const VOICE_HOST_MANIFEST = 'android/voice-host/qualified-voice-host.json';
 export const VOICE_ASR_SLOT = 'android/paradee-voice/asr-inputs.json';
 export const VOICE_ASSET_ROOT = PARADEE_NATIVE;
 export const VOICE_BUNDLE_FORMAT = 'eliza-paradee-voice-v2';
 export const VOICE_BUNDLE_ASSETS = 'assets/paradee-voice/v1';
-export const VOICE_ABIS = Object.freeze(['arm64-v8a', 'x86_64']);
 export const VOICE_LIBRARIES = Object.freeze(['libelizainference.so', 'libc++_shared.so']);
 export const VOICE_ROLES = Object.freeze(['tts-model', 'g2p-lexicon', 'g2p-data', 'asr-model', 'asr-mmproj', 'vad-model', 'notice']);
 /** Roles a packaged bundle must carry: speech output, G2P and an ASR model (the slot record decides the rest). */
@@ -35,6 +35,7 @@ interface VoiceAbi {
 interface VoiceHostRecord {
   schemaVersion: number;
   pin: string;
+  producerPin?: string;
   forkPin: string;
   identity: string;
   provider: string;
@@ -52,7 +53,6 @@ interface VoiceBundleEntries {
   read(name: string): Buffer;
 }
 interface VoiceVerificationOptions {
-  allowAbsentRuntime?: boolean;
   runtime?: typeof verifyParadeeRuntime;
   abis?: readonly string[];
 }
@@ -85,7 +85,7 @@ export function voiceHostProblems(value: unknown, label = VOICE_HOST_MANIFEST): 
     if (asrRows.map(model => model.role).sort().join() !== [...backendRoles].sort().join()) at('models', `ASR rows must be exactly ${backendRoles.join(' and ')} for the ${backend} backend`);
     if (JSON.stringify(record.asrSlot?.paths) !== JSON.stringify(asrRows.map(model => model.path))) at('asrSlot.paths', 'must list the ASR rows in order');
   }
-  if (!Array.isArray(record.abis) || record.abis.map(row => row?.abi).join() !== VOICE_ABIS.join()) at('abis', `must record ${VOICE_ABIS.join(' and ')}`);
+  if (!Array.isArray(record.abis) || record.abis.map(row => row?.abi).join() !== ANDROID_ABIS.join()) at('abis', `must record ${ANDROID_ABIS.join(' and ')}`);
   for (const [index, row] of (Array.isArray(record.abis) ? record.abis : []).entries()) {
     if (!Array.isArray(row?.libraries) || row.libraries.map(lib => lib?.name).join() !== VOICE_LIBRARIES.join()) { at(`abis[${index}].libraries`, `must list ${VOICE_LIBRARIES.join(', ')}`); continue; }
     for (const [n, lib] of row.libraries.entries()) if (!isSha(lib.sha256) || !isBytes(lib.bytes)) at(`abis[${index}].libraries[${n}]`, 'needs a lowercase SHA-256 and positive bytes');
@@ -108,7 +108,10 @@ export function voiceHostProblems(value: unknown, label = VOICE_HOST_MANIFEST): 
 
 /** Reads and admits the committed record against the pin, the shared Paradee inputs and the ASR slot. */
 export function readVoiceHost(root: string): VoiceHostRecord {
-  const record: VoiceHostRecord = readJson(root, VOICE_HOST_MANIFEST);
+  const generated = readNativeBuildReceipt(root);
+  // The generated receipt retains the original build pin. This consumer view is
+  // current only after the recipe proved those exact producer source inputs equal.
+  const record: VoiceHostRecord = generated ? {...generated.voice, pin:generated.consumerSdkCommit,producerPin:generated.producer.sdkCommit} as VoiceHostRecord : readJson(root, VOICE_HOST_MANIFEST);
   const problems = voiceHostProblems(record);
   if (problems.length) throw Error(problems.join('\n'));
   const pin = readJson(root, 'upstream.lock.json').commit;
@@ -210,7 +213,7 @@ function voiceStagingState(root: string) {
   };
   // AGP's ordinary main/build-type/flavor/variant overlays stay active in the
   // Java-only branch too. Check every real src/* directory conservatively,
-  // including release/debug and standalone/launcher combinations.
+  // including release and debug.
   for (const module of ['android/local-speech', 'android/app']) {
     const sourceRoot = `${module}/src`;
     const present = at(sourceRoot);
@@ -242,20 +245,16 @@ function voiceStagingState(root: string) {
 }
 
 /**
- * Build admission. Absent native voice outputs are accepted only for the explicit unpackaged
- * developer lane (`allowAbsentRuntime`); present outputs must be complete and byte-exact against
- * both the shared build record (scripts/paradee-runtime.ts) and this record. Never downloads.
+ * Build admission. Staged outputs must be complete and byte-exact against both the shared build
+ * record (scripts/paradee-runtime.ts) and this record. Never downloads.
  */
-export function verifyVoiceHost(root: string, {allowAbsentRuntime = false, runtime = verifyParadeeRuntime, abis}: VoiceVerificationOptions = {}) {
+export function verifyVoiceHost(root: string, {runtime = verifyParadeeRuntime, abis}: VoiceVerificationOptions = {}) {
   const selected = selectedAndroidAbis(abis);
   const staging = voiceStagingState(root);
-  // Only explicit mode + metadata-proven absence can avoid reading a record.
-  // Present/partial/orphaned output never inherits a stale source admission.
-  if (allowAbsentRuntime === true && staging === 'absent') return {status: 'not-packaged', qualified: false};
   const record = readVoiceHost(root);
   const native = path.join(root, PARADEE_NATIVE);
   if (staging === 'absent') {
-    throw Error(`On-device voice outputs are not staged in ${PARADEE_NATIVE}; run node scripts/android-stage-voice-models.ts`);
+    throw Error(`On-device voice outputs are not staged in ${PARADEE_NATIVE}; run bun scripts/android-stage-voice-models.ts`);
   }
   runtime(root, {abis: selected});
   const build: ParadeeBuildRecord = JSON.parse(fs.readFileSync(path.join(native, 'build-record.json'), 'utf8'));
@@ -274,7 +273,7 @@ export function verifyVoiceHost(root: string, {allowAbsentRuntime = false, runti
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const {rest: args, abis} = abiArguments(process.argv.slice(2));
-  if (args[0] !== '--verify' || args.slice(1).some(arg => arg !== '--allow-absent')) throw Error('Usage: node scripts/voice-host.ts --verify [--allow-absent]');
+  if (args.length !== 1 || args[0] !== '--verify') throw Error('Usage: bun scripts/voice-host.ts --verify');
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  console.log(JSON.stringify(verifyVoiceHost(root, {allowAbsentRuntime: args.includes('--allow-absent'), abis})));
+  console.log(JSON.stringify(verifyVoiceHost(root, {abis})));
 }

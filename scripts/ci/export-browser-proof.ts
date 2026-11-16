@@ -1,4 +1,4 @@
-import {createHash} from 'node:crypto';
+import {sha256 as hash} from '../sha256.ts';
 import {execFileSync} from 'node:child_process';
 import {mkdirSync,lstatSync,readdirSync,realpathSync,writeFileSync,existsSync,openSync,closeSync,fstatSync,readSync,constants} from 'node:fs';
 import {resolve,join,dirname,relative,isAbsolute,basename} from 'node:path';
@@ -7,7 +7,6 @@ import {resolve,join,dirname,relative,isAbsolute,basename} from 'node:path';
 const mode=process.argv[2],root=resolve(process.cwd());
 if(mode !== 'renderer' && mode !== 'worker')throw Error('Choose renderer or worker');
 if(realpathSync(root)!==root)throw Error('Workspace must be canonical');
-const hash=(b: string | NodeJS.ArrayBufferView)=>createHash('sha256').update(b).digest('hex');
 const git=(...args: string[])=>execFileSync('git',['--no-replace-objects','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',...args],{encoding:'utf8',env:{...process.env,GIT_NO_LAZY_FETCH:'1',GIT_OPTIONAL_LOCKS:'0'}}).trim();
 function checked(path: string,missing=false){
  const absolute=resolve(path),rel=relative(root,absolute);
@@ -70,7 +69,7 @@ function allowed(path: string){
   // This is compiler-only and still bound to the exact verified worker inventory.
   ||(/^compiler\/(?:node_modules|types)\/.+\.(?:ts|tsx|mts|cts|jsx)$/.test(path))
   ||(/^licenses\/[a-f0-9]+\//.test(path)&&license(path));
- return ['index.html','delegation-return.html','build-flags.json','logo.svg','logo-mark.svg','denton-300.woff2'].includes(path)
+ return ['index.html','delegation-return.html','build-flags.json','logo.svg','logo-mark.svg','logo-symbol.svg','denton-300.woff2'].includes(path)
   ||(/^(?:assets|icons|fonts|licenses)\//.test(path)&&/\.(?:js|mjs|css|json|txt|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|otf|wasm)$/.test(path))
   ||(/^pdfjs-assets\/(?:cmaps|standard_fonts|wasm)\/[^/]+\.(?:bcmap|pfb|ttf|wasm|js|json)$/.test(path))
   ||path==='pdfjs-assets/LICENSE'

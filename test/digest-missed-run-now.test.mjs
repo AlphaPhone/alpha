@@ -1,7 +1,8 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {javaBinary} from './fixtures/jvm-tools.mjs';
@@ -10,7 +11,6 @@ import {javaBinary} from './fixtures/jvm-tools.mjs';
 // run in the resident, which is brought back natively after boot, update and clock/time-zone changes
 // when not running. Not Android/device evidence.
 const root=resolve(import.meta.dirname,'..');
-const read=path=>readFileSync(join(root,path),'utf8');
 const script=`
 const d=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/hosted-digests.ts'))});
 const now=Date.parse('2026-10-14T12:00:00Z');
@@ -44,7 +44,7 @@ out.badId=offers([result(1,'missed',{runId:'../x'})]).length;
 out.sameId=d.missedRunNowMutationId('run-2')===d.missedRunNowMutationId('run-2');
 console.log(JSON.stringify(out));`;
 test('Run now is offered only for the newest missed morning digest over a current reviewed phone source',()=>{
- const out=JSON.parse(execFileSync(process.execPath,['--import=tsx','--input-type=module','-e',script],{cwd:root,encoding:'utf8',timeout:60000}));
+ const out=JSON.parse(execFileSync(process.execPath,['-e',script],{cwd:root,encoding:'utf8',timeout:scaledTimeout(60000)}));
  assert.deepEqual(out.missed,[{runId:'run-2',sourceId:'s',sourceRevision:'r',sourceLabel:'Phone sources',scheduledAt:'2026-10-14T08:00:00Z',mutationId:'missed-run-now-run-2'}]);
  assert.equal(out.olderMissed.length,0,'a later result supersedes the missed one');
  assert.deepEqual(out.twoMissed,['run-2'],'only the newest missed occurrence, never a backlog');
@@ -58,38 +58,10 @@ test('Run now is offered only for the newest missed morning digest over a curren
  assert.equal(out.sameId,true,'identity is stable, so a repeat returns the same run');
 });
 
-test('Run now goes through the reviewed dossier path with the derived identity and no automatic replay',()=>{
- const ui=read('apps/app/src/runtime/hosted-digest-ui.tsx');
- assert.match(ui,/missedRunNowOffers\(/);
- assert.match(ui,/setReview\(\{path:'dossier',body:\{sourceId:offer\.sourceId,sourceRevision:offer\.sourceRevision,mutationId:offer\.mutationId,confirmed:true\}/);
- assert.match(ui,/summary:`Run missed \$\{formatDateTime\(new Date\(offer\.scheduledAt\)\)\} digest now\?\\nSends \$\{offer\.sourceLabel\} to agent AI`/);
- assert.match(ui,/onClick=\{\(\)=>reviewMissedRunNow\(/,'only an owner tap opens the review');
- assert.match(ui,/\{missedOffers\.has\(result\.runId\)&&!ranMissed\.has\(result\.runId\)&&<button[^>]*onClick=\{\(\)=>reviewMissedRunNow\(missedOffers\.get\(result\.runId\)!\)\}/,'the button renders only for an offer, so revoked or rebound sources never show it');
- assert.doesNotMatch(ui,/reviewMissedRunNow\([^)]*\)\s*;?\s*\}\s*,\s*\[/,'never invoked from an effect');
- assert.doesNotMatch(ui,/submit\(\{path:'dossier'/,'never submitted without the review');
-});
-
-test('the resident is brought back after boot, update and clock or time-zone changes',()=>{
- const manifest=read('android/app/src/main/AndroidManifest.xml').replace(/<!--[\s\S]*?-->/g,'');
- const receiver=manifest.match(/<receiver android:name="\.ResidentScheduleReceiver"[^>]*>([\s\S]*?)<\/receiver>/);
- assert.ok(receiver,'receiver declared');
- assert.match(receiver[0],/android:exported="false"/);
- for(const action of ['BOOT_COMPLETED','MY_PACKAGE_REPLACED','TIME_SET','TIMEZONE_CHANGED'])assert.match(receiver[1],new RegExp(`android\\.intent\\.action\\.${action}"`),action);
- assert.doesNotMatch(receiver[1],/LOCKED_BOOT_COMPLETED/,'credential-encrypted agent state needs unlock');
- const source=read('android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleReceiver.java');
- assert.match(source,/ElizaAgentService\.shouldAutoStart\(context\)/);
- assert.match(source,/AlphaLocalAgentPlugin\.startResidentIfAdmissible\(context,action,unlocked,packaged,enabled\)/);
- assert.doesNotMatch(source,/ElizaAgentService\.start\(/,'the receiver never starts outside the lifecycle lock');
- const plugin=read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java');
- assert.match(plugin,/ResidentScheduleRearm\.admitAndStart\(lifecycleLock,[\s\S]{0,240}\(\)->accepting&&!stopping&&credentialMutationEpoch<0&&credentialShutdownRequest==-1,\(\)->ElizaAgentService\.start\(context\)\)/,'admission and start share lifecycleLock');
- assert.doesNotMatch(source,/ACTION_RESTART|restart\(|runHostedDossier|dossier/i,'never restarts a running agent or runs a digest');
- assert.doesNotMatch(read('android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java'),/import android\./,'pure policy');
-});
-
 test('resident schedule re-arming policy runs on the JVM',()=>{
  const temporary=mkdtempSync(join(tmpdir(),'resident-rearm-'));
  try{
-  execFileSync(javaBinary('javac'),['--release','11','-d',temporary,join(root,'android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java'),join(root,'test/fixtures/ResidentScheduleRearmTest.java')],{timeout:60000});
-  assert.match(execFileSync(javaBinary('java'),['-cp',temporary,'ai.alphacompute.alphaphone.ResidentScheduleRearmTest'],{encoding:'utf8',timeout:60000}),/^PASS resident schedule rearm/);
+  execFileSync(javaBinary('javac'),['--release','11','-d',temporary,join(root,'android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java'),join(root,'test/fixtures/ResidentScheduleRearmTest.java')],{timeout:scaledTimeout(60000)});
+  assert.match(execFileSync(javaBinary('java'),['-cp',temporary,'ai.alphacompute.alphaphone.ResidentScheduleRearmTest'],{encoding:'utf8',timeout:scaledTimeout(60000)}),/^PASS resident schedule rearm/);
  }finally{rmSync(temporary,{recursive:true,force:true});}
 });

@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -23,7 +34,7 @@ const activity = readFileSync('android/app/src/main/java/ai/alphacompute/alphaph
 const script = activity.match(/String script = "(.*?)"\s*\+ \(home \? "(.*?)" : "(.*?)"\) \+ "(.*?)";/s);
 assert.ok(script, 'the Back script MainActivity evaluates');
 // What the activity does with the script's answer.
-assert.match(activity, /if \(home \|\| "true"\.equals\(handled\) \|\| isFinishing\(\) \|\| isDestroyed\(\)\) return;\s*if \(BuildConfig\.IS_LAUNCHER && !isAssistantSurface\(\)\) moveTaskToBack\(true\); else finish\(\);/);
+assert.match(activity, /if \(home \|\| "true"\.equals\(handled\) \|\| isFinishing\(\) \|\| isDestroyed\(\)\) return;\s*if \(!isAssistantSurface\(\)\) moveTaskToBack\(true\); else finish\(\);/);
 const backScript = home => script[1] + (home ? script[2] : script[3]) + script[4];
 
 const built = await build({absWorkingDir: root, stdin: {resolveDir: root, sourcefile: 'back-dispatch-entry.ts', contents: `
@@ -106,7 +117,7 @@ function fixture(host) {
 }
 const shown = s => s.host === 'assistant' && s.view === '' && (s.chat === 'input' || s.chat === 'hidden') ? 'full' : s.chat;
 
-test('simulated BackDispatch traces agree with native Back, the flag and the renderer layers after every step', {timeout: 170000}, async () => {
+test("partial source contract: simulated BackDispatch traces agree with native Back, the flag and the renderer layers after every step", {timeout: scaledTimeout(170000)}, async () => {
   const traces = modelTraces({module: 'BackDispatch', traces: 200, steps: 30});
   const result = await replay(traces, {
     start: ({state}) => fixture(state.host),
@@ -119,7 +130,7 @@ test('simulated BackDispatch traces agree with native Back, the flag and the ren
     'openDrawer', 'openInner', 'openMenu', 'openPanel', 'openPopover', 'openShade', 'openView', 'releaseInert', 'startEdit', 'startVoice']);
 });
 
-test('native Back keeps Apps and its menu while retiring voice and each assistant detent above them', async () => {
+test("partial source contract: native Back keeps Apps and its menu while retiring voice and each assistant detent above them", async () => {
   const f = fixture('home');
   const apply = (action, picks = {}) => f.apply({action, picks});
   await apply('openDrawer'); await apply('openMenu'); await apply('moveChat', {chat: 'full'}); await apply('startVoice');

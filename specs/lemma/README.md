@@ -1,7 +1,7 @@
 # Function verification
 
-`npm run lemma:check` checks the pinned LemmaScript 0.6.6 generation against the
-committed proof companions, then runs Dafny 4.11.0. `npm run lemma:regen` updates
+`bun run lemma:check` checks the pinned LemmaScript 0.6.6 generation against the
+committed proof companions, then runs Dafny 4.11.0. `bun run lemma:regen` updates
 generation after an intentional source/specification change. Review and commit
 both companions. `lemmascript.json` selects JavaScript UTF-16 string semantics;
 these initial policies use no mathematical-number approximation or extern axiom.
@@ -80,8 +80,8 @@ proved about the same translated function.
 
 The check needs two tools.
 
-1. **LemmaScript 0.6.6.** It is an exact devDependency installed by `npm ci`; the checker verifies that installed package version before generation. The npm package named `lsc` is unrelated; do not
-   run bare `npx lsc`. `lsc` also needs `git` on `PATH`.
+1. **LemmaScript 0.6.6.** It is an exact devDependency installed by `bun install --frozen-lockfile`; the checker verifies that installed package version before generation. The npm package named `lsc` is unrelated; do not
+   run bare `bunx lsc`. `lsc` also needs `git` on `PATH`.
 2. **Dafny 4.11.0** (proofs were checked with 4.11.0). Download the release archive for your
    platform from <https://github.com/dafny-lang/dafny/releases/tag/v4.11.0> and unpack it; it
    includes Z3. Either put the unpacked directory on `PATH` or set `DAFNY` to the `dafny`
@@ -97,9 +97,9 @@ From the repository root:
 
 ```sh
 export PATH="<dafny dir>:$PATH"
-node scripts/check-lemma.ts                                  # every listed file
+bun scripts/check-lemma.ts                                  # every listed file
 node node_modules/lemmascript/tools/dist/lsc.js check --backend=dafny apps/app/src/browser/video-capture.ts # focused diagnosis; the gate checks every listed file
-node --test test/lemma-check.test.mjs                         # tests of the check itself
+bun test test/lemma-check.test.mjs                         # tests of the check itself
 ```
 
 For each listed file the script checks that every contract annotation is read by LemmaScript, that
@@ -178,7 +178,7 @@ obligations for the file (run of 2026-11-10, LemmaScript 0.6.6, Dafny 4.11.0).
 | | `weekDayMarked` | True exactly for a visible offset other than the selected day and other than 0; never true for a single-day view. | |
 | `prototype/chat-overlay-motion-adapter.ts` (9) | `flickSpan` | `run` is in [0, 100]; `run === 0` implies `rise === 0`; an empty track, a stale last sample or no earlier sample gives `run === 0`; a positive run is the time and height difference between the last sample and some sample of the track. | None. `(full - floor) / 3` in `chatRelease` is modelled as exact real division. |
 | | `clampSheetHeight` | For `0 < half <= full`: result is at most `full`, at least `min(200, half)`, and equals the input when that is within [200, full]. | |
-| | `chatRelease` | For `floor <= full`: result is `hidden`, `sheet` or `full`; from the input row a downward release hides and an upward one never hides; a flick from the sheet goes to `full` (up) or `hidden` (down); a height is returned only with `sheet`, equals the released height, and lies strictly between floor and full outside both snap zones; a release well inside the range always yields a sheet with that height. | |
+| | `chatRelease` | For `floor <= full`: result is `hidden`, `input`, `sheet` or `full`; with `home` set the result is never `hidden`, and `input` is returned only with `home` set; from the input row a downward release hides (on Home it settles on `input`) and an upward one never hides; a flick from the sheet goes to `full` (up) or to `hidden` (down; `input` on Home); a height is returned only with `sheet`, equals the released height, and lies strictly between floor and full outside both snap zones; a release well inside the range always yields a sheet with that height. | |
 | `prototype/context-selection.ts` (17) | `noticeCurrent` | False for a missing or empty list; true exactly when the reviewed identity (id and source) is listed once and that row has the reviewed revision; two rows with the identity make it false (hand-written `CurrentSound`, `CurrentComplete`, `CurrentRejectsDuplicates`). | `//@ skip` on four module-level `RegExp` constants (`OPAQUE`, `SETTINGS_SECTION`, `SENSITIVE_SETTINGS`, `MIME_TYPE`); no proved function reads them. |
 | | `captureUnchanged` | False when the capture is gone; true for an identical record; when true, the trashed flag matches and the mutation revision (or, without one, the revision) matches; a differing content revision makes it false. | |
 | `prototype/note-recorder.ts` (4) | `recordingClockParts` | `total` is the whole seconds of `ms` (0 for negative input); `h * 3600 + m * 60 + s === total` with `m` and `s` in [0, 60). | None |

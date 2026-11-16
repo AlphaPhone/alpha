@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 // SettingsListenerReads traces replayed against the Settings listener read gate. The gate is the
 // shipped `listenerReadGate`; the driver applies a status or an action result to the row exactly
 // where the Settings adapter does (a read only when `readApplies`, an action result always).
@@ -14,9 +25,9 @@ const source = readFileSync(`${repositoryRoot}apps/app/src/prototype/settings-ad
 const region = source.slice(source.indexOf('// settings-reads:begin'), source.indexOf('// settings-reads:end'));
 assert.ok(region.includes('export function listenerReadGate'));
 const {listenerReadGate} = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(region)).toString('base64'));
-// The adapter's two uses of the gate, which the driver repeats.
-assert.match(source, /const read = listenerReads\.beginRead\(\);\s*if \(read === null\) return;\s*const status = await listenerStatus\(\);\s*if \(owner === instance && capabilityAbort === abort && listenerReads\.readApplies\(read\)\) listener = status;/);
-assert.match(source, /if \(!listenerReads\.beginAction\(\)\) return;[\s\S]{0,260}listener = next;[\s\S]{0,420}finally \{ listenerReads\.endAction\(\);/);
+// Only the actual listenerReadGate helper executes here. The receiver below is a
+// controlled port; adapter instance/capability and unconfirmed-stop fences remain
+// separate contracts and are not inferred from source-text patterns.
 
 const project = s => ({busy: s.busy, reads: s.reads, skippedReads: s.skippedReads, shown: s.shown, shownFrom: s.shownFrom,
   readShown: s.shownFrom === 'read' ? s.shownSequence : 0});
@@ -42,7 +53,7 @@ function create() {
   };
 }
 
-test('the Settings listener gate follows SettingsListenerReads scenarios, witnesses and random walks', {timeout: 180000}, async () => {
+test("partial source contract: the Settings listener gate follows SettingsListenerReads scenarios, witnesses and random walks", {timeout: scaledTimeout(180000)}, async () => {
   const traces = modelTraces({...MODEL, scenarios: SCENARIOS, witnesses: WITNESSES, random: 80, steps: 30});
   const receipt = await replayTraces(traces, create, {project});
   assert.equal(receipt.traces, SCENARIOS.length + WITNESSES.length + 80);

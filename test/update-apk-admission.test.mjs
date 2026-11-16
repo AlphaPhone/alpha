@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ test('only the exact compiled public channel can be published', () => {
   const xml = (kind='public',digest=sha(publicUrl)) => 'E: manifest\n  E: application\n'+
     meta(UPDATE_CHANNEL_META,kind)+meta(UPDATE_DIGEST_META,'sha256:'+digest);
   assert.deepEqual(admitPublicUpdateChannel(xml(),publicUrl), {kind:'public',manifestUrlSha256:sha(publicUrl)});
-  assert.throws(()=>admitPublicUpdateChannel(xml('private-qa'),publicUrl), /compiled channel/);
+  assert.throws(()=>admitPublicUpdateChannel(xml('other'),publicUrl), /input refused/);
   assert.throws(()=>admitPublicUpdateChannel(xml('public','0'.repeat(64)),publicUrl), /compiled channel/);
   assert.throws(()=>admitPublicUpdateChannel('E: manifest\n  E: application\n',publicUrl), /metadata missing/);
   assert.throws(()=>admitPublicUpdateChannel(xml()+meta(UPDATE_CHANNEL_META,'public'),publicUrl), /metadata missing or duplicated/);
@@ -33,7 +34,7 @@ test('only the exact compiled public channel can be published', () => {
 
 test('a manifest cannot substitute package, version, flavor or signing-family assertions', () => {
   assert.deepEqual(admitUpdateApkIdentity(row,descriptor,archive,signature), {signerRootSha256:active});
-  assert.deepEqual(admitUpdateApkIdentity({...row,variant:'standalone'},descriptor,{...archive,home:false,xml:''},signature), {signerRootSha256:active});
+  assert.throws(()=>admitUpdateApkIdentity({...row,variant:'standalone'},descriptor,{...archive,home:false,xml:''},signature), /a release distribution is required/);
   for (const [name,changedRow,changedArchive,changedSignature] of [
     ['version',{...row,versionCode:46},archive,signature],
     ['flavor',{...row,variant:'standalone'},archive,signature],
@@ -58,14 +59,14 @@ test('only the exact approved rotation selects its original installed signing fa
   assert.deepEqual(admitUpdateApkIdentity({...row,versionCode:46},descriptor,archive,{...rotated,versionCode:46}), {signerRootSha256:old}, 'later updates retain the approved original family');
 });
 
-test('real SDK signatures bind binary identity and the verified original rotation certificate', {timeout:120_000}, t => {
+test('real SDK signatures bind binary identity and the verified original rotation certificate', {timeout:scaledTimeout(120_000)}, t => {
   let env;
   try {env = androidEnv();} catch {t.skip('Android SDK and JDK 21 are required');return;}
   const aapt2=tool('aapt2'), apksigner=tool('apksigner'), androidJar=path.join(env.ANDROID_HOME,'platforms/android-36/android.jar');
   if (![aapt2,apksigner,androidJar].every(file=>fs.existsSync(file))) {t.skip('build-tools 36.0.0 and android-36 are required');return;}
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-update-identity-test-'));
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
-  const run=(command,args)=>execFileSync(command,args,{env,stdio:'pipe',timeout:30_000,maxBuffer:2**20});
+  const run=(command,args)=>execFileSync(command,args,{env,stdio:'pipe',timeout:scaledTimeout(30_000),maxBuffer:2**20});
   const key=name=>{
     const pem=path.join(dir,name+'.pem'), pk8=path.join(dir,name+'.pk8'), cert=path.join(dir,name+'.x509.pem');
     run('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-subj',`/CN=Alpha OTA fixture ${name}`,'-days','1','-keyout',pem,'-out',cert]);

@@ -46,7 +46,7 @@ const sourceRevision = inventory.revision;
 if (!/^[a-f0-9]{40}$/.test(sourceRevision)) throw Error('Invalid historical specification revision');
 const manifest = json(manifestPath);
 const metadataFiles = get('metadata', '').split(',').filter(Boolean);
-const metadata = metadataFiles.length ? metadataFiles.flatMap(json) : Array.isArray(manifest) ? manifest : manifest.models;
+const metadata = metadataFiles.length ? metadataFiles.flatMap(json) : manifest;
 const requested = get('models', '').split(',').filter(Boolean);
 const requestedProfiles = get('profiles', '').split(',').filter(Boolean);
 const selected = inventory.models.filter(model => !requested.length || requested.includes(model.module) || requested.includes(model.quintModule));
@@ -102,7 +102,7 @@ function includeModel(path) {
   }
 }
 for (const {model} of modelPlans) includeModel(model.path);
-const inputFiles = [inventoryPath, manifestPath, runnerPath, tlcConfigPath, pinPath, 'package-lock.json', ...metadataFiles, ...modelFiles];
+const inputFiles = [inventoryPath, manifestPath, runnerPath, tlcConfigPath, pinPath, 'bun.lock', ...metadataFiles, ...modelFiles];
 if (phase === 'temporal') inputFiles.push(tlcJar);
 const snapshot = () => Object.fromEntries(inputFiles.map(path => [path, hash(path)]));
 const before = snapshot();
