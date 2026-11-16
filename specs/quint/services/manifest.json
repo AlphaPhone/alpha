@@ -3444,7 +3444,8 @@
       "Two credentials; record age is fresh or old and a plan end is none, ahead or past. The seven-day window and the record parser are the shared controller.",
       "Admission reasons follow the shared CloudResidentBindingController; Alpha owns the plan-end choice, the record store, forgetting the record on a refused sign-in or ended plan, and the outcome mapping.",
       "Entitlement verification, the refresher's timers and provider binding are separate. A background refresh that verifies the plan rewrites the record from the end held in memory; signing out removes the record.",
-      "Replayed through admitCloudResident, the shared controller, the redeem step and the background refresher (specs/quint/refinement/services/plan-admission-grace.mjs, test/quint-plan-admission-grace.test.mjs): nine named scenarios including refreshRewritesRecordTest. signOutRemovesRecordTest is scenario and simulation evidence only; cloudSignOut is not driven."
+      "Nine named scenarios including refreshRewritesRecordTest replay through admitCloudResident, the shared controller, the redeem step and the background refresher (specs/quint/refinement/services/plan-admission-grace.mjs).",
+      "signOutRemovesRecordTest replays the whole flag-off connection controller in Chromium with synthetic native and Cloud ports (specs/quint/refinement/services/plan-admission-sign-out.mjs, test/quint-plan-admission-grace.test.mjs). It checks admission record removal, unbinding before exact credential revocation, and refusal to reuse offline grace when the same credential is presented again."
     ],
     "sharedSources": [
       "packages/auth/src/auth/cloud-resident-binding.ts"
