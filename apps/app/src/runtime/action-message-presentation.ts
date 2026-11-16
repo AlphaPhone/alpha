@@ -18,7 +18,8 @@ const REVIEW_TEXT = 'Review on phone';
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
-  return `Opened ${destination.host}.`;
+  // The tab is created and its load dispatched; Browser may not be shown (presentation follows the receipt).
+  return `Opened ${destination.host} in a Browser tab.`;
 }
 function browserCardUrl(description: unknown): string | undefined {
   const prefix = 'Open browser destination ';
