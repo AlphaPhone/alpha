@@ -37,7 +37,7 @@ final class AlphaCallStateWatch {
  synchronized void stop() {
   Object registered = listener;
   listener = null;
-  if (!(registered instanceof Listener)) return;
+  if (!(registered instanceof Listener) || android.os.Build.VERSION.SDK_INT < 31) return;
   android.telephony.TelephonyManager phone = context.getSystemService(android.telephony.TelephonyManager.class);
   try { if (phone != null) phone.unregisterTelephonyCallback((Listener) registered); } catch (RuntimeException ignored) {}
  }
