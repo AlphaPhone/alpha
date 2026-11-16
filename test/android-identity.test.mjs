@@ -7,9 +7,28 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {androidIdentity, projectAndroidPackage, stageAndroidIdentity, RETAINED_ANDROID_APP_ID} from '../scripts/android-identity.ts';
 import {jsonJar, jvmSkip, javaBinary} from './fixtures/jvm-tools.mjs';
+import {withFixtureBuildContext} from './support/fixture-build-context.mjs';
+import {readNativeBuildReceipt} from '../scripts/native-build-inputs.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const canonical = JSON.parse(fs.readFileSync(path.join(ROOT, 'app.config.json'), 'utf8')).appId;
+
+test('a synthetic configuration scope preserves the actual selected native artifact after rejection', async () => {
+ const names = ['ALPHA_ANDROID_APPLICATION_ID', 'ELIZAOS_VERSION_CODE', 'ELIZAOS_VERSION_NAME'];
+ const settings = names.map(name => process.env[name]);
+ const selected = androidIdentity(ROOT).appId;
+ const actual = readNativeBuildReceipt(ROOT);
+ await assert.rejects(withFixtureBuildContext(async () => {
+  for (const name of names) assert.equal(Object.hasOwn(process.env, name), false);
+  await Promise.resolve();
+  assert.equal(androidIdentity(ROOT).appId, canonical);
+  throw Error('Synthetic fixture refusal');
+ }), /Synthetic fixture refusal/);
+ assert.deepEqual(names.map(name => process.env[name]), settings);
+ assert.equal(androidIdentity(ROOT).appId, selected);
+ assert.deepEqual(readNativeBuildReceipt(ROOT), actual);
+ if (actual) assert.equal(actual.recipe.identity, selected);
+});
 function fixture(t) {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-installed-identity-'));
  t.after(() => fs.rmSync(root, {recursive: true, force: true}));

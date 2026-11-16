@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -52,7 +53,7 @@ function receiptFor(dir){
   receipt.files=[...nativeOutputInventory(receipt)].map(([name,row])=>({path:name,bytes:row?.bytes||4,sha256:row?.sha256||'a'.repeat(64)}));
   return receipt;
 }
-test('generated native receipts reject qualification claims, incomplete inventories and substituted bytes',t=>{
+fixtureTest('generated native receipts reject qualification claims, incomplete inventories and substituted bytes',t=>{
   const dir=fixture(t),original=receiptFor(dir);
   const file=path.join(dir,NATIVE_BUILD_RECEIPT);fs.mkdirSync(path.dirname(file),{recursive:true});
   fs.writeFileSync(file,JSON.stringify(original));assert.ok(readNativeBuildReceipt(dir));

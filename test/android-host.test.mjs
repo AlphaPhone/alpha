@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // Alpha's Android host is data for the pinned upstream generator (AP-02). These checks run the
 // real generator against a temporary copy of the descriptor's inputs; they do not run Gradle and
 // are not APK, emulator or device evidence.
@@ -12,7 +13,7 @@ import {RESIDENT_NOTIFICATION_CLASSES, residentHelperKind, residentHostIdentity,
 import {HOST_DESCRIPTOR, PATCHED_NATIVE_ROOT, hostIdentity, hostProfile, mapReferences, readHostDescriptor, stageOwnerRouteAsset} from '../scripts/android-host.ts';
 
 import {serializeOwnerRouteTable} from '../apps/app/src/product/owner-route-table.ts';
-import {RETAINED_ANDROID_APP_ID} from '../scripts/android-identity.ts';
+import {androidIdentity, RETAINED_ANDROID_APP_ID} from '../scripts/android-identity.ts';
 import {verifyAndroidIdentity} from '../scripts/android-identity.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -63,7 +64,7 @@ function generate(t) {
  return {root, staging, result, profile};
 }
 
-test('the pinned generator accepts the descriptor and owns identity, version and signing policy', t => {
+fixtureTest('the pinned generator accepts the descriptor and owns identity, version and signing policy', t => {
  const {root, profile} = generate(t);
  assert.deepEqual(profile.identity, {appId: identity.appId, appName: identity.appName, version: identity.version, versionCode: identity.versionCode});
  assert.deepEqual(profile.sdk, {min: 29, target: 36, compile: 36});
@@ -87,7 +88,7 @@ test('the pinned generator accepts the descriptor and owns identity, version and
  assert.match(fs.readFileSync(path.join(root, 'android/eliza-consumer-host/res/values/eliza_consumer_identity.xml'), 'utf8'), new RegExp(`name="app_name"[^>]*>"${identity.appName}"<`));
 });
 
-test('no test-mocks source set is attached and product admission runs before every build', t => {
+fixtureTest('no test-mocks source set is attached and product admission runs before every build', t => {
  const {root, staging, profile} = generate(t);
  assert.equal(profile.testMocks, null);
  assert.deepEqual(profile.admission.map(step => [step.name, step.command, step.directory]), [
@@ -136,8 +137,9 @@ test('generated files are build outputs: every one is git-ignored and none is au
 });
 
 test('installed resident identities stay Alpha data-compatibility names', () => {
- const host = residentHostIdentity({packageName: identity.appId, ...descriptor.residentHost});
- assert.deepEqual(host.sockets, {agent: `${identity.appId}.agent.v1`, inference: `${identity.appId}.inference.v1`, secureStore: `${identity.appId}.secure-store`});
+ const selected = androidIdentity(ROOT).appId;
+ const host = residentHostIdentity({packageName: selected, ...descriptor.residentHost});
+ assert.deepEqual(host.sockets, {agent: `${selected}.agent.v1`, inference: `${selected}.inference.v1`, secureStore: `${selected}.secure-store`});
  assert.equal(host.notification.smallIcon, 'notification_icon');
  // Alpha supervises its resident continuously without a Stop action in the notification.
  assert.equal(host.notification.primaryAction, 'none');

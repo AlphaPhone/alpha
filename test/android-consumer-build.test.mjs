@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // Alpha's launcher APKs are built by the pinned upstream consumer build orchestration
 // (AP-02). These checks run that orchestration with Alpha's options and a stand-in for Gradle
 // and the verifier; they assemble no APK and are not APK, emulator or device evidence.
@@ -50,7 +51,7 @@ function build(t, {environment = {}, signed = false, release = true} = {}) {
 
 const gradleCalls = calls => calls.filter(call => call.command === './gradlew');
 
-test('a release build assembles the launcher APKs and instrumentation, lints and verifies them flag-off', t => {
+fixtureTest('a release build assembles the launcher APKs and instrumentation, lints and verifies them flag-off', t => {
  const f = build(t, {environment: {ELIZA_DEV_ALLOW_TEST_MOCKS: '1', VITE_ELIZA_DEV_ALLOW_TEST_MOCKS: '1'}});
  const [gradle] = gradleCalls(f.calls);
  assert.equal(gradleCalls(f.calls).length, 1);

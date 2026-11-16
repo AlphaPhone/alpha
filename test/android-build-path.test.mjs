@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -63,7 +64,7 @@ function fixture(t) {
   return {root, source, write, commit};
 }
 
-test('preflight names the exact command for a missing or refused voice input', t => {
+fixtureTest('preflight names the exact command for a missing or refused voice input', t => {
   const f = fixture(t);
   // Every build needs the staged on-device voice outputs.
   assert.match(checkoutProblems(f.root)[0], /On-device voice outputs are not staged in \.eliza\/paradee-voice\/native/);
