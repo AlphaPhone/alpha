@@ -682,10 +682,11 @@ MMS receiver's MIME type when checking eligibility for the Android SMS role
 The pin `c25d0fca2561f9f604bee8e891be772fa678589f` takes the reviewed
 fix for restoring private action targets before resident execution
 ([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)).
-The current pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
+The pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
 routes, keeps selected chat attachments through intake, binds the selected Cloud
 image model at launch and rechecks a live file selection after storage reads
 ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
+The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
