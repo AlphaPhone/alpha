@@ -187,7 +187,7 @@ for (const mode of modes) {
     const { facts, problems } = distributionProblems(d, { mode, appId: identity.appId });
     const tree = parseXmlTree(d.xml);
     try{
-      const compiled=apkUpdateChannel(tree);
+      const compiled=apkUpdateChannel(tree,identity);
       if(compiled.kind!==updateChannel.kind||compiled.manifestUrlSha256!==updateChannel.manifestUrlSha256)problems.push('Compiled APK update channel differs from build evidence');
     }catch{problems.push('Compiled APK update channel could not be verified');}
     problems.push(...requiredAppLinkProblems(tree, {
