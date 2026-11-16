@@ -846,7 +846,9 @@ function update(patch: Partial<ConnectionSnapshot>) {
   if('message' in patch&&!('previousSignInUnconfirmed' in patch)&&patch.message!==state.message)next.previousSignInUnconfirmed=false;
   if('providerStatus' in patch&&ownProviderSelected(next)!==ownProviderSelected(state))networkLostUnder&&='';
   if (state.purpose === 'cloud-account' && patch.cloudAccount && !state.cloudAccount) { next.open = false; next.purpose = 'agent'; }
-  if(next.purpose!=='plan'||patch.open===false||next.cloudAccount?.sessionId!==state.cloudAccount?.sessionId){next.membershipCodeEntry=false;next.planManager=false;}
+  if(next.purpose!=='plan'||patch.open===false||next.cloudAccount?.sessionId!==state.cloudAccount?.sessionId)next.membershipCodeEntry=false;
+  // The plan manager lives inside whichever account sheet is showing (a funding prompt keeps its purpose).
+  if(patch.open===false||next.cloudAccount?.sessionId!==state.cloudAccount?.sessionId)next.planManager=false;
   // Modal ownership follows production presentation. Automatic restore only suppresses rendering
   // temporarily; it must not erase an explicitly opened account or plan panel.
   state = isAndroid && !testMocksEnabled ? { ...next, open: connectionChooserVisible({ ...next, automaticRestore: false },!!sending) } : next;
@@ -3174,7 +3176,9 @@ export const connectionController = {
   async residentManagePlan() {
     if(operation)return;
     if(!service?.identity.email){update({open:true,error:'Sign in first'});return;}
-    update({open:true,automaticRestore:false,purpose:'plan',membershipDismissed:false,planManager:true,message:'',error:''});
+    // An account sheet already showing (a funding prompt) keeps its purpose, so it still closes by itself
+    // once a purchase activates the plan; otherwise the plan sheet opens.
+    update({open:true,automaticRestore:false,purpose:state.open?state.purpose:'plan',membershipDismissed:false,planManager:true,message:'',error:''});
   },
   /** A plan action finished in the plan manager: read the account and plan again now. */
   planChanged() {
