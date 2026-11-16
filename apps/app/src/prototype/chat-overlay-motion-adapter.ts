@@ -393,7 +393,11 @@ function measureSheet(): { content: number; floor: number } | null {
 	const agents = transcript.querySelectorAll<HTMLElement>('[data-alpha-agent-row="true"]');
 	const latest = agents.length ? agents[agents.length - 1].offsetHeight : 0;
 	const base = others + (bar || CLOSED_COMPOSER_BLOCK) + pad;
-	return { content: base + own, floor: base + latest };
+	// The full voice recorder (dictation, transcript review) fills the sheet (flex: 1) instead of
+	// sizing to its content, so its drawn height is only what the sheet gave it. It opens at the
+	// high fit, so its transcript, Send and Discard are never squeezed under the chat history.
+	const fills = !!panel.querySelector(":scope > [data-alpha-chat-recorder]:not(.alpha-chat-composer)");
+	return { content: fills ? Number.POSITIVE_INFINITY : base + own, floor: base + latest };
 }
 /** AC-29: at the largest text size the stage keeps its header and the element above the sheet. */
 function measureStageMin(): number {
