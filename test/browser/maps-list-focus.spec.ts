@@ -48,7 +48,8 @@ test('a Maps search readback keeps the focused provider place when a preceding r
 
 test('removing another saved place keeps focus and selection on the retained saved identity',async({page},info)=>{
  const hashes=captureInputs(sources),checkpoints:any[]=[];await setup(page);
- const query=page.getByRole('searchbox',{name:'Search places',exact:true});await query.fill('saved');await query.fill('');
+ const query=page.getByRole('searchbox',{name:'Search places',exact:true});await query.fill('saved');await query.press('Enter');
+ await expect(page.locator('[data-alpha-map-row]')).toHaveCount(2);await query.fill('');
  await page.evaluate(()=>{const f=(window as any).mapFocus;f.first=f.controller.save({label:'Saved One',coordinate:{latitude:43.7,longitude:7.4}});f.controller.save({label:'Saved Two',coordinate:{latitude:43.8,longitude:7.4}});});
  const sheet=page.locator('[data-alpha-maps-sheet="results"]');const target=sheet.getByRole('button',{name:/^Saved Two/});await target.focus();
  const intended=await target.getAttribute('data-alpha-map-row');expect(intended).not.toBeNull();await target.evaluate(element=>(window as any).originalMapRow=element);

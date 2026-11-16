@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {distributionProblems} from '../scripts/apk.ts';
 
-function assess({home=true,tag='service',permission='android.permission.BIND_INPUT_METHOD',action='android.view.InputMethod',metadata=true}={}) {
+function assess({appId="ai.alphacompute.alphaphone",home=true,tag='service',permission='android.permission.BIND_INPUT_METHOD',action='android.view.InputMethod',metadata=true}={}) {
  return distributionProblems({home,xml:`E: manifest
-  A: package="ai.alphacompute.alphaphone"
+  A: package="${appId}"
   E: application
     A: android:allowBackup=(type 0x12)0x0
     A: android:usesCleartextTraffic=(type 0x12)0x0
@@ -19,10 +19,17 @@ function assess({home=true,tag='service',permission='android.permission.BIND_INP
 ${metadata?`      E: meta-data
         A: android:name="android.view.im"
         A: android:resource=@0x7f010002
-`:''}`,badging:"package: name='ai.alphacompute.alphaphone' versionCode='44' versionName='44'",names:['assets/public/licenses/third-party-notices.json']},{mode:'release'}).problems;
+`:''}`,badging:`package: name='${appId}' versionCode='44' versionName='44'`,names:['assets/public/licenses/third-party-notices.json']},{mode:'release',appId}).problems;
 }
 test('voice keyboard admits the launcher service bound only by Android',()=>assert.deepEqual(assess(),[]));
 test('voice keyboard rejects standalone packaging, public binding and unrelated entry contracts',()=>{
  for(const change of [{home:false},{tag:'activity'},{permission:''},{permission:'android.permission.INTERNET'},{action:'other.action'},{metadata:false}])
   assert.ok(assess(change).length,JSON.stringify(change));
+});
+
+test('retained voice keyboard keeps launcher, Android permission, action and subtype metadata requirements',()=>{
+ const appId='ai.elizaresearch.alphaphone';
+ assert.deepEqual(assess({appId}),[]);
+ for(const change of [{home:false},{tag:'activity'},{permission:''},{permission:'android.permission.INTERNET'},{action:'other.action'},{metadata:false}])
+  assert.ok(assess({appId,...change}).length,JSON.stringify(change));
 });

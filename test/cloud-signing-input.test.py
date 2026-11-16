@@ -27,7 +27,7 @@ ADMISSION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ADMISSION)
 
 NATIVE_SOURCE_PATHS = ('packages/app/scripts', 'plugins/plugin-native-inference/src/model-catalog', 'bun.lock', 'package.json', 'packages/agent/package.json', 'packages/app/package.json', 'packages/app/platforms/android/app/src/main/elizavoice-jni/CMakeLists.txt', 'packages/app/platforms/android/app/src/main/elizavoice-jni/elizavoice-jni.cpp', 'packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaVoiceNative.java', 'packages/app/scripts/aosp/compile-libllama-paths.ts', 'packages/app/scripts/aosp/compile-libllama.ts', 'packages/app/scripts/aosp/compile-shim.ts', 'packages/app/scripts/aosp/vulkan-source-contract.ts', 'packages/app/scripts/aosp/zig-toolchain.ts', 'packages/app/scripts/build-helpers/arm64-simd.ts', 'packages/app/scripts/build-helpers/elizavoice-build-flags.ts', 'packages/app/scripts/build-helpers/omnivoice-merged.ts', 'packages/app/scripts/build-helpers/verify-fused-symbols.ts', 'packages/app/scripts/lib/repo-root.ts', 'packages/app/scripts/paradee-voice/build-native.ts', 'packages/app/scripts/stage-elizavoice-lib.ts', 'packages/app/scripts/voice/build-phonon2-gguf.ts', 'plugins/plugin-local-inference/native/android', 'plugins/plugin-native-inference/src/model-catalog/voice-model-versions.json')
-NATIVE_PRODUCT_PATHS = ('android/embedding-host/build-toolchain.json', 'android/embedding-host/native-requirements.txt', 'android/embedding-host/bootstrap-requirements.txt', 'android/paradee-voice/asr-inputs.json', 'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts', 'scripts/embedding-native-contract.ts', 'scripts/embedding-build-remap.ts', 'scripts/native-build-inputs.ts', 'scripts/android-stage-voice-models.ts', 'scripts/local-agent-source.ts', 'scripts/voice-host.ts', 'scripts/paradee-runtime.ts', 'scripts/android-abis.ts', 'scripts/copy-file-clone.ts', 'scripts/stage-embedding-host.ts')
+NATIVE_PRODUCT_PATHS = ('app.config.json', 'android/consumer-host.json', 'android/embedding-host/build-toolchain.json', 'android/embedding-host/native-requirements.txt', 'android/embedding-host/bootstrap-requirements.txt', 'android/paradee-voice/asr-inputs.json', 'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts', 'scripts/embedding-native-contract.ts', 'scripts/embedding-build-remap.ts', 'scripts/native-build-inputs.ts', 'scripts/android-identity.ts', 'scripts/android-stage-voice-models.ts', 'scripts/local-agent-source.ts', 'scripts/voice-host.ts', 'scripts/paradee-runtime.ts', 'scripts/android-abis.ts', 'scripts/copy-file-clone.ts', 'scripts/stage-embedding-host.ts')
 
 class CloudSigningInputTest(unittest.TestCase):
     def setUp(self):
@@ -155,6 +155,7 @@ class CloudSigningInputTest(unittest.TestCase):
         put(root, "android/voice-host/qualified-voice-host.json", b'{"models":[],"asrSlot":{}}')
         put(root, "upstream.lock.json", json.dumps({"commit": sdk_commit}).encode())
         put(root, "app.config.json", json.dumps({"appId": PRODUCER.CANDIDATE_PACKAGE}).encode())
+        put(root, "android/consumer-host.json", json.dumps({"installedIdentities": []}).encode())
         git(root, "init", "-q")
         git(root, "add", "android", "scripts", "upstream.lock.json", "app.config.json")
         git(root, "update-index", "--add", "--cacheinfo", "160000," + sdk_commit + ",vendor/eliza")
@@ -276,6 +277,108 @@ class CloudSigningInputTest(unittest.TestCase):
                                      "head_repository_id": PRODUCER.REPOSITORY_ID}}
         return {f"repos/{PRODUCER.REPOSITORY}/actions/runs/171/attempts/2": run,
                 f"repos/{PRODUCER.REPOSITORY}/actions/artifacts/202": artifact}
+
+    def write_retained_native(self, debug=None, change_native=None):
+        self.prepare_native_source()
+        source = Path(os.environ["ALPHA_NATIVE_SOURCE_ROOT"])
+        url = "https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-update-stable.json"
+        descriptor = {"installedIdentities": [{"appId": PRODUCER.RETAINED_PACKAGE, "updateManifestUrl": url}]}
+        (source / "android/consumer-host.json").write_text(json.dumps(descriptor))
+        subprocess.run(["git", "-C", str(source), "add", "android/consumer-host.json"], check=True)
+        subprocess.run(["git", "-C", str(source), "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "Synthetic reviewed installed identity"], check=True)
+        commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+        self.native_source = (commit, self.native_source[1])
+        self.native_recipe["identity"] = PRODUCER.RETAINED_PACKAGE
+        self.native_recipe["productInputs"]["android/consumer-host.json"] = ADMISSION.digest((source / "android/consumer-host.json").read_bytes())
+        self.pin["updateChannel"]["manifestUrlSha256"] = ADMISSION.digest(url.encode())
+        for record in [self.verification, self.build, self.producer, *self.verification["results"]]:
+            record["updateChannel"] = copy.deepcopy(self.pin["updateChannel"])
+        self.build["applicationId"] = PRODUCER.RETAINED_PACKAGE
+        self.verification["applicationId"] = PRODUCER.RETAINED_PACKAGE
+        for row in self.verification["results"]:
+            row["packageName"] = PRODUCER.RETAINED_PACKAGE
+        def identity(native):
+            for key in ("voice", "embedding"):
+                native[key]["identity"] = PRODUCER.RETAINED_PACKAGE
+            if change_native:
+                change_native(native)
+        self.write_candidate(debug, change_native=identity)
+        with zipfile.ZipFile(self.archive) as bundle:
+            candidate = json.loads(bundle.read("app-update-candidate.json"))
+            extras = {name: bundle.read(name) for name in bundle.namelist() if name in
+                      ("inputs-before.json", "inputs-after.json", "native-input-admission.json", "producer-evidence/native-build-receipt.json")
+                      or name.endswith("-debug.apk")}
+        for name in PRODUCER.GITHUB_FIELDS:
+            self.pin.pop(name, None)
+        self.pin.update(producerKind=PRODUCER.PRIVATE_RUNNER, applicationId=PRODUCER.RETAINED_PACKAGE,
+                        purpose="retained-installation-update")
+        private = {"schema": 1, "producerKind": PRODUCER.PRIVATE_RUNNER,
+                   "project": "alpha-aosp-lab-20261024", "instanceId": "8999310923263914877",
+                   **{name: self.pin[name] for name in ("alphaCommit", "sdkCommit", "versionCode", "updateChannel", "unsignedApkSHA256", "applicationId")},
+                   "runtimeProfile": "native",
+                   "checks": {name: "passed" for name in ("productSourceGuard", "sdkSourceGuard", "normalPreparation", "combinedVerification", "apkArchive")},
+                   "nativeEvidence": {name: candidate[name] for name in ("sourceFingerprint", "nativeInputAdmissionSha256", "apks")}}
+        raw = json.dumps(private).encode()
+        self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(raw)
+        self.write_archive({**extras, "private-producer.json": raw})
+        self.pin["archiveBytes"] = self.archive.stat().st_size
+        digest = self.pin["archiveSHA256"]
+        self.pin["privateStorage"].update(inputObject=f"unsigned/{digest}.zip",
+                                          outputObject=f"signed/{digest}/{'d' * 32}/signed-apks.tar")
+        return extras, private
+
+    def test_retained_native_uses_the_existing_native_member_bound_only_for_its_contract(self):
+        payload = bytes(4097)
+        self.apk_bytes["launcher-release-unsigned.apk"] = payload
+        self.pin["unsignedApkSHA256"]["launcher"] = ADMISSION.digest(payload)
+        self.verification["results"][0]["sha256"] = ADMISSION.digest(payload)
+        extras, private = self.write_retained_native({"launcher-debug.apk": payload})
+        contract = PRODUCER.input_contract(self.pin)
+        with patch.object(PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            self.assertTrue(ADMISSION.admit(self.archive, self.pin)["inputVerified"])
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.HOSTED_DISPATCH), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "runtimeProfile": "cloud"}), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "packageName": PRODUCER.CANDIDATE_PACKAGE}), 4096)
+        extras["launcher-debug.apk"] = b"changed debug input"
+        self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(json.dumps(private).encode())
+        self.write_archive({**extras, "private-producer.json": json.dumps(private).encode()})
+        with self.assertRaisesRegex(ValueError, "Producer debug APK bytes differ"):
+            ADMISSION.admit(self.archive, self.pin)
+
+    def test_retained_native_requires_truthful_profile_complete_native_evidence_and_source_identity(self):
+        extras, private = self.write_retained_native()
+        self.assertTrue(ADMISSION.admit(self.archive, self.pin)["inputVerified"])
+        self.assertEqual(PRODUCER.input_contract(self.pin), {"variants": ("launcher",), "runtimeProfile": "native", "packageName": PRODUCER.RETAINED_PACKAGE})
+        for change in ("nativeEvidence", "applicationId", "runtimeProfile"):
+            with self.subTest(change=change):
+                changed = copy.deepcopy(private)
+                if change == "nativeEvidence":
+                    changed.pop(change)
+                else:
+                    changed[change] = "cloud" if change == "runtimeProfile" else PRODUCER.CANDIDATE_PACKAGE
+                raw = json.dumps(changed).encode()
+                self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(raw)
+                self.write_archive({**extras, "private-producer.json": raw})
+                with self.assertRaises(ValueError):
+                    ADMISSION.admit(self.archive, self.pin)
+
+    def test_retained_native_cannot_borrow_canonical_or_incomplete_private_approval(self):
+        self.write_retained_native()
+        fields = ("alphaCommit", "sdkCommit", "versionCode", "updateChannel", "archiveBytes", "archiveSHA256",
+                  "producerManifestSHA256", "privateProducerReceiptSHA256", "unsignedApkSHA256", "applicationId", "purpose")
+        self.pin["archiveBytes"] = self.archive.stat().st_size
+        approval = {"approval": "approved", **{name: self.pin[name] for name in fields}}
+        self.assertTrue(ADMISSION.reviewed_private_producer(self.pin, {"privateProducerApproval": approval}))
+        for name in ("applicationId", "purpose"):
+            changed = copy.deepcopy(approval)
+            changed.pop(name)
+            self.assertFalse(ADMISSION.reviewed_private_producer(self.pin, {"privateProducerApproval": changed}))
+        for name, value in (("purpose", "unknown"), ("applicationId", "example.unreviewed.app")):
+            changed = {**self.pin, name: value}
+            with self.assertRaises(ValueError):
+                PRODUCER.input_contract(changed)
 
     def test_candidate_preparation_yields_mirror_request_then_exact_signing_plan(self):
         self.write_candidate()
@@ -498,6 +601,30 @@ class CloudSigningInputTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "on-device voice with ASR"):
             ADMISSION.admit(self.archive, self.pin)
 
+    def test_canonical_native_recipe_preserves_legacy_and_complete_identity_inputs(self):
+        identity_inputs = ("app.config.json", "android/consumer-host.json", "scripts/android-identity.ts")
+        for removed in ((), identity_inputs, identity_inputs[:1], identity_inputs[:2]):
+            with self.subTest(removed=removed):
+                def change(native):
+                    for name in removed:
+                        native["recipe"]["productInputs"].pop(name)
+                    native["recipeSha256"] = ADMISSION.digest(json.dumps(native["recipe"], separators=(",", ":")).encode())
+                self.write_candidate(change_native=change)
+                if removed and removed != identity_inputs:
+                    with self.assertRaisesRegex(ValueError, "native recipe differs from frozen product inputs"):
+                        ADMISSION.admit(self.archive, self.pin)
+                else:
+                    self.assertTrue(ADMISSION.admit(self.archive, self.pin)["inputVerified"])
+
+    def test_retained_native_recipe_cannot_omit_the_identity_input_bundle(self):
+        def change(native):
+            for name in ("app.config.json", "android/consumer-host.json", "scripts/android-identity.ts"):
+                native["recipe"]["productInputs"].pop(name)
+            native["recipeSha256"] = ADMISSION.digest(json.dumps(native["recipe"], separators=(",", ":")).encode())
+        self.write_retained_native(change_native=change)
+        with self.assertRaisesRegex(ValueError, "native recipe differs from frozen product inputs"):
+            ADMISSION.admit(self.archive, self.pin)
+
     def test_native_recipe_cannot_forge_self_consistent_source_or_model_pins(self):
         def rehash(value):
             value["recipeSha256"] = ADMISSION.digest(json.dumps(value["recipe"], separators=(",", ":")).encode())
@@ -592,7 +719,7 @@ class CloudSigningInputTest(unittest.TestCase):
         for record in (self.verification, self.build, self.producer):
             record["runtimeProfile"] = "cloud"
         for row in self.verification["results"]:
-            row["packageName"] = "ai.alphacompute.alphaphone"
+            row["packageName"] = "ai.elizaresearch.alphaphone"
         self.pin.update(producerKind=PRODUCER.PRIVATE_RUNNER, privateStorage={})
         private = {
             "schema": 1, "producerKind": PRODUCER.PRIVATE_RUNNER,

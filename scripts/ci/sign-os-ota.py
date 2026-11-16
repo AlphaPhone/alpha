@@ -47,6 +47,17 @@ def read(file):
     return json.loads(file.read_text(), object_pairs_hook=pairs)
 
 
+TARGET_IDENTITY_FIELDS = {"targetFilesSha256", "sourceCommit", "sdkCommit", "targetFingerprint", "buildTimestamp"}
+
+
+def target_binding(plan, reviewed):
+    identity = {"targetFilesSha256": plan["targetFiles"]["sha256"],
+                **{field: plan[field] for field in TARGET_IDENTITY_FIELDS - {"targetFilesSha256"}}}
+    matches = [target for target in reviewed if all(target.get(field) == value for field, value in identity.items())]
+    require(len(matches) == 1, "Target-files bytes and producer lineage must match exactly one reviewed target")
+    return matches[0]
+
+
 def validate(plan):
     fields = {"schema", "purpose", "sourceCommit", "sdkCommit", "targetFiles", "otaTools",
               "outputObject", "product", "device", "targetFingerprint", "buildTimestamp"}
@@ -76,9 +87,10 @@ def validate(plan):
     # independently reviewed exact target bytes may claim the preserving lineage.
     reviewed = pin.get("reviewedTargets")
     require(isinstance(reviewed, list) and reviewed, "No reviewed target-files admission is configured")
-    target_fields = {"targetFilesSha256", "sourceCommit", "sdkCommit", "targetFingerprint", "buildTimestamp"}
+    target_fields = TARGET_IDENTITY_FIELDS
     for target in reviewed:
-        require(isinstance(target, dict) and set(target) == target_fields and
+        require(isinstance(target, dict) and set(target) in (target_fields, target_fields | {"apkSignerMappingsSha256"}) and
+                ("apkSignerMappingsSha256" not in target or isinstance(target["apkSignerMappingsSha256"], str) and HEX.fullmatch(target["apkSignerMappingsSha256"])) and
                 isinstance(target["targetFilesSha256"], str) and HEX.fullmatch(target["targetFilesSha256"]) and
                 isinstance(target["sourceCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", target["sourceCommit"]) and
                 isinstance(target["sdkCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", target["sdkCommit"]) and
@@ -86,9 +98,7 @@ def validate(plan):
                 re.fullmatch(r"Alpha/alpha_stallion_phone/stallion:17/[^\s]{1,512}", target["targetFingerprint"]) and
                 type(target["buildTimestamp"]) is int and target["buildTimestamp"] > 0,
                 "Invalid reviewed target-files admission")
-    identity = {"targetFilesSha256": plan["targetFiles"]["sha256"],
-                **{field: plan[field] for field in target_fields - {"targetFilesSha256"}}}
-    require(identity in reviewed, "Target-files bytes and producer lineage have not been reviewed together")
+    target_binding(plan, reviewed)
     return pin
 
 
@@ -131,7 +141,8 @@ def inspect_target(file, plan, pin):
         avb = {k: v for k, v in misc.items() if k.startswith("avb_") and
                k.endswith(("_key_path", "_algorithm", "_rollback_index_location"))}
         canonical = lambda value: hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        require(canonical(signers) == pin["apkSignerMappingsSha256"] and
+        binding = target_binding(plan, pin["reviewedTargets"])
+        require(canonical(signers) == binding.get("apkSignerMappingsSha256", pin["apkSignerMappingsSha256"]) and
                 canonical(avb) == pin["avbKeyConfigurationSha256"], "OS signing identities changed")
         # Alpha's product identity overrides the generic system-image identity.
         props = key_values(member(archive, "PRODUCT/etc/build.prop"))

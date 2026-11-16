@@ -56,7 +56,7 @@ interface ArchiveFacts {
 /** Public distribution must inspect the compiled channel, not a release row's claim. */
 export function admitPublicUpdateChannel(xml: string, publicUrl: string) {
   requireValue(typeof publicUrl === 'string' && publicUrl.length > 0, 'the configured public manifest URL is required');
-  const channel = apkUpdateChannel(parseXmlTree(xml));
+  const channel = apkUpdateChannel(parseXmlTree(xml), {appId: PACKAGE});
   requireValue(channel.manifestUrlSha256 === sha256(publicUrl),
     'compiled channel is not the configured public update channel');
   return channel;

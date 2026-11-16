@@ -46,7 +46,19 @@ try {
  await page.getByRole('button', { name: 'Close place', exact: true }).click();
  assert.ok(await rejection(renamed.context), 'Closed place capability revoked');
  await input.fill('PRIVATE_SEARCH_81732');
- const searched = await observation();
+ // Observe the capability and wire message in the same browser task. Automatic
+ // search may retire a pending capability before a second evaluation executes.
+ const observeSearch = await page.evaluateHandle(async()=>{
+  const {alphaClient}=await import('/src/runtime/alpha-client.ts');
+  const {phoneContextMessage}=await import('/src/runtime/phone-context.ts');
+  return ()=>{
+   const context=alphaClient.getState().context;
+   return context.selectedObject?.kind==='map-search'&&phoneContextMessage('Help with this screen',context);
+  };
+ });
+ const searchedHandle = await page.waitForFunction(observe=>observe(),observeSearch);
+ const searched = await searchedHandle.jsonValue();
+ assert.ok(searched);
  assert.equal(searched.context.selectedObject?.kind, 'map-search');
  assert.ok(!searched.text.includes('PRIVATE_SEARCH_81732'));
  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));

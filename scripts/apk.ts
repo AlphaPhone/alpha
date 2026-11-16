@@ -48,7 +48,7 @@ interface DistributionInput {
   forbiddenDex?: string[];
   removedSpeechClasses?: string[];
 }
-interface DistributionOptions {mode?: ApkMode}
+interface DistributionOptions {mode?: ApkMode; appId?: string}
 interface ApkInspection extends DistributionInput {
   file: string;
   packageName: string | undefined;
@@ -66,7 +66,9 @@ interface ApkInspection extends DistributionInput {
 export const parseXmlTree = parseAaptTree as (text: string, options?: {decodeAttribute?: (encoded: string) => string}) => ManifestNode;
 export const manifestFacts = readManifestFacts as (xml: string, badging?: string) => ManifestFacts;
 const assessDistribution = apkDistributionProblems as (
-  apk: DistributionInput, policy: typeof DISTRIBUTION_POLICY, options?: DistributionOptions,
+  apk: DistributionInput,
+  policy: Omit<typeof DISTRIBUTION_POLICY, "exportedComponents"> & {exportedComponents: Readonly<Record<string, string | null>>},
+  options?: DistributionOptions,
 ) => {facts: ManifestFacts; problems: string[]};
 
 
@@ -80,7 +82,8 @@ export const DEVELOPMENT_CLASSES = Object.freeze([
   "DevelopmentVoiceCapture",
   "DevelopmentChatContract",
 ]);
-const TELEPHONY_SETUP_RECEIVER = "ai.alphacompute.alphaphone.AlphaTelephonySetupReceiver";
+const CANONICAL_APP_ID = "ai.alphacompute.alphaphone";
+const TELEPHONY_SETUP_RECEIVER = "AlphaTelephonySetupReceiver";
 const MANAGE_ROLE_HOLDERS = "android.permission.MANAGE_ROLE_HOLDERS";
 // Components a distribution APK may export. Each one must be guarded by the
 // listed permission (null: a deliberate public entry point).
@@ -112,7 +115,7 @@ export const EXPORTED_COMPONENTS = Object.freeze({
   "ai.alphacompute.alphaphone.AlphaRespondViaMessageService": "android.permission.SEND_RESPOND_VIA_MESSAGE",
   "ai.alphacompute.alphaphone.AlphaSmsComposeActivity": null,
   // The privileged image Provision app can prepare, but cannot assign roles through this receiver.
-  [TELEPHONY_SETUP_RECEIVER]: MANAGE_ROLE_HOLDERS,
+  [`${CANONICAL_APP_ID}.${TELEPHONY_SETUP_RECEIVER}`]: MANAGE_ROLE_HOLDERS,
 });
 // On-device speech is the fused libelizainference engine only. Entries and classes of the removed
 // speech runtimes (Open Neural Network Exchange models and runtimes, sherpa, ORT-Web, the former
@@ -139,18 +142,24 @@ export const DISTRIBUTION_POLICY = Object.freeze({
  * The upstream inspection applies DISTRIBUTION_POLICY; the Power entry's
  * component kind and the Quick Settings tile shape and target are Alpha's own checks.
  */
-export function distributionProblems(apk: DistributionInput, { mode }: DistributionOptions = {}) {
+export function distributionProblems(apk: DistributionInput, { mode, appId = CANONICAL_APP_ID }: DistributionOptions = {}) {
+  // The caller selects the admitted installation identity. Only product-owned names move;
+  // shared/platform components keep their exact names and all permission checks remain intact.
+  const exportedComponents = Object.fromEntries(Object.entries(EXPORTED_COMPONENTS).map(([name, permission]) =>
+    [name.startsWith(CANONICAL_APP_ID + ".") ? appId + name.slice(CANONICAL_APP_ID.length) : name, permission]));
   const { facts, problems } = assessDistribution(
     { ...apk, forbiddenDex: apk.forbiddenDex ?? apk.removedSpeechClasses },
-    DISTRIBUTION_POLICY,
+    {...DISTRIBUTION_POLICY, exportedComponents},
     { mode },
   );
+  if (facts.packageName && facts.packageName !== appId)
+    problems.push("APK package differs from selected application identity");
   problems.push(...legacyStorageProblems(apk.xml));
-  const powerName = "ai.alphacompute.alphaphone.AlphaPowerVoiceActivity";
+  const powerName = `${appId}.AlphaPowerVoiceActivity`;
   if (facts.exported.some(component => component.name === powerName && component.tag !== "activity"))
     problems.push("AlphaPowerVoiceActivity must be an activity");
-  const tileName = "ai.alphacompute.alphaphone.AlphaQuickSettingsTile";
-  const assistName = "ai.alphacompute.alphaphone.AlphaAssistActivity";
+  const tileName = `${appId}.AlphaQuickSettingsTile`;
+  const assistName = `${appId}.AlphaAssistActivity`;
   // aapt prints android:enabled="false" as (type 0x12)0x0; a missing attribute means enabled.
   const enabled = (node: ManifestNode | undefined) => node && node.attrs.enabled !== "0x0" && node.attrs.enabled !== "false";
   const tile = facts.components.find(component => component.name === tileName);
@@ -162,7 +171,7 @@ export function distributionProblems(apk: DistributionInput, { mode }: Distribut
     const actions = nodes.flatMap(node => node.children.filter(child => child.name === "intent-filter")
       .flatMap(filter => filter.children.filter(child => child.name === "action").map(child => child.attrs.name)));
     if (tile.tag !== "service" || !tile.exported ||
-        tile.permission !== EXPORTED_COMPONENTS[tileName] || nodes.length !== 1 ||
+        tile.permission !== exportedComponents[tileName] || nodes.length !== 1 ||
         actions.length !== 1 || actions[0] !== "android.service.quicksettings.action.QS_TILE")
       problems.push("Alpha Quick Settings tile must be one exported, permission-protected QS_TILE service");
     // The tile's only target is AlphaAssistActivity (AlphaQuickSettingsTile.entryIntent); a tile that
@@ -172,7 +181,7 @@ export function distributionProblems(apk: DistributionInput, { mode }: Distribut
     if (enabled(nodes[0]) && !enabled(assist))
       problems.push("Alpha Quick Settings tile must be disabled while AlphaAssistActivity is disabled");
   }
-  const dictationName = "ai.alphacompute.alphaphone.AlphaKeyboardDictationService";
+  const dictationName = `${appId}.AlphaKeyboardDictationService`;
   const dictation = facts.components.find(component => component.name === dictationName);
   if (dictation) {
     const application = parseXmlTree(apk.xml).children.find(node => node.name === "manifest")
@@ -183,7 +192,7 @@ export function distributionProblems(apk: DistributionInput, { mode }: Distribut
       .flatMap(filter => filter.children.filter(child => child.name === "action").map(child => child.attrs.name)));
     const metadata = nodes.flatMap(node => node.children.filter(child => child.name === "meta-data" && child.attrs.name === "android.view.im"));
     if (!apk.home || dictation.tag !== "service" || !dictation.exported ||
-        dictation.permission !== EXPORTED_COMPONENTS[dictationName] || nodes.length !== 1 ||
+        dictation.permission !== exportedComponents[dictationName] || nodes.length !== 1 ||
         actions.length !== 1 || actions[0] !== "android.view.InputMethod" ||
         metadata.length !== 1 || !metadata[0].attrs.resource)
       problems.push("Alpha voice typing must be one launcher-only, Android-bound input-method service with subtype metadata");
@@ -264,14 +273,16 @@ export function signerDigest(file: string, { apiLevel }: SignerOptions = {}): st
 export const parseSignerDigest = parseApkSignerDigest as (output: string, options?: SignerOptions) => string;
 
 /** The image provisioner must be able to prepare the launcher before its first activity starts. */
-export function telephonySetupReceiverProblems(tree: ManifestNode): string[] {
+export function telephonySetupReceiverProblems(tree: ManifestNode, {appId = CANONICAL_APP_ID}: {appId?: string} = {}): string[] {
   const manifest = tree.children.find(node => node.name === "manifest");
   const application = manifest?.children.find(node => node.name === "application");
   const receivers = application?.children.filter(node =>
-    node.attrs.name === TELEPHONY_SETUP_RECEIVER ||
+    node.attrs.name === `${appId}.${TELEPHONY_SETUP_RECEIVER}` ||
     node.attrs.name === ".AlphaTelephonySetupReceiver" ||
     node.attrs.name === "AlphaTelephonySetupReceiver") ?? [];
   const problems = [];
+  if (manifest?.attrs.package && manifest.attrs.package !== appId)
+    problems.push("AlphaTelephonySetupReceiver package differs from selected application identity");
   const [receiver] = receivers;
   if (!receiver || receivers.length !== 1 || receiver.name !== "receiver" || receiver.attrs.exported !== "0xffffffff" ||
       (receiver.attrs.enabled !== undefined && receiver.attrs.enabled !== "0xffffffff") ||
@@ -319,9 +330,9 @@ export function validateApk(file: string, identity: {appId: string}, inspect: (f
     if (!data.xml.includes(`android.permission.${permission}`))
       throw new Error(`Invalid ${permission} permission in ${file}`);
   for (const component of ['AlphaInCallService', 'AlphaCallActivity', 'AlphaDialPadActivity', 'AlphaSmsDeliverReceiver', 'AlphaSmsSendReceiver', 'AlphaMmsWapPushReceiver', 'AlphaMmsResultReceiver', 'AlphaRespondViaMessageService', 'AlphaSmsComposeActivity'])
-    if (!data.xml.includes(`ai.alphacompute.alphaphone.${component}`))
+    if (!data.xml.includes(`${identity.appId}.${component}`))
       throw new Error(`Invalid telephony-role component ${component} in ${file}`);
-  const setupProblems = telephonySetupReceiverProblems(parseXmlTree(data.xml));
+  const setupProblems = telephonySetupReceiverProblems(parseXmlTree(data.xml), identity);
   if (setupProblems.length) throw new Error(`${setupProblems.join("; ")} in ${file}`);
   // The SMS role grants these to its holder.
   for (const permission of ['RECEIVE_SMS', 'RECEIVE_MMS', 'RECEIVE_WAP_PUSH'])
