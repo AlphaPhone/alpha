@@ -1,6 +1,7 @@
 import {sha256} from './sha256.ts';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readUpstreamPin } from './upstream-pin.ts';
@@ -162,6 +163,32 @@ export function quintCacheDisabled() {
   return ['0', 'off', 'false', 'no'].includes((process.env.ALPHA_QUINT_CACHE || '').toLowerCase());
 }
 
+/**
+ * Remembered results carry no provenance: an entry is trusted because only this checker writes it. A file committed
+ * into the cache directory (`git add -f`) would instead be trusted as a past accepted run, so a cache directory in
+ * which git tracks anything, or which git cannot inspect inside this repository, is refused outright. Checked once
+ * per directory and process.
+ */
+const inspectedCaches = new Set<string>();
+export function assertQuintCacheUntracked(root: string = repositoryRoot) {
+  const directory = quintCacheDirectory(root);
+  if (inspectedCaches.has(directory)) return;
+  const paths = [directory];
+  try { if (existsSync(directory)) paths.push(realpathSync(directory)); } catch { /* inspected by its own path */ }
+  for (const path of new Set(paths)) {
+    const listed = spawnSync('git', ['ls-files', '-z', '--', path], {cwd: root, encoding: 'utf8', timeout: 30000});
+    if (listed.status === 0) {
+      const tracked = listed.stdout.split('\0').filter(Boolean);
+      if (tracked.length) throw Error(`Refusing the Quint cache ${directory}: git tracks ${tracked.length} file(s) in it, such as ${tracked[0]}. Remembered results must be written by this checker; remove them from git.`);
+      continue;
+    }
+    // Outside a git checkout, or outside this repository, nothing in it can be committed with the change under check.
+    if (listed.error?.message.includes('ENOENT') || /not a git repository|is outside repository/.test(listed.stderr || '')) continue;
+    throw Error(`Refusing the Quint cache ${directory}: git cannot tell whether it tracks files there: ${(listed.stderr || listed.error?.message || '').trim()}`);
+  }
+  inspectedCaches.add(directory);
+}
+
 /** Every file of the installed Quint package, by relative name and bytes. Computed once per process. */
 const packageDigests = new Map<string, string>();
 export function quintPackageDigest(root: string = repositoryRoot) {
@@ -197,6 +224,7 @@ export function importedModelPaths(model: Pick<ModelDefinition, 'path'>, text: s
 let metadataCacheBase: string | null | undefined;
 function metadataCacheKey(model: ModelDefinition, text: string) {
   if (metadataCacheBase === undefined) {
+    if (!quintCacheDisabled()) assertQuintCacheUntracked();
     try {
       // This file's validation code and the parser's bytes: a changed parser with the same version is a different key.
       metadataCacheBase = quintCacheDisabled() ? null : sha256(JSON.stringify([
@@ -208,19 +236,34 @@ function metadataCacheKey(model: ModelDefinition, text: string) {
   return sha256(JSON.stringify([metadataCacheBase, model, text]));
 }
 
-function validateQuintModelMetadataCached(model: ModelDefinition, text: string) {
+/**
+ * Where a remembered validation is kept and what it must say: the key, which hashes the validation code, the parser,
+ * the manifest entry and the model text, and the hash of that text. A marker vouches only by these contents, so an
+ * empty or otherwise foreign file at the same path is a miss, not a pass.
+ */
+export function quintMetadataMarker(model: ModelDefinition, text: string) {
   const key = metadataCacheKey(model, text);
-  const file = key && join(quintCacheDirectory(), 'metadata', `metadata-${key}`);
-  if (file) {
-    try { statSync(file); const now = new Date(); utimesSync(file, now, now); return; } catch { /* a miss */ }
+  if (!key) return undefined;
+  return {file: join(quintCacheDirectory(), 'metadata', `metadata-${key}`),
+    contents: `${JSON.stringify({schema: 1, module: model.module, textSha256: sha256(text), key})}\n`};
+}
+
+function validateQuintModelMetadataCached(model: ModelDefinition, text: string) {
+  const marker = quintMetadataMarker(model, text);
+  if (marker) {
+    try {
+      if (readFileSync(marker.file, 'utf8') === marker.contents) {
+        const now = new Date(); utimesSync(marker.file, now, now); return;
+      }
+    } catch { /* a miss */ }
   }
   validateQuintModelMetadata(model, text);
-  if (!file) return;
+  if (!marker) return;
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    const temporary = `${file}.${process.pid}.tmp`;
-    writeFileSync(temporary, '');
-    renameSync(temporary, file);
+    mkdirSync(dirname(marker.file), { recursive: true });
+    const temporary = `${marker.file}.${process.pid}.tmp`;
+    writeFileSync(temporary, marker.contents);
+    renameSync(temporary, marker.file);
   } catch { /* the cache is a convenience */ }
 }
 

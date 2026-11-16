@@ -152,9 +152,10 @@ test('promotion partitions every safety and temporal phase exactly once without 
     const model = byModule.get(name);return [[name, model.init, model.step, model.temporal]];
   }).sort(), temporalModels.map(model => [model.module, model.init, model.step, model.temporal]).sort());
   assert.equal(jobs.comparison.if, '$' + '{{ !inputs.models }}');
-  assert.ok(jobs.comparison.steps.some(step => step.run === 'bun scripts/check-quint.ts compare'));
+  assert.equal(jobs.comparison.steps[6].run, 'bun scripts/check-quint.ts compare');
+  assert.equal(safety.steps[5].run, 'bun run upstream:prepare-client');
   for (const job of [safety, jobs.comparison, temporal]) {
-    assert.deepEqual(job.steps.slice(0, 5), safety.steps.slice(0, 5), 'All pinned prerequisites remain identical');
+    assert.deepEqual(job.steps.slice(0, 6), safety.steps.slice(0, 6), 'All pinned prerequisites, through upstream:prepare-client, remain identical');
     assert.equal(job.needs, undefined);assert.equal(job['timeout-minutes'], 240);assert.equal(job['runs-on'], 'ubuntu-24.04');
     assert.equal(job.steps.at(-1).if, 'always()');assert.equal(job.steps.at(-1).with.path, 'test-results/quint/');
   }
@@ -164,6 +165,30 @@ test('promotion partitions every safety and temporal phase exactly once without 
   const artifacts = families.flatMap(family => [0, 1].map(partition => safetyArtifact.replace('$' + '{{ matrix.family }}', family).replace('$' + '{{ matrix.partition }}', String(partition))));
   artifacts.push(jobs.comparison.steps.at(-1).with.name, ...temporal.strategy.matrix.group.map(group => temporalArtifact.replace('$' + '{{ matrix.group }}', group)));
   assert.equal(new Set(artifacts).size, 12);
+});
+
+test('promotion Quint caches are readable only by later attempts of the same workflow run', () => {
+  const jobs = YAML.parse(read('.github/workflows/promotion.yml')).jobs;
+  const run = 'quint-$' + '{{ github.job }}-$' + '{{ strategy.job-index }}-$' + '{{ github.sha }}-$' + '{{ github.run_id }}-';
+  let checked = 0;
+  for (const [name, job] of Object.entries(jobs)) {
+    const caches = job.steps.filter(step => step.uses?.startsWith('actions/cache'));
+    if (!caches.length) continue;
+    const restore = caches.filter(step => step.uses.startsWith('actions/cache/restore@'));
+    const save = caches.filter(step => step.uses.startsWith('actions/cache/save@'));
+    assert.equal(restore.length, 1, name);assert.equal(save.length, 1, name);
+    assert.equal(caches.length, 2, `${name} uses only the explicit restore and save actions`);
+    for (const step of caches) {
+      assert.equal(step.with.path, '.cache/quint', name);
+      assert.equal(step.with.key, run + '$' + '{{ github.run_attempt }}', `${name} keys entries by commit, run and attempt`);
+    }
+    // No fallback to another commit, run or pull request push: those entries may have been written by other code.
+    assert.equal(restore[0].with['restore-keys'].trim(), run, `${name} falls back only to earlier attempts of this run`);
+    assert.ok(job.steps.indexOf(restore[0]) < job.steps.findIndex(step => /check-quint|quint:tests/.test(step.run || '')), name);
+    assert.equal(save[0].if, 'always()', name);
+    checked++;
+  }
+  assert.equal(checked, 4, 'symbolic, comparison, temporal and Quint test jobs each restore and save');
 });
 
 test('the actual promotion selectors preserve manual filters and refuse empty or invalid partitions', () => {
