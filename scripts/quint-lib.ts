@@ -155,7 +155,10 @@ export const sourcePaths = () => [...new Set([
     path => sourceExtensions.has(extname(path)) || extname(path) === '.css')).map(relativePath),
   ...runtimeScriptPaths, ...runtimeAssetPaths, ...sharedSourcePaths(),
 ])].sort();
-/** Where remembered Quint results live: outside node_modules so a reinstall keeps them, and CI can restore them. */
+/**
+ * Where remembered Quint results live, for local runs: outside node_modules so a reinstall keeps them. CI never
+ * restores them; promotion runs with ALPHA_QUINT_CACHE=off (see .github/workflows/promotion.yml).
+ */
 export function quintCacheDirectory(root: string = repositoryRoot) {
   return resolve(root, process.env.ALPHA_QUINT_CACHE_DIR || '.cache/quint');
 }

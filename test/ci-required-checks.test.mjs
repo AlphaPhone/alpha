@@ -176,15 +176,21 @@ test('promotion runs every Quint check: no remembered result is restored, saved 
   const previous = process.env.ALPHA_QUINT_CACHE;
   try { process.env.ALPHA_QUINT_CACHE = workflow.env.ALPHA_QUINT_CACHE; assert.equal(quintCacheDisabled(), true); }
   finally { if (previous === undefined) delete process.env.ALPHA_QUINT_CACHE; else process.env.ALPHA_QUINT_CACHE = previous; }
+  // The workflow-level setting is the only mention of the cache: no step, action input or expression names it again.
+  const text = read('.github/workflows/promotion.yml').split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  assert.equal(text.match(/ALPHA_QUINT_CACHE/g)?.length, 1);
+  assert.doesNotMatch(text, /actions\/cache|--cache=/);
   const consumers = [];
   for (const [name, job] of Object.entries(workflow.jobs)) {
     for (const scope of [job, ...job.steps]) {
       for (const variable of ['ALPHA_QUINT_CACHE', 'ALPHA_QUINT_CACHE_DIR']) assert.equal(scope.env?.[variable], undefined, `${name} does not override ${variable}`);
     }
     for (const step of job.steps) {
-      if (step.uses?.startsWith('actions/cache')) assert.doesNotMatch(String(step.with?.path), /quint|\.cache/, `${name} restores or saves no Quint results`);
+      // No cache action anywhere: a restored archive on any path could land where the checker reads.
+      assert.doesNotMatch(String(step.uses), /^actions\/cache/, `${name} restores or saves no cache`);
+      // Any step, not only a Quint consumer, could re-enable or move the cache for later steps through $GITHUB_ENV.
+      assert.doesNotMatch(step.run || '', /ALPHA_QUINT_CACHE|--cache=/, `${name} step ${step.name || step.run} does not touch the Quint cache`);
       if (/check-quint|quint:|lemma:check/.test(step.run || '')) {
-        assert.doesNotMatch(step.run, /--cache=on|ALPHA_QUINT_CACHE/, `${name} does not re-enable the cache`);
         consumers.push(`${name}: ${step.run.trim().split('\n').at(-1)}`);
       }
     }
