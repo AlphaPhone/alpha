@@ -97,11 +97,8 @@ public class AlphaTelephonyPlugin extends TelephonyPlugin {
   String number = call.getString("number", "");
   if (number == null || number.isBlank() || number.length() > 64) { call.reject("Invalid number", "invalid"); return; }
   fencedRead(call, "contacts", "Contacts", cancel -> {
-   JSObject value = new JSObject(); value.put("name", JSObject.NULL);
-   android.net.Uri uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode(number));
-   try (android.database.Cursor rows = getContext().getContentResolver().query(uri, new String[] { android.provider.ContactsContract.PhoneLookup.DISPLAY_NAME }, null, null, null, cancel)) {
-    if (rows != null && rows.moveToFirst()) { String name = rows.getString(0); if (name != null && !name.isBlank()) value.put("name", clip(name)); }
-   }
+   String name = AlphaContactLookup.name(getContext(), number, cancel);
+   JSObject value = new JSObject(); value.put("name", name == null ? JSObject.NULL : clip(name));
    return value;
   });
  }
