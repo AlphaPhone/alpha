@@ -34,7 +34,7 @@ const startup = /\.finally\(\(\)=>\{(update\(\{startupResolved:true,automaticRes
 assert.ok(startup, 'startup settles and then runs the sign-in queue');
 const code = stripTypeScriptTypes([
   between('let residentRebindQueue: ResidentRebindQueue | null = null;', '/**'),
-  between('async function work(message: string', '/** Only an explicitly failed native start'),
+  between('async function work(message: string', 'const RESIDENT_AUTO_RETRY_MS'),
   between("async function manageProviderKey(action:'reveal'", '/** P-43: a startup path'),
   between('function queueResidentRebind(', '/** A native sign-in return that arrived while'),
   between('/** A native sign-in return that arrived while', 'async function remoteIdentity('),
@@ -54,7 +54,7 @@ function create() {
   let held = null, notices = 0, rebinds = 0, returns = 0;
   const box = {AbortController, DOMException, Error, Promise, setTimeout, ResidentRebindQueue, cancelStoppedVoiceRead(){},
     operation: null, sending: null, epoch: 1, active: null, planRecheck: null, signInReadinessOwner: null, providerStatusGeneration: 0,
-    residentStartInBackground: false, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true, returned: [],
+    residentStartInBackground: false, homePresentationRevision: 0, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true, returned: [],
     state: {open: false, signIn: null, message: '', error: '', busy: false, startupResolved: false},
     // A notice opens its recovery message even when no sign-in form is active.
     // A rebind preserving an earlier error writes the error alone.

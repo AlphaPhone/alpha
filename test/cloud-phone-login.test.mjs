@@ -11,18 +11,19 @@ import os from 'node:os';
 import path from 'node:path';
 const require=createRequire(import.meta.url);
 
-test('phone sign-in and code entry stay in the app and are absent without native support',()=>{
+test('phone sign-in and code entry stay in the app and require native support',()=>{
  const code=buildSync({entryPoints:['apps/app/src/runtime/cloud-sign-in-ui.tsx'],bundle:true,write:false,platform:'node',format:'cjs',jsx:'automatic',external:['react','react/jsx-runtime']}).outputFiles[0].text;
  const module={exports:{}};new Function('require','module','exports',code)(require,module,module.exports);
  const panel=module.exports.CloudSignInPanel;
  const props={view:{step:'choose',environment:'production'},busy:false,google:false,message:'',error:'',actions:{}};
  const render=extra=>renderToStaticMarkup(React.createElement(panel,{...props,...extra}));
- assert.doesNotMatch(render({phone:false}),/type="tel"|Email or phone/);
+ assert.doesNotMatch(render({phone:false}),/type="tel"|Continue with phone number/);
  assert.doesNotMatch(render({phone:false}),/Sign in to verify your account|review access before authorizing|Your agent runs on this device/);
  assert.doesNotMatch(render({phone:false}),/By continuing, you allow/);
- // Email and text message share one field; the method follows what is typed.
- assert.match(render({phone:true}),/<label>Email or phone<input/);assert.doesNotMatch(render({phone:true}),/type="tel"/);
- assert.match(render({phone:true,emailEnabled:false}),/<label>Phone<input/);
+ assert.match(render({phone:true}),/<label>Email<input type="email"/);
+ assert.match(render({phone:true}),/Continue with phone number/);
+ assert.match(render({phone:false,showPhone:true}),/disabled=""[^>]*>Continue with phone number/);
+ assert.match(render({phone:true,emailEnabled:false}),/<label>Phone number<input/);
  assert.match(render({phone:true,emailEnabled:false}),/type="tel"/);
  assert.match(render({phone:true,view:{step:'choose',environment:'production',phone:'+14155550100'}}),/value="\+14155550100"/,'a failed text-message attempt returns to the phone entry with its number');
  assert.doesNotMatch(render({phone:true,emailEnabled:false}),/type="email"/);

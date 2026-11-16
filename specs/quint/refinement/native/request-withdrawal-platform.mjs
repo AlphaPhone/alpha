@@ -23,6 +23,7 @@ export function withdrawalPlatform(directory) {
   const ownership = between(' private void requireCurrent(', '\n\n');
   const invalidation = between(' private void invalidateOwnCalls(){', ' /** Runtime lifecycle changes');
   const deadlines = between(' private static final int LOCAL_REQUEST_TIMEOUT_LIMIT_MS=', ' @PluginMethod public void request(');
+  const startupRead = between('  boolean startupRead=', '\n', request);
   const admission = between('  final Long deadline;', '  JSONObject headers=call.getObject("headers");', request);
   const worker = between('  JSONObject headers=call.getObject("headers");\n  final String cancelId=', ' /** Cancellation acknowledges transport closure', request);
   const java = `package ai.alphacompute.alphaphone;
@@ -68,7 +69,10 @@ final class WithdrawalHost {
  static final class ClosedReview {void clear(){}}
  static final class ClosedStream {void cancel(){throw new AssertionError("Stream outside plain-request fixture");}}
  boolean disposed=false,accepting=true;long lifecycleEpoch=1;String ownerIdentity="owner";
+ String rootToken,ownerToken;
+ long expiresAt;
  static class Superseded extends Exception {}
+ ${line(' private static final class RuntimeRootChanged')}
  final Map<Integer,Work> work=new LinkedHashMap<>();
  final PluginCall[] calls=new PluginCall[4];
  final ThreadLocal<Integer> current=new ThreadLocal<>();
@@ -100,6 +104,7 @@ final class WithdrawalHost {
  Object getContext(){throw new AssertionError("Telephony context outside withdrawal fixture");}
  void requireProviderOwner(boolean foreground){throw new AssertionError("Telephony ownership outside withdrawal fixture");}
  void clearEnrollment(){throw new AssertionError("401 outside successful transport fixture");}
+ void requireEnrollmentRoot(long epoch,String root){throw new AssertionError("Startup enrollment reads are outside the plain-request fixture");}
  static void logRequestFailure(String group,String method,int status,String reason){}
  String enroll(long epoch)throws Exception {
   Work item=work.get(current.get());item.enrollments.incrementAndGet();event("enrolling");item.enrolling=true;
@@ -120,7 +125,8 @@ ${deadlines}
  void request(PluginCall call){
   long entered=android.os.SystemClock.elapsedRealtime();
   String path=call.getString("path",""),method=call.getString("method","GET"),body=call.getString("body"),expectedOwner=call.getString("ownerId"),group=null;
-  check(path.equals("/api/status")&&method.equals("GET")&&body==null,"Only admitted plain status reads are in this model");
+${startupRead}
+  check(!startupRead&&path.equals("/api/status")&&method.equals("GET")&&body==null,"Only admitted plain status reads are in this model");
 ${admission}
 ${worker}
  void admit(int id,JSObject input){

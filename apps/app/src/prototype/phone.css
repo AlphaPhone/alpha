@@ -38,6 +38,14 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
  * screen pixels below the bar and has no Resize chat grabber, so nothing of Alpha's competes
  * with the top-edge band where Android opens its shade. */
 .alpha-phone{--alpha-chat-full-top:max(60px,calc((max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 16px) / var(--phone-scale,1)))}
+/* Messages uses the same scaled canvas as Home. Reserve the new-message action's
+ * full height on the list and keep the thread and compose headers below the bar. */
+[data-alpha-messages] {
+  --alpha-messages-top-inset:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1));
+  padding-top:max(52px,calc(var(--alpha-messages-top-inset) + 8px));
+}
+[data-alpha-messages]:has([data-alpha-messages-new]) { padding-top:calc(var(--alpha-messages-top-inset) + 52px); }
+[data-alpha-messages-new] { top:calc(var(--alpha-messages-top-inset) + 4px); }
 .voice-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.2);font-family:'Public Sans',sans-serif;display:flex;align-items:end}
 .voice-overlay .dialog-backdrop{width:100%}
 .voice-overlay .dialog{background:var(--alpha-white);color:var(--alpha-black);border-radius:30px 30px 0 0;padding:24px;max-height:85dvh;overflow:auto}
@@ -1015,6 +1023,14 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
 html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 /* Loading placeholder for audio and transcripts in Phone: a shape, not a sentence. */
 :is([data-alpha-contact-editor],[data-alpha-phone],[data-alpha-messages],[data-alpha-contacts-bar]) :is(input,textarea) { border:0; outline:0; font-family:inherit; color:inherit; }
+.alpha-phone-tabs { display:flex; justify-content:center; padding:0 16px 8px; flex-shrink:0; }
+.alpha-phone-tabs > [role="group"] { display:flex; gap:2px; padding:3px; max-width:100%; border-radius:24px; background:var(--s2); }
+.alpha-phone-tabs button { position:relative; display:flex; align-items:center; justify-content:center; width:64px; height:44px; border-radius:22px; background:transparent; color:var(--fg); }
+.alpha-phone-tabs button[aria-pressed="true"] { background:var(--fg); color:var(--bg); }
+.alpha-phone-tabs svg { width:20px; height:20px; }
+.alpha-phone-tabs button > span { position:absolute; top:8px; right:16px; width:8px; height:8px; border-radius:4px; background:var(--acct); }
+[data-alpha-contacts-screen] > :is(.alpha-phone-tabs,[data-alpha-contacts-bar]) { margin-top:52px; }
+[data-alpha-contacts-screen] > .alpha-phone-tabs + [data-alpha-contacts-bar] { margin-top:0; }
 .alpha-keypad { container-type:size; }
 .alpha-keypad > div { --k:clamp(48px,calc((100cqh - var(--alpha-dock-reserve,108px) - 96px) / 5.5),78px); }
 .alpha-pulse { animation: fade 1s ease-in-out infinite alternate; }

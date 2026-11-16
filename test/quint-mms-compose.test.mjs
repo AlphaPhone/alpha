@@ -13,12 +13,12 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 const MODEL = {path: 'specs/quint/services/MmsCompose.qnt', module: 'MmsCompose'};
 const SCENARIOS = ['pictureChooserKeepsVisitTest', 'hideWithoutChooserEndsVisitTest', 'retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest',
   'pickedPicturesResetIdTest', 'pageHideEndsPickTest', 'sixthPictureRefusedTest', 'carrierAnswerReadBackTest',
-  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest'];
+  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'lateJournalReceiptRetiresDraftTest'];
 const WITNESSES = ['VisitKeptBehindChooserWitness', 'PicturesAddedWhileHiddenWitness', 'RetryAfterCancelledWitness', 'RepeatedIdAnsweredFromJournalWitness',
   'LatePicturesDroppedWitness', 'PickedPicturesResetIdWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const adapter = await observedSmsAdapter({
-  'platform-plugins$': 'export const registerPlugin=()=>({});',
+  'platform-plugins$': 'export const registerPlugin=()=>({smsNoticePending:async()=>({})});',
   'runtime/aosp-image$': 'export const aospImage=true;',
   'native-adapter$': 'export const watchReturnToApp=()=>()=>{};',
   'runtime/aosp-telephony$': `export {reviewSms,reviewMms} from ${JSON.stringify(`${contracts}/native-telephony.ts`)};
@@ -40,8 +40,9 @@ const project = s => ({busy: s.busy, pictures: s.pictures, chooser: s.chooser, o
   journal: s.journal, dispatches: s.dispatches, shown: s.shown});
 
 function create() {
-  const ids = [], journal = new Map(), dispatches = new Map(), pageHideListeners = new Set();
-  let sendAccess = true, call = null, mmsUpdated = () => {}, probing = null, edits = 0, input = null;
+  const ids = [], journal = new Map(), dispatches = new Map();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let sendAccess = true, journalReadable = true, call = null, mmsUpdated = () => {}, probing = null, edits = 0, input = null;
   const ordinal = id => { if (!ids.includes(id)) ids.push(id); return ids.indexOf(id) + 1; };
   const status = {permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, subscriptions: [{id: 1, slot: 0, displayName: 'SIM', carrierName: 'Carrier'}],
     defaultSmsSubscriptionId: 1, sendMode: 'direct', mmsSend: true, roles: {sms: {available: true, held: true, eligible: true}}};
@@ -59,15 +60,15 @@ function create() {
     },
     async mmsSendResult(_review, operationId) {
       if (probing) { probing.push(operationId); throw Error('no record'); }
-      if (!journal.has(operationId)) throw Error('no record');
+      if (!journalReadable || !journal.has(operationId)) throw Error('no readable record');
       return {operationId, status: journal.get(operationId)};
     },
   };
   globalThis.document = {hidden: false, addEventListener() {}, removeEventListener() {},
     createElement() { assert.equal(input, null, 'one chooser at a time'); return input = {click() {}, files: [], value: ''}; }};
-  globalThis.window = {addEventListener: (_type, listener) => pageHideListeners.add(listener), removeEventListener: (_type, listener) => pageHideListeners.delete(listener)};
+  globalThis.window = new EventTarget();
   const views = {messages: {}};
-  class Shell { view = 'home'; S() { return {view: this.view}; } setState() {} }
+  class Shell { view = 'home'; S() { return {screen: 'home', view: this.view}; } setState() {} }
   adapter.installSmsAdapter(Shell, views);
   const shell = new Shell();
   shell.componentDidMount();
@@ -81,7 +82,7 @@ function create() {
   const picture = readable => ({type: readable ? 'image/jpeg' : 'text/plain', size: 16, arrayBuffer: async () => new ArrayBuffer(16)});
   return {
     openView: () => view('messages'), closeView: () => view('home'), hide: () => visibility(true), show: () => visibility(false),
-    async pageHide() { for (const listener of [...pageHideListeners]) listener({type: 'pagehide'}); await settled(); },
+    async pageHide() { window.dispatchEvent(new Event('pagehide')); await settled(); },
     async attach() { page().nativeAttach(); await settled(); },
     async attachAtLimit() { page().nativeAttach(); await settled(); },
     async chooserAnswers(count, readable) {
@@ -93,6 +94,7 @@ function create() {
     async edit(removePicture) { if (removePicture) page().nativeAttachments[0].remove(); else type('nativeOnBody', `hello ${++edits}`); await settled(); },
     async clearDraft() { page().nativeClear(); await settled(); },
     accessChanged() { sendAccess = !sendAccess; },
+    journalReadsAvailable(available) { journalReadable = available; },
     async send() { page().nativeSendMms(); await settled(); },
     nativeDecide(confirmed) {
       const existing = journal.get(call.operationId);
@@ -104,7 +106,7 @@ function create() {
     async deliver() { const pending = call; call = null; pending.resolve({operationId: pending.operationId, status: pending.reply}); await settled(); },
     async callRejected() { const pending = call; call = null; pending.reject(Error('The bridge closed.')); await settled(); },
     journalAdvance(id, next) { journal.set(ids[id - 1], next); },
-    async reconcile(context) { mmsUpdated(ids[context.before.operationId - 1]); await settled(); },
+    async reconcile({before}) { mmsUpdated(ids[(before.operationId || before.lastSent) - 1]); await settled(); },
     async observe() {
       // The last sent receipt can reconcile independently of the current draft's held ID.
       probing = [];
@@ -118,10 +120,14 @@ function create() {
       const byId = (map, missing) => Object.fromEntries(IDS.map((key, index) => [key, map.get(ids[index]) ?? missing]));
       return {busy: model.nativeBusy, pictures: model.nativeAttachments.length, chooser: input !== null, operationId: held.mmsOperationId ? ordinal(held.mmsOperationId) : 0,
         minted: ids.length, call: call ? ordinal(call.operationId) : 0, reply: call ? call.reply : 'none',
-        journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(model.nativeNotice) : 'none'};
+        journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(held.notice) : 'none'};
     },
     effects: () => ({ids: [...ids], call: call?.operationId ?? null, journal: [...journal], dispatches: [...dispatches]}),
-    close() { shell.componentWillUnmount(); delete globalThis.document; delete globalThis.window; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe; },
+    close() {
+      shell.componentWillUnmount(); delete globalThis.document; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe;
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else delete globalThis.window;
+    },
   };
 }
 
@@ -145,7 +151,7 @@ async function runMmsComposeCase2(t, {canaries=true}={}) {
     const f = create();
     try {
       await f.openView();await f.send();f.nativeDecide(true);
-      if (hidden) {await f.callRejected();await f.hide();}
+      if (hidden) {f.journalReadsAvailable(false);await f.callRejected();await f.hide();}
       else await f.deliver();
       const before = f.effects();await f.send();assert.deepEqual(f.effects(), before, 'no new native request or carrier effect');
       if (hidden) {await f.show();assert.deepEqual(f.effects(), before);assert.ok(globalThis.__smsDraftProbe().mmsOperationId);}

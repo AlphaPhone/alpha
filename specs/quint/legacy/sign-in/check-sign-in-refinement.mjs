@@ -25,12 +25,13 @@ const state = page => page.evaluate(() => {
 
 async function chooser(page, google) {
   await expect(panel(page).getByRole('heading', {name: 'Alpha', exact: true})).toBeVisible();
-  await expect(panel(page).getByRole('textbox', {name: 'Email or phone', exact: true})).toBeVisible();
-  await expect(panel(page).getByRole('form',{name:'Sign in with email or phone',exact:true})).toBeVisible();
-  if (google) await expect(button(page, 'Continue with Google')).toBeVisible();
-  else await expect(button(page, 'Continue with Google')).toHaveCount(0);
+  await expect(panel(page).getByRole('textbox', {name: 'Email', exact: true})).toBeVisible();
+  await expect(panel(page).getByRole('form',{name:'Sign in with email',exact:true})).toBeVisible();
+  await expect(button(page, 'Continue with phone number')).toBeEnabled();
+  await expect(button(page, 'Continue with Google')).toBeVisible();
+  if (!google) await expect(button(page, 'Continue with Google')).toBeDisabled();
   const enabled = ['email', 'phone'];
-  if (await button(page, 'Continue with Google').count()) {
+  if (google) {
     await expect(button(page, 'Continue with Google')).toBeEnabled();
     enabled.push('google');
   }
@@ -39,7 +40,7 @@ async function chooser(page, google) {
 }
 
 async function emailCode(page, record) {
-  await panel(page).getByRole('textbox', {name: 'Email or phone', exact: true}).fill(address);
+  await panel(page).getByRole('textbox', {name: 'Email', exact: true}).fill(address);
   await button(page, 'Send code').click();
   await expect(panel(page).getByRole('form', {name: 'Enter your email code'})).toBeVisible();
   const offered = await state(page);
@@ -69,7 +70,8 @@ async function emailCode(page, record) {
 }
 
 async function phoneBack(page, record) {
-  await panel(page).getByRole('textbox',{name:'Email or phone',exact:true}).fill('+12025550101');
+  await button(page, 'Continue with phone number').click();
+  await panel(page).getByRole('textbox',{name:'Phone number',exact:true}).fill('+12025550101');
   await button(page, 'Send code').click();
   await expect(panel(page).getByRole('form', {name: 'Enter your phone code'})).toBeVisible();
   const offered = await state(page);

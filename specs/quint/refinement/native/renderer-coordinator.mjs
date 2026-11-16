@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {app, directory, javaTraces} from './java.mjs';
+import {directory, javaTraces} from './java.mjs';
 import {captureInputs, checkTraces} from '../check-traces.mjs';
-import {mainActivityPlatform,navigationRequestSource,navigationActionSource} from './main-activity-platform.mjs';
+import {mainActivityPlatform,mainActivitySources,navigationActionSource} from './main-activity-platform.mjs';
 
 export const rendererCoordinatorScenarios = [
   'home-escape', 'home-reload', 'standard-backoff', 'assistant',
@@ -16,14 +16,13 @@ export const rendererCoordinatorScenarios = [
 ];
 export function generateRendererCoordinatorTraces(scenario, extraSources = []) {
   const fixture = mainActivityPlatform();
-  const sources = [app + 'MainActivity.java', app + 'RendererRecoveryBudget.java', navigationRequestSource, navigationActionSource,
-    ...['MainActivityPorts.java', 'MainActivityRecoveryTraces.java', 'main-activity-platform.mjs',
+  const sources = [...mainActivitySources, navigationActionSource,
+    ...['MainActivityRecoveryTraces.java', 'main-activity-platform.mjs',
       'Trace.java', 'java.mjs'].map(name => `${directory}/${name}`), fileURLToPath(import.meta.url), ...extraSources];
   try {
     const driverHashes = captureInputs(sources);
     const traces = javaTraces('MainActivityRecoveryTraces.java',
-      [app + 'MainActivity.java', app + 'RendererRecoveryBudget.java', navigationRequestSource,
-        `${directory}/MainActivityPorts.java`, ...fixture.paths],
+      [...mainActivitySources, ...fixture.paths],
       scenario ? [scenario] : ['campaign', ...rendererCoordinatorScenarios]);
     return {traces, sources, driverHashes,
       fixtureSha256: createHash('sha256').update(JSON.stringify(fixture.sources)).digest('hex')};

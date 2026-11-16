@@ -3,8 +3,8 @@
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {captureInputs, checkTraces} from '../check-traces.mjs';
-import {app, directory, javaTraceCampaign} from './java.mjs';
-import {navigationRequestSource,navigationActionSource} from './main-activity-platform.mjs';
+import {directory, javaTraceCampaign} from './java.mjs';
+import {mainActivitySources,navigationActionSource} from './main-activity-platform.mjs';
 import {bridgeCallSource, deviceSource, textScalePlatform} from './text-scale-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 
@@ -18,7 +18,7 @@ const scenarios=[
 export async function checkNativeTextScaleLifecycle(extraSources=[]) {
   const fixture=textScalePlatform();
   try {
-    const compiled=[app+'MainActivity.java',app+'RendererRecoveryBudget.java',navigationRequestSource,join(directory,'MainActivityPorts.java'),...fixture.paths];
+    const compiled=[...mainActivitySources,...fixture.paths];
     const sources=[...compiled,navigationActionSource,deviceSource,bridgeCallSource,join(directory,harness),join(directory,'Trace.java'),
       join(directory,'java.mjs'),join(directory,'main-activity-platform.mjs'),join(directory,'text-scale-platform.mjs'),
       fileURLToPath(import.meta.url),'test/fixtures/jvm-tools.mjs','android/app/src/main/AndroidManifest.xml',

@@ -1,5 +1,5 @@
 import {createImagePreview} from '../runtime/image-preview';
-import type {VerifiedSession} from '../runtime/alpha-client';
+import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
@@ -581,6 +581,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const key=active?JSON.stringify([owner,shell.notesSourceEpoch]):null;
     if(shell.previousNotesProbeKey===key)return;
     shell.previousNotesProbe?.abort();shell.previousNotesProbeKey=key;shell.previousNotesAvailability=null;
+    if(shell.vget('notes').previousNotesMenu)originalSet.call(shell,'notes',{previousNotesMenu:false});
     if(key===null)return;
     const controller=new AbortController();shell.previousNotesProbe=controller;
     const current=()=>shell.live&&!document.hidden&&!shell.pageSuspended&&shell.S().view==='notes'&&shell.notesSourceMode==='canonical'&&shell.previousNotesProbe===controller&&previousNotesOwnerKey()===owner;
@@ -684,8 +685,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
     }
     if(view==='workflows'&&shell.clockSelection?.())providerSelection=shell.clockSelection();
-    // Folder, notification and settings selections are published by the views that own them.
-    if(view==='files'&&!providerSelection&&shell.vget('files').open!=='__native_selected_document'&&shell.folderSelection?.())providerSelection=shell.folderSelection();
     if(view==='settings'&&!providerSelection&&shell.settingsSelection?.())providerSelection=shell.settingsSelection();
     if(s.shade&&shell.notificationSelection?.())providerSelection=shell.notificationSelection();
     // The owning Calendar hook checks readiness/privacy; a chat overlay does not replace its underlying view.
@@ -1052,7 +1051,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status:result.status==='unknown'?'unknown':'failed',summary:result.status==='unknown'?'Calendar outcome is unconfirmed. Inspect action history before another action.':result.status==='cancelled'?'Calendar review cancelled. Nothing was changed.':'Calendar target changed, access was denied, or the operation is unsupported. Nothing was changed.'};
       }
       if(isNativeNotesQuery(operation)){
-        if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)return {status:'failed',summary:this.notesSourceMode==='legacy'?'Previous notes isn’t ready. Nothing was shared.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Open Notes, choose Older, then ask again. Nothing was shared.':'There are no earlier notes on this phone. Nothing was shared.'};
+        if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)return {status:'failed',summary:this.notesSourceMode==='legacy'?'Previous notes isn’t ready. Nothing was shared.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Open Notes options, choose On this phone, then ask again. Nothing was shared.':'There are no earlier notes on this phone. Nothing was shared.'};
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||this.notesPending||this.notesStorageFailed||document.hidden||expectedContext.sensitive||!['home','notes'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes query or connection changed');};
         try{return await executeNotesQuery(this.notesStore,operation,operationId,signal,current);
@@ -1068,7 +1067,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(isNotesOperation(operation)){
         try{
-          if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)throw Error(this.notesSourceMode==='legacy'?'Previous notes isn’t ready. Nothing was changed.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Open Notes, choose Older, then ask again. Nothing was changed.':'There are no earlier notes on this phone. Nothing was changed.');
+          if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)throw Error(this.notesSourceMode==='legacy'?'Previous notes isn’t ready. Nothing was changed.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Open Notes options, choose On this phone, then ask again. Nothing was changed.':'There are no earlier notes on this phone. Nothing was changed.');
           this.notesAgentBusy=true;
           const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='notes')throw Error('Selected Notes context changed');};
           const execute=()=>this.notesStore.execute(operation,operationId,signal,current);
@@ -1159,7 +1158,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if (operation.type === 'create_note') {
         if(this.notesSourceMode==='canonical'&&expectedContext.selectedObject?.kind==='workflow-run')return {status:'failed',summary:'Saving a note from a workflow isn’t available yet.'};
-        if (this.notesSourceMode!=='legacy'||this.notesStorageFailed) return { status: 'failed', summary: this.notesSourceMode==='legacy'?'Previous notes isn’t ready. Nothing was saved.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Open Notes, choose Older, then ask again. Nothing was saved.':'There are no earlier notes on this phone. Nothing was saved.' };
+        if (this.notesSourceMode!=='legacy'||this.notesStorageFailed) return { status: 'failed', summary: this.notesSourceMode==='legacy'?'Previous notes isn’t ready. Nothing was saved.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Open Notes options, choose On this phone, then ask again. Nothing was saved.':'There are no earlier notes on this phone. Nothing was saved.' };
         const existing = this.vget('notes').list.find((note: Shell) => note.id === operationId);
         if (existing) return { status: 'unknown', summary: 'A note already has this action identifier; review it before resolving.' };
         const note = { id: operationId, kind: 'text', title: operation.title, body: operation.body, pinned: false, when: 'Now', createdAt:Date.now(), modifiedAt:Date.now() };
@@ -1331,10 +1330,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   p.api = function (key: string) {
     const api = originalApi.call(this, key);
     if(key==='notes'){
-      const owner=previousNotesOwnerKey(),available=this.previousNotesProbeKey===JSON.stringify([owner,this.notesSourceEpoch])&&(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable');
+      const owner=previousNotesOwnerKey(),key=this.previousNotesProbeKey,available=key===JSON.stringify([owner,this.notesSourceEpoch])&&(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable');
       api.notesSourceOptions=[{id:'canonical',label:'Notes',selected:this.notesSourceMode!=='legacy',choose:()=>void selectNotesSource(this,'canonical')}];
-      api.notesSourceOptions.push({id:'legacy',label:'Previous notes',selected:this.notesSourceMode==='legacy',available:this.notesSourceMode==='legacy'||available,choose:()=>{
+      const choosePrevious=()=>{
         if(this.live&&!document.hidden&&!this.pageSuspended&&previousNotesOwnerKey()===owner)void selectNotesSource(this,'legacy');
+      };
+      api.notesSourceOptions.push({id:'legacy',label:'Previous notes',selected:this.notesSourceMode==='legacy',available:this.notesSourceMode==='legacy'||available,choose:choosePrevious,chooseFromMenu:()=>{
+        if(available&&this.live&&!document.hidden&&!this.pageSuspended&&this.S().view==='notes'&&this.previousNotesProbeKey===key&&previousNotesOwnerKey()===owner){
+          originalSet.call(this,'notes',{previousNotesMenu:false});
+          choosePrevious();
+        }
       }});
     }
     if(key==='workflows'&&!isAndroid){
@@ -1486,9 +1491,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.draftRecovery=!!draft?.error&&!!this.composerDraft?.recovery();
     out.recoverDraft=()=>{const recovery=this.composerDraft?.recovery();if(!recovery)return;this.draftRecoveryAbort?.abort();const controller=this.draftRecoveryAbort=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,currentDraft:String(this.S().draft||'')})};},reset:recovery.reset},'assistant draft','Assistant draft recovery','Download the saved bytes and current text before resetting this conversation’s draft. Reset does not delete messages or send anything. Reloading discards the current unsaved text.',controller.signal,undefined,Capacitor.getPlatform()==='android'?'device':'browser');};
     const connection=connectionController.getSnapshot();
-    // Routine startup stays quiet. Recovery failures remain actionable, and an
-    // attempted send still explains why it cannot dispatch before readiness.
-    const residentPending=residentAlwaysPresent&&!connection.session&&connection.kind==='recovering'?agentPendingText(connection):'';
+    // Attempted sends explain why they cannot dispatch before readiness.
+    const residentPending=residentAlwaysPresent&&!connection.session?agentAvailabilityNotice(connection):'';
     out.draftRetry=!!draft?.error;out.draftStatus=[draft?.message,residentPending].filter(Boolean).join(' ');out.draftConflict=!!draft?.conflict;out.draftSavedText=draft?.savedText||'(Empty saved draft)';out.draftOpening=!!draft?.consuming;
     out.restoreSavedDraft=async()=>{await this.composerDraft?.restoreSaved();if(this.live&&this.firstSendReview)this.refreshDraftBinding();};out.keepCurrentDraft=()=>{this.composerDraft?.keepCurrent();if(this.firstSendReview)this.refreshDraftBinding();};out.retryDraft=()=>{this.composerDraft?.retire();this.refreshDraftBinding();};
     const onDraft=out.onDraft;
@@ -1516,8 +1520,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         void connectionController.newConversation().then(()=>{const after=connectionController.getSnapshot();if(after.error&&!after.open&&after.history?.conversationId===before)this.toast('Couldn’t start a new chat. Try again.');});
       },
       openHistory:()=>{
-        // Android lists saved chats in Settings; elsewhere the connection panel holds them.
-        if(Capacitor.isNativePlatform()&&!testMocksEnabled)this.openView('settings',{page:'agent-connection'});
+        // Android lists saved chats in Agent activity.
+        if(Capacitor.isNativePlatform()&&!testMocksEnabled)this.openView('settings',{page:'agent-activity'});
         else connectionController.open();
       },
     };
@@ -1783,8 +1787,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
     const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,displayText:text,requestText}:null;
+    let stagedAttachmentKey:string|undefined;
+    const rememberSentAttachment=async (identity:NonNullable<AgentReply['messageBinding']>,recordedId:string)=>{
+      if(!sentAttachment||!(mail||transcript||sentAttachment.cameraAttachment))return;
+      // First send can create the conversation after pre-dispatch storage was skipped.
+      // History prefers the request ID and falls back to the recorded ID only if absent.
+      if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
+        await saveAttachment(identity.session,identity.conversationId,userId,sentAttachment);
+      }
+      if(recordedId!==userId)await saveAttachment(identity.session,identity.conversationId,recordedId,sentAttachment);
+    };
     if(sentAttachment&&(mail||transcript||this.cameraAttachment)&&connection.session&&conversationId){
-      try{await saveAttachment(connection.session,conversationId,userId,sentAttachment);}
+      try{
+        await saveAttachment(connection.session,conversationId,userId,sentAttachment);
+        stagedAttachmentKey=attachmentKey(connection.session,conversationId,userId);
+      }
       catch{if(fromComposer)releaseComposerSend(this,heldKey,heldText);this.toast('Attachment could not be saved. Try again.');return;}
       // The local write may settle after the composer, attachment or conversation has been replaced.
       if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment){
@@ -1837,9 +1854,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(fromComposer)await this.composerDraft?.commit();
       if (!this.live||!sameChat()) return;
       const identity=reply.messageBinding;
-      if(sentAttachment&&identity&&reply.userMessageId&&(mail||transcript||sentAttachment.cameraAttachment)){
-        await saveAttachment(identity.session,identity.conversationId,reply.userMessageId,sentAttachment);
-      }
+      if(identity&&reply.userMessageId)await rememberSentAttachment(identity,reply.userMessageId);
 
       const planCard=planActionCard(reply.planAction);
       const settlementCurrent=()=>this.live&&sameChat()&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(sourceSession)&&(!identity||connectionController.getSelectedConversationId()===identity.conversationId);
@@ -1909,7 +1924,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(fromComposer)await this.composerDraft?.commit();
         // The agent recorded the user turn before the reply failed: the sent bubble adopts its
         // message identity, as on success, so a later conversation re-read merges onto it.
-        const recorded=e&&typeof e==='object'?e as {userMessageId?:unknown;messageBinding?:unknown}:{};
+        const recorded:Pick<AgentReply,'userMessageId'|'messageBinding'>=e instanceof AlphaClientError?e as AlphaClientError&Pick<AgentReply,'userMessageId'|'messageBinding'>:{};
+        const binding=recorded.messageBinding;
+        if(this.live&&sameChat()&&binding&&typeof recorded.userMessageId==='string'&&binding.conversationId===connectionController.getSelectedConversationId()&&JSON.stringify(binding.session)===JSON.stringify(connectionController.getSnapshot().session)){
+          // The owner and recorded message are verified even though the reply failed.
+          // A storage failure must not replace the original reply error.
+          try{await rememberSentAttachment(binding,recorded.userMessageId);}catch{}
+        }
         if(this.live&&sameChat()&&typeof recorded.userMessageId==='string'&&recorded.messageBinding&&typeof recorded.messageBinding==='object')this.setState((previous:Shell)=>({msgs:previous.msgs.map((item:Shell)=>item.id===userId?{...item,id:recorded.userMessageId,messageBinding:recorded.messageBinding}:item)}));
         // After Stop the controller cancels, announces and reconciles once; its notice is the one shown.
         const reconciling=!!connectionController.getSnapshot().replyNotice&&e instanceof AlphaClientError&&e.code==='cancelled';

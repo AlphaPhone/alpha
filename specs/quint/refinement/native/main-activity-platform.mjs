@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
-import {app, root} from './java.mjs';
+import {app, directory as refinementDirectory, root} from './java.mjs';
 
-export const navigationRequestSource=app+'NavigationOpenRequest.java';
 export const navigationActionSource=app+'AlphaNavigationService.java';
+export const mainActivitySources = [
+  ...['MainActivity', 'RendererRecoveryBudget', 'NavigationOpenRequest', 'SmsNoticeOpenRequest']
+    .map(name => app + name + '.java'),
+  join(refinementDirectory, 'MainActivityPorts.java'),
+];
 
 /** Android/Capacitor primitives. MainActivity owns all product recovery and hand-off decisions. */
 export function mainActivityPlatform() {
@@ -194,11 +198,18 @@ public class View {
   }
   public ViewGroup parent;
   public int left, top, right, bottom;
+  private boolean filterObscuredTouches;
   public OnClickListener click;
   public View() {}
   public View(Object context) {}
   public Object getParent() {
     return parent;
+  }
+  public void setFilterTouchesWhenObscured(boolean value) {
+    filterObscuredTouches = value;
+  }
+  public boolean getFilterTouchesWhenObscured() {
+    return filterObscuredTouches;
   }
   public void setPadding(int l, int t, int r, int b) {
     left = l;
@@ -514,8 +525,9 @@ public class BridgeActivity {
   public android.view.Window getWindow() {
     return window;
   }
-  public android.view.View findViewById(int id) {
-    return inflated;
+  @SuppressWarnings("unchecked")
+  public <T extends android.view.View> T findViewById(int id) {
+    return id == com.getcapacitor.android.R.id.webview ? (T) inflated : null;
   }
   public void setContentView(android.view.View value) {
     content = value;
@@ -542,6 +554,14 @@ public class BridgeActivity {
     'ai/alphacompute/alphaphone/BuildConfig.java': `package ai.alphacompute.alphaphone;
 public class BuildConfig {
   public static boolean DEBUG = false;
+}`,
+    // The composer port's actual WebView listener is covered by messages-composer-port.test.mjs.
+    'ai/alphacompute/alphaphone/AlphaMessagesComposerPort.java': `package ai.alphacompute.alphaphone;
+final class AlphaMessagesComposerPort {
+  static void install(MainActivity activity, android.webkit.WebView view) {
+    if (!view.getFilterTouchesWhenObscured())
+      throw new AssertionError("Configure obscured-touch filtering before installing the composer");
+  }
 }`,
     'ai/alphacompute/alphaphone/AlphaImageCapability.java': `package ai.alphacompute.alphaphone;
 public class AlphaImageCapability {

@@ -30,7 +30,7 @@ const WITNESSES = [...model.matchAll(/^\s*val (\w+Witness)\s*=/gm)].map(match =>
 const form = readFileSync(`${repositoryRoot}apps/app/src/runtime/cloud-sign-in-ui.tsx`, 'utf8');
 const guard = /\n( {2}const stale = view\.step === 'code' && view\.stale === true;\n {2}const submitCode = \(event: FormEvent\) => \{[^\n]*\};)\n/.exec(form);
 assert.ok(guard, 'the code form decides whether a code is submitted');
-const submitCode = new Function('view', 'busy', 'ready', 'actions', 'code', `${stripTypeScriptTypes(guard[1])}\nsubmitCode({preventDefault() {}});`);
+const submitCode = new Function('view', 'busy', 'ready', 'actions', 'code', 'offline', `${stripTypeScriptTypes(guard[1])}\nsubmitCode({preventDefault() {}});`);
 
 // The key read beside the Google hand-off exists only on a host without a commit boundary, and is
 // compared while that attempt waits.
@@ -65,7 +65,7 @@ function create() {
     sendEnds: accepted => ends(() => accepted ? port.release(started()) : port.fail(failure('send-failed'))),
     async resend() { port.resending = true; void controller.resendSignInCode(); await settle(); },
     resendEnds: accepted => ends(() => accepted ? port.release(started()) : port.fail(failure('resend-failed'))),
-    async verify() { submitCode(box.state.signIn, box.state.busy, true, {verify: code => void controller.verifySignInCode(code)}, {current: {value: '123456'}}); await settle(); },
+    async verify() { submitCode(box.state.signIn, box.state.busy, true, {verify: code => void controller.verifySignInCode(code)}, {current: {value: '123456'}}, false); await settle(); },
     verifyEnds: outcome => ends(() => {
       const onCode = box.state.signIn.step === 'code';
       if (outcome === 'signed-in') { port.storedKey++; port.release({status: 'signed-in'}); }

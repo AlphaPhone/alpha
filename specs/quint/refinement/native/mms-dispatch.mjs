@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {captureInputs, checkTraces, qmap, qset} from '../check-traces.mjs';
 import {app, directory, javaTraceCampaign, root} from './java.mjs';
 import {mmsPlatform} from './mms-dispatch-platform.mjs';
+import {historicalTelephonyHost} from './sms-dispatch-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {prepareNativeFixture} from '../../../../test/fixtures/native-source.mjs';
 import {upstreamNativeSource} from '../../../../scripts/upstream-native-source.ts';
@@ -18,7 +19,8 @@ const model='NativeMmsDispatch';
 const shared='plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/';
 const extracted=['TelephonyPlugin','MmsStore','SmsProviderReader'];
 const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal','MmsPdu'];
-const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
+const historicalProduct=['AlphaTelephony','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
+const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'SmsNoticeOpenRequest.java'];
 const paths=[...extracted,...compiled].map(name=>shared+name+'.java');
 const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const harness='MmsDispatchTraces.java';
@@ -38,13 +40,15 @@ async function campaign(scenarios, extraSources, check, {historicalProbe=false} 
     const history=historicalProbe?materializeHistoricalSources(root,paths.map(path=>'vendor/eliza/'+path),historicalInventory):null;
     const resolveSource=path=>history?history.resolveSource('vendor/eliza/'+path):join(staged.root,path);
     const read=name=>readFileSync(resolveSource(shared+name+'.java'),'utf8');
-    const files=Object.entries(mmsPlatform(...extracted.map(read))).map(([path,contents])=>{
+    const fixture={...mmsPlatform(...extracted.map(read),{historical:historicalProbe}),...(historicalProbe?historicalTelephonyHost:{})};
+    const files=Object.entries(fixture).map(([path,contents])=>{
       const target=join(temporary,'driver',path);
       mkdirSync(dirname(target),{recursive:true});writeFileSync(target,contents);return target;
     });
     const receiptPath=join(staged.root,'.source.json');
     const generatedSources=[...paths.map(path=>join(staged.root,path)),receiptPath,...files,...(history?paths.map(path=>resolveSource(path)):[])];
-    const sources=[...product,...paths.map(path=>'vendor/eliza/'+path),launcherManifest,'android/consumer-host.json',
+    const productSources=historicalProbe?historicalProduct:product;
+    const sources=[...productSources,...paths.map(path=>'vendor/eliza/'+path),launcherManifest,'android/consumer-host.json',
       'android/upstream-native-sources.json','upstream.lock.json',
       'scripts/prepare-patched-native.ts','scripts/upstream-native-source.ts','test/fixtures/native-source.mjs','test/fixtures/jvm-tools.mjs',
       app+'AlphaImageCapability.java',join(directory,harness),join(directory,'Trace.java'),join(directory,'java.mjs'),
@@ -67,7 +71,7 @@ async function campaign(scenarios, extraSources, check, {historicalProbe=false} 
     assert.match(readFileSync(join(root,launcherManifest),'utf8'),/<receiver\s+android:name="\.AlphaSmsSendReceiver"\s+android:exported="false"/);
     const complete=compiled.map(name=>resolveSource(shared+name+'.java'));
     let traces;
-    try {traces=javaTraceCampaign(harness,[...product,...complete,...files],scenarios.map(name=>historicalProbe?[name,'historical']:[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
+    try {traces=javaTraceCampaign(harness,[...productSources,...complete,...files],scenarios.map(name=>historicalProbe?[name,'historical']:[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
     finally {assert.deepEqual(captureInputs(sources),driverHashes,'MMS inputs changed during replay');}
     for(const trace of traces)for(const {expect} of [trace,...trace.steps]){
       const events=expect['s.events'];
@@ -83,7 +87,7 @@ export function mmsSourceProbe(selected, options) {
 
 export function checkNativeMmsDispatch(extraSources=[]) {
   return campaign(scenarios,extraSources,async evidence=>{
-    const receipt=await checkTraces({...evidence,scope: 'bounded-orchestration',assumptions:[
+    const receipt=await checkTraces({...evidence,definitionBatchSize:10,scope: 'bounded-orchestration',assumptions:[
       'Actual product wrapper, staged SMS/MMS core, extracted native review and outbox members, and exact JVM PDU codec.',
       'One installed ID shared by two reviews. Synthetic Android telephony, provider, preview, and credential storage ports. Temporary PDU custody uses real file operations.',
       'Both live bridge registrations and exact per-bridge operation-ID notification counts are observed. Process reconstruction replaces all old registrations; the immediate Handler port does not qualify arbitrary held UI-queue retirement races.',

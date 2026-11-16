@@ -18,7 +18,7 @@ import {createPhoneInfoLoader,identifiersElsewhere,phoneDefaultRows,phoneLineSec
 import { broaderPageNotice, switchValue } from './native-adapter';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps } from '../daily';
-import { agentPendingText, connectionController } from '../runtime/connection-ui';
+import { agentPendingText, connectionController, RESIDENT_UNPACKAGED } from '../runtime/connection-ui';
 import {googleConnectionController} from '../runtime/google-connection-ui';
 import {GOOGLE_ACCOUNTS_CHANGED} from '../runtime/google-accounts';
 import { browserLocalAgentEnabled, modelLabel } from '../runtime/local-agent';
@@ -785,7 +785,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   let phoneInfo:ReturnType<typeof createPhoneInfoLoader>|null=null;
   const phoneLoader=()=>{const client=aospImage?telephonyProfile():null;return client?phoneInfo??=createPhoneInfoLoader(client,changed):null;};
   const settingsBack = definition.back;
-  const settingsParents: Record<string,string> = {'agent-connection':'about',problems:'developer',licenses:'about','password-entry':'password-provider','settings-permissions':'settings-privacy','license-detail':'licenses','phone-info':'settings-general'};
+  const settingsParents: Record<string,string> = {'agent-activity':'about',problems:'developer',licenses:'about','password-entry':'password-provider','settings-permissions':'settings-privacy','license-detail':'licenses','phone-info':'settings-general'};
   definition.back = (state:Bag,api:Bag) => {
     if(!state.sheet&&((typeof state.page==='string'&&Object.hasOwn(categoryNames,state.page))||(!state.page&&state.settingsCategory))){api.set({page:null,settingsCategory:null});return true;}
     if(!state.sheet&&settingsParents[state.page]){if(state.page==='password-entry')leavePasswordEntry();api.set({page:settingsParents[state.page]});return true;}
@@ -862,7 +862,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const problemCount = crashLog ? crashLog.entries.length : null;
     const problemsRow = (): Bag => ({ kNav:true, label:'Problem log', lbl:problemCount?`Problem log, ${problemCount}`:'Problem log', val: problemCount === null ? 'Unavailable' : problemCount ? String(problemCount) : '', hasVal:problemCount !== 0, valCss:problemCount?'padding:2px 9px;border-radius:11px;background:var(--bg);color:var(--fg);font-variant-numeric:tabular-nums':'', chev:true, noAB:true, go:()=>{ api.set({ page:'problems' }); void refresh(); void refreshResidentDiagnostics(); } });
     const diagnosticsRow = (): Bag => ({ kNav:true, label:'Export diagnostics', lbl:'Export diagnostics', hasSpin:diagnosticsBusy, chev:!diagnosticsBusy, noAB:true, go:()=>void exportDiagnostics(api) });
-    const connectionHelpRow = (): Bag => ({kNav:true,label:'Status',lbl:'Status',val:connection.name,hasVal:true,chev:true,noAB:true,go:()=>Capacitor.isNativePlatform()&&!testMocksEnabled?api.set({page:'agent-connection'}):connectionController.open()});
     const licensesRow = (): Bag => ({ kNav:true, label:'Licenses', lbl:'Licenses', chev:true, noAB:true, go:()=>{ api.set({ page:'licenses',licenseQuery:'' }); void loadLicenses(changed); } });
     const percent = typeof facts.batteryPercent === 'number' ? `${facts.batteryPercent}%` : 'Unavailable';
     const active = (key: string) => typeof facts[key] === 'boolean' ? facts[key] ? 'Active' : 'Inactive' : 'Unavailable';
@@ -1005,39 +1004,33 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           if(state.page==='cloud-plan')out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Account',hasTitle:true,backLabel:'Back to Settings',back:()=>api.set({page:null}),hero:{},groups:[group([{kNav:true,label:'Open account',lbl:'Open account',chev:true,noAB:true,go:()=>connectionController.openPlan()}])]});
         }
 
-        page.groups.push(group([{...connectionHelpRow(),label:'Agent connection',lbl:'Agent connection',val:connection.session?'Running':pending,hasDot:true,dot:connection.session?'ok':connection.residentRecoveryReason?'err':'warn'},{kNav:true,label:'AI provider',lbl:'AI provider',val:connection.providerStatus?.selected&&connection.providerStatus.provider==='cerebras'?'Own key':connection.providerStatusError?'—':'Cloud',hasVal:true,chev:true,noAB:true,go:()=>connectionController.openProviderSettings()}]));
-        // Raw recovery reason, stage and record count are developer data: the product keeps the plain status.
+        page.groups.push(group([{kNav:true,label:'AI provider',lbl:'AI provider',val:connection.providerStatus?.selected&&connection.providerStatus.provider==='cerebras'?'Own key':connection.providerStatusError?'—':'Cloud',hasVal:true,chev:true,noAB:true,go:()=>connectionController.openProviderSettings()}]));
+        // Raw recovery reason, stage and record count are developer data.
         if(native&&developerTools&&state.page==='agent-recovery-details'){
           const reason=connection.residentRecoveryReason,recovery=connection.residentRecovery;
           const rows:Bag[]=[info('Status',reason?residentRecoveryCopy(reason,recovery):connection.session?'Running':'—')];
           if(reason)rows.push(info('Reason',reason));
           if(recovery)rows.push(info('Stage',recovery.step));
           if(recovery?.step==='review')rows.push(info('Kept items',String(recovery.review.retainedCount)));
-          out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Restart details',hasTitle:true,backLabel:'Back to Agent connection',back:()=>api.set({page:'agent-connection'}),hero:{},groups:[group(rows)]});
+          out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Restart details',hasTitle:true,backLabel:'Back to Agent activity',back:()=>api.set({page:'agent-activity'}),hero:{},groups:[group(rows)]});
         }
-        if(native&&!testMocksEnabled&&state.page==='agent-connection'){
-          const agentStatus:[string,string] = connection.session ? (connection.kind==='resident'?['Running','ok']:[runtimeLocation,'ok']) : connection.residentRecoveryReason ? (connection.residentRecoveryReason==='ipc-recovery-retention-limit'?['Restart','warn']:['Error','err']) : connection.kind==='recovering'?['Off','off']:['Starting','warn'];
-          const ai=connection.residentInference==='direct'?'Cerebras':connection.residentInference==='cloud'?serviceName:'';
-          // Data leaving the phone: the AI row names where prompts go.
-          const agentRows:Bag[]=[{...info('Agent',agentStatus[0]),hasDot:true,dot:agentStatus[1]},{...info('AI',ai||(!connection.cloudAccount&&connection.residentPlanNotice!=='offline'?'Sign in':!connection.session&&connection.kind==='starting'&&!connection.residentRecoveryReason?'Starting':'—')),hasDot:true,dot:ai?'ok':'off',...(ai?{hasSub:true,sub:`Sends prompts to ${ai}`}:{})}];
-          if(connection.message)agentRows.push(info('Status',connection.message));
-          if(connection.error)agentRows.push({...info('Problem',connection.error),hasDot:true,dot:'err'});
+        if(native&&!testMocksEnabled&&state.page==='agent-activity'){
+          const groups:Bag[]=[];
+          const activityRows:Bag[]=[];
           if(connection.residentRecoveryReason&&!connection.session){
-            // Kept (S233 adapted): the recovery copy is the only instruction when no button can help.
-            agentRows.push(info('Status',residentRecoveryCopy(connection.residentRecoveryReason,connection.residentRecovery)));
+            activityRows.push(info('Recovery',residentRecoveryCopy(connection.residentRecoveryReason,connection.residentRecovery)));
             if(connection.residentRecoveryReason==='ipc-recovery-retention-limit'&&!connection.busy)
-              agentRows.push(action('Restart Alpha',()=>void connectionController.restartRecovery()));
+              activityRows.push(action('Restart Alpha',()=>void connectionController.restartRecovery()));
             else if(connection.residentRecoveryReason==='runtime-identity-unavailable'&&!connection.busy)
-              agentRows.push(action('Try again',()=>void connectionController.retryStartup()));
-            if(connection.residentRecoveryReason!=='ipc-recovery-retention-limit')
-              agentRows.push(diagnosticsRow());
-            if(developerTools)agentRows.push(action('Details',()=>api.set({page:'agent-recovery-details'})));
-          }else if(!connection.busy)agentRows.push({...action(connection.session?'Reconnect':'Retry',()=>void connectionController.startLocal()),lbl:connection.session?'Reconnect agent':'Retry',lucide:'rotate-cw',chev:false});
-          if(connection.busy){
-            agentRows.push({kNav:true,label:'Connection',lbl:'Connecting',busy:true,hasSpin:true,noAB:true,go:()=>{}});
-            if(connection.residentRecovery?.step!=='archiving')agentRows.push(action('Cancel',()=>connectionController.cancel()));
+              activityRows.push(action('Try again',()=>void connectionController.retryStartup()));
+            if(connection.residentRecoveryReason!=='ipc-recovery-retention-limit')activityRows.push(diagnosticsRow());
+            if(developerTools)activityRows.push(action('Details',()=>api.set({page:'agent-recovery-details'})));
+          }else if(connection.error&&(connection.session||connection.errorKind==='account-changed')){
+            activityRows.push({...info('Problem',connection.error),hasDot:true,dot:'err'});
           }
-          const groups:Bag[]=[group(agentRows)];
+          if(connection.busy&&!connection.backgroundWork&&!connection.residentStarting&&connection.residentRecovery?.step!=='archiving')
+            activityRows.push(action('Cancel',()=>connectionController.cancel()));
+          if(activityRows.length)groups.push(group(activityRows));
           if(connection.session){
             const historyRows:Bag[]=[];
             if(!connection.busy){
@@ -1060,7 +1053,8 @@ export function installSettingsAdapter(Component: any, views: Bag) {
               groups.push(group(rows,`agent-action:${item.id}`));
             }
           }
-          out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Status',hasTitle:true,backLabel:'Back to Settings',back:()=>api.set({page:null}),hero:{},groups});
+          if(!groups.length)groups.push(group([info('Agent activity',connection.error===RESIDENT_UNPACKAGED?connection.error:'Loads when your agent is ready')]));
+          out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Agent activity',hasTitle:true,backLabel:'Back to About',back:()=>api.set({page:'about'}),hero:{},groups});
         }
         if(native)page.groups.push(group([{kNav:true,label:'Erase all data',lbl:'Reset Alpha data',labCss:'color:#d93025',lucide:'trash-2',chev:true,noAB:true,go:async()=>{
           // Shared native review (@elizaos/capacitor-system/reset): only cancelled or unavailable reach here.
@@ -1122,7 +1116,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       } else if (page.title === 'About') {
         const native=Capacitor.isNativePlatform();
         page.hero={kAlpha:true,version:native?versionLabel(facts.appVersion||buildVersion,facts.appVersionCode):buildVersion==='Unavailable'?'Development preview':'Version '+buildVersion};
-        page.groups=[...(native&&facts.androidRelease?[group([info('Android version',facts.androidRelease)])]:[]),group([connectionHelpRow(),licensesRow()])];
+        page.groups=[...(native&&facts.androidRelease?[group([info('Android version',facts.androidRelease)])]:[]),group([...(native&&!testMocksEnabled?[{...action('Agent activity',()=>api.set({page:'agent-activity'})),lucide:'clock'}]:[]),...(testMocksEnabled?[{...action('Status',()=>connectionController.open()),val:connection.name,hasVal:true,lucide:'link'}]:[]),licensesRow()])];
       } else if (page.title === 'Wi-Fi') {
         page.hasHdrTog = false; page.hdrTog = null;
         page.hero = { ...page.hero, big: wifiValue, sub: '' };
@@ -1247,7 +1241,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         'Accounts': 'Account',
         'Connections': 'Google & email',
         'AI provider': 'AI',
-        'Agent connection': 'Agent',
         'Set up Alpha access': 'Permissions',
       };
       const sections = [
@@ -1255,7 +1248,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         ['Preferences', ['Display', 'Notifications']],
         ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts']],
         ['Apps', ['Calendar', 'Password manager', 'Photos']],
-        ['Help', ['About', 'Agent connection']],
+        ['Help', ['About']],
       ] as const;
       rows.delete('Models');
       rows.delete('Privacy & data');
@@ -1289,6 +1282,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const detailGroups=settingsTop.groups;
       const categories=[['settings-account','Account',['Account']],['settings-general','General',['Preferences','Network','Device','Updates','Reset']],['settings-privacy','Privacy',['Privacy']],['settings-apps','Apps',['Apps']],['settings-help','About',['Help']]] as const;
       settingsTop.groups=categories.filter(([key])=>key!=='settings-account').map(([key,title])=>group([{kNav:true,label:title,lbl:title,chev:true,noAB:true,go:()=>{api.set({page:key==='settings-help'?'about':key,settingsCategory:key==='settings-help'?null:key});}}]));
+      if(Capacitor.isNativePlatform())settingsTop.groups.push(group([{...nav('Android settings','system'),lucide:'settings'}]));
       if(wakeListeningStopUnconfirmed())settingsTop.groups.unshift(group([micMayBeOn()],'wake-stop-unconfirmed'));
       const appSettingsRows=detailGroups.filter((section:Bag)=>section.cap==='Apps').flatMap((section:Bag)=>section.rows);
       const appCatalog=[['Browser','browser'],['Calendar','calendar'],['Camera','camera'],['Files','files'],['Inbox','inbox'],['Maps','maps'],['Notes','notes'],['Passwords','passwords'],['Photos','photos'],['Workflows','workflows']] as const;
@@ -1350,7 +1344,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'App permissions',backLabel:'Back to Privacy',back:()=>api.set({page:'settings-privacy'}),hero:{},groups:[group(rows)]});
     }
     if(activeSettingsCategory&&!categoryPage)for(const page of out.stack)if(!page.isTop&&page.backLabel==='Back to Settings')page.backLabel='Back to '+categoryNames[activeSettingsCategory];
-    const nestedParents:Record<string,[string,string]>={'agent-connection':['about','About'],licenses:['about','About'],problems:['developer','Developer'],'license-detail':['licenses','licenses']};
+    const nestedParents:Record<string,[string,string]>={'agent-activity':['about','About'],licenses:['about','About'],problems:['developer','Developer'],'license-detail':['licenses','licenses']};
     if(nestedParents[state.page]){const [parent,label]=nestedParents[state.page];const page=out.stack[out.stack.length-1];if(page&&!page.isTop){page.backLabel='Back to '+label;page.back=()=>api.set({page:parent});}}
     const settingsIcons:Record<string,string>={General:'settings',Phone:'phone',IMEI:'info','Mobile network':'signal',Privacy:'shield',Apps:'layout-grid',Help:'info',About:'info',Browser:'globe',Calendar:'calendar-days',Camera:'camera',Files:'folder',Inbox:'mail',Maps:'map-pin',Notes:'notebook-text',Passwords:'lock-keyhole',Photos:'images',Workflows:'workflow','Account & plan':'user-round','Google & email':'link','AI connection':'cpu',Display:'sun',Notifications:'bell','Privacy & data':'shield','App permissions':'fingerprint-pattern','Redeem code':'gift','Manage plan':'credit-card','Sign out':'log-out'};
     for(const page of out.stack)for(const section of page.groups||[])for(const row of section.rows||[]){if(row.kBtn)row.btnAria=row.aria||row.label;if(row.kNav){row.lucideIcon='/icons/lucide/'+(row.licenseComponent?'file-text':row.lucide||settingsIcons[row.label]||'sliders-horizontal')+'.svg';row.hasLucideIcon=!row.isTextSize;row.hasIcon=false;row.hasTile=false;}}

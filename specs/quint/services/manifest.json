@@ -3051,7 +3051,8 @@
       "refusedBeforeJournalTest",
       "acceptedDraftRetiredUntilOwnerEditsTest",
       "retiredUncertainDraftResumesWithoutDispatchTest",
-      "retainedRefusalIsNotNewAttemptAuthorityTest"
+      "retainedRefusalIsNotNewAttemptAuthorityTest",
+      "lateJournalReceiptRetiresDraftTest"
     ],
     "invariants": [
       "TypeOK",
@@ -4815,7 +4816,8 @@
       "sixthPictureRefusedTest",
       "carrierAnswerReadBackTest",
       "acceptedDraftRetiredUntilOwnerEditsTest",
-      "retiredUncertainDraftResumesWithoutDispatchTest"
+      "retiredUncertainDraftResumesWithoutDispatchTest",
+      "lateJournalReceiptRetiresDraftTest"
     ],
     "invariants": [
       "TypeOK",

@@ -38,10 +38,13 @@ const incompleteMessage={id:'mms:2',kind:'mms',threadId:'thread:1',date:17000000
 
 async function mount(messages=[]){
   const calls=[],previousDocument=globalThis.document,previousPlugin=globalThis.__incompleteSmsPlugin;
+  const previousWindow=Object.getOwnPropertyDescriptor(globalThis,'window');
   globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
+  globalThis.window=new EventTarget();
   globalThis.__incompleteSmsPlugin=new Proxy({},{get:(_,method)=>method==='then'?undefined:async options=>{
     calls.push([method,options]);
     if(method==='status')return status;
+    if(method==='smsNoticePending')return {};
     if(method==='smsSendHistory')return {receipts:[]};
     if(method==='listThreads')return {threads:[incompleteThread,completeThread],next:null};
     if(method==='listMessages')return {messages,next:null};
@@ -50,10 +53,17 @@ async function mount(messages=[]){
     if(method==='observeMessages')return {};
     throw Error('Unexpected native effect: '+String(method));
   }});
-  class Component{S(){return {view:'messages'};}setState(){}}
+  class Component{S(){return {screen:'home',view:'messages'};}setState(){}}
+  const restore=()=>{
+    globalThis.document=previousDocument;globalThis.__incompleteSmsPlugin=previousPlugin;
+    if(previousWindow)Object.defineProperty(globalThis,'window',previousWindow);
+    else delete globalThis.window;
+  };
   const views={messages:{}};installSmsAdapter(Component,views);
-  const owner=new Component();owner.componentDidMount();await tick();
-  return {calls,model:()=>views.messages.render({},{}),async close(){owner.componentWillUnmount();await tick();globalThis.document=previousDocument;globalThis.__incompleteSmsPlugin=previousPlugin;}};
+  const owner=new Component();
+  try{owner.componentDidMount();await tick();}
+  catch(error){restore();throw error;}
+  return {calls,model:()=>views.messages.render({},{}),async close(){try{owner.componentWillUnmount();await tick();}finally{restore();}}};
 }
 const effects=calls=>calls.filter(([method])=>['markThreadRead','sendSms','sendMms','composeSms'].includes(method));
 
