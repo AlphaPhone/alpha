@@ -1904,34 +1904,30 @@
       "scripts/pilot-update.ts",
       "scripts/android-instrumentation.ts",
       "scripts/provision-unit.ts",
-      "scripts/owner/pilot-rotation-journal.ts",
-      "scripts/owner/pilot-rotation.ts",
-      "scripts/owner/VerifyApkRotation.java",
+      "scripts/owner/pilot-install-lock.ts",
       "vendor/eliza/packages/os/scripts/android/apk-release-record.mjs"
     ],
     "tests": [
       "normalUpdateRestoresHomeBeforeStartTest",
       "partialHandoffNeverDispatchesTest",
       "homeTakeoverBlocksDispatchTest",
-      "ambiguousRotationRetainsIntentTest",
-      "verifiedRotationSurvivesRestartRefusalTest",
+      "unknownInstallerResponseNeverStartsTest",
+      "verifiedUpdateFailsOnRestartRefusalTest",
       "runningIntegrityOrUnprovenHomePreventsStartTest",
       "packageOnlyReadbackCanVerifyOrdinaryUpdateTest"
     ],
     "invariants": [
       "LockOwnsUpdate",
       "DispatchHasReadback",
-      "RotationHasDurableInventory",
       "VerificationHasReturnedInstall",
-      "CompletedJournalHasEvidence",
       "RestoreOnlyOwnedHome",
       "RestartHasCleanBoundary",
       "PassedHasStartupEvidence"
     ],
     "abstractions": [
-      "One admitted APK replacement on one selected Android user, with ordinary and reviewed-rotation modes.",
-      "HOME is Alpha, selected stock or an unproven holder/activity pair. The installer reply, verification evidence, HOME cleanup, agent probe and rotation journal are distinct.",
-      "Model witnesses package-only or inventory readback, a lock and a one-shot journal. Actual Android effects, signing admission and host crashes remain separate boundaries."
+      "One admitted same-signer APK replacement on one selected Android user.",
+      "HOME is Alpha, selected stock or an unproven holder/activity pair. The installer reply, verification evidence, HOME cleanup and agent probe are distinct.",
+      "Model witnesses package-only or inventory readback under one device lock. Actual Android effects, signing admission and host crashes remain separate boundaries."
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -2892,7 +2888,6 @@
       "scripts/ci/admit-cloud-signing-input.py",
       "scripts/ci/private-apk-storage.py",
       "scripts/ci/qualified-app-update.py",
-      "scripts/ci/verify-qualified-cloud-launcher.py",
       "scripts/sign-release-apks.ts",
       "scripts/verify-apks.ts",
       "scripts/deliver-app-update.ts",

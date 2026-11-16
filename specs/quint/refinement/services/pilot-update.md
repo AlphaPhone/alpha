@@ -1,23 +1,22 @@
 # Pilot APK update
 
-`PilotApkUpdate` models one admitted replacement. HOME role and resolved activity,
-process quiescence, installer response, data verification, agent restart and rotation
-certification have separate state. An unknown installer response consumes the rotation
-attempt. A verified install can be certified even if the agent fails to start afterward.
+`PilotApkUpdate` models one admitted same-signer replacement. HOME role and resolved
+activity, process quiescence, installer response, data verification and agent restart have
+separate state. Alpha has no signing-key rotation: a unit signed by the retired version 49
+key is wiped and provisioned again, never upgraded in place.
 
 | Model boundary | Executed source |
 | --- | --- |
-| Device lock, durable rotation reservation and completion | `claimPilotInstall`, `beginPilotRotation`, `completePilotRotation` and `inspectPilotRotation` in `scripts/owner/pilot-rotation-journal.ts` |
+| Device lock | `claimPilotInstall` in `scripts/owner/pilot-install-lock.ts` |
 | HOME admission, write/readback, final restore and explicit start | `planHome` and `updateUnit` in `scripts/pilot-update.ts`, with `readHome` and `restoreHome` in `scripts/android-instrumentation.ts` |
 | Pre/post readback and admitted replacement verification | `updateUnit`, `packageFacts`, `installedApkSha256` and the pinned shared `apk-release-record.mjs` |
 
 The source witness captures real command order and returned update evidence from
-`updateUnit` against a scripted adb port. Journal operations run on an owner-only
+`updateUnit` against a scripted adb port. The device lock runs on an owner-only
 temporary filesystem. The same fixture covers normal update, missing legacy export,
 partial HOME handoff, unrelated HOME takeover, process-list failure, relaunch during
-either readback, modified data, failed cleanup, unknown install response and verified
-rotation followed by startup refusal. The witness rejects competing device claims and
-attempts to reserve a consumed rotation.
+either readback, modified data, failed cleanup, unknown install response and a verified
+install followed by startup refusal. The witness rejects competing device claims.
 
 Run the source campaign with `bun test test/quint-pilot-update-refinement.test.mjs`.
 The receipt records all named observations and binds source inputs before execution.

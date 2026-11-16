@@ -17,7 +17,6 @@
       calls.push('signIn:' + method);
       if (method === 'cancel') return {};
       if (method === 'status') return { active: false, inApp: true, google: false, email: true };
-      if (method === 'savedSignInRecoveryStatus') return { eligible: false };
       if (method === 'startEmail') {
         if (input.email !== 'video-fixture@example.invalid' || input.environment !== 'production') throw Error('Unexpected sign-in request');
         return { attemptId: session, expiresAt: Date.now() + 600000, resendAt: Date.now() + 60000 };
