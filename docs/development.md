@@ -152,6 +152,13 @@ not additional release distributions. The same launcher APK can be installed on
 stock Android or preinstalled in the Alpha image. It declares HOME.
 Phone, Contacts and SMS/MMS require an admitted AOSP image capability.
 
+Production and admitted Sense qualification images stage PackageManager component overrides for
+the exact validated Phone/SMS handlers. Their eligibility is an image default rather than something
+that first depends on opening the launcher after an APK update. The existing fresh-device Provision
+flow alone assigns default apps; these component overrides do not change an owner's role choices.
+This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
+retained-update qualification on the matching AOSP image remain separate release gates.
+
 Canonical builds use `app.config.json` unchanged. To prepare an update for an
 existing `ai.elizaresearch.alphaphone` installation, set the build value
 `ALPHA_ANDROID_APPLICATION_ID=ai.elizaresearch.alphaphone`. Only identities declared

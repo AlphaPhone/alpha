@@ -718,7 +718,7 @@ test.describe('explicit membership code entry',()=>{
  });
 });
 
-test('simultaneous plan and expiry notices keep their own actions after Settings', async ({page}) => {
+test('Home keeps the plan notice without a sign-in expiry banner after Settings', async ({page}) => {
   test.setTimeout(360_000);
   const foreign = await fenceNetwork(page);
   await boot(page, {...await entitlements(), plan:'none', expiresAt:Date.now()+5*24*3600_000,
@@ -726,25 +726,23 @@ test('simultaneous plan and expiry notices keep their own actions after Settings
   const plan = page.getByRole('region', {name:'Eliza Cloud plan notice', exact:true});
   const expiry = page.getByRole('region', {name:'Eliza Cloud sign-in notice', exact:true});
   await expect(plan).toBeVisible({timeout:90_000});
-  await expect(expiry).toBeVisible();
+  await expect(expiry).toHaveCount(0);
   const together = await observeCloudNotices(page);
   await page.getByRole('button', {name:'Settings', exact:true}).click();
   await expect(page.locator('[data-settings-page]:visible')).toHaveCount(1);
   const settings = await observeCloudNotices(page);
-  expect(settings.notices.map(({kind,visible}) => [kind,visible])).toEqual([['plan',false],['sign-in',false]]);
+  expect(settings.notices.map(({kind,visible}) => [kind,visible])).toEqual([['plan',false]]);
   await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
   await expect(plan).toBeVisible();
-  await expect(expiry).toBeVisible();
-  const returned = await observeCloudNotices(page);
-  await expiry.getByRole('button', {name:'Dismiss sign-in notice', exact:true}).click();
   await expect(expiry).toHaveCount(0);
+  const returned = await observeCloudNotices(page);
   await expect(plan).toBeVisible();
   expect((await observeCloudNotices(page)).notices.map(({kind}) => kind)).toEqual(['plan']);
   expect(foreign).toEqual([]);
   expect((await calls(page)).filter(call => call.method==='openExternal' || call.method==='startEmail' ||
     call.path?.endsWith('/redeem'))).toEqual([]);
   for (const state of [together,returned]) {
-    expect(state.notices.map(({kind}) => kind)).toEqual(['plan','sign-in']);
+    expect(state.notices.map(({kind}) => kind)).toEqual(['plan']);
     expect(state.notices.flatMap(({actions}) => actions.filter(({owned}) => !owned))).toEqual([]);
   }
 });

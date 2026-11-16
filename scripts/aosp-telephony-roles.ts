@@ -1,4 +1,6 @@
 import {parseXmlTree, type ManifestNode} from './apk.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 
 type RoleFilter = {
   action: string;
@@ -89,4 +91,24 @@ export function aospTelephonyRoleComponents(xmltree: string, packageName: string
     }
     return name;
   });
+}
+
+/**
+ * Image-owned component defaults are applied by PackageManager during package scans, before an
+ * Activity can enable its own handlers. They keep the admitted image eligible across APK updates;
+ * they neither assign a role nor replace an owner's chosen Phone or Messages app.
+ * Platform mechanism: ScanPackageUtils.configurePackageComponents (AOSP frameworks/base).
+ */
+export function writeAospTelephonyRoleOverrides(output: string, xmltree: string, packageName: string) {
+  const components = aospTelephonyRoleComponents(xmltree, packageName);
+  const name = 'alpha-telephony-components.xml';
+  const xml = '<?xml version="1.0" encoding="utf-8"?>\n<config>\n'
+    + `    <component-override package="${packageName}">\n`
+    + components.map(component => `        <component class="${component}" enabled="true" />\n`).join('')
+    + '    </component-override>\n</config>\n';
+  fs.mkdirSync(path.join(output, 'provisioning'), {recursive: true});
+  fs.writeFileSync(path.join(output, 'provisioning', name), xml, {flag: 'wx'});
+  fs.appendFileSync(path.join(output, 'product.mk'),
+    `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
+  return components;
 }

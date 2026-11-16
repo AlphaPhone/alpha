@@ -3837,8 +3837,6 @@ export function ConnectionChooser() {
   const planNotice=residentCloudFlow()&&snapshot.session&&snapshot.residentPlanNotice==='needs-plan'&&snapshot.cloudAccount?'needs-plan':null;
   // A notice that ends and comes back is shown again.
   useEffect(()=>{if(!planNotice)setDismissedNotice(null);},[planNotice]);
-  // The key-expiry notice is dismissed for one key (its expiry); a new sign-in shows its own.
-  const [dismissedKeyExpiry,setDismissedKeyExpiry]=useState<number|null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const remoteOrigin = useRef<HTMLInputElement>(null), remoteCode = useRef<HTMLInputElement>(null);
   const localOrigin = useRef<HTMLInputElement>(null), localCode = useRef<HTMLInputElement>(null);
@@ -3981,11 +3979,7 @@ export function ConnectionChooser() {
     // Never a gate: the agent is running. A non-blocking notice offers the plan actions.
     // Cloud being unreachable shows nothing (owner, 2026-11-03); the network's return checks again.
     const notice=planNotice;
-    // This phone's Cloud key expires within two weeks: offered once per key, closable.
-    const expiresAt=residentCloudFlow()&&snapshot.session?snapshot.cloudAccount?.expiresAt:undefined;
-    const keyNotice=expiresAt!==undefined&&expiresAt>Date.now()&&expiresAt-Date.now()<=CLOUD_KEY_EXPIRY_WARNING_MS&&dismissedKeyExpiry!==expiresAt?expiresAt:null;
-    const planShown=!!notice&&dismissedNotice!==notice;
-    if(!planShown&&keyNotice===null)return null;
+    if(!notice||dismissedNotice===notice)return null;
     return <div className="alpha-plan-notices" ref={node=>{
       if(!node)return;
       const measure=()=>{
@@ -4000,21 +3994,15 @@ export function ConnectionChooser() {
       for(const child of node.children)observer.observe(child);
       window.addEventListener('resize',measure);
       measure();return ()=>{observer.disconnect();window.removeEventListener('resize',measure);document.documentElement.style.removeProperty('--alpha-home-notice-clearance');};
-    }}>{planShown&&<aside className="alpha-plan-notice" role="region" aria-label={`${serviceName} plan notice`}>
+    }}><aside className="alpha-plan-notice" role="region" aria-label={`${serviceName} plan notice`}>
       <p role="status"><StatusDot tone="off">{NEEDS_PLAN_NOTICE}</StatusDot></p>
       <div className="alpha-plan-notice-actions">
         <button aria-label="Redeem code" disabled={snapshot.busy} onClick={()=>connectionController.openPlan({codeEntry:true})}><span aria-hidden="true" data-alpha-icon="/icons/lucide/ticket.svg" style={iconStyle('ticket')}/>Code</button>
         <button disabled={snapshot.busy} onClick={()=>void connectionController.residentManagePlan()}>{CHOOSE_PLAN_LABEL}</button>
         <button aria-label="Dismiss plan notice" onClick={()=>setDismissedNotice(notice)}><span aria-hidden="true" data-alpha-icon="/icons/lucide/x.svg" style={iconStyle("x")}/></button>
       </div>
-    </aside>}
-    {keyNotice!==null&&<aside className="alpha-plan-notice" role="region" aria-label={`${serviceName} sign-in notice`}>
-      <p role="status"><span aria-hidden="true" data-alpha-icon="/icons/lucide/clock.svg" style={iconStyle('clock')}/> <StatusDot tone="warn">Expires {new Date(keyNotice).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}</StatusDot></p>
-      <div className="alpha-plan-notice-actions">
-        <button disabled={snapshot.busy} onClick={()=>void connectionController.residentCloudLogin()}><span aria-hidden="true" data-alpha-icon="/icons/lucide/rotate-cw.svg" style={iconStyle('rotate-cw')}/>Renew</button>
-        <button aria-label="Dismiss sign-in notice" onClick={()=>setDismissedKeyExpiry(keyNotice)}><span aria-hidden="true" data-alpha-icon="/icons/lucide/x.svg" style={iconStyle("x")}/></button>
-      </div>
-    </aside>}</div>;
+    </aside>
+    </div>;
   }
   const ownKeySaving=snapshot.busy&&snapshot.message===OWN_KEY_CHECKING;
   const providerChoiceFor=(heading:boolean,error='')=><OwnProviderChoice heading={heading} busy={snapshot.busy} replying={!!sending} saving={ownKeySaving} status={snapshot.providerStatus} statusUnavailable={!!snapshot.providerStatusError} signedIn={!!snapshot.cloudAccount} error={error} onDismissError={()=>connectionController.dismissError()} onSave={(key,voice)=>connectionController.configureLocal(key,LOCAL_PROVIDER_MODEL,voice)} onCloud={()=>connectionController.selectCloudProvider()} onOwn={()=>connectionController.selectSavedProvider('own')} onRetryStatus={()=>void connectionController.refreshProviderStatus()}/>;
