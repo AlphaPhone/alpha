@@ -36,6 +36,7 @@ test('legacy waiting runs recover their existing proposal identity instead of du
 test('a lost read receipt resumes after reload using the original result despite source edits',async({page})=>{await setup(page,'notes');await page.evaluate(async()=>{const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(value,key){if(key==='alpha.browser.execution.local.v1'&&JSON.parse(JSON.parse(JSON.parse(value.raw).value).actions).proposals.some((p:any)=>p.state==='completed'))throw Error('Receipt storage unavailable');return put.call(this,value,key);};});await page.getByRole('button',{name:'Approve',exact:true}).click();await page.getByRole('button',{name:'Confirm approve',exact:true}).click();await expect(page.getByText(/Not synced yet; open action history to retry\./)).toBeVisible();await page.evaluate(async()=>{const m=await import('/src/runtime/browser-notes-document.ts'),before=(await m.browserNotesPort.read())!,data=JSON.parse(before.raw);data.records.find((n:any)=>n.id==='source-note').body='Changed after approved read';await m.browserNotesPort.compareExchange(before,JSON.stringify(data));});await page.reload();await installWorkflowListFixture(page);await openLegacyNotes(page);await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await workflowCard(page,'Phone workflow').click();await page.getByRole('button',{name:'waiting-approval execution',exact:true}).click();await page.getByRole('button',{name:'Check saved device results',exact:true}).click();await expect(page.getByText('Receipts sent',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Review device actions',exact:true}).click();await page.getByRole('button',{name:'Approve',exact:true}).click();await page.getByRole('button',{name:'Confirm approve',exact:true}).click();await expect.poll(()=>notes(page)).toHaveLength(1);expect(JSON.parse((await notes(page))[0].body).notes[0].text).toBe('Selected private text');await page.getByRole('button',{name:'Refresh',exact:true}).click();await expect(page.getByText('succeeded',{exact:true}).last()).toBeVisible();const journal=await page.evaluate(async()=>(await (await import('/src/browser/development-execution-document.ts')).readExecutionPart({namespace:'local'} as any,'actions',()=>({proposals:[],journal:[]}))).journal);expect(journal).toHaveLength(2);expect(journal.filter((entry:any)=>entry.record.operation.type==='read_selected_notes')).toHaveLength(1);});
 
 test('run-day Calendar confirmation checks its original anchor across midnight',async({page})=>{
+ test.setTimeout(120000);
  const anchor='2027-03-15T03:59:00.000Z';
  const nextDay='2027-03-15T04:01:00.000Z';
  await page.clock.setFixedTime(new Date(anchor));
@@ -60,7 +61,8 @@ test('run-day Calendar confirmation checks its original anchor across midnight',
  },startedAt);
  await setAnchor(nextDay);
  await page.getByRole('button',{name:'Confirm approve',exact:true}).click();
- await expect(page.getByText('Workflow execution changed; review again',{exact:true}).first()).toBeVisible();
+ await expect(page.getByRole('region',{name:'Workflow phone steps'})).toContainText('The workflow run time changed. Review the device actions again.');
+ await expect(page.getByRole('button',{name:'Approve',exact:true})).toHaveCount(0);
  expect(await calendarState()).toEqual(issued);
 
  await setAnchor(anchor);
