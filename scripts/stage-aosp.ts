@@ -407,7 +407,8 @@ fs.appendFileSync(path.join(output, "product.mk"), clockProductRequirement);
 // The image system feature Alpha Phone requires, with a system-partition install, before it offers
 // Phone, Contacts or SMS (P-36). Every image declares it, but the app also requires a release
 // launcher and the provisioning overlay written below for production and admitted Sense qualification
-// images. Test-mocks APKs were refused above, and a sideloaded APK never has the
+// images, or the capability overlay alone for an --owner-telephony development image (release,
+// non-debuggable launcher admitted above). Test-mocks APKs were refused above, and a sideloaded APK never has the
 // system-partition install. The shared Pixel 10a composition declares it for every brand, so only
 // the Cuttlefish product writes it here.
 if (!physical) {

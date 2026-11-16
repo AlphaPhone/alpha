@@ -45,7 +45,7 @@ const roleComponents: readonly RoleComponent[] = [
 /** The staged add-on's provisioning directory, as the shared provisioning overlay defines it. */
 const LAUNCHER_PROVISIONING_DIR = 'launcher_provisioning_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/provisioning';
 
-const isTrue =(value: string | undefined) => value === 'true' || value === '0xffffffff';
+const isTrue = (value: string | undefined) => value === 'true' || value === '0xffffffff';
 const isFalse = (value: string | undefined) => value === 'false' || value === '0x0';
 
 function matchesFilter(filter: ManifestNode, required: RoleFilter) {
@@ -111,13 +111,17 @@ export function writeAospTelephonyRoleOverrides(output: string, xmltree: string,
     + '    </component-override>\n</config>\n';
   const productMakefile = path.join(output, 'product.mk');
   if (!fs.existsSync(productMakefile)) throw Error('Alpha telephony role defaults require a staged product.mk');
-  // Production images define launcher_provisioning_dir with the provisioning overlay, written first.
-  // An owner development image has no provisioning overlay, so the same output-relative directory
-  // is defined here; a product that already defines it keeps its makefile byte for byte.
-  const definesDir = /^launcher_provisioning_dir\s*:=/m.test(fs.readFileSync(productMakefile, 'utf8'));
+  // Production images define launcher_provisioning_dir with the provisioning overlay, written first;
+  // a product that already defines it keeps its makefile byte for byte. An owner development image
+  // has no provisioning overlay, so the output-relative directory is defined here, at the top of
+  // product.mk: a later `include` (such as a staged listener's listener.mk) changes
+  // $(lastword $(MAKEFILE_LIST)), so only the first line resolves to this product's own directory.
+  const product = fs.readFileSync(productMakefile, 'utf8');
+  const definesDir = /^launcher_provisioning_dir\s*:=/m.test(product);
   fs.mkdirSync(path.join(output, 'provisioning'), {recursive: true});
   fs.writeFileSync(path.join(output, 'provisioning', name), xml, {flag: 'wx'});
-  fs.appendFileSync(productMakefile, (definesDir ? '' : `\n${LAUNCHER_PROVISIONING_DIR}`)
-    + `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
+  if (!definesDir) fs.writeFileSync(productMakefile, `${LAUNCHER_PROVISIONING_DIR}\n${product}`);
+  fs.appendFileSync(productMakefile,
+    `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
   return components;
 }

@@ -275,9 +275,11 @@ receiver or every disabled SMS/Dialer role handler. It writes two things:
 
 - the `AlphaImageProvisioning` capability overlay;
 - the `system_ext` sysconfig `<component-override>`
-  (`provisioning/alpha-telephony-components.xml`). Package scan enables the
-  role handlers before RoleManager re-qualifies the SMS and Dialer holders, so
-  Alpha keeps its roles after an image update changes the fingerprint.
+  (`provisioning/alpha-telephony-components.xml`). The override is intended to
+  enable the role handlers at package scan, before RoleManager re-qualifies the
+  SMS and Dialer holders, so that Alpha keeps its roles after an image update
+  changes the fingerprint. Staging output is not evidence of an image boot or
+  of role retention; only a flashed image shows that.
 
 It writes no default HOME/Autofill provisioning overlay and no fresh-telephony
 Provision feature. It cannot be combined with an activated Sense image. Such an

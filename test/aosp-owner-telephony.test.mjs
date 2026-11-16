@@ -138,7 +138,9 @@ test('an owner development image gets the capability overlay and resolvable role
     assert.match(rro, new RegExp(`targetPackage="${pkg.replaceAll('.', '\\.')}" android:targetName="AlphaImageProvisioning"`));
     assert.match(fs.readFileSync(path.join(output, 'image-capabilities/res/values/capabilities.xml'), 'utf8'), /alpha_aosp_image_capability">true/);
     const makefile = fs.readFileSync(path.join(output, 'product.mk'), 'utf8');
-    assert.ok(makefile.startsWith('# Launcher overlay (development)\n'));
+    // The directory is defined first, before any later include can change $(lastword $(MAKEFILE_LIST)).
+    assert.ok(makefile.startsWith('launcher_provisioning_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/provisioning\n'
+      + '# Launcher overlay (development)\n'));
     assert.match(makefile, /PRODUCT_PACKAGES \+= AlphaImageCapabilityOverlay/);
     // No default HOME/Autofill overlay or fresh-telephony Provision feature.
     assert.deepEqual(fs.readdirSync(path.join(output, 'provisioning')), ['alpha-telephony-components.xml']);
@@ -148,6 +150,23 @@ test('an owner development image gets the capability overlay and resolvable role
     assert.deepEqual(rules.map(rule => rule.to), ['system_ext/etc/sysconfig/alpha-telephony-components.xml']);
     assert.equal(rules[0].from, path.join(output, 'provisioning/alpha-telephony-components.xml'));
     assert.ok(fs.existsSync(rules[0].from));
+  } finally { fs.rmSync(output, {recursive: true, force: true}); }
+});
+
+test('owner role overrides resolve to this product even after a staged development listener include', {skip: !hasMake && 'GNU make is unavailable'}, () => {
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-listener-'));
+  try {
+    // stageListener (vendor/eliza/packages/os/scripts/android/sense-listener.mjs) runs before the
+    // owner writer and appends this include; afterwards $(lastword $(MAKEFILE_LIST)) is listener.mk.
+    fs.mkdirSync(path.join(output, 'listener'));
+    fs.writeFileSync(path.join(output, 'listener/listener.mk'), 'sense_listener_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))\n');
+    fs.writeFileSync(path.join(output, 'product.mk'), '# Launcher overlay (development)\n'
+      + '\ninclude $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/listener/listener.mk\n');
+    writeOwnerImageTelephony(output, launcherTree(), pkg);
+    const [rule] = copyRules(output);
+    assert.equal(rule.to, 'system_ext/etc/sysconfig/alpha-telephony-components.xml');
+    assert.equal(rule.from, path.join(output, 'provisioning/alpha-telephony-components.xml'));
+    assert.ok(fs.existsSync(rule.from));
   } finally { fs.rmSync(output, {recursive: true, force: true}); }
 });
 
