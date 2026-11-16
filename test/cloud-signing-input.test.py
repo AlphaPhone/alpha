@@ -693,7 +693,7 @@ class CloudSigningInputTest(unittest.TestCase):
         for record in (self.verification, self.build, self.producer):
             record["runtimeProfile"] = "cloud"
         for row in self.verification["results"]:
-            row["packageName"] = "ai.alphacompute.alphaphone"
+            row["packageName"] = "ai.elizaresearch.alphaphone"
         self.pin.update(producerKind=PRODUCER.PRIVATE_RUNNER, privateStorage={})
         private = {
             "schema": 1, "producerKind": PRODUCER.PRIVATE_RUNNER,

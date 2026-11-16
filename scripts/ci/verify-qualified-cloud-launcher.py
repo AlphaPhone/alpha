@@ -82,7 +82,7 @@ def unsigned_release(manifest, plan):
         require(row["file"] == f"artifacts/{variant}-release-unsigned.apk" and
                 row["sha256"] == plan["unsignedApkSHA256"][variant] and row["signed"] is False and
                 row["signerSha256"] is None and row["distributable"] is False and
-                row["versionCode"] == plan["versionCode"] and row["packageName"] == "ai.alphacompute.alphaphone" and
+                row["versionCode"] == plan["versionCode"] and row["packageName"] == "ai.elizaresearch.alphaphone" and
                 row["runtimeProfile"] == "cloud" and row["updateChannel"] == plan["updateChannel"] and
                 row["testMocks"] is False and row["debuggable"] is False and row["home"] is (variant == "launcher") and
                 row["launcher"] is True and row["webPayload"] is True and row["runtime"] == "PACKAGED" and
@@ -120,7 +120,7 @@ def verify_signature(record, plan, work, signed, descriptor, *, run=subprocess.r
     command = [str(Path(os.environ["JAVA_HOME"]) / "bin/java"), "-cp", str(jar),
                str(ROOT / "scripts/owner/VerifyApkRotation.java"), "--signed-output", str(signed), str(lineage),
                record["signedApkSHA256"]["launcher"], rotation["lineageSha256"], rotation["previousSignerSha256"],
-               descriptor["signerSha256"], "ai.alphacompute.alphaphone", "29", "37"]
+               descriptor["signerSha256"], "ai.elizaresearch.alphaphone", "29", "37"]
     if rotation.get("preserveSignaturePermissions") is True:
         command.append("--preserve-signature-permissions")
     result = run(command, check=True, capture_output=True, timeout=120)

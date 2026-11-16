@@ -51,8 +51,8 @@ def reviewed_private_producer(plan, descriptor):
 def approved_launcher_rotation(plan, descriptor):
     """Refuse missing/changed launcher migration before any signing key access."""
     contract = input_contract(plan)
-    require((contract["runtimeProfile"] == "cloud" or contract["packageName"] == RETAINED_PACKAGE) and
-            reviewed_private_producer(plan, descriptor), "Unreviewed private launcher rotation")
+    require(contract["packageName"] == RETAINED_PACKAGE and
+            reviewed_private_producer(plan, descriptor), "Unreviewed retained installation producer")
     rotation, supplied = descriptor.get("apkSigningRotation"), plan.get("rotation")
     require(isinstance(rotation, dict) and rotation.get("schema") == 1 and rotation.get("approval") == "approved" and
             rotation.get("versionCode") == plan["versionCode"] and

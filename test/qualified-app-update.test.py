@@ -139,7 +139,7 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.producer.verification["results"].append(release)
         for row in self.producer.verification["results"]:
             if row["mode"] == "release":
-                row["packageName"] = "ai.alphacompute.alphaphone"
+                row["packageName"] = "ai.elizaresearch.alphaphone"
         for record in (self.producer.verification, self.producer.build, self.producer.producer):
             record["runtimeProfile"] = "cloud"
         debug = {variant + "-debug.apk": (variant + " debug fixture").encode() for variant in ("standalone", "launcher")}
@@ -303,7 +303,7 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.assertEqual(calls[0], [str(tools / "zipalign"), "-c", "-P", "16", "4", str(self.signed_tar)])
         self.assertEqual(calls[1][1:4], ["-cp", str(jar), str(ROOT / "scripts/owner/VerifyApkRotation.java")])
         self.assertIn("--signed-output", calls[1])
-        self.assertEqual(calls[1][-4:], ["ai.alphacompute.alphaphone", "29", "37", "--preserve-signature-permissions"])
+        self.assertEqual(calls[1][-4:], ["ai.elizaresearch.alphaphone", "29", "37", "--preserve-signature-permissions"])
         self.assertIn(self.record["signedApkSHA256"]["launcher"], calls[1])
         self.assertIn(descriptor["signerSha256"], calls[1])
         calls.clear()

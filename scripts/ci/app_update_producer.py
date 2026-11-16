@@ -81,10 +81,10 @@ def input_contract(plan):
     pins = plan.get("unsignedApkSHA256")
     require(isinstance(pins, dict), "Missing unsigned APK pins")
     if kind == PRIVATE_RUNNER and set(pins) == {"standalone", "launcher"}:
-        require(plan.get("applicationId", CANDIDATE_PACKAGE) == CANDIDATE_PACKAGE,
-                "Historical Cloud pair requires its canonical identity")
+        require(plan.get("applicationId", RETAINED_PACKAGE) == RETAINED_PACKAGE,
+                "Historical Cloud pair requires its retained identity")
         return {"variants": ("standalone", "launcher"), "runtimeProfile": "cloud",
-                "packageName": CANDIDATE_PACKAGE}
+                "packageName": RETAINED_PACKAGE}
     require(set(pins) == {"launcher"}, "Unexpected release variants")
     package = plan.get("applicationId", CANDIDATE_PACKAGE)
     require(package == CANDIDATE_PACKAGE or

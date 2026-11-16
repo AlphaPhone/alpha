@@ -257,8 +257,9 @@ candidate, signed release and physical acceptance receipts with their exact buil
 
 `scripts/deliver-app-update.ts` publishes an admitted signed launcher APK and
 checks anonymous readback. Merging source does not publish an application update.
-New builds use only `ai.alphacompute.alphaphone`. A device with the former
-package needs a separate installation with its own private data.
+Canonical builds use `ai.alphacompute.alphaphone`. An update for an existing
+`ai.elizaresearch.alphaphone` installation uses the declared compatibility identity
+described above, the existing signer lineage and retained-data qualification.
 The canonical package reads the `app-stable-alphacompute` release. The publisher
 still checks the version floor from `app-stable`. Android may require
 installation confirmation.
@@ -356,8 +357,9 @@ as the `plan` input. Preflight checks the official Actions ZIP. The protected
 job checks the same run attempt and artifact again, then stages the pinned
 private generation before accessing the signing key. Current builds produce one
 native launcher APK on the public update channel. The private signing contract
-also requires the canonical package. Archives built for the former package are
-ineligible for a new signed release. Release tooling also retains
+accepts the canonical package or an explicitly approved retained-installation
+update. The latter must bind its installed identity and purpose to the exact
+reviewed producer bytes. Release tooling also retains
 the reviewed private Cloud producer input contract: its complete original standalone
 and launcher pair must match the approved hashes, Cloud profile and historical
 package identity. Both members are authenticated archive inputs; only the launcher
