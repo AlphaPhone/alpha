@@ -82,7 +82,7 @@ def unsigned_release(manifest, plan):
         require(row["file"] == f"artifacts/{variant}-release-unsigned.apk" and
                 row["sha256"] == plan["unsignedApkSHA256"][variant] and row["signed"] is False and
                 row["signerSha256"] is None and row["distributable"] is False and
-                row["versionCode"] == plan["versionCode"] and row["packageName"] == "ai.elizaresearch.alphaphone" and
+                row["versionCode"] == plan["versionCode"] and row["packageName"] == "ai.alphacompute.alphaphone" and
                 row["runtimeProfile"] == "cloud" and row["updateChannel"] == plan["updateChannel"] and
                 row["testMocks"] is False and row["debuggable"] is False and row["home"] is (variant == "launcher") and
                 row["launcher"] is True and row["webPayload"] is True and row["runtime"] == "PACKAGED" and
@@ -103,7 +103,7 @@ def verify_signature(record, plan, work, signed, descriptor, *, run=subprocess.r
     require(rotation["approval"] == "approved" and rotation["versionCode"] == plan["versionCode"] and
             rotation["unsignedApkSHA256"] == {"launcher": plan["unsignedApkSHA256"]["launcher"]},
             "Rotation must approve only this launcher output")
-    raw_lineage = QUALIFIED.PRODUCER.approved_retained_rotation(plan, descriptor)
+    raw_lineage = QUALIFIED.PRODUCER.approved_launcher_rotation(plan, descriptor)
     with QUALIFIED.signed_bundle(work / "signed.tar", record["signedBundle"], plan,
                                  QUALIFIED.read_bounded(work / "signing-plan.json", QUALIFIED.PLAN_LIMIT)) as (archive, entries, _):
         require(archive.extractfile(entries["rotation.lineage"]).read(65537) == raw_lineage and
@@ -120,7 +120,7 @@ def verify_signature(record, plan, work, signed, descriptor, *, run=subprocess.r
     command = [str(Path(os.environ["JAVA_HOME"]) / "bin/java"), "-cp", str(jar),
                str(ROOT / "scripts/owner/VerifyApkRotation.java"), "--signed-output", str(signed), str(lineage),
                record["signedApkSHA256"]["launcher"], rotation["lineageSha256"], rotation["previousSignerSha256"],
-               descriptor["signerSha256"], "ai.elizaresearch.alphaphone", "29", "37"]
+               descriptor["signerSha256"], "ai.alphacompute.alphaphone", "29", "37"]
     if rotation.get("preserveSignaturePermissions") is True:
         command.append("--preserve-signature-permissions")
     result = run(command, check=True, capture_output=True, timeout=120)
@@ -136,7 +136,7 @@ def verify(record, work, product, *, run=subprocess.run):
     require(input_contract(plan)["runtimeProfile"] == "cloud" and
             QUALIFIED.PRODUCER.reviewed_private_producer(plan, QUALIFIED.decode((ROOT / "android/release-signer.json").read_bytes())),
             "Exact approved retained Cloud input required")
-    QUALIFIED.PRODUCER.approved_retained_rotation(plan, QUALIFIED.decode((ROOT / "android/release-signer.json").read_bytes()))
+    QUALIFIED.PRODUCER.approved_launcher_rotation(plan, QUALIFIED.decode((ROOT / "android/release-signer.json").read_bytes()))
     require(QUALIFIED.read_bounded(work / "signing-plan.json", QUALIFIED.PLAN_LIMIT) == plan_bytes,
             "Staged signing plan differs")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=product, text=True).strip()

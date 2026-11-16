@@ -28,7 +28,7 @@ and build-tools 36.0.0. Set
 `JAVA_HOME` and `ANDROID_HOME`; standard macOS SDK/JDK locations are also detected.
 
 ```sh
-git clone --recurse-submodules https://github.com/eliza-research/alpha.git
+git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url)"
 cd alpha
 bun install --frozen-lockfile
 bun run verify
@@ -257,14 +257,20 @@ candidate, signed release and physical acceptance receipts with their exact buil
 
 `scripts/deliver-app-update.ts` publishes an admitted signed launcher APK and
 checks anonymous readback. Merging source does not publish an application update.
-New builds read the `app-stable-alphacompute` release. The previous package
-reads `app-stable`. Publication keeps each package on its own release and
-checks retained versions on both. Android may require installation confirmation.
-New builds use the live `eliza-research/alpha` URL. Previously issued
-`eliza-research/alphaphone` GitHub release URLs use its redirect.
-Protected release jobs check the immutable repository and owner IDs and bind
-dispatches to the reviewed commit on `main`. The
-release owner applies the reviewed workflow reference allowlist in
+New builds use only `ai.alphacompute.alphaphone`. A device with the former
+package needs a separate installation with its own private data.
+The canonical package reads the `app-stable-alphacompute` release. The publisher
+still checks the version floor from `app-stable`. Android may require
+installation confirmation.
+
+The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
+available there before distribution. Verify anonymous readback of the app
+manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
+release pointers may need their APK URLs updated to the canonical repository.
+
+Protected release jobs bind dispatches to the reviewed commit on `main`.
+After the repository moves, the release owner applies the repository ID,
+Alpha Compute owner ID and workflow reference allowlist in
 [`scripts/ci/private-artifact-identity.json`](../scripts/ci/private-artifact-identity.json)
 to the existing Workload Identity Federation provider before protected signing
 or publication uses private artifact storage.
@@ -349,7 +355,9 @@ operation `sign`, the exact reviewed `workflow_commit` and `signing-plan.json`
 as the `plan` input. Preflight checks the official Actions ZIP. The protected
 job checks the same run attempt and artifact again, then stages the pinned
 private generation before accessing the signing key. Current builds produce one
-native launcher APK on the public update channel. Release tooling also retains
+native launcher APK on the public update channel. The private signing contract
+also requires the canonical package. Archives built for the former package are
+ineligible for a new signed release. Release tooling also retains
 the reviewed private Cloud producer input contract: its complete original standalone
 and launcher pair must match the approved hashes, Cloud profile and historical
 package identity. Both members are authenticated archive inputs; only the launcher
@@ -362,7 +370,7 @@ For publication, set `delivery_artifact_id` to the numeric ID of the original
 Save its ZIP.
 
 ```sh
-gh api "repos/eliza-research/alpha/actions/artifacts/$delivery_artifact_id/zip" > delivery.zip
+gh api "repositories/1396333361/actions/artifacts/$delivery_artifact_id/zip" > delivery.zip
 ```
 
 Read `private-storage-receipt.json` from the ZIP and confirm its
@@ -428,7 +436,7 @@ signed `launcher-release.apk`. If you download the public APK asset, save it
 under that filename. For the baked launcher, use the post-signing manifest for
 the exact APK in the image. Both wireless captures verify the installed bytes
 against the reviewed `android/release-signer.json` policy, including for
-versions already recorded as released. The [wireless drill](https://github.com/eliza-research/alpha/issues/889)
+versions already recorded as released. The [wireless drill](https://github.com/alphacompute/alpha/issues/889)
 requires Android 14 or later for package installer provenance. Keep the phone
 offline from baseline installation through HOME selection, any one-time Android
 installation permission, and the `before` capture. Keep the host online and
@@ -666,7 +674,7 @@ probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
 The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
 Shell from browser-based Google sign-in and checks for an eligible browser
 when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
-The candidate pin `aee57131613d6758dbe007e53cdb791f109bdb1c` adds the reviewed MIME preflight, private-action restoration and native-media repairs. Files adds its Core workspace binding; the engine, voice assets and UUID inputs are unchanged. Full corrected-source model qualification is in progress. New native receipts and signed retained-data qualification remain required.
+The reviewed pin `aee57131613d6758dbe007e53cdb791f109bdb1c` includes MMS role eligibility ([eliza#39686](https://github.com/elizaOS/eliza/pull/39686)), private action target restoration ([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)), and shared media intake ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)). The engine, voice assets and UUID inputs are unchanged. Native receipts and signed retained-data qualification remain separate.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

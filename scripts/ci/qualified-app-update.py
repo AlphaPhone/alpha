@@ -26,7 +26,7 @@ import zipfile
 from app_update_producer import HOSTED_DISPATCH, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
 
 ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY = "eliza-research/alpha"
+REPOSITORY = "alphacompute/alpha"
 REPOSITORY_ID = 1396333361
 SIGNING_WORKFLOW = ".github/workflows/release.yml"
 HEX = re.compile(r"[0-9a-f]{64}")
@@ -196,7 +196,7 @@ def check_signing_run(record, plan, workflow_commit, api):
             run.get("display_title") == f"Release sign on {record['signingWorkflowCommit']}" and
             run.get("event") == "workflow_dispatch" and run.get("head_branch") == "main" and
             run.get("head_sha") == record["signingWorkflowCommit"] and
-            all(repo.get("id") == REPOSITORY_ID and repo.get("full_name") == REPOSITORY for repo in repos) and
+            all(repo.get("id") == REPOSITORY_ID and str(repo.get("full_name")).lower() == REPOSITORY for repo in repos) and
             run.get("path") == SIGNING_WORKFLOW and
             run.get("run_attempt") == record["signingRunAttempt"], "Signing run identity differs")
 
@@ -433,7 +433,7 @@ def main():
     require(args.record.is_file() and not args.record.is_symlink() and args.record.stat().st_size <= 131072, "Bounded regular qualification record required")
     record_bytes = args.record.read_bytes()
     record = decode(record_bytes)
-    require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY and
+    require(os.environ.get("GITHUB_REPOSITORY", "").lower() == REPOSITORY and
             os.environ.get("GITHUB_REPOSITORY_ID") == str(REPOSITORY_ID) and
             os.environ.get("GITHUB_REF") == "refs/heads/main" and
             os.environ.get("GITHUB_SHA") == args.workflow_commit, "Publication runs only on exact reviewed Alpha main")

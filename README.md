@@ -34,7 +34,7 @@ Alpha is a personal AI agent that lives on the phone itself. Tap **Ask Alpha**, 
 ## Quickstart
 
 ```bash
-git clone --recurse-submodules https://github.com/eliza-research/alpha.git
+git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url)"
 ```
 
 ```bash
