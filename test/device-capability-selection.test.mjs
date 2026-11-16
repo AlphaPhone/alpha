@@ -42,3 +42,12 @@ test('the agent must offer a capability, and platform gates still apply', () => 
   assert.ok(image.includes('sms.send.v1'));
   assert.ok(image.includes('phone.dial.v1'));
 });
+
+test('Photos view operations are negotiated with the device photo library and never without it', () => {
+  const photos = ['photos.library.v1', 'photos.view.v1'];
+  const library = {...apk, photoLibrary: true};
+  assert.deepEqual(selectDeviceCapabilities(photos, library).filter(capability => capability.startsWith('photos.')), photos);
+  assert.deepEqual(selectDeviceCapabilities(['photos.library.v1'], library).filter(capability => capability.startsWith('photos.')), ['photos.library.v1']);
+  for (const [name, offered, profile] of [['no library plugin', photos, apk], ['browser', photos, {...browser, photoLibrary: true}], ['view without library', ['photos.view.v1'], library]])
+    assert.ok(!selectDeviceCapabilities(offered, profile).includes('photos.view.v1'), name);
+});

@@ -150,7 +150,8 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
   // The device photo library is offered only where the native Photos plugin exists and the agent offers it.
-  if(agent.includes('photos.library.v1')&&native&&profile.photoLibrary)capabilities.push('photos.library.v1');
+  // photos.view.v1 (filter, open, album, share on the Photos grid) requires photos.library.v1.
+  if(agent.includes('photos.library.v1')&&native&&profile.photoLibrary){capabilities.push('photos.library.v1');if(agent.includes('photos.view.v1'))capabilities.push('photos.view.v1');}
   if((android||!native)&&profile.foregroundReview&&agent.includes('calendar.named-read.v1'))capabilities.push('calendar.named-read.v1');
   // One shared external-handoff policy for every brand: never clock.alarms.v1 (P-17).
   capabilities.push(...clockHandoffCapabilities({offered:agent,handler:android,repeatDays:android&&agent.includes('clock.handoff.v2')&&profile.clockRepeatDays}));
