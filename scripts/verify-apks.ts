@@ -19,7 +19,8 @@ import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './an
  * statement in licenses/font-licenses.json (the Denton typeface), `items` lists
  * fonts with no record. Unresolved items are copied to `licenceBlockers` and keep
  * a release distributable:false only while
- * UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION (scripts/licence-policy.ts) is true.
+ * UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION (scripts/licence-policy.ts) is true. A font check
+ * that could not run always keeps the release distributable:false and is printed as a blocker.
  * App Links: each row records `appLinks` ({present, hosts}), the https autoVerify filters in
  * the packaged manifest: the configured production web host.
  * Every http/https VIEW filter in the merged manifest must be in an exact allowed set
@@ -44,7 +45,7 @@ import { androidEnv, tool } from "./toolchain.ts";
 import { readApkEntries } from "../vendor/eliza/packages/app/scripts/mobile/artifact-inspection/apk-distribution.mjs";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
 import { BUN_ENTRY } from "./generate-licenses.ts";
-import { fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
+import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
 import { licenceFlagLines, licenceFlagRecords } from "./licence-policy.ts";
 import { packagedGzipProblems } from "./android-gzip-assets.ts";
 import { appLinkFilters, requiredAppLinkProblems, webViewFilterProblems } from "./render-assetlinks.ts";
@@ -203,9 +204,11 @@ for (const mode of modes) {
     // the bundled agent/worker packages); the committed notices carry only the umbrella entry.
     let runtimeNotices = false;
     // The font check is recorded in full; only its `blockers` (policy constant) affect distributable.
+    // A check that could not run has no result: it is recorded and printed as blocking under
+    // either policy, and releaseBlockers blocks its item.
     let fontCheck: ReturnType<typeof fontLicenceCheck>;
     try { fontCheck = fontLicenceCheck(payload.public); }
-    catch (error) { const items = [`font licence check failed: ${message(error)}`]; fontCheck = { ...fontLicenceCheck(path.join(payload.root, "absent")), status: "unresolved", items, blockers: items }; }
+    catch (error) { const items = [fontCheckFailedItem(message(error))]; fontCheck = { ...fontLicenceCheck(path.join(payload.root, "absent")), status: "unresolved", blocksDistribution: true, items, blockers: items }; }
     const licenceBlockers = fontCheck.blockers;
     // Flags are a record of the packaged notices. They are never a blocker.
     let licenceFlags: ReturnType<typeof licenceFlagRecords> = [];

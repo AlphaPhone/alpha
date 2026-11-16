@@ -9,6 +9,7 @@ import { auditWebBundle } from "../scripts/audit-production-bundle.ts";
 import { appLinkFilters, assetLinksProblems, fingerprint, PLACEHOLDER, renderAssetLinks, TEMPLATE } from "../scripts/render-assetlinks.ts";
 import { buildEnv, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
 import { releaseBlockers } from "../scripts/release-blockers.ts";
+import { fontCheckFailedItem, fontLicenceLine } from "../scripts/font-license-blockers.ts";
 import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
 
 const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZAOS_KEY_ALIAS: "a", ELIZAOS_KEY_PASSWORD: "q" };
@@ -61,15 +62,19 @@ test("only a release signed by the recorded signer with an advancing versionCode
 // Every fact verify-apks records on a distributable native release row; each case below breaks one.
 // verify-apks records distributable = releaseBlockers(row) is empty (scripts/release-blockers.ts).
 const SHA = "b".repeat(64);
+// verify-apks copies `qualified` from the committed voice-host record, which is still pending device
+// qualification; the fixture carries the same value so the gate is exercised as real rows reach it.
+const COMMITTED_VOICE_QUALIFIED = JSON.parse(fs.readFileSync(new URL("../android/voice-host/qualified-voice-host.json", import.meta.url), "utf8")).qualified;
 const DISTRIBUTABLE = {
   mode: "release", sha256: SHA, runtimeProfile: "native", distributable: true, testMocks: false, bundleAudit: "passed", signed: true,
   releaseAdmission: { signerMatches: true, blockers: [], failures: [] }, runtime: "PACKAGED", runtimeNotices: true,
-  voiceHost: { packaged: true, asr: true, differences: [], qualified: true }, licenceBlockers: [],
+  voiceHost: { packaged: true, asr: true, differences: [], qualified: COMMITTED_VOICE_QUALIFIED }, licenceBlockers: [],
 };
 
 test("a release is distributable only when releaseBlockers names nothing", () => {
   assert.deepEqual(releaseBlockers(DISTRIBUTABLE), []);
-  assert.deepEqual(releaseBlockers({...DISTRIBUTABLE, voiceHost: {...DISTRIBUTABLE.voiceHost, qualified: false}}), [], "device approval flags are separate from build integrity");
+  for (const qualified of [true, false])
+    assert.deepEqual(releaseBlockers({...DISTRIBUTABLE, voiceHost: {...DISTRIBUTABLE.voiceHost, qualified}}), [], "device approval flags are separate from build integrity");
   const broken = {
     "unsigned": [{ signed: false }, /unsigned release/],
     "signed is not exactly true": [{ signed: "true" }, /unsigned release/],
@@ -85,12 +90,31 @@ test("a release is distributable only when releaseBlockers names nothing", () =>
     "test mocks": [{ testMocks: true }, /test-mocks build/],
     "bundle audit failed": [{ bundleAudit: "failed" }, /flag-off bundle audit/],
     "licence check not recorded": [{ licenceBlockers: undefined }, /font licence check was not recorded/],
+    // verify-apks records a font check that threw as this item; an unknown result never admits a release.
+    "licence check failed to run": [{ licenceBlockers: [fontCheckFailedItem("EIO")] }, /^font licence check failed: EIO$/],
   };
   for (const [name, [change, expected]] of Object.entries(broken))
     assert.match(releaseBlockers({ ...DISTRIBUTABLE, ...change }).join("\n"), expected, name);
-  // A recorded row that verify-apks did not mark distributable is never admitted.
-  assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false }), ["verify-apks did not record this release as distributable"]);
-  assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false, voiceHost: { ...DISTRIBUTABLE.voiceHost, asr: false } }), ["on-device voice has no ASR"]);
+  // A recorded row that verify-apks did not mark distributable is never admitted, whether or not the
+  // voice host's device qualification (not a build gate) is still pending.
+  for (const qualified of [true, false]) {
+    const voiceHost = { ...DISTRIBUTABLE.voiceHost, qualified };
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, voiceHost, distributable: false }), ["verify-apks did not record this release as distributable"], `qualified ${qualified}`);
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false, voiceHost: { ...voiceHost, asr: false } }), ["on-device voice has no ASR"]);
+  }
+  // A failed font check blocks under either licence policy; an unresolved font only under the blocking one.
+  // verify-apks records the failure with the same fontCheckFailedItem and blocksDistribution true,
+  // so it also prints as a release blocker.
+  const failed = fontCheckFailedItem("EIO");
+  assert.match(fontLicenceLine(failed, true), /^RELEASE BLOCKER /);
+  // verify-apks builds that item only through the shared helper, recorded as blocking.
+  const verifier = fs.readFileSync(new URL("../scripts/verify-apks.ts", import.meta.url), "utf8");
+  assert.match(verifier, /catch \(error\) \{ const items = \[fontCheckFailedItem\(message\(error\)\)\]; fontCheck = \{[^}]*blocksDistribution: true, items, blockers: items \}/);
+  assert.doesNotMatch(verifier, /font licence check failed/, "the failure text lives only in font-license-blockers.ts");
+  for (const fontLicenceBlocks of [true, false]) {
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: [failed] }, { fontLicenceBlocks }), [failed]);
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: ["unresolved-font-licence: x"] }, { fontLicenceBlocks }), fontLicenceBlocks ? ["unresolved-font-licence: x"] : []);
+  }
   // The image path also requires a reviewed platform certificate.
   assert.match(releaseBlockers(DISTRIBUTABLE, { image: { platformCertificateSha256: "unset" } }).join(), /not a reviewed release certificate/);
 });
