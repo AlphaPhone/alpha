@@ -11,6 +11,7 @@
 import {proposalCanAct, setOpenSuggestionSource, type CommsBarSpec, type CommsProposal, type OpenSuggestionInput} from '../runtime/comms-bar';
 import {alphaProposalStore, parseProposalRecord, type AlphaProposalRecord, type StoredProposal} from '../runtime/alpha-proposal-store';
 import {isMvpView} from './mvp-features';
+import {testMocksEnabled} from '../build-flags';
 
 type Shell = any;
 
@@ -143,7 +144,8 @@ export function installCommsAlpha(Component: Shell, views: Shell) {
 			out.talkVisible = false;
 			out.alphaDictate = {label: 'Dictate a request to ' + (out.name || 'Alpha'), run: () => {
 				if (typeof this.startTranscription === 'function') this.startTranscription();
-				else this.toast?.('Voice input is not connected');
+				// The development notice is a test-mocks string; production builds never carry it.
+				else if (testMocksEnabled) this.toast?.('Voice input is not connected');
 			}};
 		}
 		// AC-19: during an emergency call no acting proposal shows its button, including cards made
