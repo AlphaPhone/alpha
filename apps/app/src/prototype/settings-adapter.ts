@@ -1133,7 +1133,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         const crossState:[string,string]=typeof cross.accessGranted!=='boolean'?['Unavailable','off']:!cross.enabled?['Off','off']:cross.paused?['Paused','warn']:!cross.accessGranted?['No access','err']:!cross.connected?['Waiting','warn']:['On','ok'];
         const crossRows:Bag[]=showCrossAppNotifications&&!cross.revision ? [{...info('Other apps',crossState[0]),hasDot:true,dot:crossState[1],hasSub:true,sub:'Not shared with agent'}] : [];
         if(showCrossAppNotifications && cross.revision){
-          crossRows.push(toggleRow('Other apps',cross.enabled?'Turn off other-app collection':'Enable selected-app collection',!!cross.enabled,async()=>{
+          crossRows.push(toggleRow('Other apps',cross.enabled?'Stop reading notifications from other apps':'Read notifications from other apps',!!cross.enabled,async()=>{
             if(Capacitor.isNativePlatform()&&!cross.enabled&&!await review('notification-collection','Collect selected-app notifications?','Reads selected apps only.','Turn on',()=>cross.revision===policyRevision))return;
             policy({enabled:!cross.enabled});
           },{hasSub:true,sub:'Not shared with agent',hasBadge:crossState[0]!=='On'&&crossState[0]!=='Off',badge:crossState[0]}),{...custom('Android access',()=>void run(async()=>{await notifications.openNotificationAccess();})),lbl:Capacitor.isNativePlatform()?'Manage notification access in Android':'Manage development notification access',hasExt:!notificationBusy,chev:false});
