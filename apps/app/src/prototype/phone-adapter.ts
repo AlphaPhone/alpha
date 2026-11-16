@@ -225,7 +225,8 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  views.phone.suggestions=()=>[];
  views.phone.status=()=>undefined;
  /* AP-16 bar. Recents, Keypad and Voicemail only: on the image the system call screen owns calls and
-    ringing, and the WebView is told nothing about them (the call-state contract is upstream). */
+    ringing. The WebView learns only whether a call is live and whether it may be an emergency call
+    (runtime/call-state.ts, AlphaCallState), which holds AC-19 shell-wide; this bar draws no call. */
  views.phone.bar=():CommsBarSpec=>{
   const now=Date.now(),missed=calls.filter(entry=>entry.isNew&&callKind(entry.type)==='missed').map(entry=>({name:who(entry),date:entry.date}));
   return {target:{kind:'recents',app:'Phone',name:null,first:null,initials:null},

@@ -128,7 +128,7 @@ export function installPrototypeNativeAdapters(
       left: spec.left && { ...spec.left, run: off(spec.left.run) },
       strip: spec.strip && { ...spec.strip, actions: (spec.strip.actions || []).map((action: Bag) => ({ ...action, run: unavailable(api) })) },
       end: off(spec.end),
-      incoming: spec.incoming && { answer: unavailable(api), decline: unavailable(api), screen: off(spec.incoming.screen) },
+      incoming: spec.incoming && { id: spec.incoming.id, answer: unavailable(api), decline: unavailable(api), screen: off(spec.incoming.screen) },
     };
   };
   async function perform(module: string, api: Bag, action: Action, payload: Bag = {}) {

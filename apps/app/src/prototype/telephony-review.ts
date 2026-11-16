@@ -55,16 +55,15 @@ export function presentTelephonyReview(entry: Pending | null) {
 type Review = ReturnType<typeof presentTelephonyReview>;
 type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; cProposal?: boolean; cDigest?: boolean; [key: string]: unknown};
 /**
- * Puts an open review into the chat card being approved (`approving` is its proposal id), or, when
- * that card is not in the transcript window, into the newest card that carries a proposal. A
- * proposal card shows the rows instead of its button; an action digest shows them as its rows.
- * Null when no card can show it: the caller then dismisses the review, so nothing is chosen unseen.
+ * Puts an open review into the chat card being approved (`approving` is its proposal id): a proposal
+ * card that is still open shows the rows instead of its button; an action digest shows them as its
+ * rows. Null when that card is not shown, or was replaced (AC-26): the caller then dismisses the
+ * review, so nothing is chosen unseen and no other proposal's card carries it.
  */
 export function placeTelephonyReview(msgs: Row[], review: Review, approving: unknown): Row[] | null {
   if (!review.open) return msgs;
-  const carries = (m: Row) => !!m.c && typeof m.c.proposalId === 'string' && !!(m.cProposal || m.cDigest);
-  let at = msgs.findIndex(m => carries(m) && m.c!.proposalId === approving);
-  if (at < 0) at = msgs.map(carries).lastIndexOf(true);
+  const carries = (m: Row) => !!m.c && typeof m.c.proposalId === 'string' && m.c.proposalId === approving && !!(m.cDigest || m.cProposal && m.c.state === 'open');
+  const at = msgs.findIndex(carries);
   if (at < 0) return null;
   return msgs.map((m, index) => {
     if (index !== at) return m;

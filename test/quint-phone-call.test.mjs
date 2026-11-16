@@ -16,6 +16,8 @@ import {readFileSync} from 'node:fs';
 import {modelTraces, replay} from '../specs/quint/refinement/application/shell-model-traces.mjs';
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
 import {tsImport} from './support/ts-import.mjs';
+const commsBar = await tsImport(new URL('../apps/app/src/runtime/comms-bar.ts', import.meta.url).pathname, import.meta.url);
+const telephonyPresenters = await tsImport(new URL('../apps/app/src/prototype/telephony-presenters.ts', import.meta.url).pathname, import.meta.url);
 
 // PhoneCall traces from the simulator, replayed on the development Phone fixture itself: the
 // module-level call latch, pnStart/pnEnd/pnDecline and the registered view's render, back,
@@ -31,26 +33,29 @@ const phoneSource = model.slice(from, to);
 // The shell's own test for a tap that ends a gesture.
 const swallowed = model.match(/\n  swallowed\(\) \{ (return [^\n]+;) \}\n/);
 assert.ok(swallowed, 'the shell swallowed() source');
-// The render registers the Recents list filter and filters rows by the bar's query (AC-22): the
-// real comms-bar registry and call-query matcher the view imports.
-const {setListFilterHandler, clearListFilter} = await tsImport('../apps/app/src/runtime/comms-bar.ts', import.meta.url);
-const {matchesCallQuery} = await tsImport('../apps/app/src/prototype/telephony-presenters.ts', import.meta.url);
+// AP-16: the owner's tap on a proposal card (Component.cardAct), outside the shell core's range.
+const cardActFrom = model.indexOf('\n  cardAct(m) {'), cardActTo = model.indexOf('\n  startVoice() {', cardActFrom);
+assert.ok(cardActFrom >= 0 && cardActTo > cardActFrom, 'the shell cardAct() source');
+const cardAct = model.slice(cardActFrom, cardActTo);
 const PEOPLE = [{id: 'ada', name: 'Ada Lovelace', first: 'Ada', ini: 'AL', phone: '(415) 555-0101'}];
 const SEEDS = [{id: 's1', pid: 'ada', num: '', dir: 'out', ago: 5}, {id: 's2', pid: null, num: '555', dir: 'out', ago: 9}];
 
 function fixture() {
   const views = {contacts: {state: {list: null}}};
   const core = shellCore({views, globals: {
+    ...commsBar,
+    ...telephonyPresenters,
+    testMocksEnabled: true,
     registerView: (key, definition) => { views[key] = definition; },
     PN_SCRIPT: {_: {lines: [], sum: ''}}, PN_REC: SEEDS, PN_VM: [], PN_SCREEN: [['alpha', 'One moment.']], PN_REPLIES: [],
     copy: () => ({presetPerson: 'ada'}), PEOPLE, person: id => PEOPLE.find(person => person.id === id) || null,
     formatTime: () => 'now', formatMonthDay: () => 'day', DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     pad2: value => String(value).padStart(2, '0'), crypto: {randomUUID},
-    setListFilterHandler, clearListFilter, matchesCallQuery,
-    // The development Phone fixture runs only behind test mocks; this replay is that fixture.
-    testMocksEnabled: true,
   }});
-  core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };`);
+  core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };\nObject.assign(Shell.prototype, {${cardAct}});`);
+  // After each committed update, as componentDidUpdate does: a closed chat ends the stage history
+  // (D11) and an emergency card lowers a full chat (AC-19).
+  core.Shell.prototype.componentDidUpdate = function () { this.settleStageSession(); this.keepEmergencyLayout(); };
   const {PN} = core.context, phone = views.phone;
   // One handler's patches settle together after it returns.
   let queue = null;
@@ -84,7 +89,7 @@ function fixture() {
       if (action === 'keypadCall') { act(() => shell.api('phone').set({dial: picks.hasDigit ? '555' : '*#'})); act(() => shown.dialCall()); }
       else if (action === 'callFrom') act(() => shown.recents.find(row => row.label === (picks.id === 'ada' ? 'Call Ada Lovelace' : 'Call 555')).call());
       else if (action === 'openCall') {
-        const patch = {...patchFor(picks.id), ...(picks.ret ? {ret: {view: 'contacts', patch: {open: 'ada'}}} : {})};
+        const patch = {...patchFor(picks.target ?? picks.id), ...(picks.ret ? {ret: {view: 'contacts', patch: {open: 'ada'}}} : {})};
         if (before.active) act(() => shell.openView('phone', patch));
         else { act(() => shell.openView('contacts', {keepState: true})); act(() => shell.api('contacts').open('phone', patch)); }
       }
@@ -100,6 +105,14 @@ function fixture() {
       else if (action === 'presetCall') act(() => shell.preset('phone:call'));
       else if (action === 'accept') act(() => shown.accept());
       else if (action === 'decline') act(() => shown.decline());
+      else if (action === 'propose') {
+        const target = patchFor(picks.target ?? picks.id);
+        act(() => shell.propose({id: 'call:' + randomUUID(), kind: 'call', title: 'Call', detail: '', button: 'Call', acts: true,
+          act: {mod: 'phone', fn: 'callApproved'}, args: {pid: target.call, num: target.num}}, 'Call?'));
+      }
+      else if (action === 'approve') act(() => shell.cardAct(shell.S().msgs.findLast(m => m.card?.type === 'proposal' && m.card.state === 'open')));
+      else if (action === 'resize') act(() => shell.setState({chat: {closed: 'input', open: 'sheet', full: 'full'}[picks.h]}));
+      else if (action === 'voiceTurn') act(() => shell.setState({voice: (picks.on ?? picks.hasDigit) ? 'listening' : 'off'}));
       else assert.fail(`unmapped action ${action}`);
     },
     observe() {
@@ -108,9 +121,27 @@ function fixture() {
       return {live: PN.live || '', want: core.context.pnWant(st) || '', callWho: st.callWho || '', bootFor: PN.boot || '', boot: core.pending(0),
         active: shell.S().view === 'phone', connected: !!st.liveAt, min: !!st.min, kp: !!st.kp, hold: !!st.hold,
         connecting: core.pending(2400), ticking: core.pending(1000, 'interval'), ret: st.ret ? st.ret.view : '',
-        incoming: !!st.incoming, ended: added.length - rings, ringRows: rings};
+        incoming: !!st.incoming, ended: added.length - rings, ringRows: rings,
+        proposal: (open => open ? (open.card.args.pid || '#' + open.card.args.num) : '')(shell.S().msgs.findLast(m => m.card?.type === 'proposal' && m.card.state === 'open')),
+        approvals: shell.S().msgs.filter(m => m.card?.type === 'proposal' && m.card.state === 'done').length,
+        chat: {input: 'closed', hidden: 'closed', sheet: 'open', full: 'full'}[shell.S().chat], voice: shell.S().voice !== 'off', staged: (shell.S().stageFrom || []).length,
+        // AC-18: where the shell draws End for Phone's own bar right now (comms-bar endPlacement).
+        endAt: shell.S().view === 'phone' ? commsBar.endPlacement(shell.commsSpec('phone'), shell.S().chat === 'hidden' ? 'input' : shell.S().chat, shell.S().voice !== 'off') : 'none'};
     },
   };
+}
+
+/** PhoneCall.qnt endAt over a trace state (the same definition, read off the state's fields). */
+function modelEndAt(s) {
+  const emergency = id => id === '#911', live = s.live !== '' && emergency(s.live);
+  const card = s.active && s.want !== '' && !s.min && !s.incoming && (emergency(s.want) || live);
+  const shown = card || (s.active && s.incoming && live);
+  const bar = s.active && (s.incoming ? s.live !== '' && s.callWho !== '' : s.want !== '' && !s.min);
+  if (!bar) return 'none';
+  if (s.voice) return 'voice';
+  if (s.chat === 'full') return shown ? 'none' : 'strip';
+  if (s.chat === 'open') return 'card';
+  return shown ? 'card' : 'bar';
 }
 
 test("partial source contract: simulated PhoneCall traces agree with the Phone fixture after every step", {timeout: scaledTimeout(180000)}, async () => {
@@ -119,10 +150,11 @@ test("partial source contract: simulated PhoneCall traces agree with the Phone f
     start: fixture,
     project: s => ({live: s.live, want: s.want, callWho: s.callWho, bootFor: s.bootFor, boot: s.bootTimers.length > 0, active: s.active, connected: s.connected,
       min: s.min, kp: s.kp, hold: s.hold, connecting: s.connectFor !== '', ticking: s.tickFor !== '', ret: s.ret,
-      incoming: s.incoming, ended: s.ended, ringRows: s.ringRows}),
+      incoming: s.incoming, ended: s.ended, ringRows: s.ringRows,
+      proposal: s.proposal, approvals: s.approvals, chat: s.chat, voice: s.voice, staged: s.staged, endAt: modelEndAt(s)}),
   });
-  assert.deepEqual([...result.exercised].sort(), ['accept', 'back', 'bootStart', 'callFrom', 'connect', 'decline', 'hangUp',
-    'keypadCall', 'leave', 'openCall', 'openKeypad', 'presetCall', 'presetIncoming', 'reopen', 'toggleHold']);
+  assert.deepEqual([...result.exercised].sort(), ['accept', 'approve', 'back', 'bootStart', 'callFrom', 'connect', 'decline', 'hangUp',
+    'keypadCall', 'leave', 'openCall', 'openKeypad', 'presetCall', 'presetIncoming', 'propose', 'reopen', 'resize', 'toggleHold', 'voiceTurn']);
 });
 
 test("partial source contract: a call started or a tab picked while a handed-over call is armed leaves the next handover able to start", () => {

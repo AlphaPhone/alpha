@@ -50,6 +50,7 @@ export type TelephonyPorts = {
 export type TelephonyExecution = {status: 'succeeded' | 'failed' | 'unknown'; summary: string; telephonyResult: TelephonyActionResult};
 
 const LOOKUP_LIMIT = 10;
+export const CONTACT_CALL_LOOKUP_LIMIT = LOOKUP_LIMIT;
 /**
  * AP-16 D5: an Alpha draft now replaces the owner's unsent text (kept for one Undo), so `occupied`
  * means only that a message is being sent or has pictures attached. The shared contract's sentence
@@ -61,10 +62,13 @@ const finish = (result: TelephonyActionResult): TelephonyExecution => {
   const outcome = result.kind === 'sms-compose' ? smsComposeReceiptOutcome(result) : telephonyActionReceiptOutcome(result);
   return {status: outcome === 'applied' ? 'succeeded' : outcome === 'unknown' ? 'unknown' : 'failed', summary: resultText(result), telephonyResult: result};
 };
-/** Every dialable number of every matching contact, one option per number. */
+/** Every dialable number of every matching contact, one option per number: the choices the owner
+ * is shown before a call to a contact (and what the AC-20 approval card counts). */
+export function contactCallOptions(rows: {id: string; displayName: string; phoneNumbers: string[]}[], normalize: (number: string) => string | null): ContactMatch[] {
+  return contactLookupMatches(rows, normalize).flatMap(match => match.phoneNumbers.map(number => ({id: match.id, name: match.displayName, number})));
+}
 async function numbers(query: string, ports: TelephonyPorts): Promise<ContactMatch[]> {
-  const rows = await ports.searchContacts(query, LOOKUP_LIMIT);
-  return contactLookupMatches(rows, value => ports.normalize(value)).flatMap(match => match.phoneNumbers.map(number => ({id: match.id, name: match.displayName, number})));
+  return contactCallOptions(await ports.searchContacts(query, LOOKUP_LIMIT), value => ports.normalize(value));
 }
 
 async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal: AbortSignal): Promise<PhoneCallResult> {

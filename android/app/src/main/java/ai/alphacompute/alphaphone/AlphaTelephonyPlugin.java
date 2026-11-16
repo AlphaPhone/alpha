@@ -88,6 +88,21 @@ public class AlphaTelephonyPlugin extends TelephonyPlugin {
   call.resolve();
  }
 
+ /**
+  * AP-16 AC-20: the contact a number belongs to, through Android's own number matching (PhoneLookup),
+  * so the approval card names the person whatever the size of the address book. Read-only.
+  */
+ @PluginMethod public void contactForNumber(PluginCall call) {
+  if (refused(call)) return;
+  String number = call.getString("number", "");
+  if (number == null || number.isBlank() || number.length() > 64) { call.reject("Invalid number", "invalid"); return; }
+  fencedRead(call, "contacts", "Contacts", cancel -> {
+   String name = AlphaContactLookup.name(getContext(), number, cancel);
+   JSObject value = new JSObject(); value.put("name", name == null ? JSObject.NULL : clip(name));
+   return value;
+  });
+ }
+
  /** Bounded same-profile reads, cancelled on background and checked again before publication. */
  @PluginMethod public void searchContacts(PluginCall call) {
   if (refused(call)) return;

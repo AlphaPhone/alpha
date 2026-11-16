@@ -8,9 +8,10 @@
  * Everything here reads the view's `bar(st, api)` spec (runtime/comms-bar.ts) and writes only
  * through the shell's `api.note` and `api.propose`. Nothing is sent, dialed or written to a provider.
  */
-import {setOpenSuggestionSource, type CommsBarSpec, type CommsProposal, type OpenSuggestionInput} from '../runtime/comms-bar';
+import {proposalCanAct, setOpenSuggestionSource, type CommsBarSpec, type CommsProposal, type OpenSuggestionInput} from '../runtime/comms-bar';
 import {alphaProposalStore, parseProposalRecord, type AlphaProposalRecord, type StoredProposal} from '../runtime/alpha-proposal-store';
 import {isMvpView} from './mvp-features';
+import {testMocksEnabled} from '../build-flags';
 
 type Shell = any;
 
@@ -49,10 +50,19 @@ export function briefingDue(opened: boolean, spec: CommsBarSpec | null, briefed:
 	return spec.briefing.trim();
 }
 
+/** AC-25: `rows` with the briefing placed right after the row `after` (the last row when the chat
+ * opened), or first when the chat opened empty. A missing anchor appends it. */
+export function briefingInserted<T extends {id: unknown}>(rows: T[], briefing: T, after: unknown): T[] {
+	const at = after == null ? 0 : rows.findIndex(row => row.id === after) + 1;
+	if (after != null && at === 0) return [...rows, briefing];
+	return [...rows.slice(0, at), briefing, ...rows.slice(at)];
+}
+
 /** AC-21: the one "Screen it" proposal for a ringing call. */
 export function screenProposal(spec: CommsBarSpec): CommsProposal {
-	return {id: 'screen:' + spec.contextKey, kind: 'screen', title: 'Screen it', detail: spec.target.name || 'Incoming call', button: 'Screen it', acts: true,
-		act: {mod: 'phone', fn: 'screenIncoming'}, args: {}};
+	const ring = spec.incoming?.id || spec.contextKey;
+	return {id: 'screen:' + ring, kind: 'screen', title: 'Screen it', detail: spec.target.name || 'Incoming call', button: 'Screen it', acts: true,
+		act: {mod: 'phone', fn: 'screenIncoming'}, args: {ring}};
 }
 
 /** The open proposal card to keep across process death (AC-30), or null. Live ones (args.proposalId) are re-offered by the agent's pending-action recovery instead. */
@@ -98,28 +108,51 @@ export function installCommsAlpha(Component: Shell, views: Shell) {
 		const S = this.S(), open = chatOpen(S.chat), opened = open && !this.commsChatWasOpen;
 		this.commsChatWasOpen = open;
 		const spec = activeCommsSpec(this, views);
-		if (opened) this.commsBriefingDue = true;
+		// AC-25: the briefing is Alpha's first line for this opening: it goes right after the rows that
+		// existed when the chat opened, even when the saved record loads after newer rows arrived.
+		if (opened) { this.commsBriefingDue = true; const rows = S.msgs || []; this.commsBriefingAfter = rows.length ? rows[rows.length - 1].id : null; }
 		if (!open) this.commsBriefingDue = false;
 		if (this.commsBriefingDue && this.commsRecord) {
 			this.commsBriefingDue = false;
 			const briefing = briefingDue(true, spec, this.commsRecord.briefed);
 			if (briefing && spec) {
 				this.commsRecord = {...this.commsRecord, briefed: spec.contextKey};
-				this.api(S.view).note(briefing, {quiet: false, briefing: true});
+				const after = this.commsBriefingAfter, row = {id: `briefing:${spec.contextKey}:${Date.now()}`, from: 'agent', text: briefing, local: true, quiet: false, briefing: true};
+				this.setState((previous: Shell) => ({msgs: briefingInserted(previous.msgs || [], row, after)}));
 			}
 		}
+		// AC-21: one "Screen it" per ring. When that ring ends (answered, declined, screened or missed),
+		// its open card is retired and can never screen a later call, even from the same caller.
+		const ring = spec?.incoming?.id;
 		if (spec?.incoming?.screen && open) {
-			if (this.commsScreenProposed !== spec.contextKey) { this.commsScreenProposed = spec.contextKey; this.api(S.view).propose(screenProposal(spec)); }
+			if (this.commsScreenProposed !== ring) { this.commsScreenProposed = ring; this.api(S.view).propose(screenProposal(spec)); }
 		} else if (!spec?.incoming) this.commsScreenProposed = undefined;
+		const stale = (m: Shell) => m.card?.type === 'proposal' && m.card.kind === 'screen' && m.card.state === 'open' && (!ring || m.card.args?.ring !== ring);
+		if ((S.msgs || []).some(stale)) this.setState((previous: Shell) => ({msgs: (previous.msgs || []).map((m: Shell) => stale(m) ? {...m, card: {...m.card, state: 'replaced'}} : m)}));
 		persist(this);
 	};
 	p.componentWillUnmount = function () { this.commsLive = false; unmount?.call(this); };
 	// The proposal card's one button shows only while it can act and no review rows replace it.
 	p.renderVals = function () {
-		const out = render.call(this);
+		const out = render.call(this), emergency = this.emergencyLive?.() === true;
+		// AC-12 / Bar by screen: where the bar addresses Alpha, its right-hand control dictates into the
+		// Alpha request ("mic"); only an open thread keeps the voice button ("send or voice"). Holding
+		// the Alpha button is how a voice turn starts there.
+		const spec = out.comms ? activeCommsSpec(this, views) : null;
+		out.alphaDictate = null;
+		if (spec && out.barTarget === 'alpha' && out.talkVisible && !(chatOpen(this.S().chat) && spec.target.kind === 'thread')) {
+			out.talkVisible = false;
+			out.alphaDictate = {label: 'Dictate a request to ' + (out.name || 'Alpha'), run: () => {
+				if (typeof this.startTranscription === 'function') this.startTranscription();
+				// Development builds say why nothing happened; production has no stand-in text (audit denylist).
+				else if (testMocksEnabled) this.toast?.('Voice input is not connected');
+			}};
+		}
+		// AC-19: during an emergency call no acting proposal shows its button, including cards made
+		// before the call started and cards restored after process death (AC-30).
 		out.msgs = (out.msgs || []).map((m: Shell) => m.c?.type !== 'proposal' ? m : {...m,
-			proposalAsk: m.c.state === 'open' && !m.c.reviewUnavailable && !m.c.reviewing?.open,
-			proposalTone: m.c.kind === 'call' ? 'var(--alpha-call-green)' : 'var(--acc)'});
+			proposalAsk: proposalCanAct(m.c, emergency) && !m.c.reviewUnavailable && !m.c.reviewing?.open,
+			proposalTone: m.c.kind === 'call' ? 'var(--alpha-call-green-text)' : 'var(--acc)'});
 		return out;
 	};
 }
