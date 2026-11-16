@@ -459,16 +459,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
       case 'deploy': {
         const env = environment(), tree = preparedTree(o.tree ? path.resolve(o.tree) : undefined);
-        const problems = secretProblems(readEnvFile(envFile()), env);
+        const values = readEnvFile(envFile());
+        const problems = [...secretProblems(values, env), ...GENERATED_SECRETS.filter(name => !values[name]).map(name => `${name} is missing`)];
         if (problems.length) throw new Error(`Secrets incomplete; run \`secrets\` first:\n  ${problems.join('\n  ')}`);
         const directory = render({policy: policy(), resources: resources(), tree, out: out(), environments: [env]});
         const components = o.component === 'all' ? CLOUD_COMPONENTS : [o.component as CloudComponent];
         if (!components.every(component => CLOUD_COMPONENTS.includes(component))) usage();
         // API first: the edge Worker's service binding needs it to exist.
-        for (const component of components) {
-          say(`deploying ${component} (${env})`);
-          wrangler(tree, ['deploy', '--config', configFile(directory, component, env)], {cwd: directory, accountId: resources()[env].accountId});
-        }
+        // Each Worker's secrets travel with its version (--secrets-file): a first deploy never runs
+        // without them, and no separate push can fall out of step. The file is private and removed.
+        const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-cloud-secrets-'));
+        try {
+          for (const component of components) {
+            say(`deploying ${component} (${env})`);
+            const args = ['deploy', '--config', configFile(directory, component, env)];
+            if (component !== 'edge') {
+              const file = path.join(scratch, `${component}.json`);
+              fs.writeFileSync(file, JSON.stringify(componentSecrets(values, component)), {mode: 0o600});
+              args.push('--secrets-file', file);
+            }
+            wrangler(tree, args, {cwd: directory, accountId: resources()[env].accountId});
+          }
+        } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
         break;
       }
       case 'tenant': {

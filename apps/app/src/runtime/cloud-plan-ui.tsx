@@ -50,13 +50,18 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
  const [code,setCode]=useState('');
  const [referralInput,setReferralInput]=useState('');
  const live=useRef<AbortController|null>(null);
+ // The caller passes a fresh callback each render; reading it through a ref keeps the effects below stable.
+ const changed=useRef(onChanged);changed.current=onChanged;
+ const notifyChanged=useCallback(()=>changed.current(),[]);
  const credential=account.identity.credentialId;
+ // service.client is one object per signed-in key (the component is keyed by credential); the wrapper is not.
+ const client=account.client;
 
  const load=useCallback(async(signal:AbortSignal)=>{
-  const [offered,current,mine]=await Promise.all([account.client.subscriptionPlans(signal),account.client.subscriptionState(signal),account.client.referral(signal).catch(()=>null)]);
+  const [offered,current,mine]=await Promise.all([client.subscriptionPlans(signal),client.subscriptionState(signal),client.referral(signal).catch(()=>null)]);
   signal.throwIfAborted();
   setPlans(offered);setSubscription(current);setReferral(mine);
- },[account]);
+ },[client]);
 
  const act=useCallback(async(label:string,work:(signal:AbortSignal)=>Promise<void>)=>{
   if(live.current)return;
@@ -72,9 +77,9 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
   const pending=pendingCheckouts.get(credential);
   if(!pending)return;
   if(Date.now()>pending.expiresAt){pendingCheckouts.delete(credential);return;}
-  const confirmed=await account.client.confirmSubscriptionCheckout(pending.sessionId,signal).catch(()=>null);
-  if(confirmed?.subscriptionId){pendingCheckouts.delete(credential);setNotice('Plan active');onChanged();}
- },[account,credential,onChanged]);
+  const confirmed=await client.confirmSubscriptionCheckout(pending.sessionId,signal).catch(()=>null);
+  if(confirmed?.subscriptionId){pendingCheckouts.delete(credential);setNotice('Plan active');notifyChanged();}
+ },[client,credential,notifyChanged]);
 
  useEffect(()=>{
   void act('Loading plans',async signal=>{await confirmPending(signal);await load(signal);});
@@ -109,7 +114,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
     // A payment that needs action (3-D Secure, a new card) continues on Stripe's invoice page.
     const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId});
     const continuation=payment.status>=200&&payment.status<300?parseUpgradePayment(payment.body):null;
-    if(continuation?.invoiceUrl){await account.client.openPaymentPage(continuation.invoiceUrl,signal);setNotice('Finish payment, then come back');}
+    if(continuation?.invoiceUrl){await client.openPaymentPage(continuation.invoiceUrl,signal);setNotice('Finish payment, then come back');}
     else setNotice('Plan upgraded');
     break;
    }
@@ -117,15 +122,15 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
    case 'cancel':setNotice('Plan ends at the end of this period');break;
    case 'undo-cancel':setNotice('Plan continues');break;
   }
-  setStep({kind:'idle'});onChanged();await load(signal);
- },[account,authority,load,onChanged,withAuthority]);
+  setStep({kind:'idle'});notifyChanged();await load(signal);
+ },[client,authority,load,notifyChanged,withAuthority]);
 
  const subscribe=(plan:PlanOffer)=>void act('Opening checkout',async signal=>{
   const previous=pendingCheckouts.get(credential);
   const idempotencyKey=previous&&previous.planKey===plan.key&&Date.now()<previous.expiresAt?previous.idempotencyKey:crypto.randomUUID();
-  const started=await account.client.startSubscriptionCheckout(plan.key,idempotencyKey,signal);
+  const started=await client.startSubscriptionCheckout(plan.key,idempotencyKey,signal);
   if(started.status==='open'){pendingCheckouts.set(credential,{sessionId:started.sessionId,planKey:plan.key,idempotencyKey,expiresAt:started.expiresAt});setNotice('Finish payment, then come back');}
-  else if(started.status==='completed'){pendingCheckouts.delete(credential);setNotice('Plan active');onChanged();await load(signal);}
+  else if(started.status==='completed'){pendingCheckouts.delete(credential);setNotice('Plan active');notifyChanged();await load(signal);}
   else {pendingCheckouts.delete(credential);throw Error('Checkout expired. Try again.');}
  });
  const change=(target:PlanOffer)=>{
@@ -155,8 +160,8 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
   event.preventDefault();const normalized=normalizeReferralCode(referralInput);
   if(!normalized){setError('Check the code');return;}
   void act('Applying code',async signal=>{
-   const result=await account.client.applyReferral(normalized,signal);
-   if(result.applied){setReferralInput('');setNotice('Referral code applied');onChanged();return;}
+   const result=await client.applyReferral(normalized,signal);
+   if(result.applied){setReferralInput('');setNotice('Referral code applied');notifyChanged();return;}
    throw Error(result.reason==='used'?'A referral code is already applied':result.reason==='invalid'?'Unknown code':'Code not accepted');
   });
  };

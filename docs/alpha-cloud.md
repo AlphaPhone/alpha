@@ -93,13 +93,13 @@ CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provi
 bun run cloud:worker -- check --environment staging   # render and bundle, no network
 bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
-CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha-cloud/staging.env --apply
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- tenant --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- smoke --environment staging
 ```
 
-`provision` creates the KV namespace, R2 bucket and Hyperdrive configuration, plus proxied DNS
+`deploy` uploads each Worker's secrets with its version (`wrangler deploy --secrets-file`); `secrets
+--apply` pushes them alone, for a rotation. `provision` creates the KV namespace, R2 bucket and Hyperdrive configuration, plus proxied DNS
 records for the API and blob hosts, and writes their ids to `cloud/resources.json` (commit that
 file). The login and web hosts are Worker custom domains, which Cloudflare creates on deploy.
 After the first deployment, the **Cloud deploy** workflow does the same from `main` with

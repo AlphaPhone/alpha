@@ -210,13 +210,22 @@ test('a plan activated in Cloud billing closes the subscription popup on return 
   test.setTimeout(150_000);
   const foreign = await zeroAccount(page);
   await page.evaluate(() => { (window as any).sameDocument = true; });
-  // Plan selection opens Cloud's billing page only after the account check; nothing is bought here.
+  // Plans are chosen in the app (cloud-plans.ts); payment is Stripe's page, and nothing is bought until it returns.
   await controls(page).getByRole('button', { name: 'Choose a plan', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Review billing account', exact: true })).toHaveCount(0);
-  await expect.poll(() => stub(page, s => s.opened)).toEqual(['https://cloud.eliza.app/cloud/billing']);
-  // The synthetic Cloud answer now reports an active plan, with the cash balance still zero.
-  await stub(page, s => { s.accounts[0].plan = undefined; s.persist(); });
+  const plans = sheet(page).getByRole('region', { name: 'Plans' });
+  await expect(plans.getByText('Plus', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await shot(page, info, '06a-in-app-plans.png');
+  // The open plan screen reads the catalogue once per opening, not on every re-render of the sheet.
+  await page.waitForTimeout(1500);
+  expect(await stub(page, s => s.planReads)).toBe(1);
+  expect(await stub(page, s => s.opened)).toEqual([]);
+  await plans.getByRole('listitem').filter({ hasText: 'Plus' }).getByRole('button', { name: 'Subscribe', exact: true }).click();
+  await expect.poll(() => stub(page, s => s.opened)).toEqual(['https://checkout.stripe.com/c/pay/cs_test_fixture']);
+  expect(await stub(page, s => s.order.filter((step: string) => step.startsWith('checkout ')))).toEqual(['checkout plus_monthly mobile']);
+  // The owner pays on Stripe's page and returns to the app: Cloud confirms the purchase.
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => stub(page, s => s.order.filter((step: string) => step.startsWith('confirm ')))).toEqual(['confirm cs_test_fixture']);
   await expect(sheet(page)).toHaveCount(0, { timeout: 30_000 });
   await send(page, 'Hello after choosing a plan');
   await expect(conversation(page).getByText(/^Resident reply \d+$/)).toHaveCount(1, { timeout: 30_000 });
