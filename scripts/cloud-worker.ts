@@ -347,7 +347,7 @@ export async function ensureDnsRecords(zone: string, hosts: string[]) {
 
 /**
  * Upstream's runner exits 0 when it pauses at a release barrier (migration 0282 on a database it
- * cannot prove fresh) and leaves later migrations pending, including the native client registry
+ * cannot prove fresh, such as an interrupted first run before eliza#39754) and leaves later migrations pending, including the native client registry
  * this tool seeds. Only its own "migrations complete" line means the schema is current.
  */
 export function migrationOutcome(output: string, status: number | null): 'complete' | 'paused' | 'failed' {
@@ -361,7 +361,9 @@ export function migrate(tree: string, values: Record<string, string>, environmen
   process.stdout.write(result.stdout ?? '');
   const outcome = migrationOutcome(result.stdout ?? '', result.status);
   if (outcome === 'failed') throw new Error('Cloud database migration failed');
-  if (outcome === 'paused') throw new Error('Cloud database migration paused before completing (release barrier); a fresh database needs an upstream pin that includes eliza#39754');
+  // A new database completes in one run. An interrupted first run resumes only from a pin that includes
+  // eliza#39754; a database with an older ledger pauses for upstream's release review.
+  if (outcome === 'paused') throw new Error('Cloud database migration paused at the release barrier before completing; see packages/cloud/scripts/README.md (an interrupted first run resumes with eliza#39754)');
 }
 
 // ---------------------------------------------------------------------------------------------
