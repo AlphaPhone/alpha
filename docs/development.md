@@ -257,6 +257,34 @@ is production staging (reviewed `--descriptor`, distributable release APK) unles
 full AOSP boot, real integrations, physical-device testing and user acceptance
 are independent results.
 
+A development image leaves Phone, Contacts and SMS off. An owner who builds
+and flashes their own Pixel 10a or Cuttlefish image can add
+`--owner-telephony` to a `--development` stage. Production staging is refused
+locally because it needs a reviewed descriptor and a distributable release.
+
+```sh
+bun run aosp:stage -- --target pixel10a --aosp-source <aosp-checkout> --factory-image <factory.zip> \
+  --apk <release-launcher-signed-locally.apk> --development --owner-telephony --applied-build-patch soong-memory \
+  --output <new-dir>
+```
+
+The flag admits only a release (non-debuggable) launcher whose bundle is
+flag-off (`testMocks: false`). It does not need to be distributable. The flag
+refuses a debuggable or test-mocks APK, and a launcher without the first-run
+receiver or every disabled SMS/Dialer role handler. It writes two things:
+
+- the `AlphaImageProvisioning` capability overlay;
+- the `system_ext` sysconfig `<component-override>`
+  (`provisioning/alpha-telephony-components.xml`). Package scan enables the
+  role handlers before RoleManager re-qualifies the SMS and Dialer holders, so
+  Alpha keeps its roles after an image update changes the fingerprint.
+
+It writes no default HOME/Autofill provisioning overlay and no fresh-telephony
+Provision feature. It cannot be combined with an activated Sense image. Such an
+image is an owner development image with image telephony enabled. It is not
+distributable or qualified. A sideloaded APK still never gets telephony: the app
+also requires a system-partition install and the image feature (P-36).
+
 The listener verifier reads the installed package grants, privapp enforcement,
 and the running listener's SELinux domain. Pass `--launcher-descriptor` with
 the reviewed launcher descriptor when the image provisions a privileged launcher.

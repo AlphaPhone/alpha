@@ -42,7 +42,10 @@ const roleComponents: readonly RoleComponent[] = [
   {name: 'ai.eliza.plugins.messages.MmsFileProvider', tag: 'provider', exported: false},
 ];
 
-const isTrue = (value: string | undefined) => value === 'true' || value === '0xffffffff';
+/** The staged add-on's provisioning directory, as the shared provisioning overlay defines it. */
+const LAUNCHER_PROVISIONING_DIR = 'launcher_provisioning_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/provisioning';
+
+const isTrue =(value: string | undefined) => value === 'true' || value === '0xffffffff';
 const isFalse = (value: string | undefined) => value === 'false' || value === '0x0';
 
 function matchesFilter(filter: ManifestNode, required: RoleFilter) {
@@ -106,9 +109,15 @@ export function writeAospTelephonyRoleOverrides(output: string, xmltree: string,
     + `    <component-override package="${packageName}">\n`
     + components.map(component => `        <component class="${component}" enabled="true" />\n`).join('')
     + '    </component-override>\n</config>\n';
+  const productMakefile = path.join(output, 'product.mk');
+  if (!fs.existsSync(productMakefile)) throw Error('Alpha telephony role defaults require a staged product.mk');
+  // Production images define launcher_provisioning_dir with the provisioning overlay, written first.
+  // An owner development image has no provisioning overlay, so the same output-relative directory
+  // is defined here; a product that already defines it keeps its makefile byte for byte.
+  const definesDir = /^launcher_provisioning_dir\s*:=/m.test(fs.readFileSync(productMakefile, 'utf8'));
   fs.mkdirSync(path.join(output, 'provisioning'), {recursive: true});
   fs.writeFileSync(path.join(output, 'provisioning', name), xml, {flag: 'wx'});
-  fs.appendFileSync(path.join(output, 'product.mk'),
-    `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
+  fs.appendFileSync(productMakefile, (definesDir ? '' : `\n${LAUNCHER_PROVISIONING_DIR}`)
+    + `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
   return components;
 }
