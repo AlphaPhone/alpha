@@ -46,13 +46,13 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await draftReachable(page);
     await setTextScale(page, 2);
     await draftReachable(page);
-    expect(await inputs(page, 'sendSms')).toEqual([]);
+    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
     await setupTelephony(page);
     // The first send fails in transport; the retry returns a receipt bound to the reviewed text.
-    await page.addInitScript(() => { let first = true; (window as any).telephonyAnswers = {sendSms: async (input: any) => {
+    await page.addInitScript(() => { let first = true; (window as any).telephonyAnswers = {sendComposedSms: async (input: any) => {
       if (first) { first = false; throw Error('transport'); }
       const {smsBindingHash} = await import('/src/runtime/aosp-telephony.ts' as string);
       const bindingHash = await smsBindingHash({recipients: input.recipients, body: input.body, subscriptionId: input.subscriptionId});
@@ -64,12 +64,12 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await sms(page, 'placeAskedSmsDraft', 'Ten minutes away')).toBe('drafted');
     await openAlpha(page);
     await expect(page.locator(bubble)).toContainText('Ten minutes away');
-    expect(await inputs(page, 'sendSms'), 'a pending draft sends nothing').toEqual([]);
+    expect(await inputs(page, 'sendComposedSms'), 'a pending draft sends nothing').toEqual([]);
     await page.locator('[data-alpha-draft-send]').click();
-    await expect.poll(() => inputs(page, 'sendSms')).toHaveLength(1);
+    await expect.poll(() => inputs(page, 'sendComposedSms')).toHaveLength(1);
     await page.locator('[data-alpha-draft-send]').click();
-    await expect.poll(() => inputs(page, 'sendSms')).toHaveLength(2);
-    const sent = await inputs(page, 'sendSms');
+    await expect.poll(() => inputs(page, 'sendComposedSms')).toHaveLength(2);
+    const sent = await inputs(page, 'sendComposedSms');
     expect(new Set(sent.map(row => row.operationId)).size, 'the retry carries the same operation, so the journal holds one send').toBe(1);
     await expect(page.getByText(/^Sent to /)).toBeVisible();
   });
@@ -101,7 +101,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
     await page.getByRole('button', {name: /^Ada Okafor/}).click();
     await expect(page.locator(personField)).toHaveValue('Draft that survives');
-    expect(await inputs(page, 'sendSms')).toEqual([]);
+    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
   test('a suggested reply is faint text only while the owner has turned suggested replies on; accepting it sends nothing', async ({page}) => {
@@ -121,7 +121,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await expect(page.locator(personField)).toHaveValue('');
     await faint.click();
     await expect(page.locator(personField)).toHaveValue('See you at three');
-    expect(await inputs(page, 'sendSms')).toEqual([]);
+    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 });
 
