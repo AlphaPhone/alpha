@@ -48,3 +48,5 @@ __pycache__/
 
 # Quint model-checker intermediate output
 /_apalache-out/
+# Content-addressed Quint run and model-metadata cache (scripts/quint-cache.ts)
+/.cache/

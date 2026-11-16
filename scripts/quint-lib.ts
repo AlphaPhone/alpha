@@ -1,7 +1,7 @@
 import {sha256} from './sha256.ts';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, relative, resolve } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readUpstreamPin } from './upstream-pin.ts';
 
@@ -154,6 +154,56 @@ export const sourcePaths = () => [...new Set([
     path => sourceExtensions.has(extname(path)) || extname(path) === '.css')).map(relativePath),
   ...runtimeScriptPaths, ...runtimeAssetPaths, ...sharedSourcePaths(),
 ])].sort();
+/** Where remembered Quint results live: outside node_modules so a reinstall keeps them, and CI can restore them. */
+export function quintCacheDirectory(root: string = repositoryRoot) {
+  return resolve(root, process.env.ALPHA_QUINT_CACHE_DIR || '.cache/quint');
+}
+export function quintCacheDisabled() {
+  return ['0', 'off', 'false', 'no'].includes((process.env.ALPHA_QUINT_CACHE || '').toLowerCase());
+}
+
+/** The repository-relative models a model imports. Quint resolves `from "./X"` beside the importing file. */
+export function importedModelPaths(model: Pick<ModelDefinition, 'path'>, text: string, root: string = repositoryRoot) {
+  const source = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  return [...source.matchAll(/\bimport\s+[\s\S]*?\bfrom\s+["']([^"']+)["']/g)].map(match =>
+    relative(root, resolve(root, dirname(model.path), match[1].endsWith('.qnt') ? match[1] : match[1] + '.qnt')).split('\\').join('/'));
+}
+
+/**
+ * Parsing every model with Quint's ANTLR parser costs about 40 ms each, 16 s per registry load. The validation is a
+ * pure function of this file, the pinned Quint, the model's metadata and its text, so a success is remembered under
+ * exactly those and a failure is never remembered.
+ */
+let metadataCacheBase: string | null | undefined;
+function metadataCacheKey(model: ModelDefinition, text: string) {
+  if (metadataCacheBase === undefined) {
+    try {
+      metadataCacheBase = quintCacheDisabled() ? null : sha256(JSON.stringify([
+        readFileSync(fileURLToPath(import.meta.url)).toString('utf8'),
+        readFileSync(join(repositoryRoot, 'node_modules/@informalsystems/quint/package.json'), 'utf8')]));
+    } catch { metadataCacheBase = null; }
+  }
+  if (metadataCacheBase === null) return undefined;
+  // The whole manifest entry, so a field a later validation reads cannot be left out of the key.
+  return sha256(JSON.stringify([metadataCacheBase, model, text]));
+}
+
+function validateQuintModelMetadataCached(model: ModelDefinition, text: string) {
+  const key = metadataCacheKey(model, text);
+  const file = key && join(quintCacheDirectory(), 'metadata', `metadata-${key}`);
+  if (file) {
+    try { statSync(file); const now = new Date(); utimesSync(file, now, now); return; } catch { /* a miss */ }
+  }
+  validateQuintModelMetadata(model, text);
+  if (!file) return;
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.tmp`;
+    writeFileSync(temporary, '');
+    renameSync(temporary, file);
+  } catch { /* the cache is a convenience */ }
+}
+
 export function readJson<T = unknown>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
@@ -301,7 +351,7 @@ export function loadModels(): QuintModel[] {
     for (const field of ['init', 'step', 'invariant'] as const) if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(model[field])) throw Error(`Invalid ${field} in ${model.module}`);
     if (!Array.isArray(model.tests) || model.tests.length === 0) throw Error(`No scenarios declared for ${model.module}`);
     const text = readFileSync(join(repositoryRoot, model.path), 'utf8');
-    validateQuintModelMetadata(model, text);
+    validateQuintModelMetadataCached(model, text);
     for (const test of model.tests) if (!new RegExp(`\\brun\\s+${test}\\s*=`).test(text)) throw Error(`Missing scenario ${model.module}.${test}`);
     for (const source of model.sources || []) readFileSync(join(repositoryRoot, source));
     for (const name of model.witnesses || []) {

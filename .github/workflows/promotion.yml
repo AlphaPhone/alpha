@@ -40,6 +40,16 @@ jobs:
         with:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
+      # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
+      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      - name: Restore remembered Quint runs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            quint-${{ github.job }}-${{ strategy.job-index }}-
+            quint-${{ github.job }}-
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -74,6 +84,13 @@ jobs:
             test -n "$MODELS"
           fi
           bun scripts/check-quint.ts verify --steps=6 ${MODELS:+--models=$MODELS}
+      # Only accepted runs are ever stored, so a failed job's passing runs are still kept.
+      - name: Save remembered Quint runs
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -92,6 +109,16 @@ jobs:
         with:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
+      # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
+      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      - name: Restore remembered Quint runs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            quint-${{ github.job }}-${{ strategy.job-index }}-
+            quint-${{ github.job }}-
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -100,6 +127,13 @@ jobs:
       # Every declared comparison and expected counterexample runs on promotion.
       - name: Expected counterexamples and current-design comparisons
         run: bun scripts/check-quint.ts compare
+      # Only accepted runs are ever stored, so a failed job's passing runs are still kept.
+      - name: Save remembered Quint runs
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -122,6 +156,16 @@ jobs:
         with:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
+      # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
+      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      - name: Restore remembered Quint runs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            quint-${{ github.job }}-${{ strategy.job-index }}-
+            quint-${{ github.job }}-
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -151,6 +195,13 @@ jobs:
           LIVENESS=final
           if [ "$TEMPORAL_GROUP" = remaining ]; then LIVENESS=default; fi
           bun scripts/check-quint.ts temporal --models="$MODELS" --tlc-liveness="$LIVENESS"
+      # Only accepted runs are ever stored, so a failed job's passing runs are still kept.
+      - name: Save remembered Quint runs
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -181,6 +232,16 @@ jobs:
         with:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
+      # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
+      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      - name: Restore remembered Quint runs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            quint-${{ github.job }}-${{ strategy.job-index }}-
+            quint-${{ github.job }}-
       - name: Install browser for source-refinement checks
         run: bash scripts/ci/install-playwright-browser.sh chromium
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -222,6 +283,13 @@ jobs:
           # Each file starts compilers and the Quint interpreter; keep their deadlines exact.
           ALPHA_TEST_CONCURRENCY: '1'
         run: bun run quint:tests
+      # Only accepted runs are ever stored, so a failed job's passing runs are still kept.
+      - name: Save remembered Quint runs
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/quint
+          key: quint-${{ github.job }}-${{ strategy.job-index }}-${{ github.sha }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
