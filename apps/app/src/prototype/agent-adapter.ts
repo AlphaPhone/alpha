@@ -449,7 +449,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         ?{...message,card:{...message.card,title:text.title,detail:text.detail,sub:text.detail}}:message)}));
     });
     // AC-26: a replaced proposal is declined, so it can never be approved later.
-    for(const replaced of result.replaced){const id=replaced.args?.proposalId;if(typeof id==='string'&&id)void declineProposal(id);}
+    // A replaced card being approved right now stops: its review (a contact's numbers) closes unchosen.
+    for(const replaced of result.replaced){const id=replaced.args?.proposalId;if(typeof id!=='string'||!id)continue;if(shell.pendingActionApprovalProposalId===id)shell.pendingActionApproval?.abort();void declineProposal(id);}
   }
   /**
    * AC-26: alphaClient drops its pending proposals when the screen's subject changes. Open proposal

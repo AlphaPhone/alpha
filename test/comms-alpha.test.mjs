@@ -88,11 +88,13 @@ test('a replaced or finished proposal can never act; other cards are unaffected 
 
 test('a contact call is chosen inside the approved card, never in a separate dialog (D8)', () => {
   const review = R.presentTelephonyReview({review: {kind: 'call', options: [{id: 'a', name: 'Maya Chen', number: '+14155550132'}]}, settle() {}});
-  const msgs = [{id: 1, cProposal: true, c: {type: 'proposal', proposalId: 'p1'}}, {id: 2, cProposal: true, c: {type: 'proposal', proposalId: 'p2'}, proposalAsk: true}, {id: 3, isUser: true}];
+  const msgs = [{id: 1, cProposal: true, c: {type: 'proposal', state: 'open', proposalId: 'p1'}}, {id: 2, cProposal: true, c: {type: 'proposal', state: 'open', proposalId: 'p2'}, proposalAsk: true}, {id: 3, isUser: true}];
   const placed = R.placeTelephonyReview(msgs, review, 'p2');
   assert.equal(placed[1].c.reviewing, review); assert.equal(placed[1].proposalAsk, false, 'the rows replace the card button');
   assert.equal(placed[0], msgs[0]);
-  assert.equal(R.placeTelephonyReview(msgs, review, 'gone')[1].c.reviewing, review, 'otherwise the newest proposal card');
+  assert.equal(R.placeTelephonyReview(msgs, review, 'gone'), null, 'never in another proposal\'s card');
+  const replaced = msgs.map(m => m.id === 2 ? {...m, c: {...m.c, state: 'replaced'}} : m);
+  assert.equal(R.placeTelephonyReview(replaced, review, 'p2'), null, 'a replaced card shows no review rows (AC-26)');
   const digest = R.placeTelephonyReview([{id: 1, cDigest: true, c: {proposalId: 'p3'}, rows: []}], review, 'p3');
   assert.deepEqual(digest[0].rows.map(row => row.who), ['Maya Chen', 'Not now']);
   assert.equal(R.placeTelephonyReview([{id: 3, isUser: true}], review, 'p1'), null, 'no card: the caller dismisses it');
