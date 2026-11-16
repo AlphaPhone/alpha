@@ -174,7 +174,8 @@ export async function resolveCallParty(target: CallTarget): Promise<CallParty | 
 export function callCardText(target: CallTarget, party: CallParty | null, format: (number: string) => string): { title: string; detail: string } {
 	if ('number' in target) {
 		const shown = format(target.number);
-		return { title: `Call ${party?.name || shown}`, detail: party?.name ? shown : `${shown} · not in Contacts` };
+		// "Not in Contacts" only when Contacts were read; an unreadable address book says nothing about it.
+		return { title: `Call ${party?.name || shown}`, detail: party && !party.name ? `${shown} · not in Contacts` : shown };
 	}
 	const name = party?.name || target.contact, numbers = party?.numbers || [];
 	return { title: `Call ${name}`, detail: numbers.length === 1 ? format(numbers[0]) : numbers.length > 1 ? `${numbers.length} numbers · you choose one before it dials` : 'You confirm the number before it dials' };

@@ -1127,6 +1127,19 @@ export function installChatOverlayMotion(Component: Shell) {
 					out.holdVoice?.();
 				}, 550);
 				shell.sheetHold = hold;
+				// A release anywhere ends the hold, including one off the mark (the sheet's drag may also
+				// capture the pointer), so a short press never turns into voice later.
+				const stop = (end: PointerEvent) => {
+					if (end.pointerId !== event.pointerId) return;
+					window.removeEventListener("pointerup", stop, true);
+					window.removeEventListener("pointercancel", stop, true);
+					if (shell.sheetHold !== hold) return;
+					clearTimeout(hold.timer);
+					shell.sheetHold = undefined;
+					if (hold.fired) shell.swallow = Date.now();
+				};
+				window.addEventListener("pointerup", stop, true);
+				window.addEventListener("pointercancel", stop, true);
 			},
 			up(event: PointerEvent) {
 				const hold = shell.sheetHold;

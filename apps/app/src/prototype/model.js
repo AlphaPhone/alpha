@@ -347,10 +347,11 @@ registerView("phone", {
     if (st.vmOpen) { if (st.playing) pnStop(api); api.set({ vmOpen: null, playing: null, vpos: 0 }); return true; }
     return false;
   },
-  /* calls and ringing keep going in the background: status-bar chip returns here */
+  /* calls and ringing keep going in the background: status-bar chip returns here. Its white text sits
+     on the text-safe call green (AC-28, 4.5:1). */
   ongoing: function (st, api) {
-    if (st.incoming) { var ip = pnWho(api, st.incoming); return { label: (st.ring === "screen" ? api.name + " · " : "Incoming · ") + (ip ? pnFirst(ip) : "Unknown"), icon: "phone", color: "var(--alpha-call-green)" }; }
-    if (st.callWho) return { label: st.liveAt ? (st.hold ? "Hold " : "") + pnClock((Date.now() - st.liveAt) / 1000) : "Calling…", icon: "phone", color: "var(--alpha-call-green)" };
+    if (st.incoming) { var ip = pnWho(api, st.incoming); return { label: (st.ring === "screen" ? api.name + " · " : "Incoming · ") + (ip ? pnFirst(ip) : "Unknown"), icon: "phone", color: "var(--alpha-call-green-text)" }; }
+    if (st.callWho) return { label: st.liveAt ? (st.hold ? "Hold " : "") + pnClock((Date.now() - st.liveAt) / 1000) : "Calling…", icon: "phone", color: "var(--alpha-call-green-text)" };
     return null;
   },
   onLeave: function (api) {
@@ -434,12 +435,15 @@ registerView("phone", {
     var none = { end: null, incoming: null, emergency: false, fit: null, briefing: null };
     if (st.incoming) {
       var ip = pnWho(api, st.incoming), rn = ip ? ip.name : "Unknown", screening = st.ring === "screen";
+      var over = !!PN.live && !!st.callWho, hangLive = function () { pnEnd(api); };
       var decline = screening ? function () { pnEndScreen(api); } : function () { pnDecline(api); };
       var answer = function () { pnAnswer(api); };
       return Object.assign({}, none, {
         target: { kind: "incoming", app: "Phone", name: rn, first: ip ? pnFirst(ip) : rn, initials: ip ? ip.ini : "#" },
         closed: ask, left: left, context: rn + " · Incoming call", contextKey: "phone:incoming:" + st.incoming,
-        strip: { title: rn, subtitle: "Incoming call", initials: ip ? ip.ini : "#", live: false, actions: [{ id: "answer", label: "Answer", run: answer }, { id: "decline", label: "Decline", run: decline }] },
+        strip: { title: rn, subtitle: "Incoming call", initials: ip ? ip.ini : "#", live: false, actions: [{ id: "answer", label: "Answer", run: answer }, { id: "decline", label: "Decline", run: decline }].concat(over ? [{ id: "end", label: "End call", run: hangLive }] : []) },
+        /* AC-18: a ring over a live call keeps that call's End reachable at every height */
+        end: over ? hangLive : null,
         incoming: { id: st.ringId || "phone:incoming:" + st.incoming, answer: answer, decline: decline, screen: screening ? null : function () { pnScreen(api); } }
       });
     }
@@ -628,6 +632,7 @@ registerView("phone", {
       endCall: function () { pnEnd(api); },
       restore: function () { api.set({ min: false }); },
 
+      ringOverCall: !!st.incoming && !!PN.live && !!st.callWho, endLive: function () { pnEnd(api); },
       ringing: !!st.incoming, rName: ip ? ip.name : "Unknown", rIni: ip ? ip.ini : "#", rSub: ip ? ip.phone : "",
       rCtx: copy("phone").ringContext || "", hasCtx: !!copy("phone").ringContext,
       isRing: !!st.incoming && !screening, isScreen: screening, scrLines: scrLines, scrDone: scrDone, scrLive: screening && !scrDone,

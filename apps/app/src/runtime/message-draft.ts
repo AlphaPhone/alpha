@@ -83,7 +83,9 @@ export function draftUndone(state: DraftState): DraftState {
  * operation back and can never send a second copy.
  */
 export function reviewFinished(state: DraftState, result: 'sent' | 'failed' | 'unknown'): DraftState {
-  return result === 'sent' ? {...emptyDraft(), declined: state.declined} : state;
+  if (result === 'sent') return {...emptyDraft(), declined: state.declined};
+  // The unknown operation stays bound to this exact text, so Undo can no longer swap it away.
+  return result === 'unknown' && state.undo ? {...state, undo: null} : state;
 }
 /** Leaving readiness (lock, background, lost access) stops a running suggestion and keeps the text. */
 export function readinessLost(state: DraftState): DraftState {

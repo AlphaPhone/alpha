@@ -19,7 +19,7 @@ async function load(entry, name) {
 }
 // One bundle, so the suggestion source installed by comms-alpha is the one comms-bar reads.
 const entry = join(dir, 'entry.ts');
-writeFileSync(entry, `export * from ${JSON.stringify(resolve('apps/app/src/prototype/comms-alpha.ts'))};\nexport {openSuggestion, proposalCanAct} from ${JSON.stringify(resolve('apps/app/src/runtime/comms-bar.ts'))};\n`);
+writeFileSync(entry, `export * from ${JSON.stringify(resolve('apps/app/src/prototype/comms-alpha.ts'))};\nexport {callCardText, openSuggestion, proposalCanAct} from ${JSON.stringify(resolve('apps/app/src/runtime/comms-bar.ts'))};\n`);
 const A = await load(entry, 'comms-alpha'), B = A;
 const R = await load('apps/app/src/prototype/telephony-review.ts', 'telephony-review');
 
@@ -126,4 +126,11 @@ test('the saved comms stage reads only its exact shape (AC-30)', async () => {
     {...value, chat: 'input'}])
     assert.equal(stageSessionFrom(bad), null, JSON.stringify(bad)?.slice(0, 80));
   assert.equal(stageSessionValue({...good, stageFrom: Array.from({length: 12}, (_, i) => ({view: 'v' + i, title: '', patch: null}))}).stageFrom.length, 8, 'history is capped');
+});
+
+test('AC-20: the call card says "not in Contacts" only when Contacts were read', () => {
+  const format = number => number;
+  assert.deepEqual(B.callCardText({number: '+15550100'}, null, format), {title: 'Call +15550100', detail: '+15550100'});
+  assert.deepEqual(B.callCardText({number: '+15550100'}, {name: null, numbers: ['+15550100']}, format), {title: 'Call +15550100', detail: '+15550100 · not in Contacts'});
+  assert.deepEqual(B.callCardText({number: '+15550100'}, {name: 'Ana Torres', numbers: ['+15550100']}, format), {title: 'Call Ana Torres', detail: '+15550100'});
 });

@@ -132,6 +132,40 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     expect(await page.evaluate(() => (window as any).alphaShell().S())).toMatchObject({view: 'messages', chat: 'sheet'});
   });
 
+  test('a ring over a live call keeps that call\'s End reachable at every height (AC-18)', async ({page}) => {
+    await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
+    for (const key of ['5', '5', '5', '0', '1', '0', '0']) await page.getByRole('button', {name: key, exact: true}).click();
+    await page.getByRole('button', {name: 'Call', exact: true}).click();
+    await expect(page.locator('[data-alpha-call-card]')).toBeVisible();
+    await page.evaluate(() => { const shell = (window as any).alphaShell(); shell.mod('phone').actions.ring({args: {pid: 'maya'}}, shell.api('phone')); });
+    await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
+    for (const chat of ['input', 'sheet', 'full']) {
+      await page.evaluate(chat => (window as any).alphaShell().setState({chat}), chat);
+      await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.timeline instanceof DocumentTimeline && a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished.catch(() => {}))));
+      const end = chat === 'full' ? '[data-alpha-strip-action="end"]' : chat === 'input' ? '[data-alpha-bar-end]' : '[data-alpha-ring-end]';
+      expect(await hits(page, end), `${chat} ${end}`).toBe(true);
+    }
+    await page.locator('[data-alpha-strip-action="end"]').click();
+    expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBeNull();
+    await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
+  });
+
+  test('the status-bar call chip\'s text meets 4.5:1 (AC-28)', async ({page}) => {
+    await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
+    for (const key of ['5', '5', '5']) await page.getByRole('button', {name: key, exact: true}).click();
+    await page.getByRole('button', {name: 'Call', exact: true}).click();
+    await page.evaluate(() => (window as any).alphaShell().goHome());
+    const chip = page.getByRole('button', {name: /^Return to /});
+    await expect(chip).toBeVisible();
+    const ratio = await chip.evaluate(el => {
+      const rgb = (v: string) => (v.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+      const lum = ([r, g, b]: number[]) => [r, g, b].map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+      const style = getComputedStyle(el), [a, b] = [lum(rgb(style.color)), lum(rgb(style.backgroundColor))];
+      return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+    });
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
   test('an emergency number keeps the full-screen call: no proposal, no stage, End reachable', async ({page}) => {
     await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
     for (const key of ['9', '1', '1']) await page.getByRole('button', {name: key, exact: true}).click();

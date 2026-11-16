@@ -344,6 +344,14 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await page.waitForTimeout(800);
 		await page.mouse.up();
 		expect(await page.evaluate(() => (window as any).__voice)).toBe(2);
+		// A short press that slides off the mark and is released elsewhere never starts voice later.
+		const again = (await mark.boundingBox())!;
+		await page.mouse.move(again.x + again.width / 2, again.y + again.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(again.x + 200, again.y + 300, {steps: 4});
+		await page.mouse.up();
+		await page.waitForTimeout(800);
+		expect(await page.evaluate(() => (window as any).__voice)).toBe(2);
 		// An open thread keeps the voice button ("send or voice").
 		await page.evaluate(() => { (window as any).__bar.notes.kind = 'thread'; (window as any).__bar.notes.field = 'person'; (window as any).__shell().setState({chat: 'sheet'}); });
 		await expect(page.getByRole('button', {name: 'Talk', exact: true})).toBeVisible();

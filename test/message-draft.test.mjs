@@ -86,6 +86,10 @@ test('a draft the owner asked Alpha for replaces the slot, keeps one Undo, and i
   // Typing, an accepted send and a dismissal end the Undo.
   assert.equal(D.typed(second, 'Mine again').undo, null);
   assert.equal(D.reviewFinished(second, 'sent').undo, null);
+  // An unknown send stays bound to the text it reviewed: Undo cannot replace it.
+  assert.equal(D.reviewFinished(second, 'unknown').undo, null);
+  assert.equal(D.reviewFinished(second, 'unknown').text, 'Shorter');
+  assert.deepEqual(D.reviewFinished(second, 'failed').undo, second.undo, 'a failed send changes nothing');
   assert.equal(D.suggestionDismissed(second).undo, null);
   // Replacing an automatic suggestion remembers the message it answered; Undo offers it again for that message.
   const suggestedReply = D.suggestionReplied(D.suggestionRequested(empty, 'm1', true), 'm1', 'm1', true, 'Sure');
