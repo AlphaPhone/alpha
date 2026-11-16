@@ -71,6 +71,9 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     expect(await hits(page, '[data-alpha-bar-end]'), 'closed: End beside the bar').toBe(true);
     await openAlpha(page);
     await expect(page.locator('[data-alpha-layer="app"][data-alpha-stage="true"]')).toBeVisible();
+    // The stage shows as the sheet starts rising (420ms height transition, AC-04); hit-test and
+    // grab the sheet once it rests, or the press lands below a grabber still moving up.
+    await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.timeline instanceof DocumentTimeline && a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished.catch(() => {}))));
     expect(await hits(page, '[data-alpha-call-end]'), 'open: End in the call card').toBe(true);
     const order = await page.locator('[data-alpha-call-card] [data-alpha-stage-last]').evaluate(row => {
       const boxes = [...row.querySelectorAll('button')].filter(b => b.getBoundingClientRect().width).map(b => ({end: b.hasAttribute('data-alpha-call-end'), x: b.getBoundingClientRect().left}));
