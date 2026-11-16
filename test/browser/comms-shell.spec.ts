@@ -200,7 +200,7 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await settled(page);
 		// Open: End leaves the bar (the call card has it); full: End is in the strip.
 		await expect(end).toHaveCount(0);
-		// A size tap right after a drag is that drag's own release, so the next tap waits it out.
+		// A size tap right after a drag is that drag’s own release, so the next tap waits it out.
 		await page.waitForTimeout(400);
 		await page.getByRole('button', {name: 'Expand chat', exact: true}).click();
 		await page.locator('[data-alpha-strip-action="end"]').click();

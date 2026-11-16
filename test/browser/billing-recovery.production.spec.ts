@@ -118,7 +118,8 @@ for (const failRestart of [false, true]) {
       await pressHome(page);
     } else {
       await button(page, 'Open conversation').click();
-      await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeVisible();
+      await expect(conversation(page)).toBeVisible();
+      await expect(page.getByRole('textbox', { name: 'Message Alpha', exact: true })).toBeVisible();
       await button(page, 'Minimize chat').click();
     }
     await expect(sheet(page)).toHaveCount(0);
