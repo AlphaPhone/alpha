@@ -628,7 +628,7 @@ class CloudSigningInputTest(unittest.TestCase):
         for record, field, replacement in (
                 (self.producer, "runtimeProfile", "native"),
                 (self.build, "runtimeProfile", "native"),
-                (standalone, "packageName", PRODUCER.CANDIDATE_PACKAGE)):
+                (standalone, "packageName", "ai.example.alphaphone")):
             with self.subTest(field=field, replacement=replacement):
                 previous = record[field]
                 record[field] = replacement
