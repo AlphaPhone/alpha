@@ -4850,7 +4850,7 @@
       "Chat Transcribe only, the one route that reaches the recorder stages: one recorder with four generations, one task in flight per generation, and one flag each for an abandoned start and an abandoned stop or transcription.",
       "A stop that returns a clip, from the Stop control or the maximum-duration event, transcribes it in the same task; the recorded stage is reached only after a failed transcription.",
       "Transcribe does not open again while an abandoned microphone start has not settled; the retirement panel shown meanwhile and an unconfirmed stop are in VoiceSurfaceRetirement.",
-      "cleanup() cancels the driver recording within the step. A rejected stop, from the Stop control or the maximum-duration timer, releases the driver recording.",
+      "cleanup() cancels the driver recording within the step. The rejected Stop-control and duration-limit schedules presume a confirmed discard. The owning test separately replays those schedules through the whole pinned native live dictation and observes the already-recording refusal directly.",
       "Route selection, on-device speech readiness and its automatic start, playback of the clip, and the voice conversation are outside this model."
     ],
     "sharedSources": [
