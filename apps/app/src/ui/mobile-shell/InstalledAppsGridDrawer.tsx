@@ -17,11 +17,8 @@ import {
   useLayoutEffect,
   useRef,
 } from "react";
+import { DEFAULT_HOLD_MS, LAUNCHER_PRESS_SLOP } from "../gestures/constants";
 
-/** A press held this long opens an entry's menu (drawer) or Home edit mode. */
-export const HOLD_MS = 450;
-/** Movement (CSS px) that turns a press into a scroll or a drag. */
-export const SLOP = 10;
 /** The drawer is a projection of the installed inventory. A resolved default handler does
  * not establish a listed launcher component and must not create a synthetic shortcut. */
 export function appsDrawerEntries(
@@ -240,7 +237,7 @@ export function InstalledAppsGridDrawer({
           if (!target.isConnected || !scope.current?.contains(target)) return;
           swallow.current = key;
           onMenu(key);
-        }, HOLD_MS),
+        }, DEFAULT_HOLD_MS),
       };
       press.current = pending;
     },
@@ -251,7 +248,7 @@ export function InstalledAppsGridDrawer({
         Math.hypot(
           event.clientX - press.current.x,
           event.clientY - press.current.y,
-        ) > SLOP
+        ) > LAUNCHER_PRESS_SLOP
       )
         endPress();
     },

@@ -29,7 +29,6 @@ export function openWorkflowHistory(read:()=>Bag,write:(patch:Bag)=>void,isRunni
  const snapshot=JSON.stringify(read());let plan:ReturnType<typeof finishedWorkflowHistory>|undefined,error='';
  try{plan=finishedWorkflowHistory(JSON.parse(snapshot));}catch(cause){error=cause instanceof Error?cause.message:'History unavailable.';}
  const dialog=current=document.createElement('dialog');dialog.setAttribute('aria-label','Workflow history');dialog.style.cssText='box-sizing:border-box;width:min(380px,92vw);max-height:85dvh;overflow:auto;border:0;border-radius:20px;padding:24px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.5 system-ui';
- const shell=document.querySelector('.os');if(shell)for(const name of ['--bg','--fg','--s2'])dialog.style.setProperty(name,getComputedStyle(shell).getPropertyValue(name));
  const heading=document.createElement('h2');heading.textContent='Workflow history';
  const description=document.createElement('p');description.hidden=true;
  const status=document.createElement('p');status.setAttribute('role','status');status.setAttribute('aria-label','Run history status');status.textContent=error||(plan?.pending||isRunning()?'Runs active':`${plan!.count} finished`);

@@ -1,4 +1,5 @@
 import {holdPhoneInert} from '../runtime/modal-inert';
+import {inheritShellTheme} from '../browser/dialog-layout';
 import {calendarApprovalPending,calendarApprovalStatus,type CalendarApproval} from '../runtime/calendar-approval';
 import {calendarApprovalFields,type CalendarApprovalLabels} from './calendar-approval-fields';
 /** A displayed request is read again at the tap. No queue or provider mutation occurs here. */
@@ -6,7 +7,7 @@ export function reviewCalendarApproval(read:(signal:AbortSignal)=>Promise<Calend
  signal.throwIfAborted();current();
  return new Promise((resolve,reject)=>{
   const dialog=document.createElement('dialog');dialog.className='note-source-dialog calendar-approval-review';dialog.setAttribute('aria-label','Calendar change');
-  const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg','s2','mut','line','acc'])dialog.style.setProperty('--'+token,style.getPropertyValue('--'+token));dialog.style.setProperty('--source-bg',style.getPropertyValue('--bg'));dialog.style.setProperty('--source-fg',style.getPropertyValue('--fg'));}
+  inheritShellTheme(dialog,['bg','fg','s2','mut','line','acc']);inheritShellTheme(dialog,['bg','fg'],{prefix:'--source-'});
   const content=document.createElement('section');content.className='note-source-content';content.tabIndex=0;content.setAttribute('aria-label','Details');
   const heading=document.createElement('h2');heading.textContent='Calendar change';
   const status=document.createElement('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.textContent='Checking request…';

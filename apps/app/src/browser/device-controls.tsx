@@ -7,6 +7,7 @@ import {openReminderRecovery} from './reminder-recovery';
 import {openCalendarRecovery} from './calendar-recovery';
 import {browserDevProfile} from './dev-profile';
 import {showSimulatorRecovery} from './simulator-recovery';
+import {inheritShellTheme} from './dialog-layout';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { registerPlugin } from '../platform-plugins';
 type Command='home'|'back'|'power'|'unlock'|'boot'|'assistant'|'shade'|'background'|'resume';
@@ -18,7 +19,7 @@ function DevelopmentDeviceControls({command}:Props) {
  const dialog=useRef<HTMLDialogElement>(null),[role,setRole]=useState(''),[savingRole,setSavingRole]=useState(false);
  useEffect(()=>{const back=(event:Event)=>{if(!dialog.current?.open)return;event.preventDefault();event.stopImmediatePropagation();dialog.current.close();};window.addEventListener('alpha-back',back,true);return()=>window.removeEventListener('alpha-back',back,true);},[]);
  const run=(action:Command)=>{dialog.current?.close();command(action);};
- const open=()=>{const phone=document.querySelector<HTMLElement>('.os');if(phone&&dialog.current){const theme=getComputedStyle(phone);for(const key of ['bg','fg','s2','line','mut'])dialog.current.style.setProperty(`--dev-${key}`,theme.getPropertyValue(`--${key}`));}dialog.current?.showModal();};
+ const open=()=>{if(dialog.current)inheritShellTheme(dialog.current,['bg','fg','s2','line','mut'],{prefix:'--dev-'});dialog.current?.showModal();};
  const changeProfile=()=>{const url=new URL(location.href);if(browserDevProfile)url.searchParams.delete('mode');else url.searchParams.set('mode','dev');location.assign(url.href);};
  return <><div className="alpha-dev-tools" data-dev-profile={browserDevProfile?'true':'false'}>
  <button className="alpha-dev-opener" aria-label="Device controls" aria-describedby="alpha-dev-profile-label" title="Device controls" onClick={open}><span aria-hidden="true" data-alpha-icon="/icons/lucide/sliders-horizontal.svg" style={{...iconStyle("sliders-horizontal"),width:"22px",height:"22px"}}/></button>

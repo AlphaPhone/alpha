@@ -1,12 +1,13 @@
 import {proposedRecordingSummary} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-recording-summary.ts';
 import {summarySourceOf,webSourceOf,recordingSourceOf,type SummarySource,type WebSource,type RecordingSource} from './summary-source';
 import type {Source} from './note-source-adapter';
+import {inheritShellTheme} from '../browser/dialog-layout';
 /** A direct user edit/save, separate from an agent proposal. Never saves on reply arrival. */
 export function reviewSummaryNote(input:{text:string;source:SummarySource;current:()=>boolean;save:(note:{title:string;body:string;documentSource?:Source;webSource?:WebSource;recordingSource?:RecordingSource;actions?:{t:string;done:boolean}[]})=>Promise<boolean>;complete:()=>void}){
  const source=summarySourceOf(input.source);if(!source||!input.current())throw Error('Source review expired. Ask about the source again.');
  const recording=recordingSourceOf(source),proposed=recording?proposedRecordingSummary(input.text):undefined;
  const dialog=document.createElement('dialog');dialog.className='note-source-dialog';dialog.setAttribute('aria-label','Save summary');
- const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));}
+ inheritShellTheme(dialog,['bg','fg'],{prefix:'--source-'});
  const heading=document.createElement('h2');heading.textContent='Review summary note';const content=document.createElement('div');content.className='note-source-content';content.tabIndex=0;content.setAttribute('role','region');content.setAttribute('aria-label','Summary note review');
  const description=document.createElement('p');description.textContent=source.name;description.style.overflowWrap='anywhere';
  const title=document.createElement('input');title.setAttribute('aria-label','Summary note title');title.maxLength=200;title.value=('Summary · '+source.name).slice(0,200);

@@ -28,7 +28,7 @@ const stubs={
  './files':`export class BrowserFiles{}`,
  './notification-store':`export const notificationState=async()=>({appEnabled:globalThis.__alphaTest.notifications,channels:{}});`,
  '../runtime/deletion-owner':`export const browserDeletionOwner=()=>'agent:test',browserDeletionOwnerCurrent=()=>true,browserDeletionOwnerVisible=()=>true;`,
- './dialog-layout':`export const layoutBrowserDialog=(dialog,actions)=>dialog.append(...actions);`,
+ './dialog-layout':`export const layoutBrowserDialog=(dialog,actions)=>dialog.append(...actions),inheritShellTheme=()=>{};`,
  './alert-audio':`export class BrowserAlertAudio{play(){}stop(){}}`,
  './screen-locked':`export const browserScreenLocked=()=>false;`,
  '@capacitor/core':`export class WebPlugin{async notifyListeners(){}}export const Capacitor={isNativePlatform:()=>false,getPlatform:()=>'web'};export const registerPlugin=()=>({});`,

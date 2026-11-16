@@ -30,7 +30,6 @@ let dialog:HTMLDialogElement|undefined;
 export function showSimulatorRecovery(){
  if(!devSurfacesEnabled||dialog?.open)return;
  const own=dialog=document.createElement('dialog');own.setAttribute('aria-label','Saved app recovery');own.style.cssText='box-sizing:border-box;width:min(400px,94vw);max-height:85dvh;overflow:auto;border:0;border-radius:22px;padding:24px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.5 system-ui';
- const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const k of ['--bg','--fg','--s2'])own.style.setProperty(k,theme.getPropertyValue(k));}
  const heading=document.createElement('h2');heading.textContent='Saved app recovery';const intro=document.createElement('p');intro.textContent=failures.size?'Some saved development apps could not be opened. Their original data is retained. Other apps remain available.':'Saved development apps are ready.';own.append(heading,intro);
  const button=(text:string)=>{const b=document.createElement('button');b.textContent=text;b.style.cssText='min-height:44px;margin:4px;padding:10px 14px;border:1px solid #aaa;border-radius:12px;background:var(--s2,#eee);color:inherit;font:inherit';return b;};
  for(const [name,failure] of failures){

@@ -1,5 +1,6 @@
 import './review.css';
 import {browserScreenLocked} from './screen-locked';
+import {inheritShellTheme} from './dialog-layout';
 /** A browser equivalent of the native operation review, with cancellation ownership. */
 export class BrowserReviews {
   private pending = new Map<string, () => void>();
@@ -13,7 +14,7 @@ export class BrowserReviews {
       const dialog = document.createElement('dialog');
       dialog.setAttribute('aria-label', title);
       dialog.className='alpha-operation-review';
-      const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const token of ['bg','fg','s2','line'])dialog.style.setProperty('--review-'+token,theme.getPropertyValue('--'+token));dialog.style.colorScheme=theme.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';}
+      inheritShellTheme(dialog,['bg','fg','s2','line'],{prefix:'--review-',colorScheme:true});
 
       const heading = document.createElement('h2'); heading.textContent = title;
       const body = document.createElement('p'); body.textContent = details; body.style.whiteSpace = 'pre-wrap';

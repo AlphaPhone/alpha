@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import {transformSync} from 'esbuild';
 const L = await import('../apps/app/src/prototype/locale-time.ts');
 const H = await import('../apps/app/src/prototype/home-cards.ts');
+const O = await import('../apps/app/src/ui/overview/daily-overview.ts');
 L.setLocalePreferences({locale: 'en-US'});
 const now = new Date(2026, 9, 7, 15, 30).getTime();
 const at = (h, m = 0, day = 7) => new Date(2026, 9, day, h, m).getTime();
@@ -55,14 +56,14 @@ test('brief: latest retained digest shows its summary, run time and agent; other
   assert.equal(long.time, 'Failed 7:00 AM'); assert.equal(long.source, 'Your agent');
 });
 test('calendar: status strings map to explicit card states', () => {
-  assert.equal(H.calendarCardState('Calendar access denied'), 'denied');
-  assert.equal(H.calendarCardState('Calendar range could not be loaded. Open device calendars to retry.'), 'error');
-  assert.equal(H.calendarCardState('Browser calendar could not be loaded. Retry or open Calendar recovery.'), 'error');
-  assert.equal(H.calendarCardState('Loading calendars…'), 'loading');
-  assert.equal(H.calendarCardState('Device calendars connected'), 'ready');
-  assert.equal(H.calendarCardState('Calendar range limited to 2,000 events'), 'ready');
-  assert.equal(H.calendarCardState('Device calendars are available in the Android app.'), 'unavailable');
-  for (const status of ['Not connected', 'Connect device calendars', undefined]) assert.equal(H.calendarCardState(status), 'not-connected');
+  assert.equal(O.overviewCalendarState('Calendar access denied'), 'denied');
+  assert.equal(O.overviewCalendarState('Calendar range could not be loaded. Open device calendars to retry.'), 'error');
+  assert.equal(O.overviewCalendarState('Browser calendar could not be loaded. Retry or open Calendar recovery.'), 'error');
+  assert.equal(O.overviewCalendarState('Loading calendars…'), 'loading');
+  assert.equal(O.overviewCalendarState('Device calendars connected'), 'ready');
+  assert.equal(O.overviewCalendarState('Calendar range limited to 2,000 events'), 'ready');
+  assert.equal(O.overviewCalendarState('Device calendars are available in the Android app.'), 'unavailable');
+  for (const status of ['Not connected', 'Connect device calendars', undefined]) assert.equal(O.overviewCalendarState(status), 'not-connected');
 });
 test('calendar: denied, error and retry copy replace neutral copy, and reads name their source', () => {
   const base = {agenda: null, readAt: at(15, 4), now, device: 'this device'};
@@ -95,9 +96,9 @@ test('calendar empty title: every state the card can show without an item', () =
   assert.doesNotMatch(readFileSync(new URL('../apps/app/src/prototype/data-adapter.ts', import.meta.url), 'utf8'), /'No upcoming events'|'Calendar access is off'/, 'the Home adapter takes the title from this helper');
 });
 test('attendee initials come only from event names, capped with an overflow count', () => {
-  assert.deepEqual(H.attendeeInitials([]), []);
-  assert.deepEqual(H.attendeeInitials(['Ada Lovelace', 'grace hopper', 42, '']), ['AL', 'GH']);
-  assert.deepEqual(H.attendeeInitials(['A B', 'C D', 'E F', 'G H', 'I J']), ['AB', 'CD', '+3']);
+  assert.deepEqual(O.overviewAttendeeInitials([]), []);
+  assert.deepEqual(O.overviewAttendeeInitials(['Ada Lovelace', 'grace hopper', 42, '']), ['AL', 'GH']);
+  assert.deepEqual(O.overviewAttendeeInitials(['A B', 'C D', 'E F', 'G H', 'I J']), ['AB', 'CD', '+3']);
   const template = readFileSync(new URL('../apps/app/src/prototype/template.html', import.meta.url), 'utf8');
   assert.doesNotMatch(template, />(MC|JP|\+2)<\/span>/, 'no hard-coded avatar initials');
   assert.doesNotMatch(template, /\{\{lockSum\}\}|\{\{showHeads\}\}/, 'no fixture lock summary or heads-up banner');
@@ -124,8 +125,8 @@ test('brief card: shown only for a retained result, with agent, run time and fai
     assert.doesNotMatch(skipped.status + skipped.label, /\bran\b/i);
     assert.equal(H.presentHomeBrief({summary: 'x', ranAt: at(8), agent: 'Alpha', status}, now).time, 'Did not run 8:00 AM');
   }
-  assert.deepEqual(['finished', 'succeeded', 'completed', '', undefined].map(H.briefOutcome), ['ran', 'ran', 'ran', 'ran', 'ran']);
-  assert.deepEqual(['failed', 'cancelled', 'error'].map(H.briefOutcome), ['failed', 'failed', 'failed']);
+  assert.deepEqual(['finished', 'succeeded', 'completed', '', undefined].map(O.overviewBriefOutcome), ['ran', 'ran', 'ran', 'ran', 'ran']);
+  assert.deepEqual(['failed', 'cancelled', 'error'].map(O.overviewBriefOutcome), ['failed', 'failed', 'failed']);
 });
 test('calendar source: useful names stay visible while read provenance remains accessible', () => {
   const base = {overdue: false, readAt: at(15, 4), now, native: true};
@@ -144,9 +145,9 @@ test('calendar source: useful names stay visible while read provenance remains a
   assert.deepEqual(H.presentHomeCalendarSource({...base, state: 'ready', reminder: true, reminderReadAt: null}), {origin: 'Reminder', read: '', description: 'Reminder saved on this device'}, 'no read time is claimed for a reminder without a recorded read');
   assert.deepEqual(H.presentHomeCalendarSource({...base, state: 'ready', overdue: true, reminderReadAt: at(14, 50)}), {origin: '', read: '', description: 'Overdue reminder saved on this device, read 2:50 PM'});
   assert.equal(H.presentHomeCalendarSource({...base, state: 'error', reminder: true, reminderReadAt: at(14, 50)}).read, 'Open Calendar to retry', 'a failed calendar read stays visible above an upcoming reminder');
-  assert.equal(H.homeAgendaHeader('Mon, Oct 5', 0), 'Mon, Oct 5');
-  assert.equal(H.homeAgendaHeader('Mon, Oct 5', 1), 'Overdue reminder');
-  assert.equal(H.homeAgendaHeader('Mon, Oct 5', 3), '3 overdue reminders');
+  assert.equal(O.overviewAgendaHeader('Mon, Oct 5', 0), 'Mon, Oct 5');
+  assert.equal(O.overviewAgendaHeader('Mon, Oct 5', 1), 'Overdue reminder');
+  assert.equal(O.overviewAgendaHeader('Mon, Oct 5', 3), '3 overdue reminders');
   assert.equal(H.overdueDueLabel(at(9), now), 'Due 9:00 AM');
   assert.equal(H.overdueDueLabel(at(9, 0, 5), now), 'Due Mon, Oct 5 9:00 AM');
 });

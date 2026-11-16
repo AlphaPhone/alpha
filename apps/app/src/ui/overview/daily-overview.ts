@@ -10,11 +10,10 @@
  * on this device, never a provider sync time.
  *
  * Brand-specific wording for the device ("this device", "this browser") and
- * locale formatting are inputs. A host binds its own clock format with
- * {@link createOverviewFormat} or by passing an {@link OverviewFormat}.
+ * locale formatting are inputs. A host binds its own clock format by passing
+ * an {@link OverviewFormat}.
  */
 
-/** Locale formatting used by every presenter. */
 /**
  * Shorten display text to at most `max` characters, marking any cut with an
  * ellipsis so a shortened brief, label or message never reads as complete.
@@ -24,39 +23,12 @@ export function overviewClip(text: string, max: number): string {
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
+/** Locale formatting used by every presenter. */
 export interface OverviewFormat {
   /** Time of day, for example "3:04 PM" or "15:04". */
   time(date: Date): string;
   /** Short date with weekday, for example "Wed, Oct 8". */
   shortDate(date: Date): string;
-}
-
-/** Intl formatting for a locale, with narrow no-break spaces normalized. */
-export function createOverviewFormat(
-  options: { locale?: string; hourCycle?: "h12" | "h23" } = {},
-): OverviewFormat {
-  const clean = (text: string) => text.replace(/[  ]/g, " ");
-  const time = new Intl.DateTimeFormat(options.locale, {
-    hour: "numeric",
-    minute: "2-digit",
-    ...(options.hourCycle ? { hourCycle: options.hourCycle } : {}),
-  });
-  const shortDate = new Intl.DateTimeFormat(options.locale, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-  return {
-    time: (date) => clean(time.format(date)),
-    shortDate: (date) => clean(shortDate.format(date)),
-  };
-}
-
-let defaultFormat: OverviewFormat | null = null;
-function resolveFormat(format: OverviewFormat | undefined): OverviewFormat {
-  if (format) return format;
-  defaultFormat ??= createOverviewFormat();
-  return defaultFormat;
 }
 
 /** Epoch milliseconds of a positive numeric or parseable time, otherwise null. */
@@ -74,9 +46,9 @@ export function overviewInstant(value: unknown): number | null {
 export function overviewWhenLabel(
   at: number,
   now: number,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): string {
-  const f = resolveFormat(format);
+  const f = format;
   const date = new Date(at);
   return date.toDateString() === new Date(now).toDateString()
     ? f.time(date)
@@ -130,7 +102,7 @@ export interface OverviewAttentionCard {
 export function presentOverviewAttention(
   summary: OverviewAttentionSummary | null | undefined,
   now: number,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewAttentionCard {
   const when = (at: number) => overviewWhenLabel(at, now, format);
   const updated = overviewInstant(summary?.updatedAt);
@@ -206,7 +178,7 @@ export function presentOverviewInboxStatus(
     unchecked: boolean;
     now: number;
   },
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): string {
   const { failure, pending, cached, now } = input;
   const read =
@@ -296,7 +268,7 @@ export interface OverviewInboxCardModel {
  */
 export function presentOverviewInboxCard(
   input: OverviewInboxCardInput,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewInboxCardModel {
   const { loaded, failure, pending, now } = input;
   const stale =
@@ -420,7 +392,7 @@ export interface OverviewBrief {
 export function presentOverviewBrief(
   brief: OverviewBriefSummary | null | undefined,
   now: number,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewBrief {
   const summary =
     typeof brief?.summary === "string"
@@ -470,7 +442,7 @@ export type OverviewBriefCard =
 export function presentOverviewBriefCard(
   brief: OverviewBriefSummary | null | undefined,
   now: number,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewBriefCard {
   const base = presentOverviewBrief(brief, now, format);
   if (!base.has || !brief)
@@ -590,7 +562,7 @@ export function presentOverviewAgendaSource(
     calendar?: string | null;
     truncated?: boolean;
   },
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewAgendaProvenance {
   const { state, overdue, readAt, now, native } = input;
   const when = (at: number) => overviewWhenLabel(at, now, format);
@@ -643,9 +615,9 @@ export function presentOverviewAgendaNext(
     now: number;
     provenance: OverviewAgendaProvenance;
   },
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): { text: string; source: string; description: string } {
-  const f = resolveFormat(format);
+  const f = format;
   const { begin, now, provenance } = input;
   const date = new Date(begin);
   const today = date.toDateString() === new Date(now).toDateString();
@@ -707,7 +679,7 @@ export function overviewAgendaHeader(
 export function overviewOverdueDueLabel(
   at: number,
   now: number,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): string {
   return `Due ${overviewWhenLabel(at, now, format)}`;
 }
@@ -729,7 +701,7 @@ export function presentOverviewCalendar(
     now: number;
     device: string;
   },
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): {
   title: string;
   time: string;
@@ -738,7 +710,7 @@ export function presentOverviewCalendar(
   people: string[];
   label: string;
 } {
-  const f = resolveFormat(format);
+  const f = format;
   const { state, agenda, readAt, now, device } = input;
   const source =
     state === "ready" && readAt
@@ -920,7 +892,7 @@ export function presentOverviewAgendaFeed(
     /** Title of a complete read with no upcoming item. */
     emptyLabel?: string;
   },
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewAgendaFeedPresentation {
   const source = input.source.trim() || "Calendar";
   const unverified = "Calendar has not been verified";
@@ -1076,9 +1048,9 @@ export interface OverviewAgendaCardModel {
  */
 export function presentOverviewAgendaCard(
   input: OverviewAgendaCardInput,
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): OverviewAgendaCardModel {
-  const f = resolveFormat(format);
+  const f = format;
   const { item, provenance, now } = input;
   const overdue = !!item?.overdue;
   const dateLabel = f.shortDate(new Date(item ? item.begin : now));
@@ -1172,7 +1144,7 @@ export function presentOverviewWorkflowFreshness(
     unified: boolean;
     agent?: boolean;
   },
-  format?: OverviewFormat,
+  format: OverviewFormat,
 ): { visible: string; description: string } {
   const at = overviewInstant(input.loadedAt);
   if (!at) return { visible: "", description: "" };

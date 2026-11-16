@@ -1,10 +1,11 @@
 import './selected-document-viewer.css';
+import {inheritShellTheme} from './dialog-layout';
 
 /** The document remains sandboxed; closing the preview does not forget its selection. */
 export function openSelectedDocumentViewer(name:string,url:string,onClose:()=>void){
  const previous=document.activeElement as HTMLElement|null;
  const dialog=document.createElement('dialog');dialog.className='alpha-document-viewer';dialog.setAttribute('aria-label','Selected document');
- const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg','s2','line'])dialog.style.setProperty('--document-'+token,style.getPropertyValue('--'+token));dialog.style.colorScheme=style.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';}
+ inheritShellTheme(dialog,['bg','fg','s2','line'],{prefix:'--document-',colorScheme:true});
  const title=document.createElement('h2');title.textContent=name;title.tabIndex=0;
  const frame=document.createElement('iframe');frame.title=name;frame.setAttribute('sandbox','');frame.src=url;
  const footer=document.createElement('footer'),done=document.createElement('button');done.textContent='Done';footer.append(done);dialog.append(title,frame,footer);

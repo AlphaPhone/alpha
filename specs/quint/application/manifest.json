@@ -159,7 +159,6 @@
     ],
     "sources": [
       "apps/app/src/runtime/alpha-client.ts",
-      "apps/app/src/runtime/assistant-draft-record.ts",
       "apps/app/src/runtime/assistant-draft-store.ts",
       "apps/app/src/runtime/conversation-selection.ts",
       "apps/app/src/prototype/agent-adapter.ts"
@@ -1100,7 +1099,6 @@
     ],
     "sources": [
       "apps/app/src/prototype/assistant-draft-controller.ts",
-      "apps/app/src/runtime/assistant-draft-record.ts",
       "apps/app/src/runtime/assistant-draft-store.ts",
       "apps/app/src/ui/state/durable-draft-controller.ts"
     ],
@@ -4247,7 +4245,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/prototype/maps-chat-adapter.ts",
+      "apps/app/src/prototype/maps-adapter.ts",
       "apps/app/src/prototype/calendar-approval-adapter.ts"
     ],
     "symbols": [
@@ -4292,7 +4290,7 @@
         "name": "voiceSendTurnId"
       },
       {
-        "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+        "path": "apps/app/src/prototype/maps-adapter.ts",
         "name": "installMapsChatAdapter"
       },
       {
@@ -8255,8 +8253,8 @@
         "name": "createStorageAccessCheck"
       },
       {
-        "path": "apps/app/src/prototype/home-cards.ts",
-        "name": "selectHomeAgenda"
+        "path": "apps/app/src/ui/overview/daily-overview.ts",
+        "name": "selectOverviewAgenda"
       },
       {
         "path": "apps/app/src/prototype/data-adapter.ts",

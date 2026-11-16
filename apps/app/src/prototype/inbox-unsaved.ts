@@ -1,8 +1,7 @@
 import {Capacitor} from '@capacitor/core';
 import {AssistantDraftController} from './assistant-draft-controller';
-import type {AssistantDraft} from '../runtime/assistant-draft-record';
-import {secureConnectionStore} from '../runtime/native-connection';
-import {nativeAssistantDraftRecovery} from '../runtime/native-assistant-draft-recovery';
+import type {DurableDraft} from '../ui/state/durable-draft.ts';
+import {durableDraftSlotStore} from '../runtime/assistant-draft-store';
 import {encodeInboxUnsaved,readInboxUnsaved,inboxUnsavedLimit,type InboxUnsaved} from '../runtime/inbox-unsaved-record';
 import {editCoalescer} from '../runtime/inbox-edit-coalescer';
 import {openDomainRecovery} from '../browser/domain-recovery';
@@ -19,7 +18,7 @@ const retainedMessages={
 /** Account-scoped recovery copies remain separate from the explicitly saved local draft. */
 export function inboxUnsaved(owner:string,publish:()=>void,restore:(value:InboxUnsaved)=>void){
  let text='',alive=true,applying=false,invalid=false,recoveryAbort:AbortController|undefined;
- let readStored:(()=>Promise<AssistantDraft|null>)|undefined;
+ let readStored:(()=>Promise<DurableDraft|null>)|undefined;
  let retiredReadback:Promise<boolean>|undefined;
  // Each edit is retained in the task after it is made, with no typing pause: a recovery copy exists
  // as soon as the composer is idle. The latest copy waits here, replaces any earlier unwritten one,
@@ -32,16 +31,12 @@ export function inboxUnsaved(owner:string,publish:()=>void,restore:(value:InboxU
  let parsed:{raw:string;value:InboxUnsaved|null}|null=null;
  const binding=JSON.stringify(['inbox-unsaved',browserDevProfile?'development':'app',owner]);
  const controller=new AssistantDraftController(async()=>{
-  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(binding))),n=>n.toString(16).padStart(2,'0')).join('');
-  const slot='inbox-drafts:v1:unsaved:'+hash,native=Capacitor.getPlatform()==='android';
-  const domain=native?null:new (await import('../browser/json-domain-document')).BrowserJsonDomainDocument('alpha.browser.'+slot);
-  const check=(row:any):AssistantDraft|null=>{if(row===null)return null;if(!row||Object.keys(row).sort().join(',')!=='binding,revision,text,version'||row.version!==1||row.binding!==binding||typeof row.revision!=='string'||!row.revision||typeof row.text!=='string'||new TextEncoder().encode(row.text).length>inboxUnsavedLimit)throw Error('Retained email edits need recovery.');if(row.text)readInboxUnsaved(row.text,owner);return row;};
-  const read=readStored=async()=>check(native?await secureConnectionStore.read(slot):await domain!.readJson());
-  const empty=()=>({version:1,binding,revision:crypto.randomUUID(),text:''});
+  const store=await durableDraftSlotStore('inbox-drafts:v1:unsaved:',binding,{textLimit:inboxUnsavedLimit});
+  const read=readStored=async()=>{const row=await store.read();if(row?.sending)throw Error('Retained email edits need recovery.');if(row?.text)readInboxUnsaved(row.text,owner);return row;};
   return {
-   recovery:domain?{capture:(signal?:AbortSignal)=>domain.capture(signal),reset:async(expected:any,signal?:AbortSignal)=>{await domain.restore(expected,JSON.stringify({raw:JSON.stringify(empty())}),signal);}}:nativeAssistantDraftRecovery(binding,{read:()=>secureConnectionStore.readRaw(slot),compareExchange:(expected,value)=>secureConnectionStore.compareExchangeRaw(slot,expected,value)}),
+   recovery:store.recovery,
    read,
-   save:async(expected:AssistantDraft|null,nextText:string)=>{queue.hold();try{const value={version:1 as const,binding,revision:crypto.randomUUID(),text:nextText};check(value);if(new TextEncoder().encode(JSON.stringify(value)).length>8*1024*1024)throw Error('Retained email is too large.');if(native){const receipt=await secureConnectionStore.compareExchange(slot,expected,value);if(receipt.status!=='saved')throw Error('Retained email changed.');}else await domain!.editJson(actual=>{check(actual);if(JSON.stringify(actual)!==JSON.stringify(expected))throw Error('Retained email changed.');return value;});return value;}finally{queue.release();}},
+   save:async(expected:DurableDraft|null,nextText:string)=>{queue.hold();try{if(nextText)readInboxUnsaved(nextText,owner);if(new TextEncoder().encode(JSON.stringify({version:1,binding,revision:crypto.randomUUID(),text:nextText})).length>8*1024*1024)throw Error('Retained email is too large.');return await store.save(expected,nextText);}finally{queue.release();}},
   };
  },()=>text,value=>{text=value;if(applying&&value)restore(readInboxUnsaved(value,owner));},()=>{if(alive)publish();},retainedMessages);
  return {

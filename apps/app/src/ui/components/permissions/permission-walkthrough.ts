@@ -117,7 +117,8 @@ export interface WalkthroughMemoryStore {
   reopen(): void;
 }
 
-const defaultStore = (): WalkthroughStore | null => {
+/** The browser's localStorage when reachable; null where storage is unavailable or throws. */
+export const defaultWalkthroughStore = (): WalkthroughStore | null => {
   try {
     return globalThis.localStorage ?? null;
   } catch {
@@ -129,7 +130,7 @@ const defaultStore = (): WalkthroughStore | null => {
 export function walkthroughMemory(
   key: string,
   reopenEvent: string,
-  store: () => WalkthroughStore | null = defaultStore,
+  store: () => WalkthroughStore | null = defaultWalkthroughStore,
 ): WalkthroughMemoryStore {
   const read = (): WalkthroughMemory => {
     try {

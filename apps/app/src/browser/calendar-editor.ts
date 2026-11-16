@@ -2,13 +2,14 @@ import {iconStyle} from '../icon-style';
 import {calendarInstant,calendarWall,civil} from './calendar-time';
 import {calendarEditorDraft,type CalendarEditorFields} from './calendar-editor-draft';
 import './calendar-editor.css';
+import {inheritShellTheme} from './dialog-layout';
 export interface EditableCalendarEvent {title:string;body:string;location:string;begin:number;end:number;allDay?:boolean;timeZone?:string;repeat?:'none'|'daily'|'weekdays'|'weekly';alert?:number|null;who?:string[];video?:boolean}
 export type CalendarPerson={id:string;name:string};
 export function editCalendarEvent(row:EditableCalendarEvent,commit:(next:EditableCalendarEvent,current:()=>boolean,signal:AbortSignal)=>Promise<void>,people:CalendarPerson[]=[],identity?:{id:string;revision:string}):Promise<{status:'saved'|'cancelled'}>{
  const cancellation=new AbortController();
  const zone=row.timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone;
  const dialog=document.createElement('dialog');dialog.className='alpha-calendar-editor';dialog.setAttribute('aria-label','Edit calendar event');
- const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg','s2','line','mut'])dialog.style.setProperty('--editor-'+token,style.getPropertyValue('--'+token));dialog.style.colorScheme=style.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';}
+ inheritShellTheme(dialog,['bg','fg','s2','line','mut'],{prefix:'--editor-',colorScheme:true});
  const header=document.createElement('header'),heading=document.createElement('h2'),dismiss=document.createElement('button');heading.textContent='Edit calendar event';dismiss.type='button';dismiss.className='alpha-calendar-dismiss';dismiss.setAttribute('aria-label','Close calendar editor');const closeIcon=document.createElement('span');closeIcon.setAttribute('aria-hidden','true');closeIcon.dataset.alphaIcon='/icons/lucide/x.svg';Object.assign(closeIcon.style,iconStyle('x'),{width:'20px',height:'20px'});dismiss.style.display='inline-flex';dismiss.style.alignItems='center';dismiss.style.justifyContent='center';dismiss.append(closeIcon);header.append(heading,dismiss);dialog.append(header);
  const form=document.createElement('div');form.className='alpha-calendar-fields';dialog.append(form);
  function field(label:string,type:'textarea',value:string):HTMLTextAreaElement;

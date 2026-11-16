@@ -1,6 +1,7 @@
 import {anyAbortSignal} from '../runtime/abort-signal';
 import {Capacitor} from '@capacitor/core';
 import {runFilePicker,inputFiles} from '../browser/file-picker';
+import {inheritShellTheme} from '../browser/dialog-layout';
 import {DailyApps} from '../daily';
 import {registerPlugin} from '../platform-plugins';
 import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
@@ -50,7 +51,7 @@ export function installNoteSourceAdapter(views:Bag){
    if(!note||note.kind!=='text')return;
    let expected=JSON.stringify(note),source=sourceOf(note.documentSource),closed=false,busy=false,opened=false;const pickerAbort=new AbortController();
    const previous=document.activeElement;
-   const dialog=document.createElement('dialog');dialog.className='note-source-dialog note-source-document-dialog';dialog.setAttribute('aria-label','Note source document');const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));dialog.style.colorScheme=style.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';}
+   const dialog=document.createElement('dialog');dialog.className='note-source-dialog note-source-document-dialog';dialog.setAttribute('aria-label','Note source document');inheritShellTheme(dialog,['bg','fg'],{prefix:'--source-',colorScheme:true});
    const heading=document.createElement('h2');heading.textContent='Source document';
    const content=document.createElement('div');content.className='note-source-content';content.tabIndex=0;content.setAttribute('role','region');content.setAttribute('aria-label','Source details');
    const name=document.createElement('p'),detail=document.createElement('p');

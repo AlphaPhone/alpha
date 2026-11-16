@@ -7,7 +7,6 @@ type Api=Record<string,any>;
 export function openIncomingSimulation(kind:'message'|'email',api:Api){
  if(!devSurfacesEnabled||!browserDevProfile)return;
  const dialog=document.createElement('dialog');dialog.setAttribute('aria-label',kind==='message'?'Incoming message':'Incoming email');dialog.style.cssText='box-sizing:border-box;width:min(380px,92vw);max-height:85dvh;overflow:auto;border:0;border-radius:20px;padding:20px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.4 system-ui';
- const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const name of ['--bg','--fg','--s2'])dialog.style.setProperty(name,theme.getPropertyValue(name));}
  const heading=document.createElement('h2');heading.textContent=dialog.getAttribute('aria-label');dialog.append(heading);
  const field=(name:string,control:HTMLElement)=>{control.setAttribute('aria-label',name);control.style.cssText='box-sizing:border-box;width:100%;padding:8px;font:inherit;background:var(--bg,#fff);color:inherit';const label=document.createElement('label');label.textContent=name;label.style.cssText='display:grid;gap:4px;margin:10px 0';label.append(control);dialog.append(label);};
  const sender=document.createElement('select');for(const person of api.get('contacts').list||api.people||[])sender.add(new Option(person.name,person.id));sender.value='maya';if(!sender.value)sender.selectedIndex=0;field('From',sender);

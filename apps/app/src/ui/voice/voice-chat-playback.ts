@@ -1,23 +1,8 @@
-import { collapseWhitespace } from "./speech-segments";
-
-export {
-  collapseWhitespace,
-  isRealSentenceEnd,
-  shelterUrls,
-  splitFirstSentence,
-} from "./speech-segments";
-
 /**
- * Playback / TTS logic for voice chat — text processing, sentence splitting,
- * speech text extraction, and mouth animation helpers.
+ * Speakable-text extraction for voice chat: strips structured payloads and
+ * hidden model blocks, then sanitizes the text for TTS.
  */
 import { sanitizeSpeechText } from "@elizaos/core/speech";
-export type SpeechSegmentKind = "full" | "first-sentence" | "remainder";
-export const MOUTH_OPEN_STEP = 0.02;
-// ── Text processing helpers ───────────────────────────────────────────
-export function capSpeechLength(input: string): string {
-  return input;
-}
 // ── Hidden model block stripping ──────────────────────────────────────
 /**
  * Hidden model block tags whose content should never be spoken. During
@@ -64,26 +49,5 @@ export function toSpeakableText(input: string): string {
   if (!extracted) return "";
   const normalized = sanitizeSpeechText(extracted);
   if (!normalized) return "";
-  return capSpeechLength(normalized);
-}
-// ── Sentence splitting ────────────────────────────────────────────────
-/** Committed words may gain punctuation, but must never turn into a longer word. */
-export function isCommittedSpeechPrefix(
-  fullText: string,
-  prefix: string,
-): boolean {
-  const full = collapseWhitespace(fullText);
-  const committed = collapseWhitespace(prefix);
-  return (
-    !committed ||
-    full === committed ||
-    (full.startsWith(committed) &&
-      /^[\s.,!?;:…]/u.test(full.slice(committed.length)))
-  );
-}
-// ── Mouth animation ───────────────────────────────────────────────────
-export function normalizeMouthOpen(value: number): number {
-  const clamped = Math.max(0, Math.min(1, value));
-  const stepped = Math.round(clamped / MOUTH_OPEN_STEP) * MOUTH_OPEN_STEP;
-  return stepped < MOUTH_OPEN_STEP ? 0 : Math.min(1, stepped);
+  return normalized;
 }

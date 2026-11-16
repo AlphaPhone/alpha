@@ -3,6 +3,7 @@ import { WebPlugin } from '@capacitor/core';
 import { reviewMailAttachment, type MailAttachment } from '../runtime/inbox-attachment';
 import { reviewOpaqueAttachment } from '../runtime/inbox-operation';
 import { BrowserFiles } from './files';
+import { inheritShellTheme } from './dialog-layout';
 /** Same byte/type/hash validation as the provider review; no uploads. */
 export class BrowserMailAttachments extends WebPlugin {
  private generation=0;
@@ -42,7 +43,7 @@ export class BrowserMailAttachments extends WebPlugin {
  async openReviewed(input:MailAttachment&{reviewed:boolean;sha256:string;offerSave?:boolean}){
   const offerSave=input.offerSave===true;input={...input};delete input.offerSave;
   const generation=this.generation,review=await reviewMailAttachment(input);if(!input.reviewed||review.sha256!==input.sha256||generation!==this.generation)throw Error('Review this attachment again.');this.clear();
-  const bytes=Uint8Array.from(atob(input.dataBase64),c=>c.charCodeAt(0)),url=this.url=URL.createObjectURL(new Blob([bytes],{type:input.mimeType})),dialog=this.dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Reviewed attachment');dialog.className='alpha-mail-attachment';const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg','s2','line'])dialog.style.setProperty('--attachment-'+token,style.getPropertyValue('--'+token));dialog.style.colorScheme=style.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';};const heading=document.createElement('h2');heading.textContent=input.name;heading.tabIndex=0;const close=document.createElement('button');close.textContent='Done';close.onclick=()=>void this.cancel();dialog.append(heading);
+  const bytes=Uint8Array.from(atob(input.dataBase64),c=>c.charCodeAt(0)),url=this.url=URL.createObjectURL(new Blob([bytes],{type:input.mimeType})),dialog=this.dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Reviewed attachment');dialog.className='alpha-mail-attachment';inheritShellTheme(dialog,['bg','fg','s2','line'],{prefix:'--attachment-',colorScheme:true});const heading=document.createElement('h2');heading.textContent=input.name;heading.tabIndex=0;const close=document.createElement('button');close.textContent='Done';close.onclick=()=>void this.cancel();dialog.append(heading);
   if(review.text!==undefined){const text=document.createElement('pre');text.textContent=review.text;text.tabIndex=0;dialog.append(text);}else{const frame=document.createElement('iframe');frame.title=input.name;frame.setAttribute('sandbox','');frame.src=url;dialog.append(frame);}
   const download=document.createElement('a');download.href=url;download.download=input.name;download.textContent='Download';const footer=document.createElement('footer');footer.append(close,download);dialog.append(footer);
   // Local development mail offers the same exact-copy save as provider mail review.

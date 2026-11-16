@@ -1,7 +1,6 @@
 import {
   createPermissionStepFlow,
-  locationAccess,
-  photoLibraryAccess,
+  defaultWalkthroughStore as defaultStore,
   walkthroughMemory,
   type PermissionStepBridge,
   type PermissionStepState,
@@ -22,12 +21,6 @@ export type NativeStartupPermissionKey = typeof nativeStartupPermissionKeys[numb
 export type StartupPermissionBridge = PermissionStepBridge;
 export type StartupPermissionState = PermissionStepState;
 
-/** A selected-photo grant is useful access, never described as the whole library. */
-export function startupPhotoAccess(value: unknown) {
-  const {granted, enabled, description} = photoLibraryAccess(value);
-  return {granted, enabled, description};
-}
-
 /** Files all-files access (decision F1). The step opens Android's "All files access" page, which
  * returns to Alpha; access is read back then. Android 10 (API 29) has no such access: native asks
  * for READ_/WRITE_EXTERNAL_STORAGE (legacy storage) and reports them as this access. */
@@ -38,18 +31,11 @@ export function startupFilesAccess(value: unknown) {
   return {granted, enabled: granted, requestable: true};
 }
 
-/** Permission metadata only: approximate access is usable without claiming a precise fix. */
-export function startupLocationAccess(value: unknown) {
-  const {granted, enabled, description} = locationAccess(value);
-  return {granted, enabled, description};
-}
-
 /** Installed names: which OS prompts were already shown, and the Settings reopen event. */
 export const STARTUP_PERMISSIONS_KEY = 'alpha.startup-permissions.v1';
 export const STARTUP_PERMISSIONS_REOPEN = 'alpha:startup-permissions-reopen';
 export type StartupPermissionMemory = WalkthroughMemory;
 type Store = WalkthroughStore;
-const defaultStore = (): Store | null => { try { return globalThis.localStorage ?? null; } catch { return null; } };
 const memory = (store: Store | null) => walkthroughMemory(STARTUP_PERMISSIONS_KEY, STARTUP_PERMISSIONS_REOPEN, () => store);
 
 export function readStartupPermissionMemory(store: Store | null = defaultStore()): StartupPermissionMemory {

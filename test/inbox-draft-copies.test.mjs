@@ -62,7 +62,7 @@ test('retained edits are written once per task with the latest copy, and read ba
   try {
     const {inboxUnsaved} = await bundle('apps/app/src/prototype/inbox-unsaved.ts', {
       core: `export const Capacitor={getPlatform:()=>'android',isNativePlatform:()=>true};`,
-      'native-connection': `const s=()=>globalThis.unsavedStoreFixture;export const secureConnectionStore={read:async slot=>structuredClone(s().slots.get(slot)??null),readRaw:async()=>null,compareExchangeRaw:async()=>({status:'saved'}),compareExchange:async(slot,before,value)=>{if(JSON.stringify(s().slots.get(slot)??null)!==JSON.stringify(before))return {status:'conflict'};s().slots.set(slot,structuredClone(value));s().writes++;return {status:'saved'};}};`,
+      'native-connection': `const s=()=>globalThis.unsavedStoreFixture;export const secureConnectionStore={readRaw:async slot=>s().slots.has(slot)?JSON.stringify(s().slots.get(slot)):null,compareExchangeRaw:async(slot,before,value)=>{if((s().slots.has(slot)?JSON.stringify(s().slots.get(slot)):null)!==before)return {status:'conflict'};s().slots.set(slot,JSON.parse(value));s().writes++;return {status:'saved'};}};`,
       'native-assistant-draft-recovery': `export const nativeAssistantDraftRecovery=()=>({capture:async()=>({}),reset:async()=>{}});`,
       'domain-recovery': `export const openDomainRecovery=()=>{};`,
       'dev-profile': `export const browserDevProfile=false;`,

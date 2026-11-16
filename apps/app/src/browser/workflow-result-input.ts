@@ -8,7 +8,6 @@ export function requestWorkflowResult(instruction:string,input:string,signal:Abo
  return new Promise((resolve,reject)=>{
   let settled=false;const previous=document.activeElement as HTMLElement|null;
   const dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Workflow step result');dialog.style.cssText='box-sizing:border-box;width:min(380px,92vw);max-height:85dvh;overflow:auto;border:0;border-radius:20px;padding:24px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.5 system-ui';
-  const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const name of ['--bg','--fg','--s2'])dialog.style.setProperty(name,theme.getPropertyValue(name));}
   const title=document.createElement('h2');title.textContent='Workflow step result';title.style.margin='0 0 12px';
   const prompt=document.createElement('p');prompt.textContent=instruction;
   const sourceLabel=document.createElement('label');sourceLabel.textContent='Step input';const source=document.createElement('textarea');source.value=input;source.readOnly=true;source.rows=3;sourceLabel.append(source);

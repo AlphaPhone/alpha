@@ -1,10 +1,11 @@
 import {holdPhoneInert} from '../runtime/modal-inert';
+import {inheritShellTheme} from '../browser/dialog-layout';
 /** One modal review over an inert phone: focus returns on close, and Cancel, Back, abort,
  * background and page hide all resolve null, so leaving the review never counts as a choice. */
 export function openReview<T>(label:string,region:string,signal:AbortSignal,build:(parts:{content:HTMLElement;footer:HTMLElement;close:(value:unknown,error?:unknown)=>void})=>HTMLElement|null):Promise<T|null>{
  return new Promise((resolve,reject)=>{
   const previous=document.activeElement as HTMLElement|null,dialog=document.createElement('dialog');dialog.className='note-source-dialog';dialog.setAttribute('aria-label',label);
-  const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));}
+  inheritShellTheme(dialog,['bg','fg'],{prefix:'--source-'});
   const content=document.createElement('div');content.className='note-source-content';content.tabIndex=0;content.setAttribute('role','region');content.setAttribute('aria-label',region);
   const footer=document.createElement('footer');
   let done=false;const release=holdPhoneInert(document.querySelector<HTMLElement>('.os'));

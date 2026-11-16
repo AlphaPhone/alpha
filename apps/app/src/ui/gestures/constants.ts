@@ -38,7 +38,11 @@ export const DEFAULT_SWIPE_VELOCITY = 0.4;
 // Press-and-hold durations — the full long-press timer table.
 // ---------------------------------------------------------------------------
 
-/** iOS-style long-press threshold (conversation-item context menu). */
+/**
+ * iOS-style long-press threshold: a still press held this long opens a menu,
+ * enters edit mode or starts a selection (conversation items, launcher Home and
+ * Apps drawer, Notes folder chips, Photos tiles).
+ */
 export const DEFAULT_HOLD_MS = 450;
 /**
  * Per-surface override (chat thread copy-hold): a still hold on a message past
@@ -46,6 +50,11 @@ export const DEFAULT_HOLD_MS = 450;
  * quicker than {@link DEFAULT_HOLD_MS}.
  */
 export const COPY_HOLD_MS = 420;
+/**
+ * Per-surface override (launcher Home grid and Apps drawer): movement in CSS px
+ * that turns a press into a scroll or a drag.
+ */
+export const LAUNCHER_PRESS_SLOP = 10;
 
 // ---------------------------------------------------------------------------
 // Overscroll damping.

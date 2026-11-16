@@ -193,7 +193,7 @@ export class BrowserNotifications extends WebPlugin {
  async removeDeviceEvent(input:{id:string;revision:string}){await notificationDocument.edit(state=>{trim(state);const row=state.deviceEvents!.find(row=>row.id===input.id);if(!row||row.revision!==input.revision)throw Error('The device event changed.');state.deviceEvents=state.deviceEvents!.filter(event=>event.id!==row.id);if(this.allowed(state,row))record(state,row,'removed');});this.changed();}
  private show(dialog:HTMLDialogElement,actions:HTMLElement[]){
   dialog.classList.add('alpha-notification-dialog');
-  const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const name of ['--bg','--fg','--s2','--line','--acc'])dialog.style.setProperty(name,theme.getPropertyValue(name));}
+  const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const name of ['--acc'])dialog.style.setProperty(name,theme.getPropertyValue(name));}
   const style=document.createElement('style');style.textContent=`
    .alpha-notification-dialog{box-sizing:border-box;font:14px/1.5 'Public Sans',system-ui,sans-serif;box-shadow:0 16px 60px #0003}
    .alpha-notification-dialog::backdrop{background:#0005}

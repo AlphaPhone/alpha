@@ -17,7 +17,8 @@ import {
 } from "./fixtures.js";
 import { isMvpView, DEFERRED_MVP_VIEWS, deferredMvpPrompt } from "./mvp-features";
 import { ALPHA_PRODUCT, alphaPaletteColor, alphaThemeVariables } from "../product/alpha-product";
-import { navigateMobileShell, resolveMobileShellSwipe } from "../ui/mobile-shell/core.ts";
+import { MOBILE_SHELL_CANVAS_WIDTH, MOBILE_SHELL_EDGE, MOBILE_SHELL_HOME_BAR_TOP, navigateMobileShell, resolveMobileShellSwipe } from "../ui/mobile-shell/core.ts";
+import { DEFAULT_HOLD_MS } from "../ui/gestures/constants";
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
@@ -26,6 +27,12 @@ import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, 
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
 
+/* Canvas geometry shared by every pointer handler: the [data-screen] box and its CSS-px-per-canvas-px scale. */
+function canvasBox(el) { var sc = el && el.closest ? el.closest("[data-screen]") : null; var r = (sc || el).getBoundingClientRect(); return { r: r, s: r.width / MOBILE_SHELL_CANVAS_WIDTH || 1 }; }
+/* Top band (canvas px) reserved for the status bar and the system shade pull. */
+var SHELL_TOP_ZONE = 90;
+/* System gesture zones (edge Back, top shade, bottom HOME) belong to the shell (resolveMobileShellSwipe). */
+function inShellGestureZone(px, py) { return px < MOBILE_SHELL_EDGE || px > MOBILE_SHELL_CANVAS_WIDTH - MOBILE_SHELL_EDGE || py < SHELL_TOP_ZONE || py > MOBILE_SHELL_HOME_BAR_TOP; }
 
 var IC = {
   inbox: "M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z",
@@ -2788,12 +2795,12 @@ registerView("maps", {
 
     /* map pan (release-based) */
     var mapDown = function (e) {
-      var sc = e.currentTarget.closest ? e.currentTarget.closest("[data-screen]") : null; var r = (sc || e.currentTarget).getBoundingClientRect(); var k = r.width / 412 || 1;
+      var o = canvasBox(e.currentTarget), r = o.r, k = o.s;
       MAPS_DRAG = { on: true, x: e.clientX, y: e.clientY, k: k, px: (e.clientX - r.left) / k, py: (e.clientY - r.top) / k, t: MAPS_DRAG.t };
     };
     var mapUp = function (e) {
       var d = MAPS_DRAG; if (!d.on) return; d.on = false;
-      if (d.px < 30 || d.px > 382 || d.py < 90 || d.py > 872) return;
+      if (inShellGestureZone(d.px, d.py)) return;
       var dx = (e.clientX - d.x) / d.k, dy = (e.clientY - d.y) / d.k;
       if (Math.abs(dx) + Math.abs(dy) < 12) return;
       d.t = Date.now(); var p0 = api.get("maps").pan || { x: 0, y: 0 }; api.set({ pan: { x: p0.x + dx, y: p0.y + dy } });
@@ -3031,7 +3038,7 @@ async function notesRenameFolder(api, id) {
 /** Long-press (or a context-menu click) on a folder chip opens its options. */
 function notesChipHold(api, id) {
   return {
-    down: function () { clearTimeout(NT.holdT); NT.held = null; NT.holdT = setTimeout(function () { NT.holdT = null; NT.held = id; api.set({ folderSheet: { kind: "options", id: id } }); }, 450); },
+    down: function () { clearTimeout(NT.holdT); NT.held = null; NT.holdT = setTimeout(function () { NT.holdT = null; NT.held = id; api.set({ folderSheet: { kind: "options", id: id } }); }, DEFAULT_HOLD_MS); },
     up: function () { clearTimeout(NT.holdT); NT.holdT = null; },
     context: function (e) { if (e && e.preventDefault) e.preventDefault(); clearTimeout(NT.holdT); NT.holdT = null; NT.held = id; api.set({ folderSheet: { kind: "options", id: id } }); }
   };
@@ -5586,7 +5593,7 @@ class Component extends DCLogic {
   }
 
   /* ---- gestures ---- */
-  scale(el) { var sc = el && el.closest ? el.closest("[data-screen]") : null; var r = (sc || el).getBoundingClientRect(); return { r: r, s: r.width / 412 || 1 }; }
+  scale(el) { return canvasBox(el); }
   gDown(e) { if (e.target.closest?.("[data-alpha-transcript],[data-alpha-note-transcript]")) { this.g = null; return; } var o = this.scale(e.currentTarget); this.g = { x: (e.clientX - o.r.left) / o.s, y: (e.clientY - o.r.top) / o.s, cx: e.clientX, cy: e.clientY, s: o.s, pull: pullStart(e.target) }; }
   gUp(e) { var g = this.g; this.g = null; if (!g || window.getSelection()?.isCollapsed === false) return; this.swipe(g, (e.clientX - g.cx) / g.s, (e.clientY - g.cy) / g.s); }
   swipe(g, dx, dy) {
@@ -5614,7 +5621,7 @@ class Component extends DCLogic {
       down: function (e) {
         var o = self.scale(e.currentTarget);
         var px = (e.clientX - o.r.left) / o.s, py = (e.clientY - o.r.top) / o.s;
-        if (!opts.capture && (px < 30 || px > 382 || py < 90 || py > 872)) { self.cg = null; return; }   // system gesture zones belong to the shell
+        if (!opts.capture && inShellGestureZone(px, py)) { self.cg = null; return; }   // system gesture zones belong to the shell
         // A fresh pointer gesture is a deliberate action, not the previous swipe click.
         self.swallow = 0;
         if (opts.capture) e.currentTarget.setPointerCapture(e.pointerId);
