@@ -1,9 +1,11 @@
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { createConnection } from 'node:net';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { importedModelPaths, quintCacheDirectory, quintCacheDisabled } from './quint-lib.ts';
+import { importedModelPaths, quintCacheDirectory, quintCacheDisabled, quintPackageDigest } from './quint-lib.ts';
 import { sha256 } from './sha256.ts';
 
 export { quintCacheDirectory, quintCacheDisabled };
@@ -12,13 +14,15 @@ export { quintCacheDirectory, quintCacheDisabled };
  * Content-addressed memory of Quint runs.
  *
  * A run is remembered under exactly what decides its answer: the Quint program (its package bytes, every package it
- * loads, Node and the platform), the arguments it was launched with, and the bytes of every file it reads: the model
- * and its transitive imports, plus the TLC configuration a `verify` names. Each run executes in a fresh directory
+ * loads, the Bun or Node that runs it, and the QUINT_* environment it reads), the arguments it was launched with and
+ * the time limit it ran under, the model checker it reaches (the Apalache distribution's bytes and the Java that runs
+ * it), and the bytes of every file it reads: the model and its transitive imports, plus the configuration files a
+ * `verify` names. Each run executes in a fresh directory
  * holding only those files, so a file left out of the key is one Quint cannot find: a missed import fails loudly and
  * is never served stale. Only a run the checker accepted is stored, and a remembered output is judged again by the
  * current checker before it is reused, so a stricter checker reruns rather than trusting an old verdict.
  */
-export const quintCacheSchema = 1;
+export const quintCacheSchema = 2;
 const maxAgeMs = 30 * 24 * 60 * 60 * 1000;
 const maxBytes = 512 * 2 ** 20;
 
@@ -60,34 +64,74 @@ function packageClosure(directory: string, found = new Map<string, string>()) {
   return found;
 }
 
-function treeDigest(directory: string): string {
-  const parts: string[] = [];
-  const walk = (path: string) => {
-    for (const entry of readdirSync(path, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
-      const child = join(path, entry.name);
-      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); }
-      else if (entry.isFile()) parts.push(`${relative(directory, child)}\0${sha256(readFileSync(child))}`);
-    }
-  };
-  walk(directory);
-  return sha256(parts.join('\n'));
-}
-
 /** The JavaScript runtime that launches Quint: Bun when the checker runs under Bun, otherwise Node. */
 function runtimeIdentity() {
   const bun = (globalThis as {Bun?: {version: string; revision: string}}).Bun;
   return {bun: bun ? `${bun.version}+${bun.revision}` : null, node: process.versions.node, platform: process.platform, arch: process.arch};
 }
 
-/** What tells this Quint from another: its own bytes, the packages it loads, and the runtime that runs it. */
+/**
+ * Quint reads QUINT_HOME (which Apalache distribution runs) and QUINT_RETRY_NONDET_SMALLER_THAN (how the simulator
+ * retries a disabled nondeterministic choice, which changes verdicts). Every QUINT_* variable is keyed so a future one
+ * is covered too.
+ */
+export function quintEnvironment(env: NodeJS.ProcessEnv = process.env) {
+  return Object.entries(env).filter(([name]) => name.startsWith('QUINT_')).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+}
+
+/** What tells this Quint from another: its own bytes, the packages it loads, its environment and the runtime that runs it. */
 export function quintToolchain(root: string) {
   const quint = realpathSync(join(root, 'node_modules/@informalsystems/quint'));
   return sha256(JSON.stringify({
     schema: quintCacheSchema,
-    quint: treeDigest(quint),
+    quint: quintPackageDigest(root),
     packages: [...packageClosure(quint).values()].sort(),
     runtime: runtimeIdentity(),
+    environment: quintEnvironment(),
   }));
+}
+
+/**
+ * The model checker a `verify` reaches: the pinned Apalache distribution's jar bytes (which also hold TLC) and the Java
+ * that runs it. Undefined while the distribution is not yet installed; such a run is neither recalled nor stored, and
+ * the next run, after Quint has installed it, keys it. A present identity is computed once per process.
+ */
+const engines = new Map<string, unknown>();
+export function checkerEngine(root: string, apalacheVersion: string) {
+  if (engines.has(apalacheVersion)) return engines.get(apalacheVersion);
+  let jar: string;
+  try {
+    // Quint's own resolution of its distribution directory, which honours QUINT_HOME.
+    const require = createRequire(join(root, 'node_modules/@informalsystems/quint/package.json'));
+    const {apalacheDistDir} = require('@informalsystems/quint/dist/src/config.js') as {apalacheDistDir(version: string): string};
+    jar = join(apalacheDistDir(apalacheVersion), 'apalache/lib/apalache.jar');
+  } catch { return undefined; }
+  if (!existsSync(jar)) return undefined;
+  const java = process.env.JAVA_HOME ? join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
+  const version = spawnSync(java, ['-version'], {encoding: 'utf8', timeout: 30000});
+  const engine = {apalache: apalacheVersion, jar: sha256(readFileSync(jar)), java,
+    javaVersion: version.error ? `unavailable: ${version.error.message}` : `${version.stdout}${version.stderr}`,
+    javaOptions: ['JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS'].map(name => [name, process.env[name] ?? null])};
+  engines.set(apalacheVersion, engine);
+  return engine;
+}
+
+/**
+ * Whether something already listens where Quint would start its own Apalache server. Quint then uses that server
+ * whatever its version, and the server Quint starts itself exits with Quint, so a listener found before a run is one
+ * this checker did not start: its answers are used but never remembered.
+ */
+export function serverListening(endpoint: string, timeoutMs = 500): Promise<boolean> {
+  const separator = endpoint.lastIndexOf(':');
+  const host = endpoint.slice(0, separator), port = Number(endpoint.slice(separator + 1));
+  if (!host || !Number.isInteger(port)) return Promise.resolve(false);
+  return new Promise(resolveListening => {
+    const socket = createConnection({host, port});
+    const settle = (listening: boolean) => { socket.destroy(); resolveListening(listening); };
+    socket.setTimeout(timeoutMs, () => settle(false));
+    socket.once('connect', () => settle(true));
+    socket.once('error', () => settle(false));
+  });
 }
 
 export function openQuintCache(root: string, enabled = !quintCacheDisabled()): QuintCache {
@@ -159,8 +203,8 @@ export function recallRun(cache: QuintCache, key: string): CachedRun | undefined
     try { const now = new Date(); utimesSync(file, now, now); } catch { /* still a hit */ }
     return value;
   } catch {
-    // Cut short by a kill or a full disk: a miss, and never read again.
-    rmSync(file, {force: true});
+    // Cut short by a kill or a full disk: a miss, and never read again where the cache may be written.
+    try { rmSync(file, {force: true}); } catch { /* a read-only cache stays a miss */ }
     return undefined;
   }
 }
@@ -183,14 +227,25 @@ export function storeRun(cache: QuintCache, run: CachedRun) {
   }
 }
 
-/** A fresh directory holding exactly the snapshot, at the same repository-relative paths. */
+const liveSandboxes = new Set<string>();
+// An interrupt exits the process without running pending finally blocks; remove every sandbox still in use.
+process.on('exit', () => { for (const directory of liveSandboxes) try { rmSync(directory, {recursive: true, force: true}); } catch { /* best effort */ } });
+
+/** A fresh directory holding exactly the snapshot, at the same repository-relative paths. Remove it with `release`. */
 export function materialize(files: ReadonlyMap<string, Buffer>) {
   const directory = mkdtempSync(join(tmpdir(), 'alpha-quint-run-'));
-  for (const [path, bytes] of files) {
-    mkdirSync(dirname(join(directory, path)), {recursive: true});
-    writeFileSync(join(directory, path), bytes);
-  }
+  liveSandboxes.add(directory);
+  try {
+    for (const [path, bytes] of files) {
+      mkdirSync(dirname(join(directory, path)), {recursive: true});
+      writeFileSync(join(directory, path), bytes);
+    }
+  } catch (error) { release(directory); throw error; }
   return directory;
+}
+export function release(directory: string) {
+  liveSandboxes.delete(directory);
+  rmSync(directory, {recursive: true, force: true});
 }
 
 /** Keep a month of entries within 512 MiB; never evict what this run used. */
@@ -207,14 +262,15 @@ export function collectGarbage(cache: QuintCache) {
       let stat;
       try { stat = statSync(file); } catch { continue; }
       if (cache.used.has(name)) continue;
-      if (name.endsWith('.tmp') ? stat.mtimeMs < Date.now() - 60 * 60 * 1000 : stat.mtimeMs < expired) rmSync(file, {force: true});
-      else retained.push({file, size: stat.size, touched: stat.mtimeMs});
+      if (name.endsWith('.tmp') ? stat.mtimeMs < Date.now() - 60 * 60 * 1000 : stat.mtimeMs < expired) {
+        try { rmSync(file, {force: true}); } catch { /* another owner's entry */ }
+      } else retained.push({file, size: stat.size, touched: stat.mtimeMs});
     }
     if (sub !== 'runs') continue;
     let bytes = retained.reduce((total, entry) => total + entry.size, 0);
     for (const entry of retained.sort((a, b) => a.touched - b.touched)) {
       if (bytes <= maxBytes) break;
-      rmSync(entry.file, {force: true});
+      try { rmSync(entry.file, {force: true}); } catch { continue; }
       bytes -= entry.size;
     }
   }

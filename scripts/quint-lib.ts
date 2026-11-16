@@ -1,6 +1,6 @@
 import {sha256} from './sha256.ts';
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readUpstreamPin } from './upstream-pin.ts';
@@ -162,6 +162,26 @@ export function quintCacheDisabled() {
   return ['0', 'off', 'false', 'no'].includes((process.env.ALPHA_QUINT_CACHE || '').toLowerCase());
 }
 
+/** Every file of the installed Quint package, by relative name and bytes. Computed once per process. */
+const packageDigests = new Map<string, string>();
+export function quintPackageDigest(root: string = repositoryRoot) {
+  const directory = realpathSync(join(root, 'node_modules/@informalsystems/quint'));
+  const known = packageDigests.get(directory);
+  if (known) return known;
+  const parts: string[] = [];
+  const walk = (path: string) => {
+    for (const entry of readdirSync(path, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); }
+      else if (entry.isFile()) parts.push(`${relative(directory, child)}\0${sha256(readFileSync(child))}`);
+    }
+  };
+  walk(directory);
+  const digest = sha256(parts.join('\n'));
+  packageDigests.set(directory, digest);
+  return digest;
+}
+
 /** The repository-relative models a model imports. Quint resolves `from "./X"` beside the importing file. */
 export function importedModelPaths(model: Pick<ModelDefinition, 'path'>, text: string, root: string = repositoryRoot) {
   const source = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -178,9 +198,9 @@ let metadataCacheBase: string | null | undefined;
 function metadataCacheKey(model: ModelDefinition, text: string) {
   if (metadataCacheBase === undefined) {
     try {
+      // This file's validation code and the parser's bytes: a changed parser with the same version is a different key.
       metadataCacheBase = quintCacheDisabled() ? null : sha256(JSON.stringify([
-        readFileSync(fileURLToPath(import.meta.url)).toString('utf8'),
-        readFileSync(join(repositoryRoot, 'node_modules/@informalsystems/quint/package.json'), 'utf8')]));
+        readFileSync(fileURLToPath(import.meta.url)).toString('utf8'), quintPackageDigest()]));
     } catch { metadataCacheBase = null; }
   }
   if (metadataCacheBase === null) return undefined;

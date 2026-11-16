@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { boundedTlcSpec, detectedCounterexample, fullTemporalTlcSpec, fullTemporalTlcViolation, loadModels, missingQuintScenarios, quintModelOptions, quintProofBackend, readJson, registeredQuintModelNames, repositoryRoot, runQuintChecker, type BoundedTlcEvidence, type CheckerResult, type FullTemporalTlcEvidence, type QuintModel } from './quint-lib.ts';
 import { sha256 } from './sha256.ts';
-import { collectGarbage, materialize, openQuintCache, recallRun, runKey, snapshotInputs, storeRun } from './quint-cache.ts';
+import { checkerEngine, collectGarbage, quintCacheSchema, materialize, openQuintCache, recallRun, release, runKey, serverListening, snapshotInputs, storeRun } from './quint-cache.ts';
 
 const args = process.argv.slice(2);
 const commands = ['check', 'typecheck', 'test', 'simulate', 'verify', 'temporal', 'compare'] as const;
@@ -47,6 +47,8 @@ if (requestedTlcLiveness !== undefined && (command !== 'temporal' || requestedBa
 const tlcLiveness = requestedTlcLiveness ?? 'default';
 const cacheOption = value('cache', 'on');
 if (cacheOption !== 'on' && cacheOption !== 'off') throw Error('--cache must be on or off');
+// --cache=off also bypasses the remembered metadata validation of the registry load below.
+if (cacheOption === 'off') process.env.ALPHA_QUINT_CACHE = 'off';
 const requested = value('models', '').split(',').filter(Boolean);
 if (requested.length) {
   const registered = new Set(registeredQuintModelNames());
@@ -63,7 +65,7 @@ if (command === 'temporal' && !models.some(model => model.temporal?.length)) thr
 if (command === 'compare' && !models.some(model => model.currentChecks?.length || model.currentTemporalChecks?.length || model.expectedViolations?.length)) throw Error('Selected models declare no current-design comparisons');
 const cli = join(repositoryRoot, 'node_modules/@informalsystems/quint/dist/src/cli.js');
 const version = readJson<{version: string}>(join(repositoryRoot, 'node_modules/@informalsystems/quint/package.json')).version;
-const inputPaths = [...new Set(['bun.lock', 'scripts/check-quint.ts', 'scripts/quint-lib.ts', 'scripts/sha256.ts', 'scripts/upstream-pin.ts', 'specs/quint/tlc.json',
+const inputPaths = [...new Set(['bun.lock', 'scripts/check-quint.ts', 'scripts/quint-lib.ts', 'scripts/quint-cache.ts', 'scripts/sha256.ts', 'scripts/upstream-pin.ts', 'specs/quint/tlc.json',
   ...(models.some(model => model.module === 'NativeCrashJournal')
     ? ['scripts/ci/native-crash-completion-factor.json', '.github/workflows/promotion.yml'] : []),
   ...allModels.map(model => model.path),
@@ -87,7 +89,7 @@ type CheckEvidence = {
   modelSha256: string;
   timeoutSeconds: number;
   /** Set when the result was remembered: the run that produced this output finished at recordedAt. */
-  cache?: {key: string; hit: boolean; recordedAt?: string};
+  cache?: {key: string; hit: boolean; recordedAt?: string; stored?: boolean; reason?: string};
   output: string;
   boundedProof?: BoundedTlcEvidence;
   fullTemporalProof?: FullTemporalTlcEvidence;
@@ -132,7 +134,7 @@ const receipt: Receipt = { schemaVersion: 1, startedAt: new Date().toISOString()
   backend: receiptBackend, jobs, timeoutSeconds, tlcLiveness, results: [] };
 const cache = openQuintCache(repositoryRoot, cacheOption === 'on' ? undefined : false);
 // The TLC translation runs code of this checker and a pinned distribution, so its answers are also keyed by both.
-const compiledTlcRunner = {code: ['scripts/check-quint.ts', 'scripts/quint-lib.ts'].map(path => sha256(readFileSync(join(repositoryRoot, path)))), apalache: '0.62.4'};
+const compiledTlcRunner = {code: ['scripts/check-quint.ts', 'scripts/quint-lib.ts', 'scripts/quint-cache.ts'].map(path => sha256(readFileSync(join(repositoryRoot, path)))), apalache: '0.62.4'};
 const receiptPath = resolve(repositoryRoot, value('out', `test-results/quint/${command}.json`));
 mkdirSync(dirname(receiptPath), { recursive: true });
 writeFileSync(receiptPath, `${JSON.stringify({ ...receipt, status: 'running', passed: false }, null, 2)}\n`);
@@ -205,7 +207,8 @@ async function runCompiledTlc(options: string[], finalTemporal = false, deadline
   const boundedSpec = finalTemporal ? undefined : boundedTlcSpec(compiled.stdout || '', depth);
   const spec = temporalSpec ?? boundedSpec!;
   const label = finalTemporal ? 'Full temporal TLC' : 'Bounded TLC';
-  const config = readJson<{workers: number | string; maxHeap: string; stackSize: string}>(join(repositoryRoot, 'specs/quint/tlc.json'));
+  // Read from the run's snapshot, which keys it, not from a checkout that may have moved since.
+  const config = readJson<{workers: number | string; maxHeap: string; stackSize: string}>(join(cwd, 'specs/quint/tlc.json'));
   if (!config.workers || !config.maxHeap || !config.stackSize) throw Error(`${label} requires configured workers, maxHeap and stackSize`);
   const require = createRequire(import.meta.url);
   const {apalacheDistDir} = require('@informalsystems/quint/dist/src/config.js') as {apalacheDistDir(version: string): string};
@@ -256,38 +259,61 @@ function accepted(model: QuintModel, phase: string, expected: string, result: Ch
 
 async function run(model: QuintModel, phase: string, options: string[], expected = 'pass') {
   if (options[0] === 'verify') options.push(`--server-endpoint=${serverEndpoint}`, '--apalache-version=0.62.4', '--tlc-config=specs/quint/tlc.json');
-  const argv = [cli, ...options];
-  // Quint reads the model, its transitive imports and the configuration files its arguments name: nothing else.
-  const configuration = options.find(option => option.startsWith('--apalache-config='))?.slice('--apalache-config='.length);
-  const inputs = snapshotInputs(repositoryRoot, model.path, [
-    ...options[0] === 'verify' ? ['specs/quint/tlc.json'] : [],
-    ...configuration ? [relative(repositoryRoot, configuration).split('\\').join('/')] : []]);
-  const modelSha256 = sha256(inputs.get(model.path)!);
+  // Quint reads the model, its transitive imports and the configuration files its arguments name: nothing else. They are
+  // launched from the snapshot by repository-relative path; the receipt keeps the arguments as given.
+  const configurationOption = options.find(option => option.startsWith('--apalache-config='));
+  const configuration = configurationOption && relative(repositoryRoot, resolve(repositoryRoot, configurationOption.slice('--apalache-config='.length))).split('\\').join('/');
+  const launched = options.map(option => option === configurationOption ? `--apalache-config=${configuration}` : option);
+  const argv = [cli, ...launched];
   const startedAt = new Date().toISOString();
   const backend = options[0] === 'verify' ? options.find(option => option.startsWith('--backend='))?.slice('--backend='.length) : undefined;
   // The complete six-step journal proof needs the qualified three-hour budget.
   // Explicit --timeout values remain authoritative; every phase records its own limit.
   const phaseTimeoutSeconds = model.module === 'NativeCrashJournal' && backend === 'apalache'
     && options.includes('--max-steps=6') && value('timeout') === undefined ? 10800 : timeoutSeconds;
+  let inputs: Map<string, Buffer>;
+  try {
+    inputs = snapshotInputs(repositoryRoot, model.path, [
+      ...options[0] === 'verify' ? ['specs/quint/tlc.json'] : [], ...configuration ? [configuration] : []]);
+  } catch (error) {
+    // An unreadable or escaping import fails this model like any other checker failure, not the whole run.
+    const message = error instanceof Error ? error.message : String(error);
+    failed = true;
+    receipt.results.push({model: model.module, phase, backend, expected, passed: false, exitCode: null, startedAt,
+      finishedAt: new Date().toISOString(), signal: null, error: `Cannot read the model's inputs: ${message}`, argv: options,
+      modelSha256: '', timeoutSeconds: phaseTimeoutSeconds, missingScenarios: [], output: ''});
+    console.log(`FAIL ${model.module} ${phase}`);
+    console.error(`Cannot read the model's inputs: ${message}`);
+    return false;
+  }
+  const modelSha256 = sha256(inputs.get(model.path)!);
   const finalTemporal = tlcLiveness === 'final' && backend === 'tlc' && options.some(option => option.startsWith('--temporal='));
   const finalTemporalDeadline = Date.now() + timeoutSeconds * 1000;
   const compiledTlc = backend === 'tlc-bounded' || finalTemporal;
-  const key = cache.enabled ? runKey(cache, options, inputs, compiledTlc ? {...compiledTlcRunner, finalTemporal} : null) : undefined;
+  // A verify reaches a model checker: key its bytes and Java. Until the pinned distribution is installed there is no
+  // identity to key, so that run is neither recalled nor stored.
+  const engine = options[0] === 'verify' ? checkerEngine(repositoryRoot, '0.62.4') : null;
+  const key = cache.enabled && engine !== undefined ? runKey(cache, launched, inputs, {engine,
+    limitSeconds: compiledTlc ? timeoutSeconds : phaseTimeoutSeconds,
+    compiledTlc: compiledTlc ? {...compiledTlcRunner, finalTemporal} : null}) : undefined;
   const remembered = key ? recallRun(cache, key) : undefined;
   const reused = remembered && accepted(model, phase, expected, {...remembered, signal: null}).accepted;
   let result: CheckerResult & {boundedProof?: BoundedTlcEvidence; fullTemporalProof?: FullTemporalTlcEvidence};
   let interruptedAttempt: Awaited<ReturnType<typeof runQuintChecker>>['interruptedAttempt'];
+  // A server already listening was not started by this checker, so its version is unknown: use, never remember.
+  let foreignServer = false;
   if (reused) {
     result = {status: remembered.status, signal: null, stdout: remembered.stdout, stderr: remembered.stderr, ...remembered.evidence};
     cache.hits++;
   } else {
     if (key) cache.misses++;
+    if (key && options[0] === 'verify') foreignServer = await serverListening(serverEndpoint);
     // A fresh directory holding only the snapshot: an input missing from the key is one Quint cannot find.
     const sandbox = materialize(inputs);
     try {
-      ({result, interruptedAttempt} = await runQuintChecker(() => backend === 'tlc-bounded' ? runCompiledTlc(options, false, undefined, sandbox)
-        : finalTemporal ? runCompiledTlc(options, true, finalTemporalDeadline, sandbox) : runCommand(argv, phaseTimeoutSeconds, process.execPath, sandbox)));
-    } finally { rmSync(sandbox, {recursive: true, force: true}); }
+      ({result, interruptedAttempt} = await runQuintChecker(() => backend === 'tlc-bounded' ? runCompiledTlc(launched, false, undefined, sandbox)
+        : finalTemporal ? runCompiledTlc(launched, true, finalTemporalDeadline, sandbox) : runCommand(argv, phaseTimeoutSeconds, process.execPath, sandbox)));
+    } finally { release(sandbox); }
   }
   const {output, missingScenarios, accepted: answered} = accepted(model, phase, expected, result);
   const modelChanged = modelSha256 !== sha256(readFileSync(join(repositoryRoot, model.path)));
@@ -297,16 +323,16 @@ async function run(model: QuintModel, phase: string, options: string[], expected
   const finishedAt = new Date().toISOString();
   // The run read only its snapshot, so its answer belongs to the snapshot's key even if the checkout moved meanwhile.
   // Only an accepted answer is remembered; a failure, a timeout or a retried fault always runs again.
-  if (key && !reused && answered && !interruptedAttempt) {
+  if (key && !reused && answered && !interruptedAttempt && !foreignServer) {
     const evidence = boundedProof || fullTemporalProof ? {boundedProof, fullTemporalProof} : undefined;
-    storeRun(cache, {schemaVersion: 1, key, argv: options, startedAt, finishedAt, status: result.status!,
+    storeRun(cache, {schemaVersion: quintCacheSchema, key, argv: options, startedAt, finishedAt, status: result.status!,
       stdout: result.stdout || '', stderr: result.stderr || '', evidence});
   }
   receipt.results.push({ model: model.module, phase, backend, expected, passed, exitCode: result.status,
     startedAt, finishedAt, signal: result.signal, interruptedAttempt,
     error: modelChanged ? 'Model changed while its checker was running' : result.error?.message,
     argv: options, modelSha256, timeoutSeconds: phaseTimeoutSeconds, missingScenarios,
-    cache: key ? {key, hit: !!reused, recordedAt: reused ? remembered.finishedAt : undefined} : undefined,
+    cache: key ? {key, hit: !!reused, recordedAt: reused ? remembered.finishedAt : undefined, ...foreignServer ? {stored: false, reason: 'pre-existing checker server'} : {}} : undefined,
     output, boundedProof, fullTemporalProof });
   console.log(`${passed ? 'PASS' : 'FAIL'} ${model.module} ${phase}${expected === 'violation' ? ' (counterexample required)' : ''}${reused ? ' (cached)' : ''}`);
   if (interruptedAttempt) console.log(`Retried ${model.module} ${phase} after checker signal ${interruptedAttempt.signal}`);

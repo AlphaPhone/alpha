@@ -41,7 +41,8 @@ jobs:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
-      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      # closure, argument list, time limit, checker runtime and engine, so any restored entry is safe to reuse. GitHub
+      # scopes a pull request's cache to that pull request, so this saves re-runs and later pushes of one promotion.
       - name: Restore remembered Quint runs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -110,7 +111,8 @@ jobs:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
-      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      # closure, argument list, time limit, checker runtime and engine, so any restored entry is safe to reuse. GitHub
+      # scopes a pull request's cache to that pull request, so this saves re-runs and later pushes of one promotion.
       - name: Restore remembered Quint runs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -157,7 +159,8 @@ jobs:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
-      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      # closure, argument list, time limit, checker runtime and engine, so any restored entry is safe to reuse. GitHub
+      # scopes a pull request's cache to that pull request, so this saves re-runs and later pushes of one promotion.
       - name: Restore remembered Quint runs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -233,7 +236,8 @@ jobs:
           bun-version: "1.4.2"
       - run: bun install --frozen-lockfile
       # Quint runs are content-addressed (scripts/quint-cache.ts): an entry is reused only for a byte-identical model
-      # closure, argument list, checker runtime and Quint package, so any earlier promotion's cache is safe to start from.
+      # closure, argument list, time limit, checker runtime and engine, so any restored entry is safe to reuse. GitHub
+      # scopes a pull request's cache to that pull request, so this saves re-runs and later pushes of one promotion.
       - name: Restore remembered Quint runs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
