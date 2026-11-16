@@ -6068,6 +6068,10 @@ class Component extends DCLogic {
     // The product record (apps/app/src/product/alpha-product-registration.ts) supplies every color and font.
     var VM = alphaThemeVariables(theme);
     var vars = Object.keys(VM).map(function (k) { return k + ":" + VM[k]; }).join(";");
+    /* "Ink" lock screen: the dark palette on true black in either theme, so the clock and the blue
+       fingerprint carry the identity (matches the true-black AOSP wallpaper). */
+    var DM = alphaThemeVariables("dark");
+    var lockVars = Object.keys(DM).map(function (k) { return k + ":" + DM[k]; }).join(";");
     var rootRef = function (el) {
       if (!el || !el.style) return;
       Object.keys(VM).forEach(function (k) { el.style.setProperty(k, VM[k]); });
@@ -6269,7 +6273,7 @@ class Component extends DCLogic {
     return Object.assign(out, {
       assistantSurface: assistantOnly, notAssistantSurface: !assistantOnly, closeAssistant: closeAssistant,
       mvpMessages: isMvpView("messages"),
-      ic: IC, iconAssets: ICON_ASSETS, vars: vars, rootRef: rootRef, frame: VM["--mobile-shell-frame"], clock: clock, dateStr: dateStr, name: name,
+      ic: IC, iconAssets: ICON_ASSETS, vars: vars, lockVars: lockVars, rootRef: rootRef, frame: VM["--mobile-shell-frame"], clock: clock, dateStr: dateStr, name: name,
       isBoot: S.screen === "boot", isOff: S.screen === "off", isLock: S.screen === "lock", isOn: isOn, isView: isView,
       viewBg: imm.dark ? "var(--alpha-black)" : "var(--bg)", viewFg: imm.dark ? "var(--alpha-white)" : "var(--fg)", sbColor: sbColor, homeIndicatorColor: out.photos && out.photos.albumManager ? "var(--fg)" : sbColor,
       systemShell: P.systemShell !== false,
