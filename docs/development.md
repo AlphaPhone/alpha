@@ -700,6 +700,13 @@ routes, keeps selected chat attachments through intake, binds the selected Cloud
 image model at launch and rechecks a live file selection after storage reads
 ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
 The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
+The pin `49d8b466043ca6c3316127b616362c9d80836084` adds the fitted chat-sheet open height to the shared
+`chat-panel-layout.ts` ([eliza#39771](https://github.com/elizaOS/eliza/pull/39771), for AP-16 AC-07; Alpha
+still uses its own `fitSheetHeight` until it adopts `resolveChatSheetFitHeight`), awaits and fences local
+Inbox draft reviews ([eliza#39748](https://github.com/elizaOS/eliza/pull/39748)), clears the Files filter
+when its view is left ([eliza#39740](https://github.com/elizaOS/eliza/pull/39740)) and resumes fresh Cloud
+database migrations ([eliza#39754](https://github.com/elizaOS/eliza/pull/39754)). None of the recorded core,
+mobile-build or formal-sidecar targets changed; the eliza `bun.lock` is unchanged.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
