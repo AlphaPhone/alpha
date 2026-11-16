@@ -65,14 +65,16 @@ test('the image enables every admitted role handler before Activity startup with
     const refused = path.join(output, 'refused');
     assert.throws(() => writeAospTelephonyRoleOverrides(refused, apkTree.replace('BIND_INCALL_SERVICE', 'UNRELATED'), pkg), /AlphaInCallService/);
     assert.equal(fs.existsSync(refused), false);
+    // The former installed identity is never given image role handlers.
     const retained = 'ai.elizaresearch.alphaphone';
+    const retainedTree = apkTree.replaceAll(pkg, retained);
+    assert.throws(() => aospTelephonyRoleComponents(retainedTree, retained), /staged only for ai\.alphacompute\.alphaphone/);
     const retainedOutput = path.join(output, 'retained');
     fs.mkdirSync(retainedOutput);
-    fs.writeFileSync(path.join(retainedOutput, 'product.mk'), '# retained image\n');
-    const retainedComponents = writeAospTelephonyRoleOverrides(retainedOutput, apkTree.replaceAll(pkg, retained), retained);
-    assert.equal(retainedComponents[0], `${retained}.AlphaInCallService`);
-    const retainedXml = fs.readFileSync(path.join(retainedOutput, 'provisioning/alpha-telephony-components.xml'), 'utf8');
-    assert.ok(retainedXml.includes(`package="${retained}"`) && !retainedXml.includes(pkg));
+    fs.writeFileSync(path.join(retainedOutput, 'product.mk'), '# image\n');
+    assert.throws(() => writeAospTelephonyRoleOverrides(retainedOutput, retainedTree, retained), /staged only for/);
+    assert.equal(fs.existsSync(path.join(retainedOutput, 'provisioning')), false);
+    assert.equal(fs.readFileSync(path.join(retainedOutput, 'product.mk'), 'utf8'), '# image\n');
   } finally { fs.rmSync(output, {recursive: true, force: true}); }
 });
 

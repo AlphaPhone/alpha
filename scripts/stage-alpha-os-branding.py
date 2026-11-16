@@ -123,12 +123,28 @@ const tree = await Bun.file(file).text();
             admission['packageName'], str(REPO/'scripts/stage-aosp.ts'), str(REPO/'scripts/aosp-telephony-roles.ts')], text=True, cwd=REPO)
     return admission
 
+BRANDING_INCLUDE = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
+BRANDING_SUFFIX = b'\n# Alpha OS visual identity.\n' + BRANDING_INCLUDE.encode() + b'\n'
+
+def stage_preimage(root, image_stage, name):
+    """A source packet publishes beside its admitted image stage, which becomes vendor/alphaphone.
+    Its vendor/alphaphone preimages are that stage, never an older install in the source tree."""
+    prefix = 'vendor/alphaphone/'
+    return safe(image_stage, name[len(prefix):]) if image_stage and name.startswith(prefix) else safe(root, name)
+
+def branding_product(current, product_mk_hash, image_stage):
+    """Return the new product.mk bytes to stage, or None when no change is planned."""
+    assert current.decode().count(BRANDING_INCLUDE) <= 1, 'Duplicate branding inclusion'
+    if image_stage:
+        # stage-aosp added exactly this include to the generated stage; bind it to that preimage.
+        assert current.endswith(BRANDING_SUFFIX) and product_mk_hash == digest(current[:-len(BRANDING_SUFFIX)]), 'Image stage product.mk differs from its pinned preimage'
+        return None
+    if BRANDING_INCLUDE in current.decode(): return None
+    assert product_mk_hash == digest(current), 'Explicit generated product.mk preimage pin required'
+    return current + BRANDING_SUFFIX
+
 def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None, image_stage=None):
-    # A source packet publishes beside its admitted image stage, which becomes vendor/alphaphone.
-    # Its vendor/alphaphone preimages are that stage, never an older install in the source tree.
-    def existing(name):
-        prefix = 'vendor/alphaphone/'
-        return safe(image_stage, name[len(prefix):]) if image_stage and name.startswith(prefix) else safe(root, name)
+    existing = lambda name: stage_preimage(root, image_stage, name)
     check_revision(root, 'packages/apps/Provision')
     check_revision(root, 'frameworks/base')
     report_path = assets / 'branding-assets.json'
@@ -188,16 +204,9 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     # The production product copies this feature only after the matching Provision sources are staged.
     put('vendor/alphaphone/branding/provision/fresh-telephony.xml',
         (BRAND/'provision/fresh-telephony.xml').read_bytes())
-    product = existing('vendor/alphaphone/product.mk'); current = product.read_bytes()
-    include = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
-    suffix = b'\n# Alpha OS visual identity.\n'+include.encode()+b'\n'
-    assert current.decode().count(include) <= 1, 'Duplicate branding inclusion'
-    if image_stage:
-        # stage-aosp added exactly this include to the generated stage; bind it to that preimage.
-        assert current.endswith(suffix) and product_mk_hash == digest(current[:-len(suffix)]), 'Image stage product.mk differs from its pinned preimage'
-    elif include not in current.decode():
-        assert product_mk_hash == digest(current), 'Explicit generated product.mk preimage pin required'
-        put('vendor/alphaphone/product.mk',current+suffix,[digest(current)])
+    current = existing('vendor/alphaphone/product.mk').read_bytes()
+    branded = branding_product(current, product_mk_hash, image_stage)
+    if branded is not None: put('vendor/alphaphone/product.mk',branded,[digest(current)])
     rows=[]
     prior_rows = {row['path']:row['sha256'] for row in (prior or {}).get('files',[])}
     for name,value in plan.items():
