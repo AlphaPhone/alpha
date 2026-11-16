@@ -8865,6 +8865,7 @@
       "OneRowPerCall",
       "RingsAccounted",
       "EmergencyKept",
+      "EmergencyDrawn",
       "EmergencyNotCompacted",
       "EndReachable"
     ],

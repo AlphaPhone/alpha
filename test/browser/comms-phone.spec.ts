@@ -149,6 +149,17 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     // The call is still live and End still reachable.
     await expect(card).toHaveAttribute('data-emergency', 'true');
     expect(await hits(page, '[data-alpha-call-end]')).toBe(true);
+    // Call from a thread header and from a contact card: refused once each, before anything is drawn.
+    await page.evaluate(() => { const w = window as any, shell = w.alphaShell(); w.toasts = []; const toast = shell.toast; shell.toast = function (text: string, ...rest: unknown[]) { w.toasts.push(text); return toast.call(this, text, ...rest); }; });
+    await page.evaluate(() => (window as any).alphaShell().api('messages').open('phone', {call: 'maya'}));
+    await page.evaluate(() => (window as any).alphaShell().api('contacts').open('phone', {call: 'maya', ret: {view: 'contacts', patch: {open: 'maya'}}}));
+    await page.waitForTimeout(2000);
+    expect(await page.evaluate(() => (window as any).toasts)).toEqual(['End the emergency call first', 'End the emergency call first']);
+    expect(await page.evaluate(() => { const st = (window as any).alphaShell().vget('phone'); return [st.call, st.num, st.callWho]; })).toEqual([null, '911', '#911']);
+    await expect(card).toHaveAttribute('data-emergency', 'true');
+    // End ends the emergency call and logs it as 911, not as the refused contact.
+    await page.locator('[data-alpha-call-end]').click();
+    expect(await page.evaluate(() => { const r = (window as any).alphaShell().vget('phone').recents[0]; return [r.pid, r.num]; })).toEqual([null, '911']);
   });
 });
 

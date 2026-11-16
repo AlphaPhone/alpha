@@ -41,8 +41,11 @@ module PhoneCall {
   pure val Heights = Set("closed", "open", "full")
   pure def emergency(id: str): bool = id == "#911"
   pure def emergencyLive(v: State): bool = v.live != "" and emergency(v.live)
-  /// The call card drawn is to an emergency number (the bar's AC-19 flag).
-  pure def emergencyCard(v: State): bool = v.active and v.want != "" and not(v.min) and not(v.incoming) and emergency(v.want)
+  /// The call card drawn is an emergency call (the bar's AC-19 flag): its number is one, or the
+  /// live call is one.
+  pure def emergencyCard(v: State): bool = v.active and v.want != "" and not(v.min) and not(v.incoming) and (emergency(v.want) or emergencyLive(v))
+  /// AC-19: over a live emergency call no other call is drawn or armed.
+  pure def blocked(v: State, id: str): bool = emergencyLive(v) and id != v.live
   /// Proposals are dropped and none can act while either holds (Component.emergencyLive).
   pure def emergencyNow(v: State): bool = emergencyLive(v) or emergencyCard(v)
   /// Phone shows the running call's card (not minimised, no ring over it).
@@ -68,7 +71,7 @@ module PhoneCall {
   /// Closing the chat ends its stage history (D11).
   pure def settled(v: State): State = kept(if (v.chat == "closed") { ...v, staged: 0 } else v)
   pure def shown(v: State): State = settled(
-    if (v.active and v.want != "" and v.callWho != v.want and not(v.incoming) and v.bootFor != v.want)
+    if (v.active and v.want != "" and v.callWho != v.want and not(v.incoming) and v.bootFor != v.want and not(blocked(v, v.want)))
       { ...v, bootFor: v.want, bootTimers: v.bootTimers.append(v.want) }
     else v)
   /// Leaving the view cancels its armed starts and restores a running call's minimised screen.
@@ -122,7 +125,9 @@ module PhoneCall {
   action openCall(id: str, ret: str): bool = all { id.in(Dialable), ret.in(Set("", "contacts")), s.started < MaxCalls,
     s.bootTimers.length() < MaxArmed,
     val kept = s.active or s.callWho != "" or s.incoming
-    s' = shown(if (kept) { ...s, active: true, want: id, ret: if (ret != "") ret else s.ret, chat: "closed" }
+    // Phone's patch hook refuses another call over a live emergency call: the drawn call stays.
+    s' = shown(if (kept and blocked(s, id)) { ...s, active: true, chat: "closed" }
+      else if (kept) { ...s, active: true, want: id, ret: if (ret != "") ret else s.ret, chat: "closed" }
       else { ...s, active: true, want: id, ret: ret, min: false, kp: false, hold: false, chat: "closed" }) }
   /// The oldest armed start runs: it releases the latch and starts its call only if that call is
   /// still the one drawn and not yet running.
@@ -179,7 +184,7 @@ module PhoneCall {
   val SingleSource = s.live == s.callWho or (s.orphaned and s.callWho == "")
   /// While Phone is in front with no ring showing, a drawn call that is not the running one has
   /// its start armed.
-  val NoPhantomCall = s.active and s.want != "" and s.callWho != s.want and not(s.incoming) implies armed(s, s.want)
+  val NoPhantomCall = s.active and s.want != "" and s.callWho != s.want and not(s.incoming) and not(blocked(s, s.want)) implies armed(s, s.want)
   /// Armed starts belong to the view in front, and the latch names one of them.
   val BootOwned = (s.bootTimers.length() > 0 implies s.active) and (s.bootFor != "" implies armed(s, s.bootFor))
   val TimersOwned = (s.tickFor != "" implies s.tickFor == s.live) and
@@ -189,12 +194,15 @@ module PhoneCall {
   val RingsAccounted = s.rings == s.ringRows + s.accepted + s.dropped + count(s.incoming)
   /// AC-19: an emergency call ends only by its own End (or a development jump that orphans it).
   val EmergencyKept = not(s.emergencyCut)
+  /// AC-19: while an emergency call is live and shown, the card drawn is that call, so its End and
+  /// its emergency layout are its own (not another person's).
+  val EmergencyDrawn = emergencyLive(s) and s.callWho != "" implies s.want == s.live
   /// AC-19: no compaction: the emergency card is never under a full sheet.
   val EmergencyNotCompacted = emergencyCard(s) implies s.chat != "full"
   /// AC-18/AC-04: with the call on screen, End is reachable at every height and during a voice turn.
   val EndReachable = callScreen(s) implies endAt(s) != "none"
   val safety = SingleSource and NoPhantomCall and BootOwned and TimersOwned and ControlsNeedCall and
-    OneRowPerCall and RingsAccounted and EmergencyKept and EmergencyNotCompacted and EndReachable
+    OneRowPerCall and RingsAccounted and EmergencyKept and EmergencyDrawn and EmergencyNotCompacted and EndReachable
 
   val OrphanedLiveWitness = s.orphaned and s.live != ""
   /// A ring that another call or a development jump replaced leaves no recents row.
@@ -257,7 +265,8 @@ module PhoneCall {
     .expect(s.live == "#911" and s.proposal == "ada" and safety)
     .then(approve).expect(s.live == "#911" and s.want == "#911" and s.approvals == 0 and safety)
     .then(propose("#555")).expect(s.proposal == "ada" and safety)
-    .then(openCall("ada", "")).then(bootStart).expect(s.live == "#911" and s.started == 1 and safety)
+    // Call on a thread or contact over the emergency call: refused before it is drawn or armed.
+    .then(openCall("ada", "")).expect(s.live == "#911" and s.want == "#911" and s.bootTimers.length() == 0 and s.started == 1 and safety)
     .then(hangUp).expect(s.live == "" and not(s.emergencyCut) and safety)
   // AC-19: the chat cannot compact an emergency call to the strip; AC-18: End stays reachable.
   run emergencyNeverCompactedTest = init.then(openCall("#911", "")).then(bootStart).then(resize("full"))

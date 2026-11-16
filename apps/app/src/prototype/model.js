@@ -318,6 +318,15 @@ registerView("phone", {
   badge: function (st) { return (st.vms || []).some(function (v) { return !v.heard; }); },
   /* AC-19: an emergency call is live, whichever view or chat height is on screen. */
   emergency: function (st, api) { return pnLiveEmergency(api); },
+  /* AC-19: a patch that would draw another call (Call in a thread or on a contact, a calendar
+     place, an approved proposal) is refused while an emergency call is live: the drawn call stays
+     the emergency call, so its card, layout and End stay its own. Only End ends it. */
+  incoming: function (st, patch, api) {
+    if (!patch || !("call" in patch || "num" in patch) || !PN.live || !pnLiveEmergency(api)) return;
+    if (pnCallId(patch.call, patch.num) === PN.live) return;
+    delete patch.call; delete patch.num; delete patch.ret;
+    api.toast("End the emergency call first");
+  },
   back: function (st, api) {
     if (st.incoming) { if (st.rs) api.set({ rs: false }); return true; }
     if (pnWant(st) && !st.min) { if (st.kp) api.set({ kp: false }); else api.set({ min: true }); return true; }
@@ -429,7 +438,7 @@ registerView("phone", {
         strip: { title: cn + " · " + pnClock(st.liveAt ? (now - st.liveAt) / 1000 : 0), subtitle: "On call", initials: cp ? cp.ini : "#", live: true, actions: [
           { id: "mute", label: st.mute ? "Unmute" : "Mute", pressed: !!st.mute, run: function () { api.set({ mute: !api.get("phone").mute }); } },
           { id: "end", label: "End call", run: hang }] },
-        end: hang, emergency: pnEmergency(cp ? cp.phone : st.num)
+        end: hang, emergency: pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : st.num)
       });
     }
     /* Recents, Keypad and Voicemail: typing filters Recents on the device (AC-22); a typed sentence or
@@ -452,7 +461,8 @@ registerView("phone", {
     var tab = st.tab === "favorites" ? "recents" : (st.tab || "recents");
     var want = pnWant(st);
     /* deep link {call} / {num}: start the call once */
-    if (want && st.callWho !== want && !st.incoming && PN.boot !== want) {
+    /* AC-19: a different call is never armed over a live emergency call (pnStart would refuse it). */
+    if (want && st.callWho !== want && !st.incoming && PN.boot !== want && !(PN.live && PN.live !== want && pnLiveEmergency(api))) {
       PN.boot = want;
       api.later(function () { PN.boot = null; var s = api.get("phone"); if (pnWant(s) === want && s.callWho !== want) { PN.lastTab = tab; pnStart(api, s.call, s.num); } }, 0);
     }
@@ -595,7 +605,7 @@ registerView("phone", {
 
       inCall: inCall, callFull: inCall && !st.min && !st.incoming, banner: inCall && !!st.min,
       cName: cp ? cp.name : cnum, cIni: cp ? cp.ini : "#", cStatus: status, calling: inCall && !live, live: inCall && live,
-      emergency: inCall && pnEmergency(cp ? cp.phone : st.num),
+      emergency: inCall && (pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : st.num)),
       showAvatar: inCall && !st.kp && !(st.ai && lines.length), showLines: inCall && !st.kp && st.ai && lines.length > 0, lines: lines,
       aiOn: inCall && st.ai, aiWait: inCall && st.ai && !lines.length && !st.kp,
       notesLabel: st.ai ? api.name + " notes off" : api.name + " takes notes", notesText: st.ai ? "Notes on" : "Take notes", toggleNotes: toggle("ai"),
