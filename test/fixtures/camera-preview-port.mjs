@@ -6,7 +6,13 @@ function installPreviewPort() {
     const camera = window.quintMountedCamera();
     const request = {id: port.requests.length + 1, view: shell.S().view, phase: camera.phase, token: camera.token};
     port.requests.push(request);
-    return new Promise(resolve => {request.resolve = resolve;port.pending.push(request);});
+    return new Promise((resolve, reject) => {Object.assign(request, {resolve, reject});port.pending.push(request);});
+  };
+  port.reject = id => {
+    const index = port.pending.findIndex(request => request.id === id);
+    if (index < 0) throw Error('The selected synthetic stream is not pending');
+    const [request] = port.pending.splice(index, 1);
+    request.reject(Error('Synthetic preview unavailable'));
   };
   port.release = id => {
     const index = port.pending.findIndex(request => request.id === id);
@@ -57,6 +63,9 @@ export async function mountCameraPreviewPort(f) {
     },
     release(id) {
       return page.evaluate(id => window.quintCameraLeave.release(id), id);
+    },
+    reject(id) {
+      return page.evaluate(id => window.quintCameraLeave.reject(id), id);
     },
     releaseAll() {
       return page.evaluate(() => {

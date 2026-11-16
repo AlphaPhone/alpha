@@ -7918,6 +7918,7 @@
       "recordingBeforeResumeRefusesTest",
       "busyCameraFailsAtOnceTest",
       "unconfirmedShutterIsUnknownTest",
+      "abortReleasesWaitingRequestTest",
       "changedRequestTakesNoPhotoTest"
     ],
     "invariants": [
@@ -7936,7 +7937,12 @@
       "UnknownWithoutRowWitness"
     ],
     "sources": [
-      "apps/app/src/prototype/camera-adapter.ts"
+      "apps/app/src/prototype/camera-adapter.ts",
+      "apps/app/src/prototype/browser-camera.ts",
+      "apps/app/src/prototype/model.js"
+    ],
+    "sharedSources": [
+      "plugins/plugin-native-camera/src/session.ts"
     ],
     "symbols": [
       {
@@ -7962,14 +7968,15 @@
     ],
     "stateMapping": {
       "view/phase/busyBy": "Camera view visibility, the shared session phase and what holds the camera",
-      "request/refused/aborted": "The agentRequest slot, its refused flag and the request signal",
-      "result/dispatched/agentRows/rowsAtRequest": "The reported capture attempt, whether the shutter ran, and photos written for the assistant",
+      "request/refused/aborted": "The admitted slot, recording refusal, and stale current-context check. An active AbortSignal settles the wait through cancelWaiting.",
+      "result/dispatched/agentRows/rowsAtRequest": "The capture attempt, whether its shutter ran, and image rows attributable to assistant attempts, excluding the separately observed owner photo",
       "holds/startsByAgent": "requestedCaptureHolds and previews the request started itself"
     },
     "abstractions": [
       "The preview phase machine is the shared camera session; here it is off, starting, ready or error with a nondeterministic start outcome.",
-      "One request at a time and three photos. Owner captures and recordings are opaque holders of the camera.",
-      "Model safety checks do not establish implementation refinement or device acceptance."
+      "The mounted test drives the full Camera adapter, Browser capture and storage, shell and shared session. It observes one owned preview or retry, actual owner capture and recording exclusion, stale context and abort, exact successful row and receipt identities, and unknown both before and after a browser storage commit.",
+      "One admitted request at a time, three assistant rows, and opaque non-agent holders. CameraAgentCapture separately compares chat coverage and reveal. AgentPhotoRequest abstracts reveal time on a ready preview; its queued recording replay uses a real reveal wait after the owner preview has become ready.",
+      "The browser replay injects a synthetic sensor, a failed IndexedDB transaction, and loss of the capture reply after a real commit. Browser photos always return a row identity on success; the native saved-without-identity response remains a model-only branch. Proposal and conversation admission and device MediaStore and camera acceptance are separate."
     ]
   },
   {

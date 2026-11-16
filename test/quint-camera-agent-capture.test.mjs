@@ -159,3 +159,288 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
   assert.equal(receipt.driverInputsBound, true);
   assert.equal(receipt.traces, 5);
 });
+
+async function installStoredCapturePort() {
+  const {browserCamera, browserPhotoLibrary} = await import('/src/prototype/browser-camera.ts');
+  const {captureAgentPhoto} = await import('/src/prototype/camera-adapter.ts');
+  const state = window.quintStoredCapture = {
+    agentShots: 0, ownerShots: 0, result: null, dispatched: false,
+    ownerRows: new Set(), contextCurrent: true, controller: null, fault: null, release: null,
+  };
+  const capture = browserCamera.capturePhoto.bind(browserCamera);
+  browserCamera.capturePhoto = async options => {
+    const agent = window.quintMountedCamera().agentQueued === false;
+    if (agent) {
+      state.agentShots++;
+      state.dispatched = true;
+    } else state.ownerShots++;
+    const fault = state.fault;
+    state.fault = null;
+    if (fault === 'hold') await new Promise(resolve => {state.release = resolve;});
+    const add = IDBObjectStore.prototype.add;
+    if (fault === 'rollback') IDBObjectStore.prototype.add = function (row, ...keys) {
+      const request = add.call(this, row, ...keys);
+      if (this.name === 'photos' && row.kind === 'image') this.transaction.abort();
+      return request;
+    };
+    try {
+      const receipt = await capture(options);
+      if (!agent) state.ownerRows.add(receipt.path.split('/').pop());
+      if (fault === 'lost-receipt') throw Error('Synthetic bridge answer lost after storage committed');
+      return receipt;
+    } finally {
+      if (fault === 'rollback') IDBObjectStore.prototype.add = add;
+    }
+  };
+  state.start = (id, fault = null) => {
+    state.controller = new AbortController();
+    state.fault = fault;
+    state.result = null;
+    state.dispatched = false;
+    state.contextCurrent = true;
+    void captureAgentPhoto(id, state.controller.signal, () => {
+      if (!state.contextCurrent) throw Error('Synthetic request context retired');
+    }).then(result => {state.result = result;});
+  };
+  state.secondRequest = id => captureAgentPhoto(id, new AbortController().signal, () => {});
+  state.snapshot = async () => {
+    const camera = window.quintMountedCamera();
+    const images = (await browserPhotoLibrary.list()).items.filter(row => row.kind === 'image')
+      .map(({id, width, height, image}) => ({id, width, height, jpeg: image.startsWith('data:image/jpeg;base64,')}));
+    return {
+      view: window.quintMountedCalendar.S().view === 'camera', camera, images,
+      agentRows: images.filter(row => !state.ownerRows.has(row.id)).length,
+      agentShots: state.agentShots, ownerShots: state.ownerShots, result: state.result,
+      dispatched: state.dispatched,
+    };
+  };
+}
+
+function storedCaptureProjection(state) {
+  const {camera} = state;
+  const request = camera.agentQueued === true ? 'queued' : camera.agentQueued === false ? 'dispatched' : 'none';
+  const busyBy = camera.recordingBusy ? 'recording' : camera.capturing ? (request === 'dispatched' ? 'agent' : 'owner') : 'none';
+  return {'s.view': state.view, 's.phase': camera.phase, 's.busyBy': busyBy, 's.request': request,
+    's.refused': camera.agentRefused, 's.result': state.result?.status ?? 'none',
+    's.dispatched': state.dispatched, 's.agentRows': state.agentRows, 's.holds': camera.captureHolds};
+}
+
+const secondOperationId = '8056107e-4b77-4328-8c74-882c453e04fb';
+
+function assertStoredReceipt(state, id, previousIds = []) {
+  const {cameraResult, status} = state.result;
+  assert.equal(status, 'succeeded');
+  const added = state.images.filter(row => !previousIds.includes(row.id));
+  assert.equal(added.length, 1);
+  const [row] = added;
+  assert.equal(row.jpeg, true);
+  assert.deepEqual(cameraResult, {version: 1, kind: 'camera_capture_photo', operationId: id, mediaId: row.id,
+    width: row.width, height: row.height, mime: 'image/jpeg'});
+  assert.deepEqual([row.width, row.height], [320, 240]);
+}
+
+test('mounted assistant photo requests preserve preview ownership, exclusive dispatch and stored receipts', {timeout: scaledTimeout(240_000)}, async () => {
+  const sources = new Set([driver, ...mountedCalendarFixtureSources, ...inputs]);
+  captureSources([...sources]);
+  const browser = await startMountedCalendar({observeCamera: true, onSource(path) {
+    if (sources.has(path)) return;
+    sources.add(path);
+    captureSources([path]);
+  }});
+  const traces = [];
+  try {
+    async function replay(name, run) {
+      const fixture = await browser.page();
+      const {page} = fixture;
+      try {
+        const preview = await mountCameraPreviewPort(fixture);
+        await page.evaluate(installStoredCapturePort);
+        const snapshot = () => page.evaluate(() => window.quintStoredCapture.snapshot());
+        const observed = trace(name, {'s.agentRows': (await snapshot()).agentRows});
+        const mark = async (label, actions, extra = {}) => {
+          const actual = await snapshot();
+          checkpoint(observed, label, actions, {...storedCaptureProjection(actual), ...extra});
+          return actual;
+        };
+        const ask = (id = operationId, fault = null) => page.evaluate(([id, fault]) => window.quintStoredCapture.start(id, fault), [id, fault]);
+        const result = () => page.waitForFunction(() => !!window.quintStoredCapture.result);
+        const settlePreview = async () => {await preview.release(1); await preview.ready(1);};
+        const releaseShutter = () => page.evaluate(() => window.quintStoredCapture.release());
+        const open = async () => {
+          await preview.open(1);
+          await mark('The owner opens Camera and owns the pending preview', call('startPreview'), {'s.startsByAgent': 0});
+        };
+        await run({page, fixture, preview, snapshot, mark, ask, result, settlePreview, releaseShutter, open});
+        traces.push(observed);
+      } finally {await fixture.close();}
+    }
+
+    await replay('the request joins the owner preview and writes exactly one row per shutter', async c => {
+      await c.open();
+      await c.ask(operationId, 'hold');
+      await c.page.waitForFunction(() => window.quintMountedCamera().agentQueued === true);
+      assert.equal((await c.preview.snapshot()).requests.length, 1);
+      await c.mark('The queued request keeps the existing preview token and one hold', call('agentAsks'), {'s.startsByAgent': 0});
+      const rejected = await c.page.evaluate(id => window.quintStoredCapture.secondRequest(id), secondOperationId);
+      assert.equal(rejected.status, 'failed');
+      assert.equal(rejected.cameraResult, undefined);
+      await c.mark('A second request cannot take the occupied slot', null);
+      await c.settlePreview();
+      await c.page.waitForFunction(() => typeof window.quintStoredCapture.release === 'function');
+      const inFlight = await c.mark('Only the agent owns the shutter while its port is held', [call('startSettles', true), call('agentResumes')]);
+      assert.equal(inFlight.agentShots, 1);
+      assert.equal(inFlight.images.length, 0);
+      await c.releaseShutter();
+      await c.result();
+      const first = await c.mark('The storage row matches the successful receipt', call('shutterSettles', 'saved', true));
+      assertStoredReceipt(first, operationId);
+      await c.ask(secondOperationId);
+      await c.result();
+      const second = await c.mark('A fresh request takes a separate identified photo', [call('agentAsks'), call('shutterSettles', 'saved', true)]);
+      assert.equal(second.agentShots, 2);
+      assertStoredReceipt(second, secondOperationId, first.images.map(row => row.id));
+      assert.equal((await c.preview.snapshot()).requests.length, 1);
+    });
+
+    await replay('the request starts one fresh preview after a denied start and takes no failed photo', async c => {
+      await c.open();
+      await c.preview.reject(1);
+      await c.page.waitForFunction(() => window.quintMountedCamera().phase === 'error');
+      await c.mark('The first preview settles unavailable', call('startSettles', false));
+      await c.ask();
+      await c.page.waitForFunction(() => window.quintCameraLeave.pending.some(request => request.id === 2));
+      const started = await c.preview.snapshot();
+      assert.equal(started.current, 2);
+      assert.equal(started.requests.length, 2);
+      await c.mark('The agent owns exactly one new preview attempt', call('agentAsks'), {'s.startsByAgent': 1});
+      await c.preview.reject(2);
+      await c.result();
+      const failed = await c.mark('The unavailable retry retires without dispatch or storage', [call('startSettles', false), call('agentResumes')]);
+      assert.equal(failed.agentShots, 0);
+      assert.deepEqual(failed.images, []);
+    });
+
+    await replay('an owner shutter excludes the agent while preserving the owner photo', async c => {
+      await c.open();
+      await c.settlePreview();
+      await c.mark('The real owner preview is ready', call('startSettles', true));
+      await c.page.evaluate(() => {window.quintStoredCapture.fault = 'hold';});
+      await c.fixture.button('Take photo').click();
+      await c.page.waitForFunction(() => typeof window.quintStoredCapture.release === 'function');
+      await c.mark('The owner holds the exclusive shutter', call('ownerShutter'));
+      await c.ask();
+      await c.result();
+      const failed = await c.mark('The busy refusal leaves the owner in control', call('agentAsks'));
+      assert.equal(failed.agentShots, 0);
+      assert.equal(failed.ownerShots, 1);
+      assert.deepEqual(failed.images, []);
+      await c.releaseShutter();
+      await c.page.waitForFunction(() => !window.quintMountedCamera().capturing);
+      const owner = await c.mark('Only the owner photo is stored before the camera is idle', call('cameraIdle'));
+      assert.equal(owner.images.length, 1);
+      assert.equal(owner.agentRows, 0);
+      await c.ask(secondOperationId);
+      await c.result();
+      const saved = await c.mark('A later independent request can acquire the shutter', [call('agentAsks'), call('shutterSettles', 'saved', true)]);
+      assertStoredReceipt(saved, secondOperationId, owner.images.map(row => row.id));
+    });
+
+    for (const abort of [false, true]) await replay(abort ? 'abort while preview is still pending' : 'retired context refuses on preview readiness', async c => {
+      await c.open();
+      await c.ask();
+      await c.page.waitForFunction(() => window.quintMountedCamera().agentQueued === true);
+      await c.mark('The request waits without taking a shutter', call('agentAsks'));
+      if (abort) {
+        await c.page.evaluate(() => window.quintStoredCapture.controller.abort());
+        await c.result();
+        await c.mark('Abort releases the request while the owner preview remains pending', call('cancelWaiting'));
+        await c.settlePreview();
+        await c.mark('The owner preview can still become ready after abort', call('startSettles', true));
+      } else {
+        await c.page.evaluate(() => {window.quintStoredCapture.contextCurrent = false;});
+        await c.mark('The previous request context is retired', call('requestChanges'), {'s.aborted': true});
+        await c.settlePreview();
+        await c.result();
+        await c.mark('The dispatcher rechecks context before taking a shutter', [call('startSettles', true), call('agentResumes')]);
+      }
+      const failed = await c.snapshot();
+      assert.equal(failed.agentShots, 0);
+      assert.equal(failed.result.status, 'failed');
+      assert.deepEqual(failed.images, []);
+    });
+
+    await replay('leaving Camera retires the request and disposes its late preview', async c => {
+      await c.open();
+      await c.ask();
+      await c.page.waitForFunction(() => window.quintMountedCamera().agentQueued === true);
+      await c.mark('The request joins the Camera preview under its current owner', call('agentAsks'));
+      await c.preview.leave();
+      await c.result();
+      await c.mark('The real Home transition retires the preview and queued shutter', [call('leaveView'), call('agentResumes')]);
+      await c.preview.release(1);
+      await c.preview.ended([1]);
+      const failed = await c.mark('The retired late stream cannot become a preview or a photo', null);
+      assert.equal(failed.result.status, 'failed');
+      assert.equal(failed.agentShots, 0);
+      assert.deepEqual(failed.images, []);
+      assert.equal((await c.preview.snapshot()).preview, 0);
+    });
+
+    await replay('recording starts first while the admitted photo waits for reveal', async c => {
+      await c.open();
+      await c.page.evaluate(() => window.quintMountedCalendar.setState({chat: 'full'}));
+      await c.page.waitForFunction(() => Number(getComputedStyle(document.querySelector('[data-alpha-layer="conversation"]')).opacity) === 1);
+      await c.page.addStyleTag({content: '[data-alpha-layer="conversation"][inert] { transition-duration: 60s !important; }'});
+      await c.ask();
+      await c.page.waitForFunction(() => window.quintMountedCamera().agentQueued === true && window.quintMountedCalendar.S().chat === 'hidden');
+      await c.mark('The request waits through the real closing panel', call('agentAsks'));
+      await c.settlePreview();
+      await c.mark('The owner preview is ready while the request remains queued', call('startSettles', true));
+      await c.page.evaluate(() => {
+        const source = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async constraints => {
+          if (constraints.audio) throw new DOMException('Synthetic audio denial', 'NotAllowedError');
+          return source(constraints);
+        };
+      });
+      await c.fixture.button('Video mode').click();
+      await c.fixture.button('Start recording').click();
+      await c.fixture.button('Record without sound').click();
+      await c.fixture.button('Stop recording').waitFor();
+      await c.mark('Owner recording takes the actual session and refuses the queued photo', call('recordingStarts'));
+      await c.page.evaluate(() => document.querySelector('[data-alpha-layer="conversation"]').getAnimations().forEach(animation => animation.finish()));
+      await c.result();
+      const failed = await c.mark('Reveal completion cannot take a photo over the owner recording', call('agentResumes'));
+      assert.equal(failed.result.summary, 'Recording — no photo');
+      assert.equal(failed.agentShots, 0);
+      assert.deepEqual(failed.images, []);
+      await c.fixture.button('Stop recording').click();
+      await c.page.waitForFunction(() => !window.quintMountedCamera().recordingBusy);
+      await c.mark('Finishing the recording releases the shared session', call('cameraIdle'));
+    });
+
+    for (const fault of ['rollback', 'lost-receipt']) await replay(`the shutter is unknown after ${fault}`, async c => {
+      await c.open();
+      await c.settlePreview();
+      await c.mark('The real preview is ready for a new request', call('startSettles', true));
+      await c.ask(operationId, fault);
+      await c.result();
+      const written = fault === 'lost-receipt';
+      const unknown = await c.mark('The actual browser catalog proves the post-dispatch row count',
+        [call('agentAsks'), call('shutterSettles', 'threw', written)]);
+      assert.equal(unknown.result.status, 'unknown');
+      assert.equal(unknown.result.cameraResult, undefined);
+      assert.equal(unknown.agentShots, 1);
+      assert.equal(unknown.images.length, written ? 1 : 0);
+      if (written) assert.equal(unknown.images[0].jpeg, true);
+    });
+  } finally {await browser.close();}
+  const receipt = await checkTraces(boundInputs({model: 'AgentPhotoRequest', scope: 'bounded-orchestration',
+    sources: [...sources], traces, assumptions: ['The complete Camera adapter, shell, browser media implementation and shared session run in Chromium.',
+      'Canvas MediaStreams drive the preview and owner recording. The browser photo catalog uses IndexedDB; a failed transaction and a lost reply after commit are injected at their separate effect boundaries.',
+      'The supplied current-context guard and abort signal enter at the adapter boundary. Proposal transport and Android sensor, MediaStore and device acceptance are separate.']}));
+  assert.equal(receipt.passed, true);
+  assert.equal(receipt.inputsUnchanged, true);
+  assert.equal(receipt.driverInputsBound, true);
+  assert.equal(receipt.traces, 9);
+});
