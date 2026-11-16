@@ -1,5 +1,5 @@
 {
-  "pin": "c9247e6966b572612b51e6b5e6a1f15af2843af8",
+  "pin": "9e87d1ce947018c9ee201527b74798387c7bf694",
   "forkPin": "6337fd4c4bd071c17235986344d552d4036e177b",
   "identity": "ai.alphacompute.alphaphone",
   "abi": "arm64-v8a",
@@ -123,5 +123,10 @@
     "mode": "registered",
     "className": "ai/alphacompute/alphaphone/ElizaVoiceNative",
     "subset": "full"
+  },
+  "requalification": {
+    "required": true,
+    "atPin": "c9247e6966b572612b51e6b5e6a1f15af2843af8",
+    "reason": "The root and packages/app package manifests changed in the embedding producer source inventory. A build receipt from the current SDK must authenticate all 14 inputs and the resulting ARM64 libraries before distribution."
   }
 }
