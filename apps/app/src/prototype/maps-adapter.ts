@@ -36,8 +36,6 @@ import type { TravelMode } from '../maps/contracts';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
-const VOICE_ON = 'M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11';
-const VOICE_OFF = 'M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 10l4 4M20 10l-4 4';
 const PIN = 'M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0zM15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z';
 const locationText = (text: string) => text === 'Your location' ? 'My location' : /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text.trim()) ? 'Selected location' : text;
 const mapsConnected = () => mapsConnection().config.status === 'configured';
@@ -53,13 +51,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   const device=registerPlugin<{openSettings(input:{page:string}):Promise<unknown>}>('AlphaDevice');
   const module = views.maps; if (!module) return () => {};
   const original = { render: module.render, back: module.back, onLeave: module.onLeave, reply: module.reply, suggestions: module.suggestions, ongoing: module.ongoing };
-  let api: Bag | undefined, disposed=false, renders=0,voicePreferenceRead=false,placeShown=false;
+  let api: Bag | undefined, disposed=false, renders=0,placeShown=false;
   let planeBasemap:MapBasemap|undefined, plane: MapPlane | undefined, planeElement: HTMLElement | undefined;
   let mapGeneration=0,mapFailed=false,mapObserver:MutationObserver|undefined;
   let mapCopyright='';
   let pendingHandoff: {query:string}|undefined, mapsController:MapsController|undefined;
   let queryTimer:ReturnType<typeof setTimeout>|undefined,originTimer:ReturnType<typeof setTimeout>|undefined;
   let queryDraft:string|undefined,originDraft:string|undefined,searchEpoch=0,submittedQueryEpoch=-1;
+  let submittedOriginEpoch=-1,submittedOriginText='',submittedOriginKind:'search'|'route'|'location'='route';
   const cancelSearchTimers=()=>{if(queryTimer!==undefined)clearTimeout(queryTimer);if(originTimer!==undefined)clearTimeout(originTimer);queryTimer=originTimer=undefined;};
   const retireSearch=()=>{++searchEpoch;cancelSearchTimers();queryDraft=originDraft=undefined;};
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
@@ -81,7 +80,8 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   };
   const navigationVoice = new NavigationVoice(
     error => screen.notify(speechCleanupNotice(error) || ((error instanceof Error ? error.message + ' ' : '') + 'Voice paused')),
-    () => !googleContent(),
+    // Navigation speech is deferred; the assistant owns its separate speech lifecycle.
+    () => false,
   );
   const navigationTransport=registerPlugin<NavigationBridge & {consumeNavigationOpen():Promise<{open:boolean}>;clearNavigationOpen():Promise<unknown>}>('AlphaMapsTransport');
   const background=new BackgroundNavigation(navigationTransport,()=>Capacitor.isNativePlatform());
@@ -188,7 +188,6 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   module.suggestions = () => mapsConnected() ? [...(placeShown ? ['Help me with this place'] : []), 'Explain Maps coverage'] : ['Help me with Maps', 'Explain location permissions'];
   module.render = (st: Bag, currentApi: Bag) => {
     api = currentApi;
-    if(!voicePreferenceRead){navigationVoice.enabled=st.voice!==false;voicePreferenceRead=true;}
     // Cross-app navigation carries a one-use search, not a selected destination.
     // Consume it outside render and fence it against leaving or a newer action.
     if(typeof st.query==='string'&&st.query.trim()&&!pendingHandoff){
@@ -222,16 +221,29 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       const draft=queryDraft,text=draft??screen.view().query,state=mapsController?.snapshot();queryDraft=undefined;
       // Enter after the debounce reuses this input's in-flight or ready search.
       // A new edit, refused request or changed provider still admits a new search.
-      if(draft===undefined&&submittedQueryEpoch===searchEpoch&&!pendingHandoff&&currentApi.get('maps').query==null&&state?.query===text.trim()&&(state.search.phase==='loading'||state.search.phase==='ready'))return;
+      if(draft===undefined&&submittedQueryEpoch===searchEpoch&&!pendingHandoff&&currentApi.get('maps').query==null&&state?.query===text.trim()&&(state.search.phase==='loading'||state.search.phase==='ready'||state.search.phase==='empty'))return;
       ++searchEpoch;
       screen.setQuery(text);if(text.trim()){screen.submit();submittedQueryEpoch=searchEpoch;}
     };
     const submitOrigin=()=>{
       if(originTimer!==undefined)clearTimeout(originTimer);originTimer=undefined;
       if(!active()||!currentApi.isActive())return;
-      const text=originDraft??screen.view().directions?.originText??'';originDraft=undefined;
-      if(text==='My location'||text==='Your location'){screen.locate();return;}
-      if(screen.view().directions?.originText!==text)screen.setOriginText(text);if(text.trim())screen.planOrigin();
+      const draft=originDraft,text=draft??screen.view().directions?.originText??'',state=mapsController?.snapshot();originDraft=undefined;
+      const phase=submittedOriginKind==='search'?state?.originSearch.phase:state?.route.phase;
+      const reusable=submittedOriginKind==='location'
+        ? state?.position.phase==='loading'||state?.position.phase==='ready'&&(state.route.phase==='loading'||state.route.phase==='ready')
+        : phase==='loading'||phase==='ready'||phase==='empty';
+      const sameText=text===submittedOriginText||submittedOriginKind==='location'&&(text==='My location'||text==='Your location');
+      if(draft===undefined&&submittedOriginEpoch===searchEpoch&&!pendingHandoff&&currentApi.get('maps').query==null&&sameText&&reusable)return;
+      ++searchEpoch;
+      if(text==='My location'||text==='Your location'){
+        screen.locate();submittedOriginEpoch=searchEpoch;submittedOriginText=text;submittedOriginKind='location';return;
+      }
+      if(screen.view().directions?.originText!==text)screen.setOriginText(text);
+      if(text.trim()){
+        screen.planOrigin();const next=screen.view();submittedOriginEpoch=searchEpoch;
+        submittedOriginText=next.directions?.originText??text;submittedOriginKind=next.mode==='origin'?'search':'route';
+      }
     };
     const schedule=(origin:boolean,text:string)=>{
       const token=++searchEpoch,provider=mapsConnection().provider,owner=shell;
@@ -302,7 +314,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
           mapObserver?.disconnect();plane?.destroy();mapFailed=false;mapCopyright='';planeElement=element;planeBasemap=basemap;const generation=++mapGeneration;delete element.dataset.mapReady;delete element.dataset.mapError;
           const current=()=>generation===mapGeneration&&planeElement===element&&!disposed&&!!api?.isActive();
           try{
-            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>screen.pin(id),text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>screen.stopFollowing());
+            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();});
             mapObserver=new MutationObserver(()=>{if(current())screen.setMapState(element.dataset.mapError ? 'error' : element.dataset.mapReady === 'true' ? 'ready' : 'loading');});
             mapObserver.observe(element,{attributes:true,attributeFilter:['data-map-ready','data-map-error']});
           }catch{mapFailed=true;element.replaceChildren();queueMicrotask(()=>{if(current())screen.setMapState('error');});}
@@ -329,16 +341,15 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       searchLead: () => {retireSearch();screen.searchLead();},
       onQ: (event: Event) => schedule(view.mode==='origin',(event.target as HTMLInputElement).value),
       focusQ: () => {},
-      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin'){++searchEpoch;submitOrigin();}else submitQuery();(event.target as HTMLInputElement).blur(); } },
+      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin')submitOrigin();else submitQuery();(event.target as HTMLInputElement).blur(); } },
       clearQ: () => {retireSearch();screen.clearQuery();},
-      chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => screen.chooseSaved(item.id) })),
+      chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
       cats: (view.map.selected||view.map.overlay.position?data.cats:[]).map((category: Bag) => ({ ...category, go: () => screen.searchFor(category.label) })),
       savedRows: view.saved.map(item => ({ id: 'saved:' + item.id, name: locationText(item.label), sub: '', d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
       results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {retireSearch();screen.choose(row.key);} })),
       hasResults: queryDraft===undefined&&originDraft===undefined&&results.length > 0, noResults: queryDraft===undefined&&originDraft===undefined&&(view.noResults || view.hasResults && results.length === 0), emptyQ: view.emptyQuery,
       recenter: () => {retireSearch();screen.recenter();}, recBottom, recCss: '',
       sheetH: sheetHeight,
-      askAlpha: () => currentApi.send(view.query || 'Help me with Maps.'), noResTxt: 'Ask',
     });
     const place = view.place;
     if (place) {
@@ -367,19 +378,19 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       data.originPlaceholder='My location';
       data.originFocus=(event:FocusEvent)=>{const input=event.target as HTMLInputElement;if(input.value==='My location')input.select();};
       data.onOrigin=(event:Event)=>schedule(true,(event.target as HTMLInputElement).value);
-      data.originKey=(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();++searchEpoch;submitOrigin();}};
+      data.originKey=(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();submitOrigin();}};
       data.originLocation=()=>{retireSearch();screen.locate();};
       const nav = view.navigation;
       data.dr={name:locationText(directions.name),close:()=>{retireSearch();screen.back();},min:directions.duration,meta:directions.meta,via:directions.via,shareLabel:'Share route',shareEta:googleMaps ? undefined : () => screen.shareRoute(),
-       modes:data.nativeModeMetadata.map((reference:{mode:'drive'|'walk'|'bike'|'transit';label:string;d:string})=>{const mode:TravelMode=reference.mode==='bike'?'bicycle':reference.mode;const on=!!directions.modes.find(choice=>choice.mode===mode)?.selected;return {label:reference.label,t:reference.label,d:reference.d,on,available:!!directions.modes.find(choice=>choice.mode===mode)?.available,css:on?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>screen.setMode(mode)};}),
+       modes:data.nativeModeMetadata.map((reference:{mode:'drive'|'walk'|'bike'|'transit';label:string;d:string})=>{const mode:TravelMode=reference.mode==='bike'?'bicycle':reference.mode;const on=!!directions.modes.find(choice=>choice.mode===mode)?.selected;return {label:reference.label,t:reference.label,d:reference.d,on,available:!!directions.modes.find(choice=>choice.mode===mode)?.available,css:on?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>{retireSearch();screen.setMode(mode);}};}),
        // The provider's ordered route choice (recommended first); choosing requests nothing.
        hasRoutes:directions.routes.length>0,
-       routes:directions.routes.map(choice=>({label:`${choice.label}, ${choice.duration}, ${choice.meta}`,t:choice.label,sub:`${choice.duration} · ${choice.meta}`,on:choice.selected,css:choice.selected?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>screen.chooseRoute(choice.id)})),
-       start:()=>screen.start(),
+       routes:directions.routes.map(choice=>({label:`${choice.label}, ${choice.duration}, ${choice.meta}`,t:choice.label,sub:`${choice.duration} · ${choice.meta}`,on:choice.selected,css:choice.selected?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>{retireSearch();screen.chooseRoute(choice.id);}})),
+       start:()=>{retireSearch();screen.start();},
        nav:{going:!nav?.arrived,arrived:!!nav?.arrived,dist:nav?.distance||'Locating…',street:nav?.instruction||'Waiting for location',icon:nav?.maneuverIcon||PIN,hasThen:!!nav?.following,thenD:nav?.following?.icon||'',thenText:nav?.following?.text||'',
         left:nav?.remainingTime||'Guidance',meta:nav?.remaining&&nav.remaining===nav.meta?'':nav?.meta||'',remaining:nav?.remaining||'',
-        offRoute:!!nav?.offRoute,canReroute:!!nav?.canReroute,reroute:()=>screen.reroute(),rerouteLabel:'Reroute from here',background:!!nav?.background,
-        end:()=>screen.end(),ask:()=>currentApi.send('Help me with this route.'),voiceLabel:navigationVoice.enabled?'Mute voice guidance':'Enable voice guidance',voice:googleMaps ? undefined : ()=>{screen.toggleVoice();currentApi.set({voice:navigationVoice.enabled});},voiceD:navigationVoice.enabled?VOICE_ON:VOICE_OFF}};
+        offRoute:!!nav?.offRoute,background:!!nav?.background,
+        end:()=>{retireSearch();screen.end();}}};
     }
     const eventOrigin=mapsEventReturnOffered(st.fromEvent,currentApi.S.stack,isNav);
     data.eventReturnFloating=!!eventOrigin&&!!data.showSearch;data.eventReturnInline=!!eventOrigin&&!!data.isDir;
@@ -413,6 +424,12 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     }
     return showable()&&shell!.S().view==='maps'&&!!api?.isActive()&&!!surface.snapshot();
   });
+  // Agent origin/navigation changes retire the same input ownership as user actions.
+  // The shared controller remains product-neutral; these ports own Alpha's debounce.
+  const {planFrom:agentPlanFrom,reroute:agentReroute,stop:agentStop}=surface;
+  surface.planFrom=origin=>{retireSearch();return agentPlanFrom(origin);};
+  surface.reroute=origin=>{retireSearch();return agentReroute(origin);};
+  surface.stop=()=>{retireSearch();return agentStop();};
   // Offered to the agent only while Eliza Cloud Maps is installed for the signed-in account.
   const agentNavigation=bindAgentNavigation({
     // Eliza Cloud Maps in the launcher renderer only; never the regional gateway or the assistant window.

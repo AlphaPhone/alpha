@@ -96,6 +96,20 @@ requests. Its default URL is `http://127.0.0.1:5318`.
 resident profiles live under `~/.local/share/alphaphone/`. Existing accounts,
 credentials and histories are not copied or reset.
 
+### Maps input and navigation controls
+
+Automatic search and Enter share one accepted input generation for destination and origin
+fields. Loading, ready and successful empty results are reused; an explicit retry after a failed
+request remains available. New edits, provider/account changes, place/origin choices and navigation
+changes retire that ownership. Keep provider-effect counts in the owning browser/model checks.
+
+Maps navigation is visual for now, following the owner's voice deferral. Its footer keeps ETA,
+distance and End, with symmetric space around the centered ETA. The Maps-specific Ask, voice and
+manual Reroute controls and the empty-search Ask prompt are removed. The normal assistant speech
+lifecycle and the always-packaged resident/on-device speech runtime remain separate. Shared speech
+component contracts are retained; the Maps UI tests now verify silence, visual guidance, unrelated
+playback ownership and End rather than advertising deferred controls.
+
 ### Standalone Cloud (development)
 
 Distributed builds use the Cloud in `scripts/cloud-deployment-policy.ts` (Eliza Cloud

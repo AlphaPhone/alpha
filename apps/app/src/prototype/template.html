@@ -63,7 +63,7 @@
 
 
 <sc-if value="{{isOn}}">
-<sc-if value="{{showAppBack}}"><button data-alpha-app-back-fallback aria-label="Back to apps" onClick="{{backToApps}}" style="position:absolute;top:0;left:12px;z-index:44;min-height:44px;display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--fg);font-size:14px"><svg class="i" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="{{ic.back}}"></path></svg>Apps</button></sc-if>
+<sc-if value="{{showAppBack}}"><button data-alpha-app-back-fallback aria-label="Back to apps" onClick="{{backToApps}}" style="position:absolute;top:0;left:12px;z-index:44;min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:center;padding:0 8px;color:var(--fg);font-size:14px"><svg class="i" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="{{ic.back}}"></path></svg></button></sc-if>
 
 <!-- Home and its app grid come from the shared mobile shell, the Apps drawer from Alpha
      (prototype/home-shell.ts); this template fills Home's notice and card slots
@@ -2418,10 +2418,6 @@
             <svg class="i" viewBox="0 0 24 24" style="width: 28px; height: 28px"><path d="{{ic.search}}"></path></svg>
             <div style="font-size: 15px">No places</div>
           </div>
-          <button class="tap" onClick="{{maps.askAlpha}}" style="width: 100%; display: flex; align-items: center; gap: 14px; padding: 10px 20px">
-            <span style="width: 42px; height: 42px; border-radius: 21px; background: var(--s2); color: var(--acct); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: Denton, Fraunces, Georgia, serif; font-style: italic; font-size: 22px"><span class="alpha-compute-mark" aria-hidden="true"></span></span>
-            <span style="font-size: 16px; font-weight: 600; text-align: left; min-width: 0">{{maps.noResTxt}}</span>
-          </button>
         </sc-if>
       </div>
     </div>
@@ -2475,16 +2471,13 @@
 
   
   <sc-if value="{{maps.isNav}}">
-    <div class="enter" data-alpha-maps-guidance-controls style="position: absolute; left: 12px; right: 12px; bottom: var(--alpha-maps-guidance-bottom,26px); border-radius: 32px; background: var(--alpha-gray-15); color: var(--alpha-white); padding: 10px; display: flex; align-items: center; gap: 12px; z-index: 5">
+    <div class="enter" data-alpha-maps-guidance-controls style="position: absolute; left: 12px; right: 12px; bottom: var(--alpha-maps-guidance-bottom,26px); border-radius: 32px; background: var(--alpha-gray-15); color: var(--alpha-white); padding: 10px; display: grid; grid-template-columns: 56px minmax(0,1fr) 56px; align-items: center; gap: 12px; z-index: 5">
       <button aria-label="End navigation" onClick="{{maps.dr.nav.end}}" style="width: 56px; height: 56px; border-radius: 28px; background: var(--alpha-gray-26); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
       <div style="flex-grow: 1; min-width: 0; text-align: center">
         <div class="serif" style="font-size: 30px; line-height: 1.05">{{maps.dr.nav.left}}</div>
         <sc-if value="{{maps.dr.nav.meta}}"><div style="font-size: 13px; color: var(--alpha-gray-8f); margin-top: 3px">{{maps.dr.nav.meta}}</div></sc-if>
         <sc-if value="{{maps.dr.nav.remaining}}"><div role="status" aria-label="Remaining distance and time" style="font-size: 13px; color: var(--alpha-gray-bd); margin-top: 2px">{{maps.dr.nav.remaining}}</div></sc-if>
-        <sc-if value="{{maps.dr.nav.canReroute}}"><button onClick="{{maps.dr.nav.reroute}}" style="min-height: 48px; margin-top: 4px; padding: 0 12px; border-radius: 18px; background: var(--alpha-gray-26); color: var(--alpha-white); font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px"><svg class="i" viewBox="0 0 24 24" style="width: 16px; height: 16px"><path d="{{ic.mapsRoute}}"></path></svg>Reroute</button></sc-if>
       </div>
-      <button aria-label="Ask {{name}}" onClick="{{maps.dr.nav.ask}}" style="width: 56px; height: 56px; border-radius: 28px; background: var(--alpha-gray-26); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: Denton, Fraunces, Georgia, serif; font-style: italic; font-size: 24px"><span class="alpha-compute-mark" aria-hidden="true"></span></button>
-      <sc-if value="{{maps.dr.nav.voice}}"><button aria-label="{{maps.dr.nav.voiceLabel}}" onClick="{{maps.dr.nav.voice}}" style="width: 56px; height: 56px; border-radius: 28px; background: var(--alpha-gray-26); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24"><path d="{{maps.dr.nav.voiceD}}"></path></svg></button></sc-if>
     </div>
   </sc-if>
 </div>
