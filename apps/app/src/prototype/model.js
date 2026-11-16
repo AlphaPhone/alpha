@@ -5574,7 +5574,9 @@ class Component extends DCLogic {
   vset(k, p, options) {
     this.setState(function (prev) {
       var vs = Object.assign({}, (prev && prev.vs) || {});
-      vs[k] = Object.assign({}, (VIEWS[k] && VIEWS[k].state) || {}, vs[k] || {}, p);
+      var current = Object.assign({}, (VIEWS[k] && VIEWS[k].state) || {}, vs[k] || {});
+      if (options?.when && !options.when(prev, current)) return null;
+      vs[k] = Object.assign(current, p);
       return { vs: vs };
     }, options?.afterCommit);
   }

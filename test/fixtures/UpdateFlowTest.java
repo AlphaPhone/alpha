@@ -2235,7 +2235,7 @@ public final class UpdateFlowTest {
   Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
   byte[] original=manifestBytes(manifestOffer(tlsApk(8)));
   var replacement=manifestOffer(tlsApk(9));
-  var other=manifestOffer(tlsApk(9)).put("variant","standalone");
+  var other=manifestOffer(tlsApk(9)).put("signerSha256","6d".repeat(32));
   byte[] newer=manifestBytes(new org.json.JSONObject().put("schema","alpha-update/index-v1")
    .put("releases",new org.json.JSONArray().put(other).put(replacement)));
   try{

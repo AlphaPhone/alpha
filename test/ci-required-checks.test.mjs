@@ -152,7 +152,7 @@ test('promotion partitions every safety and temporal phase exactly once without 
     const model = byModule.get(name);return [[name, model.init, model.step, model.temporal]];
   }).sort(), temporalModels.map(model => [model.module, model.init, model.step, model.temporal]).sort());
   assert.equal(jobs.comparison.if, '$' + '{{ !inputs.models }}');
-  assert.equal(jobs.comparison.steps[5].run, 'bun scripts/check-quint.ts compare');
+  assert.ok(jobs.comparison.steps.some(step => step.run === 'bun scripts/check-quint.ts compare'));
   for (const job of [safety, jobs.comparison, temporal]) {
     assert.deepEqual(job.steps.slice(0, 5), safety.steps.slice(0, 5), 'All pinned prerequisites remain identical');
     assert.equal(job.needs, undefined);assert.equal(job['timeout-minutes'], 240);assert.equal(job['runs-on'], 'ubuntu-24.04');

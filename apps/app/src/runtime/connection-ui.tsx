@@ -1,5 +1,6 @@
 import {googleConnectionController} from './google-connection-ui';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+import {NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isCalendarReadFailureCode} from "../../../../.eliza/client-features/packages/contracts/src/calendar.ts";
 import {SingleFlightMemo} from "@elizaos/core/read-memo";
 import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
@@ -118,7 +119,6 @@ export interface ConnectionSnapshot {
   /** Ephemeral explicit code entry, retired when its current account or panel changes. */
   membershipCodeEntry?: boolean;
   residentSavedCredential?: boolean;
-  legacySignInRecovery?: boolean;
   /**
    * Production plan notice (#410). The on-device agent ALWAYS runs (owner directive 2026-10-13);
    * plan state only decides whether Eliza Cloud inference is bound into it. 'needs-plan': signed
@@ -496,11 +496,11 @@ async function calendarAgendaObservation(actions:DeviceActions,context:ContextEn
 }
 /** The X-Eliza-Device-Capabilities value for every runtime (remote, resident, Cloud), selected by
  * selectDeviceCapabilities for this phone's platform. */
-async function deviceCapabilities(offered:unknown):Promise<string>{
+async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<string>{
   const android=Capacitor.getPlatform()==='android';
   return selectDeviceCapabilities(offered,{android,native:Capacitor.isNativePlatform(),
     camera:Capacitor.isPluginAvailable('ElizaCamera')||!android&&typeof navigator!=='undefined'&&typeof navigator.mediaDevices?.getUserMedia==='function',
-    foregroundReview:typeof foregroundExecutor==='function',
+    foregroundReview:typeof foregroundExecutor==='function',canonicalNotes,
     photoLibrary:Capacitor.isNativePlatform()&&Capacitor.isPluginAvailable('AlphaPhotoLibrary'),
     files:Capacitor.isPluginAvailable('AlphaFiles'),
     clockRepeatDays:android&&Array.isArray(offered)&&offered.includes('clock.handoff.v2')&&await clockRepeatDaysSupported(),
@@ -922,8 +922,8 @@ function selection(): Selection | null {
     if (value?.kind === 'offline' || value?.kind === 'none') return residentAlwaysPresent ? { kind: 'resident' } : value.kind === 'offline' ? { kind: 'offline' } : { kind: 'none' };
     if (value?.kind === 'resident') return value;
     if (testMocksEnabled && value?.kind === 'mock') return value;
-    // Product builds have no hosted or paired agent (#406): a saved one reads as the resident agent.
-    if (!testMocksEnabled) return legacyHostedKind(value?.kind) ? { kind: 'resident' } : null;
+    // Product builds have no hosted or paired agent (#406).
+    if (!testMocksEnabled) return null;
     if ((value?.kind === 'remote' || value?.kind === 'local') && typeof value.origin === 'string') return value;
     if (value?.kind === 'cloud' && cloudEnvironmentAllowed(value.environment) && typeof value.agentId === 'string') return value;
   } catch { /* Invalid nonsecret preferences do not authenticate a connection. */ }
@@ -1244,7 +1244,7 @@ async function connectRemote(kind: 'remote' | 'local', origin: string, code: str
 async function connectDevelopment(profile:DevelopmentProfile,signal:AbortSignal){
  if(!browserDevProfile)throw Error('Development mode required.');
  // This explicitly gated browser fixture implements reminder v2; real peers still negotiate it.
- const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY]},scope=await actionScope(JSON.stringify([client.origin,session.ownerId,session.agentId,credential.installationId]));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=await workflowDeviceProtocol(signal);save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});developmentVoiceExpiresAt=Date.now()+3600000;activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
+ const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY,NOTES_LIST_FILTER_CAPABILITY]},scope=await actionScope(JSON.stringify([client.origin,session.ownerId,session.agentId,credential.installationId]));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=await workflowDeviceProtocol(signal);save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});developmentVoiceExpiresAt=Date.now()+3600000;activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
  await restoreSavedHistory(signal);
 }
 /** Native's identity read during a bind failed without Cloud refusing the key (transport, 408, 429, 5xx). */
@@ -1554,7 +1554,7 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
     if(registered.installationId!==credential.installationId||typeof registered.enrollmentId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId))throw Error('Device registration was not verified');
     if(registered.userTextFormatVersion===1)userTextFormatVersion=1;
     reason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
-    headers['X-Eliza-Device-Capabilities']=await deviceCapabilities(registered.capabilities);
+    headers['X-Eliza-Device-Capabilities']=await deviceCapabilities(registered.capabilities,true);
     credential.enrollmentId=registered.enrollmentId;await store.write(slot,credential);signal.throwIfAborted();
     // Cost: one authenticated read after durable enrollment, not per message.
     // Its existing native enrollment entry wakes notifications only after the complete slot exists.
@@ -1663,33 +1663,6 @@ function migrateLegacyMock(): boolean {
   if (residentAlwaysPresent) { try { save({ kind: 'resident' }); } catch { /* The resident starts either way. */ } return false; }
   try { save({ kind: 'none' }); } catch { /* The open chooser still requires an explicit choice. */ }
   update({ open: true, message: '' });
-  return true;
-}
-/** Saved selection kinds of the retired hosted and paired agents (remote, local development, Cloud). */
-function legacyHostedKind(kind: unknown): kind is 'remote' | 'local' | 'cloud' { return kind === 'remote' || kind === 'local' || kind === 'cloud'; }
-/** Where migrated hosted-agent selections are kept, oldest first, unread by product code, for recovery and diagnostics. */
-export const LEGACY_HOSTED_SELECTION = 'alpha.connection.legacy-hosted-selection.v1';
-/**
- * The agent always runs on the phone (#406): product builds have no remote, paired or Cloud-hosted
- * agent. A saved selection of one from an earlier build becomes the resident agent. The old choice is
- * appended to LEGACY_HOSTED_SELECTION, not deleted: every earlier record (and an unreadable one, as
- * its raw text) is kept. Nothing is connected to it: no credential slot is read or removed, no request
- * is made, and conversation selections and history stay where they are. In the product web build,
- * which has no on-device agent, the stored 'resident' only names the Android agent: the web branch
- * of initialize() never connects it and shows the chooser. Test-mocks builds keep their development
- * selections.
- */
-function migrateLegacyHostedSelection(): boolean {
-  if (testMocksEnabled) return false;
-  let stored: unknown = null;
-  try { stored = JSON.parse(localStorage.getItem(SELECTION) || 'null'); } catch { return false; }
-  if (!stored || typeof stored !== 'object' || !legacyHostedKind((stored as { kind?: unknown }).kind)) return false;
-  try {
-    let kept: unknown[] = [];
-    try { const prior: unknown = JSON.parse(localStorage.getItem(LEGACY_HOSTED_SELECTION) || '[]'); kept = Array.isArray(prior) ? prior : [prior]; } catch { kept = [localStorage.getItem(LEGACY_HOSTED_SELECTION)]; }
-    localStorage.setItem(LEGACY_HOSTED_SELECTION, JSON.stringify([...kept, stored]));
-    save({ kind: 'resident' });
-  } catch { /* selection() already reads the stored choice as the resident agent. */ }
   return true;
 }
 /**
@@ -2507,6 +2480,7 @@ export const connectionController = {
     };
     ownerReminderBindingCache={selected,session,generation,port};return port;
   },
+  canonicalNotesFilterAvailable(){return active?.kind==='resident'&&active.actions?.credential.capabilities?.includes(NOTES_LIST_FILTER_CAPABILITY)===true;},
   /** Canonical app records belong to the same resident agent as chat, on Android and in DEV. */
   getAppRecordClient():AppRecordPort|null {
     const selected=active,session=state.session,generation=epoch;
@@ -2709,8 +2683,6 @@ export const connectionController = {
       // Subscription gate QA in a test-mocks build runs the production gate before any development flow.
       if (residentQa()) { await startResidentGate(); return; }
       if (!testMocksEnabled && migrateLegacyMock()) return;
-      // A saved hosted or paired agent becomes the resident agent; nothing connects to it.
-      if (!testMocksEnabled) migrateLegacyHostedSelection();
       if (testMocksEnabled && ((!isAndroid && !browserLocalAgentEnabled) || new URLSearchParams(location.search).get('mode') === 'mock')) return;
       if (!testMocksEnabled && !isAndroid && !browserLocalAgentEnabled) {
         // A production browser build has no on-device agent. Explain the real choices once.
@@ -2720,8 +2692,7 @@ export const connectionController = {
       }
       const saved = selection();
       if(!testMocksEnabled&&!isAndroid&&!browserLocalAgentEnabled){
-        // History stays for recovery; a hosted choice was already moved to LEGACY_HOSTED_SELECTION and the
-        // selection now names the Android agent. Never read credentials or reconnect from the browser.
+        // History stays for recovery. Never read credentials or reconnect from the browser.
         update({open:saved?.kind!=='offline',message:'Android only'});return;
       }
       if (residentCloudFlow()) { await startResidentGate(); return; }
@@ -2911,25 +2882,6 @@ export const connectionController = {
     if(operation||document.hidden||state.residentRecoveryReason!=='runtime-identity-unavailable'||state.session)return;
     update({residentRecoveryReason:undefined,error:''});
     await connectionController.startLocal();
-  },
-  async restoreSavedSignIn() {
-    if(!isAndroid||!residentCloudFlow()||residentEnvironment()!=='production'||(state.signIn&&state.signIn.environment!=='production')||operation||state.cloudAccount||!cloudSignIn?.restoreSavedSignIn)return;
-    await work('Restoring',async signal=>{
-      signal.throwIfAborted();
-      const cancel=()=>{void cloudSignIn!.cancel().catch(()=>{});};
-      signal.addEventListener('abort',cancel,{once:true});
-      try{
-        const outcome=await cloudSignIn!.restoreSavedSignIn!();signal.throwIfAborted();
-        if(outcome.restored!==true)throw Error('Saved sign-in expired');
-        update({legacySignInRecovery:false,residentSavedCredential:true,signIn:null});
-      }finally{signal.removeEventListener('abort',cancel);}
-      if(state.residentRecoveryReason){update({open:true,purpose:'agent',error:residentRecoveryMessage(state.residentRecoveryReason)});return;}
-      // Keep the same owned operation through normal admission. Releasing busy/operation
-      // between the native commit and this start lets automatic chooser readiness steal it.
-      retire();
-      await connectResident(signal);
-    });
-    if(residentAlwaysPresent&&!active&&state.kind==='starting')update({kind:'recovering'});
   },
   async startLocal() { if(state.residentRecoveryReason){update({open:true,purpose:'agent',error:residentRecoveryMessage(state.residentRecoveryReason)});return;} if (residentAlwaysPresent) { if (!operation) { retire(); await startResident('Starting the local agent…', false); } return; } await work('Starting the local agent…', signal => { retire(); return connectResident(signal); }); },
   async pair(kind: 'remote' | 'local', origin: string, code: string) {
@@ -3803,12 +3755,6 @@ export function ConnectionChooser() {
     if (refreshNegative) refreshSignInOnReconnect.current = false;
     void connectionController.beginSignIn(residentEnvironment(), refreshNegative, true);
   }, [signInPageShown, snapshot.busy, snapshot.signIn, snapshot.cloudAccount, snapshot.startupResolved, snapshot.automaticRestore, cloudSignInNetwork.offline, cloudSignInNetwork.unvalidated, cloudSignInNetwork.reachable, cloudSignInNetwork.checking]);
-  useEffect(()=>{
-    if(!isAndroid||!signInEntryRequired||(snapshot.signIn?.environment??residentEnvironment())!=='production'||snapshot.cloudAccount||!cloudSignIn?.savedSignInRecoveryStatus)return;
-    let current=true;
-    void cloudSignIn.savedSignInRecoveryStatus().then(result=>{if(current)update({legacySignInRecovery:result.eligible===true});}).catch(()=>{if(current)update({legacySignInRecovery:false});});
-    return()=>{current=false;};
-  },[signInEntryRequired,snapshot.signIn?.environment,snapshot.cloudAccount,snapshot.signOutNotice]);
   const visible=signInEntryRequired||connectionChooserVisible(snapshot,!!sending);
   const [accountSection,setAccountSection]=useState<'provider'|null>(null);
   const [signOutAccount,setSignOutAccount]=useState<ConnectionSnapshot['cloudAccount']>(null);
@@ -4021,8 +3967,7 @@ export function ConnectionChooser() {
   const offerOwnKeys=(productionSignInRequired||(!ownProviderSelected(snapshot)&&snapshot.purpose!=='cloud-account'&&snapshot.purpose!=='plan'))&&requiredSignInView.step==='choose';
   // The readiness probe is the only operation with this message; it is not an attempt the owner started.
   const probing=snapshot.busy&&snapshot.message===signInProbeMessage(requiredSignInView.environment);
-  const restoreSaved=!snapshot.cloudAccount&&snapshot.legacySignInRecovery&&requiredSignInView.step==='choose'&&requiredSignInView.environment==='production'?<button type="button" className="alpha-btn alpha-btn--text" disabled={snapshot.busy} aria-label="Restore saved sign-in" onClick={()=>void connectionController.restoreSavedSignIn()}><span aria-hidden="true" data-alpha-icon="/icons/lucide/undo-2.svg" style={iconStyle('undo-2')}/>Restore</button>:null;
-  const signInExtra=restoreSaved||testMocksEnabled?<>{restoreSaved}{testMocksEnabled&&<button type="button" className="alpha-btn alpha-btn--text" disabled={snapshot.busy} onClick={()=>void connectionController.signInBrowser()}>Browser sign-in (diagnostic)</button>}</>:undefined;
+  const signInExtra=testMocksEnabled?<button type="button" className="alpha-btn alpha-btn--text" disabled={snapshot.busy} onClick={()=>void connectionController.signInBrowser()}>Browser sign-in (diagnostic)</button>:undefined;
   const ownKeyForm=offerOwnKeys&&ownKeyEntry?<OwnKeyForm busy={snapshot.busy&&!probing} replying={!!sending} saving={ownKeySaving} error={ownKeyAttempted?snapshot.error:''} idleCancelLabel="Back"
     onSave={(key,voice)=>{setOwnKeyAttempted(true);return connectionController.configureLocal(key,LOCAL_PROVIDER_MODEL,voice,{onboarding:true});}}
     onCancel={()=>{setOwnKeyEntry(false);setOwnKeyAttempted(false);connectionController.dismissError();const current=connectionController.getSnapshot();if(!current.signIn&&!current.busy)void connectionController.beginSignIn(residentEnvironment(),false,true);}}/>:undefined;

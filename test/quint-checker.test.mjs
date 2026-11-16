@@ -22,7 +22,7 @@ test('unknown model selection fails before source loading while valid selections
   const root = mkdtempSync(join(tmpdir(), 'alpha-quint-selection-'));
   t.after(() => rmSync(root, {recursive: true, force: true}));
   mkdirSync(join(root, 'scripts'));
-  for (const name of ['check-quint.ts', 'quint-lib.ts', 'sha256.ts', 'upstream-pin.ts']) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
+  for (const name of ['check-quint.ts', 'quint-lib.ts', 'quint-cache.ts', 'sha256.ts', 'upstream-pin.ts']) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
   const models = ['Selected', 'Unselected'].map(module => ({module,
     path: `specs/quint/application/${module}.qnt`, init: 'init', step: 'step', invariant: 'safety',
     tests: ['exampleTest'], sources: module === 'Unselected' ? ['missing-unselected.ts'] : []}));
@@ -86,7 +86,7 @@ test('crash verification retains step six, detects its boundary violation and re
   const model = {module: 'NativeCrashJournal', path: 'specs/quint/native/NativeCrashJournal.qnt',
     init: 'init', step: 'step', invariant: 'safety', tests: ['exampleTest']};
   try {
-    for (const name of ['check-quint.ts', 'quint-lib.ts', 'sha256.ts', 'upstream-pin.ts']) {
+    for (const name of ['check-quint.ts', 'quint-lib.ts', 'quint-cache.ts', 'sha256.ts', 'upstream-pin.ts']) {
       mkdirSync(join(root, 'scripts'), {recursive: true});copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
     }
     symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir');
@@ -205,7 +205,7 @@ test('full temporal final scheduling CLI checks beyond nominal depth and refuses
   const config = readJson(join(repositoryRoot, 'specs/quint/tlc.json'));
   try {
     mkdirSync(join(root, 'scripts'));
-    for (const name of ['check-quint.ts', 'quint-lib.ts', 'sha256.ts', 'upstream-pin.ts']) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
+    for (const name of ['check-quint.ts', 'quint-lib.ts', 'quint-cache.ts', 'sha256.ts', 'upstream-pin.ts']) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
     symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir');
     write('upstream.lock.json', JSON.stringify({commit: 'fixture'}));write('bun.lock', '{}');write(model.path, source);
     const manifests = selected => {for (const family of ['application', 'services', 'native', 'legacy'])
@@ -269,7 +269,7 @@ test('bounded TLC CLI includes the boundary, retains selected init and rejects t
   await new Promise(resolve => listener.close(resolve));
   try {
     for (const path of [...sourceRoots, 'scripts']) mkdirSync(join(root, path), {recursive: true});
-    for (const name of ['check-quint.ts', 'quint-lib.ts', 'sha256.ts', 'upstream-pin.ts']) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
+    for (const name of ['check-quint.ts', 'quint-lib.ts', 'quint-cache.ts', 'sha256.ts', 'upstream-pin.ts']) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
     symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir');
     write('upstream.lock.json', JSON.stringify({commit: 'fixture'}));
     write('bun.lock', '{}');
@@ -332,7 +332,8 @@ test('bounded TLC CLI includes the boundary, retains selected init and rejects t
       assert.equal(existsSync(freshCache), false);
       write(model.path, source(7));
       write('specs/quint/application/manifest.json', JSON.stringify([model]));
-      const phase = run(6, 'pass', undefined, {...process.env, QUINT_HOME: freshCache});
+      // The same proof is remembered; bypass the run cache so this run must provision a fresh distribution.
+      const phase = run(6, 'pass', undefined, {...process.env, QUINT_HOME: freshCache, ALPHA_QUINT_CACHE: 'off'});
       assert.match(phase.output, /Downloading Apalache distribution 0\.62\.4/);
       const jarSha256 = sha256(readFileSync(join(freshCache, 'apalache-dist-0.62.4/apalache/lib/apalache.jar')));
       assert.equal(jarSha256, sha256(readFileSync(warmJar)));
@@ -404,7 +405,7 @@ test('runner records backend routing, unexpected exceptions and unfinished resul
   };
   try {
     for (const path of [...sourceRoots, 'scripts']) mkdirSync(join(root, path), { recursive: true });
-    const runnerModules = ['check-quint.ts', 'quint-lib.ts', 'sha256.ts', 'upstream-pin.ts', 'core-state-patch.ts', 'build-policy-source.ts'];
+    const runnerModules = ['check-quint.ts', 'quint-lib.ts', 'quint-cache.ts', 'sha256.ts', 'upstream-pin.ts', 'core-state-patch.ts', 'build-policy-source.ts'];
     for (const name of runnerModules) copyFileSync(join(repositoryRoot, 'scripts', name), join(root, 'scripts', name));
     const fixtureSources = [...runtimeScriptPaths, ...runtimeAssetPaths];
     for (const path of fixtureSources) if (!runnerModules.some(name => path === `scripts/${name}`)) write(path, '');
@@ -448,15 +449,17 @@ test('runner records backend routing, unexpected exceptions and unfinished resul
     assert.match(parallelProof.stderr, /one job per server endpoint/);
 
     if (availableParallelism() >= 2) {
+      // Each run executes in its own input sandbox, so the workers meet at an absolute path.
+      const started = JSON.stringify(join(root, 'routed-started'));
       write('node_modules/@informalsystems/quint/dist/src/cli.js', `
         const {existsSync, writeFileSync} = require('node:fs');
         const name = require('node:path').basename(process.argv[3]);
         if (name === 'Routed.qnt') {
-          writeFileSync('routed-started', '');
+          writeFileSync(${started}, '');
           console.log(name);
         } else {
           const timer = setInterval(() => {
-            if (existsSync('routed-started')) {
+            if (existsSync(${started})) {
               clearInterval(timer);
               clearTimeout(deadline);
               console.log(name);
