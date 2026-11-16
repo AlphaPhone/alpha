@@ -12,9 +12,19 @@ import ai.eliza.plugins.agent.connection.CloudConnectionPolicy;
  */
 final class ConnectionRoutes {
  private ConnectionRoutes() {}
+ /** The hosted invoice an upgrade that needs payment action answers (Stripe's invoice page only). */
+ static final String STRIPE_INVOICE_HOST="invoice.stripe.com";
  static final CloudConnectionPolicy POLICY=new CloudConnectionPolicy(new CloudConnectionPolicy.Hosts(
   CloudDeployment.PRODUCTION_API_HOST,CloudDeployment.STAGING_API_HOST,CloudDeployment.PRODUCTION_WEB_HOST,CloudDeployment.STAGING_WEB_HOST,
-  CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,java.util.Collections.singleton("accounts.google.com")));
+  CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,
+  // Google consent, and the Stripe pages an in-app checkout or plan upgrade answers (cloud-plans.ts).
+  java.util.Set.of("accounts.google.com",CloudConnectionPolicy.SUBSCRIPTION_CHECKOUT_HOST,STRIPE_INVOICE_HOST)));
+ /** Referral read and apply with the device's own key (Alpha manages referrals in the app). */
+ static boolean referral(String path,String query,String method,boolean hasBody){
+  if(query!=null)return false;
+  if("/api/v1/referrals".equals(path))return "GET".equals(method)&&!hasBody;
+  return "/api/v1/referrals/apply".equals(path)&&"POST".equals(method)&&hasBody;
+ }
  static boolean retiredPairing(String decodedPath){return POLICY.retiredPairing(decodedPath,false);}
  static boolean admittedOrigin(String scheme,String host,int port){return POLICY.admittedOrigin(scheme,host,port,false);}
  /**
@@ -22,7 +32,7 @@ final class ConnectionRoutes {
   * through the native host, so it refuses the hand-off ahead of the shared route set.
   */
  static boolean cloudSignInHandOff(String path){return path!=null&&("/api/auth/cli-session".equals(path)||path.startsWith("/api/auth/cli-session/"));}
- static boolean managedService(String path,String query,String method,boolean hasBody){return !cloudSignInHandOff(path)&&POLICY.managedService(path,query,method,hasBody,false);}
+ static boolean managedService(String path,String query,String method,boolean hasBody){return !cloudSignInHandOff(path)&&(POLICY.managedService(path,query,method,hasBody,false)||referral(path,query,method,hasBody));}
  static boolean calendarSync(String path,String query,String method,boolean hasBody){return CloudConnectionPolicy.calendarSync(path,query,method,hasBody);}
  static boolean externalHost(String scheme,String host,int port){return POLICY.externalHost(scheme,host,port,false);}
  static boolean externalCliLogin(String host,String path){return POLICY.externalCliLogin(host,path,false);}

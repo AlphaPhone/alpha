@@ -80,7 +80,9 @@ flowchart LR
 - **The resident agent** runs on the phone. It plans, calls tools, remembers and
   schedules.
 - **Alpha Compute Cloud** supplies managed services: model inference, your subscription,
-  Gmail, and optional Google Calendar and Maps. It never hosts your agent.
+  Gmail, and optional Google Calendar and Maps. It never hosts your agent. Its own
+  deployment on Cloudflare, the secrets it needs and in-app plan management are in
+  [docs/alpha-cloud.md](docs/alpha-cloud.md).
 
 Local speech does not mean an offline language model: text inference is hosted,
 and Alpha tells you what context a request sends.
