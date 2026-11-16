@@ -15,6 +15,12 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   return prose.trimEnd();
 }
 const REVIEW_TEXT = 'Review on phone';
+// This SDK fallback states uncertainty, not a failed effect. Keep stored receipts
+// intact and give the person a safe next step without encouraging a replay.
+function actionResultText(text: unknown) {
+  return text === 'The action could not reach a confirmed result.'
+    ? 'I couldn’t confirm the result. Check the app before trying again.' : text;
+}
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
@@ -66,7 +72,7 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (!stored || stored.from !== 'agent') return message;
     const destination = cardDestination(stored);
     if (stored.card?.proposalId && stored.card.done) {
-      const displayText = destination && stored.card.title === 'Completed' ? browserNavigationSummary(destination) : stored.card.sub;
+      const displayText = destination && stored.card.title === 'Completed' ? browserNavigationSummary(destination) : actionResultText(stored.card.sub);
       if (typeof displayText !== 'string' || !displayText.trim()) return message;
       return {...message, cGeneric:false, cDigest:false, displayText, hasCalendarText:true, deviceReceipt:true};
     }
@@ -75,7 +81,7 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (stored.deviceReceipt && stored.browserDestination) {
       try { return {...message, displayText:browserNavigationSummary(stored.browserDestination), hasCalendarText:true, deviceReceipt:true}; } catch { return {...message, deviceReceipt:true}; }
     }
-    if (stored.deviceReceipt === true && !stored.card) return {...message, deviceReceipt:true};
+    if (stored.deviceReceipt === true && !stored.card) return {...message, displayText:actionResultText(stored.text), deviceReceipt:true};
     if (destination && message.cDigest && message.rows?.length) {
       return {...message,hasCalendarText:false,rows:message.rows.map((row:Message,index:number)=>index===0?{...row,who:new URL(destination).host,text:'Open'}:row)};
     }

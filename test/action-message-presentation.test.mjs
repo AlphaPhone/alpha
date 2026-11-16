@@ -16,6 +16,22 @@ test('pending review keeps its existing approve/cancel handlers and shows the de
 test('failures remain visible once, user quotes and unrelated later messages are preserved',()=>{
  const failed={...action,card:{...action.card,title:'Not completed',sub:'The browser is unavailable.'}};const rows=[user,failed,{id:'device-receipt:p',from:'agent',text:'The browser is unavailable.',deviceReceipt:true},{id:'next',from:'user',text:notice},{id:'later',from:'agent',text:old}];const shown=projectActionMessages(render(rows),rows);assert.deepEqual(shown.map(m=>m.id),['user','action','next','later']);assert.equal(shown[1].displayText,'The browser is unavailable.');assert.equal(shown[2].text,notice);
 });
+test('an unconfirmed action remains uncertain, appears once and never rewrites its stored receipt',()=>{
+ const summary='The action could not reach a confirmed result.';
+ const uncertain={...action,card:{...action.card,title:'Not confirmed',sub:summary}};
+ const rows=[{...user,text:summary},uncertain,{id:'device-receipt:p',from:'agent',text:summary,deviceReceipt:true}];
+ const frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
+ assert.deepEqual(shown.map(m=>m.id),['user','action']);assert.equal(shown[0].text,summary);
+ assert.equal(shown[1].displayText,'I couldn’t confirm the result. Check the app before trying again.');
+ assert.equal(shown[1].cGeneric,false);assert.deepEqual(rows,frozen);
+});
+test('standalone unconfirmed receipts get safe copy while specific results and ordinary prose remain intact',()=>{
+ const generic='The action could not reach a confirmed result.',specific='Clock result is unknown. Check Clock before repeating the request.';
+ const rows=[{id:'generic',from:'agent',text:generic,deviceReceipt:true},{id:'specific',from:'agent',text:specific,deviceReceipt:true},{id:'prose',from:'agent',text:generic}];
+ const frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
+ assert.equal(shown[0].displayText,'I couldn’t confirm the result. Check the app before trying again.');
+ assert.equal(shown[1].displayText,specific);assert.equal(shown[2].displayText,generic);assert.deepEqual(rows,frozen);
+});
 test('restored verified browser receipt hides only exact protocol instruction in its turn',()=>{
  const rows=[user,{id:'n',from:'agent',text:notice},{id:'receipt',from:'agent',text:old,deviceReceipt:true,browserDestination:'https://example.com/'}];const shown=projectActionMessages(render(rows),rows);assert.deepEqual(shown.map(m=>m.id),['user','receipt']);assert.equal(shown[1].displayText,'Opened example.com.');assert.equal(projectActionMessages(render([rows[1]]),[rows[1]]).length,1);
 });

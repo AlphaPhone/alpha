@@ -4420,7 +4420,7 @@
       "unknownSendIsNotRetriedTest",
       "lockDismissesReviewTest",
       "inboundDuringAgentReviewClosesItTest",
-      "askedDraftNeverReplacesOwnerTextTest",
+      "askedRewriteReplacesOwnerTextWithoutSendingTest",
       "askedDraftSentOnlyAfterTapTest",
       "askedDraftReplacesSuggestionTest",
       "dismissedSuggestionIsNotOfferedAgainTest"

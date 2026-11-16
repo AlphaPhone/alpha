@@ -11,6 +11,7 @@
  *
  * Not observed: `triggers` (a bound) and `dropped`. */
 import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
 import {transformSync} from 'esbuild';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 
@@ -44,10 +45,13 @@ export function createDriver(code) {
     getSnapshot: () => ({session, history: {revision}, phoneActionsAvailable: true, open: false, busy}),
     pendingActions(_context, signal) { return new Promise((resolve, reject) => { reads.push({resolve, reject, signal, revision, pending: true}); }); },
   };
-  const recover = new Function('connectionController', 'alphaClient', 'document', 'setTimeout', 'clearTimeout', 'retainReadReply', 'crypto', 'Date', code)(
+  // The existing recovery traces run on Home, which registers no comms bar.
+  // Comms proposal rendering is a separate owning contract, not a simulated effect here.
+  const activeCommsSpec = (shell, views) => {assert.equal(shell.S().view,undefined);assert.deepEqual(views,{});return null;};
+  const recover = new Function('connectionController', 'alphaClient', 'document', 'setTimeout', 'clearTimeout', 'retainReadReply', 'crypto', 'Date', 'activeCommsSpec', 'views', code)(
     connectionController, {getState: () => ({context})}, {hidden: false},
     (run, delay) => { const timer = {run, delay, revision, live: true}; timers.push(timer); return timer; },
-    timer => { if (timer) timer.live = false; }, () => {}, {randomUUID: () => `card-${++uuid}`}, {now: () => clock});
+    timer => { if (timer) timer.live = false; }, () => {}, {randomUUID: () => `card-${++uuid}`}, {now: () => clock}, activeCommsSpec, {});
   const keyOf = value => value ? JSON.parse(value)[1] : -1;
   const expiring = () => msgs.filter(message => message.card?.proposalId && !message.card.done && !message.card.reviewUnavailable && Number.isFinite(message.card.expiresAt));
   const marks = () => msgs.filter(message => message.card?.proposalId?.startsWith('read-'));

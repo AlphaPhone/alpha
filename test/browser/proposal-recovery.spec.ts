@@ -3,12 +3,12 @@ import { test, expect } from '@playwright/test';
 
 // Real renderer, pairing, connection controller, proposal parser and journal
 // orchestration; synthetic HTTP/native boundaries, no provider or device effects.
-for (const mode of ['pending', 'wrong-owner', 'expired', 'wrong-reminder-context', 'rate-limit-empty', 'stale-session', 'notes-from-calendar'] as const) {
+for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wrong-reminder-context', 'rate-limit-empty', 'stale-session', 'notes-from-calendar'] as const) {
   test(`interrupted reply recovers only reviewable proposals: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
       const w = window as any, store = new Map();
       const agentId = '12345678-1234-4234-8234-123456789abc';
-      const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, journal: [] as string[], proposal: null as any };
+      const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, unknown:mode==='unknown-receipt', journal: [] as string[], proposal: null as any };
       const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
       w.Capacitor = {
         PluginHeaders: [
@@ -66,7 +66,7 @@ for (const mode of ['pending', 'wrong-owner', 'expired', 'wrong-reminder-context
             if (body.digest !== fixture.proposal.digest) throw Error('Review digest changed');
             if (pathname.endsWith('/decision')) { if (body.decision !== 'approve') throw Error('Unexpected decision'); fixture.decisions++; return ok({ proposal: { ...fixture.proposal, state: 'approved' }, digest: fixture.proposal.digest }); }
             if (pathname.endsWith('/claim')) { fixture.claims++; return ok({ proposal: { ...fixture.proposal, state: 'executing', execution: { attemptId: 'fixture-attempt' } }, digest: fixture.proposal.digest }); }
-            if (pathname.endsWith('/receipt')) { fixture.receipts++; return ok({ proposal: { ...fixture.proposal, state: 'succeeded' }, digest: fixture.proposal.digest }); }
+            if (pathname.endsWith('/receipt')) { fixture.receipts++; return ok({ proposal: { ...fixture.proposal, state: fixture.unknown ? 'unknown' : 'succeeded' }, digest: fixture.proposal.digest }); }
           }
           throw Error('Unexpected fixture route ' + pathname);
         },
@@ -84,7 +84,8 @@ for (const mode of ['pending', 'wrong-owner', 'expired', 'wrong-reminder-context
     await page.evaluate(async () => {
       const { connectionController } = await import('/src/runtime/connection-ui.tsx');
       connectionController.setDeviceExecutor(async () => {
-        (window as any).recoveryFixture.effects++;
+        const fixture=(window as any).recoveryFixture;fixture.effects++;
+        if(fixture.unknown)return {status:'unknown',summary:'The action could not reach a confirmed result.'};
         return { status: 'succeeded', summary: 'Synthetic approved effect recorded' };
       });
     });
@@ -123,11 +124,17 @@ for (const mode of ['pending', 'wrong-owner', 'expired', 'wrong-reminder-context
       await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
       await expect(page.getByText('notes query',{exact:true})).toBeVisible();
       expect(await counts()).toEqual({posts:1,decisions:0,claims:0,receipts:0,effects:0,journal:[]});
-    } else if (mode === 'pending') {
+    } else if (mode === 'pending' || mode === 'unknown-receipt') {
       await expect(page.getByText(/Review the action below\./)).toBeVisible();
       await page.getByText('Create note', { exact: true }).click();
       await expect.poll(counts).toEqual({ posts: 1, decisions: 1, claims: 1, receipts: 1, effects: 1, journal: ['get', 'reserve', 'markApplying', 'finish'] });
-      await expect(page.getByText('Synthetic approved effect recorded', { exact: true }).last()).toBeVisible();
+      if(mode==='unknown-receipt'){
+        await expect(page.getByText('I couldn’t confirm the result. Check the app before trying again.',{exact:true})).toHaveCount(1);
+        await expect(page.getByText('The action could not reach a confirmed result.',{exact:true})).toHaveCount(0);
+        await expect(page.getByText('Create note',{exact:true})).toHaveCount(0);
+        await page.getByRole('button',{name:'Back to apps',exact:true}).click();
+        expect(await counts()).toEqual({posts:1,decisions:1,claims:1,receipts:1,effects:1,journal:['get','reserve','markApplying','finish']});
+      }else await expect(page.getByText('Synthetic approved effect recorded', { exact: true }).last()).toBeVisible();
     } else {
       await expect(page.locator('.alpha-action-review')).toHaveCount(0);
       expect(await counts()).toEqual({ posts: 1, decisions: 0, claims: 0, receipts: 0, effects: 0, journal: [] });

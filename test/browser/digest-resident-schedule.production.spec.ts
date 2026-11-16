@@ -128,7 +128,7 @@ test('loop D on Android: a schedule edit made against an older version is refuse
   await button(page, 'Pause').click();
   await page.evaluate(() => { const loop = (window as any).flagOff.digests.loops[0]; loop.versionId = 'changed-elsewhere'; });
   await digests.locator('section', { has: page.getByRole('heading', { name: 'Review', exact: true }) }).getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(digests.getByRole('status')).toHaveText('Save not confirmed. Retry.');
+  await expect(digests.getByRole('status')).toHaveText('Schedule changed before saving. Review it again.');
   expect(await harness(page, f => [f.digests.loops[0].spec.enabled, f.digests.loops[0].versionId])).toEqual([true, 'changed-elsewhere']);
   expect(Object.keys(await harness(page, f => f.digests.receipts))).toHaveLength(1);
   // The refused edit was sent once and applied nothing.

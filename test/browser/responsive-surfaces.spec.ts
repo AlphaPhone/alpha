@@ -81,7 +81,7 @@ test('the listening panel stays compact beside the page in landscape and keeps t
   const textGeometry=new Map<string,{x:number;y:number;width:number;height:number;radius:string}>();
   for(const viewport of MATRIX){
     await resize(page,viewport);await settled();
-    const geometry=await page.locator('[data-alpha-layer="conversation"] textarea[data-alpha-composer]').evaluate(el=>{const node=el.parentElement!,r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,radius:getComputedStyle(node).borderRadius};});
+    const geometry=await page.locator('[data-alpha-layer="conversation"] textarea[data-alpha-composer]').evaluate(el=>{const node=el.closest<HTMLElement>('.alpha-chat-composer')!,r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,radius:getComputedStyle(node).borderRadius};});
     textGeometry.set(`${viewport.width}x${viewport.height}`,geometry);
   }
   await page.getByRole('button', { name: 'Talk', exact: true }).click();

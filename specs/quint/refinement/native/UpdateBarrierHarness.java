@@ -192,7 +192,7 @@ public final class UpdateBarrierHarness {
   context.packages.installer.destroy(UpdateFlowTest.committed(context));
   var state = readState(caller);
   require("canceled".equals(state.optString("outcome")) && activeId.equals(state.optString("activationId")),
-    "readback publishes the exact terminal identity");
+    "readback publishes the exact terminal identity: expected=" + activeId + ", actual=" + state);
   trace.step("settle", observe(), caller, "canceled");
   for (var entry : bridges.entrySet()) {
    if (!((Set<?>) field("updateBridges").get(null)).contains(entry.getValue())) continue;
