@@ -147,10 +147,12 @@ remains unproved.
 ## Bounds and exclusions
 
 `DeviceActionReview` replays the real coordinator with recording transport,
-journal, preference and executor ports. Thirty-six schedules include exact-screen
+journal, preference and executor ports. Thirty-eight schedules include exact-screen
 changes (also for the direct pass), foreign owners, expiration before approval and
 after the claim, double taps, failed reservation/decision/claim, changed digest or
-journal identity, cancellation before and after dispatch, unsynced receipts, a
+journal identity, an approval that adopts the unclaimed reservation a decision
+outage left, an executor that refuses before its effect, cancellation before and
+after dispatch, unsynced receipts, a
 terminal journal refusing replay after coordinator recreation, and the direct
 pass: ask-first, an unreadable preference, an old request, a reviewed type, a
 workflow-bound step that is never listed, `open_view` to Settings beside an
@@ -169,10 +171,10 @@ Known divergence, kept visible rather than weakened: the intended rule
 decision or claim failure returns `unknown` from the public call although nothing
 was dispatched (app review AGENT-06; the journal itself records `failed` or stays
 reserved, so `UnknownJournalOnlyAfterDispatch` holds). The manifest lists it under
-`expectedViolations`, requires the witness `UnknownWithoutDispatch`, and six
-replayed schedules reproduce it. A product executor that throws for a pre-effect
-guard after it was entered is likewise journaled `unknown`; that is executor
-behaviour outside this model's ports. Remove the registration when the shared
+`expectedViolations`, requires the witness `UnknownWithoutDispatch`, and seven
+replayed schedules reproduce it. Alpha's executor throws `DeviceActionNotStarted`
+for its pre-effect screen guards, which the coordinator journals and returns as
+`failed`. Remove the registration when the shared
 coordinator answers `failed` for a not-dispatched attempt.
 
 Camera, Files, Photos, Notes-organise and SMS-reply direct types, workflow-run

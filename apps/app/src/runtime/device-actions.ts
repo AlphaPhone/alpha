@@ -13,6 +13,7 @@ import {
   deviceJournalContext,
   CAMERA_CONTEXT_NOTICE,
   ContextNotice,
+  DeviceActionNotStarted,
   type DeviceActionClientProfile,
   type CurrentDeviceActionRequest,
   DeviceActionCoordinator,
@@ -45,7 +46,7 @@ import {isMvpView} from '../prototype/mvp-features';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
-export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice};
+export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,DeviceActionNotStarted};
 export type {CurrentDeviceActionRequest,DeviceCredential,DeviceJournalIdentity,DeviceOperation,DeviceRecovery,ReviewableDeviceOperation,WorkflowNoticeRoute,WorkflowPresentationOperation};
 /** Foreground reviews (free/busy, Notes search, name-targeted edits) and their validators are
  * the shared device-review contract bound to the shared Notes, Calendar and reminder contracts. */

@@ -88,6 +88,7 @@ function fixture(DeviceActions, options = {}) {
     async reserve(input) {
       const slot = f.focus;assert.equal(input.proposalId, slot.id);
       if (options.failure === 'reserve') throw Error('Controlled reservation failure');
+      if (slot.entry?.phase === 'reserved' && !slot.entry.attemptId) {record('an unclaimed reservation of this proposal is adopted',call('adopt'));return {created:false,entry:slot.entry};}
       if (slot.entry) {record('existing durable effect is never admitted twice',call('existing'));return {created:false,entry:slot.entry};}
       slot.reservedId=input.operationId;slot.entry={...input,phase:'reserved'};
       if (options.failure === 'identity') slot.entry.operationId='foreign-operation';
@@ -118,6 +119,7 @@ function fixture(DeviceActions, options = {}) {
     record('real coordinator calls its executor exactly once',call('dispatch'));
     if (options.abort === 'after') {f.controller.abort();record('post-dispatch cancellation preserves the effect outcome',call('abort'));}
     if (options.failure === 'executor') throw Error('Controlled executor uncertainty');
+    if (options.failure === 'not-started') throw new options.NotStarted('The screen changed.');
     return {status:slot.outcome,summary:'Controlled executor outcome'};
   };
   f.recreate=()=>{f.client=new DeviceActions(session,credential,scope,request,journal,execute);};f.recreate();
@@ -178,6 +180,7 @@ async function checkDeviceActionReview(extraSources = []) {
   try {
     for (const options of [
       {name:'reviewed-success'}, {name:'executor-failure',outcome:'failed'}, {name:'executor-throw',failure:'executor'},
+      {name:'executor-not-started',failure:'not-started',NotStarted:loaded.exports.DeviceActionNotStarted},
       {name:'receipt-outage',failure:'receipt'}, {name:'reserve-failure',failure:'reserve'},
       {name:'changed-journal-identity',failure:'identity'}, {name:'decision-outage',failure:'decision'},
       {name:'changed-decision-digest',failure:'digest'}, {name:'missing-execution-claim',failure:'claim'},
@@ -248,6 +251,14 @@ async function checkDeviceActionReview(extraSources = []) {
       f.record('overlapping explicit approval cannot enter twice',call('refused'));f.holdLookup.resolve();await pending;traces.push(f.trace);
     }
     {
+      // A decision outage leaves an unclaimed reservation; the next approval adopts it and runs once.
+      const options={name:'recovered-approval',failure:'decision'};
+      const f=fixture(loaded.exports.DeviceActions,options);Date.now=()=>f.now;
+      await f.review();assert.equal((await f.run()).status,'unknown');assert.equal(f.focus.entry.phase,'reserved');
+      options.failure=undefined;await f.review();assert.equal((await f.run()).status,'succeeded');
+      assert.equal(f.focus.dispatches,1);assert.equal(f.focus.decisions,2);traces.push(f.trace);
+    }
+    {
       const f=fixture(loaded.exports.DeviceActions,{name:'terminal-journal-never-replayed'});Date.now=()=>f.now;
       await f.review();await f.run();f.focus.state='pending';await f.review();await f.run();
       assert.equal(f.focus.dispatches,1);assert.equal(f.focus.returned,'unknown');traces.push(f.trace);
@@ -264,6 +275,7 @@ async function checkDeviceActionReview(extraSources = []) {
       'Actual Alpha DeviceActions and shared coordinator, parsing, listing, context checks, direct-pass admission, execution fence and hashing execute; transport, journal persistence, the Review-first preference read and device effects are controlled recording ports.',
       'Up to five proposals of one listing. Operation classes are driver declarations (open_view, open_view to Settings, create_note, browser_navigate, reminder write, workflow-bound note, an operation outside the contract); the coordinator alone decides which parse, list and run. Each port call and each `allowed` call is an observation boundary. No provider, Android or real user effect runs.',
       'pass, passOpen and browserUsed are inferred from the results and port calls of the real pass and asserted against its returned receipts. Host owner retirement supplies AbortSignal; current-context equality is checked on approve entry.',
+      'An executor that throws DeviceActionNotStarted (Alpha\'s pre-effect screen guards) is journaled and returned `failed`, not `unknown`.',
       'KNOWN DIVERGENCE (AGENT-06): reserve-failure, decision-outage, changed-decision-digest, missing-execution-claim, changed-journal-identity and direct-pre-dispatch-failure-answers-unknown end with returned `unknown` and no dispatch. The model reproduces this; UnknownOnlyAfterDispatch is registered as an expected violation, not as safety.',
       'Camera, Files, Photos, Notes-organise and SMS-reply direct types, workflow-run review, navigation-only review destinations, domain-specific result validation, Files identities, native journal durability and recovery are separate contracts.']}));
 }
@@ -271,7 +283,7 @@ async function checkDeviceActionReview(extraSources = []) {
 test('real device-action coordinator binds review, reservation, claim and one effect', {timeout:scaledTimeout(120000)}, async()=>{
   const receipt=await checkDeviceActionReview(['test/quint-device-action-review.test.mjs']);
   assert.ok(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound);
-  assert.equal(receipt.traces,36);
+  assert.equal(receipt.traces,38);
   const last=Object.fromEntries(receipt.traceInputs.map(t=>[t.name,t.steps.at(-1).expect]));
   assert.equal(last['abort-before-effect']['s.dispatches'],0);
   assert.equal(last['abort-after-effect']['s.status'],'succeeded');
@@ -295,6 +307,10 @@ test('real device-action coordinator binds review, reservation, claim and one ef
   assert.equal(last['settings-is-navigation-only']['s.card'],false);
   assert.equal(last['expired-after-claim']['s.dispatches'],0);
   assert.equal(last['expired-after-claim']['s.status'],'failed');
+  assert.equal(last['executor-not-started']['s.status'],'failed');
+  assert.equal(last['executor-not-started']['s.returned'],'failed');
+  assert.equal(last['recovered-approval']['s.returned'],'succeeded');
+  assert.equal(last['recovered-approval']['s.dispatches'],1);
   // Known divergence (AGENT-06): no dispatch, yet the public call answers "unknown".
   for (const name of ['reserve-failure','decision-outage','missing-execution-claim','direct-pre-dispatch-failure-answers-unknown']) {
     const steps=receipt.traceInputs.find(t=>t.name===name).steps;

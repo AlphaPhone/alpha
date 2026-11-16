@@ -80,6 +80,9 @@ module DeviceActionReview {
   action reserve(exact: bool): bool = all {s.busy, s.journal == "empty",
     s' = {...s, journal: "reserved", identity: exact}}
   action existing = all {s.busy, s.journal.in(Set("applying", "terminal")), s' = s}
+  /// A later approval that finds this proposal's own reservation without a claim adopts it:
+  /// nothing was dispatched under it, so it is the same attempt and continues to decision and claim.
+  action adopt = all {s.busy, s.journal == "reserved", s.identity, s.claims == 0, s.dispatches == 0, s' = s}
   action decide = all {s.busy, s.journal == "reserved", s.identity, valid,
     s.decisions < 2, s' = {...s, decisions: s.decisions + 1}}
   action claim = all {s.busy, s.journal == "reserved", s.decisions > s.claims, valid,
@@ -122,7 +125,7 @@ module DeviceActionReview {
     propose("notes_read", true, true, false, false), propose("settings_write", false, true, false, false),
     startPass(true), startPass(false),
     review(true), review(false), reviewWorkflow, restart, changeContext, sensitive, expire, abort,
-    begin(true), begin(false), refused, directRefused, reserve(true), reserve(false), existing,
+    begin(true), begin(false), refused, directRefused, reserve(true), reserve(false), existing, adopt,
     decide, claim, applying, dispatch, settle("succeeded"), settle("failed"), settle("unknown"),
     upload, finish(true), finish(false), abandon, s' = s}
 
@@ -196,6 +199,13 @@ module DeviceActionReview {
     .then(directRefused).expect(safety and s.card and s.dispatches == 0 and not(canDirect))
   run reviewedTypeNeverDirectTest = init.then(propose("create_reminder", false, true, false, false))
     .then(review(true)).then(directRefused).expect(safety and s.card and not(canDirect))
+  /// A decision outage leaves the reservation unclaimed; the owner's next approval adopts it and
+  /// runs the one effect.
+  run recoveredApprovalTest = init.then(review(true)).then(begin(false)).then(reserve(true))
+    .then(decide).then(abandon).then(review(true)).then(begin(false)).then(adopt)
+    .then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded"))
+    .then(upload).then(finish(true))
+    .expect(safety and s.returned == "succeeded" and s.dispatches == 1 and s.decisions == 2)
   run changedJournalIdentityTest = init.then(review(true)).then(begin(false)).then(reserve(false)).then(abandon)
     .expect(safety and s.dispatches == 0 and s.returned == "unknown")
   /// The registered divergence: nothing was dispatched, yet the call answers "unknown".
