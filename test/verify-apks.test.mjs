@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // Integration checks of packaging CLIs and archived APK bytes.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -197,7 +198,7 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
 // Exercise the archive CLI, its child environments and real ZIP retention without
 // running Gradle. Only the Android builder and source snapshot are fixture commands.
 // `inherited` starts from an environment that still carries the mock flags: the archive strips them.
-for (const mode of ['native', 'inherited', 'wrong-profile', 'wrong-channel']) test(`build archive keeps the one runtime profile and its update channel: ${mode}`, t => {
+for (const mode of ['native', 'inherited', 'wrong-profile', 'wrong-channel']) fixtureTest(`build archive keeps the one runtime profile and its update channel: ${mode}`, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-build-archive-'));
   t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
   for (const name of ['scripts', 'bin']) fs.mkdirSync(path.join(dir, name));

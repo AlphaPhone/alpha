@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -123,7 +124,7 @@ test('generated native admission refuses a wrong consumer pin and changed output
   assert.throws(() => verifyNativeFileBytes(dir, [row]), /Native output changed/);
 });
 
-test('staging copies exactly the recorded bytes into the shared paradee-voice layout, ASR slot included', t => {
+fixtureTest('staging copies exactly the recorded bytes into the shared paradee-voice layout, ASR slot included', t => {
   const {dir, from, record} = fixtureProduct(t);
   assert.throws(() => verifyVoiceHost(dir), /not staged/, 'a build needs the voice outputs');
   const result = stageVoiceModels(dir, {from: [from]});
@@ -148,7 +149,7 @@ test('staging copies exactly the recorded bytes into the shared paradee-voice la
   assert.throws(() => stageVoiceModels(dir, {from: [from]}), /already exists with other bytes/);
 });
 
-test('voice host conflicts and linked destinations are refused before staging outputs', t => {
+fixtureTest('voice host conflicts and linked destinations are refused before staging outputs', t => {
   const {dir, from, record} = fixtureProduct(t);
   const target = path.join(dir, 'android/app/src/main/jniLibs/arm64-v8a/libelizainference.so');
   fs.mkdirSync(path.dirname(target), {recursive: true});
@@ -165,7 +166,7 @@ test('voice host conflicts and linked destinations are refused before staging ou
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, VOICE_HOST))), record);
 });
 
-test('failed host publication retains verified libraries and a retry completes', t => {
+fixtureTest('failed host publication retains verified libraries and a retry completes', t => {
   const {dir, from, record} = fixtureProduct(t);
   const host = path.join(dir, 'android/app/src/main/jniLibs');
   const existing = path.join(host, 'arm64-v8a/libelizainference.so');
@@ -191,7 +192,7 @@ test('failed host publication retains verified libraries and a retry completes',
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, VOICE_HOST))).qualified, false);
 });
 
-test('a failing stager preserves libraries adopted by a completed concurrent stager', t => {
+fixtureTest('a failing stager preserves libraries adopted by a completed concurrent stager', t => {
   const {dir, from, record} = fixtureProduct(t);
   const link = fs.linkSync;
   let publications = 0;
@@ -216,7 +217,7 @@ test('a failing stager preserves libraries adopted by a completed concurrent sta
   stageVoiceModels(dir, {from: [from]});
 });
 
-test('a vanished concurrent host publication cannot report successful staging', t => {
+fixtureTest('a vanished concurrent host publication cannot report successful staging', t => {
   const {dir, from} = fixtureProduct(t);
   const link = fs.linkSync;
   try {
@@ -227,7 +228,7 @@ test('a vanished concurrent host publication cannot report successful staging', 
   }
 });
 
-test('staging refuses source bytes that differ from the record and missing rows', t => {
+fixtureTest('staging refuses source bytes that differ from the record and missing rows', t => {
   const {dir, from} = fixtureProduct(t);
   fs.writeFileSync(path.join(from, 'tts/paradee/misaki-en-us.lex'), 'tampered');
   assert.throws(() => stageVoiceModels(dir, {from: [from]}), /does not match the pinned tts\/paradee\/misaki-en-us\.lex/);

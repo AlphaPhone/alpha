@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,7 +29,7 @@ function fixture(t, auth = original) {
  return {root,pin};
 }
 
-test('Android dependency fingerprint includes pinned auth declarations under a stable source label',t=>{
+fixtureTest('Android dependency fingerprint includes pinned auth declarations under a stable source label',t=>{
  const before=androidDependencyFingerprint(fixture(t).root);
  const declaration=version=>original+"dependencies {\n implementation 'androidx.browser:browser:"+version+"'\n}\n";
  const source=fixture(t,declaration('1.9.0'));
@@ -40,7 +41,7 @@ test('Android dependency fingerprint includes pinned auth declarations under a s
  assert.notEqual(updated,androidDependencyFingerprint(fixture(t,declaration('1.8.0')).root),'later dependency changes invalidate the snapshot again');
 });
 
-test('Android dependency fingerprint includes transitive credential custody but excludes fixture modules',t=>{
+fixtureTest('Android dependency fingerprint includes transitive credential custody but excludes fixture modules',t=>{
  const {root}=fixture(t);
  const host=JSON.parse(fs.readFileSync(path.join(root,'android/consumer-host.json'),'utf8'));
  const nativeOnly='plugins/plugin-native-secure-store/android-nativeonly';
