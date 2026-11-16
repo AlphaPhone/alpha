@@ -69,9 +69,46 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		await expect(cards.nth(0).getByRole('button')).toHaveCount(0);
 		await expect(cards.nth(0)).toContainText('Replaced');
 		await expect(cards.nth(1).getByRole('button', {name: 'Call: Call (415) 555-0199'})).toBeVisible();
+		await expect(cards.nth(1).locator('[data-alpha-proposal-detail]')).toHaveText('(415) 555-0199 · not in Contacts');
 		// The replaced proposal is declined upstream; nothing was approved, dialed or sent.
 		await expect.poll(async () => (await fixture(page)).declined).toEqual(['first']);
 		expect((await fixture(page)).approved).toEqual([]);
+	});
+
+	test('the call approval card names the person and the number (AC-20)', async ({page}) => {
+		await setup(page, {comms: true});
+		await page.evaluate(p => (window as any).commsAlpha.replies.push({text: 'I can call her.', proposals: [p]}), proposal('n', '+14155550132'));
+		await ask(page, 'Call Maya');
+		const card = page.locator('[data-alpha-chat-proposal]');
+		await expect(card.getByRole('button', {name: 'Call: Call Maya Chen'})).toBeVisible();
+		await expect(card.locator('[data-alpha-proposal-detail]')).toHaveText('(415) 555-0132');
+		// A contact target shows the contact's one number.
+		await page.evaluate(() => (window as any).commsAlpha.replies.push({text: 'Calling Maya?', proposals: [{id: 'c', title: 'Place call', description: 'Contact: Maya\n\nCalls this number from your phone after you confirm.', expiresAt: Date.now() + 600_000, contextRevision: 0}]}));
+		await ask(page, 'Call Maya again');
+		await expect(card.nth(1).getByRole('button', {name: 'Call: Call Maya Chen'})).toBeVisible();
+		await expect(card.nth(1).locator('[data-alpha-proposal-detail]')).toHaveText('(415) 555-0132');
+		expect((await fixture(page)).approved).toEqual([]);
+	});
+
+	test('a "Screen it" card belongs to one ring and is retired when that ring ends (AC-21)', async ({page}) => {
+		await setup(page, {comms: true});
+		await page.evaluate(async bar => {
+			const {VIEWS} = await import('/src/prototype/model.js');
+			const base = new Function('return ' + bar)();
+			const w = window as any;
+			w.ring = 'ring-1';
+			VIEWS.notes.bar = () => ({...base, target: {...base.target, kind: 'incoming', app: 'Phone'}, contextKey: 'notes:incoming:maya',
+				incoming: w.ring ? {id: w.ring, answer() {}, decline() {}, screen() {}} : null});
+			w.commsAlpha.shell.setState({chat: 'sheet'});
+		}, BAR);
+		const screen = () => page.evaluate(() => (window as any).commsAlpha.shell.S().msgs.filter((m: any) => m.card?.kind === 'screen').map((m: any) => [m.card.args.ring, m.card.state]));
+		await expect.poll(screen).toEqual([['ring-1', 'open']]);
+		// The ring ends: its card can never screen a later call.
+		await page.evaluate(() => { (window as any).ring = null; (window as any).commsAlpha.shell.setState({}); });
+		await expect.poll(screen).toEqual([['ring-1', 'replaced']]);
+		// The same caller rings again: a new card for the new ring.
+		await page.evaluate(() => { (window as any).ring = 'ring-2'; (window as any).commsAlpha.shell.setState({}); });
+		await expect.poll(screen).toEqual([['ring-1', 'replaced'], ['ring-2', 'open']]);
 	});
 
 	test('reopening the chat on an unchanged subject adds no new briefing (AC-25)', async ({page}) => {

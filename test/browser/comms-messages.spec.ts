@@ -49,6 +49,27 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
+  test('AC-19 on the image: while Telecom reports a call that may be an emergency call, no proposal acts', async ({page}) => {
+    await setupTelephony(page);
+    await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
+    await page.getByRole('button', {name: /^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    const shell = `(() => { const el = document.querySelector('[data-screen]'); let f = el[Object.keys(el).find(k => k.startsWith('__reactFiber$'))]; while (f && !(f.stateNode && typeof f.stateNode.cardAct === 'function')) f = f.return; return f.stateNode; })()`;
+    const proposal = (id: string) => `({id: "${id}", kind: "other", title: "Save Ada", detail: "Ada Okafor", button: "Save", acts: true, act: {mod: "messages", fn: "none"}, args: {}})`;
+    expect(await page.evaluate(`${shell}.propose(${proposal('before')}).shown`)).toBe(true);
+    await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
+    // Telecom reports a live call whose kind it cannot tell: AC-19 holds, through the image's own path.
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: null, emergencyLive: true, watching: true}));
+    await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(0);
+    expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(true);
+    expect(await page.evaluate(`JSON.stringify(${shell}.propose(${proposal('during')}))`)).toBe(JSON.stringify({shown: false, replaced: []}));
+    // An ordinary call does not hold it; neither does the call ending.
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: false, emergencyLive: false, watching: true}));
+    await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: false, emergency: false, emergencyLive: false, watching: true}));
+    expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(false);
+  });
+
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
     await setupTelephony(page);
     // The first send fails in transport; the retry returns a receipt bound to the reviewed text.
@@ -179,5 +200,41 @@ test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA
     await expect(page.locator('[data-alpha-draft-sent="true"]')).toHaveText('My words');
     await expect(page.locator(bubble)).toHaveCount(0);
     await expect(page.getByText('Sent to Maya Chen', {exact: true})).toBeVisible();
+  });
+
+  test('a draft Alpha writes from outside Messages is in the thread it opens', async ({page}) => {
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-screen]') as any;
+      let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+      while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+      fiber.stateNode.goHome('sheet');
+    });
+    const composer = page.locator('[data-alpha-layer="conversation"] textarea[data-alpha-composer]');
+    await expect(composer).toBeVisible();
+    for (const ask of ["tell maya I'm running ten minutes late", 'reply to maya']) {
+      await composer.fill(ask);
+      await composer.press('Enter');
+      await expect(page.locator('[data-alpha-sheet-context]')).toHaveText('Maya Chen · Messages', {timeout: 10_000});
+      await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'alpha');
+      // Each request's own draft is in the slot: the reply replaces the first draft, kept for one Undo.
+      const draft = await page.evaluate(() => {
+        const el = document.querySelector('[data-screen]') as any;
+        let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+        while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+        return fiber.stateNode.vget('messages').drafts.maya;
+      });
+      if (ask.startsWith('tell')) expect(draft.text).toBe("I'm running ten minutes late.");
+      else {
+        expect(draft.text).not.toBe("I'm running ten minutes late.");
+        expect(draft.undo).toEqual({draft: 'asked', text: "I'm running ten minutes late."});
+      }
+      await expect(page.locator(bubble)).toContainText(draft.text.slice(0, 40));
+      await page.evaluate(() => {
+        const el = document.querySelector('[data-screen]') as any;
+        let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+        while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+        fiber.stateNode.goHome('sheet');
+      });
+    }
   });
 });

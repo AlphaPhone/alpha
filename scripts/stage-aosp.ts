@@ -15,10 +15,10 @@ import { provisioningComponents, writeProvisioningOverlay } from "./aosp-provisi
 import { aospTelephonyRoleComponents, writeAospTelephonyRoleOverrides } from "./aosp-telephony-roles.ts";
 import { writeImageCapability } from "./aosp-image-capability.ts";
 import { releaseBlockers } from "./release-blockers.ts";
-import {parseXmlTree, signerDigest, telephonySetupReceiverProblems} from "./apk.ts";
+import {auditBundle, extractWebPayload, parseXmlTree, signerDigest, telephonySetupReceiverProblems, verifyOwnerRouteTable} from "./apk.ts";
 import {apkUpdateChannelOrLegacy, assertProvisioningUpdateChannel, recordedProvisioningUpdateChannel} from "./update-channel.ts";
 import {updateArtifactDigest} from "./update-artifact.ts";
-import { aaptManifestTree, admitImageApk, reviewedSourceOverrides as sharedReviewedSourceOverrides } from "../vendor/eliza/packages/os/scripts/android/image-apk-admission.mjs";
+import { aaptManifestTree, admitImageApk, manifestTreeIsDebuggable, readApkBuildFlags, reviewedSourceOverrides as sharedReviewedSourceOverrides } from "../vendor/eliza/packages/os/scripts/android/image-apk-admission.mjs";
 import { CUTTLEFISH_TARGETS, cuttlefishProductProblems } from "../vendor/eliza/packages/os/scripts/android/cuttlefish-product.mjs";
 import { assertSenseLauncher, assertSenseQualification, readSenseQualification, senseLauncherDigest, writeSenseImageActivation, type SenseImageActivation } from './aosp-sense-image.ts';
 import { stageAlphaSensePolicy } from './aosp-sense-policy.ts';
@@ -80,6 +80,80 @@ export function assertImageLauncherManifest(tree: string, production: boolean, a
   if (!production) return;
   const problems = telephonySetupReceiverProblems(parseXmlTree(tree), {appId});
   if (problems.length) throw Error(`Production launcher cannot be staged: ${problems.join("; ")}`);
+}
+
+/**
+ * --owner-telephony: an owner-built development image (local debug key, no reviewed descriptor or
+ * distributable release) that still keeps Alpha's Phone and SMS roles across image updates. It is
+ * refused anywhere but a plain --development Pixel 10a or Cuttlefish stage; an activated Sense image
+ * already carries the same image telephony.
+ */
+export function assertOwnerTelephonyOptions({development, target, senseImage}: {development: boolean; target: string | null; senseImage: boolean}) {
+  if (!development) throw Error("--owner-telephony requires --development: production staging already provisions image telephony");
+  if (target !== "pixel10a" && target !== "cuttlefish") throw Error("--owner-telephony requires --target pixel10a or --target cuttlefish");
+  if (senseImage) throw Error("--owner-telephony does not apply to an activated Sense image, which already stages image telephony");
+}
+
+/**
+ * The checks verify-apks runs on a packaged web payload, run here on the exact APK: the shared
+ * production-bundle audit (scripts/audit-production-bundle.ts) and the generated owner-route table.
+ * A locally signed launcher never gets a verify-apks row, so owner admission runs them itself.
+ */
+export function auditOwnerLauncherPayload(apk: string) {
+  const payload = extractWebPayload(apk);
+  try { auditBundle(payload.public); }
+  finally { fs.rmSync(payload.root, {recursive: true, force: true}); }
+  verifyOwnerRouteTable(apk);
+}
+
+/**
+ * Admission of the owner's launcher for --owner-telephony: the release build type the app itself
+ * requires for image telephony (P-36), so a debuggable APK is refused, and never a test-mocks build.
+ * It need not be distributable: the owner signs it locally and the image is never distributed, so
+ * it may have no verify-apks release row. Not distributable never means unverified: its packaged
+ * web payload always passes the production-bundle audit and the owner-route table check, and a
+ * row, when one is recorded, must be a release row.
+ */
+export function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = path.resolve("artifacts/test-mocks"), readBuildFlags = readApkBuildFlags, readManifestTree, auditPayload = auditOwnerLauncherPayload}: {
+  apk: string; hash: string; manifestFile: string; testMocksDir?: string;
+  readBuildFlags?: (apk: string) => {testMocks?: unknown}; readManifestTree: (apk: string) => string;
+  auditPayload?: (apk: string) => void;
+}) {
+  const mocks = [path.resolve(testMocksDir), ...(fs.existsSync(testMocksDir) ? [fs.realpathSync(testMocksDir)] : [])];
+  for (const candidate of [path.resolve(apk), fs.realpathSync(apk)])
+    if (mocks.some(directory => { const relative = path.relative(directory, candidate); return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)); }))
+      throw Error(`Refusing ${apk}: test-mocks builds are never staged into an image.`);
+  let flags;
+  try { flags = readBuildFlags(apk); } catch { throw Error(`Refusing ${apk}: its web bundle has no assets/public/build-flags.json, so its test-mocks flag is unverified.`); }
+  if (flags?.testMocks !== false) throw Error(`Refusing ${apk}: its web bundle was built with test mocks enabled.`);
+  const manifest = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile, "utf8")) : null;
+  const entry = manifest?.results?.find((row: {sha256?: unknown}) => row?.sha256 === hash) ?? null;
+  if (manifest?.testMocks === true || entry?.testMocks === true) throw Error(`Refusing ${apk}: ${manifestFile} records it as a test-mocks build.`);
+  if (entry && entry.mode !== "release") throw Error(`Refusing ${apk}: --owner-telephony stages a release launcher; ${manifestFile} records a ${entry.mode} build.`);
+  if (manifestTreeIsDebuggable(readManifestTree(apk)))
+    throw Error(`Refusing ${apk}: --owner-telephony stages a release (non-debuggable) launcher; Alpha never admits image telephony in a debuggable build.`);
+  try { auditPayload(apk); }
+  catch (error) { throw Error(`Refusing ${apk}: its packaged web payload fails the production checks: ${error instanceof Error ? error.message : String(error)}`); }
+}
+
+/** The staged launcher must carry the production first-run contract and every disabled role handler. */
+export function assertOwnerTelephonyLauncher(tree: string, packageName: string) {
+  if (manifestTreeIsDebuggable(tree)) throw Error("--owner-telephony requires a release (non-debuggable) staged launcher");
+  assertImageLauncherManifest(tree, true);
+  return aospTelephonyRoleComponents(tree, packageName);
+}
+
+/**
+ * Writes image telephony for an owner development image: the AlphaImageProvisioning RRO the app
+ * requires (P-36) and the system_ext component overrides that enable its role handlers at package
+ * scan, before RoleManager re-qualifies the SMS and Dialer holders after an image update. It writes no
+ * default HOME/Autofill provisioning overlay and no fresh-telephony Provision feature.
+ */
+export function writeOwnerImageTelephony(output: string, tree: string, packageName: string) {
+  assertOwnerTelephonyLauncher(tree, packageName);
+  const components = writeAospTelephonyRoleOverrides(output, tree, packageName);
+  writeAospCapabilityOverlay(output, packageName);
+  return components;
 }
 
 
@@ -240,14 +314,14 @@ const get = (key: string) => {
   return i < 0 ? null : args[i + 1];
 };
 for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--development") continue;
+  if (args[i] === "--development" || args[i] === "--owner-telephony") continue;
   if (
     !["--apk", "--output", "--descriptor", "--apk-manifest", "--aosp-source", "--listener-apk", "--listener-descriptor", "--listener-qualification", "--target", "--factory-image", "--applied-systemui-patch", "--applied-build-patch", "--boot-animation", "--branding-assets", "--branding-assets-report-sha256"].includes(args[i]) ||
     !args[i + 1] ||
     args[i + 1].startsWith("--")
   )
     throw new Error(
-      "Use --target cuttlefish | --target pixel10a --factory-image FILE, with --aosp-source PATH --apk FILE --output NEW_DIR [--development] [--descriptor FILE (required without --development)] [--apk-manifest FILE] [--listener-apk FILE [--listener-descriptor FILE] [--listener-qualification FILE]] [--applied-systemui-patch chip|ops|assist|alpha-protected-power ...] [--applied-build-patch soong-memory|alpha-sense-policy ...] [--boot-animation ZIP (pixel10a, when the composition pins one)] [--branding-assets DIR --branding-assets-report-sha256 HASH (matching Pixel source packet)]",
+      "Use --target cuttlefish | --target pixel10a --factory-image FILE, with --aosp-source PATH --apk FILE --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE (required without --development)] [--apk-manifest FILE] [--listener-apk FILE [--listener-descriptor FILE] [--listener-qualification FILE]] [--applied-systemui-patch chip|ops|assist|alpha-protected-power ...] [--applied-build-patch soong-memory|alpha-sense-policy ...] [--boot-animation ZIP (pixel10a, when the composition pins one)] [--branding-assets DIR --branding-assets-report-sha256 HASH (matching Pixel source packet)]",
     );
   if (args[i] === '--applied-systemui-patch') appliedPatchNames.push(args[i + 1]);
   if (args[i] === '--applied-build-patch') appliedBuildNames.push(args[i + 1]);
@@ -278,6 +352,9 @@ if (senseImage && (!['chip', 'ops', 'alpha-protected-power'].every(name => appli
   throw Error('An activated Sense image requires chip, ops, alpha-protected-power and alpha-sense-policy source patches');
 if (!senseImage && appliedBuildNames.includes('alpha-sense-policy'))
   throw Error('The alpha-sense-policy patch requires an activated Sense image');
+// Owner development images (local debug key) may keep image telephony; checked before any input is read.
+const ownerTelephony = args.includes("--owner-telephony");
+if (ownerTelephony) assertOwnerTelephonyOptions({development, target: get('--target'), senseImage});
 // The product lock is checked before any source or APK is read: production never stages into an
 // unset product. Pixel 10a has its own production descriptor; the Cuttlefish product its own lock.
 if (production || senseImage) {
@@ -307,7 +384,10 @@ if (!apk)
 const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
 const hash = sha256File(apk);
 const manifestFile = get('--apk-manifest') || 'artifacts/apk-manifest.json';
-const reviewedUpdateChannel = admitApk({
+// An owner image admits its locally signed release launcher; it records no reviewed update channel.
+if (ownerTelephony)
+  admitOwnerTelephonyApk({apk, hash, manifestFile, readManifestTree: file => aaptManifestTree(file, {aapt: tool("aapt"), env: androidEnv()})});
+const reviewedUpdateChannel = ownerTelephony ? null : admitApk({
   apk,
   hash,
   development: development && !senseImage,
@@ -406,6 +486,7 @@ if (updateArtifactDigest(stagedLauncher).sha256 !== hash)
 const provisioningTree = aaptManifestTree(stagedLauncher, {aapt: tool("aapt"), env});
 assertImageLauncherManifest(provisioningTree, production, identity.appId);
 if (production) aospTelephonyRoleComponents(provisioningTree, identity.appId);
+if (ownerTelephony) assertOwnerTelephonyLauncher(provisioningTree, identity.appId);
 if (senseImage) assertSenseLauncher(provisioningTree, identity.appId);
 if (production || senseImage)
   assertProvisioningUpdateChannel(apkUpdateChannelOrLegacy(parseXmlTree(provisioningTree), identity), reviewedUpdateChannel);
@@ -413,13 +494,14 @@ fs.appendFileSync(path.join(output, "product.mk"), clockProductRequirement);
 // The image system feature Alpha Phone requires, with a system-partition install, before it offers
 // Phone, Contacts or SMS (P-36). Every image declares it, but the app also requires a release
 // launcher and the provisioning overlay written below for production and admitted Sense qualification
-// images. Test-mocks APKs were refused above, and a sideloaded APK never has the
+// images, or the capability overlay alone for an --owner-telephony development image (release,
+// non-debuggable launcher admitted above). Test-mocks APKs were refused above, and a sideloaded APK never has the
 // system-partition install. The shared Pixel 10a composition declares it for every brand, so only
 // the Cuttlefish product writes it here.
 if (!physical) {
   const capability = writeImageCapability(output, identity.appId);
   const feature = Object.keys(capability).find(name => name !== "productMakefile");
-  console.log(production
+  console.log(production || ownerTelephony
     ? `Image capability: ${feature}.`
     : `Image capability: ${feature} declared; Phone, Contacts and SMS need a production-staged release launcher.`);
 }
@@ -456,6 +538,10 @@ if (production || senseActivation) {
   // image also needs the same capability to exercise the guarded source on its userdebug build.
   if (!physical || !production) writeAospCapabilityOverlay(output, identity.appId);
   console.log(`Provisioning overlay: HOME ${components.home}, Autofill ${components.autofill}${components.assistant ? `, assistant ${components.assistant}` : ''}.`);
+}
+if (ownerTelephony) {
+  const components = writeOwnerImageTelephony(output, provisioningTree, identity.appId);
+  console.log(`Owner development image: image telephony enabled (capability overlay and ${components.length} role handler overrides; no default HOME/Autofill or fresh-telephony provisioning). This is not a distributable or qualified image.`);
 }
 if (cuttlefish) writeCuttlefishNatives({root:process.cwd(), output, apk:stagedLauncher, module:identity.moduleName, launcher:reviewed});
 if (physical) {

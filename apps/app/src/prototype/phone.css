@@ -1162,3 +1162,8 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .chat-search-results > button { display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;padding:16px 0;border-bottom:1px solid var(--line);font:inherit; }
 .chat-search-results small { color:var(--mut); }
 .alpha-search-hit { outline:2px solid var(--acc);outline-offset:6px;border-radius:16px; }
+/* AC-12: the bar's own dictation recorder, above the bar. */
+.alpha-bar-recorder{position:relative;display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 6px 6px 16px;border-radius:28px;background:var(--s2);color:var(--fg);box-shadow:0 14px 40px var(--shc)}
+.alpha-bar-recorder-status{flex:1;min-width:0;margin:0;font-size:15px;line-height:1.35;max-height:5.4em;overflow:auto;overflow-wrap:anywhere}
+.alpha-bar-recorder-primary{width:44px;height:44px;border-radius:22px;flex-shrink:0;background:var(--acc);color:var(--alpha-white);display:flex;align-items:center;justify-content:center}
+.alpha-bar-recorder-primary:disabled{opacity:.5}

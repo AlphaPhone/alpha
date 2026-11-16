@@ -132,6 +132,40 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     expect(await page.evaluate(() => (window as any).alphaShell().S())).toMatchObject({view: 'messages', chat: 'sheet'});
   });
 
+  test('a ring over a live call keeps that call\'s End reachable at every height (AC-18)', async ({page}) => {
+    await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
+    for (const key of ['5', '5', '5', '0', '1', '0', '0']) await page.getByRole('button', {name: key, exact: true}).click();
+    await page.getByRole('button', {name: 'Call', exact: true}).click();
+    await expect(page.locator('[data-alpha-call-card]')).toBeVisible();
+    await page.evaluate(() => { const shell = (window as any).alphaShell(); shell.mod('phone').actions.ring({args: {pid: 'maya'}}, shell.api('phone')); });
+    await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
+    for (const chat of ['input', 'sheet', 'full']) {
+      await page.evaluate(chat => (window as any).alphaShell().setState({chat}), chat);
+      await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.timeline instanceof DocumentTimeline && a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished.catch(() => {}))));
+      const end = chat === 'full' ? '[data-alpha-strip-action="end"]' : chat === 'input' ? '[data-alpha-bar-end]' : '[data-alpha-ring-end]';
+      expect(await hits(page, end), `${chat} ${end}`).toBe(true);
+    }
+    await page.locator('[data-alpha-strip-action="end"]').click();
+    expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBeNull();
+    await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
+  });
+
+  test('the status-bar call chip\'s text meets 4.5:1 (AC-28)', async ({page}) => {
+    await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
+    for (const key of ['5', '5', '5']) await page.getByRole('button', {name: key, exact: true}).click();
+    await page.getByRole('button', {name: 'Call', exact: true}).click();
+    await page.evaluate(() => (window as any).alphaShell().goHome());
+    const chip = page.getByRole('button', {name: /^Return to /});
+    await expect(chip).toBeVisible();
+    const ratio = await chip.evaluate(el => {
+      const rgb = (v: string) => (v.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+      const lum = ([r, g, b]: number[]) => [r, g, b].map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+      const style = getComputedStyle(el), [a, b] = [lum(rgb(style.color)), lum(rgb(style.backgroundColor))];
+      return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+    });
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
   test('an emergency number keeps the full-screen call: no proposal, no stage, End reachable', async ({page}) => {
     await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
     for (const key of ['9', '1', '1']) await page.getByRole('button', {name: key, exact: true}).click();
@@ -142,8 +176,47 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await expect(page.locator('[data-alpha-layer="app"][data-alpha-stage="true"]')).toHaveCount(0);
     expect(await hits(page, '[data-alpha-call-end]')).toBe(true);
     await askAlpha(page, 'can you call maya');
-    await page.waitForTimeout(600);
+    // Wait for the reply itself: the dropped proposal is answered with a plain line.
+    await expect(page.locator('[data-alpha-layer="conversation"]').getByText('Not during an emergency call.', {exact: true})).toBeVisible();
     await expect(page.locator('[data-alpha-chat-proposal]')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).alphaShell().S().msgs.filter((m: any) => m.card?.type === 'proposal').length)).toBe(0);
+    // The call is still live and End still reachable.
+    await expect(card).toHaveAttribute('data-emergency', 'true');
+    expect(await hits(page, '[data-alpha-call-end]')).toBe(true);
+    // Call from a thread header and from a contact card: refused once each, before anything is drawn.
+    await page.evaluate(() => { const w = window as any, shell = w.alphaShell(); w.toasts = []; const toast = shell.toast; shell.toast = function (text: string, ...rest: unknown[]) { w.toasts.push(text); return toast.call(this, text, ...rest); }; });
+    await page.evaluate(() => (window as any).alphaShell().api('messages').open('phone', {call: 'maya'}));
+    await page.evaluate(() => (window as any).alphaShell().api('contacts').open('phone', {call: 'maya', ret: {view: 'contacts', patch: {open: 'maya'}}}));
+    await page.waitForTimeout(2000);
+    expect(await page.evaluate(() => (window as any).toasts)).toEqual(['End the emergency call first', 'End the emergency call first']);
+    expect(await page.evaluate(() => { const st = (window as any).alphaShell().vget('phone'); return [st.call, st.num, st.callWho]; })).toEqual([null, '911', '#911']);
+    await expect(card).toHaveAttribute('data-emergency', 'true');
+    // A write that bypasses the refusal (as a development jump can) still draws the emergency call.
+    await page.evaluate(() => (window as any).alphaShell().vset('phone', {call: 'maya', num: ''}));
+    await expect(card).toHaveAttribute('aria-label', 'Call with 911');
+    await expect(card).toHaveAttribute('data-emergency', 'true');
+    // Only End ends it: free text asking to hang up, or not to, ends nothing (AC-19).
+    for (const text of ['hang up', "don't hang up"]) {
+      await askAlpha(page, text);
+      await page.waitForTimeout(2500);
+      expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBe('#911');
+    }
+    // A ring over the emergency call: no compaction or strip replaces it, and declining or
+    // screening it leaves the emergency call's clock running.
+    await page.evaluate(() => { const shell = (window as any).alphaShell(); shell.mod('phone').actions.ring({args: {pid: 'maya'}}, shell.api('phone')); });
+    await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
+    await page.evaluate(() => (window as any).alphaShell().setState({chat: 'full'}));
+    await expect.poll(() => page.evaluate(() => (window as any).alphaShell().S().chat)).toBe('sheet');
+    await expect(page.locator('[data-alpha-layer="app"][data-alpha-stage="true"]')).toHaveCount(0);
+    await page.evaluate(() => (window as any).alphaShell().mod('phone').actions.screenIncoming({args: {ring: (window as any).alphaShell().vget('phone').ringId}}, (window as any).alphaShell().api('phone')));
+    await page.locator('[data-alpha-incoming-decline]').click();
+    await expect(page.locator('[data-alpha-incoming-card]')).toHaveCount(0);
+    const tick = await page.evaluate(() => (window as any).alphaShell().vget('phone').tick);
+    await expect.poll(() => page.evaluate(() => (window as any).alphaShell().vget('phone').tick), {timeout: 5000}).toBeGreaterThan(tick);
+    expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBe('#911');
+    // End ends the emergency call and logs it as 911, not as the refused contact.
+    await page.locator('[data-alpha-call-end]').click();
+    expect(await page.evaluate(() => { const r = (window as any).alphaShell().vget('phone').recents[0]; return [r.pid, r.num]; })).toEqual([null, '911']);
   });
 });
 
@@ -183,5 +256,32 @@ test.describe('Alpha image shape (telephony-fixture.ts): Recents filter', () => 
     await page.locator('[data-alpha-bar-field="filter"]').fill('');
     await expect(page.getByRole('button', {name: /^Unknown, missed/})).toBeVisible();
     expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).filter(row => row[0] === 'listRecentCalls').length)).toBeLessThanOrEqual(reads);
+  });
+});
+
+test.describe('Alpha image shape (telephony-fixture.ts): AC-20 call card lookup', () => {
+  test('the image resolver names the person by the number, counts the review\'s options, and claims nothing it did not read', async ({page}) => {
+    // 150 contacts sort ahead of Carmen: a first-page scan of 100 could not find her.
+    await setupTelephony(page, {padContacts: 150});
+    await page.getByRole('button', {name: 'Phone', exact: true}).first().click();
+    const resolve = (target: unknown) => page.evaluate(async target => {
+      const {resolveCallParty, callCardText} = await import('/src/runtime/comms-bar.ts' as string);
+      const party = await resolveCallParty(target);
+      return {party, card: callCardText(target, party, (n: string) => n)};
+    }, target);
+    // By Android's own number matching, not the first page of the address book.
+    const lookups = () => page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).filter(([method]) => method === 'contactForNumber' || method === 'searchContacts').map(([method, input]) => [method, input.number ?? input.query]));
+    const before = (await lookups()).length;
+    expect(await resolve({number: '(555) 010-0103'})).toEqual({party: {name: 'Carmen Ruiz', numbers: ['(555) 010-0103']}, card: {title: 'Call Carmen Ruiz', detail: '(555) 010-0103'}});
+    // The number goes to Android's lookup; no address-book page is scanned for it.
+    expect((await lookups()).slice(before)).toEqual([['contactForNumber', '(555) 010-0103']]);
+    expect((await resolve({number: '+15559990000'})).card.detail).toBe('+15559990000 · not in Contacts');
+    // An unparseable number names nobody and says nothing about Contacts.
+    expect(await resolve({number: '1-800-FLOWERS'})).toEqual({party: null, card: {title: 'Call 1-800-FLOWERS', detail: '1-800-FLOWERS'}});
+    // A contact: the same normalised options the in-card review offers before the dial.
+    expect((await resolve({contact: 'Bao'})).card).toEqual({title: 'Call Bao Tran', detail: '2 numbers · you choose one before it dials'});
+    // Without Contacts access nothing is claimed.
+    await page.evaluate(() => { (window as any).access.contacts = false; });
+    expect((await resolve({number: '+15559990000'})).card.detail).toBe('+15559990000');
   });
 });

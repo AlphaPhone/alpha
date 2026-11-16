@@ -5,7 +5,7 @@ import type {CommsStageEntry} from './comms-bar';
  * AC-30: where the comms stage was left, so process death or a permission loss returns the owner to
  * the same sheet height, stage view and stage history. Data only: restoring never runs an action,
  * sends, dials or opens a proposal. The Alpha request draft is not kept here (composerDraft owns it)
- * and neither are SMS drafts (sms-draft-store) or proposals (alpha-proposal-store).
+ * and neither are SMS drafts (the native per-thread shelf) or proposals (alpha-proposal-store).
  *
  * Android keeps it in the renderer secure slot `stage-session:v1`; the browser in the document
  * `alpha.browser.stage-session:v1`.

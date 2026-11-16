@@ -3246,7 +3246,8 @@
       "dialRefusedDuringHandoffTest",
       "accessNeededTest",
       "supersededReadTest",
-      "typedNumberClearsNoticeTest"
+      "typedNumberClearsNoticeTest",
+      "emergencyCallRefusesEffectsTest"
     ],
     "invariants": [
       "TypeOK",
@@ -3263,12 +3264,17 @@
       "AccessNeededWitness",
       "DialNoticeWitness",
       "RowsKeptWhileReadingWitness",
-      "StaleHandoffBesideLaterDialWitness"
+      "StaleHandoffBesideLaterDialWitness",
+      "EmergencyRefusalWitness",
+      "UnknownCallRefusalWitness",
+      "BrokenBridgeRefusalWitness"
     ],
     "sources": [
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCallState.java",
       "apps/app/src/prototype/phone-adapter.ts",
+      "apps/app/src/runtime/aosp-image.ts",
       "apps/app/src/runtime/aosp-telephony.ts",
-      "apps/app/src/runtime/aosp-image.ts"
+      "apps/app/src/runtime/call-state.ts"
     ],
     "symbols": [
       {
@@ -3325,13 +3331,16 @@
       "epoch/reads/reading": "refresh() token, recent-call reads in flight and the read latch",
       "session/dials/dialing/handoffs": "the per-showing dial session, handoffs still in flight tagged with the session they started in, the dial latch and dial-screen handoffs issued",
       "calls/needsAccess": "recent-call rows and the call-log access request state",
-      "notice": "the dial notice"
+      "notice": "the dial notice",
+      "inCall/callKind/effects/refused": "AlphaCallState callState (inCall, emergency) as runtime/call-state.ts reads it, and the executor's side-effect ports run or refused behind guardTelephonyPorts",
+      "bridge": "whether the AlphaCallState bridge answers or throws"
     },
     "abstractions": [
       "Six epochs, three handoffs and one row class. busy() is the disjunction of the read and dial latches; a typed number clears the notice, a recent-call row does not.",
       "The shared telephony profile (status, requestAccess, recentCalls, dial) is a controlled port. No call is placed, simulated or reported by the view.",
       "Replayed against installPhoneAdapter with a held telephony plugin (test/quint-phone-session.test.mjs); no installed-image, Telecom or call-log claim.",
-      "The dial handoff branch after a role-required or permission-required refusal is modeled here. Direct Telecom placement is covered separately by PhoneCalls and the Phone adapter tests."
+      "The dial handoff branch after a role-required or permission-required refusal is modeled here. Direct Telecom placement is covered separately by PhoneCalls and the Phone adapter tests.",
+      "AC-19 gate: telecom stands for a Telephony call-state change; alphaEffect for an approved phone call or contact write run by the real telephony executor through the guarded image ports (SMS and dial handoff share the guard). The Java rule is checked separately on the JVM (test/call-state-native.test.mjs)."
     ],
     "sharedSources": [
       "packages/contracts/src/native-telephony.ts"

@@ -59,7 +59,7 @@ test('the image enables every admitted role handler before Activity startup with
     assert.equal(actual.length, 9);
     assert.ok(!xml.includes('MainActivity') && !xml.includes('role-holder'));
     const makefile = fs.readFileSync(path.join(output, 'product.mk'), 'utf8');
-    assert.ok(makefile.startsWith('# existing image setup\n'));
+    assert.ok(makefile.startsWith('launcher_provisioning_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/provisioning\n# existing image setup\n'));
     assert.match(makefile, /TARGET_COPY_OUT_SYSTEM_EXT\)\/etc\/sysconfig\/alpha-telephony-components\.xml/);
     assert.throws(() => writeAospTelephonyRoleOverrides(output, apkTree, pkg), /EEXIST/);
     const refused = path.join(output, 'refused');

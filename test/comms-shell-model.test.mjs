@@ -7,7 +7,7 @@ import vm from 'node:vm';
 // proposals, stage switches and the Back order (docs/agentic-comms.md AC-05, AC-06, AC-19, AC-26).
 // Browser behaviour is in test/browser/comms-shell.spec.ts.
 const model = readFileSync('apps/app/src/prototype/model.js', 'utf8');
-const {proposalCanAct} = await import('../apps/app/src/runtime/comms-bar.ts');
+const {deviceEmergencyLive, isAskSentence, proposalCanAct} = await import('../apps/app/src/runtime/comms-bar.ts');
 const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected)), message);
 /** Source of one shell class method: from its name to the brace that closes its body. */
 function method(name) {
@@ -25,12 +25,12 @@ function method(name) {
   }
   assert.fail(`${name} has a closed body`);
 }
-const METHODS = ['isCommsView', 'commsSpec', 'defaultChat', 'shellDetent', 'nextMessageId', 'stage', 'stageBack', 'stageSwitched', 'propose', 'cardAct', 'back'];
+const METHODS = ['isCommsView', 'commsSpec', 'defaultChat', 'shellDetent', 'nextMessageId', 'stage', 'stageBack', 'stageSwitched', 'propose', 'emergencyLive', 'keepEmergencyLayout', 'fillCommsBar', 'send', 'cardAct', 'back'];
 
 /** A shell over plain state with recorded navigation; setState applies at once, like a committed update. */
 function shell(state, views) {
   const log = {opened: [], navigated: [], toasts: [], acted: []};
-  const ctx = vm.createContext({Object, JSON, Number, Date, isMvpView: () => true, proposalCanAct, DEFERRED_MVP_VIEWS: new Set(), VIEWS: views});
+  const ctx = vm.createContext({Object, JSON, Number, Date, isMvpView: () => true, proposalCanAct, isAskSentence, deviceEmergencyLive, deferredMvpPrompt: () => false, DEFERRED_MVP_VIEWS: new Set(), VIEWS: views});
   vm.runInContext(`globalThis.shell={${METHODS.map(method).join(',\n')}};`, ctx);
   const s = ctx.shell;
   state = {screen: 'home', chat: 'input', msgs: [], stack: [], stageFrom: [], vs: {}, voice: 'off', ...state};
@@ -106,4 +106,74 @@ test('a stage switch keeps the chat and the Back stack; Back returns the stage, 
   same(log.navigated.at(-1), {type: 'assistant', detent: 'rest'});
   same([state().view, state().chat, state().stageFrom], ['messages', 'input', []]);
   assert.equal(s.stageBack(), false, 'nothing to return to');
+});
+
+test('AC-19: a call proposal made before an emergency call never acts during it, and shows no button', () => {
+  const acted = [];
+  let emergency = false;
+  const views = {messages: {bar: bar()}, phone: {bar: bar({target: {kind: 'call', app: 'Phone'}}), emergency: () => emergency, actions: {callApproved: card => acted.push(card.id)}}};
+  const {s, state} = shell({view: 'messages', chat: 'sheet'}, views);
+  assert.equal(s.propose(proposal('before')).shown, true);
+  // The emergency call is live in Phone while Messages is on screen (or Phone's card is minimised).
+  emergency = true;
+  assert.equal(s.emergencyLive(), true);
+  s.cardAct(state().msgs[0]);
+  same(acted, [], 'approving during an emergency call does nothing');
+  assert.equal(state().msgs[0].card.state, 'open', 'the card is kept, not executed');
+  assert.equal(proposalCanAct(state().msgs[0].card, true), false, 'its button is hidden (comms-alpha proposalAsk)');
+  assert.equal(proposalCanAct({...state().msgs[0].card, acts: false}, true), true, 'a note-only card is unaffected');
+  same(s.propose(proposal('during')), {shown: false, replaced: []});
+  emergency = false;
+  s.cardAct(state().msgs[0]);
+  same(acted, ['before'], 'after the emergency call ends the owner can approve it');
+});
+
+test('AC-19: an emergency call on screen never stays under a full chat', () => {
+  const {s, state} = shell({view: 'phone', chat: 'full'}, {phone: {bar: bar({emergency: true})}});
+  s.keepEmergencyLayout();
+  assert.equal(state().chat, 'sheet');
+  const plain = shell({view: 'phone', chat: 'full'}, {phone: {bar: bar()}});
+  plain.s.keepEmergencyLayout();
+  assert.equal(plain.state().chat, 'full');
+});
+
+test('AC-12/AC-22: dictation fills the bar\'s own field: appended to the text, or the list filter; nothing is sent', () => {
+  const typed = [];
+  const field = (kind, value = '') => ({kind, value, onText: text => typed.push([kind, text])});
+  const person = shell({view: 'messages', chat: 'input'}, {messages: {bar: bar({closed: field('person', 'Running late')})}});
+  assert.equal(person.s.fillCommsBar('see you at 3'), true);
+  const filter = shell({view: 'contacts', chat: 'input'}, {contacts: {bar: bar({contextKey: 'contacts:list:', closed: field('filter')})}});
+  assert.equal(filter.s.fillCommsBar('Maya'), true);
+  // A dictated sentence waits in the field for Enter, which asks Alpha; the list keeps its filter.
+  assert.equal(filter.s.fillCommsBar('who works at the studio?'), true);
+  same(filter.s.barFilter, {key: 'contacts:list:', text: 'who works at the studio?'});
+  same(typed, [['person', 'Running late see you at 3'], ['filter', 'Maya']]);
+  same([person.state().msgs, filter.state().msgs], [[], []]);
+  const alpha = shell({view: 'phone', chat: 'input'}, {phone: {bar: bar({closed: {kind: 'alpha', value: '', onText: null}})}});
+  assert.equal(alpha.s.fillCommsBar('hello'), false);
+});
+
+test('a short command on the Contacts list is not taken as a list filter, so Phone and Messages still get it', () => {
+  const from = model.indexOf('\nfunction ctListAsk('), to = model.indexOf('\n}\n', from) + 3;
+  const ctx = vm.createContext({});
+  vm.runInContext(model.slice(from, to), ctx);
+  const ask = ctx.ctListAsk;
+  for (const command of ['Call Maya', 'Text Maya hi', 'Email Maya', 'ring Priya', 'Message Maya'])
+    assert.equal(ask(command), null, command);
+  same([ask('Maya'), ask('design lead'), ask('who works at Lumen?'), ask('Show people from Lumen')], ['Maya', 'design lead', 'Lumen?'.replace('?', ''), 'Lumen']);
+});
+
+test('a scripted reply never shares an id with a line added while it was pending (the briefing)', () => {
+  const {s, state} = shell({view: 'notes', chat: 'input'}, {notes: {}});
+  const now = Date.now;
+  Date.now = () => 1000;
+  try {
+    // The briefing lands on the opening update, at the next id, before the reply arrives.
+    s.later = run => { state().msgs = state().msgs.concat([{id: s.nextMessageId(state().msgs), from: 'agent', text: 'Briefing', local: true}]); run(); };
+    s.reply = () => ({text: 'Done.'});
+    s.send('hello');
+  } finally { Date.now = now; }
+  const ids = state().msgs.map(m => m.id);
+  same(state().msgs.map(m => m.text), ['hello', 'Briefing', 'Done.']);
+  assert.equal(new Set(ids).size, ids.length, `unique ids ${ids}`);
 });

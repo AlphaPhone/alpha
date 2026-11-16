@@ -8854,7 +8854,12 @@
       "ringHoldsHandoverTest",
       "staleStartIsDroppedTest",
       "startReleasesLatchTest",
-      "freshOpenDropsReturnTest"
+      "freshOpenDropsReturnTest",
+      "proposalNeedsApprovalTest",
+      "emergencyKeptTest",
+      "emergencyNeverCompactedTest",
+      "endDuringVoiceTest",
+      "emergencyHandoverNotCompactedTest"
     ],
     "invariants": [
       "SingleSource",
@@ -8863,7 +8868,11 @@
       "TimersOwned",
       "ControlsNeedCall",
       "OneRowPerCall",
-      "RingsAccounted"
+      "RingsAccounted",
+      "EmergencyKept",
+      "EmergencyDrawn",
+      "EmergencyNotCompacted",
+      "EndReachable"
     ],
     "witnesses": [
       "OrphanedLiveWitness",
@@ -8872,7 +8881,9 @@
       "ReturnedWitness",
       "RingHoldsHandoverWitness",
       "StaleStartWitness",
-      "HeldBeforeStartWitness"
+      "HeldBeforeStartWitness",
+      "EmergencyProposalRefusedWitness",
+      "VoiceEndWitness"
     ],
     "sources": [
       "apps/app/src/prototype/model.js"
@@ -8917,6 +8928,30 @@
       {
         "path": "apps/app/src/prototype/model.js",
         "name": "callWho"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "function pnLiveEmergency"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "emergencyLive()"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "keepEmergencyLayout()"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "propose(p, text)"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "function pnLiveParty"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "function pnDrawn"
       }
     ],
     "stateMapping": {
@@ -8924,11 +8959,14 @@
       "bootFor/bootTimers/active": "the PN.boot latch, the zero-delay view timers armed for a handed-over call (each bound to the call it was armed for), and whether Phone is the open view",
       "connected/min/kp/hold/ret/incoming": "st.liveAt, st.min, st.kp, st.hold, st.ret and st.incoming",
       "connectFor/tickFor": "the laterBg connect timer and the everyBg tick, each bound to the call id it was armed for",
-      "started/ended/rings/ringRows/accepted/dropped/orphaned": "ghosts counting calls, recents rows and rings, and a view reset under a live module call"
+      "started/ended/rings/ringRows/accepted/dropped/orphaned": "ghosts counting calls, recents rows and rings, and a view reset under a live module call",
+      "proposal/approvals/chat/voice/staged": "the one open call proposal card's call id, the owner's approval taps (cardAct on it), S.chat (input and hidden are closed, sheet is open), S.voice and S.stageFrom.length",
+      "emergencyCut": "ghost: an emergency call ended other than by its own End"
     },
     "abstractions": [
       "Development fixture only: the simulated call exists with ELIZA_DEV_ALLOW_TEST_MOCKS and never places a call. The image Phone view is PhoneRecents.",
       "Two callees; rings and the development jumps use the preset person. Mute, speaker, the assistant transcript, screening text, tabs and voicemail playback are not modeled.",
+      "AP-16: Alpha's call proposal is the shell's propose/cardAct path with Phone's callApproved action; End's place (bar, card, strip or voice panel) is a model function of the chat height, voice and emergency, checked in the browser by test/browser/comms-shell.spec.ts rather than by this replay. #911 stands for every emergency short code.",
       "The view is drawn after every state change while Phone is in front, and the patches one handler queues are applied together.",
       "Model safety checks do not establish device acceptance."
     ]

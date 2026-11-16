@@ -238,7 +238,7 @@
 <div style="display: flex; flex-direction: column; height: 100%; position: relative">
   <style>
     /* AP-16 call and incoming cards: one tree, roomy while the chat is closed and compact in the stage
-       (the shell's stage.compact). An emergency call keeps the roomy layout with End among its controls (AC-19). */
+       (the shell's stage.on). An emergency call keeps the roomy layout with End among its controls (AC-19). */
     .pn-card{position:relative;flex-grow:1;min-height:0;display:flex;flex-direction:column;align-items:stretch;box-sizing:border-box;padding:44px 0 calc(var(--alpha-dock-reserve,108px) + 8px);background:var(--bg);color:var(--fg)}
     .pn-card[data-compact="true"]:not([data-emergency="true"]){padding-bottom:8px}
     .pn-card:not([data-compact="true"]) .pn-compact,.pn-card[data-emergency="true"] .pn-compact{display:none!important}
@@ -275,11 +275,11 @@
   </div>
 
   <sc-if value="{{phone.banner}}">
-    <div class="drop" style="display: flex; align-items: center; gap: 4px; margin: 6px 16px 4px; height: 56px; padding: 0 6px 0 4px; border-radius: 28px; background: var(--alpha-call-green); color: var(--alpha-white); flex-shrink: 0">
+    <div class="drop" style="display: flex; align-items: center; gap: 4px; margin: 6px 16px 4px; height: 56px; padding: 0 6px 0 4px; border-radius: 28px; background: var(--alpha-call-green-text); color: var(--alpha-white); flex-shrink: 0">
       <button aria-label="Return to call" onClick="{{phone.restore}}" style="flex-grow: 1; min-width: 0; height: 56px; display: flex; align-items: center; gap: 12px; padding-left: 14px; text-align: left">
         <svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.phone}}"></path></svg>
         <span style="flex-grow: 1; min-width: 0; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{phone.cName}}</span>
-        <span style="font-size: 15px; font-variant-numeric: tabular-nums; opacity: .85">{{phone.cStatus}}</span>
+        <span style="font-size: 15px; font-variant-numeric: tabular-nums">{{phone.cStatus}}</span>
       </button>
       <button aria-label="End call" onClick="{{phone.endCall}}" class="alpha-end-button"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; transform: rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button>
     </div>
@@ -404,7 +404,7 @@
   </sc-if>
 
   <sc-if value="{{phone.callFull}}">
-    <div data-alpha-call-card class="pn-card" data-compact="{{stage.compact}}" data-emergency="{{phone.emergency}}" role="region" aria-label="Call with {{phone.cName}}">
+    <div data-alpha-call-card class="pn-card" data-compact="{{stage.on}}" data-emergency="{{phone.emergency}}" role="region" aria-label="Call with {{phone.cName}}">
       <div class="pn-compact alpha-stage-header" data-alpha-stage-header style="gap: 12px; padding: 0 16px">
         <span class="pn-av" data-alpha-stage-avatar aria-hidden="true">{{phone.cIni}}</span>
         <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
@@ -463,7 +463,7 @@
   </sc-if>
 
   <sc-if value="{{phone.ringing}}">
-    <div data-alpha-incoming-card class="pn-card pn-ring" data-compact="{{stage.compact}}" role="region" aria-label="Incoming call from {{phone.rName}}">
+    <div data-alpha-incoming-card class="pn-card pn-ring" data-compact="{{stage.on}}" role="region" aria-label="Incoming call from {{phone.rName}}">
       <div class="pn-compact alpha-stage-header" data-alpha-stage-header style="gap: 12px; padding: 0 16px">
         <span class="pn-av" data-alpha-stage-avatar aria-hidden="true">{{phone.rIni}}</span>
         <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
@@ -482,7 +482,9 @@
         <sc-if value="{{phone.isScreen}}">
           <button data-alpha-incoming-decline class="pn-answer" aria-label="Hang up" onClick="{{phone.endScreen}}" style="background: var(--alpha-call-red)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 28px; height: 28px; transform: rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button>
         </sc-if>
-        <button data-alpha-incoming-answer class="pn-answer" aria-label="Accept" onClick="{{phone.accept}}" style="background: var(--alpha-call-green)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 28px; height: 28px"><path d="{{ic.phone}}"></path></svg></button>
+        <button data-alpha-incoming-answer class="pn-answer" aria-label="Answer" onClick="{{phone.accept}}" style="background: var(--alpha-call-green)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 28px; height: 28px"><path d="{{ic.phone}}"></path></svg></button>
+        <!-- AC-18: a ring over a live call keeps that call's End (right-most, red). -->
+        <sc-if value="{{phone.ringOverCall}}"><button data-alpha-ring-end class="alpha-end-button" aria-label="End call" onClick="{{phone.endLive}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 24px; height: 24px; transform: rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button></sc-if>
       </div>
       <div class="pn-middle" style="flex-direction: column; justify-content: flex-start; gap: 16px; padding-top: 16px">
         <sc-if value="{{phone.isRing}}">
@@ -548,7 +550,7 @@
 <sc-if value="{{is.messages}}">
 <sc-if value="{{messages.nativeManaged}}">
  <div data-alpha-messages style="position:relative;display:flex;flex-direction:column;height:100%;box-sizing:border-box">
-  <sc-if value="{{stage.compact}}"><style>[data-alpha-messages] [data-alpha-stage-avatar]{width:32px!important;height:32px!important;border-radius:16px!important}</style></sc-if>
+  <sc-if value="{{stage.on}}"><style>[data-alpha-messages] [data-alpha-stage-avatar]{width:32px!important;height:32px!important;border-radius:16px!important}</style></sc-if>
   <sc-if value="{{messages.needsAccess}}">
    <div style="flex-grow:1;display:flex;align-items:center;justify-content:center">
     <button data-alpha-messages-allow onClick="{{messages.nativeRead}}" disabled="{{messages.nativeBusy}}" style="min-height:52px;padding:0 28px;border-radius:26px;background:var(--fg);color:var(--bg);font-size:17px;font-weight:600">Allow SMS read access</button>
@@ -676,7 +678,7 @@
 </sc-if>
 <sc-if value="{{messages.nativePrototype}}">
 <div data-alpha-messages-dev style="display: flex; flex-direction: column; height: 100%; position: relative">
-  <sc-if value="{{stage.compact}}"><style>[data-alpha-messages-dev] .alpha-messages-title { font-size: 22px !important } [data-alpha-messages-dev] [data-alpha-stage-avatar] { width: 32px !important; height: 32px !important; border-radius: 16px !important }</style></sc-if>
+  <sc-if value="{{stage.on}}"><style>[data-alpha-messages-dev] .alpha-messages-title { font-size: 22px !important } [data-alpha-messages-dev] [data-alpha-stage-avatar] { width: 32px !important; height: 32px !important; border-radius: 16px !important }</style></sc-if>
   <div data-alpha-stage-header="{{messages.listStage}}" class="alpha-stage-header" style="flex-wrap: wrap; min-height: 56px; margin-top: 44px; padding: 0 8px 0 20px; gap: 2px">
     <h1 class="serif alpha-messages-title" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">Messages</h1>
     <button class="ib" aria-label="New message" onClick="{{messages.newMsg}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg></button>
@@ -2894,7 +2896,7 @@
 
   
   <sc-if value="{{contacts.detail}}">
-    <div data-alpha-contact-detail data-alpha-compact="{{stage.compact}}" class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 4">
+    <div data-alpha-contact-detail data-alpha-compact="{{stage.on}}" class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 4">
       <div data-alpha-stage-header class="alpha-stage-header alpha-contact-head">
         <button class="ib" data-alpha-contact-back aria-label="Back to contacts" onClick="{{contacts.d.close}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
         <span data-alpha-stage-avatar class="serif" aria-hidden="true" style="background: var(--s2); color: var(--fg); display: flex; align-items: center; justify-content: center; white-space: nowrap; flex-shrink: 0">{{contacts.d.ini}}</span>
@@ -4377,7 +4379,7 @@
   <div data-alpha-chat-header style="display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);align-items:center;padding:0 12px 4px;gap:0;flex-shrink:0">
     <div data-alpha-chat-lead style="display:flex;align-items:center;gap:2px;min-width:0">
     <button class="tap" data-alpha-chat-home aria-label="Go Home" aria-description="{{sheetContext}}" onPointerDown="{{chatControlPointer}}" onClick="{{backToApps}}" style="display:flex;align-items:center;gap:12px;min-width:0;min-height:44px;text-align:left;border-radius:12px">
-      <span class="alpha-mark-fill" style="width:34px;height:34px;border-radius:17px;flex-shrink:0;background:var(--acc);color:var(--alpha-white);display:flex;align-items:center;justify-content:center"><span class="alpha-compute-mark" aria-hidden="true"></span></span>
+      <span data-alpha-sheet-alpha class="alpha-mark-fill" onPointerDown="{{sheetAlphaHold.down}}" onPointerUp="{{sheetAlphaHold.up}}" onPointerCancel="{{sheetAlphaHold.cancel}}" onContextMenu="{{sheetAlphaHold.menu}}" style="width:34px;height:34px;border-radius:17px;flex-shrink:0;background:var(--acc);color:var(--alpha-white);display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-touch-callout:none"><span class="alpha-compute-mark" aria-hidden="true"></span></span>
       <span style="display:flex;flex-direction:column;min-width:0"><span data-alpha-chat-name style="font-weight:600;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{name}}</span><sc-if value="{{sheetContext}}"><span data-alpha-sheet-context class="alpha-sheet-context">{{sheetContext}}</span></sc-if></span>
     </button>
     </div>
@@ -4621,6 +4623,7 @@
       <sc-if value="{{canStopReply}}"><button aria-label="Stop reply" onClick="{{stopReply}}" style="width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"></rect></svg></button></sc-if>
     <sc-if value="{{sendVisible}}"><button aria-label="Send" onClick="{{sendNow}}" style="width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.send}}"></path></svg></button></sc-if>
       <sc-if value="{{talkVisible}}"><button title="Voice assistant" aria-label="Talk" onPointerDown="{{chatControlPointer}}" onClick="{{startVoice}}" style="width: 44px; height: 44px; border-radius: 22px; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
+      <sc-if value="{{alphaDictate}}"><button data-alpha-bar-dictate class="ib" aria-label="{{alphaDictate.label}}" onPointerDown="{{chatControlPointer}}" onClick="{{alphaDictate.run}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
     </div>
   </sc-if>
   <sc-if value="{{voiceOn}}"><div style="height: 150px; flex-shrink: 0"></div></sc-if>
@@ -4634,6 +4637,14 @@
   <sc-if value="{{hasPendingFiles}}"><div class="chat-pending-files" aria-label="Pending attachments"><sc-for list="{{pendingFiles}}" key="{{f.id}}" as="f"><button aria-label="{{f.removeLabel}}" onClick="{{f.remove}}" disabled="{{f.disabled}}">{{f.name}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.x}}"></path></svg></button></sc-for></div></sc-if>
   <sc-if value="{{messageComposeContext}}"><div style="display:flex;align-items:center;gap:8px;padding:6px 16px;font-size:13px;background:var(--s2);border-radius:14px"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{messageComposeContext}}</span><button class="tap" aria-label="Cancel reply or edit" onClick="{{cancelMessageContext}}" style="min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.x}}"></path></svg></button></div></sc-if>
 
+  <sc-if value="{{barRecorder}}">
+    <!-- AC-12: dictation into the bar's own field records here, on the bar; the Alpha sheet stays closed. -->
+    <section data-alpha-bar-recorder data-voice-state="{{barRecorder.state}}" role="region" aria-label="{{barRecorder.regionLabel}}" class="alpha-bar-recorder">
+      <p role="status" class="alpha-bar-recorder-status">{{barRecorder.status}}</p>
+      <button class="ib" aria-label="{{barRecorder.closeControlLabel}}" onClick="{{barRecorder.closeControl}}"><svg class="i" viewBox="0 0 24 24"><path d="{{barRecorder.closeControlIcon}}"></path></svg></button>
+      <button class="alpha-bar-recorder-primary" aria-label="{{barRecorder.primaryLabel}}" disabled="{{barRecorder.primaryDisabled}}" onClick="{{barRecorder.stop}}"><svg class="i" viewBox="0 0 24 24"><path d="{{barRecorder.primaryIcon}}"></path></svg></button>
+    </section>
+  </sc-if>
   <sc-if value="{{barAskHint}}"><p data-alpha-bar-hint class="alpha-bar-hint" role="status">{{barAskHint}}</p></sc-if>
   <div data-alpha-input-bar class="enter {{barFieldClass}}" onPointerDown="{{inputSw.down}}" onPointerMove="{{inputSw.move}}" onPointerUp="{{inputSw.up}}" onPointerCancel="{{inputSw.cancel}}" onLostPointerCapture="{{inputSw.lost}}" style="{{inputDragStyle}}; position:relative; display: flex; align-items: center; gap: 4px; min-height: 62px; padding: 6px 8px 6px 9px; border-radius: 31px; background: var(--s2); box-shadow: 0 14px 40px var(--shc); touch-action: pan-y">
     <span data-alpha-input-drag-background aria-hidden="true" style="position:absolute;inset:0;z-index:0;border-radius:inherit;touch-action:none"></span>
@@ -4647,6 +4658,7 @@
     <sc-if value="{{canStopReply}}"><button aria-label="Stop reply" onClick="{{stopReply}}" style="position:relative;z-index:1;width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"></rect></svg></button></sc-if>
     <sc-if value="{{sendVisible}}"><button aria-label="Send" onClick="{{sendNow}}" style="position:relative;z-index:1;width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.send}}"></path></svg></button></sc-if>
     <sc-if value="{{talkVisible}}"><button class="ib" style="position:relative;z-index:1" title="Voice assistant" aria-label="Talk" onPointerDown="{{chatControlPointer}}" onClick="{{startVoice}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
+    <sc-if value="{{alphaDictate}}"><button data-alpha-bar-dictate class="ib" style="position:relative;z-index:1" aria-label="{{alphaDictate.label}}" onPointerDown="{{chatControlPointer}}" onClick="{{alphaDictate.run}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
     </sc-if>
     <sc-if value="{{barPersonSend}}"><button data-alpha-bar-send aria-label="Send" disabled="{{barSendDisabled}}" onClick="{{barSubmit}}" style="position:relative;z-index:1;width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.send}}"></path></svg></button></sc-if>
     <sc-if value="{{barDictate}}"><button data-alpha-bar-dictate class="ib" style="position:relative;z-index:1" aria-label="{{barDictateLabel}}" onPointerDown="{{chatControlPointer}}" onClick="{{barMic}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
@@ -4692,6 +4704,7 @@
       <sc-for list="{{bars}}" as="b"><span class="bar" style="flex-grow: 1; height: {{b.h}}px; border-radius: 2px; background: {{vBarColor}}; animation-delay: {{b.dl}}s; animation-play-state: {{vPlay}}"></span></sc-for>
     </div>
     <button class="ib" aria-label="Switch to keyboard" onClick="{{voiceToType}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.kbd}}"></path></svg></button>
+    <sc-if value="{{voiceEnd}}"><button data-alpha-voice-end class="alpha-end-button" aria-label="End call" onClick="{{endCall}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:22px;height:22px;transform:rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button></sc-if>
     <button aria-label="Stop" onClick="{{stopVoice}}" style="width: 46px; height: 46px; border-radius: 23px; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
   </div>
 </div>
