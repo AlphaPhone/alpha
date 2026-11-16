@@ -2,7 +2,7 @@
 module FilesFilter {
   type Operation = {kind: int, phase: str, queryTicket: int,
     aborted: bool, result: str, count: int}
-  type State = {pending: int, filter: int, rows: List[int], access: str, stateGeneration: int,
+  type State = {active: bool, pending: int, filter: int, rows: List[int], access: str, stateGeneration: int,
     filterGeneration: int, writes: int, operations: int -> Operation}
   var s: State
   pure val Ids = 1.to(3)
@@ -15,13 +15,16 @@ module FilesFilter {
     List(4, 3, 2, 1).select(row => Matches(kind).contains(row) and input.contains(row))
   pure def Settle(op: Operation, outcome: str, count: int): Operation =
     {...op, phase: "done", result: outcome, count: count}
-  action init = s' = {pending: 0, filter: 0, rows: List(), access: "granted", stateGeneration: 1,
+  action init = s' = {active: true, pending: 0, filter: 0, rows: List(), access: "granted", stateGeneration: 1,
     filterGeneration: 0, writes: 0, operations: Ids.mapBy(_ => Empty)}
   action begin(id: int, kind: int): bool = all {
     Ids.contains(id), Kinds.contains(kind), s.operations.get(id).phase == "idle",
     val op = s.operations.get(id)
     if (op.aborted)
       s' = {...s, operations: s.operations.set(id, Settle({...op, kind: kind}, "aborted", 0))}
+    // A filter requested after Files was left fails before admission.
+    else if (not(s.active))
+      s' = {...s, operations: s.operations.set(id, Settle({...op, kind: kind}, "failed", 0))}
     else
       s' = {...s, pending: id, operations: s.operations.set(id, {...op, kind: kind, phase: "admission"})}
   }
@@ -52,14 +55,17 @@ module FilesFilter {
       operations: s.operations.set(id, Settle(op, if (success) "succeeded" else if (op.aborted) "aborted" else "failed", rows.length()))}
   }
   action clear = all {s.filter != 0, s' = {...s, filter: 0, rows: List()}}
+  // Leaving Files retires the pending and displayed filter with its rows (eliza#39740).
+  // Re-entering the view is outside this model.
+  action leave = all {s.active, s' = {...s, active: false, pending: 0, filter: 0, rows: List()}}
   // A reload with a pending agent filter owns only shared view state and skips a competing query.
-  action reload = all {s.pending != 0, s.stateGeneration < 3, s' = {...s, stateGeneration: s.stateGeneration + 1}}
+  action reload = all {s.active, s.pending != 0, s.stateGeneration < 3, s' = {...s, stateGeneration: s.stateGeneration + 1}}
   action step = any {
     {nondet id = Ids.oneOf(); nondet kind = Kinds.oneOf(); begin(id, kind)},
     {nondet id = Ids.oneOf(); abort(id)},
     {nondet id = Ids.oneOf(); nondet access = Set("granted", "denied", "unavailable").oneOf(); accessReply(id, access)},
     {nondet id = Ids.oneOf(); nondet ready = Bool.oneOf(); nondet rows = RowIds.powerset().oneOf(); queryReply(id, ready, rows)},
-    clear, reload, s' = s,
+    clear, leave, reload, s' = s,
   }
   val TypeOK = s.pending.in(0.to(3)) and s.filter.in(0.to(3)) and s.stateGeneration.in(1.to(3))
     and s.filterGeneration.in(0.to(3)) and s.operations.keys() == Ids
@@ -75,7 +81,9 @@ module FilesFilter {
     else s.rows.indices().forall(i => Matches(s.operations.get(s.filter).kind).contains(s.rows.nth(i)))
   val FailureHasNoCount = Ids.forall(id => s.operations.get(id).result != "succeeded" implies s.operations.get(id).count == 0)
   val CountReflectsCurrent = if (s.filter == 0) s.rows == List() else s.rows.length() == s.operations.get(s.filter).count
-  val safety = TypeOK and PendingOwnsRead and CurrentRowsMatch and FailureHasNoCount and CountReflectsCurrent and s.writes == 0
+  val LeftViewHasNoFilter = s.active or (s.filter == 0 and s.rows == List())
+  val safety = TypeOK and PendingOwnsRead and CurrentRowsMatch and FailureHasNoCount and CountReflectsCurrent
+    and LeftViewHasNoFilter and s.writes == 0
   run oldFailureCannotEraseNewRowsTest = init.then(begin(1, 1)).then(accessReply(1, "granted"))
     .then(begin(2, 2)).then(accessReply(2, "granted")).then(queryReply(2, true, RowIds))
     .then(queryReply(1, false, Set())).expect(s.rows == List(3, 2) and s.operations.get(1).result == "failed" and safety)
@@ -85,4 +93,12 @@ module FilesFilter {
     .then(clear).then(queryReply(1, true, RowIds)).expect(s.rows == List() and s.operations.get(1).result == "failed" and safety)
   run cancelledQueryCannotPublishTest = init.then(begin(1, 1)).then(reload).then(accessReply(1, "granted"))
     .then(abort(1)).then(queryReply(1, true, RowIds)).expect(s.rows == List() and s.operations.get(1).result == "aborted" and safety)
+  run leaveRetiresShownFilterTest = init.then(begin(1, 1)).then(accessReply(1, "granted"))
+    .then(queryReply(1, true, RowIds)).then(leave)
+    .expect(s.rows == List() and s.filter == 0 and s.operations.get(1).count == 2 and safety)
+  run leftQueryCannotPublishTest = init.then(begin(1, 1)).then(accessReply(1, "granted"))
+    .then(leave).then(queryReply(1, true, RowIds))
+    .expect(s.rows == List() and s.filter == 0 and s.operations.get(1).result == "failed" and safety)
+  run leftViewCannotAdmitFilterTest = init.then(leave).then(begin(1, 1))
+    .expect(s.pending == 0 and s.filter == 0 and s.filterGeneration == 0 and s.operations.get(1).result == "failed" and safety)
 }

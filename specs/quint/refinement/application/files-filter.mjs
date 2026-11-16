@@ -94,7 +94,7 @@ async function fixture(compiled) {
     const pending = actual.pendingFilter ? owners.get(actual.pendingFilter) : 0;
     assert.notEqual(filter, undefined, 'Current filter came from an observed admission');
     assert.notEqual(pending, undefined, 'Pending filter came from an observed admission');
-    return {'s.filter': filter, 's.pending': pending, 's.rows': actual.filterRows.map(fileId), 's.access': actual.access,
+    return {'s.active': actual.active, 's.filter': filter, 's.pending': pending, 's.rows': actual.filterRows.map(fileId), 's.access': actual.access,
       's.writes': writes,
       's.stateGeneration': actual.stateGeneration, 's.filterGeneration': actual.filterGeneration,
       's.operations': qmap([...operations].map(([id, op]) => [id, {
@@ -184,6 +184,10 @@ const schedules = [
   ['preaborted', [abort(1), begin(1, 1)]],
   ['abort-during-admission', [begin(1, 1), abort(1), access(1, 'denied')]],
   ['abort-during-query', [...start(1, 1), abort(1), query(1)]],
+  ['leave-retires-shown-filter', [...start(1, 1), query(1, 'ready', [1]), ['leave']]],
+  ['leave-during-admission', [begin(1, 1), ['leave'], access(1)]],
+  ['leave-during-query', [...start(1, 1), ['leave'], query(1)]],
+  ['filter-after-leave-fails', [['leave'], begin(1, 1)]],
 ];
 
 export async function checkFilesFilter(extraSources = []) {
@@ -205,6 +209,7 @@ export async function checkFilesFilter(extraSources = []) {
   return checkTraces(boundInputs({model: 'FilesFilter', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
     'Actual prepared shared Files browser runner, matching and sorting execute against held storage replies. The observer exposes pending and current filter identities, rows and the separate reload and query generations.',
     'The campaign starts in a settled mounted Browse view and observes three operation identities, two text classes and four unique storage rows. Provider query syntax and result data are controlled ports. A success count is parsed from the actual agent result.',
+    'Leaving the view runs the installed onLeave handler; the observed activity is the adapter watch activation. Leaving retires the pending and displayed filter and its rows. Re-entering the view is a separate obligation.',
     'Unexpected storage mutations fail the campaign. Category and Trash results, viewport remount and background watch ownership remain separate obligations.',
   ]}));
 }
@@ -218,9 +223,14 @@ export async function checkRetiredFilesFilterReload(extraSources = []) {
     assert.deepEqual(f.observe()['s.rows'], [1]);
     f.reload(); await tick();
     f.leave();
+    const left = f.inspect();
+    assert.equal(left.active, false);
+    assert.equal(left.filter, null, 'Leaving Files retires the displayed filter');
+    assert.equal(left.pendingFilter, null, 'Leaving Files retires the pending filter');
+    assert.deepEqual(f.observe()['s.rows'], [], 'Leaving Files clears the filter rows');
     f.queryReply(0, 'ready', [3]); await tick();
-    assert.equal(f.inspect().active, false);
-    assert.deepEqual(f.observe()['s.rows'], [1], 'Retired reload preserves the last active rows');
+    assert.equal(f.inspect().filter, null, 'A retired reload cannot restore the filter');
+    assert.deepEqual(f.observe()['s.rows'], [], 'A retired reload cannot publish filter rows');
     f.assertSettled();
   } finally {await f.close();}
 }
