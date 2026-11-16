@@ -5061,7 +5061,9 @@
       "cancelledWhileCompletingTest",
       "bindingChangeLeavesUnconfirmedTest",
       "failedActionCancelsLeaseTest",
-      "staleReceiptLeavesLeasePendingTest"
+      "staleReceiptLeavesLeasePendingTest",
+      "mismatchedHintNeverStartsCompletionTest",
+      "failedCompletionRemainsUnconfirmedTest"
     ],
     "invariants": [
       "PhaseKnown",
@@ -5123,15 +5125,15 @@
     ],
     "stateMapping": {
       "lease": "The phase of one readReplyLeases entry",
-      "bindingCurrent": "readReplyCurrent(binding) with the origin, digest, visibility and sensitive-screen checks",
-      "approval/taps": "The approval in flight for the proposal",
-      "completions/answers/voiceResumed": "completeReadReply requests, answers added to the conversation and resumeReadReplyVoice calls",
+      "bindingCurrent": "Current original connection epoch and conversation, independent of the lease being cancelled",
+      "approval/taps": "The card approval remains in flight while the read answer is completing",
+      "completions/answers/voiceResumed": "Completion dispatch plus settlement, answer insertions and calls to the voice-resume boundary",
       "wasCancelled/cancelRequests": "cancelReadReplyCompletions and its cancelReadReply request"
     },
     "abstractions": [
-      "One lease. Session, conversation, origin, digest, visibility and sensitive-screen checks are one bindingCurrent predicate that never becomes true again.",
-      "A succeeded receipt stands for a receipt carrying the read-reply hint; any other receipt cancels the lease.",
-      "The answer text and message identity are omitted; the count of answers added to the conversation is tracked."
+      "One rendered lease, an exact synthetic proposal and its original user message. The source replay supplies the local connection epoch and conversation, while expiry, account credential checks and the voice-media implementation have separate scopes.",
+      "A successful approved read carries a hint. A mismatched digest or origin is refused before completion, and a failed approval without a hint cancels the lease.",
+      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls."
     ]
   },
   {
