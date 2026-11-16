@@ -1867,7 +1867,10 @@
       "oldFailureCannotEraseNewRowsTest",
       "deniedReadbackCannotQueryTest",
       "clearedQueryCannotPublishTest",
-      "cancelledQueryCannotPublishTest"
+      "cancelledQueryCannotPublishTest",
+      "leaveRetiresShownFilterTest",
+      "leftQueryCannotPublishTest",
+      "refusedReopenCannotAdmitFilterTest"
     ],
     "sources": [
       "apps/app/src/prototype/selection-adapter.ts",
@@ -1879,6 +1882,7 @@
     ],
     "abstractions": [
       "Installed agent filters from a mounted Browse view, with separate reload and query generations, pending and displayed filter ownership, cancellation, filtered result ordering and no storage writes.",
+      "Leaving the view retires the pending and displayed filter and clears its rows (eliza#39740); after leaving, a filter whose request to reopen Files is refused fails before admission. Reopening and re-entering the view are covered by FilesAgentActions, not this model.",
       "Three operation identities, two text classes and four unique row identities. The model covers reloads during an explicit filter. Other reload sequences, category and Trash transactions, and provider queries remain separate obligations.",
       "Installed agent filter operations from a mounted Browse view, with separate access and query generations, current filter ownership, cancellation and filtered result ordering.",
       "Three operation identities, two text classes and four unique row identities. Reload after mount, category/Trash list transactions, file mutations and provider query implementation remain separate obligations."
