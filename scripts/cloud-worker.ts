@@ -44,7 +44,7 @@ import {nativeAuthCallbackRegistration, validateCloudDeployment, type CloudDeplo
 import {registrationRows, seedRegistration, readIdentity, releaseSignerFingerprints, type CloudDatabaseAuthority} from './cloud-registration.ts';
 import {cloudEnvironments, type CloudEnvironment} from './cloud-sdk-authority.ts';
 import {leakedElizaHost} from './local-cloud.ts';
-import {provisionedId, reconcileCloudResources} from './cloud-provision.ts';
+import {provisionedId, reconcileCloudResources, writeProvisionedResources} from './cloud-provision.ts';
 import {publishedAssetLinksCheck} from './render-assetlinks.ts';
 import {PLAN_KEYS, parsePlans} from '../apps/app/src/runtime/cloud-plans.ts';
 import {parseCloudServiceInfo} from '../apps/app/src/runtime/cloud-service-info.ts';
@@ -569,19 +569,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         break;
       }
       case 'provision': {
-        const env = environment(), targetPolicy = policy(), next = resources();
+        const env = environment(), targetPolicy = policy(), configured = resources();
         const writePath = o.write ? outsideVendor(o.resources!) : undefined;
-        workerDeployment(targetPolicy, next);
-        next[env] = await reconcile(targetPolicy, next, env, readEnvFile(envFile()).DATABASE_URL, true);
+        workerDeployment(targetPolicy, configured);
+        const verified = await reconcile(targetPolicy, configured, env, readEnvFile(envFile()).DATABASE_URL, true);
         if (writePath) {
-          const scratch = fs.mkdtempSync(path.join(path.dirname(writePath), '.alpha-cloud-resources-'));
-          const staged = path.join(scratch, 'resources.json');
-          try {
-            fs.writeFileSync(staged, JSON.stringify(next, null, 2) + '\n');
-            fs.renameSync(staged, writePath);
-          } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+          writeProvisionedResources(writePath, env, configured[env], verified);
           say(`wrote ${o.resources}`);
-        } else console.log(JSON.stringify(next[env], null, 1));
+        } else console.log(JSON.stringify(verified, null, 1));
         break;
       }
       case 'preflight': {

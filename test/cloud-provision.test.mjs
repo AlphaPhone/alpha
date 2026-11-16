@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import test from 'node:test';
-import {reconcileCloudResources} from '../scripts/cloud-provision.ts';
+import {reconcileCloudResources,writeProvisionedResources} from '../scripts/cloud-provision.ts';
 
 const resources = JSON.parse(fs.readFileSync(new URL('../cloud/resources.json', import.meta.url), 'utf8'));
 const policy = JSON.parse(fs.readFileSync(new URL('../cloud/policy.json', import.meta.url), 'utf8'));
@@ -26,7 +29,7 @@ function cloudflareFixture({existing = false} = {}) {
   const error = (status, code) => Response.json({success: false, errors: [{code, message: inputs.databaseUrl}], result: null}, {status});
   const paged = (url, items) => {
     const page = Number(url.searchParams.get('page'));
-    assert.equal(url.searchParams.get('per_page'), '100');
+    assert.equal(url.searchParams.get('per_page'), '50');
     return ok(items.slice(page - 1, page), {result_info: {page, per_page: 1, total_count: items.length}});
   };
   const fetcher = async (input, options) => {
@@ -41,7 +44,9 @@ function cloudflareFixture({existing = false} = {}) {
       assert.equal(options.method, 'GET');
       assert.equal(url.searchParams.get('name'), inputs.ids.zone);
       assert.equal(url.searchParams.get('account.id'), accountId);
-      return paged(url, [state.zone]);
+      assert.equal(url.searchParams.get('match'), 'all');
+      assert.equal(url.searchParams.get('per_page'), '50');
+      return ok([state.zone], {result_info: {page: 1, per_page: 50, total_count: 25}});
     }
     if (path.startsWith('/accounts/')) assert.ok(path.startsWith(`/accounts/${accountId}/`));
     if (path.startsWith('/zones/')) assert.ok(path.startsWith(`/zones/${zoneId}/`));
@@ -73,7 +78,11 @@ function cloudflareFixture({existing = false} = {}) {
     } else if (path.endsWith('/storage/kv/namespaces')) return paged(url, state.kv);
     else if (path.endsWith('/hyperdrive/configs')) return paged(url, state.hyper);
     else if (path.endsWith(`/r2/buckets/${bucket.name}`)) return state.bucket instanceof Response ? state.bucket.clone() : state.bucket ? ok(state.bucket) : error(404, 10006);
-    else if (path.endsWith('/dns_records')) return paged(url, state.dns.filter(row => row.name === url.searchParams.get('name')));
+    else if (path.endsWith('/dns_records')) {
+      const name = url.searchParams.get('name.exact');
+      assert.ok([apiHost, inputs.ids.blobHost].includes(name));
+      return paged(url, state.dns.filter(row => row.name === name));
+    }
     throw new Error(`Unexpected synthetic Cloudflare request ${options.method} ${path}`);
   };
   return {state, writes, reads, onWrite, fetcher, ok, error};
@@ -140,4 +149,63 @@ test('a created ID that disagrees with named readback fails closed', async () =>
   fixture.onWrite.set('hyper', create => { create(); return fixture.ok({...hyperdrive, id: id('2')}); });
   await assert.rejects(reconcileCloudResources({...inputs, fetcher: fixture.fetcher, create: true}), /conflicting Hyperdrive create receipt/);
   assert.equal(fixture.writes.length, 2);
+});
+
+test('resource write preserves a sibling update and rejects stale writes to the same environment', () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-cloud-resource-write-'));
+  const file = path.join(scratch, 'resources.json');
+  const production = {...resources.production, accountId, kvNamespaceId: id('2'), hyperdriveId: id('3')};
+  try {
+    fs.writeFileSync(file, JSON.stringify({...resources, production}));
+    writeProvisionedResources(file, 'staging', resources.staging, known);
+    writeProvisionedResources(file, 'staging', resources.staging, known);
+    assert.throws(() => writeProvisionedResources(file, 'staging', resources.staging, {...known, kvNamespaceId: id('4')}), /resources changed for staging/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {production, staging: known});
+    fs.writeFileSync(`${file}.alpha-cloud-write-lock`, '');
+    assert.throws(() => writeProvisionedResources(file, 'production', production, {...production, hyperdriveId: id('5')}), {code: 'EEXIST'});
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {production, staging: known});
+  } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+});
+
+test('the preflight command checks the env file origin using only scoped reads', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-cloud-cli-preflight-'));
+  try {
+    const config = path.join(directory, 'resources.json');
+    const envFile = path.join(directory, 'staging.env');
+    const trace = path.join(directory, 'requests.jsonl');
+    const mockFetch = path.join(directory, 'cloudflare.mjs');
+    fs.writeFileSync(config, JSON.stringify({...resources, staging: known}));
+    fs.writeFileSync(envFile, `DATABASE_URL=${inputs.databaseUrl}\n`, {mode: 0o600});
+    fs.writeFileSync(mockFetch, `
+      import {appendFileSync} from 'node:fs';
+      globalThis.fetch = async (input, options) => {
+        const url = new URL(input);
+        if (options.method !== 'GET' || url.origin !== 'https://api.cloudflare.com') throw new Error('unexpected request');
+        appendFileSync(${JSON.stringify(trace)}, JSON.stringify(url.pathname)+'\\n');
+        const responses = ${JSON.stringify({
+          '/client/v4/zones': [zone],
+          [`/client/v4/accounts/${accountId}/storage/kv/namespaces`]: [kv],
+          [`/client/v4/accounts/${accountId}/hyperdrive/configs`]: [hyperdrive],
+          [`/client/v4/accounts/${accountId}/r2/buckets/${known.r2Bucket}`]: bucket,
+        })};
+        const name = url.searchParams.get('name.exact');
+        const dns = ${JSON.stringify({[apiHost]: dnsRow(apiHost), [known.blobHost]: dnsRow(known.blobHost)})};
+        const result = url.pathname === '/client/v4/zones/${zoneId}/dns_records' ? [dns[name]] : responses[url.pathname];
+        if (!result) throw new Error('unexpected request path');
+        return Response.json({success: true, result});
+      };`);
+    const run = () => spawnSync(process.execPath, ['--import', mockFetch, 'scripts/cloud-worker.ts', 'preflight',
+      '--environment', 'staging', '--resources', config, '--env-file', envFile], {encoding: 'utf8', env: {
+      ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_API_TOKEN: inputs.token,
+    }});
+    const admitted = run();
+    assert.equal(admitted.status, 0, admitted.stderr);
+    assert.match(admitted.stdout, /resource ownership verified for staging/);
+    assert.equal(fs.readFileSync(trace, 'utf8').trim().split('\n').length, 6);
+    fs.writeFileSync(envFile, 'DATABASE_URL=postgresql://fixture:synthetic@wrong.example.invalid/cloud\n');
+    const refused = run();
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /Hyperdrive origin does not match DATABASE_URL/);
+    assert.doesNotMatch(refused.stderr, /wrong\.example\.invalid/);
+  } finally { fs.rmSync(directory, {recursive: true, force: true}); }
 });
