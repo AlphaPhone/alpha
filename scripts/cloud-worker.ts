@@ -40,10 +40,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
-import {validateCloudDeployment, type CloudDeploymentConfig} from './cloud-deployment.ts';
-import {registrationRows, seedRegistration, readIdentity} from './cloud-registration.ts';
+import {nativeAuthCallbackRegistration, validateCloudDeployment, type CloudDeploymentConfig} from './cloud-deployment.ts';
+import {registrationRows, seedRegistration, readIdentity, releaseSignerFingerprints} from './cloud-registration.ts';
 import {cloudEnvironments, type CloudEnvironment} from './cloud-sdk-authority.ts';
 import {leakedElizaHost} from './local-cloud.ts';
+import {publishedAssetLinksCheck} from './render-assetlinks.ts';
+import {PLAN_KEYS, parsePlans} from '../apps/app/src/runtime/cloud-plans.ts';
+import {parseCloudServiceInfo} from '../apps/app/src/runtime/cloud-service-info.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const identity = readIdentity(root);
@@ -53,11 +56,13 @@ export interface CloudResources {
   hyperdriveId: string; kvNamespaceId: string; r2Bucket: string; rateLimitNamespaceIds: Record<string, string>;
 }
 
-/** Secrets the operator obtains from a provider (docs/alpha-cloud.md walks through each). */
+const SERVICE_DOCUMENT_BINDINGS = ['CLOUD_PUBLIC_SERVICE_TERMS_JSON', 'CLOUD_PUBLIC_SERVICE_PRIVACY_JSON'] as const;
+
+/** Values the operator supplies, including the approved public documents. */
 export const OPERATOR_SECRETS = Object.freeze({
   required: ['DATABASE_URL', 'STEWARD_DATABASE_URL', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'CEREBRAS_API_KEY', 'RESEND_API_KEY',
     'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
-    'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID'],
+    'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID', ...SERVICE_DOCUMENT_BINDINGS],
   optional: ['CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STEWARD_GOOGLE_NATIVE_CLIENT_IDS'],
 });
 /** Secrets this tool generates once and keeps in the env file. */
@@ -71,7 +76,7 @@ export const WORKER_SECRETS = Object.freeze(['DATABASE_URL', 'KV_REST_API_URL', 
   'SECRETS_MASTER_KEY', 'CRON_SECRET', 'ELIZA_ENTITLEMENT_SIGNING_KEY', 'ELIZA_ENTITLEMENT_SIGNING_KEY_ID', 'ELIZA_SUBSCRIPTION_GRANT_CODE_PEPPER',
   'CEREBRAS_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
   'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID',
-  'CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY']);
+  'CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY', ...SERVICE_DOCUMENT_BINDINGS]);
 export const LOGIN_SECRETS = Object.freeze(['DATABASE_URL', 'STEWARD_MASTER_PASSWORD', 'STEWARD_JWT_SECRET', 'STEWARD_KDF_SALT', 'STEWARD_AUDIT_HMAC_KEY',
   'STEWARD_RATE_LIMIT_TOKEN', 'STEWARD_AGGREGATION_TOKEN', 'STEWARD_SPEND_METRICS_TOKEN', 'STEWARD_REQUEST_SIGNING_SECRET',
   'STEWARD_PLATFORM_KEYS', 'STEWARD_PLATFORM_KEY_SCOPES', 'RESEND_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STEWARD_GOOGLE_NATIVE_CLIENT_IDS']);
@@ -366,6 +371,18 @@ export function secretProblems(values: Record<string, string>, environment: Clou
   if (values.DATABASE_URL && values.DATABASE_URL === values.STEWARD_DATABASE_URL) problems.push('STEWARD_DATABASE_URL must be a separate database from DATABASE_URL');
   if (values.KV_REST_API_URL && !/^https:\/\//.test(values.KV_REST_API_URL)) problems.push('KV_REST_API_URL must be https');
   if (values.STEWARD_GOOGLE_NATIVE_CLIENT_IDS) { try { JSON.parse(values.STEWARD_GOOGLE_NATIVE_CLIENT_IDS); } catch { problems.push('STEWARD_GOOGLE_NATIVE_CLIENT_IDS must be JSON'); } }
+  for (const name of SERVICE_DOCUMENT_BINDINGS) {
+    const value = values[name];
+    if (!value) continue;
+    if (Buffer.byteLength(value, 'utf8') > 5120) {
+      problems.push(`${name} must be at most 5120 UTF-8 bytes`);
+      continue;
+    }
+    try {
+      const document = JSON.parse(value);
+      parseCloudServiceInfo({success: true, version: 1, service: {name: identity.appName, terms: document, privacy: document}});
+    } catch { problems.push(`${name} must be a JSON document with a title, revision and plain-text sections`); }
+  }
   return problems;
 }
 
@@ -435,28 +452,68 @@ export function migrate(tree: string, values: Record<string, string>, environmen
 
 export async function smoke(policy: CloudDeploymentConfig, resources: Record<CloudEnvironment, CloudResources>, environment: CloudEnvironment, fetchImpl: typeof fetch = fetch) {
   const row = validateCloudDeployment(policy)[environment], ids = resources[environment];
+  const {redirectUri} = nativeAuthCallbackRegistration(policy, identity, environment);
+  const registration = new URLSearchParams({clientId: identity.appId, environment, redirectUri});
   const rows: {gate: string; passed: boolean; detail: string}[] = [];
   const probe = async (gate: string, url: string, test: (response: Response, text: string) => string | null) => {
     try {
-      const response = await fetchImpl(url, {redirect: 'manual', headers: {'cache-control': 'no-cache'}});
+      const response = await fetchImpl(url, {redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: {'cache-control': 'no-cache'}});
       const text = await response.text();
-      const problem = test(response, text) ?? (leakedElizaHost(text) ? `names ${leakedElizaHost(text)}` : null);
+      const leak = leakedElizaHost(text) ?? leakedElizaHost(response.headers.get('location'));
+      const problem = response.status === 200 ? test(response, text) ?? (leak ? `names ${leak}` : null) : `HTTP ${response.status}`;
       rows.push({gate, passed: !problem, detail: problem ?? `HTTP ${response.status}`});
     } catch (error) { rows.push({gate, passed: false, detail: (error as Error).message}); }
   };
   const json = (text: string) => { try { return JSON.parse(text); } catch { return null; } };
-  await probe('api health', `${row.api}/api/health`, response => response.ok ? null : `HTTP ${response.status}`);
-  await probe('service document', `${row.api}/api/public/service`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status}`);
-  await probe('entitlement keys', `${row.api}/api/v1/subscription/entitlement-keys`, (response, text) => response.ok && Array.isArray(json(text)?.keys) ? null : `HTTP ${response.status}`);
-  await probe('app registration', `${row.api}/api/v1/app-auth/mobile/config?clientId=${encodeURIComponent(identity.appId)}`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status} ${text.slice(0, 120)}`);
-  await probe('plans', `${row.api}/api/v1/subscriptions/plans`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status}`);
-  await probe('sign-in providers', `${ids.loginApiUrl}/auth/providers?tenantId=${encodeURIComponent(row.tenant)}`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status}`);
-  await probe('asset links', `${row.web}/.well-known/assetlinks.json`, (response, text) => {
-    if (response.status !== 200) return `HTTP ${response.status} (Android needs 200 without redirect)`;
-    if (!/application\/json/.test(response.headers.get('content-type') ?? '')) return 'not application/json';
-    const statements = json(text);
-    return Array.isArray(statements) && statements.some((s: any) => s?.target?.package_name === identity.appId) ? null : `no statement for ${identity.appId}`;
+  await probe('api health', `${row.api}/api/health`, (_response, text) => {
+    const health = json(text);
+    return health?.status === 'ok' && health.environment === environment ? null : `expected API health for ${environment}`;
   });
+  await probe('service document', `${row.api}/api/public/service`, (_response, text) => {
+    try {
+      const service = parseCloudServiceInfo(json(text));
+      return service.name === (row.name ?? new URL(row.api).hostname) ? null : 'unexpected Cloud service name';
+    } catch { return 'expected Terms and Privacy documents accepted by Alpha sign-in'; }
+  });
+  await probe('entitlement keys', `${row.api}/api/v1/subscription/entitlement-keys`, (_response, text) => {
+    const keys: unknown = json(text)?.keys;
+    const usable = Array.isArray(keys) && keys.length > 0 && keys.every(key => {
+      if (key?.kty !== 'EC' || key.crv !== 'P-256' || typeof key.kid !== 'string' || !key.kid.trim() || key.d !== undefined
+        || typeof key.x !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(key.x)
+        || typeof key.y !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(key.y)) return false;
+      try { crypto.createPublicKey({key, format: 'jwk'}); return true; } catch { return false; }
+    });
+    return usable ? null : 'expected a nonempty set of public P-256 entitlement keys';
+  });
+  await probe('app registration', `${row.api}/api/v1/app-auth/mobile/config?${registration}`, (_response, text) => {
+    const config = json(text);
+    return config?.success === true && config.clientId === identity.appId && config.environment === environment
+      && config.redirectUri === redirectUri && config.codeChallengeMethod === 'S256' ? null : 'expected the exact native client, callback and S256';
+  });
+  await probe('plans', `${row.api}/api/v1/subscriptions/plans`, (_response, text) => {
+    try {
+      const body = json(text);
+      if (body?.success === true) {
+        const plans = parsePlans(body);
+        if (plans.length === PLAN_KEYS.length && PLAN_KEYS.every(key => plans.some(plan => plan.key === key))) return null;
+      }
+    } catch { /* The server catalogue must be usable by Alpha. */ }
+    return 'expected the Plus and Pro subscription plans';
+  });
+  await probe('sign-in providers', `${ids.loginApiUrl}/auth/providers?tenantId=${encodeURIComponent(row.tenant)}`, (_response, text) => {
+    const providers = json(text);
+    return providers?.email === true && providers.google === true ? null : 'expected email and Google sign-in';
+  });
+  await probe('asset links', `${row.web}/.well-known/assetlinks.json`, (response, text) => {
+    if (!/^application\/json\b/i.test(response.headers.get('content-type') ?? '')) return 'not application/json';
+    const signerSha256 = releaseSignerFingerprints()[0].replaceAll(':', '').toLowerCase();
+    const links = publishedAssetLinksCheck(text, {packageName: identity.appId, signerSha256});
+    return links.granted ? null : links.problems.join('; ');
+  });
+  const callback = new URL(redirectUri);
+  const callbackIntent = `intent://${callback.host}${callback.pathname}#Intent;scheme=https;package=${identity.appId};end`;
+  await probe('callback page', redirectUri, (response, text) => /^text\/html\b/i.test(response.headers.get('content-type') ?? '')
+    && text.includes(`href="${callbackIntent}"`) ? null : 'expected the hosted HTML callback for this Android package');
   return rows;
 }
 
