@@ -132,7 +132,7 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
         await expect(page.locator('[data-alpha-layer="conversation"]').getByText('I couldn’t confirm the result. Check the app before trying again.',{exact:true})).toHaveCount(1);
         await expect(page.getByText('The action could not reach a confirmed result.',{exact:true})).toHaveCount(0);
         await expect(page.getByText('Create note',{exact:true})).toHaveCount(0);
-        await page.getByRole('button',{name:'Back to apps',exact:true}).click();
+        await page.getByRole('button',{name:'Go Home',exact:true}).click();
         await page.evaluate(()=>new Promise(requestAnimationFrame));
         const after=await counts();
         // Read-only status checks may run on navigation; the uncertain effect
