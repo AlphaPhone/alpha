@@ -63,7 +63,7 @@ keys for staging and live keys for production.
 
 | Name | Where to get it | Notes |
 |---|---|---|
-| **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.ai` zone, on Workers Paid with Containers | `CLOUDFLARE_ACCOUNT_ID` and an API token: Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone DNS edit on `alphacompute.ai`. Your current wrangler login is the Eliza Labs account; do not deploy there. |
+| **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.ai` zone, on Workers Paid with Containers | Set `CLOUDFLARE_ACCOUNT_ID` and use a token for that account. Grant Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone read and DNS edit on `alphacompute.ai`. |
 | `DATABASE_URL` | Postgres for Cloud (Neon, Supabase or Railway) | Its own database. Hyperdrive is created from it. |
 | `DATABASE_IDENTITY_EXPECTED_CLUSTER_SHA256`, `DATABASE_IDENTITY_EXPECTED_AUTHORITY_SHA256` | Reviewed output of `database-identity` for that environment | Migration and registration both verify these receipts against the connection they use. |
 | `STEWARD_DATABASE_URL` | A second Postgres database for Steward | Must differ from `DATABASE_URL`. Steward migrates it at start. |
@@ -94,7 +94,7 @@ bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha
 bun run cloud:worker -- database-identity --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provision --environment staging --env-file ~/.config/alpha-cloud/staging.env --write
 bun run cloud:worker -- check --environment staging   # render and bundle, no network
-CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging
+CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
@@ -103,13 +103,18 @@ bun run cloud:worker -- pricing --environment staging --env-file ~/.config/alpha
 bun run cloud:worker -- smoke --environment staging
 ```
 
-`deploy` uploads each Worker's secrets with its version (`wrangler deploy --secrets-file`); `secrets
---apply` pushes them alone, for a rotation. `provision` creates the KV namespace, R2 bucket and Hyperdrive configuration, plus proxied DNS
-records for the API and blob hosts, and writes their ids to `cloud/resources.json` (commit that
-file). The login and web hosts are Worker custom domains, which Cloudflare creates on deploy.
-After the first deployment, the **Cloud deploy** workflow does the same from `main` with
-`--frozen` secrets. Before migrating or seeding, `preflight` checks for provisioned account,
-Hyperdrive and KV IDs in the selected environment and an explicit Cloudflare API token.
+`deploy` uploads each Worker's secrets with its version using `wrangler deploy --secrets-file`.
+`secrets --apply` pushes them alone for a rotation. `provision` verifies the account's zone, KV
+namespace, Hyperdrive configuration, R2 bucket and proxied DNS for the API and blob hosts.
+It creates missing resources and confirms them by readback. If a previous run stopped partway,
+rerun with the same account and environment to recover the resources by name. Resolve conflicts
+in the account or resource configuration before continuing. With `--write`, commit the updated
+`cloud/resources.json`. The login and web hosts are Worker custom domains created on deployment.
+
+`preflight` reads the configured resources from the selected account without changing them. With
+`--env-file`, it also checks that Hyperdrive's host, port, database and user match `DATABASE_URL`.
+`deploy` repeats these checks with its env file before uploading. Run `preflight` with the frozen
+env file before migrating or seeding.
 The `smoke` step checks which API environment answered, the Terms and Privacy text,
 public entitlement keys, the exact native client and S256 callback binding, the plan catalogue, sign-in
 providers, the enrolled release certificate's App Links grant, and the hosted callback page.
