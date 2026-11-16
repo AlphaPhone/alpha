@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { importedModelPaths, quintCacheDirectory, quintCacheDisabled, quintPackageDigest } from './quint-lib.ts';
+import { assertQuintCacheUntracked, importedModelPaths, quintCacheDirectory, quintCacheDisabled, quintPackageDigest } from './quint-lib.ts';
 import { sha256 } from './sha256.ts';
 
 export { quintCacheDirectory, quintCacheDisabled };
@@ -137,6 +137,8 @@ export function serverListening(endpoint: string, timeoutMs = 500): Promise<bool
 export function openQuintCache(root: string, enabled = !quintCacheDisabled()): QuintCache {
   const dir = quintCacheDirectory(root);
   let toolchain = '';
+  // Fails the whole check, loudly: a committed entry would otherwise be reported as a remembered pass.
+  if (enabled) assertQuintCacheUntracked(root);
   if (enabled) {
     try { toolchain = quintToolchain(root); }
     catch (error) {

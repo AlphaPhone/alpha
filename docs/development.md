@@ -173,42 +173,31 @@ flow alone assigns default apps; these component overrides do not change an owne
 This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
 retained-update qualification on the matching AOSP image remain separate release gates.
 
-Retained Pixel images use the same declared installation identity as their APK build.
-The production image stage still checks the signed release, reviewed launcher descriptor,
-platform certificate, source lock and native inputs. Supply `--branding-assets DIR` and
-`--branding-assets-report-sha256 HASH` for the matching source packet. Staging publishes
-that packet as `source-packet.zip`, with its hash-bound `source-packet.json` receipt,
-with the launcher only after all checks pass; it does not apply source, build
-or flash an image. The packet binds the catalogue identity, APK, descriptor, qualified
-Phone/SMS handlers and Provision resource. The source planner verifies the canonical
-core and system-entry preimages and outputs before it checks the exact declared retained
-projection hashes in `android/aosp/branding/installed-image-policies.json`. It reads the
+Pixel production image staging admits only `ai.alphacompute.alphaphone`. Supply
+`--branding-assets DIR` and `--branding-assets-report-sha256 HASH` to stage its matching
+branding source packet. After the normal signed-release, launcher descriptor, platform
+certificate, source lock and native checks pass, staging publishes the packet as
+`source-packet.zip` with its hash-bound `source-packet.json` receipt beside the launcher;
+it does not apply source, build or flash an image. The packet binds the canonical APK,
+descriptor, signer and qualified Phone/SMS handlers. The planner reads the
 `vendor/alphaphone` preimages from the image stage being published, whose generated
 `product.mk` is pinned before staging adds the branding include, never from an earlier
-install in the source tree. Canonical
-policy packets stay unchanged. Apply the source packet through the existing guarded
-branding stage, with `--image-stage` pointing at the admitted image stage and a new
-receipt; preserve any required prior source receipt. A retained update must preserve
-actual Phone/SMS holders and show no setup prompts. Manual role restoration does not
-pass that gate. Completed setup and explicit alternative defaults are not reassigned.
+install in the source tree. Apply the packet through the existing guarded branding stage
+with a new receipt; preserve any required prior source receipt.
 
-
-Canonical builds use `app.config.json` unchanged. To prepare an update for an
-existing `ai.elizaresearch.alphaphone` installation, set the build value
-`ALPHA_ANDROID_APPLICATION_ID=ai.elizaresearch.alphaphone`. Only identities declared
-in `android/consumer-host.json` are accepted. This selects installation identity,
+Canonical builds use `app.config.json` unchanged. A local build can set
+`ALPHA_ANDROID_APPLICATION_ID` to an identity declared in `android/consumer-host.json`
+(the historical `ai.elizaresearch.alphaphone`). This selects installation identity,
 not features or another flavor: the renderer, pinned SDK and native profile are
-the same current source. The generated native source view preserves the installed
-Java namespace, callback names, sockets and update channel without editing the
+the same current source. The generated native source view preserves that Java
+namespace, callback names, sockets and update channel without editing the
 canonical sources. Gradle refuses a stale view; APK verification compares the
-packaged identity receipt with that view. Native input receipts and signing
-approval must name the same package. The current native profile remains native;
-do not label a new build as the historical Cloud profile.
+packaged identity receipt with that view. No release path admits that identity:
+installations of the historical package carry the retired version 49 signer and
+Alpha signs with one key and no signing-key rotation, so signing admission,
+qualification and update publication accept only `ai.alphacompute.alphaphone`.
+Those phones are wiped and installed again, never upgraded in place.
 
-The canonical package starts with its own private data. This compatibility path
-updates the existing package; it does not move data or keys between packages.
-Retain the existing signer lineage and prove account, Notes, journals and pending
-callbacks on a retained-data emulator upgrade before any physical update.
 Qualify the native libraries and APKs for the exact product and SDK revisions.
 
 There is one runtime profile. Every build packages libelizainference with the
@@ -298,9 +287,8 @@ candidate, signed release and physical acceptance receipts with their exact buil
 
 `scripts/deliver-app-update.ts` publishes an admitted signed launcher APK and
 checks anonymous readback. Merging source does not publish an application update.
-Canonical builds use `ai.alphacompute.alphaphone`. An update for an existing
-`ai.elizaresearch.alphaphone` installation uses the declared compatibility identity
-described above, the existing signer lineage and retained-data qualification.
+Releases use `ai.alphacompute.alphaphone` only; an existing
+`ai.elizaresearch.alphaphone` installation is not updated in place (see above).
 The canonical package reads the `app-stable-alphacompute` release. The publisher
 still checks the version floor from `app-stable`. Android may require
 installation confirmation.
@@ -397,15 +385,12 @@ operation `sign`, the exact reviewed `workflow_commit` and `signing-plan.json`
 as the `plan` input. Preflight checks the official Actions ZIP. The protected
 job checks the same run attempt and artifact again, then stages the pinned
 private generation before accessing the signing key. Current builds produce one
-native launcher APK on the public update channel. The private signing contract
-accepts the canonical package or an explicitly approved retained-installation
-update. The latter must bind its installed identity and purpose to the exact
-reviewed producer bytes. Release tooling also retains
-the reviewed private Cloud producer input contract: its complete original standalone
-and launcher pair must match the approved hashes, Cloud profile and historical
-package identity. Both members are authenticated archive inputs; only the launcher
-is staged for signing, exported, voice-qualified or published. The rotation approval
-also names only the launcher. Input enrollment is not independent attestation of the
+native launcher APK on the public update channel. Signing admission
+(`scripts/ci/app_update_producer.py`) accepts only a
+launcher-only native plan for `ai.alphacompute.alphaphone`, signed with the one
+enrolled key: it refuses another installation identity, a standalone APK pin
+and a plan or signer record that carries a signing-key rotation.
+Input enrollment is not independent attestation of the
 private bytes or release acceptance; protected admission must still read and verify them.
 
 For publication, set `delivery_artifact_id` to the numeric ID of the original
@@ -427,7 +412,7 @@ gcloud storage cp "$signed_uri" signed.tar
 
 Complete Cartesia qualification on each exact signed APK. Record a content-free
 `alpha-cloud-voice-qualification-v1` JSON receipt with one `results` row per
-approved signed APK: exactly one launcher, including a retained Cloud input. Each
+approved signed APK: exactly one launcher. Each
 row names the observed `apkSha256`, `provider` and `outcome`, and records the
 observed booleans in `checks` for `consent`, `session`, `acousticInput`,
 `blueBar`, `transcript`, `audibleSpeakerReply`, `mute`, `unmute` and
@@ -435,16 +420,15 @@ observed booleans in `checks` for `consent`, `session`, `acousticInput`,
 and credentials. The workflow admits passing Cartesia checks for every exact APK
 named in the launcher-only signed output.
 
-For a retained Cloud archive, publication runs its unchanged historical verifier on
-the original unsigned pair and debug inputs. Alpha then independently verifies that
-the signed launcher preserves every ZIP member, compression fact, local header and
-payload byte, passes 16 KiB alignment and the pinned signature/lineage verifier on
-Android APIs 29–37, and has the exact reviewed voice receipt. The original unsigned
-manifest is retained separately. The derived one-row signed manifest names Alpha's
-admission commit, the original producer/SDK commits and the byte-equivalence proof;
-it is not attributed as a new output of the historical producer. Current native
-builds continue through the normal native verifier. Historical v62 receipts keep
-their original source, hashes and qualification scope.
+Publication reverifies every signed launcher with the normal native verifier
+(`bun run android:verify`). Alpha signs with one key and no signing-key rotation:
+phones still on version 49 (the retired signer) are wiped and installed again,
+never upgraded in place, so no release carries a rotation lineage or a standalone
+APK. `android/release-signer.json` must not carry `apkSigningRotation`; the
+signing and admission scripts refuse a record that does and name the edit that
+removes it. A `standalone` pin left in an existing producer approval is inert:
+admission is launcher-only, so the next approval is written launcher-only. Historical v62 receipts keep their original
+source, hashes and qualification scope.
 
 Set `publication_commit` to the exact reviewed commit currently on `main`.
 Prepare the qualification using the original plan bytes and the reviewed voice
@@ -728,6 +712,13 @@ routes, keeps selected chat attachments through intake, binds the selected Cloud
 image model at launch and rechecks a live file selection after storage reads
 ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
 The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
+The pin `49d8b466043ca6c3316127b616362c9d80836084` adds the fitted chat-sheet open height to the shared
+`chat-panel-layout.ts` ([eliza#39771](https://github.com/elizaOS/eliza/pull/39771), for AP-16 AC-07; Alpha
+still uses its own `fitSheetHeight` until it adopts `resolveChatSheetFitHeight`), awaits and fences local
+Inbox draft reviews ([eliza#39748](https://github.com/elizaOS/eliza/pull/39748)), clears the Files filter
+when its view is left ([eliza#39740](https://github.com/elizaOS/eliza/pull/39740)) and resumes fresh Cloud
+database migrations ([eliza#39754](https://github.com/elizaOS/eliza/pull/39754)). None of the recorded core,
+mobile-build or formal-sidecar targets changed; the eliza `bun.lock` is unchanged.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

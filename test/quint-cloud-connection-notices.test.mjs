@@ -32,6 +32,13 @@ async function observe(page) {
       plan: !!snapshot.session && !!snapshot.cloudAccount && snapshot.residentPlanNotice === 'needs-plan',
       signIn: !!snapshot.session && c.residentPlanSettings().keyExpiring,
       accountOpen: snapshot.open,
+      // The Account dialog itself shows the key's expiry with its Renew control.
+      accountExpiry: (() => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node => node.getAttribute('aria-label') === 'Account' || node.querySelector('h1,h2')?.textContent.trim() === 'Account');
+        const shown = node => !!node && node.getClientRects().length > 0;
+        return shown(dialog) && [...dialog.querySelectorAll('*')].some(node => /^Expires /.test(node.textContent.trim()) && shown(node))
+          && [...dialog.querySelectorAll('button')].some(button => button.textContent.trim() === 'Renew' && shown(button));
+      })(),
       covered: snapshot.open || (document.documentElement.dataset.activeView ?? 'home') !== 'home' || !!document.querySelector('[data-alpha-layer="conversation"][aria-hidden="false"]'),
       compact: innerWidth === 360 && innerHeight === 480,
       largeText: Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale')) >= 1.5,
@@ -43,6 +50,7 @@ async function observe(page) {
   return {
     's.required': qset(kinds),
     's.keyExpiring': input.signIn,
+    's.accountExpiry': input.accountExpiry,
     // Account temporarily unmounts Home notices; closing it proves dismissal survived.
     ...(!input.accountOpen ? {'s.dismissed': qset(kinds.filter(kind => !mounted.includes(kind)))} : {}),
     's.accountOpen': input.accountOpen,
@@ -149,6 +157,16 @@ async function exercise(page, short) {
   await expect(region(page, 'sign-in')).toHaveCount(0);
   await dismiss('plan');
   await expect(stack(page)).toHaveCount(0);
+  // Account replaces the chooser's Home branch; the dismissal must survive opening and closing it.
+  await page.evaluate(() => window.quintNoticeController.openPlan());
+  await expect(account).toBeVisible();
+  await expect(account.getByText(/^Expires /)).toBeVisible();
+  checkpoint(t, 'Account opens over the dismissed plan notice', call('openAccount'), await observe(page));
+  await account.getByRole('button', {name:'Close Account', exact:true}).click();
+  await expect(account).toHaveCount(0);
+  await expect(region(page, 'plan')).toHaveCount(0);
+  await expect(stack(page)).toHaveCount(0);
+  checkpoint(t, 'Closing Account keeps the plan notice dismissed', call('closeAccount'), await observe(page));
   await settingsRoundTrip(page, t);
   await expect(region(page, 'sign-in')).toHaveCount(0);
 
@@ -256,6 +274,6 @@ async function checkCloudConnectionNotices(extraSources = []) {
 test('mounted Cloud plan notices preserve Account expiry and Settings ownership', {timeout:scaledTimeout(600000)}, async () => {
   const receipt = await checkCloudConnectionNotices(['test/quint-cloud-connection-notices.test.mjs']);
   assert.equal(receipt.traces, 2);
-  assert.equal(receipt.observedFields.length, 10);
+  assert.equal(receipt.observedFields.length, 11);
   assert.ok(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound);
 });

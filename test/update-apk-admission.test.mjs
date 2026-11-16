@@ -19,7 +19,7 @@ const row = {build:'release',variant:'launcher',versionCode:45};
 const archive = {packageName:PACKAGE,home:true,launcher:true,xml:'android.permission.READ_CONTACTS'};
 const signature = {verified:true,packageName:PACKAGE,versionCode:45,activeSignerSha256:active,signerRootSha256:active,lineageSize:0,lineageSha256:null};
 const rotated = {...signature,signerRootSha256:old,lineageSize:2,lineageSha256:lineageHash};
-const descriptor = {signerSha256:active,apkSigningRotation:{schema:1,approval:'approved',fromVersionCode:44,versionCode:45,previousSignerSha256:old,lineageSha256:lineageHash}};
+const descriptor = {signerSha256:active};
 
 test('only the exact compiled public channel can be published', () => {
   const meta = (name,value) => `    E: meta-data\n      A: android:name="${name}"\n      A: android:value="${value}"\n`;
@@ -48,18 +48,15 @@ test('a manifest cannot substitute package, version, flavor or signing-family as
   ]) assert.throws(() => admitUpdateApkIdentity(changedRow,descriptor,changedArchive,changedSignature), undefined,name);
 });
 
-test('only the exact approved rotation selects its original installed signing family', () => {
-  assert.deepEqual(admitUpdateApkIdentity(row,descriptor,archive,rotated), {signerRootSha256:old});
-  for (const change of [{approval:'pending'},{approval:undefined},{previousSignerSha256:active},
-    {lineageSha256:old},{versionCode:46},{fromVersionCode:45},{schema:2}]) {
-    assert.throws(() => admitUpdateApkIdentity(row,{...descriptor,apkSigningRotation:{...descriptor.apkSigningRotation,...change}},archive,rotated), /exact approved/);
-  }
-  assert.throws(() => admitUpdateApkIdentity(row,{signerSha256:active},archive,rotated), /exact approved/);
-  assert.throws(() => admitUpdateApkIdentity(row,descriptor,archive,{...rotated,lineageSize:3}), /exact approved/);
-  assert.deepEqual(admitUpdateApkIdentity({...row,versionCode:46},descriptor,archive,{...rotated,versionCode:46}), {signerRootSha256:old}, 'later updates retain the approved original family');
+test('an APK with a signing-key rotation is refused, and so is a signer record that still approves one', () => {
+  assert.throws(() => admitUpdateApkIdentity(row,descriptor,archive,rotated), /carries a signing-key rotation/);
+  assert.throws(() => admitUpdateApkIdentity(row,descriptor,archive,{...signature,lineageSize:1}), /carries a signing-key rotation/);
+  const retired = {...descriptor,apkSigningRotation:{schema:1,approval:'approved',fromVersionCode:44,versionCode:45,previousSignerSha256:old,lineageSha256:lineageHash}};
+  for (const signing of [signature,rotated])
+    assert.throws(() => admitUpdateApkIdentity(row,retired,archive,signing), /Delete the apkSigningRotation object from android\/release-signer\.json/);
 });
 
-test('real SDK signatures bind binary identity and the verified original rotation certificate', {timeout:scaledTimeout(120_000)}, t => {
+test('real SDK signatures bind binary identity, and an embedded rotation is refused', {timeout:scaledTimeout(120_000)}, t => {
   let env;
   try {env = androidEnv();} catch {t.skip('Android SDK and JDK 21 are required');return;}
   const aapt2=tool('aapt2'), apksigner=tool('apksigner'), androidJar=path.join(env.ANDROID_HOME,'platforms/android-36/android.jar');
@@ -109,9 +106,7 @@ test('real SDK signatures bind binary identity and the verified original rotatio
   assert.equal(actualRotation.activeSignerSha256,second.digest);
   assert.equal(actualRotation.signerRootSha256,first.digest);
   assert.equal(actualRotation.lineageSha256,sha(fs.readFileSync(lineage)), 'the verified embedded lineage matches exact public file bytes');
-  const approved={signerSha256:second.digest,apkSigningRotation:{schema:1,approval:'approved',fromVersionCode:44,versionCode:45,previousSignerSha256:first.digest,lineageSha256:sha(fs.readFileSync(lineage))}};
-  assert.deepEqual(admitUpdateApkIdentity(replacement,approved,inspectApk(replacement.file),actualRotation), {signerRootSha256:first.digest});
-  assert.throws(()=>admitUpdateApkIdentity(replacement,{...approved,apkSigningRotation:{...approved.apkSigningRotation,approval:'pending'}},binary,actualRotation), /exact approved/);
+  assert.throws(()=>admitUpdateApkIdentity(replacement,{signerSha256:second.digest},inspectApk(replacement.file),actualRotation), /carries a signing-key rotation/);
   assert.throws(()=>verifiedUpdateSigning({...replacement,sha256:'0'.repeat(64)}), /Command failed/);
   fs.appendFileSync(replacement.file,'tampered');
   assert.throws(()=>verifiedUpdateSigning({...replacement,sha256:sha(fs.readFileSync(replacement.file))}), /Command failed/,'rehashing modified signed bytes does not grant signing authority');

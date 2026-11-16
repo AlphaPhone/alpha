@@ -89,14 +89,6 @@ public class AlphaCredentialStore {
   public AlphaCredentialStore(Context context, Runnable check) {
     owner = check;
   }
-  public boolean legacyCloudRecoveryEligible(){throw new AssertionError("Unused legacy recovery");}
-  static final class RecoveryRefused extends Exception {
-    final String code;
-    RecoveryRefused(String code) { super("Saved sign-in refused"); this.code = code; }
-  }
-  public boolean restoreLegacyCloudCredential() throws RecoveryRefused {
-    throw new AssertionError("Unused legacy recovery");
-  }
   public String readCredentialSlot(String key) {
     owner.run();
     String value = SignInTestPorts.values.get(key);
