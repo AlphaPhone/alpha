@@ -42,3 +42,10 @@ test('the toast option marks a failure', () => {
   assert.equal(ERROR_TOAST.kind, 'error');
   assert.ok(Object.isFrozen(ERROR_TOAST));
 });
+
+test('Camera and Photos failure toasts pass caught errors through errorNotice', () => {
+  // NOTIF-05: a raw exception message (a native bridge or platform error) never reaches a Photos toast.
+  const adapter = readFileSync(new URL('../apps/app/src/prototype/camera-adapter.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(adapter, /toast\([^;]*\berror\.message\b/);
+  assert.ok((adapter.match(/toast\(errorNotice\(error,/g) || []).length >= 9);
+});
