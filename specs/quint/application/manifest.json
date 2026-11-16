@@ -2863,9 +2863,9 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "simultaneousNoticesSuspendAndReturnTest",
-      "dismissPlanKeepsExactSignInTest",
-      "dismissSignInKeepsExactPlanTest"
+      "planNoticeSuspendsAndReturnsTest",
+      "dismissPlanKeepsAccountExpiryTest",
+      "compactPlanKeepsExpiryOutOfHomeTest"
     ],
     "invariants": [
       "ExactDismissal",
@@ -2877,8 +2877,8 @@
       "apps/app/src/browser/display.ts"
     ],
     "abstractions": [
-      "The mounted chooser projects a running resident with a needs-plan admission and a near-expiry sign-in. Each notice owns one dismissal and Settings suppresses publication while retaining its mounted card.",
-      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, scrolling and both dismissal orders. Account replacement, renewal, billing and installed WebView behavior remain separate."
+      "The mounted chooser projects a running resident with needs-plan admission and a near-expiry key. Only the plan owns a Home notice and dismissal; Account owns expiry and Renew. Settings, Account and foreground apps suppress publication while retaining dismissal state.",
+      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, overflow-driven scrolling, plan dismissal and Account expiry controls. Account replacement, renewal effects, billing and installed WebView behavior remain separate."
     ]
   },
   {
@@ -4347,7 +4347,10 @@
       "leaveWhileQueuedTest",
       "unconfirmedSaveTest",
       "reopenedChatRefusesCaptureTest",
-      "expandedChatRefusesCaptureTest"
+      "expandedChatRefusesCaptureTest",
+      "closingPanelDelaysCaptureTest",
+      "abortDuringRevealTest",
+      "paintedPanelRefusesCaptureTest"
     ],
     "sources": [
       "apps/app/src/prototype/camera-adapter.ts",
@@ -4360,11 +4363,11 @@
       "plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"
     ],
     "abstractions": [
-      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; one shutter. Admission represents the committed chat close in `takeRequestedPhoto`. The hold keeps the preview available during the close and while preview startup settles. Compositor transition frames are abstracted by the model and observed at the shutter in the mounted replay.",
+      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; a closing panel that may still be painted over the viewfinder after the committed chat is hidden; one shutter. Admission represents the committed chat close in `takeRequestedPhoto`; `revealed` is the wait for the closing panel's transition, and the hold keeps the preview available during it and while preview startup settles. Compositor frames are abstracted to the painted flag, which the mounted replay observes at the shutter. Without a request hold, an open chat releases the preview after its grace (`chatGraceReleases`).",
       "Current-source successor of the agent actions in the historical legacy CameraSession design model. Settlement after the preview settles is checked by scenarios (queued capture, start failure, leave while queued), not as a temporal property; no fairness assumption is made.",
-      "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter refuses a sheet, full chat, or painted panel that still overlaps the viewfinder. The context is checked again before dispatch.",
+      "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter separately refuses a committed sheet or full chat (`chatCovers`) and a painted panel that still overlaps the viewfinder (`conversationOverViewfinder`). ShutterNeverCovered follows directly from those two guard checks and adds no evidence of its own; RequestUncoversViewfinder carries the reveal wait, and the mounted replay shows that removing either painted-panel check in the source fails a trace.",
       "A recording that starts while a request is queued, lens, flash, zoom, video and scan are outside this model. A context change that the phone executor detects before it reaches the camera adapter is journaled as unknown by the coordinator (see DeviceActionReview).",
-      "The owning mounted Camera replay drives the real capture adapter with synthetic preview and shutter ports. It checks the sheet and full chat refusals, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
+      "The owning mounted Camera replay (test/quint-camera-agent-capture.test.mjs) drives the real capture adapter with synthetic preview and shutter ports. It checks the sheet and full chat refusals, a request admitted while the owner's closing panel is still painted, a reopened-then-closed panel refused at the shutter gate, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
     ],
     "invariants": [
       "CaptureNeedsVisibleCamera",
@@ -4379,7 +4382,8 @@
       "NoCaptureWhileRecording"
     ],
     "witnesses": [
-      "ReopenedChatRefusedWitness"
+      "ReopenedChatRefusedWitness",
+      "PaintedPanelRefusedWitness"
     ],
     "bounds": {
       "maxSamples": 400,
@@ -10540,7 +10544,7 @@
     "stateMapping": {
       "owner/front/session": "the mounted instance, owner.S().view === 'settings' and connectionController.getCloudClient()?.sessionId",
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
-      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization\u2026, a grant label, Authorization not verified",
+      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization…, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },

@@ -18,7 +18,9 @@ final class AlphaTelephonyRoles {
  static final Class<?>[] SMS = { AlphaSmsDeliverReceiver.class, AlphaMmsWapPushReceiver.class, AlphaMmsResultReceiver.class, AlphaRespondViaMessageService.class, AlphaSmsComposeActivity.class, ai.eliza.plugins.messages.MmsFileProvider.class };
  static void sync(Context context) {
   boolean image = AlphaImageCapability.verified(context);
-  int wanted = image ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
+  // An image may enable the manifest default through SystemConfig. A failed image admission must
+  // explicitly disable handlers instead of falling back to that enabled image default.
+  int wanted = image ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
   syncComponents(context, wanted);
  }
 

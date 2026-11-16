@@ -8,7 +8,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `Application` | `AlphaClient.attachVerifiedTransport`, `disconnect`, `setViewContext`, native startup/reset gates | Two owners, three non-reused epochs, lifecycle, sensitive observation, pending work, reviewed dispatch, voice and owner-scoped visible cache |
 | `DeviceActionReview` | Current `DeviceActions` binding and shared `DeviceActionCoordinator.pendingReview`, `performRequested`, `approve` | One focused proposal at a time with its operation class (direct, reviewed, workflow step, outside the contract), request-message binding, typed-address grounding for Browser, the Review-first preference (off, on, unreadable), one direct pass of at most four approvals that stops on the first non-success, exact context, expiry, consumed card, durable reservation identity, server decision/claim, applying marker, one effect per proposal, terminal journal and receipt. `UnknownOnlyAfterDispatch` is a registered expected violation (the public call answers `unknown` for a failure before any dispatch) |
 | `BrowserAgentOpen` | `BrowserAdapter.browserNavigateApproved`, `browserCommand`, `ViewNavigationClient.receiveInteraction`, shared `browserAllowed`/`consumeBrowserRequest` | One Browser proposal with destination class and typed-address match, one automatic open per message, presentation only after the journal and receipt attempt, and one unjournaled back/forward/reload command bound to the exact tab navigation with review-first refusal. Model-only; `OpenedClaimMeansShown` is a registered expected violation |
-| `CameraAgentCapture` | camera adapter `takeRequestedPhoto`, `active`, phone executor camera branch | One agent photo request: visible Camera required, chat closed on admission, preview hold, queued start, second check before the shutter, unknown only after the shutter. Mounted Chromium replay checks `ShutterNeverCovered` at dispatch, ready and starting previews, owner reopen, and abort during chat close |
+| `CameraAgentCapture` | camera adapter `takeRequestedPhoto`, `active`, phone executor camera branch | One agent photo request: visible Camera required, chat closed on admission and its closing panel awaited, preview hold, queued start, second check before the shutter that refuses an open chat or a painted panel, unknown only after the shutter. The mounted Chromium replay (`test/quint-camera-agent-capture.test.mjs`) observes coverage at dispatch for ready and starting previews, owner reopen, a request admitted during the owner's chat close, a panel reopened and closed before the shutter, and abort during chat close |
 | `FilesAgentActions` | phone executor Files branch, shared Files runner `run`/`reviewedIdentities`, `filesContextAllowed` | Direct filter/open (may bring Files forward) versus reviewed share, new folder, move and trash; move/trash bound to the identity read when the card was built. Model-only |
 | `NotesAgentSource` | phone executor `create_note`, Notes query and selected-note branches | Phone-side Notes operations act only on Previous notes; selected-note binding, trash copy before tombstone, reviewed reads. The canonical Notes write outside the Review-first preference is an explicit assumption and a registered expected violation. Model-only |
 | `CalendarAgentWrites` | phone executor Calendar branch | No direct Calendar operation, native review after the card, selected-record binding, queued delete reported unknown until its Undo window settles. `UnknownOnlyAfterNativeCall` is a registered expected violation. Model-only |
@@ -182,7 +182,7 @@ obligations. `Application.ReviewedDispatch` is scoped to the review-first path;
 it must not be used to infer that current-request execution requires a second
 user tap.
 
-The per-view agent modules `BrowserAgentOpen`, `CameraAgentCapture`,
+The per-view agent modules `BrowserAgentOpen`,
 `FilesAgentActions`, `NotesAgentSource`, `CalendarAgentWrites` and
 `MapsSelectedRead` are model-only: their rules were read from the listed
 sources at the pinned revision and no refinement adapter drives that source.
@@ -191,10 +191,13 @@ proposal custody that `DeviceActionReview` replays against the real coordinator.
 Each known divergence between an intended rule and the code is kept as a named
 property outside `safety`, listed under `expectedViolations` in the manifest,
 with its counterexample required as a witness by the default gate:
-`BrowserAgentOpen.OpenedClaimMeansShown`, `CameraAgentCapture.ShutterNeverCovered`,
+`BrowserAgentOpen.OpenedClaimMeansShown`,
 `NotesAgentSource.ReviewFirstCoversCanonicalNotes`,
 `CalendarAgentWrites.UnknownOnlyAfterNativeCall` and
-`MapsSelectedRead.UnknownOnlyAfterRead`. Photos agent operations are not modeled:
+`MapsSelectedRead.UnknownOnlyAfterRead`. `CameraAgentCapture` is replayed
+against the mounted Camera adapter instead: `ShutterNeverCovered` is in its
+`safety` and follows from the shutter gate's chat and painted-panel checks,
+while the replay shows each check is needed. Photos agent operations are not modeled:
 the Photos view capability is not negotiated by `phone-context.ts`, and the
 pinned server device-action contract, action, service and tools files name no
 `photo_library_*` operation, so no such proposal can reach the phone.

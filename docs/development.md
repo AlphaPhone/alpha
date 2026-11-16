@@ -96,6 +96,20 @@ requests. Its default URL is `http://127.0.0.1:5318`.
 resident profiles live under `~/.local/share/alphaphone/`. Existing accounts,
 credentials and histories are not copied or reset.
 
+### Maps input and navigation controls
+
+Automatic search and Enter share one accepted input generation for destination and origin
+fields. Loading, ready and successful empty results are reused; an explicit retry after a failed
+request remains available. New edits, provider/account changes, place/origin choices and navigation
+changes retire that ownership. Keep provider-effect counts in the owning browser/model checks.
+
+Maps navigation is visual for now, following the owner's voice deferral. Its footer keeps ETA,
+distance and End, with symmetric space around the centered ETA. The Maps-specific Ask, voice and
+manual Reroute controls and the empty-search Ask prompt are removed. The normal assistant speech
+lifecycle and the always-packaged resident/on-device speech runtime remain separate. Shared speech
+component contracts are retained; the Maps UI tests now verify silence, visual guidance, unrelated
+playback ownership and End rather than advertising deferred controls.
+
 ### Standalone Cloud (development)
 
 Distributed builds use the Cloud in `scripts/cloud-deployment-policy.ts` (Eliza Cloud
@@ -151,6 +165,13 @@ always pass it. Debug and instrumentation are test/build evidence,
 not additional release distributions. The same launcher APK can be installed on
 stock Android or preinstalled in the Alpha image. It declares HOME.
 Phone, Contacts and SMS/MMS require an admitted AOSP image capability.
+
+Production and admitted Sense qualification images stage PackageManager component overrides for
+the exact validated Phone/SMS handlers. Their eligibility is an image default rather than something
+that first depends on opening the launcher after an APK update. The existing fresh-device Provision
+flow alone assigns default apps; these component overrides do not change an owner's role choices.
+This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
+retained-update qualification on the matching AOSP image remain separate release gates.
 
 Canonical builds use `app.config.json` unchanged. To prepare an update for an
 existing `ai.elizaresearch.alphaphone` installation, set the build value
@@ -682,10 +703,11 @@ MMS receiver's MIME type when checking eligibility for the Android SMS role
 The pin `c25d0fca2561f9f604bee8e891be772fa678589f` takes the reviewed
 fix for restoring private action targets before resident execution
 ([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)).
-The current pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
+The pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
 routes, keeps selected chat attachments through intake, binds the selected Cloud
 image model at launch and rechecks a live file selection after storage reads
 ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
+The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

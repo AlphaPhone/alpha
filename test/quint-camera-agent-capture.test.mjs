@@ -47,7 +47,7 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
   }});
   const traces = [];
   try {
-    for (const scenario of ['sheet', 'full', 'uncovered', 'ready', 'abort']) {
+    for (const scenario of ['sheet', 'full', 'uncovered', 'ready', 'abort', 'closing', 'painted']) {
       const fixture = await browser.page();
       const {page} = fixture;
       try {
@@ -55,7 +55,11 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
         await page.evaluate(installCapturePort, {mediaId, operationId});
         await preview.open(1);
         const abortClosing = scenario === 'abort';
-        const alreadyReady = scenario === 'ready' || abortClosing;
+        // The owner has just closed the chat: the committed chat is hidden, its panel still painted.
+        const ownerClosing = scenario === 'closing';
+        // The owner reopens and closes the chat while the preview starts; only the panel covers it.
+        const paintedAtGate = scenario === 'painted';
+        const alreadyReady = scenario === 'ready' || abortClosing || ownerClosing;
         const reopensChat = scenario === 'sheet' || scenario === 'full';
         if (alreadyReady) {
           await preview.release(1);
@@ -72,27 +76,54 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
           return {'s.view': shell.view, 's.chat': shell.chat, 's.phase': window.quintMountedCamera().phase,
             's.shutters': shutters, 's.outcome': result?.status ?? 'none', 's.saved': !!result?.cameraResult};
         });
+        const painted = () => page.waitForFunction(() => {
+          const panel = document.querySelector('[data-alpha-layer="conversation"]');
+          return panel && Number(getComputedStyle(panel).opacity) === 1 &&
+            panel.getBoundingClientRect().height > 100;
+        });
+        const slowClose = () => page.addStyleTag({content: '[data-alpha-layer="conversation"][inert] { transition-duration: 60s !important; }'});
+        const closing = () => page.waitForFunction(() => {
+          const panel = document.querySelector('[data-alpha-layer="conversation"][inert]');
+          return window.quintMountedCalendar.S().chat === 'hidden' &&
+            panel?.getAnimations().length > 0 && Number(getComputedStyle(panel).opacity) > 0;
+        });
+        const finishClosing = () => page.evaluate(async () => {
+          const panel = document.querySelector('[data-alpha-layer="conversation"]');
+          const animations = panel.getAnimations();
+          for (const animation of animations) animation.finish();
+          await Promise.allSettled(animations.map(animation => animation.finished));
+        });
+        const frames = () => page.evaluate(() => new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 250)))));
         const initialChat = alreadyReady ? 'full' : 'sheet';
         await chat(initialChat);
-        if (alreadyReady) {
-          await page.waitForFunction(() => {
-            const panel = document.querySelector('[data-alpha-layer="conversation"]');
-            return panel && Number(getComputedStyle(panel).opacity) === 1 &&
-              panel.getBoundingClientRect().height > 100;
-          });
-        }
-        if (abortClosing) {
-          await page.addStyleTag({content: '[data-alpha-layer="conversation"][inert] { transition-duration: 60s !important; }'});
-        }
+        if (alreadyReady) await painted();
+        if (abortClosing || ownerClosing) await slowClose();
         const initial = await observe();
         const description = abortClosing ? 'request aborts while the closing panel still covers the ready preview' :
           reopensChat ? `owner opens ${scenario} while the preview is starting` :
-            `${initial['s.phase']} preview saves once after the owner can see it`;
+            ownerClosing ? 'request admitted while the owner closing panel still covers the ready preview' :
+              paintedAtGate ? 'owner reopens and closes the chat so a painted panel reaches the shutter gate' :
+                `${initial['s.phase']} preview saves once after the owner can see it`;
         const observed = trace(description,
           {'s.shutters': initial['s.shutters'], 's.outcome': initial['s.outcome']});
         checkpoint(observed, 'Camera is beneath the initial conversation',
           call('place', 'camera', initialChat, alreadyReady ? 'ready' : 'starting', false), initial);
+        if (ownerClosing) {
+          await chat('hidden');
+          await closing();
+          checkpoint(observed, 'The owner commits the close while its panel still paints over Camera',
+            call('ownerClosesChat'), await observe());
+        }
         await page.evaluate(() => window.quintAgentCapture.start());
+        if (ownerClosing) {
+          await frames();
+          const waiting = await observe();
+          assert.equal(waiting['s.shutters'], 0, 'A painted closing panel must hold the shutter');
+          assert.equal(waiting['s.outcome'], 'none', 'The request waits for the closing panel instead of refusing');
+          checkpoint(observed, 'The request waits for the painted closing panel', call('admit'), waiting);
+          await finishClosing();
+        }
         if (abortClosing) {
           await page.waitForFunction(() => {
             const panel = document.querySelector('[data-alpha-layer="conversation"][inert]');
@@ -116,6 +147,23 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
             checkpoint(observed, 'The owner covers the live viewfinder before it is ready',
               call('ownerCoversChat', scenario), await observe());
           }
+          if (paintedAtGate) {
+            await page.waitForFunction(() => {
+              const panel = document.querySelector('[data-alpha-layer="conversation"]');
+              return panel.getAnimations().length === 0 && Number(getComputedStyle(panel).opacity) === 0;
+            });
+            await frames();
+            checkpoint(observed, 'The agent close has cleared the viewfinder', [call('panelCleared'), call('revealed')], await observe());
+            await chat('sheet');
+            await painted();
+            checkpoint(observed, 'The owner reopens the chat while the preview starts',
+              call('ownerCoversChat', 'sheet'), await observe());
+            await slowClose();
+            await chat('hidden');
+            await closing();
+            checkpoint(observed, 'The owner closes it again and the panel is still painted',
+              call('ownerClosesChat'), await observe());
+          }
           await preview.release(1);
         }
         await page.waitForFunction(() => !!window.quintAgentCapture.result);
@@ -124,19 +172,26 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
         if (abortClosing) {
           assert.equal(result.status, 'failed');
           assert.equal(final['s.shutters'], 0);
-          checkpoint(observed, 'Retiring the request prevents a late shutter', [call('abort'), call('recheckFails')], final);
-          await page.evaluate(async () => {
-            const panel = document.querySelector('[data-alpha-layer="conversation"]');
-            const animations = panel.getAnimations();
-            for (const animation of animations) animation.finish();
-            await Promise.allSettled(animations.map(animation => animation.finished));
-          });
+          checkpoint(observed, 'Retiring the request prevents a late shutter', [call('abort'), call('revealFails')], final);
+          await finishClosing();
+          assert.deepEqual(await observe(), final);
+        } else if (paintedAtGate) {
+          assert.equal(result.status, 'failed');
+          assert.equal(result.summary, 'Camera viewfinder is covered');
+          assert.equal(final['s.shutters'], 0);
+          assert.equal(final['s.chat'], 'hidden');
+          checkpoint(observed, 'The shutter gate refuses the painted panel before any write',
+            [call('previewReady'), call('recheckFails')], final);
+          await finishClosing();
           assert.deepEqual(await observe(), final);
         } else if (reopensChat) {
           assert.equal(result.status, 'failed', `The ${scenario} must stop a queued shutter`);
           assert.equal(final['s.shutters'], 0);
           assert.equal(result.cameraResult, undefined);
-          checkpoint(observed, 'A covered viewfinder refuses capture before any write', [call('previewReady'), call('recheckFails')], final);
+          // Once the hold is gone, the chat grace may already have released the covered preview.
+          checkpoint(observed, 'A covered viewfinder refuses capture before any write',
+            [call('revealed'), call('previewReady'), call('recheckFails'),
+              ...(final['s.phase'] === 'off' ? [call('chatGraceReleases')] : [])], final);
         } else {
           assert.equal(result.status, 'succeeded');
           assert.equal(final['s.shutters'], 1);
@@ -144,7 +199,8 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
           assert.equal(result.cameraResult.mediaId, mediaId);
           assert.equal(result.cameraResult.operationId, operationId);
           checkpoint(observed, 'The uncovered preview completes one identified capture',
-            [alreadyReady ? call('admit') : call('previewReady'), call('shutter'), call('written', 'succeeded')], final);
+            [...(ownerClosing ? [] : alreadyReady ? [call('admit')] : []), call('panelCleared'), call('revealed'),
+              ...(alreadyReady ? [] : [call('previewReady')]), call('shutter'), call('written', 'succeeded')], final);
         }
         traces.push(observed);
       } finally { await fixture.close(); }
@@ -157,7 +213,7 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 5);
+  assert.equal(receipt.traces, 7);
 });
 
 async function installStoredCapturePort() {
