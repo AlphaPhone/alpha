@@ -1,3 +1,4 @@
+import {androidIdentity} from './android-identity.ts';
 // Consumer-owned preparation of the pinned fused Android engine and relocated JNI host.
 // Produces isolated artifacts only; does not alter vendor, package an APK or select runtime providers.
 import fs from 'node:fs';
@@ -28,7 +29,7 @@ const forkPin=git(upstream,'ls-tree',pin,forkPath).match(/^160000 commit ([a-f0-
 if(!forkPin||git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact Eliza gitlink');
 if(git(fork,'submodule','status','--recursive').split('\n').some(line=>line&&/^[-+U]/.test(line)))throw Error('Engine nested submodules must already be initialized at their pins; no downloads are performed');
 for(const file of ['tools/omnivoice/CMakeLists.txt','tools/omnivoice/include/eliza-inference-ffi.h'])if(!fs.existsSync(path.join(fork,file)))throw Error('Pinned fused engine source is incomplete');
-const identity=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8')).appId;
+const identity=androidIdentity(root).appId;
 if(!/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(identity))throw Error('Invalid product identity');
 const sdk=process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT;
 if(!sdk)throw Error('Set ANDROID_HOME to the existing SDK');

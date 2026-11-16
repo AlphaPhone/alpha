@@ -67,6 +67,35 @@ class OSAdmission(unittest.TestCase):
         ota.validate(self.plan)
         ota.inspect_target(self.reviewed_target, self.plan, self.pin)
 
+    def test_target_specific_signer_map_preserves_legacy_admission_and_exact_binding(self):
+        original = copy.deepcopy(self.plan)
+        added = 'name="AlphaImageCapabilityOverlay.apk" certificate="security/platform.x509.pem" private_key="security/platform.pk8"\n'
+        target = self.target("provisioned-target.zip", {"META/apkcerts.txt":
+            'name="Settings.apk" certificate="security/platform.x509.pem" private_key="security/platform.pk8"\n' + added})
+        plan = copy.deepcopy(self.plan);self.bind_target(plan, target)
+        signers = {**self.signers, "AlphaImageCapabilityOverlay.apk": self.signers["Settings.apk"]}
+        mapping = hashlib.sha256(json.dumps(signers, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        row = {"targetFilesSha256": plan["targetFiles"]["sha256"],
+               **{field: plan[field] for field in ("sourceCommit", "sdkCommit", "targetFingerprint", "buildTimestamp")},
+               "apkSignerMappingsSha256": mapping}
+        self.pin["reviewedTargets"].append(row)
+        pin_file = self.root / "android/signing/ota-tools.json";pin_file.write_text(json.dumps(self.pin))
+        ota.validate(original);ota.inspect_target(self.reviewed_target, original, self.pin)
+        ota.validate(plan);ota.inspect_target(target, plan, self.pin)
+        row["apkSignerMappingsSha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "identities changed"): ota.inspect_target(target, plan, self.pin)
+        row["apkSignerMappingsSha256"] = mapping
+        with self.assertRaisesRegex(ValueError, "identities changed"): ota.inspect_target(self.reviewed_target, plan, self.pin)
+        self.pin["reviewedTargets"].append(copy.deepcopy(row));pin_file.write_text(json.dumps(self.pin))
+        with self.assertRaisesRegex(ValueError, "exactly one"): ota.validate(plan)
+
+    def test_invalid_target_specific_signer_map_or_extra_fields_are_refused(self):
+        pin_file = self.root / "android/signing/ota-tools.json"
+        for patch in [{"apkSignerMappingsSha256": "invalid"}, {"apkSignerMappingsSha256": None},
+                      {"apkSignerMappingsSha256": "a" * 64, "allowOtherSigners": True}]:
+            pin = copy.deepcopy(self.pin);pin["reviewedTargets"][0].update(patch);pin_file.write_text(json.dumps(pin))
+            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, "Invalid reviewed target"): ota.validate(self.plan)
+
     def test_foreign_or_unbounded_plans_are_refused(self):
         for field, value in [("purpose", "production"), ("sourceCommit", "f" * 40), ("device", "other"),
                              ("buildTimestamp", True), ("outputObject", "signed/other.zip")]:
@@ -107,9 +136,10 @@ class OSAdmission(unittest.TestCase):
             file = self.target(f"metadata-copy-{i}.zip", change)
             plan = copy.deepcopy(self.plan)
             self.bind_target(plan, file)
-            # These metadata-only checks intentionally cannot prove image identity.
-            ota.inspect_target(file, plan, self.pin)
-            with self.subTest(case=i), self.assertRaisesRegex(ValueError, "lineage"):
+            # Inspection also binds the exact reviewed target before selecting its signer mapping.
+            with self.subTest(case=i, stage="inspect"), self.assertRaisesRegex(ValueError, "lineage"):
+                ota.inspect_target(file, plan, self.pin)
+            with self.subTest(case=i, stage="validate"), self.assertRaisesRegex(ValueError, "lineage"):
                 ota.validate(plan)
 
     def test_data_partitions_hooks_signer_changes_and_wrong_build_are_refused(self):

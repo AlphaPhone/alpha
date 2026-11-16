@@ -339,7 +339,7 @@ assertImageLauncherManifest(provisioningTree, production);
 if (production) aospTelephonyRoleComponents(provisioningTree, identity.appId);
 if (senseImage) assertSenseLauncher(provisioningTree, identity.appId);
 if (production || senseImage)
-  assertProvisioningUpdateChannel(apkUpdateChannelOrLegacy(parseXmlTree(provisioningTree)), reviewedUpdateChannel);
+  assertProvisioningUpdateChannel(apkUpdateChannelOrLegacy(parseXmlTree(provisioningTree), identity), reviewedUpdateChannel);
 fs.appendFileSync(path.join(output, "product.mk"), clockProductRequirement);
 // The image system feature Alpha Phone requires, with a system-partition install, before it offers
 // Phone, Contacts or SMS (P-36). Every image declares it, but the app also requires a release

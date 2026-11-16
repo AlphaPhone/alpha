@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // The release SBOM is built offline from source pins and admitted native outputs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -167,7 +168,7 @@ test('release-candidate options list what was built and never upgrade it', t => 
   assert.deepEqual(sbomArgs('artifacts', dir).slice(-1), ['--packaged-runtime']);
 });
 
-test('staged native candidates retain their actual hashes when the embedding source record is superseded', t => {
+fixtureTest('staged native candidates retain their actual hashes when the embedding source record is superseded', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-sbom-source-record-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const write = (file, bytes) => {

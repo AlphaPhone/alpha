@@ -64,6 +64,8 @@ async function driver(code) {
     typeQuery: () => act(() => data().onQ({target: {value: 'cafe'}})),
     clearQuery: () => act(() => data().clearQ()),
     submitSearch: () => act(() => data().qKey(enter)),
+    debounceInput: () => act(() => harness.flushInputTimers()),
+    lateInputTimer: () => act(() => harness.flushRetiredInputTimers()),
     pickResult: () => act(() => { const rows = data().results; assert.equal(rows.length, 1, 'one result row'); rows[0].go(); }),
     pickSaved: () => act(() => data().chips[0].go()),
     closePlace: () => act(() => data().pc.close()),
@@ -120,6 +122,7 @@ async function driver(code) {
       const s = screen(), background = harness.host.background, state = s.state, selected = s.selected;
       assert.equal(m.render().mode, view.mode, 'a render changes nothing');
       return {
+        pendingInput: harness.inspect().queryDraft!==undefined||harness.inspect().originDraft!==undefined?(screen().directions?'origin':'query'):'none',
         mode: modes[view.mode] ?? view.mode, searching: s.searching, hasQuery: !!s.query, results: state?.search.phase === 'ready',
         selected: !selected ? 'none' : selected.origin === 'location' ? 'location' : selected.origin === 'saved' ? 'saved' : 'place',
         directions: s.directions, originMode: s.originMode, navigating: s.navigating,

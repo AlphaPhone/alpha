@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 /** Unexecuted source proposal: metadata-only admission controls, never voice qualification. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -46,7 +47,7 @@ test('present staging retains stale-current-pin refusal despite explicit allow',
   assert.throws(() => verifyVoiceHost(f.root), /records pin .*upstream.lock.json pins/);
 });
 
-test('empty/partial native staging still reaches the real strict build-record gate', t => {
+fixtureTest('empty/partial native staging still reaches the real strict build-record gate', t => {
   const f = fixture(t);
   f.stage();
   assert.throws(() => verifyVoiceHost(f.root), /Paradee native build record is missing/);
