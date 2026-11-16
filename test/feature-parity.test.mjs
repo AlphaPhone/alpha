@@ -30,7 +30,6 @@ test('every Alpha-owned behavioural module is listed; moved modules leave the al
   assert.deepEqual(allowlist.modules, [...allowlist.modules].sort(), 'modules stay sorted');
 });
 
-
 test('reviewed product helpers retain an inventoried owner and focused validation', () => {
   for (const [module, review] of Object.entries(allowlist.reviewedHelpers)) {
     assert.ok(allowlist.modules.includes(module), `${module} remains in the exact inventory`);
