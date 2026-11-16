@@ -184,7 +184,7 @@ for (const mode of modes) {
     const d = validateApk(file, identity);
     if (d.debuggable !== (mode === "debug"))
       throw new Error(`Wrong debug flag: ${file}`);
-    const { facts, problems } = distributionProblems(d, { mode });
+    const { facts, problems } = distributionProblems(d, { mode, appId: identity.appId });
     const tree = parseXmlTree(d.xml);
     try{
       const compiled=apkUpdateChannel(tree);
