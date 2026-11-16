@@ -94,6 +94,8 @@ function rendererSlots(){
    if(where.endsWith('runtime/notes-secure-store.ts')&&match[2].trim()==='key')continue;
    // The Inbox local store passes its caller's slot through; its callers' slots are checked.
    if(where.endsWith('runtime/inbox-local-store.ts')&&match[2].trim()==='slot')continue;
+   // The durable draft slot store hashes its caller's prefix + binding; its callers' prefixes are checked below.
+   if(where.endsWith('runtime/assistant-draft-store.ts')&&match[2].trim()==='slot'){assert.ok(text.includes('const slot=prefix+hash;'));continue;}
    // The reminder journal binding passes its caller's slot through; its callers' slots are checked below.
    if(where.endsWith('runtime/reminder-journal-store.ts')&&match[2].trim()==='slot')continue;
    if(where.endsWith('runtime/service-read-cache-store.ts')&&match[2].trim()==='slot'){found.push({slot:'connected-read-cache:v1:'+SAMPLE,where});assert.ok(text.includes("slot='connected-read-cache:v1:'+hash"));continue;}
@@ -118,6 +120,13 @@ function rendererSlots(){
  // The shared Notes draft slot writes Alpha's named draft slot through the vault above.
  assert.equal([...notes.matchAll(/createNotesDraftSlot\(vault,SECURE_NOTES_DRAFT_SLOT\)/g)].length,3,'read, save and clear use the draft slot');
  found.push({slot:exported.get('SECURE_NOTES_DRAFT_SLOT'),where:'apps/app/src/runtime/notes-secure-store.ts (shared draft slot)'});
+ // Each durable draft slot store caller names its prefix; the slot is that prefix + a SHA-256 hex digest.
+ const draftCallers=[];
+ for(const file of files){
+  const text=readFileSync(file,'utf8');
+  for(const match of text.matchAll(/durableDraftSlotStore\((['"])([^'"]+)\1,/g)){draftCallers.push(relative(root,file));found.push({slot:match[2]+SAMPLE,where:relative(root,file)});}
+ }
+ assert.deepEqual(draftCallers.sort(),['apps/app/src/prototype/inbox-unsaved.ts','apps/app/src/runtime/assistant-draft-store.ts'],'every durable draft slot prefix is a literal');
  // The shared reminder journals write the slots their Alpha bindings name.
  for(const name of ['reminder-creations','reminder-deletions']){
   const where=`apps/app/src/runtime/${name}.ts`,text=readFileSync(join(root,where),'utf8');
