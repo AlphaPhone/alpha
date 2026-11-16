@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,7 +14,7 @@ const native = '.eliza/paradee-voice/native';
 const host = 'android/app/src/main/jniLibs';
 const engine = 'libelizainference.so';
 
-test('staging publishes recorded x86_64 voice libraries only when x86_64 is selected', t => {
+fixtureTest('staging publishes recorded x86_64 voice libraries only when x86_64 is selected', t => {
   const {dir, from, record} = fixtureProduct(t);
   const options = {from: [from], abis: ['x86_64']};
   const result = stageVoiceModels(dir, options);
@@ -31,7 +32,7 @@ test('staging publishes recorded x86_64 voice libraries only when x86_64 is sele
   assert.deepEqual(stageVoiceModels(dir, options), result, 'same recorded output is idempotent');
 });
 
-test('staging refuses a changed voice output or conflicting app library before publication', t => {
+fixtureTest('staging refuses a changed voice output or conflicting app library before publication', t => {
   const changed = fixtureProduct(t);
   const relative = `jniLibs/x86_64/${engine}`;
   fs.writeFileSync(path.join(changed.from, relative), 'engine x86_64 changed');

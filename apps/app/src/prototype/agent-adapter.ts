@@ -1,5 +1,5 @@
 import {createImagePreview} from '../runtime/image-preview';
-import {ChatAttachmentPicker,encodeChatAttachment} from './attachment-picker';
+import {ChatAttachmentPicker,encodeChatAttachments} from './attachment-picker';
 import {storedChatFiles,type ChatFile} from './chat-attachment-files';
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
 import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
@@ -1509,7 +1509,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     try{
       const files:File[]=await shell.chatAttachmentPicker.choose(abort.signal,maximum,current);
       if(!current()||!files.length)return;
-      const encoded=await Promise.all(files.map(encodeChatAttachment));
+      const encoded=await encodeChatAttachments(files);
       if(!current())return;
       if(!attachmentBatchFits([...existing,...encoded],camera?.image)){shell.toast('Choose fewer or smaller files.');return;}
       shell.fileAttachmentScope=binding;
