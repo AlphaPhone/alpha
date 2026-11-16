@@ -10660,6 +10660,8 @@
       "unloadedPageRefusesEveryEgressTest",
       "insecurePageIsNotBookmarkedTest",
       "privateTabEgressTest",
+      "bookmarkCommitAndRemoveTest",
+      "privateBookmarkOutsideHistoryTest",
       "copyLinkNeedsShownPageTest",
       "insecurePageFailureIsExplainedTest",
       "failedShareIsReportedTest"
@@ -10684,7 +10686,9 @@
       "InsecurePageFailedWitness"
     ],
     "sources": [
-      "apps/app/src/prototype/browser-adapter.ts"
+      "apps/app/src/prototype/browser-adapter.ts",
+      "apps/app/src/browser/browser-surface.ts",
+      "apps/app/src/browser/preference-documents.ts"
     ],
     "symbols": [
       {
@@ -10738,7 +10742,7 @@
     "abstractions": [
       "One tab is selected throughout; it loads one HTTPS and one plain-HTTP address. Revisions are bounded at 5 and each kind of egress at 3.",
       "The clipboard answers a copy before anything else happens; the source checks the page again after that answer. The bookmark store applies a write at once (BookmarksHydration models its queue and hydration).",
-      "On the web build a page that can only be opened externally may also be bookmarked; the model covers the native build.",
+      "The native port replay covers all page actions. The mounted web replay covers bookmark admission and persistent bookmark storage for committed HTTPS, pending loads, HTTP and private tabs. The shipped web surface emits committed pages, pending loads or errors; the retained externalOnly event compatibility is outside these traces.",
       "PrivatePageBookmarkedWitness, PrivatePageEmailedWitness and PrivatePageCopiedWitness record current behavior: a private page's address can be bookmarked, put in an email draft and copied by the user's own action without a further confirmation. PageMovedUnderShareSheetWitness records that a page may navigate while the native sheet is open.",
       "test/quint-browser-page-egress.test.mjs replays this model's scenario, witness and random traces against the installed Browser adapter's rendered Share, Share by email, Copy link and Bookmark controls over the shared tab session in a jsdom document, with a controlled native plugin, clipboard and menu-close delay, and compares the observed state after every step; that is bounded evidence within the stated ports and does not establish device acceptance."
     ],
