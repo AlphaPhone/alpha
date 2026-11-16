@@ -1,18 +1,43 @@
+// Alpha Cloud is described by data: the app's Cloud policy rows plus the operator's resource ids
+// (scripts/cloud-worker.ts), with the app's native client registered as database rows
+// (scripts/cloud-registration.ts). The app and its Cloud share one identity.
 import {spawnSync} from 'node:child_process';
-// The product's own Cloud API Worker is described by data: the app's Cloud policy rows plus the
-// operator's resource ids (scripts/cloud-worker.ts). The app and its Cloud share one identity.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
-import {workerDeployment,WORKER_SECRETS} from '../scripts/cloud-worker.ts';
+import os from 'node:os';
+import path from 'node:path';
+import {migrationOutcome,workerDeployment,edgeConfig,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
+ WORKER_SECRETS,LOGIN_SECRETS,OPERATOR_SECRETS,GENERATED_SECRETS} from '../scripts/cloud-worker.ts';
+import {registrationRows,registrationFor,registrationAppId,colonFingerprint,releaseSignerFingerprints} from '../scripts/cloud-registration.ts';
+import {edgeRoute} from '../cloud/edge/worker.ts';
 import {SHIPPED_CLOUD_DEPLOYMENT} from '../scripts/cloud-deployment-policy.ts';
+import {validateCloudDeployment,storageFingerprint,STORAGE_NAMESPACES} from '../scripts/cloud-deployment.ts';
 import {leakedElizaHost} from '../scripts/local-cloud.ts';
 
-const policy=JSON.parse(fs.readFileSync('cloud/policy.example.json','utf8'));
-const resources=JSON.parse(fs.readFileSync('cloud/resources.example.json','utf8'));
-const identity=JSON.parse(fs.readFileSync('app.config.json','utf8'));
+const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
+const example={policy:read('cloud/policy.example.json'),resources:read('cloud/resources.example.json')};
+const alpha={policy:read('cloud/policy.json'),resources:read('cloud/resources.json')};
+const identity=read('app.config.json');
 
-test('the Worker deployment takes every authority from the app policy and every id from the operator',()=>{
+test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.ai and is not a shipped namespace',()=>{
+ validateCloudDeployment(alpha.policy);
+ assert.equal(identity.appId,'ai.alphacompute.alphaphone');
+ for(const environment of ['production','staging']){
+  const row=alpha.policy[environment];
+  for(const origin of [row.api,row.web,row.services])assert.match(new URL(origin).hostname,/(^|\.)alphacompute\.ai$/);
+  assert.equal(row.entitlementAudience,identity.appId);
+  assert.match(row.tenant,/^alphacompute/);
+  const ids=alpha.resources[environment];
+  assert.equal(ids.zone,'alphacompute.ai');
+  for(const host of [ids.blobHost,new URL(ids.loginApiUrl).hostname])assert.match(host,/\.alphacompute\.ai$/);
+ }
+ assert.ok(!STORAGE_NAMESPACES.includes(storageFingerprint(alpha.policy)));
+ assert.equal(leakedElizaHost(alpha),null);
+});
+
+for(const [name,{policy,resources}] of Object.entries({example,alpha}))test(`the ${name} deployment takes every authority from the policy and every id from the operator`,()=>{
  const deployment=workerDeployment(policy,resources);
  assert.equal(deployment.id,identity.slug+'-cloud');
  assert.deepEqual(Object.keys(deployment.environments).sort(),['production','staging']);
@@ -22,28 +47,36 @@ test('the Worker deployment takes every authority from the app policy and every 
   assert.equal(worker.tenantId,row.tenant);
   assert.equal(worker.serviceName,row.name);
   assert.deepEqual(worker.entitlement,{issuer:row.api,audience:row.entitlementAudience});
-  assert.equal(worker.billingUrl,row.services+'/cloud/billing');
   assert.deepEqual(worker.routes,[{pattern:new URL(row.api).host+'/*',zone:ids.zone},{pattern:ids.blobHost+'/*',zone:ids.zone}]);
   assert.equal(worker.accountId,ids.accountId);
   assert.equal(worker.resources.hyperdriveId,ids.hyperdriveId);
-  const [callback]=worker.components.web.nativeAuthCallbacks;
-  assert.equal(callback.redirectUri,row.web+'/alphaphone/auth/callback');
-  assert.equal(callback.androidPackage,identity.appId);
-  assert.equal(callback.browserSignIn.apiOrigin,row.api);
   assert.deepEqual(worker.secrets,[...WORKER_SECRETS]);
-  // Every component is this product's own: names derive from its API Worker, hosts and tenant from the policy.
-  const {login,speech,admission,web}=worker.components;
+  assert.equal(worker.vars.ELIZA_MOBILE_APP_AUTH_ENABLED,'true');
+  assert.equal(worker.vars.DIRECT_REDIS_BACKEND,'redis-rest');
+  // Only Steward is an upstream component: Pages, speech and admission are not deployed, and the
+  // removed per-app registration setting is never a secret.
+  assert.deepEqual(Object.keys(worker.components),['login']);
+  assert.equal(worker.durableObjectTransfers,undefined);
+  assert.ok(!worker.secrets.includes('ELIZA_MOBILE_APP_AUTH_CLIENTS_JSON'));
+  const {login}=worker.components;
   assert.equal(login.host,new URL(ids.loginApiUrl).host);
-  assert.deepEqual([login.vars.APP_URL,login.vars.PASSKEY_ORIGIN,login.vars.PASSKEY_RP_ID,login.vars.STEWARD_DEFAULT_TENANT_ID,login.vars.EMAIL_FROM],[row.web,row.web,new URL(row.web).hostname,row.tenant,ids.mailFrom]);
-  for(const component of [login,speech,admission])assert.ok(component.workerName.startsWith(ids.workerName+'-'),component.workerName);
-  assert.equal(worker.durableObjectTransfers.InferenceAdmissionGate,admission.workerName);
-  assert.deepEqual(web.nativeAuthCallbacks,[callback]);
+  assert.ok(login.workerName.startsWith(ids.workerName+'-'));
+  assert.deepEqual([login.vars.APP_URL,login.vars.PASSKEY_ORIGIN,login.vars.PASSKEY_RP_ID,login.vars.STEWARD_DEFAULT_TENANT_ID,login.vars.EMAIL_FROM],[ids.loginApiUrl,row.web,new URL(row.web).hostname,row.tenant,ids.mailFrom]);
+  assert.equal(login.vars.STEWARD_OAUTH_ALLOWED_REDIRECTS,row.web+'/alphaphone/auth/callback');
+  assert.deepEqual(login.secrets,[...LOGIN_SECRETS]);
+  // The web host is Alpha's edge Worker bound to this deployment's API.
+  const edge=edgeConfig(policy,resources,environment,os.tmpdir());
+  assert.equal(edge.name,ids.workerName+'-edge');
+  assert.deepEqual(edge.routes,[{pattern:new URL(row.web).host,custom_domain:true}]);
+  assert.deepEqual(edge.services,[{binding:'API',service:ids.workerName}]);
+  assert.ok(path.resolve(os.tmpdir(),edge.main).endsWith('cloud/edge/worker.ts'));
  }
  assert.equal(leakedElizaHost(deployment),null);
 });
 
-test('secrets are names only, and a shipped, Eliza-naming or incomplete input is refused',()=>{
- for(const name of WORKER_SECRETS)assert.match(name,/^[A-Z][A-Z0-9_]+$/);
+test('shipped, Eliza-naming or incomplete input is refused',()=>{
+ const {policy,resources}=example;
+ for(const name of [...WORKER_SECRETS,...LOGIN_SECRETS])assert.match(name,/^[A-Z][A-Z0-9_]+$/);
  assert.throws(()=>workerDeployment(SHIPPED_CLOUD_DEPLOYMENT,resources),/shipped Cloud deployment/);
  const naming=structuredClone(resources);naming.production.loginApiUrl='https://login.eliza.app';
  assert.throws(()=>workerDeployment(policy,naming),/must not name login\.eliza\.app/);
@@ -55,9 +88,109 @@ test('secrets are names only, and a shipped, Eliza-naming or incomplete input is
  assert.throws(()=>workerDeployment(insecure,resources),/canonical HTTPS origins/);
 });
 
-test('Worker rendering refuses an output under the pinned source before invoking upstream',()=>{
- const result=spawnSync(process.execPath,['scripts/cloud-worker.ts','render','--policy','cloud/policy.example.json',
-  '--resources','cloud/resources.example.json','--upstream','unused','--out','vendor/eliza/cloud-output-fixture'],{encoding:'utf8'});
+test('the app registration is the rows upstream admits: approved app, exact https callback, release signers',()=>{
+ for(const environment of ['production','staging']){
+  const rows=registrationRows(alpha.policy,environment),row=alpha.policy[environment];
+  const callback=row.web+'/alphaphone/auth/callback';
+  assert.equal(rows.client.client_id,'ai.alphacompute.alphaphone');
+  assert.equal(rows.client.android_package_name,'ai.alphacompute.alphaphone');
+  assert.equal(rows.client.callback_android_package,'ai.alphacompute.alphaphone');
+  assert.equal(rows.client.redirect_uri,callback);
+  assert.equal(rows.client.app_id,rows.app.id);
+  assert.match(rows.app.id,/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(rows.app.id,registrationAppId(identity,environment,row.api));
+  assert.deepEqual(rows.app.allowed_origins,[callback]);
+  assert.equal(rows.app.is_active&&rows.app.is_approved,true);
+  assert.deepEqual(rows.client.browser_sign_in,{startPath:'/alphaphone/auth/browser-start',returnPath:'/__alpha-browser-cloud/signin-return',storageKey:'alpha-browser-sign-in:v1',apiOrigin:row.api,tenant:row.tenant});
+  for(const fingerprint of rows.client.android_cert_fingerprints)assert.match(fingerprint,/^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/);
+  assert.deepEqual(rows.client.android_cert_fingerprints,releaseSignerFingerprints());
+ }
+ assert.notEqual(registrationRows(alpha.policy,'production').app.id,registrationRows(alpha.policy,'staging').app.id);
+ const signer=read('android/release-signer.json');
+ assert.equal(releaseSignerFingerprints()[0],colonFingerprint(signer.signerSha256));
+ assert.throws(()=>colonFingerprint('AB'),/64 lower-case hex/);
+ // The loopback local Cloud uses the same rows with its port-bearing origin.
+ const local=registrationFor({api:'https://127.0.0.1:8787',web:'https://127.0.0.1:8787',tenant:'alphacloud-local'},'staging');
+ assert.equal(local.client.redirect_uri,'https://127.0.0.1:8787/alphaphone/auth/callback');
+ assert.equal(local.owner.email,'apps@localhost.invalid');
+});
+
+test('secrets: operator names are named, internal ones are generated once and never rotated',()=>{
+ const environment='staging';
+ const first=completeSecrets({},environment);
+ for(const name of GENERATED_SECRETS)assert.ok(first[name],name);
+ assert.match(first.STEWARD_PLATFORM_KEYS,/^stw_platform_[0-9a-f]{64}$/);
+ const scopes=JSON.parse(first.STEWARD_PLATFORM_KEY_SCOPES);
+ assert.deepEqual(Object.keys(scopes),[crypto.createHash('sha256').update(first.STEWARD_PLATFORM_KEYS).digest('hex')]);
+ assert.ok(!first.STEWARD_PLATFORM_KEY_SCOPES.includes(first.STEWARD_PLATFORM_KEYS));
+ crypto.createPrivateKey({key:Buffer.from(first.ELIZA_ENTITLEMENT_SIGNING_KEY,'base64'),format:'der',type:'pkcs8'});
+ assert.deepEqual(completeSecrets(first,environment),first);
+ const missing=secretProblems(first,environment);
+ for(const name of OPERATOR_SECRETS.required)assert.ok(missing.includes(`${name} is missing`),name);
+ const operator={DATABASE_URL:'postgresql://cloud@db.internal/alpha',STEWARD_DATABASE_URL:'postgresql://steward@db.internal/steward',KV_REST_API_URL:'https://kv.internal',
+  KV_REST_API_TOKEN:'t',CEREBRAS_API_KEY:'c',RESEND_API_KEY:'r',GOOGLE_CLIENT_ID:'g.apps.googleusercontent.com',GOOGLE_CLIENT_SECRET:'s',STRIPE_SECRET_KEY:'sk_test_x',
+  STRIPE_WEBHOOK_SECRET:'w',STRIPE_PLUS_MONTHLY_PRICE_ID:'price_p',STRIPE_PLUS_PRODUCT_ID:'prod_p',STRIPE_PRO_MONTHLY_PRICE_ID:'price_q',STRIPE_PRO_PRODUCT_ID:'prod_q'};
+ const complete={...first,...operator};
+ assert.deepEqual(secretProblems(complete,environment),[]);
+ assert.deepEqual(secretProblems(complete,'production'),['STRIPE_SECRET_KEY must be a live key in production']);
+ assert.ok(secretProblems({...complete,STEWARD_DATABASE_URL:complete.DATABASE_URL},environment).some(problem=>/separate database/.test(problem)));
+ assert.ok(secretProblems({...complete,KV_REST_API_URL:'https://kv.eliza.app'},environment).some(problem=>/names kv\.eliza\.app/.test(problem)));
+ // Steward gets its own database as DATABASE_URL; the API never sees Steward's vault secrets.
+ const login=componentSecrets(complete,'login'),api=componentSecrets(complete,'api');
+ assert.equal(login.DATABASE_URL,operator.STEWARD_DATABASE_URL);
+ assert.equal(api.DATABASE_URL,operator.DATABASE_URL);
+ for(const name of ['STEWARD_MASTER_PASSWORD','STEWARD_KDF_SALT','STEWARD_AUDIT_HMAC_KEY'])assert.equal(api[name],undefined);
+ assert.equal(api.STEWARD_JWT_SECRET,login.STEWARD_JWT_SECRET);
+});
+
+test('the secrets file must be private and outside the checkout',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-cloud-secrets-'));
+ const file=path.join(dir,'staging.env');
+ fs.writeFileSync(file,'A_KEY=1\nQUOTED="two"\n# comment\n',{mode:0o644});
+ assert.throws(()=>readEnvFile(file),/chmod 600/);
+ fs.chmodSync(file,0o600);
+ assert.deepEqual(readEnvFile(file),{A_KEY:'1',QUOTED:'two'});
+ assert.throws(()=>readEnvFile('cloud/staging.env'),/outside the checkout/);
+});
+
+test('the edge Worker forwards only asset links and the registered native returns',()=>{
+ const at=url=>edgeRoute(new URL(url));
+ assert.equal(at('https://cloud.alphacompute.ai/.well-known/assetlinks.json'),'assetlinks');
+ assert.equal(at('https://cloud.alphacompute.ai/alphaphone/auth/callback?code=x&state=y'),'hosted');
+ assert.equal(at('https://cloud.alphacompute.ai/alphaphone/billing/return?session=x'),'hosted');
+ assert.equal(at('https://cloud.alphacompute.ai/alphaphone/auth/browser-start'),'hosted');
+ assert.equal(at('https://cloud.alphacompute.ai/health'),'health');
+ for(const url of ['https://cloud.alphacompute.ai/','https://cloud.alphacompute.ai/cloud/billing','https://cloud.alphacompute.ai/api/v1/user',
+  'https://cloud.alphacompute.ai/a/b/auth/callback','http://cloud.alphacompute.ai/alphaphone/auth/callback','https://cloud.alphacompute.ai/ALPHA/auth/callback'])assert.equal(at(url),null,url);
+});
+
+test('smoke readiness requires every public answer the phone needs and refuses Eliza hosts',async()=>{
+ const row=alpha.policy.staging,ids=alpha.resources.staging;
+ const answers={
+  [`${row.api}/api/health`]:[200,{ok:true}],
+  [`${row.api}/api/public/service`]:[200,{name:row.name}],
+  [`${row.api}/api/v1/subscription/entitlement-keys`]:[200,{keys:[]}],
+  [`${row.api}/api/v1/app-auth/mobile/config?clientId=ai.alphacompute.alphaphone`]:[200,{clientId:'ai.alphacompute.alphaphone'}],
+  [`${row.api}/api/v1/subscriptions/plans`]:[200,{plans:[]}],
+  [`${ids.loginApiUrl}/auth/providers?tenantId=${row.tenant}`]:[200,{google:true}],
+  [`${row.web}/.well-known/assetlinks.json`]:[200,[{target:{package_name:'ai.alphacompute.alphaphone'}}]],
+ };
+ const fake=overrides=>async url=>{const [status,body]=overrides[url]??answers[url]??[404,{}];return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});};
+ assert.ok((await smoke(alpha.policy,alpha.resources,'staging',fake({}))).every(row=>row.passed));
+ const leaked=await smoke(alpha.policy,alpha.resources,'staging',fake({[`${row.api}/api/public/service`]:[200,{billing:'https://cloud.eliza.app/cloud/billing'}]}));
+ assert.match(leaked.find(row=>row.gate==='service document').detail,/names cloud\.eliza\.app/);
+ const noLinks=await smoke(alpha.policy,alpha.resources,'staging',fake({[`${row.web}/.well-known/assetlinks.json`]:[200,[]]}));
+ assert.equal(noLinks.find(row=>row.gate==='asset links').passed,false);
+});
+
+test('Cloud tool outputs under the pinned source are refused before invoking upstream',()=>{
+ const result=spawnSync(process.execPath,['scripts/cloud-worker.ts','render','--out','vendor/eliza/cloud-output-fixture'],{encoding:'utf8'});
  assert.notEqual(result.status,0);
  assert.match(result.stderr,/outside the pinned vendor checkout/);
+});
+
+test('a migration that pauses at a release barrier is not success',()=>{
+ assert.equal(migrationOutcome('[db:migrate] applying 0574\n[db:migrate] migrations complete\n',0),'complete');
+ assert.equal(migrationOutcome('[db:migrate] release barrier permits 3 safe pending migrations before 0282\n',0),'paused');
+ assert.equal(migrationOutcome('[db:migrate] migrations complete\n',1),'failed');
 });

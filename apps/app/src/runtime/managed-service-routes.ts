@@ -1,6 +1,8 @@
 import {productionCloud} from './cloud-deployment.generated.ts';
 /** Product transport admits managed services, never agent hosts or provisioning. The Cloud sign-in
  * hand-off (cli-session) is not a product route: product sign-in is the native in-app host. */
+/** Body-only POSTs the signed-in device makes for its own plan and referral code. */
+export const BILLING_POSTS=new Set(['/api/v1/subscriptions/checkout','/api/v1/subscriptions/checkout/confirm','/api/v1/referrals/apply']);
 const MAPS_POST=/^\/api\/v1\/maps\/(?:geocode|reverse|places\/search|places\/details|routes|tiles\/viewport)$/;
 export function mapsTilePath(path:string):boolean {
  const match=/^\/api\/v1\/maps\/tiles\/(0|[1-9][0-9]?)\/(0|[1-9][0-9]{0,6})\/(0|[1-9][0-9]{0,6})$/.exec(path);
@@ -23,6 +25,11 @@ export function managedServiceRequest(url:string,method:string,hasBody=false):bo
  if(method==='POST'&&MAPS_POST.test(path))return !parsed.search&&hasBody;
  if(path==='/api/v1/maps/capabilities')return method==='GET'&&!parsed.search&&!hasBody;
  if(mapsTilePath(path))return method==='GET'&&!parsed.search&&!hasBody;
+ // In-app plans (cloud-plans.ts): the catalogue, the device-key checkout and its confirmation, and
+ // referrals. Plan changes and cancellation never use this transport (native billing authority).
+ if(path==='/api/v1/subscriptions/plans')return method==='GET'&&!parsed.search&&!hasBody;
+ if(BILLING_POSTS.has(path))return method==='POST'&&!parsed.search&&hasBody;
+ if(path==='/api/v1/referrals')return method==='GET'&&!parsed.search&&!hasBody;
  if(method==='POST')return !parsed.search&&(path==='/api/v1/subscription/redeem'&&hasBody||path==='/api/v1/eliza/google/connect/initiate'||path==='/api/v1/eliza/google/disconnect'||path==='/api/v1/eliza/google/gmail/inbox-v1/operations'||/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations\/[A-Za-z0-9_-]{1,160}\/dispatch$/.test(path));
  if(method!=='GET'||hasBody)return false;
  return ['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/eliza/google/accounts','/api/v1/eliza/google/status','/api/v1/eliza/google/calendar/calendars','/api/v1/eliza/google/calendar/feed','/api/v1/eliza/google/gmail/search','/api/v1/eliza/google/gmail/read'].includes(path)||/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/(capabilities|thread|attachment|drafts|draft)$/.test(path)||/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations\/[A-Za-z0-9_-]{1,160}$/.test(path);

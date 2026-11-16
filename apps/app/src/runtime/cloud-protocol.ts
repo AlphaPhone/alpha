@@ -10,6 +10,7 @@ import { ManagedGmailMailboxClient } from '../../../../.eliza/client-features/pl
 import type { GmailAccount, GmailDraftContent, GmailDraftSummary, GmailInboxCapabilities, GmailInboxReceipt, GmailReadResult, GmailSearchPage, GmailThreadPage, GoogleConnection } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
 import type { CloudMapsRoute } from '../maps/cloud-provider.ts';
 import {mapsTilePath} from './managed-service-routes.ts';
+import {parseCheckout,parsePlans,parseReferral,parseSubscription,type CheckoutStart,type PlanKey,type PlanOffer,type ReferralState,type SubscriptionState} from './cloud-plans.ts';
 import { authenticated as signInAuthenticated, googleOutcome, type CloudSignInGoogleOutcome, CloudSignInError, emailStarted, verified as signInVerified, type CloudSignInAuthenticated, type CloudSignInEmailStarted, type CloudSignInMfaRequired, type CloudSignInPort } from './cloud-sign-in.ts';
 import type { EntitlementSource, FallbackPlan, OrganizationCreditBalance, RedeemResult } from './subscription-entitlement.ts';
 import { parseManagedGoogleCalendars, parseManagedGoogleCalendarFeed } from "../../../../.eliza/client-features/packages/app/src/runtime/managed-google-agent/managed-google-calendar-read.ts";
@@ -267,6 +268,50 @@ export class CloudProtocol {
     signal.throwIfAborted();
     await this.openExternal(planManagementUrl(this.environment), signal);
     signal.throwIfAborted();
+  }
+  /** The paid plans, as Cloud offers them (public catalogue). */
+  async subscriptionPlans(signal: AbortSignal): Promise<PlanOffer[]> {
+    return parsePlans(await this.requestData("/api/v1/subscriptions/plans", signal));
+  }
+  /** The organization's subscription from the billing snapshot, read with this device's key. */
+  async subscriptionState(signal: AbortSignal): Promise<SubscriptionState | null> {
+    return parseSubscription(await this.requestData("/api/v1/billing/limits", signal, { authenticated: true }));
+  }
+  /**
+   * Starts (or, with the same idempotency key, resumes) a checkout for one plan with this device's
+   * key and opens Stripe's hosted page. The page returns to the app's registered
+   * `/billing/return` App Link; the caller then confirms with the answered `sessionId`.
+   */
+  async startSubscriptionCheckout(planKey: PlanKey, idempotencyKey: string, signal: AbortSignal): Promise<CheckoutStart> {
+    const started = parseCheckout(await this.requestData("/api/v1/subscriptions/checkout", signal, { authenticated: true, body: { planKey, idempotencyKey, presentation: "mobile" } }));
+    if (started.status === "open") { signal.throwIfAborted(); await this.openExternal(started.checkoutUrl, signal); }
+    return started;
+  }
+  /** Opens a Stripe payment page Cloud answered (checkout or an upgrade's hosted invoice), and nothing else. */
+  async openPaymentPage(url: string, signal: AbortSignal): Promise<void> {
+    const page = new URL(url);
+    if (page.protocol !== "https:" || page.username || page.password || page.port || !["checkout.stripe.com", "invoice.stripe.com"].includes(page.hostname)) throw new CloudProtocolError("invalid-response");
+    signal.throwIfAborted();
+    await this.openExternal(page.href, signal);
+  }
+  /** Confirms a checkout from Cloud's own payment evidence; the session id is not payment authority. */
+  async confirmSubscriptionCheckout(sessionId: string, signal: AbortSignal): Promise<{subscriptionId: string | null}> {
+    const body = object(await this.requestData("/api/v1/subscriptions/checkout/confirm", signal, { authenticated: true, body: { sessionId } }));
+    const data = object(body.data);
+    return { subscriptionId: typeof data.subscriptionId === "string" ? data.subscriptionId : null };
+  }
+  /** The owner's own referral code to share, and how many accounts used it. */
+  async referral(signal: AbortSignal): Promise<ReferralState> {
+    return parseReferral(await this.requestData("/api/v1/referrals", signal, { authenticated: true }));
+  }
+  /** Applies someone else's referral code to this account. Refusals come back as a message. */
+  async applyReferral(code: string, signal: AbortSignal): Promise<{applied: true} | {applied: false; reason: "invalid" | "used" | "refused"}> {
+    const response = object(await this.requestData("/api/v1/referrals/apply", signal, { authenticated: true, body: { code }, anyStatus: true }));
+    const status = typeof response.status === "number" ? response.status : 0;
+    if (status >= 200 && status < 300) return { applied: true };
+    if (status === 401 || status >= 500 || status === 0) throw new CloudProtocolError("http", status, response.data);
+    const error = response.data && typeof response.data === "object" ? String((response.data as {error?: unknown}).error ?? "") : "";
+    return { applied: false, reason: /already used/i.test(error) ? "used" : status === 404 || /invalid/i.test(error) ? "invalid" : "refused" };
   }
   /** Whether this build can sign in here. The production web build has no sign-in host. */
   get signInAvailable(): boolean { return this.options.signIn !== undefined; }

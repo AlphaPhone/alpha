@@ -81,6 +81,9 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
    if(method!=='request')return {};
    const path=new URL(input.url).pathname;
    if(path==='/api/v1/user'){if(f.identity==='offline')throw Error('Connection request failed');return f.identity==='401'?{status:401,data:{}}:{status:200,data:{success:true,data:{id:'22222222-2222-4222-8222-222222222222',email:'synthetic-plan@example.invalid'}}};}
+   // In-app plans (cloud-plans.ts): the public catalogue and the owner's referral code.
+   if(path==='/api/v1/subscriptions/plans')return {status:200,data:{success:true,data:{catalogVersion:'v1',plans:[{key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25.00'}},{key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90.00'}}]}}};
+   if(path==='/api/v1/referrals')return {status:200,data:{code:'ALPHA-FIXTURE',total_referrals:0,is_active:true}};
    if(path==='/api/v1/subscription/entitlement-keys')return {status:200,data:{keys:f.keys??[]}};
    if(path==='/api/v1/subscription/entitlement'){
     if(f.route==='signed')return {status:200,data:{entitlement:f.tokens[f.plan]}};
