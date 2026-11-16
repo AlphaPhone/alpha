@@ -7,6 +7,7 @@ import {filesWithin, relativePath, sourcePaths} from '../../../../scripts/quint-
 import {fenceNetwork, flagOffAndroid} from '../../../../test/browser/flag-off-android.ts';
 import {residentStub} from '../../../../test/browser/resident-stub.ts';
 import {captureInputs, checkTraces} from '../check-traces.mjs';
+import {scaledTimeout} from '../timeouts.mjs';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const recordKey = 'alpha.connection.plan-admission.v1';
@@ -59,7 +60,7 @@ export async function checkPlanAdmissionSignOut(extraSources = []) {
     await server.listen();
     browser = await chromium.launch({headless: true});
     const page = await browser.newPage();
-    page.setDefaultTimeout(30000);
+    page.setDefaultTimeout(scaledTimeout(30000));
     const foreign = await fenceNetwork(page);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -130,7 +131,7 @@ export async function checkPlanAdmissionSignOut(extraSources = []) {
       ${initializers.join('\n')}
     })();`);
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/quint-plan-signout`,
-      {waitUntil: 'domcontentloaded', timeout: 90000});
+      {waitUntil: 'domcontentloaded', timeout: scaledTimeout(90000)});
     try {
       await page.waitForFunction(() => !!window.planController);
     } catch (error) {

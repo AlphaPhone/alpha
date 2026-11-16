@@ -44,7 +44,11 @@ export async function loadWorkflowClockFixture() {
   const contextStart = agentText.indexOf('  function context(shell: Shell) {');
   const contextEnd = agentText.indexOf('  p.componentDidMount', contextStart);
   assert.ok(contextStart >= 0 && contextEnd > contextStart);
-  const context = strip(agentText.slice(contextStart, contextEnd));
+  // AC-26: context() retires open proposal cards when the published subject changes.
+  const retireStart = agentText.indexOf('  function retireProposalCards(shell:Shell){');
+  const retireEnd = agentText.indexOf('  p.cancelReadReplyCompletions', retireStart);
+  assert.ok(retireStart >= 0 && retireEnd > retireStart);
+  const context = strip(agentText.slice(retireStart, retireEnd) + agentText.slice(contextStart, contextEnd));
   const shellText = read(shellSource);
   const leaveStart = shellText.indexOf('  leave() {');
   const leaveEnd = shellText.indexOf('\n\n  preset(', leaveStart);
@@ -111,9 +115,7 @@ function fixture({bindings, installer, context, leave, routes, browser, testMock
   const alphaClient = {setViewContext(value) {selected = value;}, getState: () => ({context: selected})};
   const readContext = vm.runInNewContext(`${context}\ncontext`, {...bindings, document, alphaClient,
     connectionController: {getSnapshot: () => ({open: false})}, syncPreviousNotesAvailability() {},
-    updateBackAvailability() {}, recoverPendingActions() {},
-    // This Clock fixture has no assistant transcript or proposal cards to retire.
-    retireProposalCards(shell) {assert.equal(shell.S().msgs,undefined);}});
+    updateBackAvailability() {}, recoverPendingActions() {}});
   class Shell {
     componentDidMount() {}
     componentWillUnmount() {}

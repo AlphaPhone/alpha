@@ -4420,7 +4420,9 @@
       "unknownSendIsNotRetriedTest",
       "lockDismissesReviewTest",
       "inboundDuringAgentReviewClosesItTest",
-      "askedRewriteReplacesOwnerTextWithoutSendingTest",
+      "askedDraftReplacesOwnerTextTest",
+      "askedDraftNeedsReadinessTest",
+      "askedDraftKeepsUnknownSendTest",
       "askedDraftSentOnlyAfterTapTest",
       "askedDraftReplacesSuggestionTest",
       "dismissedSuggestionIsNotOfferedAgainTest"
@@ -4438,7 +4440,8 @@
     ],
     "abstractions": [
       "One thread, up to three inbound messages and two draft texts. The reviewed radio dispatch is NativeSmsDispatch; here a confirmed review yields sent, failed or unknown.",
-      "ready collapses image admission, SMS role, permission, unlock and foreground."
+      "ready collapses image admission, SMS role, permission, unlock and foreground.",
+      "An asked draft replaces the slot, owner text included (AC-14); the one Undo that restores the displaced text is not modelled."
     ]
   },
   {
