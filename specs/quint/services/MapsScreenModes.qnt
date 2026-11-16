@@ -9,6 +9,8 @@ module MapsScreenModes {
     // this generation; an error permits a new explicit attempt. Response mode is a closed port.
     queryAccepted: bool, originAccepted: bool, queryFailed: bool, originFailed: bool,
     queryRequests: int, originRequests: int, responseMode: str,
+    // The provider outcome of the latest starting-point search: only "ready" has candidate rows.
+    originSearch: str,
     // A rendered editing draft waits for its350ms timer; committed screen query stays unchanged.
     pendingInput: str,
     // The destination: a provider place, a saved place or the device's location.
@@ -48,14 +50,17 @@ module MapsScreenModes {
       routeReady: false, lastChoice: "search" }
   /// Maps is released: only the search text, its open sheet and the origin text stay; the rows,
   /// the origin and the route go with the controller.
-  pure def released(v: Screen): Screen =
-    { ...guidanceEnded(locateCancelled(handoffDiscarded(v))), results: false, directions: false,
+  pure def released(v: Screen): Screen = providerReleased(handoffDiscarded(v))
+  /// A provider replacement releases the same view data and retires every input, but keeps a
+  /// cross-app search that has not run yet: it runs against the new provider.
+  pure def providerReleased(v: Screen): Screen =
+    { ...guidanceEnded(locateCancelled(inputsRetired(v))), results: false, directions: false,
       originMode: false, selected: "none", origin: false, routeReady: false, lastChoice: "none", pendingInput: "none" }
 
   action init = s' = {
     searching: false, hasQuery: false, results: false, pendingInput: "none", selected: "none", directions: false, originMode: false,
     navigating: false, screenOff: "none", hidden: false, locating: false, watch: false,
-    originText: "empty", origin: false, routeReady: false, queryAccepted: false, originAccepted: false, queryFailed: false, originFailed: false, queryRequests: 0, originRequests: 0, responseMode: "ready",
+    originText: "empty", origin: false, routeReady: false, queryAccepted: false, originAccepted: false, queryFailed: false, originFailed: false, queryRequests: 0, originRequests: 0, responseMode: "ready", originSearch: "none",
     lastChoice: "none", handoffQuery: false, handoffPending: false, requests: 0, handoffs: 0
   }
   /// The shared controller commits input immediately. Alpha's host owns the
@@ -89,7 +94,7 @@ module MapsScreenModes {
     not(s.hidden), s.pendingInput != "none",
     s' = if(s.pendingInput == "query") submitted(s)
       else if(s.originText == "coordinates") { ...locateCancelled(s), pendingInput: "none", originMode: false, origin: true, routeReady: false, originAccepted: true, originFailed: false, originRequests: s.originRequests + 1 }
-      else { ...locateCancelled(s), pendingInput: "none", originMode: true, originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1 }
+      else { ...locateCancelled(s), pendingInput: "none", originMode: true, originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1, originSearch: s.responseMode }
   }
   action lateInputTimer = all { s.pendingInput == "none", s' = s }
   action pickResult = all {
@@ -139,7 +144,8 @@ module MapsScreenModes {
     val moved = { ...settled, origin: true, routeReady: false, searching: false }
     all {
       s.watch,
-      s' = if (not(usable)) settled
+      // A refused fix fails a submitted located origin, so Enter on it asks again.
+      s' = if (not(usable)) { ...settled, originFailed: s.originAccepted }
         else if (s.directions) { ...moved, originText: "location" }
         else { ...moved, selected: "location" }
     }
@@ -151,18 +157,32 @@ module MapsScreenModes {
     s' = { ...locateCancelled(handoffDiscarded(s)), pendingInput: "origin", originMode: if (mode(s) == "dir") false else s.originMode,
       originText: if (coordinates) "coordinates" else "typed", origin: false, routeReady: false }
   }
+  /// Enter repeats the accepted input of this generation: it is still pending, answered or routed.
+  pure def originReused(v: Screen): bool =
+    v.pendingInput == "none" and v.originAccepted and not(v.originFailed) and not(v.handoffQuery or v.handoffPending)
   /// Enter on a name searches for starting points.
   action searchOrigin = all {
     mode(s).in(Set("dir", "origin")), s.originText.in(Set("typed", "chosen")),
-    s' = if(s.pendingInput == "none" and s.originAccepted and not(s.originFailed) and not(s.handoffQuery or s.handoffPending)) s
-      else { ...locateCancelled(s), originMode: true, pendingInput: "none", originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1 }
+    s' = if(originReused(s)) s
+      else { ...locateCancelled(s), originMode: true, pendingInput: "none", originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1, originSearch: s.responseMode }
+  }
+  /// Enter on the located starting point asks for a new fix, unless this generation's fix is
+  /// still pending or its route is pending or ready. A fix already requested by another control is
+  /// left alone; that interleaving is not modeled.
+  action submitLocatedOrigin = all {
+    mode(s).in(Set("dir", "origin")), s.originText == "location", originReused(s) or not(s.locating),
+    s' = if(originReused(s)) s
+      else { ...handoffDiscarded(s), locating: true, watch: true, searching: false, pendingInput: "none",
+        originAccepted: true, originRequests: s.originRequests + 1 }
   }
   /// A chosen starting point, or Enter on coordinates, becomes the origin and ends a pending
   /// location request. Coordinates stay in the field; a candidate's name replaces a typed name.
+  /// A candidate exists only when the reused search answered with rows, or a new one would.
   action chooseOrigin = all {
-    (mode(s) == "origin" and s.originText.in(Set("typed", "chosen"))) or
+    (mode(s) == "origin" and s.originText.in(Set("typed", "chosen")) and
+      (if(originReused(s)) s.originSearch == "ready" else s.responseMode == "ready")) or
       (mode(s).in(Set("dir", "origin")) and s.originText == "coordinates"),
-    s' = if(s.originText == "coordinates" and s.pendingInput == "none" and s.originAccepted and not(s.originFailed) and not(s.handoffQuery or s.handoffPending)) s
+    s' = if(s.originText == "coordinates" and originReused(s)) s
       else { ...inputsRetired(locateCancelled(s)), originMode: false, pendingInput: "none",
         originText: if (s.originText == "coordinates") s.originText else "chosen",
         originAccepted: s.originText == "coordinates", originFailed: false,
@@ -170,8 +190,10 @@ module MapsScreenModes {
         origin: true, routeReady: false }
   }
   /// The provider answers a route request. Leaving and hiding abort the request in flight.
+  /// A submitted located origin is routed only once its fix arrives; an earlier route still in
+  /// flight while that fix is pending is not modeled.
   action routePlanned(ready: bool): bool = all {
-    s.directions, not(s.navigating), s.origin, not(s.hidden),
+    s.directions, not(s.navigating), s.origin, not(s.hidden), not(s.originAccepted and s.locating),
     s' = { ...if(s.routeReady or s.originFailed) inputsRetired(s) else s, routeReady: ready,
       originFailed: s.originAccepted and not(s.routeReady or s.originFailed) and not(ready) }
   }
@@ -245,21 +267,26 @@ module MapsScreenModes {
   }
   // Closed provider outcomes: no live account or network request is created by these actions.
   action providerResponse(outcome: str): bool = all { outcome.in(Set("ready", "empty", "error", "pending")), s' = { ...s, responseMode: outcome } }
-  action providerChanged = s' = released(s)
+  action providerChanged = s' = providerReleased(s)
   action step = {
     nondet flag = Set(false, true).oneOf()
     // Events that close Maps layers are drawn less often, so sampled traces reach guidance.
     nondet draw = 0.to(3).oneOf()
+    // The closed provider port answers later requests ready, empty, failed or never.
+    nondet outcome = Set("ready", "empty", "error", "pending").oneOf()
+    nondet rare = 0.to(15).oneOf()
     any {
       // Nothing is tapped or typed on a hidden page.
       all { not(s.hidden), any {
         focusSearch, typeQuery, clearQuery, submitSearch, debounceInput, lateInputTimer, pickResult, pickSaved, closePlace,
-        openDirections, openGrantedDirections, locate, editOrigin(flag), searchOrigin, chooseOrigin, start,
+        openDirections, openGrantedDirections, locate, editOrigin(flag), searchOrigin, chooseOrigin, submitLocatedOrigin, start,
         agentShowPlace, agentShowDirections, agentPlanFrom, crossAppQuery, offerHandoff,
         all { draw == 0, any { end, back, leave, hide } } } },
       all { s.hidden, draw == 0, end },
       fixArrives(flag), routePlanned(flag), screenOffStarted, screenOffRefused, screenOffLost, show,
       consumeHandoff,
+      // Provider answers and replacements are drawn rarely, so sampled traces still reach hidden guidance.
+      all { rare == 0, providerResponse(outcome) }, all { rare == 1, providerChanged },
       s' = s
     }
   }
@@ -269,7 +296,8 @@ module MapsScreenModes {
     s.screenOff.in(Set("none", "starting", "running")) and
     s.lastChoice.in(Set("none", "typing", "search", "place", "locate")) and
     s.requests.in(0.to(MaxRequests)) and s.handoffs.in(0.to(MaxRequests)) and
-    s.queryRequests >= 0 and s.originRequests >= 0 and s.responseMode.in(Set("ready", "empty", "error", "pending"))
+    s.queryRequests >= 0 and s.originRequests >= 0 and s.responseMode.in(Set("ready", "empty", "error", "pending")) and
+    s.originSearch.in(Set("none", "ready", "empty", "error", "pending"))
   val NavigationNeedsRouteSheet = s.navigating implies s.directions and s.selected != "none"
   val DirectionsNeedDestination = s.directions implies s.selected != "none"
   val OriginPickNeedsRouteSheet = s.originMode implies s.directions
@@ -428,4 +456,18 @@ module MapsScreenModes {
   run destinationFailureRetryTest = init.then(providerResponse("error")).then(typeQuery).then(debounceInput)
     .expect(s.queryFailed and s.queryRequests == 1).then(providerResponse("ready")).then(submitSearch)
     .expect(not(s.queryFailed) and s.queryRequests == 2 and s.results and safety)
+  // Enter on "Your location" asks once for a fix and reuses it while it, or its route, is pending
+  // or ready; a refused fix or a failed route admits one new request.
+  run locatedOriginReuseTest = init.then(typeQuery).then(submitSearch).then(pickResult)
+    .then(openGrantedDirections).then(fixArrives(true)).expect(s.originText == "location" and s.originRequests == 0)
+    .then(submitLocatedOrigin).expect(s.locating and s.originAccepted and s.originRequests == 1)
+    .then(submitLocatedOrigin).expect(s.locating and s.originRequests == 1)
+    .then(fixArrives(true)).then(submitLocatedOrigin).expect(not(s.locating) and s.originRequests == 1)
+    .then(routePlanned(true)).then(submitLocatedOrigin).expect(s.routeReady and s.originRequests == 1 and safety)
+  run locatedOriginRetryTest = init.then(typeQuery).then(submitSearch).then(pickResult)
+    .then(openGrantedDirections).then(fixArrives(true)).then(submitLocatedOrigin)
+    .then(fixArrives(false)).expect(s.originFailed and s.originRequests == 1)
+    .then(submitLocatedOrigin).expect(s.locating and not(s.originFailed) and s.originRequests == 2)
+    .then(fixArrives(true)).then(routePlanned(false)).expect(s.originFailed and s.originRequests == 2)
+    .then(submitLocatedOrigin).expect(s.locating and not(s.originFailed) and s.originRequests == 3 and safety)
 }
