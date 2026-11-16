@@ -51,8 +51,10 @@ function fixture() {
     copy: () => ({presetPerson: 'ada'}), PEOPLE, person: id => PEOPLE.find(person => person.id === id) || null,
     formatTime: () => 'now', formatMonthDay: () => 'day', DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     pad2: value => String(value).padStart(2, '0'), crypto: {randomUUID},
-    // The Phone source's module imports (AP-16 Recents filter and briefing).
-    callsBriefing, matchesCallQuery, applyListFilter, clearListFilter, setListFilterHandler, testMocksEnabled: true, proposalCanAct, setCallPartyResolver: () => {},
+    // The Phone source's module imports (AP-16 Recents filter, briefing, proposal gate and call party).
+    callsBriefing, matchesCallQuery, applyListFilter, clearListFilter, setListFilterHandler, proposalCanAct, setCallPartyResolver: () => {},
+    // The development Phone fixture runs only behind test mocks; this replay is that fixture.
+    testMocksEnabled: true,
   }});
   core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };\nObject.assign(Shell.prototype, {${cardAct}});`);
   // After each committed update, as componentDidUpdate does: a closed chat ends the stage history
@@ -69,13 +71,14 @@ function fixture() {
   let shown = null;
   const settle = run => {
     queue = [];
-    // A throw from the handler or a render is the test's failure, never a skipped step.
-    let pending;
+    let settledPatches = 0;
+    // No return in finally: an exception from the handler must reach the test.
     try { run(); } finally {
-      pending = queue; queue = null;
+      const pending = queue; queue = null;
+      settledPatches = pending.length;
       for (const [patch, done] of pending) settleNow.call(shell, patch, done);
     }
-    return pending.length > 0;
+    return settledPatches > 0;
   };
   // A state change redraws the view while it is in front; its render arms the start of a handed-over call.
   const act = run => {

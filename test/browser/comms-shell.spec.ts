@@ -185,11 +185,16 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		expect((await calls(page)).filter(call => call[1] === 'end')).toHaveLength(1);
 		// The closed bar for a call addresses Alpha, outlined.
 		await expect(page.locator('[data-alpha-input-bar].alpha-bar-field-alpha')).toBeVisible();
-		// The empty field is a drag handle (the bar's buttons keep their taps).
-		const bar = (await page.locator('[data-alpha-input-bar] textarea').boundingBox())!;
-		await page.mouse.move(bar.x + 20, bar.y + bar.height / 2);
+		const grab = await page.locator('[data-alpha-input-drag-background]').evaluate(background => {
+			const box = background.getBoundingClientRect();
+			const point = {x: box.x + box.width / 2, y: box.bottom - 4};
+			if (document.elementFromPoint(point.x, point.y) !== background)
+				throw Error('The bar must expose a drag background outside its buttons and field');
+			return point;
+		});
+		await page.mouse.move(grab.x, grab.y);
 		await page.mouse.down();
-		await page.mouse.move(bar.x + 20, bar.y - 160, {steps: 8});
+		await page.mouse.move(grab.x, grab.y - 160, {steps: 8});
 		expect(await hit()).toBe(true);
 		await page.mouse.up();
 		await settled(page);
