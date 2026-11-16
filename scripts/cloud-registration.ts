@@ -6,7 +6,7 @@
  * command that creates one. This module derives the two rows from the app's own identity
  * (app.config.json), the Cloud policy rows and the release signer, so the local Cloud and every
  * deployed environment register exactly the same client. `seedRegistration` applies them through
- * `scripts/cloud-seed-registration.mjs`, which runs inside an installed upstream tree so that it
+ * `scripts/cloud-seed-registration.ts`, which runs inside an installed upstream tree so that it
  * uses upstream's own `pg` driver.
  *
  * The same rows also produce `/.well-known/assetlinks.json` (upstream serves it from them), so
@@ -22,7 +22,7 @@ import {validateCloudDeployment, type CloudDeploymentConfig} from './cloud-deplo
 import type {CloudEnvironment} from './cloud-sdk-authority.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SEED_SCRIPT = path.join(root, 'scripts/cloud-seed-registration.mjs');
+const SEED_SCRIPT = path.join(root, 'scripts/cloud-seed-registration.ts');
 
 export interface AppIdentity { appId: string; appName: string; slug: string }
 export interface RegistrationRows {
