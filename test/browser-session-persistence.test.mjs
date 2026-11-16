@@ -11,7 +11,7 @@ import {stripTypeScriptTypes} from './support/strip-types.mjs';
 // The extracted saver remains independently checked; production retains the stronger
 // epoch/drain/React-commit writer while sharing its bounded retry and idle-poll semantics.
 const load = async path => import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(readFileSync(path, 'utf8'))).toString('base64'));
-const {createSessionSaver, saveRetryDelay, surfacePollIdle} = await load('apps/app/src/browser/browser-poll.ts');
+const {approvedOpenTab, createSessionSaver, saveRetryDelay, surfacePollIdle} = await load('apps/app/src/browser/browser-poll.ts');
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolveTick => setImmediate(resolveTick)); };
 
 function saverHarness() {
@@ -123,4 +123,20 @@ test('a question dialog that cannot open removes itself and its listeners', asyn
     names.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]); else delete globalThis[name]; });
     rmSync(directory, {recursive: true, force: true});
   }
+});
+
+test('approved opens reuse an untouched New tab or the agent tab and never a user page', () => {
+  const tabs = [{id: 'user'}, {id: 'agent'}, {id: 'blank'}, {id: 'private-blank', priv: true}];
+  const untouched = id => id === 'blank' || id === 'private-blank';
+  // The selected untouched New tab comes first, then the agent's own tab, then any untouched New tab.
+  assert.equal(approvedOpenTab(tabs, 'blank', 'agent', false, untouched), 'blank');
+  assert.equal(approvedOpenTab(tabs, 'user', 'agent', false, untouched), 'agent');
+  assert.equal(approvedOpenTab(tabs, 'user', undefined, false, untouched), 'blank');
+  // A closed agent tab or a page the user opened is never a target; with no candidate a new tab opens.
+  assert.equal(approvedOpenTab([{id: 'user'}], 'user', 'agent', false, () => false), undefined);
+  assert.equal(approvedOpenTab([{id: 'user'}, {id: 'other'}], 'user', undefined, false, () => false), undefined);
+  // Profiles never mix: a private open reuses only a private tab, a normal open only a normal one.
+  assert.equal(approvedOpenTab(tabs, 'user', 'agent', true, untouched), 'private-blank');
+  assert.equal(approvedOpenTab([{id: 'user'}, {id: 'private-blank', priv: true}], 'private-blank', undefined, false, untouched), undefined);
+  assert.equal(approvedOpenTab([{id: 'user'}, {id: 'agent', priv: true}], 'user', 'agent', false, () => false), undefined);
 });

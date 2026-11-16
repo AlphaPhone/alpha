@@ -1,5 +1,15 @@
-/** Work the browser adapter's 100 ms poll may skip. Pure decisions and a small saver with injected
- * effects; nothing here touches the DOM or a native plugin directly. */
+/** Work the browser adapter's 100 ms poll may skip, and where an approved open loads. Pure decisions
+ * and a small saver with injected effects; nothing here touches the DOM or a native plugin directly. */
+
+/** The existing tab an approved (agent) open loads into, or undefined for a new tab: the selected
+ * tab while it is an untouched New tab, else the agent's own earlier tab, else any untouched New
+ * tab. Only tabs of the requested profile qualify; a page the user opened is never replaced. */
+export function approvedOpenTab(tabs: ReadonlyArray<{id: string; priv?: boolean}>, selected: string | undefined, agentTab: string | undefined, privateTab: boolean, untouched: (id: string) => boolean): string | undefined {
+  const fits = (id: string | undefined) => tabs.some(tab => tab.id === id && !!tab.priv === privateTab);
+  if (selected && fits(selected) && untouched(selected)) return selected;
+  if (agentTab && fits(agentTab)) return agentTab;
+  return tabs.find(tab => !!tab.priv === privateTab && untouched(tab.id))?.id;
+}
 
 /** Off the Browser view with the native surface already hidden, there is no geometry to measure or send. */
 export const surfacePollIdle = (view: unknown, lastGeometry: string, hiddenGeometry: string): boolean =>
