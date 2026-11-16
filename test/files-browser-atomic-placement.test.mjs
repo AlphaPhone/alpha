@@ -14,6 +14,7 @@ before(() => {checkClientFeatures({root});}, {timeout: scaledTimeout(600000)});
 
 test('Browser Files placement preserves exact rows and Trash markers on IndexedDB refusal', {timeout: scaledTimeout(90000)}, async () => {
   const {outputFiles: [bundle]} = await build({
+    tsconfig: resolve(root, 'tsconfig.json'),
     stdin: {resolveDir: root, contents: `
       import {BrowserFiles} from './.eliza/client-features/plugins/plugin-files/src/browser/files.ts';
       import {BrowserStorageVolume} from './.eliza/client-features/plugins/plugin-files/src/browser/storage-volume.ts';

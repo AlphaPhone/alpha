@@ -130,7 +130,7 @@ export async function preparePortableNativeInputs(root:string) {
       }
       return {name:library.name,bytes:fs.statSync(output).size,sha256:fileDigest(output)};
     })}));
-    const voice={...host,description:'Portable source-built voice inputs. Exact bytes are recorded by this build; device and user qualification remain separate.',pin,forkPin:recipe.engineCommit,abis,qualified:false,evidence:{deviceExecuted:false,emulatorDeviceExecuted:false,userAccepted:false}};
+    const voice={...host,identity:recipe.identity,description:'Portable source-built voice inputs. Exact bytes are recorded by this build; device and user qualification remain separate.',pin,forkPin:recipe.engineCommit,abis,qualified:false,evidence:{deviceExecuted:false,emulatorDeviceExecuted:false,userAccepted:false}};
     const voiceProblems=voiceHostProblems(voice);
     if(voiceProblems.length)throw Error(voiceProblems.join('\n'));
     // Every non-native byte remains pinned independently of the build output receipt.

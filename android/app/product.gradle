@@ -7,6 +7,30 @@
 // ELIZA_RUNTIME_PROFILE=native (upstream's local-embeddings route).
 // Debug packages the ABIs resident staging produces (scripts/stage-local-agent-runtime.ts);
 // dependency ABI flags do not filter the app. Release is arm64-v8a (android/consumer-host.json).
+// Preserve installed component and callback names when the current source is packaged for
+// an existing identity. The generated view contains the same feature code, not another flavor.
+def generatedHostProfile = new groovy.json.JsonSlurper().parse(rootProject.file('.eliza-consumer-profile.json'))
+def identityAsset = generatedHostProfile.assetFiles.find { it.name == 'android-identity.json' }
+def projectedIdentity = identityAsset == null ? null : new groovy.json.JsonSlurper().parse(file(identityAsset.source))
+if (identityAsset != null) {
+ if (projectedIdentity.schema != 1 || projectedIdentity.applicationId != android.defaultConfig.applicationId ||
+     projectedIdentity.sourceApplicationId == projectedIdentity.applicationId)
+  throw new GradleException('Generated Android identity differs from the application')
+ def projectedRoot = file(identityAsset.source).parentFile
+ android.sourceSets.all { sources ->
+  // Replace the whole authored Java root: instrumentation helpers can keep a shared
+  // package while importing the selected product identity. Pinned module roots stay intact.
+  def authoredJava = file('src/' + sources.name + '/java')
+  def projectedJava = new File(projectedRoot, 'android/app/src/' + sources.name + '/java')
+  if (projectedJava.isDirectory()) {
+   sources.java.setSrcDirs(sources.java.srcDirs.collect { directory ->
+    directory.canonicalFile == authoredJava.canonicalFile ? projectedJava : directory
+   }.unique())
+  }
+  def manifest = new File(projectedRoot, 'android/app/src/' + sources.name + '/AndroidManifest.xml')
+  if (manifest.isFile()) sources.manifest.srcFile manifest
+ }
+}
 def runtimeAbis = ['arm64-v8a', 'x86_64']
 apply from: file('cloud-deployment.generated.gradle')
 def cloudWebHost = alphaCloudWebHosts.production
@@ -16,7 +40,7 @@ def cloudWebHost = alphaCloudWebHosts.production
 // assetlinks.json rendered by scripts/render-assetlinks.ts on that configured host.
 def appLinkHost = cloudWebHost
 // One-tap app update (AlphaDevicePlugin checkForUpdate): the one HTTPS update manifest, app.config.json updateManifestUrl.
-def updateManifestUrl = new groovy.json.JsonSlurper().parse(file('../../app.config.json')).updateManifestUrl
+def updateManifestUrl = projectedIdentity == null ? new groovy.json.JsonSlurper().parse(file('../../app.config.json')).updateManifestUrl : projectedIdentity.updateManifestUrl
 if (!(updateManifestUrl instanceof String) || new URI(updateManifestUrl).scheme != 'https' || !new URI(updateManifestUrl).host)
  throw new GradleException('app.config.json updateManifestUrl must be an HTTPS URL')
 def updateManifestSha256 = java.security.MessageDigest.getInstance('SHA-256').digest(updateManifestUrl.getBytes('UTF-8')).encodeHex().toString()

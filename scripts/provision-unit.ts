@@ -142,7 +142,7 @@ export function apkFacts(file: string, {apiLevel}: {apiLevel?: number} = {}) {
   return {
     testMocks: attempt(() => (readApkBuildFlags(file) as {testMocks?: unknown} | null)?.testMocks ?? null),
     debuggable: tree === null ? null : manifestTreeIsDebuggable(tree),
-    updateChannel: tree === null ? null : attempt(() => apkUpdateChannelOrLegacy(parseXmlTree(tree)) ?? ("legacy" as const)),
+    updateChannel: tree === null ? null : attempt(() => apkUpdateChannelOrLegacy(parseXmlTree(tree), {appId: PACKAGE}) ?? ("legacy" as const)),
     signerSha256: attempt(() => signerDigest(file, {apiLevel})),
     runtime: attempt(() => apkRuntimeIdentity(file).runtime),
   };

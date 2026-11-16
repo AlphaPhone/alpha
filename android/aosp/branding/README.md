@@ -8,7 +8,7 @@ Settings, SystemUI, the keyguard, navigation controllers, permissions or account
 | Surface | Reused authority | Alpha customization |
 | --- | --- | --- |
 | Boot animation | Existing Alpha SVG; pinned elizaOS/os brand-independent frame packer | Alpha blue field, white mark, short reveal |
-| Lock/Home wallpaper | Existing Alpha launcher mark and palette; Android WallpaperManager | Dark wallpaper, Alpha mark; native clock and notifications remain |
+| Lock/Home wallpaper | Existing Alpha launcher mark and palette; Android WallpaperManager | True-black wallpaper with no artwork ("Ink"); native clock and notifications remain |
 | Native Settings, Wi-Fi, screen security | Complete AOSP Settings activities and preference hierarchy | DeviceDefault/Material color roles and app label |
 | Shade and Quick Settings | Complete AOSP SystemUI controllers, tiles and notification layouts | Shared system palette and Alpha labels |
 | Navigation | Existing Android Back/Home gesture engine and security gates | Home and edge Back only; overview and horizontal quick-switch disabled by the Alpha product policy |

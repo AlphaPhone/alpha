@@ -28,7 +28,7 @@ export const runtimeScriptPaths = ['scripts/stage-alpha-os-branding.py', 'script
   'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts',
   'scripts/stage-embedding-host.ts', 'scripts/voice-host.ts',
   'scripts/android-build-preflight.ts', 'scripts/build-android.ts',
-  'scripts/android-host.ts', 'scripts/android-gzip-assets.ts', 'scripts/stage-aosp.ts',
+  'scripts/android-host.ts', 'scripts/android-identity.ts', 'scripts/android-gzip-assets.ts', 'scripts/stage-aosp.ts',
   'scripts/audit-production-bundle.ts', 'scripts/generate-licenses.ts',
   'scripts/cloud-deployment.ts', 'scripts/cloud-deployment-policy.ts', 'scripts/native-view-policy.ts',
   'scripts/with-test-mocks.ts', 'scripts/child-command.ts', 'scripts/regular-files.ts', 'scripts/sha256.ts', 'scripts/upstream-pin.ts', 'capacitor.config.ts', 'vite.config.ts',
