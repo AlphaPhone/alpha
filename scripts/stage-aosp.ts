@@ -15,7 +15,7 @@ import { provisioningComponents, writeProvisioningOverlay } from "./aosp-provisi
 import { aospTelephonyRoleComponents, writeAospTelephonyRoleOverrides } from "./aosp-telephony-roles.ts";
 import { writeImageCapability } from "./aosp-image-capability.ts";
 import { releaseBlockers } from "./release-blockers.ts";
-import {parseXmlTree, signerDigest, telephonySetupReceiverProblems} from "./apk.ts";
+import {auditBundle, extractWebPayload, parseXmlTree, signerDigest, telephonySetupReceiverProblems, verifyOwnerRouteTable} from "./apk.ts";
 import {apkUpdateChannelOrLegacy, assertProvisioningUpdateChannel, recordedProvisioningUpdateChannel} from "./update-channel.ts";
 import {updateArtifactDigest} from "./update-artifact.ts";
 import { aaptManifestTree, admitImageApk, manifestTreeIsDebuggable, readApkBuildFlags, reviewedSourceOverrides as sharedReviewedSourceOverrides } from "../vendor/eliza/packages/os/scripts/android/image-apk-admission.mjs";
@@ -95,13 +95,29 @@ export function assertOwnerTelephonyOptions({development, target, senseImage}: {
 }
 
 /**
+ * The checks verify-apks runs on a packaged web payload, run here on the exact APK: the shared
+ * production-bundle audit (scripts/audit-production-bundle.ts) and the generated owner-route table.
+ * A locally signed launcher never gets a verify-apks row, so owner admission runs them itself.
+ */
+export function auditOwnerLauncherPayload(apk: string) {
+  const payload = extractWebPayload(apk);
+  try { auditBundle(payload.public); }
+  finally { fs.rmSync(payload.root, {recursive: true, force: true}); }
+  verifyOwnerRouteTable(apk);
+}
+
+/**
  * Admission of the owner's launcher for --owner-telephony: the release build type the app itself
  * requires for image telephony (P-36), so a debuggable APK is refused, and never a test-mocks build.
- * It need not be distributable: the owner signs it locally and the image is never distributed.
+ * It need not be distributable: the owner signs it locally and the image is never distributed, so
+ * it may have no verify-apks release row. Not distributable never means unverified: its packaged
+ * web payload always passes the production-bundle audit and the owner-route table check, and a
+ * row, when one is recorded, must be a release row.
  */
-export function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = path.resolve("artifacts/test-mocks"), readBuildFlags = readApkBuildFlags, readManifestTree}: {
+export function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = path.resolve("artifacts/test-mocks"), readBuildFlags = readApkBuildFlags, readManifestTree, auditPayload = auditOwnerLauncherPayload}: {
   apk: string; hash: string; manifestFile: string; testMocksDir?: string;
   readBuildFlags?: (apk: string) => {testMocks?: unknown}; readManifestTree: (apk: string) => string;
+  auditPayload?: (apk: string) => void;
 }) {
   const mocks = [path.resolve(testMocksDir), ...(fs.existsSync(testMocksDir) ? [fs.realpathSync(testMocksDir)] : [])];
   for (const candidate of [path.resolve(apk), fs.realpathSync(apk)])
@@ -116,6 +132,8 @@ export function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = 
   if (entry && entry.mode !== "release") throw Error(`Refusing ${apk}: --owner-telephony stages a release launcher; ${manifestFile} records a ${entry.mode} build.`);
   if (manifestTreeIsDebuggable(readManifestTree(apk)))
     throw Error(`Refusing ${apk}: --owner-telephony stages a release (non-debuggable) launcher; Alpha never admits image telephony in a debuggable build.`);
+  try { auditPayload(apk); }
+  catch (error) { throw Error(`Refusing ${apk}: its packaged web payload fails the production checks: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 /** The staged launcher must carry the production first-run contract and every disabled role handler. */

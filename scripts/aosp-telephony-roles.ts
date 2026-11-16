@@ -115,11 +115,14 @@ export function writeAospTelephonyRoleOverrides(output: string, xmltree: string,
     + '    </component-override>\n</config>\n';
   const productMakefile = path.join(output, 'product.mk');
   if (!fs.existsSync(productMakefile)) throw Error('Alpha telephony role defaults require a staged product.mk');
-  // Production images define launcher_provisioning_dir with the provisioning overlay, written first;
-  // a product that already defines it keeps its makefile byte for byte. An owner development image
-  // has no provisioning overlay, so the output-relative directory is defined here, at the top of
-  // product.mk: a later `include` (such as a staged listener's listener.mk) changes
-  // $(lastword $(MAKEFILE_LIST)), so only the first line resolves to this product's own directory.
+  // A product that already defines launcher_provisioning_dir (production and Sense images, through
+  // the provisioning overlay) keeps its makefile byte for byte. Only a definition that precedes every
+  // `include` resolves to this product's directory: an include (such as a staged listener's
+  // listener.mk) changes $(lastword $(MAKEFILE_LIST)). The production Pixel 10a stage with
+  // --listener-apk stages the listener before the provisioning overlay, so its definition follows
+  // the listener include; that existing ordering is tracked separately and is not changed here.
+  // An owner development image has no provisioning overlay, so the output-relative directory is
+  // defined here, as the first line of product.mk, ahead of any include.
   const product = fs.readFileSync(productMakefile, 'utf8');
   const definesDir = /^launcher_provisioning_dir\s*:=/m.test(product);
   fs.mkdirSync(path.join(output, 'provisioning'), {recursive: true});
