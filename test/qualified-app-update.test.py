@@ -152,11 +152,40 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.assertEqual((product / ".eliza/native-inputs/receipt.json").read_bytes(), expected)
         self.assertFalse(json.loads(expected)["qualification"]["deviceExecuted"])
 
-    def test_private_runner_signed_member_keeps_its_ceiling(self):
+    def test_canonical_private_native_uses_the_bounded_native_member_limit(self):
+        with zipfile.ZipFile(self.producer.archive) as archive:
+            extra = {name: archive.read(name) for name in archive.namelist()
+                     if name == "private-producer.json" or name.endswith("-debug.apk")}
+        private = json.loads(extra["private-producer.json"])
+        self.producer.unsigned_pair(4097)
+        private["unsignedApkSHA256"] = self.plan["unsignedApkSHA256"]
+        extra["private-producer.json"] = json.dumps(private).encode()
+        self.plan["privateProducerReceiptSHA256"] = BRIDGE.sha(extra["private-producer.json"])
+        self.producer.write_archive(extra)
+        self.plan["archiveBytes"] = self.producer.archive.stat().st_size
+        digest = self.plan["archiveSHA256"]
+        self.plan["privateStorage"].update(inputObject=f"unsigned/{digest}.zip",
+                                          outputObject=f"signed/{digest}/{'d' * 32}/signed-apks.tar")
+        self.signed_entries["signing-plan.json"] = encoded(self.record, "signingPlan", self.plan)
         self.set_signed_launcher(bytes(4097))
         with patch.object(FIXTURES.PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            contract = FIXTURES.PRODUCER.input_contract(self.plan)
+            self.assertEqual(FIXTURES.PRODUCER.apk_member_limit(FIXTURES.PRODUCER.PRIVATE_RUNNER, contract),
+                             FIXTURES.PRODUCER.MAX_ARCHIVE_BYTES)
+            for supplied in (None, {**contract, "runtimeProfile": "cloud"},
+                             {**contract, "packageName": "another.application"}):
+                self.assertEqual(FIXTURES.PRODUCER.apk_member_limit(FIXTURES.PRODUCER.PRIVATE_RUNNER, supplied), 4096)
+            product = self.directory / "private-native-large"
+            self.stage_fixture(product)
+            self.assertEqual((product / "artifacts/launcher-release.apk").read_bytes(), bytes(4097))
+
+    def test_canonical_private_native_still_rejects_an_oversized_signed_member(self):
+        ceiling = 64_000
+        self.set_signed_launcher(bytes(ceiling + 1))
+        self.assertLess(self.producer.archive.stat().st_size, ceiling)
+        with patch.object(FIXTURES.PRODUCER, "MAX_ARCHIVE_BYTES", ceiling):
             with self.assertRaisesRegex(ValueError, "Unexpected signed bundle members"):
-                self.stage_fixture(self.directory / "private-large")
+                self.stage_fixture(self.directory / "private-native-oversized")
 
     def api(self, endpoint):
         if endpoint == f"repos/{BRIDGE.REPOSITORY}/git/ref/heads/main":

@@ -1643,25 +1643,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.setState({});
       },
     }));
-    // New chat and history sit in the chat header once an agent is connected; the same two
-    // controls stay in Settings. Neither sends anything, and a reply in flight is never cut off.
-    const toolsSession=connectionController.getSnapshot();
-    out.chatTools={
-      show:!!toolsSession.session,history:!!toolsSession.session&&!out.assistantSurface,
-      newChat:()=>{
-        const now=connectionController.getSnapshot();
-        if(this.S().typing||alphaClient.getState().pending){this.toast('Wait for the current reply before starting a new chat.');return;}
-        if(now.busy||this.pendingActionApproval||this.decliningProposal){this.toast('Wait for the current step to finish, then try again.');return;}
-        const before=now.history?.conversationId;
-        // Product Android shows no connection panel for this step, so a failure is reported here.
-        void connectionController.newConversation().then(()=>{const after=connectionController.getSnapshot();if(after.error&&!after.open&&after.history?.conversationId===before)this.toast('Couldn’t start a new chat. Try again.');});
-      },
-      openHistory:()=>{
-        // Android lists saved chats in Agent activity.
-        if(Capacitor.isNativePlatform()&&!testMocksEnabled)this.openView('settings',{page:'agent-activity'});
-        else connectionController.open();
-      },
-    };
     out.onKey=(event:KeyboardEvent&{nativeEvent?:KeyboardEvent})=>{
       if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&!event.nativeEvent?.isComposing&&event.keyCode!==229){event.preventDefault();sendFromComposer(this);}
     };
