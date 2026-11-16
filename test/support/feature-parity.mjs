@@ -511,6 +511,7 @@ export const featureParityAllowlist = {
     "apps/app/src/runtime/cloud-voice-limit.ts",
     "apps/app/src/runtime/cloud-voice.ts",
     "apps/app/src/runtime/comms-bar.ts",
+    "apps/app/src/runtime/composer-sizing.ts",
     "apps/app/src/runtime/connection-ui.tsx",
     "apps/app/src/runtime/conversation-selection.ts",
     "apps/app/src/runtime/crash-log.ts",
