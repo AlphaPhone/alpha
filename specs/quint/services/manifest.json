@@ -4477,7 +4477,10 @@
       "startEndsPendingFixTest",
       "chosenOriginEndsLocationRequestTest",
       "submittedSearchEndsLocationRequestTest",
-      "lateFixReplacesUnsubmittedChoiceTest"
+      "lateFixReplacesUnsubmittedChoiceTest",
+      "debouncedDestinationTest",
+      "debouncedOriginTest",
+      "cancelledInputTimerTest"
     ],
     "invariants": [
       "TypeOK",

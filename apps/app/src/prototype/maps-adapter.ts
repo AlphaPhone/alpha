@@ -121,7 +121,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     active,
     invalidate: () => { if (!disposed && !document.hidden && (active() || screen.isNavigating())) api?.set({ nativeMapsRevision: ++renders }); },
     toast: text => api?.toast(text),
-    discardHandoff: () => { pendingHandoff=undefined; if(api?.get('maps').query!=null)api.set({query:null}); },
+    discardHandoff: () => { retireSearch(); pendingHandoff=undefined; if(api?.get('maps').query!=null)api.set({query:null}); },
     handoffReturn: () => !!mapsEventReturnOffered(api?.get('maps').fromEvent,api?.S.stack,screen.isNavigating()),
     released: dropPlane,
     // With no Maps provider on Android, an event's location can be handed to an installed map
@@ -214,6 +214,8 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     return text.length > 200 ? `${text.slice(0, 199)}…` : text;
   }
   function bind(data: Bag, view: MapsScreenView, st: Bag, currentApi: Bag) {
+    // A committed route action replaces the edited origin and retires its delayed search.
+    if(originDraft!==undefined&&view.directions?.originText!==originDraft)retireSearch();
     const submitQuery=()=>{
       if(queryTimer!==undefined)clearTimeout(queryTimer);queryTimer=undefined;
       if(!active()||!currentApi.isActive())return;
@@ -229,9 +231,9 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     };
     const schedule=(origin:boolean,text:string)=>{
       const token=++searchEpoch,provider=mapsConnection().provider,owner=shell;
-      cancelSearchTimers();
-      if(origin){originDraft=text;queryDraft=undefined;screen.setOriginText(text);}else{queryDraft=text;originDraft=undefined;}
-      currentApi.set({nativeMapsRevision:++renders});
+      cancelSearchTimers();pendingHandoff=undefined;
+      if(origin){originDraft=text;queryDraft=undefined;if(view.mode==='origin')screen.setQuery(text);else screen.setOriginText(text);}else{queryDraft=text;originDraft=undefined;}
+      currentApi.set({query:null,nativeMapsRevision:++renders});
       const timer=setTimeout(()=>{
         if(token!==searchEpoch||provider!==mapsConnection().provider||shell!==owner||!owner?.live||!active()||!currentApi.isActive())return;
         if(origin)submitOrigin();else submitQuery();
@@ -319,11 +321,11 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       },
       mode:view.mode==='navigation'?'nav':view.mode==='directions'?'dir':view.mode, isBase:view.mode==='base',isResults,isPlace,isDir:view.mode==='directions',isNav,
       showSearch:view.showSearch, showRec:!isNav||view.map.overlay.follow===false, grid: '', major: '', fwy: '', water: '', parks: '', rwy: '', routeD: '', doneD: '', hasRoute: false, pins: [], labels: [], meCss: 'display:none;',
-      q: queryDraft??view.query, hasQ: !!(queryDraft??view.query), searchIcon:view.searchLead==='back'?'M15 5l-7 7 7 7':data.searchIcon, searchLabel: view.searchLead === 'back' ? 'Back' : 'Search', leadIsSearch: view.searchLead !== 'back',
+      q: originDraft??queryDraft??view.query, hasQ: !!(originDraft??queryDraft??view.query), searchIcon:view.searchLead==='back'?'M15 5l-7 7 7 7':data.searchIcon, searchLabel: view.searchLead === 'back' ? 'Back' : 'Search', leadIsSearch: view.searchLead !== 'back',
       searchLead: () => {retireSearch();screen.searchLead();},
-      onQ: (event: Event) => schedule(false,(event.target as HTMLInputElement).value),
+      onQ: (event: Event) => schedule(view.mode==='origin',(event.target as HTMLInputElement).value),
       focusQ: () => {},
-      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();++searchEpoch;submitQuery();(event.target as HTMLInputElement).blur(); } },
+      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();++searchEpoch;if(view.mode==='origin')submitOrigin();else submitQuery();(event.target as HTMLInputElement).blur(); } },
       clearQ: () => {retireSearch();screen.clearQuery();},
       chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => screen.chooseSaved(item.id) })),
       cats: (view.map.selected||view.map.overlay.position?data.cats:[]).map((category: Bag) => ({ ...category, go: () => screen.searchFor(category.label) })),
@@ -345,7 +347,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         canDir: place.canDirections && placeSourceVerified, min: 'Directions', saved: place.saved,
         saveLabel: place.saved ? 'Remove from saved' : 'Save', starCss: place.saved ? 'color:var(--acct)' : '', starFill: place.saved ? 'fill:currentColor' : '',
         close: () => {retireSearch();screen.closePlace();}, save: !restrictedPlace || place.saved ? () => screen.toggleSaved() : undefined,
-        dirs: placeSourceVerified ? () => {retireSearch();screen.openDirections();const next=screen.view().directions;if(next&&!next.originText.trim())screen.locate();} : undefined,
+        dirs: placeSourceVerified ? () => {retireSearch();screen.openDirections();const next=screen.view().directions;if(next&&!next.originText.trim()&&mapsController?.snapshot().route.phase!=='ready')screen.locate();} : undefined,
         share: restrictedPlace ? undefined : () => screen.sharePlace(),
         nativeName: place.name, nativeEditing: place.editingName,
         canRename:!restrictedPlace&&(place.saved||place.meta==='Coordinates'||place.meta==='Device location'),

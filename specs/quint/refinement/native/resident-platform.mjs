@@ -385,6 +385,8 @@ public class OwnerRoutes {
  public static OwnerRoutes shipped(Assets assets) { throw new IllegalStateException("Owner route asset unavailable in resident fixture"); }
  public String group(String path,String... groups) { throw new AssertionError("Unused owner route"); }
  public boolean allowed(String group,String path,String method) { throw new AssertionError("Unused owner route"); }
+ public boolean requestAllowed(String path,String method,String body,String owner) { throw new AssertionError("Unused owner request"); }
+ public static int requestBodyLimit(String path,String method) { throw new AssertionError("Unused owner request body"); }
 }`,
     'ai/eliza/voice/LiveSegmentPipe.java': `package ai.eliza.voice;
 public class LiveSegmentPipe {
