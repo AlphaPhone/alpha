@@ -3,6 +3,7 @@ import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {JSDOM} from 'jsdom';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {captureInputs,checkTraces} from '../check-traces.mjs';
 import {androidPorts,compileJava,javaJson,materialize,root} from './os-host-support.mjs';
@@ -74,7 +75,7 @@ public class Probe {
 }`;
 
 export async function checkOSProvisioning(extraSources=[]){
- const sources=[driver,'app.config.json','specs/quint/refinement/application/os-host-support.mjs','test/fixtures/jvm-tools.mjs',
+ const sources=[driver,'app.config.json',folder+'strings.xml','specs/quint/refinement/application/os-host-support.mjs','test/fixtures/jvm-tools.mjs',
   'android/gradle/verification-metadata.xml',jsonJar,...['AlphaWelcome.java','AlphaAppearance.java','AlphaFreshPresets.java','AlphaFreshSetupPolicy.java'].map(name=>folder+name),...extraSources];
  sources.push('test/fixtures/jvm-tools.mjs','scripts/prepare-patched-native.ts','scripts/upstream-native-source.ts','test/quint-application-refinement.test.mjs');
  const before=captureInputs(sources),temporary=mkdtempSync(join(tmpdir(),'alpha-os-provision-'));
@@ -87,7 +88,11 @@ export async function checkOSProvisioning(extraSources=[]){
   for(const anchor of [entry,result,fail])assert.equal(welcome.split(anchor).length,2,'Unique observer anchor');
   const observed=welcome.replace(entry,'            Probe.enterPresets();\n'+entry).replace(result,'            Probe.keyboardResult(keyboard);\n'+result).replace(fail,fail+'\n            Probe.fail();');
   const names=[...new Set([...welcome.matchAll(/R\.string\.([a-z_]+)/g),...readFileSync(resolve(root,folder+'AlphaAppearance.java'),'utf8').matchAll(/R\.string\.([a-z_]+)/g)].map(match=>match[1]))];
-  const generated=materialize(temporary,{...androidPorts(identity),'com/android/provision/AlphaWelcome.java':observed,'com/android/provision/Probe.java':probe,
+  const xml=new JSDOM(readFileSync(resolve(root,folder+'strings.xml'),'utf8'),{contentType:'text/xml'});
+  const launcher=xml.window.document.querySelector('string[name="alpha_launcher_package"]')?.textContent;xml.window.close();
+  assert.equal(launcher,identity,'Canonical HOME-only traces use the actual declared launcher resource');
+  const launcherId=names.indexOf('alpha_launcher_package')+1;assert.ok(launcherId>0);
+  const generated=materialize(temporary,{...androidPorts(identity,{[launcherId]:launcher}),'com/android/provision/AlphaWelcome.java':observed,'com/android/provision/Probe.java':probe,
    'com/android/provision/R.java':`package com.android.provision;final class R {static class drawable {static final int alpha_mark=1,alpha_wallpaper=2;}static class string {${names.map((name,index)=>`static final int ${name}=${index+1};`).join('')}}}`});
   const driverHashes={...before,...captureInputs(generated)};
   compileJava([...generated,...['AlphaAppearance.java','AlphaFreshPresets.java','AlphaFreshSetupPolicy.java'].map(name=>resolve(root,folder+name))],temporary);

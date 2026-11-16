@@ -19,8 +19,9 @@ export function javaJson(directory,main){
  return JSON.parse(execFileSync(javaBinary('java'),['-cp',directory+':'+jsonJar,main],{encoding:'utf8',timeout:scaledTimeout(120000)}));
 }
 /** Android boundary ports only. Production controller/policy methods compile unchanged. */
-export function androidPorts(identity){
+export function androidPorts(identity, strings={}){
  if(!/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(identity))throw Error('Invalid Android fixture identity');
+ for(const [id,value] of Object.entries(strings))if(!Number.isSafeInteger(Number(id))||Number(id)<1||typeof value!=='string')throw Error('Invalid Android string resource port');
  return {
  'android/content/Context.java':`package android.content; import android.content.pm.*; import java.util.*; public class Context {
  public final Map<Class<?>,Object> services=new HashMap<>(); public final ContentResolver resolver=new ContentResolver();
@@ -42,7 +43,7 @@ export function androidPorts(identity){
  public static final int RESULT_OK=-1,RESULT_CANCELED=0;
  public boolean isFinishing(){return finishing;}public boolean isDestroyed(){return destroyed;} public void finish(){finishing=true;}
  public java.util.concurrent.Executor getMainExecutor(){return Runnable::run;}public Resources getResources(){return new Resources();}
- public Window getWindow(){return new Window();} public String getString(int id){return "string-"+id;}
+ public Window getWindow(){return new Window();} public String getString(int id){${Object.entries(strings).map(([id,value])=>`if(id==${id})return ${JSON.stringify(value)};`).join('')}return "string-"+id;}
  public void setContentView(View view){content=view;}public void startActivity(Intent intent){starts++;}public void onCreate(Bundle bundle){}
  public void sendOrderedBroadcast(Intent intent,String permission,BroadcastReceiver receiver,Handler handler,int initialCode,String data,Bundle extras){
   throw new AssertionError("HOME-only setup must not dispatch a telephony preparation broadcast");
