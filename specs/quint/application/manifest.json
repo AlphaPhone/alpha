@@ -10428,14 +10428,18 @@
       "hiddenSettingsReadsNothingTest",
       "signedOutAsksForSignInTest",
       "unmountRetiresReadTest",
-      "licensesLoadOnceTest"
+      "licensesLoadOnceTest",
+      "newerDiagnosticSupersedesStatusTest",
+      "diagnosticLimitRetiresStatusTest",
+      "unmountRetiresDiagnosticLogTest"
     ],
     "invariants": [
       "CheckingEnds",
       "VerifiedIsCurrentSession",
       "OneNewestRead",
       "ReadsAreLimited",
-      "LicensesLoadOnce"
+      "LicensesLoadOnce",
+      "DiagnosticStateIsScoped"
     ],
     "witnesses": [
       "SupersededResultWitness",
@@ -10471,6 +10475,14 @@
       {
         "path": "apps/app/src/prototype/settings-adapter.ts",
         "name": "gmailGrantLabel"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "async function refreshResidentDiagnostics"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "inferenceAbort"
       }
     ],
     "stateMapping": {
@@ -10478,10 +10490,12 @@
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
       "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization\u2026, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
+      "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures and results published by the diagnostic read",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },
     "abstractions": [
-      "Only the Gmail authorization read of refreshCapabilities is modeled; the listener status read is SettingsListenerReads and the browser agent status read follows the same fence. refreshResidentDiagnostics (inferenceAbort) uses the same supersede-and-limit shape and is not separately modeled.",
+      "The Gmail authorization read, licence loading and explicit Problem log diagnostic read are modeled. Listener status is SettingsListenerReads.",
+      "An accepted failure is unique in this diagnostic campaign. Independent ordinary log refreshes, explicit log clear, the export chooser, and the resident transport's internal session validation are outside these transitions.",
       "A change of the account binding always reaches the page through the connection subscription, which starts a read in the same task. A Cloud client that never settles a request after its abort is ended by the limit.",
       "Settings busy labels (update check, notification work, photo access, crash log) are single-flight flags around one awaited call and are not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."
