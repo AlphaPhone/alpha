@@ -15,6 +15,8 @@ import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {modelTraces, replay} from '../specs/quint/refinement/application/shell-model-traces.mjs';
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
+import {callsBriefing, matchesCallQuery} from '../apps/app/src/prototype/telephony-presenters.ts';
+import {applyListFilter, clearListFilter, setListFilterHandler} from '../apps/app/src/runtime/comms-bar.ts';
 
 // PhoneCall traces from the simulator, replayed on the development Phone fixture itself: the
 // module-level call latch, pnStart/pnEnd/pnDecline and the registered view's render, back,
@@ -41,6 +43,8 @@ function fixture() {
     copy: () => ({presetPerson: 'ada'}), PEOPLE, person: id => PEOPLE.find(person => person.id === id) || null,
     formatTime: () => 'now', formatMonthDay: () => 'day', DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     pad2: value => String(value).padStart(2, '0'), crypto: {randomUUID},
+    // The Phone source's module imports (AP-16 Recents filter and briefing).
+    callsBriefing, matchesCallQuery, applyListFilter, clearListFilter, setListFilterHandler, testMocksEnabled: true,
   }});
   core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };`);
   const {PN} = core.context, phone = views.phone;
@@ -54,11 +58,13 @@ function fixture() {
   let shown = null;
   const settle = run => {
     queue = [];
+    // A throw from the handler or a render is the test's failure, never a skipped step.
+    let pending;
     try { run(); } finally {
-      const pending = queue; queue = null;
+      pending = queue; queue = null;
       for (const [patch, done] of pending) settleNow.call(shell, patch, done);
-      return pending.length > 0;
     }
+    return pending.length > 0;
   };
   // A state change redraws the view while it is in front; its render arms the start of a handed-over call.
   const act = run => {
