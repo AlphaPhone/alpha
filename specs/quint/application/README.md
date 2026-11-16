@@ -7,7 +7,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | --- | --- | --- |
 | `Application` | `AlphaClient.attachVerifiedTransport`, `disconnect`, `setViewContext`, native startup/reset gates | Two owners, three non-reused epochs, lifecycle, sensitive observation, pending work, reviewed dispatch, voice and owner-scoped visible cache |
 | `DeviceActionReview` | Current `DeviceActions` binding and shared `DeviceActionCoordinator.pendingReview`, `performRequested`, `approve` | One focused proposal at a time with its operation class (direct, reviewed, workflow step, outside the contract), request-message binding, typed-address grounding for Browser, the Review-first preference (off, on, unreadable), one direct pass of at most four approvals that stops on the first non-success, exact context, expiry, consumed card, durable reservation identity, server decision/claim, applying marker, one effect per proposal, terminal journal and receipt. `UnknownOnlyAfterDispatch` is a registered expected violation (the public call answers `unknown` for a failure before any dispatch) |
-| `BrowserAgentOpen` | `BrowserAdapter.browserNavigateApproved`, `browserCommand`, `ViewNavigationClient.receiveInteraction`, shared `browserAllowed`/`consumeBrowserRequest` | One Browser proposal with destination class and typed-address match, one automatic open per message, presentation only after the journal and receipt attempt, and one unjournaled back/forward/reload command bound to the exact tab navigation with review-first refusal. Model-only; `OpenedClaimMeansShown` is a registered expected violation |
+| `BrowserAgentOpen` | `BrowserAdapter.browserNavigateApproved`, `browserCommand`, `ViewNavigationClient.receiveInteraction`, shared `browserAllowed`/`consumeBrowserRequest` | Typed-address admission, one automatic open per message, a receipt for the created tab, presentation after the receipt attempt, and one unjournaled command bound to the exact tab navigation. Replayed through the installed Browser and device-action coordinator. |
 | `CameraAgentCapture` | camera adapter `takeRequestedPhoto`, `active`, phone executor camera branch | One agent photo request: visible Camera required, chat closed on admission, preview hold, queued start, second check before the shutter, unknown only after the shutter. Model-only; `ShutterNeverCovered` is a registered expected violation (owner reopens chat while the preview starts) |
 | `FilesAgentActions` | phone executor Files branch, shared Files runner `run`/`reviewedIdentities`, `filesContextAllowed` | Direct filter/open (may bring Files forward) versus reviewed share, new folder, move and trash; move/trash bound to the identity read when the card was built. Model-only |
 | `NotesAgentSource` | phone executor `create_note`, Notes query and selected-note branches | Phone-side Notes operations act only on Previous notes; selected-note binding, trash copy before tombstone, reviewed reads. The canonical Notes write outside the Review-first preference is an explicit assumption and a registered expected violation. Model-only |
@@ -182,8 +182,8 @@ obligations. `Application.ReviewedDispatch` is scoped to the review-first path;
 it must not be used to infer that current-request execution requires a second
 user tap.
 
-The per-view agent modules `BrowserAgentOpen`, `CameraAgentCapture`,
-`FilesAgentActions`, `NotesAgentSource`, `CalendarAgentWrites` and
+The per-view agent modules `CameraAgentCapture`, `FilesAgentActions`,
+`NotesAgentSource`, `CalendarAgentWrites` and
 `MapsSelectedRead` are model-only: their rules were read from the listed
 sources at the pinned revision and no refinement adapter drives that source.
 They add the view-specific admission each operation needs on top of the
@@ -191,7 +191,7 @@ proposal custody that `DeviceActionReview` replays against the real coordinator.
 Each known divergence between an intended rule and the code is kept as a named
 property outside `safety`, listed under `expectedViolations` in the manifest,
 with its counterexample required as a witness by the default gate:
-`BrowserAgentOpen.OpenedClaimMeansShown`, `CameraAgentCapture.ShutterNeverCovered`,
+`CameraAgentCapture.ShutterNeverCovered`,
 `NotesAgentSource.ReviewFirstCoversCanonicalNotes`,
 `CalendarAgentWrites.UnknownOnlyAfterNativeCall` and
 `MapsSelectedRead.UnknownOnlyAfterRead`. Photos agent operations are not modeled:

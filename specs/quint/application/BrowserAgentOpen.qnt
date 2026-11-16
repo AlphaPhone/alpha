@@ -9,7 +9,7 @@ module BrowserAgentOpen {
     autoUsed: bool, autoOpens: int,
     // executor, journal, receipt attempt and presentation
     tab: bool, journal: str, receiptTried: bool, synced: bool, foreground: bool,
-    presented: bool, claimedOpened: bool,
+    presented: bool, tabReceipt: bool,
     // view command (back / forward / reload)
     command: str, native: bool, inBrowser: bool, overlay: bool, tabRevision: int,
     claimRevision: int, boundRevision: int, sentRevision: int, commandAsked: bool, claims: int, sends: int, acks: int}
@@ -17,7 +17,7 @@ module BrowserAgentOpen {
   pure val schemes = Set("https", "http", "userinfo")
   action init = s' = {scheme: "https", typed: false, reviewFirst: "off", card: false, authority: "none",
     autoUsed: false, autoOpens: 0, tab: false, journal: "empty", receiptTried: false, synced: false,
-    foreground: true, presented: false, claimedOpened: false,
+    foreground: true, presented: false, tabReceipt: false,
     command: "none", native: true, inBrowser: true, overlay: false, tabRevision: 0, claimRevision: -1,
     boundRevision: -1, sentRevision: -1, commandAsked: false, claims: 0, sends: 0, acks: 0}
   val asks = s.reviewFirst != "off"
@@ -27,17 +27,16 @@ module BrowserAgentOpen {
   /// A new proposal of the same message. Only HTTPS without credentials parses into a card.
   action propose(scheme: str, typed: bool): bool = all {idle or s.journal == "terminal", scheme.in(schemes),
     s' = {...s, scheme: scheme, typed: typed, card: scheme == "https", authority: "none",
-      tab: false, journal: "empty", receiptTried: false, synced: false, presented: false, claimedOpened: false}}
+      tab: false, journal: "empty", receiptTried: false, synced: false, presented: false, tabReceipt: false}}
   action newMessage = all {idle or s.journal == "terminal",
     s' = {...s, card: false, authority: "none", autoUsed: false, autoOpens: 0, typed: false}}
   /// The direct pass: the typed address must match, once per message, with the preference off.
   action openDirect = all {s.card, idle, not(asks), s.typed, not(s.autoUsed),
     s' = {...s, card: false, authority: "request", autoUsed: true}}
   action openReviewed = all {s.card, idle, s' = {...s, card: false, authority: "review"}}
-  /// The executor re-checks the scheme, creates the tab without selecting it, and answers
-  /// "Opened <host>." before anything is shown.
+  /// The executor re-checks the scheme and records creation of the new tab.
   action execute = all {not(idle), s.journal == "empty", not(s.tab), s.scheme == "https",
-    s' = {...s, tab: true, claimedOpened: true,
+    s' = {...s, tab: true, tabReceipt: true,
       autoOpens: s.autoOpens + (if (s.authority == "request") 1 else 0)}}
   action journalFinish = all {s.tab, s.journal == "empty", s' = {...s, journal: "terminal"}}
   action receipt(ok: bool): bool = all {s.journal == "terminal", not(s.receiptTried),
@@ -82,6 +81,7 @@ module BrowserAgentOpen {
   val HttpsNoUserinfo = (s.card or s.tab) implies s.scheme == "https"
   val AutoOpenMatchesTypedAddress = (s.authority == "request") implies s.typed
   val OneAutoOpenPerMessage = s.autoOpens <= 1
+  val ReceiptReportsTabCreation = s.tabReceipt iff s.tab
   val PresentationAfterReceiptAttempt = s.presented implies
     (s.tab and s.journal == "terminal" and s.receiptTried)
   val ViewCommandNeedsToggleOff = s.command.in(Set("bound", "sent")) implies not(s.commandAsked)
@@ -90,14 +90,12 @@ module BrowserAgentOpen {
   val ViewCommandNativeForegroundOnly = s.command.in(Set("bound", "sent")) implies
     (s.native and s.inBrowser and not(s.overlay))
   val ViewCommandNeverRepeated = s.sends <= s.claims and s.acks <= s.claims
-  val safety = HttpsNoUserinfo and AutoOpenMatchesTypedAddress and OneAutoOpenPerMessage and
+  val safety = HttpsNoUserinfo and AutoOpenMatchesTypedAddress and OneAutoOpenPerMessage and ReceiptReportsTabCreation and
     PresentationAfterReceiptAttempt and ViewCommandNeedsToggleOff and
     ViewCommandBoundToExactTabRevision and ViewCommandNativeForegroundOnly and ViewCommandNeverRepeated
 
-  /// KNOWN DIVERGENCE (app review AGENT-10): the receipt says "Opened <host>." when the tab was
-  /// created, whether or not Browser was then shown. Registered as an expected violation.
-  val OpenedClaimMeansShown = (s.claimedOpened and s.receiptTried and not(s.foreground)) implies s.presented
-  val OpenedButNotShown = s.claimedOpened and s.receiptTried and not(s.foreground) and not(s.presented)
+  /// A receipt can report a created tab while presentation is still unavailable.
+  val CreatedTabRemainsUnselected = s.tabReceipt and s.receiptTried and not(s.foreground) and not(s.presented)
 
   run typedAddressOpensOnceTest = init.then(propose("https", true)).then(openDirect).then(execute)
     .then(journalFinish).then(receipt(true)).then(present)
@@ -113,9 +111,9 @@ module BrowserAgentOpen {
   run presentationWaitsForReceiptTest = init.then(propose("https", true)).then(openDirect).then(execute)
     .then(journalFinish).expect(safety and not(s.receiptTried) and not(s.presented))
     .then(receipt(false)).then(present).expect(safety and s.presented and not(s.synced))
-  run openedButNotShownTest = init.then(propose("https", true)).then(openDirect).then(execute)
+  run hiddenForegroundReportsTabCreationTest = init.then(propose("https", true)).then(openDirect).then(execute)
     .then(journalFinish).then(leaveForeground).then(receipt(true)).then(presentSkipped)
-    .expect(safety and OpenedButNotShown and not(OpenedClaimMeansShown))
+    .expect(safety and CreatedTabRemainsUnselected)
   run commandRefusedUnderReviewFirstTest = init.then(prefer("on")).then(claim).then(commandRefused)
     .then(acknowledge(true)).expect(safety and s.sends == 0 and s.acks == 1)
   run commandBoundToTabTest = init.then(claim).then(commandBind).then(tabNavigates).then(commandStale)

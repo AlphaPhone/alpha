@@ -9,6 +9,7 @@ import {loadBundled} from './browser-model-traces.mjs';
 const self = fileURLToPath(import.meta.url);
 const turn = 'browser-agent-request';
 const url = 'https://example.com/article';
+const tabCreated = 'Created a browser tab for example.com.';
 const prefs = ['off', 'on', 'unreadable'];
 const browserCalls = ['bookmarks', 'browsingState', 'saveBrowsingState', 'present', 'close', 'cancelReading', 'readingSupport', 'create', 'navigate'];
 
@@ -235,7 +236,7 @@ async function replayOpen(DeviceActions, browserNavigationSummary, options) {
     's.card':client.proposals.has(proposalId), 's.tab':navigate().length > 0,
     's.journal':journalEntry?.phase === 'terminal' ? 'terminal' : 'empty',
     's.receiptTried':receiptReturned, 's.synced':synced, 's.foreground':!host.page.document.hidden,
-    's.presented':host.viewOpens.length > 0, 's.claimedOpened':summary === 'Opened example.com.',
+    's.presented':host.viewOpens.length > 0, 's.tabReceipt':summary === tabCreated,
   });
   const r = recorder(name, observe);
   try {
@@ -270,8 +271,8 @@ async function replayOpen(DeviceActions, browserNavigationSummary, options) {
       assert.equal(host.state().cur, navigate()[0].input.id);
       assert.deepEqual(host.viewOpens[0], ['browser', null, null, {restore:true}]);
     }
-    if (receiptSucceeds) assert.equal(receipt.summary, 'Opened example.com.');
-    else assert.match(receipt.summary, /^Opened example\.com\. Not synced yet/);
+    const syncNotice = ' Not synced yet; open action history to retry.';
+    assert.equal(receipt.summary, receiptSucceeds ? tabCreated : tabCreated + syncNotice);
     r.step(r.action('receipt', receiptSucceeds), r.action(hidden ? 'presentSkipped' : 'present'));
     return r.trace;
   } finally {
@@ -302,7 +303,7 @@ export async function checkBrowserAgentOpen(extraSources = []) {
   for (const options of [
     {name:'typed open waits for the held receipt', direct:true},
     {name:'reviewed open presents after an unsynced receipt attempt', receiptSucceeds:false},
-    {name:'AGENT-10: successful receipt says Opened while its hidden tab stays unselected', hidden:true},
+    {name:'the receipt records tab creation while the hidden tab stays unselected', hidden:true},
     {name:'HTTP creates no proposal card or tab', invalidScheme:'http'},
     {name:'credentialed HTTPS creates no proposal card or tab', invalidScheme:'userinfo'},
   ]) traces.push(await replayOpen(DeviceActions, browserNavigationSummary, options));

@@ -4279,7 +4279,7 @@
       "insecureAddressHasNoCardTest",
       "reviewFirstKeepsCardTest",
       "presentationWaitsForReceiptTest",
-      "openedButNotShownTest",
+      "hiddenForegroundReportsTabCreationTest",
       "commandRefusedUnderReviewFirstTest",
       "commandBoundToTabTest",
       "commandSentOnceTest",
@@ -4302,14 +4302,14 @@
     "abstractions": [
       "One proposal at a time with a destination class (HTTPS, plain HTTP, credentials in the address) and whether the owner's message typed that address; one view command (back, forward or reload are not distinguished) bound to one tab's navigation revision, at most three claims.",
       "The direct open and its one-per-message rule are also replayed against the real coordinator by DeviceActionReview; this module adds the scheme rule, presentation after the journal and receipt attempt, and the unjournaled view-command path with its review-first refusal (an unreadable choice counts as on).",
-      "KNOWN DIVERGENCE (app review AGENT-10): the receipt text says the address was opened once the tab exists, whether or not Browser is then shown. OpenedClaimMeansShown is registered under expectedViolations with the required witness OpenedButNotShown, not weakened.",
       "The directed BrowserAgentOpen replay runs the whole view navigation client, installed Browser adapter and shared device action coordinator. It covers the exact tab bridge call, denied or stale commands, lost acknowledgment without a repeated effect, HTTPS admission and deferred presentation after the receipt attempt.",
-      "AGENT-10 is replayed with a hidden foreground. The actual receipt formatter says Opened after creating its background tab while Browser stays unselected. The property violation stays registered. Server, renderer journal persistence, agent adapter context wiring and Android navigation internals are separate evidence."
+      "The hidden foreground replay observes the exact tab-creation summary while Browser remains unselected. Server grants, renderer journal persistence, agent adapter context wiring and Android navigation internals are separate evidence."
     ],
     "invariants": [
       "HttpsNoUserinfo",
       "AutoOpenMatchesTypedAddress",
       "OneAutoOpenPerMessage",
+      "ReceiptReportsTabCreation",
       "PresentationAfterReceiptAttempt",
       "ViewCommandNeedsToggleOff",
       "ViewCommandBoundToExactTabRevision",
@@ -4317,15 +4317,7 @@
       "ViewCommandNeverRepeated"
     ],
     "witnesses": [
-      "OpenedButNotShown"
-    ],
-    "expectedViolations": [
-      {
-        "init": "init",
-        "step": "step",
-        "invariant": "OpenedClaimMeansShown",
-        "expected": "violation"
-      }
+      "CreatedTabRemainsUnselected"
     ],
     "bounds": {
       "maxSamples": 400,
