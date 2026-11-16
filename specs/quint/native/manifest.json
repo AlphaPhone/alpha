@@ -3353,7 +3353,10 @@
       "busyRecorderMessageTest",
       "waitingSuccessorRejectedTest",
       "waitingAppSuccessorStopsOnceTest",
-      "restartOpensChainsTest"
+      "restartOpensChainsTest",
+      "confirmedReadingStartsItsSuccessorTest",
+      "confirmedVoiceCleanupAllowsEntryTest",
+      "dismissedVoiceFailureRequiresRestartTest"
     ],
     "invariants": [
       "StagesKnown",
@@ -3450,9 +3453,10 @@
       "epoch": "The app process"
     },
     "abstractions": [
-      "Four independent chains, each idle, playing, retiring, recovering or closed; at most six requests and one restart.",
+      "Four modeled chains, each idle, playing, retiring, recovering or closed, with at most six requests and one restart. The installed replays exercise each chain on its own and leave cross-chain handoff separate.",
       "A request made while speech plays on its chain retires that speech and waits; who cancels the predecessor is not distinguished.",
       "The voice surface and read aloud stay closed until the app process restarts. App speech and Cloud app speech ask native to stop playback once per request on a closed chain: a confirmed stop admits the request, a refused one keeps the chain closed with the restart message.",
+      "The whole voice and note-read replay executes the actual reply and playback controllers with held native stop replies. The app and Cloud app playback members retain their separate partial-source regression.",
       "Native cancel and stop are one confirmed-or-unconfirmed settle step (see RendererSpeechChunk). Starting a voice conversation on a closed voice chain is refused the same way as Transcribe."
     ]
   },
