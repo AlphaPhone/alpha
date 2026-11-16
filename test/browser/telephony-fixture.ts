@@ -136,8 +136,8 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
         if (method === 'status') return status();
         if (method === 'requestAccess') { w.access[input.access] = true; return status(); }
         if (method === 'searchContacts') { const query = String(input.query || '').toLowerCase(); return {contacts: people.filter(p => !query || p.name.toLowerCase().includes(query) || p.phones.some(n => n.includes(query))).slice(0, input.limit).map(p => ({id: p.id, lookupKey: `lookup-${p.id}`, displayName: p.name, phoneNumbers: p.phones, emailAddresses: p.emails, starred: false}))}; }
-        // AC-20: Android's PhoneLookup over the whole address book, by digits.
-        if (method === 'contactForNumber') { const digits = String(input.number).replace(/\D/g, '').slice(-10); const hit = people.find(p => p.phones.some(n => n.replace(/\D/g, '').slice(-10) === digits)); return {name: hit ? hit.name : null}; }
+        // AC-20: AlphaContactLookup over the whole address book: exact E.164 equality for the fixture's US SIM.
+        if (method === 'contactForNumber') { const e164 = (n: string) => { const d = n.replace(/[^\d+]/g, ''); return d.startsWith('+') ? d : d.length === 10 ? '+1' + d : d.length === 11 && d.startsWith('1') ? '+' + d : d; }; const hit = people.find(p => p.phones.some(n => e164(n) === e164(String(input.number)))); return {name: hit ? hit.name : null}; }
         if (method === 'listRecentCalls') return {calls};
         if (method === 'placeCall') return {status: 'placed', message: ''};
         if (method === 'dial') return {status: 'handed-off', target: 'dialer', handler: 'com.android.dialer', message: 'Your phone app is open with the number.'};

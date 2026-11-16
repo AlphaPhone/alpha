@@ -7,20 +7,68 @@ import android.os.CancellationSignal;
 import android.provider.ContactsContract;
 
 /**
- * AP-16 AC-20: the contact a number belongs to, through Android's own number matching (PhoneLookup)
- * over the whole address book, so the call approval card names the person. Read-only; the caller
- * holds the Contacts read fence.
+ * AP-16 AC-20: the contact a number belongs to, for the call approval card. Android's PhoneLookup
+ * finds candidates over the whole address book, but it matches loosely (trailing digits), so a
+ * candidate names the card only when its stored number is exactly the number that will be dialed:
+ * the same E.164 number for the SIM's country (or, when either cannot be formatted, the same digits).
+ * Otherwise the card shows the number with no name.
+ * Read-only; the caller holds the Contacts read fence.
  */
 final class AlphaContactLookup {
  private AlphaContactLookup() {}
 
- /** The display name of the contact with this number, or null when none has it. */
+ /** The display name of the contact whose number is exactly this one, or null. */
  static String name(Context context, String number, CancellationSignal cancel) {
   Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number));
-  try (Cursor rows = context.getContentResolver().query(uri, new String[] { ContactsContract.PhoneLookup.DISPLAY_NAME }, null, null, null, cancel)) {
-   if (rows == null || !rows.moveToFirst()) return null;
-   String name = rows.getString(0);
-   return name == null || name.isBlank() ? null : name;
+  String[] columns = { ContactsContract.PhoneLookup.DISPLAY_NAME, ContactsContract.PhoneLookup.NUMBER };
+  try (Cursor rows = context.getContentResolver().query(uri, columns, null, null, null, cancel)) {
+   if (rows == null) return null;
+   java.util.List<String[]> candidates = new java.util.ArrayList<>();
+   while (rows.moveToNext()) candidates.add(new String[] { rows.getString(0), rows.getString(1) });
+   String iso = country(context);
+   return exactName(candidates, number, value -> e164(value, iso));
   }
+ }
+
+ /** The SIM's (else the network's) country, upper case, or null. */
+ static String country(Context context) {
+  android.telephony.TelephonyManager phone = context.getSystemService(android.telephony.TelephonyManager.class);
+  if (phone == null) return null;
+  String iso = phone.getSimCountryIso();
+  if (iso == null || iso.isEmpty()) iso = phone.getNetworkCountryIso();
+  return iso == null || iso.isEmpty() ? null : iso.toUpperCase(java.util.Locale.ROOT);
+ }
+
+ /** The E.164 form for the country, or the plain digits when it cannot be formatted. */
+ static String e164(String number, String iso) {
+  String formatted = iso == null ? null : android.telephony.PhoneNumberUtils.formatNumberToE164(number, iso);
+  return formatted != null ? formatted : digits(number);
+ }
+
+ /** The first candidate {name, number} whose number is exactly the target; null when none is. */
+ static String exactName(java.util.List<String[]> candidates, String target) {
+  return exactName(candidates, target, AlphaContactLookup::digits);
+ }
+ static String exactName(java.util.List<String[]> candidates, String target, java.util.function.Function<String, String> normalize) {
+  if (digits(target).isEmpty()) return null;
+  String wanted = normalize.apply(target);
+  if (wanted == null || wanted.isEmpty()) return null;
+  for (String[] row : candidates) {
+   if (row == null || row.length < 2 || row[0] == null || row[0].isBlank() || digits(row[1]).isEmpty()) continue;
+   if (wanted.equals(normalize.apply(row[1]))) return row[0];
+  }
+  return null;
+ }
+
+ /** A leading '+' and the digits, with formatting removed; empty when there are no digits. */
+ static String digits(String number) {
+  if (number == null) return "";
+  StringBuilder out = new StringBuilder();
+  for (int i = 0; i < number.length(); i++) {
+   char c = number.charAt(i);
+   if (c >= '0' && c <= '9') out.append(c);
+   else if (c == '+' && out.length() == 0) out.append(c);
+  }
+  return out.length() == 0 || out.toString().equals("+") ? "" : out.toString();
  }
 }

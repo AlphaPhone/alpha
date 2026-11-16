@@ -393,6 +393,7 @@ export const featureParityAllowlist = {
     "apps/app/src/prototype/home-cards.ts",
     "apps/app/src/prototype/home-overview-cards.ts",
     "apps/app/src/prototype/home-shell.ts",
+    "apps/app/src/prototype/image-telephony.ts",
     "apps/app/src/prototype/inbox-cloud-adapter.ts",
     "apps/app/src/prototype/inbox-drafts.ts",
     "apps/app/src/prototype/inbox-provider-controls.ts",

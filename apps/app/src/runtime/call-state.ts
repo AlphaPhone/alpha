@@ -34,13 +34,16 @@ export function parseCallState(value: unknown): CallState | null {
 }
 
 let current: CallState = UNKNOWN;
+/** Each listener event advances this; a read that began before the latest event is not applied. */
+let generation = 0;
 export const currentCallState = (): CallState => current;
 
 /** A fresh native reading for the display. A failed read keeps the last one. */
 export async function readCallState(plugin: CallStatePlugin): Promise<CallState> {
+	const started = generation;
 	try {
 		const parsed = parseCallState(await plugin.callState());
-		if (parsed) current = parsed;
+		if (parsed && started === generation) current = parsed;
 	} catch {
 		// keep the last reading
 	}
@@ -63,6 +66,7 @@ export function watchCallState(plugin: CallStatePlugin, changed: () => void): ()
 		const parsed = parseCallState(value);
 		if (!parsed || !live) return;
 		const before = JSON.stringify(current);
+		generation++;
 		current = parsed;
 		if (JSON.stringify(current) !== before) changed();
 	}).then(registered => { if (live) handle = registered; else void registered.remove(); }, () => {});
@@ -99,28 +103,42 @@ export function installCallStateWatch(Component: any, plugin: CallStatePlugin): 
  * and rules out an emergency call. A failed or malformed read, or unknown state, refuses (fail closed). */
 export async function telephonyEffectAllowed(plugin: CallStatePlugin): Promise<boolean> {
 	let state: CallState | null;
+	const started = generation;
 	try {
 		state = parseCallState(await plugin.callState());
 	} catch {
 		return false;
 	}
 	if (!state) return false;
-	current = state;
+	// A Telephony event that arrived during the read is newer: it can only add a refusal.
+	if (started === generation) current = state;
+	else if (current.emergencyLive || current.inCall === null) return false;
 	return state.inCall !== null && !state.emergencyLive;
 }
 
 type SideEffectPorts = {
+	current(): void;
 	placeCall(number: string): Promise<{status: string}>;
 	sendSms(number: string, body: string, operationId: string, signal: AbortSignal): Promise<string>;
 	saveContact(draft: never, target?: never): Promise<{status: string}>;
 	removeContact(id: string, version: string): Promise<{status: string}>;
 };
-/** The image executor's side-effect ports, each behind the fail-closed guard read right before it. */
+/**
+ * The image executor's side-effect ports, each behind the fail-closed guard read right before it. The
+ * read is awaited, so the executor's fence (ports.current(), and the send's abort signal) runs again
+ * after it: nothing acts for a review that ended while Telecom was being read.
+ */
 export function guardTelephonyPorts<T extends SideEffectPorts>(ports: T, allowed: () => Promise<boolean>): T {
+	const cleared = async (signal?: AbortSignal) => {
+		const ok = await allowed();
+		signal?.throwIfAborted();
+		ports.current();
+		return ok;
+	};
 	return {...ports,
-		placeCall: async (number: string) => await allowed() ? ports.placeCall(number) : {status: 'busy'},
-		sendSms: async (number: string, body: string, operationId: string, signal: AbortSignal) => await allowed() ? ports.sendSms(number, body, operationId, signal) : 'cancelled',
-		saveContact: async (draft: never, target?: never) => await allowed() ? ports.saveContact(draft, target) : {status: 'failed'},
-		removeContact: async (id: string, version: string) => await allowed() ? ports.removeContact(id, version) : {status: 'failed'},
+		placeCall: async (number: string) => await cleared() ? ports.placeCall(number) : {status: 'busy'},
+		sendSms: async (number: string, body: string, operationId: string, signal: AbortSignal) => await cleared(signal) ? ports.sendSms(number, body, operationId, signal) : 'cancelled',
+		saveContact: async (draft: never, target?: never) => await cleared() ? ports.saveContact(draft, target) : {status: 'failed'},
+		removeContact: async (id: string, version: string) => await cleared() ? ports.removeContact(id, version) : {status: 'failed'},
 	} as T;
 }

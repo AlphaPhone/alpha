@@ -17,14 +17,15 @@ import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,camer
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
-import {guardTelephonyPorts,telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
+import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
+import {EMERGENCY_REFUSAL,imageDialHandoff,imageSmsSend,imageTelephonyAction} from './image-telephony';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,phoneDialResultText,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,executeTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,type TelephonyPorts} from '../runtime/telephony-executor';
 import {normalizePhoneNumber,reviewSms} from '../runtime/aosp-telephony';
 import {parseContactDetail,parseContactRemove,parseContactSave} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {askTelephonyReview} from './telephony-review';
@@ -271,12 +272,8 @@ export async function declineProposal(id:string):Promise<{ok:boolean;message:str
   if(after.error)return {ok:false,message:after.error};
   return {ok:true,message:'Declined. No phone action was performed.'};
 }
-/** AC-19 defence in depth: a fresh Telecom reading right before a telephony side effect. */
-const EMERGENCY_REFUSAL='Nothing was done during a call that may be an emergency call.';
-async function emergencyCallBlocks():Promise<boolean>{
-  if(!aospImage)return false;
-  return !(await telephonyEffectAllowed(registerPlugin<CallStatePlugin>('AlphaCallState')));
-}
+/** AC-19: a fresh Telecom reading right before a telephony side effect; fails closed (image-telephony.ts). */
+const imageEffectAllowed=():Promise<boolean>=>telephonyEffectAllowed(registerPlugin<CallStatePlugin>('AlphaCallState'));
 export function installAgentAdapter(Component: Shell, views: Shell) {
   const p = Component.prototype;
   // AC-20: on the image, a call proposal's person and number come from the phone's own contacts,
@@ -1033,11 +1030,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Reviewed dial handoff on the verified image only: the system dial screen opens with the
         // approved number and the owner places the call there. Contact targets are not negotiated.
         if(!aospImage||operation.target.kind!=='number'||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was dialed. Keep Alpha open and unlocked, then ask again.'};
-        if(await emergencyCallBlocks())return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
-        signal.throwIfAborted();context(this);
-        if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');
-        const handoff=await client.dial(operation.target.number);
+        const fence=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');};
+        // AC-19: Telecom is read right before the dial screen opens, and the review fence runs again after it.
+        const handoff=await imageDialHandoff(operation.target.number,number=>client.dial(number),{allowed:imageEffectAllowed,fence});
+        if(!handoff)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const dialResult:PhoneDialResult={kind:'phone-dial',status:handoff.status,handler:handoff.status==='handed-off'?handoff.handler:null,contact:false};
         return {status:dialDeviceStatus(dialResult),summary:phoneDialResultText(dialResult),dialResult};
       }
@@ -1046,7 +1043,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // phone; the owner confirms the exact number or the before and after before anything
         // calls, sends or writes, and the agent receives only the outcome.
         if(!aospImage||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was done. Keep Alpha open and unlocked, then ask again.'};
-        if(await emergencyCallBlocks())return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true),book=registerPlugin<any>('AlphaContacts');
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
@@ -1073,12 +1069,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
         };
-        // AC-19: every side effect re-reads Telecom first and refuses unless it can rule out an emergency call.
-        return executeTelephonyAction(operation,operationId,guardTelephonyPorts(ports,async()=>!(await emergencyCallBlocks())),signal);
+        // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
+        return imageTelephonyAction(operation,operationId,ports,{allowed:imageEffectAllowed},signal);
       }
       if(isSmsSend(operation)){
         if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent. Open Messages, choose the SIM, then ask again.'};
-        if(await emergencyCallBlocks())return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true);
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('SMS review context changed');};
@@ -1087,7 +1082,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!selectedSim||expectedContext.selectedObject.revision!==smsSubscriptionRevision(selectedSim))return {status:'failed' as const,summary:'Nothing was sent because the SIM changed. Open Messages, choose the SIM, then ask again.'};
         const cancel=()=>{void plugin.cancelSmsReview({operationId}).catch(()=>{});};
         signal.addEventListener('abort',cancel,{once:true});
-        try{current();const native=await client.sendSms(operation,operationId);const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:receiptLabel(smsResult.status)};}
+        try{
+          // AC-19: Telecom is read right before the send, and the review fence runs again after it.
+          const native=await imageSmsSend(()=>client.sendSms(operation,operationId),{allowed:imageEffectAllowed,fence:current});
+          if(!native)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:receiptLabel(smsResult.status)};}
         finally{signal.removeEventListener('abort',cancel);}
       }
       if(isClockOperation(operation)){

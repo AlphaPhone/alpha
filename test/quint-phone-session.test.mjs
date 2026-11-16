@@ -3,8 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {modelTraces, replayTraces, settle, sourceModule} from '../specs/quint/refinement/services/identity-comms-traces.mjs';
 import {createAospTelephony} from '../apps/app/src/runtime/aosp-telephony.ts';
-import {currentCallState, guardTelephonyPorts, telephonyEffectAllowed, watchCallState} from '../apps/app/src/runtime/call-state.ts';
-import {executeTelephonyAction} from '../apps/app/src/runtime/telephony-executor.ts';
+import {currentCallState, telephonyEffectAllowed, watchCallState} from '../apps/app/src/runtime/call-state.ts';
+import {imageTelephonyAction} from '../apps/app/src/prototype/image-telephony.ts';
 
 /** Existing source-executing MBT harness, shared by its original owning tests and the strict services receipt. */
 // PhoneSession traces replayed against the image Phone adapter. The telephony plugin is a held
@@ -73,7 +73,7 @@ function create() {
     removeContact: async () => { sideEffects.push(['remove']); return {status: 'deleted'}; },
     draftInOpenThread: () => 'none-selected', openThread: () => null, openVoicemail: () => null, deleteOpenVoicemail: async () => 'none-selected',
   };
-  const guardedPorts = guardTelephonyPorts(basePorts, () => telephonyEffectAllowed(device));
+  const guard = {allowed: () => telephonyEffectAllowed(device)};
   const operations = [{type: 'phone_call', target: {kind: 'number', number: '+15555550100'}},
     {type: 'contact_create', contact: {displayName: 'Ana Torres', phoneNumbers: ['+15555550101'], emailAddresses: []}}];
   const stopCallState = watchCallState(device, () => {});
@@ -102,7 +102,8 @@ function create() {
     async telecom(inCall, kind) { deviceAnswer = nativeCallState(inCall, kind); for (const listener of deviceListeners) listener(deviceAnswer); await settle(); },
     async alphaEffect() {
       const before = sideEffects.length;
-      await executeTelephonyAction(operations[attempts++ % operations.length], `op-${attempts}`, guardedPorts, new AbortController().signal);
+      // The image's own path (agent-adapter runs every telephony action through it).
+      await imageTelephonyAction(operations[attempts++ % operations.length], `op-${attempts}`, basePorts, guard, new AbortController().signal);
       if (sideEffects.length > before) effects++; else refusedEffects++;
       await settle();
     },

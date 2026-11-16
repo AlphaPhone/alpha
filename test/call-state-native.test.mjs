@@ -27,3 +27,7 @@ test('the renderer re-derives exactly the native rule for every reading', async 
 test('the call-state listener registers once phone-state access exists, follows changes and stops cleanly', () => {
   assert.match(runJvm([nativeSource('AlphaCallStateWatch.java'), fixture('CallStateWatchTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.CallStateWatchTest'), /PASS call-state watch/);
 });
+
+test('AC-20: PhoneLookup names a contact on the card only for an exact number match', () => {
+  assert.match(runJvm([nativeSource('AlphaContactLookup.java'), fixture('ContactLookupTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.ContactLookupTest'), /PASS contact lookup/);
+});

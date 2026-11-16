@@ -160,7 +160,9 @@ function pnScript(call) { return PN_SCRIPT[call] || PN_SCRIPT._ || { lines: [], 
 /* AC-20, development fixture only: call proposals name the fixture person and number. The image
    installs its contacts lookup instead (agent-adapter.ts). */
 if (testMocksEnabled) setCallPartyResolver(function (target) {
-  if (target.number) { var d = pnDigits(target.number), hit = PEOPLE.filter(function (p) { var pd = pnDigits(p.phone); return !!pd && (pd === d || d.slice(-pd.length) === pd); })[0]; return Promise.resolve({ name: hit ? hit.name : null, numbers: [target.number] }); }
+  /* exact numbers only, as the image's lookup (US fixture numbers: a national number is its +1 form) */
+  var e164 = function (n) { var d = pnDigits(n); return d.length === 10 ? "1" + d : d; };
+  if (target.number) { var d = e164(target.number), hit = PEOPLE.filter(function (p) { return !!pnDigits(p.phone) && e164(p.phone) === d; })[0]; return Promise.resolve({ name: hit ? hit.name : null, numbers: [target.number] }); }
   var q = String(target.contact || "").toLowerCase(), found = PEOPLE.filter(function (p) { return p.phone && p.name.toLowerCase().indexOf(q) >= 0; });
   return Promise.resolve({ name: found.length === 1 ? found[0].name : null, numbers: found.map(function (p) { return p.phone; }) });
 });

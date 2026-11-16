@@ -10,4 +10,6 @@ public class Context {
  @SuppressWarnings("unchecked") public <T> T getSystemService(Class<T> type) { return (T) services.get(type); }
  public android.content.pm.ApplicationInfo getApplicationInfo() { return info; }
  public java.util.concurrent.Executor getMainExecutor() { return Runnable::run; }
+ public ContentResolver resolver = new ContentResolver();
+ public ContentResolver getContentResolver() { return resolver; }
 }
