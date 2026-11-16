@@ -287,8 +287,12 @@ export async function startMountedCalendar({onSource = () => {}, observeCamera =
   return {close, async page({legacyTitle = '', eventTitles = [], notes = []} = {}) {
     const page = await browser.newPage({viewport: {width: 412, height: 915}});
     page.setDefaultTimeout(scaledTimeout(60_000));
-    const errors = [], foreign = [];
+    const errors = [], foreign = [], startupFailures=[];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('requestfailed', request => {
+      if(request.resourceType()==='script'&&request.url().startsWith(origin+'/'))
+        startupFailures.push({url:request.url(),error:request.failure()?.errorText});
+    });
     await page.route(/^https?:\/\/(?!127\.0\.0\.1:)/, route => {
       foreign.push(route.request().url());
       return route.abort();
@@ -296,7 +300,8 @@ export async function startMountedCalendar({onSource = () => {}, observeCamera =
     await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})));
     await page.goto(origin, {waitUntil: 'domcontentloaded', timeout: scaledTimeout(120_000)});
     const button = name => page.getByRole('button', {name, exact: true});
-    await button('Calendar').waitFor();
+    try { await button('Calendar').waitFor(); }
+    catch(cause) { throw new Error('Mounted renderer did not start: '+JSON.stringify({errors,startupFailures}),{cause}); }
     await page.evaluate(installCalendar, {legacyTitle, eventTitles, notes});
     const status = async (value, session) => page.waitForFunction(({value, session}) => {
       const s = window.quintCalendar.snapshot();

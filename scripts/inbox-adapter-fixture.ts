@@ -1,6 +1,8 @@
 // Shared Inbox adapter harness: the real adapter, drafts and review controllers in a vm realm with a
 // closed provider fixture and a fixed clock. No network, real account or mail; nothing is dispatched.
 import React from 'react';
+import {createAddressBookClient,isIncompleteAddressBookContact} from '../.eliza/client-features/packages/contracts/src/native-address-book.ts';
+import {literalMailAddress} from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
 import {MailFolderPicker} from '../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
 import {mailSenderImage} from '../apps/app/src/runtime/mail-sender-image.ts';
 import {decodeMailPreview} from '../apps/app/src/runtime/mail-preview.ts';
@@ -199,6 +201,7 @@ function scenario({caps={},accounts=null,nativePlatform=false}: {caps?: Partial<
  const serviceReadCache = async (): Promise<Cache | null> => null;
 
  const sandbox=inboxAdapterBindings({MailboxListCache:class extends mailboxList.MailboxListCache{get(key: string,now=clock){return super.get(key,now);}},MailBodyCache:class extends mailboxList.MailBodyCache<Read>{remember(key: string,body: Read,now=clock){return super.remember(key,body,now);}},serviceReadCache,alphaClient:{getState:()=>({context:{sensitive:false}})},reviewOwnNoticeQuestion:(options: ReviewNotice)=>{mailNotices.review=options;return ()=>{};},releaseGmailQuestion:async()=>{mailNotices.released++;mailNotices.tap=null;},configureGmailBackground:async()=>{},withdrawGmailBackground:async (grant?: string)=>{mailNotices.withdrawals++;mailNotices.withdrawn.push(grant??null);},pendingGmailNotice:async (): Promise<MailNoticeTap | null>=>mailNotices.tap,consumeGmailNotice:async (token: string)=>{mailNotices.consumed.push(token);mailNotices.tap=null;},onGmailNotice:async (fn: Action)=>{mailNotices.listener=fn;return {remove:async()=>{}};},readGmailAccountChoice:(owner: Parameters<typeof readGmailAccountChoice>[0])=>readGmailAccountChoice(owner,choices),saveGmailAccountChoice:(owner: Parameters<typeof saveGmailAccountChoice>[0], id: string | null)=>saveGmailAccountChoice(owner,id,choices),Date:FixedDate,inboxUnsaved,
+  createAddressBookClient,isIncompleteAddressBookContact,literalMailAddress,aospImage:false,setTimeout,clearTimeout,
   registerPlugin:()=>native,
   Capacitor:{isNativePlatform:()=>nativePlatform},
   secureConnectionStore:inboxMemoryStore(slots),

@@ -1,3 +1,4 @@
+import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './android-identity.ts';
 /**
  * Verify the launcher APKs of one build and record the result in apk-manifest.json.
  *
@@ -61,6 +62,7 @@ interface RuntimePackaging {
   distributable?: boolean;
 }
 interface BuildRecord {
+  applicationId?: string;
   updateChannel?: unknown;
   runtimeProfile?: string;
   localEmbeddings?: boolean;
@@ -124,7 +126,7 @@ if(cloudEvidenceArgs.length){
   } catch { throw Error('Cloud voice evidence could not be read as JSON'); }
 }
 
-const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
+const identity = androidIdentity(process.cwd());
 const callbackHost = new URL(CLOUD_DEPLOYMENT.production.web).hostname;
 // The only web VIEW filters an APK may carry: the main manifest's two returns on the production web
 // host (android/app/product.gradle supplies appLinkHost). Add a new app link here deliberately.
@@ -136,6 +138,12 @@ const webViewFiltersAllowed = [
 const buildRecordFile = path.join(directory, "build-config.json");
 if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run bun run android:build first.`);
 const buildRecord: BuildRecord = JSON.parse(fs.readFileSync(buildRecordFile, "utf8"));
+const configuredIdentity = JSON.parse(fs.readFileSync('app.config.json', 'utf8')).appId;
+if (buildRecord.applicationId !== undefined && buildRecord.applicationId !== identity.appId ||
+    identity.appId !== configuredIdentity && buildRecord.applicationId !== identity.appId)
+ throw Error('Build installation identity differs from APK verification');
+const identityProjection = stageAndroidIdentity(process.cwd(), identity, true);
+if (identityProjection) verifyAndroidIdentity(process.cwd());
 const updateChannel=validateUpdateChannel(buildRecord?.updateChannel);
 if(updateChannel.manifestUrlSha256!==sha256(identity.updateManifestUrl))throw Error('Public update channel differs from source configuration');
 if((buildRecord?.runtimeProfile||"native")!==runtimeProfile||buildRecord?.localEmbeddings!==undefined)throw Error("Build record names a removed runtime profile; rebuild (there is one profile now)");
@@ -176,10 +184,10 @@ for (const mode of modes) {
     const d = validateApk(file, identity);
     if (d.debuggable !== (mode === "debug"))
       throw new Error(`Wrong debug flag: ${file}`);
-    const { facts, problems } = distributionProblems(d, { mode });
+    const { facts, problems } = distributionProblems(d, { mode, appId: identity.appId });
     const tree = parseXmlTree(d.xml);
     try{
-      const compiled=apkUpdateChannel(tree);
+      const compiled=apkUpdateChannel(tree,identity);
       if(compiled.kind!==updateChannel.kind||compiled.manifestUrlSha256!==updateChannel.manifestUrlSha256)problems.push('Compiled APK update channel differs from build evidence');
     }catch{problems.push('Compiled APK update channel could not be verified');}
     problems.push(...requiredAppLinkProblems(tree, {
@@ -223,6 +231,13 @@ for (const mode of modes) {
     catch (error) { problems.push(`Native patch provenance: ${message(error)}`); }
     try { verifyOwnerRouteTable(file); }
     catch (error) { problems.push(`Owner route table: ${message(error)}`); }
+    try {
+      if (identityProjection) {
+        const expected = fs.readFileSync(path.join(identityProjection.root, 'identity.json'));
+        if (!execFileSync('unzip', ['-p', file, 'assets/android-identity.json']).equals(expected))
+          throw Error('Packaged Android identity differs from the authenticated source view');
+      } else if (d.names.includes('assets/android-identity.json')) throw Error('Canonical APK contains an unexpected installation identity view');
+    } catch (error) { problems.push(`Android installation identity: ${message(error)}`); }
     problems.push(...embeddingApkProblems({names:d.names,read:entry=>execFileSync('unzip',['-p',file,entry],{maxBuffer:256*1024*1024})},embeddingManifest));
     let signerSha256: string | null = null;
     if (signed) {
@@ -397,6 +412,7 @@ fs.writeFileSync(
       allowUnpackagedRuntime: false,
       mapsProvider: "cloud",
       runtimeProfile,
+      applicationId: identity.appId,
       updateChannel,
       version: { code: versionCode, name: versionName },
       signing: {
