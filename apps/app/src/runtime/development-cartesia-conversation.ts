@@ -28,7 +28,7 @@ export async function developmentCartesiaConversation(input:{binding:VoiceConver
  const health=await request('/api/v1/voice/session/health?conversationId='+encodeURIComponent(input.binding.conversationId));if(requireTurnTerminal&&health.turnTerminal!==true||health.ready!==true||health.conversationId!==input.binding.conversationId||health.agentId!==input.binding.session.agentId)throw Error('The selected developer speech service is unavailable.');
  if(!own&&developmentCloudRealtimeVoiceEnabled&&(health.speechRoute!=='cloud'||health.speechProvider!=='cartesia'||health.providerAdmission!=='at-session-start'))throw Error('Cloud realtime speech was not attested.');
  if((own||!developmentCloudRealtimeVoiceEnabled)&&health.speechRoute!==undefined&&health.speechRoute!=='direct')throw Error('Direct realtime speech route changed.');
- const {createVoiceSessionClient}=await import('@elizaos/ui/voice/voice-session-client');current();
+ const {createVoiceSessionClient}=await import('../ui/voice/voice-session-client-core.ts');current();
  let directActions=false,preferenceGeneration=0;
  const refreshActionPreference=async()=>{const generation=++preferenceGeneration;directActions=false;try{const preferences=await readDevicePreferences(lifecycle.signal);if(!stopped&&generation===preferenceGeneration)directActions=!preferences.askBeforeAgentActions;}catch{ /* Unreadable preferences retain review. */ }};
  await refreshActionPreference();current();

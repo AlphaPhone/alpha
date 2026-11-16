@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-// Alpha's binding of the shared walkthrough (packages/ui permission-walkthrough) at the prepared pin.
+// Alpha's binding of its walkthrough (apps/app/src/ui/components/permissions/permission-walkthrough.ts).
 const flow=await import('../apps/app/src/startup-permission-flow.ts');
 test('photo grant description preserves selected/partial scope and rejects locked or malformed native results',()=>{
  assert.match(flow.startupPhotoAccess({scope:'selected',locked:false}).description,/Selected/);

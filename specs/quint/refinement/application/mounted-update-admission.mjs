@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {JSDOM} from 'jsdom';
@@ -10,8 +9,7 @@ import {boundInputs, captureSources, checkpoint, deferred, read, tick, trace, ca
 
 const model = 'MountedUpdateAdmission';
 const modelPath = 'specs/quint/application/MountedUpdateAdmission.qnt';
-const shared = 'packages/ui/src/state/app-update-gate.ts';
-const effective = '.eliza/client-features/' + shared;
+const local = 'apps/app/src/ui/state/app-update-gate.ts';
 const projection = '.eliza/client-features/.source.json';
 const main = 'apps/app/src/main.tsx';
 const activations = ['', '11111111-2222-4333-8444-555555555555', '22222222-2222-4333-8444-555555555555'];
@@ -197,18 +195,13 @@ async function fixture(name, code) {
 }
 
 export async function checkMountedUpdateAdmission() {
-  const sources = [fileURLToPath(import.meta.url), main, 'apps/app/src/prototype/settings-adapter.ts', 'vendor/eliza/' + shared, effective, projection,
+  const sources = [fileURLToPath(import.meta.url), main, 'apps/app/src/prototype/settings-adapter.ts', local, projection,
     'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java',
     'upstream.lock.json', 'scripts/prepare-client-features.ts', 'scripts/pinned-upstream-source.ts'];
   captureSources([...sources, modelPath]);
   checkClientFeatures();
-  const gate = read(effective);
+  const gate = read(local);
   const stamp = JSON.parse(read(projection));
-  const digest = createHash('sha256').update(gate).digest('hex');
-  assert.equal(stamp.files[shared], digest);
-  const pinned = createHash('sha256').update(read('vendor/eliza/' + shared)).digest('hex');
-  assert.equal(stamp.sourceFiles[shared], pinned);
-  assert.equal(digest, pinned, 'the prepared updater is the exact reviewed upstream source');
   assert.equal(Object.hasOwn(stamp, 'appUpdateResumePatch'), false, 'the retired updater patch has no receipt');
   const text = read(main);
   const settings = read('apps/app/src/prototype/settings-adapter.ts');
@@ -280,7 +273,7 @@ globalThis.replace = () => { shell = {live: true}; };
   });
 
   return checkTraces(boundInputs({model, modelPath, sources, traces, scope: 'bounded-orchestration',
-    assumptions: ['Exact prepared mounted-update gate and Alpha draft-flush orchestration execute with controlled Android readbacks and draft promises.',
+    assumptions: ['Exact Alpha-owned mounted-update gate and Alpha draft-flush orchestration execute with controlled Android readbacks and draft promises.',
       'Two unique activation IDs and two bridge identities. DOM modality and native readback timers are controlled.',
       'Installed Android PackageInstaller callbacks and physical persistence of each draft store require separate evidence.']}));
 }

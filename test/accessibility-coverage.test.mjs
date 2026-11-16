@@ -187,12 +187,13 @@ test('TalkBack reading order is checked in every lane, as Android checks it, acr
   assert.match(read('apps/app/src/prototype/subview-accessibility.ts'), /pageCovered:!!out\.editing/);
   // Focus follows the screen: installed by the renderer, and asserted by the lifecycle spec and the emulator.
   assert.match(read('apps/app/src/main.tsx'), /installViewFocus\(\)/);
-  // The behaviour is Eliza's shared screen focus; Alpha keeps only its selectors and screen-change wiring.
+  // The behaviour is Alpha's screen focus module (ui/accessibility/screen-focus.ts); view-focus keeps
+  // only its selectors and screen-change wiring.
   const viewFocus = read('apps/app/src/runtime/view-focus.ts');
-  assert.match(viewFocus, /from '@elizaos\/ui\/accessibility\/screen-focus'/);
+  assert.match(viewFocus, /from '\.\.\/ui\/accessibility\/screen-focus\.ts'/);
   assert.match(viewFocus, /createScreenFocus\(/);
-  assert.doesNotMatch(viewFocus, /setAttribute\('tabindex'|requestAnimationFrame/, 'no local copy of the focus mover');
-  assert.match(read('scripts/prepare-client-features.ts'), /'packages\/ui\/src\/accessibility\/screen-focus\.ts'/);
+  assert.doesNotMatch(viewFocus, /setAttribute\('tabindex'|requestAnimationFrame/, 'no second copy of the focus mover');
+  assert.match(read('apps/app/src/ui/accessibility/screen-focus.ts'), /export function createScreenFocus\(/);
 });
 
 test('both sweeps fail on a cut app title and allow a clamped preview', () => {
@@ -241,7 +242,7 @@ test('the dock, title and toast fixes the sweep depends on stay in the source', 
   // The dock moves without resizing when Android's insets arrive on the root element. The
   // publisher is shared Eliza code (projected from the pin); Alpha binds its own selectors to it.
   assert.match(dock, /installSharedDockClearance\(\{ screen: '\[data-screen\]', docks: DOCK, bar: '\[data-alpha-input-bar\]', clearanceProperty: DOCK_CLEARANCE_PROPERTY, restProperty: DOCK_REST_PROPERTY \}\)/);
-  const shared = read('.eliza/client-features/packages/ui/src/components/shell/dock-clearance.ts');
+  const shared = read('apps/app/src/ui/components/shell/dock-clearance.ts');
   assert.match(shared, /root\.observe\(document\.documentElement, \{\s*attributes: true,\s*attributeFilter: \["class", "style"\],?\s*\}\)/);
   // Focus under the dock is scrolled clear, but never focus that came from a pointer.
   assert.match(read('apps/app/src/prototype/chat-overlay-motion-adapter.ts'), /if \(!sheet && !target\.matches\(":focus-visible"\)\) return;/);
@@ -264,12 +265,12 @@ test('the layout hooks the sweep depends on stay in the template', () => {
   for (const hook of ['data-alpha-camera-root', 'data-alpha-camera="viewfinder"', 'data-alpha-camera="capture"', 'data-alpha-camera="modes"', 'data-alpha-camera="zoom"', 'data-alpha-maps-sheet="results"', 'data-alpha-maps-sheet="place"', 'data-alpha-maps-sheet="directions"', 'data-alpha-maps-directions', 'data-alpha-map-plane', 'class="calendar-block-text"'])
     assert.ok(template.includes(hook), `${hook} is in the template`);
   assert.ok(template.includes('data-alpha-browser-menu') && template.includes('data-alpha-header-grow'));
-  // Home's app grid is the shared mobile shell's; Alpha maps its text scale to the measured text size.
+  // Home's app grid is Alpha's mobile shell's; Alpha maps its text scale to the measured text size.
   assert.match(css, /\[data-alpha-layer="home"\] \{ --mobile-shell-text-scale:var\(--alpha-text-scale,1\); \}/);
   assert.match(read('apps/app/src/prototype/home-shell.ts'), /const gridProps: Bag = \{\s*'data-alpha-home-apps': ''/);
   // The Apps drawer's icon grid is four columns of at least 62px times the text scale too.
   assert.match(read('apps/app/src/prototype/home-shell.ts'), /classes: \{[^}]*grid: 'alpha-fit-grid'\},\s*gridAttributes: \{'data-alpha-apps-grid': ''\}/);
-  assert.match(read('.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx'), /className=\{classes\.grid\}\s+\{\.\.\.gridAttributes\}\s+style=\{\s*\{\s*["']--fit-columns["']:\s*4,\s*["']--fit-min["']:\s*["']62px["']/);
+  assert.match(read('apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx'), /className=\{classes\.grid\}\s+\{\.\.\.gridAttributes\}\s+style=\{\s*\{\s*["']--fit-columns["']:\s*4,\s*["']--fit-min["']:\s*["']62px["']/);
   assert.doesNotMatch(template, /data-alpha-home-(calendar|workflows|inbox)\b[^>]*height: 196px/);
   assert.match(read('apps/app/src/main.tsx'), /installTextScale\(\)/);
   // Search fields may shrink below the input's intrinsic width, so Close search stays on screen.

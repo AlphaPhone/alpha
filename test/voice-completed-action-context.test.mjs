@@ -49,7 +49,7 @@ test('shared voice context admits direct actions only for a bound renderer',()=>
  assert.equal(parse(binding).agentActionMode,undefined);
 });
 test('shared completion parser preserves exact message IDs and refuses malformed correlation',()=>{
- const source=readFileSync('.eliza/client-features/packages/ui/src/voice/voice-session-protocol.ts','utf8');
+ const source=readFileSync('apps/app/src/ui/voice/voice-session-protocol.ts','utf8');
  const js=stripTypeScriptTypes(source,{mode:'strip'}).replace(/^import[\s\S]*?;\n/gm,'').replace(/^export /gm,'');
  const parse=new Function('findViewActionHandoff',js+';return parseServerControl;')(()=>null);
  const frame={t:'reply_complete',traceId:'trace',userMessageId:'11111111-2222-4333-8444-555555555555'};

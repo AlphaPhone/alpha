@@ -62,10 +62,10 @@ function adapterFixture(request,storage={},options={}){
  const context={...protocol,homeReadIsStale,presentHomeWorkflowFreshness,connectionController:controller,showAgentStatus,DailyApps:{listReminders:async()=>({reminders:options.deviceReminders??[{id:'device',title:'On-device reminder',body:'Existing phone row',at:Date.now()+10000,status:'scheduled'}]})},Capacitor:{getPlatform:()=> 'android',isNativePlatform:()=>options.native!==false},localStorage,window:dom?.window||{dispatchEvent(event){for(const fn of windowEvents.get(event.type)||[])fn(event);},addEventListener(name,fn){const f=windowEvents.get(name)||new Set();f.add(fn);windowEvents.set(name,f);},removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}},document:dom?.window.document||{hidden:false,addEventListener:(name,fn)=>events.set(name,fn),removeEventListener(){}},getComputedStyle:dom?.window.getComputedStyle,innerWidth:400,innerHeight:800,catalog:JSON.parse(fs.readFileSync('apps/app/src/icon-catalog.json','utf8')),queueMicrotask,AbortController,Date:options.now?class extends Date{static now(){return options.now();}}:Date,crypto,Event,console};
  vm.runInNewContext('(()=>{'+transformed('.eliza/client-features/packages/contracts/src/workflow-intents.ts')+'\nglobalThis.SharedWorkflowIntentStore=WorkflowIntentStore;globalThis.sharedWorkflowIntentKey=workflowIntentKey;globalThis.emptyWorkflowIntentArchive=emptyWorkflowIntentArchive;globalThis.storageWorkflowIntentBackend=storageWorkflowIntentBackend;globalThis.workflowIntentOwnerPrefix=workflowIntentOwnerPrefix;})();',context);
  vm.runInNewContext(transformed('apps/app/src/runtime/workflow-intents.ts')+'\nglobalThis.WorkflowIntentStore=WorkflowIntentStore;globalThis.workflowIntentKey=workflowIntentKey;',context);
- vm.runInNewContext(transformed('.eliza/client-features/packages/ui/src/utils/automation-feed-filter.ts')+'\nglobalThis.FEED_FILTERS=FEED_FILTERS;globalThis.passesFilter=passesFilter;',context);
+ vm.runInNewContext(transformed('apps/app/src/ui/utils/automation-feed-filter.ts')+'\nglobalThis.FEED_FILTERS=FEED_FILTERS;globalThis.passesFilter=passesFilter;',context);
  for(const [file,names] of [
-  ['.eliza/client-features/packages/ui/src/utils/cron-format.ts',['CRON_PRESETS','formatSchedule']],
-  ['.eliza/client-features/packages/ui/src/utils/reminder-presentation.ts',['canSnoozeReminder','reminderDeliveryLabel','reminderDue']],
+  ['apps/app/src/ui/utils/cron-format.ts',['CRON_PRESETS','formatSchedule']],
+  ['apps/app/src/ui/utils/reminder-presentation.ts',['canSnoozeReminder','reminderDeliveryLabel','reminderDue']],
   ['apps/app/src/icon-style.ts',['iconStyle']],
   ['apps/app/src/runtime/modal-inert.ts',['holdPhoneInert']],
   ['apps/app/src/prototype/workflow-filters.ts',['openWorkflowFilters','workflowFilterLabel']],
@@ -200,7 +200,7 @@ test('production Workflows template has every top-level automation binding',asyn
  const f=await fixture(read),app=adapterFixture(f.request);
  try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);const model=app.render().automation;assert.ok(expected.length>16);assert.deepEqual(expected.filter(name=>!Object.hasOwn(model,name)),[]);}finally{app.close();await f.close();}
 });
-const presentationBundle=await build({entryPoints:['.eliza/client-features/packages/ui/src/utils/reminder-presentation.ts'],bundle:true,write:false,format:'esm',platform:'neutral',logLevel:'silent'});
+const presentationBundle=await build({entryPoints:['apps/app/src/ui/utils/reminder-presentation.ts'],bundle:true,write:false,format:'esm',platform:'neutral',logLevel:'silent'});
 const presentation=await import('data:text/javascript;base64,'+Buffer.from(presentationBundle.outputFiles[0].text).toString('base64'));
 test('shared canonical reminder labels and snooze policy cover delivery, terminal and acknowledged states',()=>{
  const row=(status='active',state='pending',outcome=null,metadata={})=>({definition:{status,cadence:{kind:'once',dueAt:'2030-01-01T12:00:00Z'}},occurrence:state?{state,metadata}:null,latestAttempt:outcome?{outcome}:null});
@@ -240,8 +240,8 @@ test('retired-owner list replies and completion events cannot repopulate old rem
  try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);second=true;app.notify();app.render();await new Promise(resolve=>setTimeout(resolve,10));app.retire();app.setView('home');release();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(app.home().homeWorkflowHasRows,undefined);assert.equal(app.render().cards.length,0);app.notify('session');assert.equal(app.render().cards.length,0);assert.equal(writes.length,0);assert.equal(Object.keys(app.storage).length,0);}finally{release();app.close();}
 });
 
-test('Alpha reminder status text follows current canonical English labels',async()=>{
- const strings=JSON.parse(fs.readFileSync('vendor/eliza/packages/ui/src/i18n/locales/en.json','utf8'));
+test('Alpha reminder status text uses its English labels',async()=>{
+ const strings={'automationsreminders.status.blocked':'Delivery blocked','automationsreminders.status.duplicate':'Duplicate skipped'};
  const cases=[['unscheduled',null,null],['blocked',{id:'occurrence',state:'visible'},{outcome:'blocked_channel'}],['duplicate',{id:'occurrence',state:'visible'},{outcome:'skipped_duplicate'}],['unknown',{id:'occurrence',state:'unrecognized'},null]];
  for(const [status,occurrence,latestAttempt] of cases){const f=await fixture(call=>call.path==='/api/lifeops/reminders'?{reminders:[{...reminder,occurrence,latestAttempt}]}:read(call)),app=adapterFixture(f.request);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);assert.equal(app.render().cards.find(card=>card.name==='Check the draft').statusLabel,({unscheduled:'—',unknown:'Unknown'})[status]??strings['automationsreminders.status.'+status]);}finally{app.close();await f.close();}}
 });

@@ -5,7 +5,7 @@ for(const theme of ['light','dark'])test(`canonical launcher, dock and Files ass
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/?mode=dev&theme='+theme);
  const camera=page.getByRole('button',{name:'Camera',exact:true});
- // Home's app grid is the shared mobile shell's (prototype/home-shell.ts): each tile draws its
+ // Home's app grid is Alpha's mobile shell's (prototype/home-shell.ts): each tile draws its
  // published asset as a single-color mask. Camera stays an ordinary named button; inspecting it
  // never starts a device capture.
  const tileGlyph=(name:string)=>page.getByRole('region',{name:'Home',exact:true}).getByRole('button',{name,exact:true}).locator('[data-mobile-shell-tile-face] > span[aria-hidden="true"]');

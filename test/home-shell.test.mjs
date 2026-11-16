@@ -1,4 +1,4 @@
-// Alpha's Home and app grid render from the shared mobile shell (@elizaos/ui/mobile-shell), its Apps
+// Alpha's Home and app grid render from Alpha's mobile shell (apps/app/src/ui/mobile-shell), its Apps
 // drawer from the shared installed-app grid, with the product record in apps/app/src/product/alpha-product-registration.ts. Shared controller and search cases live in
 // the upstream mobile-shell and native-system suites.
 import {test} from 'node:test';
@@ -7,7 +7,7 @@ import {tsImport} from 'tsx/esm/api';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {cloneElement,createElement} from 'react';
 const {installHomeShell}=await tsImport('../apps/app/src/prototype/home-shell.ts',import.meta.url);
-const {navigateMobileShell}=await tsImport('../.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts',import.meta.url);
+const {navigateMobileShell}=await tsImport('../apps/app/src/ui/mobile-shell/navigation.ts',import.meta.url);
 const icon='data:image/png;base64,iVBORw0KGgo=';
 const apps=[
  {packageName:'com.android.settings',label:'Settings',icon},

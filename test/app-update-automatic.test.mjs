@@ -14,7 +14,7 @@ assert.ok(poll.includes('automatic:true'),'execute the product automatic install
 const root='5c'.repeat(32), sha256='0a'.repeat(32);
 const manifest={schema:'alpha-update/v1',variant:'launcher',signerSha256:root,versionCode:8,
   apkUrl:'https://example.test/launcher-8.apk',sha256,sizeBytes:500};
-const gate=readFileSync('.eliza/client-features/packages/ui/src/state/app-update-gate.ts','utf8');
+const gate=readFileSync('apps/app/src/ui/state/app-update-gate.ts','utf8');
 const scheduler=gate.slice(gate.indexOf('export function createAppUpdateScheduler('));
 function fixture(voiceShell){
   const installs=[];
@@ -106,7 +106,7 @@ test('offline checks and active edits retry without requesting native installati
 });
 
 test('a focused editor is remembered before either native readiness path freezes the UI',async()=>{
-  const gate=readFileSync('.eliza/client-features/packages/ui/src/state/app-update-gate.ts','utf8');
+  const gate=readFileSync('apps/app/src/ui/state/app-update-gate.ts','utf8');
   const activationId='11111111-2222-4333-8444-555555555555',bridgeId='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   for(const event of [false,true])for(const automatic of [false,true]){
     const dom=new JSDOM('<textarea></textarea>'),{window}=dom,{document}=window;
@@ -160,7 +160,7 @@ async function mountedVoiceGate(owner,automatic,{holdFlush=false}={}){
   for(const domain of ['Composer','Calendar','Notes','Inbox','Workflows'])owner['flush'+domain+'ForAppUpdate']=current=>{assert.equal(current(),true);flushes++;return barrier;};
   const main=readFileSync('apps/app/src/main.tsx','utf8'),start=main.indexOf('async function prepareMountedUpdate(');
   const preparer=main.slice(start,main.indexOf('\nlet nativeAppUpdateGate',start));
-  const gate=readFileSync('.eliza/client-features/packages/ui/src/state/app-update-gate.ts','utf8');
+  const gate=readFileSync('apps/app/src/ui/state/app-update-gate.ts','utf8');
   const context=vm.createContext({window,document,HTMLElement:window.HTMLElement,fixtureShell:owner,
     connectionController:{getSnapshot:()=>({busy:false,open:false}),captureAppUpdateReconnect:()=>async()=>{}},
     setTimeout(callback){waits.push(callback);}});

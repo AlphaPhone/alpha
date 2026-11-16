@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import vm from 'node:vm';
-import {changeBatches,runBatches} from '../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts';
+import {changeBatches,runBatches} from '../apps/app/src/ui/mobile-shell/photos-view.ts';
 const source=readFileSync('apps/app/src/prototype/camera-adapter.ts','utf8');
 const begin=source.indexOf('  async function changeSelection(');
 const end=source.indexOf('  // Browser-owned album storage',begin);

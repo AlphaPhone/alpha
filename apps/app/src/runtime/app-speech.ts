@@ -4,7 +4,7 @@ import {createOnDeviceVoice} from './local-voice';
 import {speakCloudText} from './cloud-voice';
 import {confirmSpeechRetirement} from '../local-speech-playback';
 import {connectionController} from './connection-ui';
-import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../../../../.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts';
+import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../ui/voice/tts-playback-activity.ts';
 let retirement:Promise<void>=Promise.resolve();
 /** Reviewed app/workflow text follows the run-time speech route (voice-selection.ts): Cloud or the
  * owner's Cartesia key when available, otherwise this phone. A network request that fails before

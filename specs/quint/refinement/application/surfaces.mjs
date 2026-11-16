@@ -10,7 +10,7 @@ const checkTraces = options => check(boundInputs({...options, sources: [...optio
 export async function shellNavigation() {
   const path = 'apps/app/src/prototype/model.js', source = read(path);
   const methods = source.slice(source.indexOf('  goHome(chat) {'), source.indexOf('  /* ---- Android', source.indexOf('  goHome(chat) {')));
-  const {navigateMobileShell} = await sourceModule('.eliza/client-features/packages/ui/src/mobile-shell/core.ts');
+  const {navigateMobileShell} = await sourceModule('apps/app/src/ui/mobile-shell/core.ts');
   const traces = [];
   for (const view of ['notes', 'calendar', 'files', 'browser', 'settings']) {
     const context = vm.createContext({navigateMobileShell, VIEWS: {[view]: {}}, isMvpView: value => value === view});

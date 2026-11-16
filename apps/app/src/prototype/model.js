@@ -17,7 +17,7 @@ import {
 } from "./fixtures.js";
 import { isMvpView, DEFERRED_MVP_VIEWS, deferredMvpPrompt } from "./mvp-features";
 import { ALPHA_PRODUCT, alphaPaletteColor, alphaThemeVariables } from "../product/alpha-product";
-import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile-shell/core";
+import { navigateMobileShell, resolveMobileShellSwipe } from "../ui/mobile-shell/core.ts";
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
@@ -5519,7 +5519,7 @@ class Component extends DCLogic {
     this.setState(Object.assign(nav, { screen: "home", shade: false, heads: false }));
     this.homeHint();
   }
-  /* ---- navigation: the shared mobile shell reducer owns view, Back stack, drawer and the
+  /* ---- navigation: the mobile shell reducer (ui/mobile-shell/navigation.ts) owns view, Back stack, drawer and the
      assistant detent (Alpha's "hidden" chat is the shell's pill) ---- */
   shellNav() { var S = this.S(); return { view: S.view || null, stack: S.stack || [], drawer: !!S.drawer, drawerQuery: S.drawerQ || "", assistant: this.shellDetent(S.chat) || "input" }; }
   /** A chat state as a shell assistant detent; none for an absent request (the surface's rest). */

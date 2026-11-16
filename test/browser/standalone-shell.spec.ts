@@ -1,6 +1,6 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
 import {openLegacyNotes} from './helpers/legacy-notes';
-import {DEFAULT_PULL_DISTANCE} from '../../.eliza/client-features/packages/ui/src/gestures/constants';
+import {DEFAULT_PULL_DISTANCE} from '../../apps/app/src/ui/gestures/constants';
 import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {

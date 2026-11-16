@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {JSDOM} from 'jsdom';
@@ -10,9 +9,7 @@ import {boundInputs, captureSources, checkpoint, read, tick, trace, call} from '
 const model = 'ScreenFocusOwnership';
 const modelPath = 'specs/quint/application/ScreenFocusOwnership.qnt';
 const host = 'apps/app/src/runtime/view-focus.ts';
-const shared = 'packages/ui/src/accessibility/screen-focus.ts';
-const effective = '.eliza/client-features/' + shared;
-const projection = '.eliza/client-features/.source.json';
+const coordinator = 'apps/app/src/ui/accessibility/screen-focus.ts';
 const strip = text => stripTypeScriptTypes(text, {mode: 'strip'})
   .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
 
@@ -149,17 +146,10 @@ function fixture(name, code) {
 }
 
 export async function checkScreenFocusOwnership() {
-  const sources = [fileURLToPath(import.meta.url), host, 'vendor/eliza/' + shared, effective, projection,
-    'apps/app/src/main.tsx', 'upstream.lock.json', 'scripts/prepare-client-features.ts'];
+  const sources = [fileURLToPath(import.meta.url), host, coordinator,
+    'apps/app/src/main.tsx', 'upstream.lock.json'];
   captureSources([...sources, modelPath]);
-  const stamp = JSON.parse(read(projection));
-  const prepared = read(effective);
-  const pinned = read('vendor/eliza/' + shared);
-  const digest = createHash('sha256').update(pinned).digest('hex');
-  assert.equal(stamp.baseCommit, JSON.parse(read('upstream.lock.json')).commit);
-  assert.equal(stamp.sourceFiles[shared], digest);
-  assert.equal(stamp.files[shared], digest);
-  assert.equal(prepared, pinned);
+  const prepared = read(coordinator);
   const marker = '  return {\n    screenChanged: () => schedule(),';
   assert.equal(prepared.split(marker).length, 2);
   const inspect = `  globalThis.inspectFocus = () => ({frame, remaining, held,
@@ -203,7 +193,7 @@ export async function checkScreenFocusOwnership() {
   });
 
   return checkTraces(boundInputs({model, modelPath, sources, traces, scope: 'bounded-component',
-    assumptions: ['Actual prepared coordinator and Alpha focus owner execute. A read-only test hook captures private scheduling state.',
+    assumptions: ['Actual Alpha-owned focus coordinator and Alpha focus owner execute. A read-only test hook captures private scheduling state.',
       'The DOM fixture controls geometry, animation frames and overlay existence. Captured resize callback identity is covered through observed behavior.',
       'Installed TalkBack, physical rotation timing and mounted modal shapes beyond the focused browser tests remain separate.']}));
 }

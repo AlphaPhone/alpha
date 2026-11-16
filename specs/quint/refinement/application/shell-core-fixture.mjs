@@ -21,7 +21,7 @@ const methods = between('\n  S() {', '\n  /* ---- gestures ---- */');
 const voice = between('\n  startVoice() {', '\n  showHeads() {');
 const pullContext = between('\n  pullContext() {', '\n  sw(fn, opts) {');
 const base = between('\nvar BASE = {', '\n};') + '\n};';
-const {navigateMobileShell} = await tsImport(join(root, '.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts'), import.meta.url);
+const {navigateMobileShell} = await tsImport(join(root, 'apps/app/src/ui/mobile-shell/navigation.ts'), import.meta.url);
 
 /**
  * `views` are the registered view definitions (their `chat`, `back`, `onLeave`); `globals` adds

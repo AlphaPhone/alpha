@@ -5,7 +5,7 @@ import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import vm from 'node:vm';
 import {tsImport} from 'tsx/esm/api';
 const {alphaNavigation}=await tsImport('../apps/app/src/product/alpha-product.ts',import.meta.url);
-const {navigateMobileShell}=await tsImport('../.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts',import.meta.url);
+const {navigateMobileShell}=await tsImport('../apps/app/src/ui/mobile-shell/navigation.ts',import.meta.url);
 // Only Notes is available here; the product registry resolves Home and canonical ids.
 const notesOnly=alphaNavigation(view=>view==='notes');
 

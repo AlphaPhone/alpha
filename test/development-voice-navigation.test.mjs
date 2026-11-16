@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {tsImport} from 'tsx/esm/api';
-import {applyServerEvent,INITIAL_VOICE_SESSION_STATE} from '../vendor/eliza/packages/ui/src/voice/voice-session-state.ts';
+import {applyServerEvent,INITIAL_VOICE_SESSION_STATE} from '../apps/app/src/ui/voice/voice-session-state.ts';
 
 // Synthetic transport callbacks only; no socket, microphone, provider, or model calls.
 const source=fs.readFileSync(new URL('../apps/app/src/runtime/development-cartesia-conversation.ts',import.meta.url),'utf8');
-const js=stripTypeScriptTypes(source.replace(/^import .*;\n/gm,'').replace(/^export \{.*\} from .*;\n/gm,'').replace(/import\.meta\.env\.DEV===true&&devSurfacesEnabled&&!Capacitor\.isNativePlatform\(\)&&import\.meta\.env\.VITE_ALPHA_DEV_CARTESIA==='1'/,'true').replace("await import('@elizaos/ui/voice/voice-session-client')",'({createVoiceSessionClient:fixtureClient})').replace(/export /g,''),{mode:'strip'});
+const js=stripTypeScriptTypes(source.replace(/^import .*;\n/gm,'').replace(/^export \{.*\} from .*;\n/gm,'').replace(/import\.meta\.env\.DEV===true&&devSurfacesEnabled&&!Capacitor\.isNativePlatform\(\)&&import\.meta\.env\.VITE_ALPHA_DEV_CARTESIA==='1'/,'true').replace("await import('../ui/voice/voice-session-client-core.ts')",'({createVoiceSessionClient:fixtureClient})').replace(/export /g,''),{mode:'strip'});
 class RendererSocket{static latest;constructor(){RendererSocket.latest=this;queueMicrotask(()=>this.onopen?.());}close(){}}
 const factory=new Function('connectionController','fixtureClient','WebSocket','location','setTimeout','clearTimeout','developmentCloudRealtimeVoiceEnabled','developmentCartesiaVoiceEnabled','readDevicePreferences','window','validateUuid','beginRealtimeVoiceTiming',js+'\nreturn developmentCartesiaConversation;');
 const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};

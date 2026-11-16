@@ -1,7 +1,7 @@
 /**
  * Focus follows the screen (PRD AP-15: TalkBack, keyboard and repeated HOME).
  *
- * The behaviour is Eliza's `createScreenFocus` (`@elizaos/ui/accessibility`): focus that a screen
+ * The behaviour is `createScreenFocus` (`ui/accessibility/screen-focus.ts`): focus that a screen
  * change, an inline modal surface (the Apps drawer) or a rotation dropped to the page body moves
  * to what is now in front, made programmatically focusable only (tabindex -1) and focused without
  * scrolling, so TalkBack announces where the person is and Tab continues from there. Focus a view or
@@ -19,7 +19,7 @@
  * - startup: the first view of a page load is not a screen change, and nothing is judged before it
  *   (startup dialogs own focus then).
  */
-import { createScreenFocus, isExposed } from '@elizaos/ui/accessibility/screen-focus';
+import { createScreenFocus, isExposed } from '../ui/accessibility/screen-focus.ts';
 
 const TITLE = '[data-alpha-app-title]';
 const HOME = '[data-alpha-layer="home"]';

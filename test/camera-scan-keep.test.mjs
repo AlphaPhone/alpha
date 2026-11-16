@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import {resolve} from 'node:path';
 import {tsImport} from 'tsx/esm/api';
 const {createScanCapture}=await tsImport(new URL('../.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts',import.meta.url).href,{parentURL:import.meta.url});
-const {changeBatches,runBatches,favoriteTarget,patchRows,insertRows}=await tsImport(new URL('../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts',import.meta.url).href,{parentURL:import.meta.url});
+const {changeBatches,runBatches,favoriteTarget,patchRows,insertRows}=await tsImport(new URL('../apps/app/src/ui/mobile-shell/photos-view.ts',import.meta.url).href,{parentURL:import.meta.url});
 const source=readFileSync(resolve(import.meta.dirname,'../apps/app/src/prototype/camera-adapter.ts'),'utf8');
 function declaration(signature){const start=source.indexOf(signature);assert.ok(start>=0,signature);let end=source.indexOf('{',start),depth=1;for(end++;depth;end++){if(source[end]==='{')depth++;if(source[end]==='}')depth--;}return source.slice(start,end);}
 function run(signature,name,sandbox){vm.createContext(sandbox);vm.runInContext(stripTypeScriptTypes(declaration(signature)+`\nglobalThis.${name}=${name};`,{mode:'strip'}),sandbox);return sandbox[name];}

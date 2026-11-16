@@ -82,6 +82,10 @@ function rendererSlots(){
    // Pure cache CAS exchanges a whole document; the platform factory's hashed slot is checked separately.
    if(where.endsWith('runtime/service-read-cache.ts')&&receiver==='this.store')continue;
    if(browserOnly.has(receiver))continue;
+   // Alpha's local UI browser document store exchanges IndexedDB records in this browser; it names no native secure slot.
+   if(where==='apps/app/src/ui/platform/browser-document-store.ts'&&receiver==='this'){assert.match(text,/export class BrowserDocumentStore\b/);assert.match(text,/indexedDB/);assert.equal(match[2].trim(),'key');continue;}
+   // The browser draft slot binds one BrowserDocumentStore key; the native Notes draft slot is checked below.
+   if(where==='apps/app/src/ui/state/durable-draft.ts'&&receiver==='documents'){assert.match(text,/documents: Pick<BrowserDocumentStore, "read" \| "compareExchange">/);assert.equal(match[2].trim(),'key');continue;}
    // These typed canonical Notes adapters exchange a document revision; they do not name a secure slot.
    if(where.endsWith('prototype/legacy-notes-access.ts')&&receiver==='port'){assert.match(text,/port:NotesDocumentPort/);assert.equal(match[2].trim(),'expected');continue;}
    if(where.endsWith('prototype/legacy-notes-access.ts')&&receiver==='vault'){assert.match(text,/SecureNotesStore\.open\(guarded/);assert.equal(match[2].trim(),'key');continue;}

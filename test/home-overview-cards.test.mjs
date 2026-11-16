@@ -5,7 +5,7 @@ import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {build} from 'esbuild';
-// Home's agenda and brief cards are the shared upstream cards (packages/ui/src/overview), rendered by
+// Home's agenda and brief cards are Alpha's overview cards (apps/app/src/ui/overview), rendered by
 // apps/app/src/prototype/home-overview-cards.ts from the values the Home adapters computed. These
 // render them to markup and check that Alpha's installed selectors, classes and states are kept.
 // Source-level evidence only: no browser, device calendar or digest is involved.

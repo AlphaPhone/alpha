@@ -118,7 +118,7 @@ test('Quint large-text trace agrees with the real layout policy', async () => {
 
 test('Quint draft-conflict trace agrees with real revisioned composer writes', async () => {
   const expected = modelTrace('AssistantConversation', 'draftConflictTest').at(-1);
-  const { replaceDurableDraft } = await sourceModule('.eliza/client-features/packages/ui/src/state/durable-draft.ts');
+  const { replaceDurableDraft } = await sourceModule('apps/app/src/ui/state/durable-draft.ts');
   const original = { version: 1, binding: 'owner-one', revision: 'first', text: '' };
   const saved = replaceDurableDraft(original, original, 'owner-one', expected.savedDraft, {revision: () => 'second'});
   assert.throws(() => replaceDurableDraft(saved, original, 'owner-one', expected.draft, {revision: () => 'third'}), /changed in another view/);

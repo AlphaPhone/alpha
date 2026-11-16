@@ -1,9 +1,9 @@
 import {workflowClockSchedule,workflowClockExpression,workflowClockContext,workflowSnoozeTime} from '../runtime/workflow-local-time';
-import {CRON_PRESETS,formatSchedule} from '../../../../.eliza/client-features/packages/ui/src/utils/cron-format.ts';
-import {canSnoozeReminder,reminderDue} from '../../../../.eliza/client-features/packages/ui/src/utils/reminder-presentation';
+import {CRON_PRESETS,formatSchedule} from '../ui/utils/cron-format.ts';
+import {canSnoozeReminder,reminderDue} from '../ui/utils/reminder-presentation';
 import {AUTOMATIONS_COMMITTED_EVENT} from '../runtime/automation-completion';
 import {openWorkflowFilters,workflowFilterLabel,type WorkflowTypeFilter,type WorkflowStatusFilter} from './workflow-filters';
-import {FEED_FILTERS,passesFilter,type FeedFilter} from '../../../../.eliza/client-features/packages/ui/src/utils/automation-feed-filter';
+import {FEED_FILTERS,passesFilter,type FeedFilter} from '../ui/utils/automation-feed-filter';
 import {AutomationsProtocol,AutomationOutcomeError,automationIssue,automationLocalDateInput,automationWhen,workflowDeviceTimeZone,mergeAutomationRows,scheduledTaskEnded,scheduledSnoozeAt,type AutomationRow,type AutomationIssue,type PromptDraft,type ReminderDraft,type AutomationRequest} from '../runtime/automations-protocol';
 import {connectionController,agentPendingText,agentAvailabilityNotice} from '../runtime/connection-ui';
 import {showAgentStatus} from './workflow-authoring';

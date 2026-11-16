@@ -570,14 +570,14 @@
       "apps/app/src/prototype/home-shell.ts",
       "apps/app/src/prototype/settings-adapter.ts",
       "apps/app/src/browser/display.ts",
-      "apps/app/src/prototype/system-shade.ts"
+      "apps/app/src/prototype/system-shade.ts",
+      "apps/app/src/ui/components/shell/responsive-layout.ts"
     ],
     "abstractions": [
       "Representative geometry and text-scale inputs. Broken-result canaries are deliberately excluded from step and must violate the result predicates.",
       "No draft, selection or native-shade preservation claim is made by this layout model. Those effects require their own source-bound shell/native checks."
     ],
     "sharedSources": [
-      "packages/ui/src/components/shell/responsive-layout.ts",
       "plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/SystemShade.java"
     ],
     "invariants": [
@@ -613,7 +613,8 @@
       "apps/app/src/prototype/home-shell.ts",
       "apps/app/src/prototype/settings-adapter.ts",
       "apps/app/src/browser/display.ts",
-      "apps/app/src/prototype/system-shade.ts"
+      "apps/app/src/prototype/system-shade.ts",
+      "apps/app/src/ui/components/shell/responsive-layout.ts"
     ],
     "abstractions": [
       "Complementary current-source audit scope. The canonical model and its existing source-observation driver remain separate; this state model does not claim complete implementation refinement.",
@@ -623,7 +624,6 @@
       "The build chooses one shade surface (Android's, or the browser development stand-in); typed text and its selection are one pair that layout changes leave alone. Draft durability across a restart belongs to DraftDispatch."
     ],
     "sharedSources": [
-      "packages/ui/src/components/shell/responsive-layout.ts",
       "plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/SystemShade.java"
     ],
     "invariants": [
@@ -762,14 +762,12 @@
     "sources": [
       "apps/app/src/startup-permissions.tsx",
       "apps/app/src/startup-permission-progress.ts",
-      "apps/app/src/startup-permission-flow.ts"
+      "apps/app/src/startup-permission-flow.ts",
+      "apps/app/src/ui/components/permissions/permission-walkthrough.ts"
     ],
     "abstractions": [
       "Seven permission state machines share one serial UI action and a durable versioned walkthrough. Attempts are retained in memory for the current flow and across restart only when the best-effort write succeeds.",
       "Platform readiness is external input. Completed installation records grant no platform access."
-    ],
-    "sharedSources": [
-      "packages/ui/src/components/permissions/permission-walkthrough.ts"
     ]
   },
   {
@@ -1071,7 +1069,7 @@
     "sources": [
       "apps/app/src/prototype/agent-adapter.ts",
       "apps/app/src/runtime/assistant-draft-store.ts",
-      "vendor/eliza/packages/ui/src/state/durable-draft.ts"
+      "apps/app/src/ui/state/durable-draft.ts"
     ],
     "stateMapping": {
       "phase/live/binding/retries": "Actual migration call and held raw slot or timer, controlled shell owner binding and observed retry schedule",
@@ -1104,7 +1102,7 @@
       "apps/app/src/prototype/assistant-draft-controller.ts",
       "apps/app/src/runtime/assistant-draft-record.ts",
       "apps/app/src/runtime/assistant-draft-store.ts",
-      "vendor/eliza/packages/ui/src/state/durable-draft-controller.ts"
+      "apps/app/src/ui/state/durable-draft-controller.ts"
     ],
     "abstractions": [
       "Hold requires a durable matching saved draft. Per-binding sending markers survive process restart and require review, while confirmed non-dispatch unmarks the original binding.",
@@ -1570,7 +1568,7 @@
       "apps/app/src/startup-permission-progress.ts",
       "apps/app/src/startup-permission-flow.ts",
       "apps/app/src/startup-browser-permissions.ts",
-      ".eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts"
+      "apps/app/src/ui/components/permissions/permission-walkthrough.ts"
     ],
     "abstractions": [
       "Seven Android permissions and four browser permissions use the current React coordinator and staged shared permission-flow/progress implementation.",
@@ -1763,7 +1761,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/camera-adapter.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts"
+      "apps/app/src/ui/mobile-shell/photos-view.ts"
     ],
     "abstractions": [
       "Native Photos catalog access/window request epochs, serialized/coalesced reads, pagination/reload window and hidden/disposed completion fencing. Three media identities and bounded provider page classes.",
@@ -1785,7 +1783,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/camera-adapter.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts",
+      "apps/app/src/ui/mobile-shell/photos-view.ts",
       "apps/app/src/browser/files.ts"
     ],
     "abstractions": [
@@ -1939,7 +1937,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/home-shell.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts",
+      "apps/app/src/ui/mobile-shell/mobile-launcher.ts",
       ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts"
     ],
     "abstractions": [
@@ -1961,7 +1959,7 @@
     ],
     "sources": [
       ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts",
+      "apps/app/src/ui/mobile-shell/mobile-launcher.ts",
       "apps/app/src/prototype/home-shell.ts"
     ],
     "abstractions": [
@@ -1983,7 +1981,7 @@
     ],
     "sources": [
       ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts",
+      "apps/app/src/ui/mobile-shell/mobile-launcher.ts",
       "apps/app/src/prototype/home-shell.ts",
       "vendor/eliza/plugins/plugin-native-system/src/client/launcher.ts",
       "upstream.lock.json"
@@ -2089,12 +2087,11 @@
     ],
     "sources": [
       ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/view-id-migration.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/view-registry.ts",
+      "apps/app/src/ui/mobile-shell/mobile-launcher.ts",
+      "apps/app/src/ui/mobile-shell/view-id-migration.ts",
+      "apps/app/src/ui/mobile-shell/view-registry.ts",
       "apps/app/src/product/alpha-product.ts",
       "apps/app/src/product/alpha-product-registration.ts",
-      "vendor/eliza/packages/ui/src/mobile-shell/view-registry.ts",
       "upstream.lock.json"
     ],
     "abstractions": [
@@ -2229,9 +2226,9 @@
     ],
     "sources": [
       "apps/app/src/prototype/home-shell.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/MobileHomeScreen.tsx",
-      ".eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx",
-      ".eliza/client-features/packages/ui/src/mobile-shell/navigation.ts",
+      "apps/app/src/ui/mobile-shell/MobileHomeScreen.tsx",
+      "apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx",
+      "apps/app/src/ui/mobile-shell/navigation.ts",
       ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts"
     ],
     "abstractions": [
@@ -2260,7 +2257,7 @@
     "sources": [
       "apps/app/src/runtime/view-focus.ts",
       "apps/app/src/main.tsx",
-      "vendor/eliza/packages/ui/src/accessibility/screen-focus.ts",
+      "apps/app/src/ui/accessibility/screen-focus.ts",
       "upstream.lock.json"
     ],
     "stateMapping": {
@@ -2303,7 +2300,7 @@
       "apps/app/src/native.ts",
       "apps/app/src/platform-plugins.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSystemPlugin.java",
-      "vendor/eliza/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx",
+      "apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx",
       "vendor/eliza/plugins/plugin-native-system/src/client/launcher.ts",
       "vendor/eliza/plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/SystemLauncherApps.java"
     ],
@@ -2344,10 +2341,9 @@
     ],
     "sources": [
       "apps/app/src/prototype/home-shell.ts",
-      ".eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx",
-      ".eliza/client-features/packages/ui/src/mobile-shell/navigation.ts",
+      "apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx",
+      "apps/app/src/ui/mobile-shell/navigation.ts",
       ".eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts",
-      "vendor/eliza/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx",
       "upstream.lock.json"
     ],
     "abstractions": [
@@ -2376,7 +2372,7 @@
       "apps/app/src/runtime/dock-clearance.ts",
       "apps/app/src/main.tsx",
       "apps/app/src/prototype/template.html",
-      "vendor/eliza/packages/ui/src/components/shell/dock-clearance.ts"
+      "apps/app/src/ui/components/shell/dock-clearance.ts"
     ],
     "stateMapping": {
       "installed/generation": "Actual paired observer cleanup and installation count",
@@ -2414,7 +2410,7 @@
     ],
     "sources": [
       "apps/app/src/main.tsx",
-      "vendor/eliza/packages/ui/src/state/app-update-gate.ts",
+      "apps/app/src/ui/state/app-update-gate.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java"
     ],
     "stateMapping": {
@@ -2452,7 +2448,7 @@
     ],
     "sources": [
       "apps/app/src/main.tsx",
-      "vendor/eliza/packages/ui/src/state/app-update-gate.ts",
+      "apps/app/src/ui/state/app-update-gate.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java"
     ],
     "stateMapping": {
@@ -2497,8 +2493,8 @@
       "apps/app/src/runtime/canonical-calendar-draft.ts",
       "apps/app/src/runtime/calendar-form-draft.ts",
       "apps/app/src/prototype/assistant-draft-controller.ts",
-      ".eliza/client-features/packages/ui/src/state/durable-draft-controller.ts",
-      ".eliza/client-features/packages/ui/src/state/durable-draft.ts"
+      "apps/app/src/ui/state/durable-draft-controller.ts",
+      "apps/app/src/ui/state/durable-draft.ts"
     ],
     "abstractions": [
       "Canonical Calendar editor owner transition, opaque lifetime, durable slot reads/writes, consumed records, stale controls and recovery.",
@@ -2715,7 +2711,7 @@
       "apps/app/src/runtime/agent-calendar.ts",
       "apps/app/src/runtime/agent-calendar-client.ts",
       "apps/app/src/prototype/agent-calendar-adapter.ts",
-      ".eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy.ts"
+      "apps/app/src/ui/calendar/event-editor-policy.ts"
     ],
     "abstractions": [
       "Actual create/update/delete admission, exact preservation read, captured owner/session and dispatch fields, synthetic provider completion, and latest deferred refresh.",
@@ -3771,7 +3767,7 @@
       "apps/app/src/browser/documents.ts",
       "apps/app/src/browser/domain-document.ts",
       "apps/app/src/browser/preference-documents.ts",
-      "vendor/eliza/packages/ui/src/platform/browser-document-store.ts"
+      "apps/app/src/ui/platform/browser-document-store.ts"
     ],
     "abstractions": [
       "Closed Chromium tabs exercise actual IndexedDB and a representative three-item rendered batch. Mixed-version writers and process interruption remain separate."
@@ -3825,7 +3821,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/settings-adapter.ts",
-      "vendor/eliza/packages/ui/src/state/app-update-gate.ts"
+      "apps/app/src/ui/state/app-update-gate.ts"
     ],
     "stateMapping": {
       "active/disposed/busy/failures/wakeAt": "Actual shared foreground scheduler snapshot",
@@ -4444,7 +4440,8 @@
       "FinishedWitness"
     ],
     "sources": [
-      "apps/app/src/runtime/connection-ui.tsx"
+      "apps/app/src/runtime/connection-ui.tsx",
+      "apps/app/src/ui/api/conversation-turn-controller.ts"
     ],
     "symbols": [
       {
@@ -4501,9 +4498,6 @@
       "The conversation read yields one of four classes: error, stopped message not recorded, reply not finished, reply finished. Matching by clientMessageId or by text and time is abstracted into the unrecorded class.",
       "Selecting another agent, an explicit history load, a new conversation and a new send retire the check and clear its notice in one step, as the controller does. A new send that never reached the agent puts the unchecked notice back.",
       "The chat bubble that mirrors the notice (syncStoppedReplyNotice) and automatic restores that change the selected conversation are not modeled."
-    ],
-    "sharedSources": [
-      "packages/ui/src/api/conversation-turn-controller.ts"
     ]
   },
   {
@@ -7757,7 +7751,8 @@
       "apps/app/src/prototype/agent-adapter.ts",
       "apps/app/src/prototype/home-shell.ts",
       "apps/app/src/prototype/model.js",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java"
+      "android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java",
+      "apps/app/src/ui/mobile-shell/navigation.ts"
     ],
     "symbols": [
       {
@@ -7831,9 +7826,6 @@
       "A dialog or panel that refuses its cancel event, and focus restoration after a close, are not modeled.",
       "Voice and each expanded assistant detent close before the Apps drawer and its entry menu; every Back still removes at most one layer.",
       "Model safety checks do not establish implementation refinement or device acceptance."
-    ],
-    "sharedSources": [
-      "packages/ui/src/mobile-shell/navigation.ts"
     ]
   },
   {
@@ -7870,7 +7862,9 @@
     "sources": [
       "apps/app/src/prototype/chat-overlay-motion-adapter.ts",
       "apps/app/src/prototype/model.js",
-      "apps/app/src/main.tsx"
+      "apps/app/src/main.tsx",
+      "apps/app/src/ui/components/shell/chat-overlay-motion.ts",
+      "apps/app/src/ui/gestures/constants.ts"
     ],
     "symbols": [
       {
@@ -7943,10 +7937,6 @@
       "The compatibility click arrives inside the 350 ms window or not at all. A deliberate later click is a new gesture.",
       "The assistant surface, the scrim press lease, composer focus and the dock keyboard watch are not modeled here (KeyboardFocus, ModalScrimOwnership).",
       "Model safety checks do not establish implementation refinement or device acceptance."
-    ],
-    "sharedSources": [
-      "packages/ui/src/components/shell/chat-overlay-motion.ts",
-      "packages/ui/src/gestures/constants.ts"
     ]
   },
   {
@@ -7978,7 +7968,8 @@
     ],
     "sources": [
       "apps/app/src/runtime/canvas-geometry.ts",
-      "apps/app/src/main.tsx"
+      "apps/app/src/main.tsx",
+      "apps/app/src/ui/components/shell/responsive-layout.ts"
     ],
     "symbols": [
       {
@@ -8017,9 +8008,6 @@
       "The keyboard is up only while a text field has focus, and blur lowers it in the same step. Split and freeform window resizes are not enumerated, so a non-rotation width change while typing (which takes the measured, keyboard-shortened height) is outside the model.",
       "The shell's mount effect measures the window synchronously and the keyboard only arrives in a later resize, so no keyboard rises before the first measurement. A reloaded document has no focused field and the WebView drops its keyboard with the document; a keyboard still closing during the first measurement of a reloaded renderer is corrected by the resize that follows and is not modeled. Neither assumption has device evidence.",
       "Model safety checks do not establish implementation refinement or device acceptance."
-    ],
-    "sharedSources": [
-      "packages/ui/src/components/shell/responsive-layout.ts"
     ]
   },
   {
@@ -8250,7 +8238,8 @@
     ],
     "sources": [
       "apps/app/src/prototype/home-cards.ts",
-      "apps/app/src/prototype/data-adapter.ts"
+      "apps/app/src/prototype/data-adapter.ts",
+      "apps/app/src/ui/overview/daily-overview.ts"
     ],
     "symbols": [
       {
@@ -8284,9 +8273,6 @@
       "Three candidates (a timed item, an all-day item and an overdue reminder) and seven clock ticks stand for every agenda; the probe interval is two ticks.",
       "The fresh selection is the shared selectOverviewAgenda rule. Card wording, attention and brief cards are presentation and are not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."
-    ],
-    "sharedSources": [
-      "packages/ui/src/overview/daily-overview.ts"
     ]
   },
   {
@@ -9414,7 +9400,8 @@
     ],
     "sources": [
       "apps/app/src/prototype/maps-adapter.ts",
-      "apps/app/src/runtime/action-message-presentation.ts"
+      "apps/app/src/runtime/action-message-presentation.ts",
+      "apps/app/src/ui/components/chat/message-maps-parser.ts"
     ],
     "symbols": [
       {
@@ -9460,9 +9447,6 @@
       "The question key is the message id; the choice id inside the text is folded into the text version.",
       "The reply the agent sends after an answer, the agent-side confirmation gate and card presentation are outside this model.",
       "Changes that take the composer, the account or the page away are drawn one time in four so sampled traces reach sends."
-    ],
-    "sharedSources": [
-      "packages/ui/src/components/chat/message-maps-parser.ts"
     ]
   },
   {
@@ -9771,7 +9755,8 @@
     "sources": [
       "apps/app/src/prototype/chat-overlay-motion-adapter.ts",
       "apps/app/src/runtime/canvas-geometry.ts",
-      "apps/app/src/main.tsx"
+      "apps/app/src/main.tsx",
+      "apps/app/src/ui/components/shell/responsive-layout.ts"
     ],
     "symbols": [
       {
@@ -9815,9 +9800,6 @@
       "Both estimators first see the window at mount without a keyboard, and the dock's listener runs before the canvas's on every resize. Neither has device evidence.",
       "Only the viewport fallback of the dock watch is modeled: where Android reports keyboard visibility the native event owns the release (KeyboardFocus).",
       "Model safety checks do not establish implementation refinement or device acceptance."
-    ],
-    "sharedSources": [
-      "packages/ui/src/components/shell/responsive-layout.ts"
     ]
   },
   {
@@ -9958,7 +9940,7 @@
     "stateMapping": {
       "owner/front/session": "the mounted instance, owner.S().view === 'settings' and connectionController.getCloudClient()?.sessionId",
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
-      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization\u2026, a grant label, Authorization not verified",
+      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization…, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },

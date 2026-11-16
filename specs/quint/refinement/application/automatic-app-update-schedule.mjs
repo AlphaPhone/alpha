@@ -1,28 +1,21 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
-import {createAppUpdateScheduler} from '../../../../.eliza/client-features/packages/ui/src/state/app-update-gate.ts';
+import {createAppUpdateScheduler} from '../../../../apps/app/src/ui/state/app-update-gate.ts';
 import {checkClientFeatures} from '../../../../scripts/prepare-client-features.ts';
 import {checkTraces} from '../check-traces.mjs';
 import {boundInputs,captureSources,checkpoint,deferred,read,tick,trace,call} from './support.mjs';
 
 export async function checkAutomaticAppUpdateSchedule() {
   const model='AutomaticAppUpdateSchedule', modelPath='specs/quint/application/'+model+'.qnt';
-  const shared='packages/ui/src/state/app-update-gate.ts';
+  const gate='apps/app/src/ui/state/app-update-gate.ts';
   const sources=[fileURLToPath(import.meta.url),'apps/app/src/prototype/settings-adapter.ts',
-    'apps/app/src/main.tsx','vendor/eliza/'+shared,'.eliza/client-features/'+shared,
-    '.eliza/client-features/.source.json','scripts/prepare-client-features.ts',
+    'apps/app/src/main.tsx',gate,'.eliza/client-features/.source.json','scripts/prepare-client-features.ts',
     'scripts/pinned-upstream-source.ts','test/support/strip-types.mjs','upstream.lock.json'];
   captureSources([...sources,modelPath]);
   checkClientFeatures();
   const stamp=JSON.parse(read('.eliza/client-features/.source.json'));
-  const digest=createHash('sha256').update(read('.eliza/client-features/'+shared)).digest('hex');
-  const pinned=createHash('sha256').update(read('vendor/eliza/'+shared)).digest('hex');
-  assert.equal(stamp.files[shared],digest);
-  assert.equal(stamp.sourceFiles[shared],pinned);
-  assert.equal(digest,pinned,'the prepared updater is the exact reviewed upstream source');
   assert.equal(Object.hasOwn(stamp,'appUpdateResumePatch'),false,'the retired updater patch has no receipt');
   const traces=[];
   async function run(name,sequence){

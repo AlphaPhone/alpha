@@ -1,4 +1,4 @@
-import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../../../../.eliza/client-features/packages/ui/src/components/chat/message-maps-parser.ts';
+import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance';
 import {connectionController} from '../runtime/connection-ui';
 

@@ -28,7 +28,7 @@ const backScript = home => script[1] + (home ? script[2] : script[3]) + script[4
 
 const built = await build({absWorkingDir: root, stdin: {resolveDir: root, sourcefile: 'back-dispatch-entry.ts', contents: `
   export {installHomeShell} from './apps/app/src/prototype/home-shell.ts';
-  export {appsDrawerEntries} from './.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer';
+  export {appsDrawerEntries} from './apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer';
   export {ALPHA_PRODUCT} from './apps/app/src/product/alpha-product';`},
   bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react', 'react-dom'], define: {'import.meta.env': '{}'}});
 const BAR = 'barView', PILL = 'pillView';

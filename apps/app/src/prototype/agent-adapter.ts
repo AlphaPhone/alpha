@@ -12,7 +12,7 @@ import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/p
 import {CAMERA_CONTEXT_NOTICE,publishCommittedDeviceChanges,setFilesReviewIdentity} from '../runtime/device-actions';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
-import {dismissMailFolderMenu} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
+import {dismissMailFolderMenu} from '../ui/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';

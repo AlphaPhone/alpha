@@ -270,7 +270,7 @@ test('Home template renders source, freshness and the brief card only from live 
   const homeStart = template.indexOf('<sc-element value="{{homeShell}}">');
   const home = template.slice(homeStart, template.indexOf('</sc-element>', homeStart));
   assert.ok(home.includes('<sc-slot name="cards">'), 'Home cards fill the shared shell\'s card slot');
-  // The agenda, mail and brief cards are the shared upstream cards (home-overview-cards.ts); the
+  // The agenda, mail and brief cards are Alpha's overview cards (home-overview-cards.ts); the
   // template only places them, in this order around the workflows card. Their DOM is asserted in
   // test/home-overview-cards.test.mjs.
   assert.match(home, /^\s*\{\{homeAgendaCard\}\}$/m);

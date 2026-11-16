@@ -7,7 +7,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import * as reminderJournal from '../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts';
 
-const helperBundle=buildSync({stdin:{contents: "export * from './apps/app/src/prototype/calendar-form-inputs';export {cancellationModeForEditorEvent} from './.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy';export {canonicalCalendarEditorTiming} from './apps/app/src/runtime/agent-calendar-view';export {calendarIntervalDetail} from './apps/app/src/prototype/calendar-interval-presentation';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'cjs',write:false});
+const helperBundle=buildSync({stdin:{contents: "export * from './apps/app/src/prototype/calendar-form-inputs';export {cancellationModeForEditorEvent} from './apps/app/src/ui/calendar/event-editor-policy';export {canonicalCalendarEditorTiming} from './apps/app/src/runtime/agent-calendar-view';export {calendarIntervalDetail} from './apps/app/src/prototype/calendar-interval-presentation';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'cjs',write:false});
 const helperModule={exports:{}};new Function('module','exports',helperBundle.outputFiles[0].text)(helperModule,helperModule.exports);
 const helpers=helperModule.exports;
 

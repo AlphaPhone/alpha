@@ -16,6 +16,8 @@ const pending = new Set([
   'prototype/automations-adapter.ts', 'prototype/calendar-adapter.ts',
   'prototype/reminder-adapter.ts', 'prototype/settings-adapter.ts',
   'runtime/cloud-voice.ts', 'runtime/hosted-live-source-ui.tsx', 'runtime/reminder-creations.ts',
+  // Moved in from upstream packages/ui as Alpha-owned code; not yet converted.
+  'ui/mobile-shell/photos-view.ts',
 ]);
 
 function files(dir) {

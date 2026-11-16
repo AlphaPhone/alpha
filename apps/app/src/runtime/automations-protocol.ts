@@ -1,4 +1,4 @@
-import {reminderDeliveryLabel,reminderDue} from "../../../../.eliza/client-features/packages/ui/src/utils/reminder-presentation";
+import {reminderDeliveryLabel,reminderDue} from "../ui/utils/reminder-presentation";
 import {workflowDeviceTimeZone,workflowLocalInstant,workflowCronLabel,automationLocalDateInput,localDate,workflowNextClockOccurrence,workflowSnoozeTime} from './workflow-local-time';
 export {workflowDeviceTimeZone,automationLocalDateInput,localDate,workflowNextClockOccurrence,workflowSnoozeTime} from './workflow-local-time';
 /** Alpha presentation over OG's canonical automation, ScheduledTask and LifeOps contracts.

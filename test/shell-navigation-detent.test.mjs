@@ -1,12 +1,12 @@
 // Back, Home and opening a view move the assistant (pill, composer, sheet, full) through the
-// shared mobile shell reducer (@elizaos/ui/mobile-shell/core). This runs model.js's own
+// mobile shell reducer (apps/app/src/ui/mobile-shell/navigation.ts). This runs model.js's own
 // navigation methods against that reducer; the browser specs cover the rendered shell.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {tsImport} from 'tsx/esm/api';
-const {navigateMobileShell}=await tsImport('../.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts',import.meta.url);
+const {navigateMobileShell}=await tsImport('../apps/app/src/ui/mobile-shell/navigation.ts',import.meta.url);
 
 const model=readFileSync(process.env.ALPHA_SHELL_MODEL_SOURCE||'apps/app/src/prototype/model.js','utf8');
 const start=model.indexOf('  goHome(chat) {'),end=model.indexOf('\n  }\n',model.indexOf('  back() {'))+4;

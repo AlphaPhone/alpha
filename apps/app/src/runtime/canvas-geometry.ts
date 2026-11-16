@@ -1,4 +1,4 @@
-import { DEFAULT_SURFACE_LAYOUT, keyboardFreeHeight, raisesSoftKeyboard, sameSurfaceLayout, surfaceLayout as sharedSurfaceLayout, type SurfaceLayout } from '../../../../.eliza/client-features/packages/ui/src/components/shell/responsive-layout.ts';
+import { DEFAULT_SURFACE_LAYOUT, keyboardFreeHeight, raisesSoftKeyboard, sameSurfaceLayout, surfaceLayout as sharedSurfaceLayout, type SurfaceLayout } from '../ui/components/shell/responsive-layout.ts';
 /**
  * How the phone canvas is fitted to the window (issue #411).
  *
@@ -39,8 +39,8 @@ const REFERENCE_WIDTH = 412, REFERENCE_HEIGHT = 915;
 export const WIDE_CANVAS = 760;
 
 /**
- * The window height without the soft keyboard for the current width, shared with Eliza
- * (packages/ui/src/components/shell/responsive-layout.ts): Android keeps a focused field and its
+ * The window height without the soft keyboard for the current width
+ * (ui/components/shell/responsive-layout.ts): Android keeps a focused field and its
  * keyboard through a rotation, so a swap of the sides while editing is a rotation, not a keyboard.
  */
 export { keyboardFreeHeight };

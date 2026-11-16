@@ -7,13 +7,13 @@ import {
   type PermissionStepState,
   type WalkthroughMemory,
   type WalkthroughStore,
-} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+} from './ui/components/permissions/permission-walkthrough.ts';
 
 /**
- * Alpha's binding of the shared startup permission walkthrough (packages/ui permissions
- * permission-walkthrough): the ordered keys this build installs and Alpha's installed storage
+ * Alpha's binding of its startup permission walkthrough (ui/components/permissions/
+ * permission-walkthrough.ts): the ordered keys this build installs and Alpha's installed storage
  * names. Explicit-tap prompts, one prompt per step, denial-to-settings, the photo and location
- * readers and the reopen entry are upstream.
+ * readers and the reopen entry live in that walkthrough module.
  */
 export const startupPermissionKeys = ['notifications', 'microphone', 'camera', 'location'] as const;
 export const nativeStartupPermissionKeys = [...startupPermissionKeys, 'calendar', 'photos', 'files'] as const;

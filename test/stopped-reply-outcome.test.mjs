@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
-import {findStoppedUserTurn} from '../.eliza/client-features/packages/ui/src/api/conversation-turn-controller.ts';
+import {findStoppedUserTurn} from '../apps/app/src/ui/api/conversation-turn-controller.ts';
 
 const source=readFileSync('apps/app/src/runtime/connection-ui.tsx','utf8');
 const start=source.indexOf('export const STOPPED_REPLY_NOTICE ='),end=source.indexOf('async function conversationList(',start);

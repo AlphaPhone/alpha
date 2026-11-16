@@ -52,7 +52,7 @@ async function start(page:Page,options:{mediaSource:boolean}={mediaSource:true})
     state:()=>voice.state(),gate:()=>markers.isTtsEchoGateActive(performance.now(),-1)};
    const play=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.addEventListener('playing',()=>{proof.firstAudioMs??=Math.round(performance.now()-speakAt);},{once:true});return play.call(this);};
    for(const event of ['playbackEnded','playbackFailed','playbackStopped'])await voice.addListener(event,()=>proof.events.push(event));
-  },'/@fs'+resolve('.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts'));
+  },'/@fs'+resolve('apps/app/src/ui/voice/tts-playback-activity.ts'));
  }catch(error){await cleanup();throw error;}
  const proof=<T,>(read:(value:Proof)=>T|Promise<T>)=>page.evaluate(`(${read.toString()})(window.ttsStream)`) as Promise<T>;
  const audible=()=>proof(async value=>{const state=await value.state();return state.playing&&state.positionMs>100;});

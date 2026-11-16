@@ -1,6 +1,6 @@
 /**
  * Home daily overview presentation. The domain (states, freshness, agenda selection and copy) is
- * the shared upstream module `packages/ui/src/overview/daily-overview.ts`; this file only binds
+ * Alpha's UI module `ui/overview/daily-overview.ts`; this file only binds
  * Alpha's locale and hour-cycle preferences (`locale-time.ts`) and keeps the names Alpha's adapters
  * use. Nothing here reads a provider or runs a digest.
  */
@@ -35,7 +35,7 @@ import {
   type OverviewFormat,
   type OverviewInboxCardInput,
   type OverviewInboxCardModel,
-} from '../../../../.eliza/client-features/packages/ui/src/overview/daily-overview.ts';
+} from '../ui/overview/daily-overview.ts';
 import {formatTime, formatShortDate} from './locale-time.ts';
 
 /** Alpha's locale preferences, read at each call so a changed preference applies at once. */

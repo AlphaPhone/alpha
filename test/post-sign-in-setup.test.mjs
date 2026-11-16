@@ -209,7 +209,7 @@ test('the agent panel shows a calm starting state while a signed-in agent starts
 test('a returning sign-in on completed setup opens Ready when an unconfirmed revocation arrives after setup opened',async()=>{
   // spec-startup-permissions-F04: a completed install with no new account shows no Ready card, and
   // the restart's notice used to have nowhere to render.
-  const {showWalkthroughCompletion}=await import('../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts');
+  const {showWalkthroughCompletion}=await import('../apps/app/src/ui/components/permissions/permission-walkthrough.ts');
   const {lateReadyNotice}=await import('../apps/app/src/startup-permission-flow.ts');
   const shown=showWalkthroughCompletion({accountCreated:false,resumed:false});
   assert.equal(shown,false,'setup opened silently');

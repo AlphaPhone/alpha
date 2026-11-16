@@ -8,7 +8,7 @@ import {boundInputs, call, captureSources, checkpoint, root, trace} from './supp
 
 const fixture = 'specs/quint/refinement/application/drawer-interaction-fixture.tsx';
 const driver = fileURLToPath(import.meta.url);
-const drawer = '.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx';
+const drawer = 'apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx';
 const replaceOnce = (input, old, next) => {
   assert.equal(input.split(old).length, 2, 'Exact Drawer observer or timer port seam');
   return input.replace(old, next);
@@ -92,7 +92,7 @@ export async function checkDrawerInteraction(extraSources = []) {
     assert.deepEqual(errors, [], 'Mounted Drawer has no browser errors');
   } finally {await browser.close();}
   return checkTraces(boundInputs({model: 'DrawerInteraction', sources: compiled.sources, traces, scope: 'bounded-orchestration', assumptions: [
-    'The actual Alpha installHomeShell adapter, shared launcher and React InstalledAppsGridDrawer mount in Chromium with a real DOM, controlled timers, and synthetic native and storage ports.',
+    'The actual Alpha installHomeShell adapter, shared launcher and Alpha-owned React InstalledAppsGridDrawer mount in Chromium with a real DOM, controlled timers, and synthetic native and storage ports.',
     'Two installed component identities, one work profile, two pointer IDs, four query classes, and one outstanding App Info request form the bounded scope. The real React refs, visible entries, focus and owner selection are observed after committed effects.',
     'App Info completion is a controlled port outcome. The model includes replies after close/removal while the same Home owner lives. Actual platform navigation, overlapping requests, owner replacement and physical touch remain external.',
   ]}));

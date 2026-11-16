@@ -1,14 +1,14 @@
 // Shared Inbox adapter harness: the real adapter, drafts and review controllers in a vm realm with a
 // closed provider fixture and a fixed clock. No network, real account or mail; nothing is dispatched.
 import React from 'react';
-import {MailFolderPicker} from '../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
+import {MailFolderPicker} from '../apps/app/src/ui/mailbox/MailFolderPicker.tsx';
 import {mailSenderImage} from '../apps/app/src/runtime/mail-sender-image.ts';
 import {decodeMailPreview} from '../apps/app/src/runtime/mail-preview.ts';
 import {readGmailAccountChoice,saveGmailAccountChoice} from '../apps/app/src/runtime/gmail-account-selection.ts';
 import {GmailReadAhead} from '../apps/app/src/runtime/gmail-read-ahead.ts';
 import {formatMonthDay,formatTime,formatFullDateTime,weekdayName} from '../apps/app/src/prototype/locale-time.ts';
 // Existing shared formatter supplies fixture presentation; retention tests do not depend on its wording.
-import {formatBytes} from '../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts';
+import {formatBytes} from '../apps/app/src/ui/mobile-shell/photos-view.ts';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {prototypeScript} from './fixtures/prototype-script.ts';

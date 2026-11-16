@@ -6,12 +6,12 @@ import {installCanonicalCalendarDrafts} from './prototype/canonical-calendar-dra
 import {installAgentCalendarAdapter,deviceCalendarScope} from './prototype/agent-calendar-adapter';
 import {Capacitor} from '@capacitor/core';
 import {registerPlugin} from './platform-plugins';
-import {holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates} from '../../../.eliza/client-features/packages/ui/src/state/app-update-gate';
+import {holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates} from './ui/state/app-update-gate';
 import {ownerReminderNotifications} from './runtime/owner-reminder-notification-port';
 import {installCalendarApprovalAdapter} from './prototype/calendar-approval-adapter';
 import {bindBrowserDeletionOwner} from './runtime/deletion-owner';
-import {DEFAULT_PULL_VELOCITY} from "../../../.eliza/client-features/packages/ui/src/gestures/constants";
-import {usePullGesture} from "../../../.eliza/client-features/packages/ui/src/components/shell/use-pull-gesture";
+import {DEFAULT_PULL_VELOCITY} from "./ui/gestures/constants";
+import {usePullGesture} from "./ui/components/shell/use-pull-gesture";
 import {installChatOverlayMotion} from './prototype/chat-overlay-motion-adapter';
 import {installSubviewAccessibility,installReplyAnnouncer,keepFocusOnScreen} from './prototype/subview-accessibility';
 import {installCalendarMonthFocus} from './prototype/calendar-month-focus';
@@ -185,7 +185,7 @@ installHomeCardVisibility(Component, () => googleConnectionController.open());
 if(isAndroid&&!fixture){installTelephonyAttention(Component);installTelephonyReview(Component);installVoicemailTranscription();setSmsReplySuggester((thread,signal)=>connectionController.draftSmsReply(thread,signal));}
 installHomeOverviewCards(Component);
 installClockAdapter(Component, VIEWS, { simulated: testMocksEnabled && fixture, browser: !isAndroid });
-// Home and its app grid from the shared mobile shell, and Alpha's Apps drawer. Apps reads
+// Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer. Apps reads
 // ElizaSystem on Android; the browser device inventory remains available in test-mocks builds only.
 // Outermost so Home composes with every binding above. App info exists on Android only.
 const appInventory = isAndroid ? 'android' : testMocksEnabled ? 'simulated' : undefined;

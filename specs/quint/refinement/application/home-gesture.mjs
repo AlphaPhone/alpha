@@ -8,7 +8,7 @@ import {boundInputs, call, captureSources, checkpoint, root, tick, trace} from '
 
 const driver = fileURLToPath(import.meta.url);
 const source = 'apps/app/src/prototype/home-shell.ts';
-const navigation = '.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts';
+const navigation = 'apps/app/src/ui/mobile-shell/navigation.ts';
 const notes = 'alpha:notes', inbox = 'alpha:inbox', files = 'alpha:files';
 
 async function compile(extraSources) {
@@ -198,7 +198,7 @@ export async function checkHomeGesture(extraSources = []) {
     } finally {f.close();}
   }
   return checkTraces(boundInputs({model: 'HomeGesture', sources: compiled.sources, traces, scope: 'bounded-orchestration', assumptions: [
-    'Actual installHomeShell grid, edit callbacks and mounted lifecycle execute with the shared launcher/navigation code and controlled pointer, timer, focus and storage ports.',
+    'Actual installHomeShell grid, edit callbacks and mounted lifecycle execute with the Alpha-owned launcher/navigation code and controlled pointer, timer, focus and storage ports.',
     'Two pointer IDs, three favorite keys, a fixed tile geometry, one keyboard frame, and distinct hidden/drawer/view/retired states are modeled. The source campaign drives the real callbacks, reads the original closure fields, and records pointer-capture and click suppression calls.',
     'One successful favorite store and no overlapping host mounts are used. Drop is a macrostep across ordered writes. Browser pointer delivery, multi-write refusal, full modal focus trap and native touch acceptance require separate evidence.',
   ]}));

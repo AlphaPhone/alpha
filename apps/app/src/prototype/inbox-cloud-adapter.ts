@@ -1,5 +1,5 @@
 import React from 'react';
-import {MailFolderPicker} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
+import {MailFolderPicker} from '../ui/mailbox/MailFolderPicker.tsx';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
 import type {ServiceReadCache} from '../runtime/service-read-cache';
 import {mailSenderImage} from '../runtime/mail-sender-image';

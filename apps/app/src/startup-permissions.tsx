@@ -9,7 +9,7 @@ import {Busy,StatusDot} from './runtime/status-ui';
 import {browserStartupPermission} from './startup-browser-permissions';
 import {createStartupPermissionFlow, startupPermissionKeys, nativeStartupPermissionKeys, type NativeStartupPermissionKey as PermissionKey, type StartupPermissionState} from './startup-permission-flow';
 import {readStartupPermissionProgress, writeStartupPermissionProgress, startupPermissionProgressKey} from './startup-permission-progress';
-import {showWalkthroughCompletion} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+import {showWalkthroughCompletion} from './ui/components/permissions/permission-walkthrough.ts';
 import './startup-permissions.css';
 
 const notifications = registerPlugin<{status(): Promise<{permissionGranted: boolean; appEnabled: boolean}>}>('AlphaNotifications');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import vm from 'node:vm';
-import {readWindow,thumbnailPlan,batches} from '../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts';
+import {readWindow,thumbnailPlan,batches} from '../apps/app/src/ui/mobile-shell/photos-view.ts';
 const source=readFileSync(new URL('../apps/app/src/prototype/camera-adapter.ts',import.meta.url),'utf8');
 function declaration(signature){const start=source.indexOf(signature);assert.ok(start>=0);let end=source.indexOf('{',start),depth=1;for(end++;depth;end++){if(source[end]==='{')depth++;if(source[end]==='}')depth--;}return source.slice(start,end);}
 const photo=(n,image='')=>({id:'native-camera-'+n,date:n,image,revision:'r1'});

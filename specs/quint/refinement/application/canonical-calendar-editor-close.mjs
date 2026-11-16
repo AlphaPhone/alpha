@@ -17,7 +17,7 @@ const notices = new Map([['Draft open', 'finish-draft'],
 const inputs = ['test/fixtures/calendar-draft-handoff.mjs', 'apps/app/src/prototype/canonical-calendar-drafts.ts', 'apps/app/src/prototype/template.html',
   'apps/app/src/prototype/model.js', 'apps/app/src/prototype/subview-accessibility.ts', 'apps/app/src/runtime/canonical-calendar-draft.ts',
   'apps/app/src/runtime/assistant-draft-store.ts', 'apps/app/src/prototype/assistant-draft-controller.ts',
-  '.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts'];
+  'apps/app/src/ui/state/durable-draft-controller.ts'];
 const empty = {id: 0, owner: 0, target: 0, title: ''};
 
 function eventIndex(key) {

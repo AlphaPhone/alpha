@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {JSDOM} from 'jsdom';
@@ -10,10 +9,8 @@ import {boundInputs, captureSources, checkpoint, read, tick, trace, call} from '
 const model = 'DockClearanceOwnership';
 const modelPath = 'specs/quint/application/DockClearanceOwnership.qnt';
 const host = 'apps/app/src/runtime/dock-clearance.ts';
-const shared = 'packages/ui/src/components/shell/dock-clearance.ts';
-const effective = '.eliza/client-features/' + shared;
-const projection = '.eliza/client-features/.source.json';
-const screenFocus = '.eliza/client-features/packages/ui/src/accessibility/screen-focus.ts';
+const layout = 'apps/app/src/ui/components/shell/dock-clearance.ts';
+const screenFocus = 'apps/app/src/ui/accessibility/screen-focus.ts';
 const strip = text => stripTypeScriptTypes(text, {mode: 'strip'})
   .replace(/^import[\s\S]*?;\r?\n/gm, '').replace(/^export /gm, '');
 
@@ -147,17 +144,11 @@ function fixture(name, code) {
 }
 
 export async function checkDockClearanceOwnership() {
-  const sources = [fileURLToPath(import.meta.url), host, 'vendor/eliza/' + shared, effective, projection, screenFocus,
+  const sources = [fileURLToPath(import.meta.url), host, layout, screenFocus,
     'apps/app/src/main.tsx', 'apps/app/src/prototype/template.html'];
   captureSources([...sources, modelPath]);
-  const stamp = JSON.parse(read(projection));
-  const codeText = read(effective);
-  const digest = createHash('sha256').update(codeText).digest('hex');
-  assert.equal(stamp.files[shared], digest);
-  assert.equal(stamp.sourceFiles[shared], digest);
-  assert.equal(read('vendor/eliza/' + shared), codeText);
+  const codeText = read(layout);
   const focusText = read(screenFocus);
-  assert.equal(createHash('sha256').update(focusText).digest('hex'), stamp.files['packages/ui/src/accessibility/screen-focus.ts']);
   const code = new vm.Script(`const {isExposed, NATIVE_DIALOG_SELECTOR} = (() => {
 ${strip(focusText)}
 return {isExposed, NATIVE_DIALOG_SELECTOR};
@@ -197,6 +188,6 @@ globalThis.install = installDockClearance; globalThis.current = () => installed;
   });
 
   return checkTraces(boundInputs({model, modelPath, sources, traces, scope: 'bounded-component',
-    assumptions: ['Actual product and prepared shared layout observers execute on synthetic geometry and settled frames.',
+    assumptions: ['Actual product and Alpha-owned layout observers execute on synthetic geometry and settled frames.',
       'One screen and one layout dock. Physical Android insets, installed font scaling, and focus scrolling have separate evidence.']}));
 }

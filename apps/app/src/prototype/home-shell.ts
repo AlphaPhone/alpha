@@ -1,9 +1,11 @@
 import {createElement, type CSSProperties} from 'react';
 import type {FavoritesStore, InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
 import {appKey} from '@elizaos/capacitor-system/launcher';
-import {createMobileShellLauncher, mobileShellIconUrl, MobileHomeScreen, type MobileHomeEntry, type MobileHomeTile} from '@elizaos/ui/mobile-shell';
+import {createMobileShellLauncher, type MobileHomeEntry} from '../ui/mobile-shell/mobile-launcher.ts';
+import {mobileShellIconUrl} from '../ui/mobile-shell/product-registration.ts';
+import {MobileHomeScreen, type MobileHomeTile} from '../ui/mobile-shell/MobileHomeScreen.tsx';
 import {ALPHA_PRODUCT, alphaViews} from '../product/alpha-product';
-import {InstalledAppsGridDrawer, HOLD_MS, SLOP, appsDrawerEntries} from '../../../../.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer';
+import {InstalledAppsGridDrawer, HOLD_MS, SLOP, appsDrawerEntries} from '../ui/mobile-shell/InstalledAppsGridDrawer';
 import {createInlineModal} from '../runtime/inline-modal';
 type Bag = Record<string, any>;
 
@@ -25,7 +27,7 @@ const HOME_EDIT_CSS = `
 @media (prefers-reduced-motion: reduce){[data-alpha-home-editing="true"] [data-mobile-shell-tile-face]{animation:none}}
 `;
 
-/** Home and its app grid from the shared mobile shell, and Alpha's Apps drawer, themed by the Alpha
+/** Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer, themed by the Alpha
  * record (view refresh PLAN section 5). The template fills Home's notice and card slots; open state
  * and Back go through the shared navigation reducer (Component.shellNavigate), so Back and Home close
  * the drawer. The installed favorites are the record's (alpha.launcher.favorites.v1, product views as

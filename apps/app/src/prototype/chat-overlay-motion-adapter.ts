@@ -1,12 +1,12 @@
 import {
 	clamp01,
 	OVERLAY_EASE,
-} from "../../../../.eliza/client-features/packages/ui/src/components/shell/chat-overlay-motion.ts";
-import { resolveChatPanelLayout } from "../../../../.eliza/client-features/packages/ui/src/components/shell/chat-panel-layout.ts";
+} from "../ui/components/shell/chat-overlay-motion.ts";
+import { resolveChatPanelLayout } from "../ui/components/shell/chat-panel-layout.ts";
 import {
 	DEFAULT_PULL_DISTANCE,
 	TAP_SLOP,
-} from "../../../../.eliza/client-features/packages/ui/src/gestures/constants";
+} from "../ui/gestures/constants";
 import { isEditing, keyboardFreeHeight } from "../runtime/canvas-geometry";
 import { visibleDocks } from "../runtime/dock-clearance";
 
