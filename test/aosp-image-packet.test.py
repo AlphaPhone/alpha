@@ -128,6 +128,60 @@ class ImagePacket(unittest.TestCase):
             self.assertEqual(stage.stage_preimage(source, None, 'vendor/alphaphone/product.mk'), source/'vendor/alphaphone/product.mk')
             with self.assertRaisesRegex(AssertionError, 'Unsafe'): stage.stage_preimage(source, root, 'vendor/alphaphone/../x')
 
+    def test_exact_packet_command_plans_from_the_image_stage_not_the_source_tree(self):
+        """main() runs with brandingPacketCommand's exact argv. Pinned AOSP objects and the core
+        policy are synthetic ports here; the stage/source-tree preimage selection is the real code."""
+        with tempfile.TemporaryDirectory(prefix='alpha-image-packet-') as d:
+            root = Path(d); image = root/'stage'; image.mkdir(); aosp = root/'aosp'; assets = root/'assets'; assets.mkdir()
+            generated = b'# Generated Pixel launcher stage product\n'; (image/'product.mk').write_bytes(generated)
+            branding = 'vendor/alphaphone/branding/branding.mk'; reviewed = (stage.BRAND/'branding.mk').read_bytes()
+            # The stage holds the reviewed branding bytes; an older source-tree install holds other bytes.
+            (image/'branding').mkdir(); (image/'branding/branding.mk').write_bytes(reviewed)
+            (aosp/'vendor/alphaphone/branding').mkdir(parents=True)
+            (aosp/'vendor/alphaphone/product.mk').write_bytes(b'# older source-tree install\n')
+            (aosp/branding).write_bytes(b'# older unreviewed branding\n')
+            for name, data in [('bootanimation.zip', b'boot fixture'), ('default_wallpaper.png', b'wallpaper fixture')]: (assets/name).write_bytes(data)
+            (assets/'branding-assets.json').write_text(json.dumps({'sourceLogoSha256': stage.digest((REPO/'apps/app/public/logo-mark.svg').read_bytes()),
+                'width': 1080, 'height': 2424, 'accent': '#0000FF', 'wallpaperBackground': '#000000',
+                'bootAnimationSha256': stage.digest(b'boot fixture'), 'wallpaperSha256': stage.digest(b'wallpaper fixture')}))
+            command = json.loads(bun('const [output, source, assets, reportSha256] = process.argv.slice(-4);'
+                'console.log(JSON.stringify((await import("./scripts/stage-aosp.ts")).brandingPacketCommand('
+                '{output, source, assets, reportSha256, aapt: "aapt-fixture", apksigner: "apksigner-fixture"})));',
+                str(image), str(aosp), str(assets), stage.digest((assets/'branding-assets.json').read_bytes())))
+            provision = {'src/com/android/provision/DefaultActivity.java': b'class DefaultActivity {\n    void onCreate() {\n        finishSetup();\n    }\n\n    private void finishSetup() {}\n}\n',
+                         'AndroidManifest.xml': b'<manifest>\n    <application>\n    </application>\n</manifest>\n'}
+            real_pinned = stage.pinned
+            def pinned(project, path):
+                row = real_pinned(project, path)
+                return {**row, 'sha256': stage.digest(provision[path])} if project == 'packages/apps/Provision' and path in provision else row
+            def git_show(args, **kwargs):
+                self.assertEqual(args[:4], ['git', '-C', str(aosp/'packages/apps/Provision'), 'show'])
+                return provision[args[4].split(':', 1)[1]]
+            identity = {'schema': 1, 'packageName': CANONICAL}
+            def admitted(path, aapt, apksigner):
+                self.assertEqual((path, aapt, apksigner), (image.resolve(), 'aapt-fixture', 'apksigner-fixture')); return identity
+            def run_main():
+                with patch.object(stage, 'check_revision'), patch.object(stage, 'core_policy_plan', return_value={}), \
+                     patch.object(stage, 'pinned', side_effect=pinned), patch.object(stage.subprocess, 'check_output', side_effect=git_show), \
+                     patch.object(stage, 'image_identity', side_effect=admitted), patch('sys.argv', command):
+                    stage.main()
+            run_main()
+            receipt = json.loads((image/'source-packet.json').read_text())
+            self.assertEqual(receipt['state'], 'SIGNED_IMAGE_SOURCE_PACKET_NOT_APPLIED'); self.assertEqual(receipt['imageIdentityAdmission'], identity)
+            rows = {row['path']: row for row in receipt['files']}
+            self.assertEqual(rows[branding]['beforeSha256'], stage.digest(reviewed)); self.assertFalse(rows[branding]['changed'])
+            self.assertNotIn('vendor/alphaphone/product.mk', rows, 'the stage product.mk already carries its pinned include')
+            for name, row in rows.items():
+                if name.startswith('vendor/alphaphone/'):
+                    copy = image/name[len('vendor/alphaphone/'):]
+                    self.assertEqual(row['beforeSha256'], stage.digest(copy.read_bytes()) if copy.exists() else None, name)
+            self.assertEqual((aosp/branding).read_bytes(), b'# older unreviewed branding\n')
+            self.assertFalse((aosp/'packages').exists(), 'packet generation never writes the source tree')
+            # A stage copy that differs from the reviewed bytes is refused, whatever the source tree holds.
+            for name in ['source-packet.json', 'source-packet.zip']: (image/name).unlink()
+            (image/'branding/branding.mk').write_bytes(b'# unreviewed stage branding\n'); (aosp/branding).write_bytes(reviewed)
+            with self.assertRaisesRegex(AssertionError, 'Unreviewed existing stage file: ' + branding): run_main()
+
     def test_packet_requires_admission_and_never_applies(self):
         with tempfile.TemporaryDirectory(prefix='alpha-image-packet-') as d:
             root = Path(d); aosp = root/'aosp'; aosp.mkdir(); assets = root/'assets'; assets.mkdir()
