@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {workerDeployment,edgeConfig,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
+import {migrationOutcome,workerDeployment,edgeConfig,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
  WORKER_SECRETS,LOGIN_SECRETS,OPERATOR_SECRETS,GENERATED_SECRETS} from '../scripts/cloud-worker.ts';
 import {registrationRows,registrationFor,registrationAppId,colonFingerprint,releaseSignerFingerprints} from '../scripts/cloud-registration.ts';
 import {edgeRoute} from '../cloud/edge/worker.ts';
@@ -187,4 +187,10 @@ test('Cloud tool outputs under the pinned source are refused before invoking ups
  const result=spawnSync(process.execPath,['scripts/cloud-worker.ts','render','--out','vendor/eliza/cloud-output-fixture'],{encoding:'utf8'});
  assert.notEqual(result.status,0);
  assert.match(result.stderr,/outside the pinned vendor checkout/);
+});
+
+test('a migration that pauses at a release barrier is not success',()=>{
+ assert.equal(migrationOutcome('[db:migrate] applying 0574\n[db:migrate] migrations complete\n',0),'complete');
+ assert.equal(migrationOutcome('[db:migrate] release barrier permits 3 safe pending migrations before 0282\n',0),'paused');
+ assert.equal(migrationOutcome('[db:migrate] migrations complete\n',1),'failed');
 });

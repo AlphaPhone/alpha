@@ -22,6 +22,7 @@
  *   bun scripts/cloud-worker.ts seed     --environment ENV --env-file F   register the app (apps + client rows)
  *   bun scripts/cloud-worker.ts deploy   --environment ENV --env-file F [--component api|login|edge|all]
  *   bun scripts/cloud-worker.ts tenant   --environment ENV --env-file F   create the Steward tenant (after deploy)
+ *   bun scripts/cloud-worker.ts pricing  --environment ENV --env-file F   fill the model price catalogue (after deploy)
  *   bun scripts/cloud-worker.ts smoke    --environment ENV                public, credential-free readiness probe
  *
  * --policy (default cloud/policy.json) holds the Cloud's public identity: the same `production` and
@@ -344,10 +345,23 @@ export async function ensureDnsRecords(zone: string, hosts: string[]) {
 // ---------------------------------------------------------------------------------------------
 // Database.
 
+/**
+ * Upstream's runner exits 0 when it pauses at a release barrier (migration 0282 on a database it
+ * cannot prove fresh) and leaves later migrations pending, including the native client registry
+ * this tool seeds. Only its own "migrations complete" line means the schema is current.
+ */
+export function migrationOutcome(output: string, status: number | null): 'complete' | 'paused' | 'failed' {
+  if (status !== 0) return 'failed';
+  return /\[db:migrate\] migrations complete/.test(output) ? 'complete' : 'paused';
+}
+
 export function migrate(tree: string, values: Record<string, string>, environment: CloudEnvironment) {
-  const result = spawnSync(pinnedBun(tree), ['run', '--cwd', 'packages/cloud/shared', 'db:migrate'], {cwd: tree, stdio: 'inherit', env: {
+  const result = spawnSync(pinnedBun(tree), ['run', '--cwd', 'packages/cloud/shared', 'db:migrate'], {cwd: tree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], env: {
     ...process.env, DATABASE_URL: values.DATABASE_URL, DATABASE_IDENTITY_ENVIRONMENT: environment, DATABASE_IDENTITY_GATE_MODE: 'off'}});
-  if (result.status !== 0) throw new Error('Cloud database migration failed');
+  process.stdout.write(result.stdout ?? '');
+  const outcome = migrationOutcome(result.stdout ?? '', result.status);
+  if (outcome === 'failed') throw new Error('Cloud database migration failed');
+  if (outcome === 'paused') throw new Error('Cloud database migration paused before completing (release barrier); a fresh database needs an upstream pin that includes eliza#39754');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -388,7 +402,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     tree: {type: 'string'}, out: {type: 'string'}, environment: {type: 'string'}, 'env-file': {type: 'string'}, component: {type: 'string', default: 'all'},
     apply: {type: 'boolean', default: false}, frozen: {type: 'boolean', default: false}, write: {type: 'boolean', default: false}, json: {type: 'boolean', default: false}}});
   const command = positionals[0];
-  const usage = () => { console.error('Usage: bun scripts/cloud-worker.ts prepare|deployment|render|check|registration|secrets|provision|migrate|seed|deploy|tenant|smoke [options] (see the header of this file)'); process.exit(2); };
+  const usage = () => { console.error('Usage: bun scripts/cloud-worker.ts prepare|deployment|render|check|registration|secrets|provision|migrate|seed|deploy|tenant|pricing|smoke [options] (see the header of this file)'); process.exit(2); };
   const environment = () => { const value = o.environment as CloudEnvironment; if (!cloudEnvironments.includes(value)) usage(); return value; };
   const envFile = () => { if (!o['env-file']) usage(); return path.resolve(o['env-file']!); };
   const policy = () => loadJson<CloudDeploymentConfig>(o.policy!);
@@ -491,6 +505,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         const join = await fetch(`${ids.loginApiUrl}/platform/tenants/${row.tenant}/join-mode`, {method: 'PATCH', redirect: 'error', headers, body: JSON.stringify({joinMode: 'open'})});
         if (!join.ok) throw new Error(`Steward join mode failed (HTTP ${join.status})`);
         say(`tenant ${row.tenant} ${created.status === 409 ? 'already existed' : 'created'}; open sign-up enabled`);
+        break;
+      }
+      case 'pricing': {
+        // Inference refuses requests until the price catalogue exists, and upstream schedules no refresh.
+        const env = environment(), values = readEnvFile(envFile()), row = validateCloudDeployment(policy())[env];
+        if (!values.CRON_SECRET) throw new Error('CRON_SECRET is missing from the env file');
+        const response = await fetch(`${row.api}/api/v1/cron/refresh-pricing`, {method: 'POST', redirect: 'error', headers: {Authorization: `Bearer ${values.CRON_SECRET}`}});
+        const text = await response.text();
+        if (!response.ok) throw new Error(`Price catalogue refresh failed (HTTP ${response.status}: ${text.slice(0, 200)})`);
+        say(`price catalogue refreshed: ${text.slice(0, 200)}`);
         break;
       }
       case 'smoke': {

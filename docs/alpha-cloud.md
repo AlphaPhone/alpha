@@ -95,6 +95,7 @@ bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha
 bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- tenant --environment staging --env-file ~/.config/alpha-cloud/staging.env
+bun run cloud:worker -- pricing --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- smoke --environment staging
 ```
 
@@ -106,9 +107,9 @@ After the first deployment, the **Cloud deploy** workflow does the same from `ma
 `--frozen` secrets. Then:
 
 - In Stripe, send a test webhook and check that it returns 200.
-- Run `POST https://api.alphacompute.ai/api/v1/cron/refresh-pricing` with
-  `Authorization: Bearer $CRON_SECRET` so inference has prices. Inference fails closed until the
-  pricing catalogue exists. (I found no schedule that runs this refresh, so run it after each deploy.)
+- `bun run cloud:worker -- pricing --environment staging --env-file …` fills the model price
+  catalogue (the deploy workflow runs it). Inference refuses requests until it exists, and upstream
+  schedules no refresh.
 - Mint launch grant codes with upstream's
   `packages/cloud/scripts/admin/mint-subscription-grant-codes.ts` against `DATABASE_URL`.
 

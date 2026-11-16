@@ -89,6 +89,9 @@ jobs:
       - name: Create the Steward tenant (idempotent)
         if: inputs.action == 'deploy' && (inputs.component == 'all' || inputs.component == 'login')
         run: bun scripts/cloud-worker.ts tenant --environment "${{ inputs.environment }}" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+      - name: Fill the model price catalogue (inference refuses requests without it)
+        if: inputs.action == 'deploy' && (inputs.component == 'all' || inputs.component == 'api')
+        run: bun scripts/cloud-worker.ts pricing --environment "${{ inputs.environment }}" --env-file "$RUNNER_TEMP/alpha-cloud.env"
       - name: Public readiness probe
         if: inputs.action == 'deploy'
         run: bun scripts/cloud-worker.ts smoke --environment "${{ inputs.environment }}"
