@@ -435,6 +435,7 @@ export const featureParityAllowlist = {
     "apps/app/src/prototype/scan-text-layer.ts",
     "apps/app/src/prototype/selection-adapter.ts",
     "apps/app/src/prototype/settings-adapter.ts",
+    "apps/app/src/prototype/settings-sections.ts",
     "apps/app/src/prototype/share-panel-adapter.ts",
     "apps/app/src/prototype/sms-adapter.ts",
     "apps/app/src/prototype/sms-recipient-picker.ts",
