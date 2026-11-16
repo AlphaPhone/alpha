@@ -2,13 +2,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {sha256, sha256File} from './sha256.ts';
-import {verifyAndroidIdentity} from './android-identity.ts';
 const roots=['apps/app/src','apps/app/public','android/app/src/main/java','android/app/src/main/res','android/app/src/androidTest','android/app/src/main/AndroidManifest.xml','android/app/build.gradle','android/settings.gradle','capacitor.config.ts','vite.config.ts','package.json','bun.lock','app.config.json'];
 // Record flavor manifests and build policy as well as renderer/bridge sources.
 // Generated web assets and Gradle output remain outputs, not source inputs.
 roots.push('android/app/src/launcher','android/app/src/release',
  // The Gradle host the pinned upstream generator writes from android/consumer-host.json.
- 'android/consumer-host.json','android/app/product.gradle','scripts/android-host.ts','scripts/android-identity.ts',
+ 'android/consumer-host.json','android/app/product.gradle','scripts/android-host.ts',
  'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment.ts','scripts/cloud-deployment-policy.ts',
  'android/.eliza-consumer-profile.json','android/eliza-consumer-host',
  'vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs',
@@ -51,17 +50,6 @@ roots.push('android/app/src/main/assets/agent','android/app/src/main/jniLibs',
  'vendor/eliza/packages/app/platforms/android/app/src/main/java/ai/elizaos/app',
  'vendor/eliza/plugins/plugin-native-browser-surface/android/src/main/java/ai/eliza/plugins/browsersurface/ChromiumBrowserIdentity.java');
 const files: string[]=[];
-const profileFile = 'android/.eliza-consumer-profile.json';
-if (fs.existsSync(profileFile)) {
- const profile = JSON.parse(fs.readFileSync(profileFile, 'utf8'));
- const asset = profile.assetFiles?.find((file: {name: string}) => file.name === 'android-identity.json');
- if (asset) {
-  verifyAndroidIdentity(process.cwd());
-  const directory = path.dirname(fs.realpathSync(asset.source));
-  if (!directory.startsWith(path.resolve('.eliza/android-identity') + path.sep)) throw new Error('Android identity source is outside its generated directory');
-  roots.push(path.relative(process.cwd(), directory));
- }
-}
 function walk(entry: string){if(!fs.existsSync(entry))return;const stat=fs.lstatSync(entry);if(stat.isDirectory())for(const name of fs.readdirSync(entry).sort())walk(path.join(entry,name));else if(stat.isFile())files.push(entry);}
 roots.forEach(walk);
 const hashes=Object.fromEntries(files.sort().map(file=>[file,sha256File(file)]));

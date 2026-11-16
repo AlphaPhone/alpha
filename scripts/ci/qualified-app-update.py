@@ -287,10 +287,10 @@ def restore_file(root, name, source, size, digest, failure):
             temporary.unlink(missing_ok=True)
 
 
-def restore_producer_evidence(unsigned, product, kind, variants=VARIANTS, *, contract=None):
+def restore_producer_evidence(unsigned, product, kind, variants=VARIANTS):
     with zipfile.ZipFile(unsigned) as archive:
         verified = decode(archive.read("apk-verification.json"))
-        debug = PRODUCER.debug_apk_members(archive, verified, kind, variants, contract=contract)
+        debug = PRODUCER.debug_apk_members(archive, verified, kind, variants)
         producer = decode(archive.read("producer-evidence/manifest.json"))
         names = PRODUCER.archive_members(archive)
         for name, entry, expected in PRODUCER.producer_evidence_members(names, producer["files"]):
@@ -324,7 +324,7 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
             members = list(islice(archive, len(expected) + 1))
             # The exact uncompressed TAR receipt authenticates its member sizes.
             # APKs may fill that envelope. Metadata keeps the historical ceiling.
-            signed_limit = min(size, apk_member_limit(producer_kind(plan), input_contract(plan)))
+            signed_limit = min(size, apk_member_limit(producer_kind(plan)))
             metadata_limit = apk_member_limit(HOSTED_DISPATCH)
             require(len(members) == len(expected) and {item.name for item in members} == expected and
                     all(item.isfile() and 0 < item.size <= (signed_limit if item.name in signed_apks else metadata_limit)
@@ -353,7 +353,7 @@ def stage(record, plan, work, product, fetch_unsigned=STORAGE.download, fetch_si
     plan_bytes = read_bounded(work / "signing-plan.json", PLAN_LIMIT)
     with signed_bundle(signed, record["signedBundle"], plan, plan_bytes) as (archive, entries, apks):
         require(apks == record["signedApkSHA256"], "Signed checksum receipt differs")
-        restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"], contract=inputs)
+        restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"])
         # The historical verifier requires the complete unsigned pair. They are
         # verification inputs, never signed/exported release outputs. Keep the
         # signed launcher separate until its unchanged payload is verified.

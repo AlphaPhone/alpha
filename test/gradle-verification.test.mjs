@@ -21,7 +21,7 @@ const PRODUCT = 'android/app/product.gradle';
 function mutated(t, replacements) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-gradle-verification-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  for (const rel of new Set(['app.config.json', METADATA, CLASSPATH, REVIEWED_GROUPS, HOST_DESCRIPTOR, `${HOST_TEMPLATES}/toolchain.json`, ...buildScripts(ROOT), ...Object.keys(replacements)])) {
+  for (const rel of new Set([METADATA, CLASSPATH, REVIEWED_GROUPS, HOST_DESCRIPTOR, `${HOST_TEMPLATES}/toolchain.json`, ...buildScripts(ROOT), ...Object.keys(replacements)])) {
     if (replacements[rel] === null) continue;
     fs.mkdirSync(path.dirname(path.join(root, rel)), {recursive: true});
     fs.writeFileSync(path.join(root, rel), replacements[rel] ?? read(rel));

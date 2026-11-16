@@ -2723,7 +2723,6 @@
     ],
     "sources": [
       "scripts/stage-local-agent-sources.ts",
-      "scripts/android-identity.ts",
       "scripts/local-agent-source.ts",
       "android/consumer-host.json",
       "app.config.json",
@@ -5365,45 +5364,5 @@
       "packages/contracts/src/workflow-client.ts",
       "packages/contracts/src/workflow-intents.ts"
     ]
-  },
-  {
-    "path": "specs/quint/services/AndroidInstallationIdentity.qnt",
-    "module": "AndroidInstallationIdentity",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "retainedInputChangeTest",
-      "corruptedViewRefusedTest",
-      "canonicalDefaultRetainedTest",
-      "unknownPackageKeepsProfileTest"
-    ],
-    "invariants": [
-      "AcceptedIdentityIsCurrent",
-      "CacheStatesAreBounded"
-    ],
-    "sources": [
-      "scripts/android-identity.ts",
-      "scripts/android-host.ts",
-      "android/consumer-host.json",
-      "android/app/product.gradle",
-      "capacitor.config.ts"
-    ],
-    "stateMapping": {
-      "selected/profile": "Configured canonical, retained or unsupported installation identity and the generated host identity",
-      "revision/profileRevision": "Two byte identities of the authored source and the projected receipt currently selected",
-      "cache0/cache1": "Absent, valid or tampered generated view for each input identity",
-      "accepted/result": "Actual generation or verification outcome"
-    },
-    "abstractions": [
-      "One authored Java input with two byte identities, canonical and retained package choices, and one unsupported package. Hashes stand for exact bytes.",
-      "Generation and verification are settled synchronous calls. The model does not claim concurrent generation, file-system crash recovery, full Gradle consumption, ELF/JNI/model compatibility, key custody, APK signing, UID/data retention or device acceptance.",
-      "Only safety is claimed; no temporal fairness or progress assumption is used."
-    ],
-    "bounds": {
-      "maxSamples": 1000,
-      "maxSteps": 60,
-      "maxVerifyDepth": 10
-    }
   }
 ]

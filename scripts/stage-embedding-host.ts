@@ -1,4 +1,3 @@
-import {androidIdentity} from './android-identity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -55,7 +54,7 @@ const isCommit=(value: unknown)=>typeof value==='string'&&/^[a-f0-9]{40}$/.test(
 /** A new runtime pin may reuse reviewed binaries only when every native build input is exact. */
 export function verifyEmbeddingInputs(productRoot: string,qualification: EmbeddingInputs,{requireProducerInputs=false}={}) {
  const pin=JSON.parse(fs.readFileSync(path.join(productRoot,'upstream.lock.json'),'utf8')).commit;
- const identity=androidIdentity(productRoot).appId;
+ const identity=JSON.parse(fs.readFileSync(path.join(productRoot,'app.config.json'),'utf8')).appId;
  if(!isCommit(pin)||!isCommit(qualification.pin)||!isCommit(qualification.forkPin)||qualification.identity!==identity||qualification.abi!=='arm64-v8a')throw Error('Embedding host source or identity admission changed');
  const inputs=qualification.inputs;
 
@@ -148,7 +147,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
  else if(args[0]==='--receipt'&&(args.length===2||args.length===4&&args[2]==='--library-root')){
   const libraryRoot=args.length===4?args[3]:undefined;
   const receipt: EmbeddingReceipt = JSON.parse(fs.readFileSync(args[1],'utf8'));
-  const identity=androidIdentity(root).appId;
+  const identity=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8')).appId;
   if(receipt.built!==true||!Array.isArray(receipt.libraries)||receipt.libraries.length!==3)throw Error('Complete ARM64 build receipt required');
   verifyEmbeddingInputs(root,receipt,{requireProducerInputs:true});
   const libraries=names.map(name=>{

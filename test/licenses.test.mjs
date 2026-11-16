@@ -249,7 +249,7 @@ function scratchRoot(t, {ownNodeModules = false} = {}) {
   } else fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
   fs.mkdirSync(path.join(dir, 'apps/app'), {recursive: true});
   fs.symlinkSync(path.join(ROOT, 'apps/app/public'), path.join(dir, 'apps/app/public'));
-  for (const name of ['package.json', 'bun.lock', 'upstream.lock.json', 'app.config.json']) fs.copyFileSync(path.join(ROOT, name), path.join(dir, name));
+  for (const name of ['package.json', 'bun.lock', 'upstream.lock.json']) fs.copyFileSync(path.join(ROOT, name), path.join(dir, name));
   fs.cpSync(path.join(ROOT, 'licenses'), path.join(dir, 'licenses'), {recursive: true});
   return dir;
 }

@@ -1,4 +1,3 @@
-import {androidIdentity} from './android-identity.ts';
 /**
  * Build and verify the launcher APKs.
  *
@@ -158,7 +157,7 @@ const OUTPUT = "artifacts";
 
 async function main() {
   const { release } = parseBuildArgs(process.argv.slice(2));
-  const channel=publicUpdateChannel(androidIdentity().updateManifestUrl);
+  const channel=publicUpdateChannel(JSON.parse(fs.readFileSync(new URL('../app.config.json',import.meta.url),'utf8')).updateManifestUrl);
   // A partial signing set would silently produce unsigned releases; refuse it up front.
   const partial = partialSigningProblem(process.env);
   if (partial) throw new Error(partial);
@@ -182,8 +181,6 @@ async function main() {
   // The pinned upstream generator writes the Gradle host from android/consumer-host.json.
   run("bun", ["scripts/android-host.ts"]);
   run("bun", ["run", "android:sync"]);
-  // Sync may create native metadata; bind the final source view before Gradle checks it.
-  run("bun", ["scripts/android-host.ts"]);
   // The packaged web bundle must be flag-off before Gradle runs.
   const flags = JSON.parse(fs.readFileSync("web-dist/build-flags.json", "utf8"));
   if (flags.testMocks !== false) throw new Error(`web-dist/build-flags.json records testMocks=${flags.testMocks}; the APK packages only a flag-off bundle`);
@@ -204,7 +201,7 @@ async function main() {
  * APK (a signed release keeps `launcher-release.apk`) and its R8 mapping. Alpha supplies the output
  * directory, signing variable names, build record and its own APK verification.
  */
-export function consumerBuildOptions(env: NodeJS.ProcessEnv, root: string, updateChannel: UpdateChannel = publicUpdateChannel(androidIdentity().updateManifestUrl),
+export function consumerBuildOptions(env: NodeJS.ProcessEnv, root: string, updateChannel: UpdateChannel = publicUpdateChannel(JSON.parse(fs.readFileSync(new URL('../app.config.json',import.meta.url),'utf8')).updateManifestUrl),
   { release = false }: { release?: boolean } = {}) {
   return {
     root,
@@ -230,7 +227,6 @@ export function consumerBuildOptions(env: NodeJS.ProcessEnv, root: string, updat
         // verify-apks verifies a release APK exactly when this build assembled one.
         release,
         runtimeProfile: "native",
-        applicationId: androidIdentity(root, env.ALPHA_ANDROID_APPLICATION_ID || '').appId,
         updateChannel,
         mapsProvider: "cloud",
         signingRequested: signingRequested(env),

@@ -1,4 +1,3 @@
-import {androidIdentity, readHostDescriptor} from './android-identity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -9,7 +8,7 @@ const root=path.resolve(import.meta.dirname,'..');
 const upstream=path.join(root,'vendor/eliza');
 const pin=readUpstreamPin(root).commit;
 if(execFileSync('git',['-C',upstream,'rev-parse','HEAD'],{encoding:'utf8'}).trim()!==pin)throw Error('Unexpected native runtime source pin');
-const identity=androidIdentity(root).appId;
+const identity=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8')).appId;
 if(!/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(identity))throw Error('Invalid application identity');
 // All shared native code comes directly from the same reviewed upstream commit.
 const runtimeSource=sourceDirectory(root);
@@ -18,13 +17,7 @@ verifySource(runtimeSource,pin);
 // Upstream owns the rewrite anchors; android/consumer-host.json supplies Alpha's installed
 // identities (sockets, secure-store route, notification resources, environment and lifecycle
 // hooks) and the shared notification classes Alpha compiles beside the resident runtime.
-const {residentHost}=readHostDescriptor(root);
-// The pinned JS function infers its optional helper [] as never[]. Keep the
-// actual descriptor-based interface at this consumer boundary.
-const stageResident = stageResidentHostSources as unknown as (options: {
- sourceRoot: string; output: string; classes: string[]; helpers: string[];
- identity: {packageName: string} & Pick<typeof residentHost, 'sockets' | 'notification' | 'environmentHook' | 'lifecycleHooks'>;
-}) => ReturnType<typeof stageResidentHostSources>;
+const {residentHost}=JSON.parse(fs.readFileSync(path.join(root,'android/consumer-host.json'),'utf8'));
 const parent=path.join(root,'android/app/build/generated');
 const published=path.join(parent,'local-agent');
 fs.mkdirSync(parent,{recursive:true});
@@ -34,7 +27,7 @@ const previous=path.join(transaction,'previous');
 let preservePrevious=false;
 let count;
 try{
- const staged=stageResident({
+ const staged=stageResidentHostSources({
   sourceRoot:runtimeSource,
   output:path.join(candidate,'java'),
   identity:{

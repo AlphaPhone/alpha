@@ -18,9 +18,8 @@ import {fileURLToPath} from 'node:url';
 import {generateAndroidConsumerHost} from '../vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs';
 import {preparePatchedNative} from './prepare-patched-native.ts';
 import {serializeOwnerRouteTable} from '../apps/app/src/product/owner-route-table.ts';
-import {androidIdentity, readHostDescriptor, HOST_DESCRIPTOR, stageAndroidIdentity, verifyAndroidIdentity} from './android-identity.ts';
-export {readHostDescriptor, HOST_DESCRIPTOR};
 
+export const HOST_DESCRIPTOR = 'android/consumer-host.json';
 export const PATCHED_NATIVE_ROOT = 'patchedNative';
 const OWNER_ROUTE_ASSET = '.eliza/generated-android/owner-routes.json';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -29,9 +28,17 @@ type ReferenceMapper = (reference: HostReference) => HostReference;
 type HostDescriptor = typeof import('../android/consumer-host.json');
 type AppConfig = typeof import('../app.config.json');
 
+/** The committed descriptor; only Alpha-owned data, no Gradle. */
+export function readHostDescriptor(root = ROOT) {
+ const descriptor: HostDescriptor = JSON.parse(fs.readFileSync(path.join(root, HOST_DESCRIPTOR), 'utf8'));
+ if (descriptor?.schema !== 1 || descriptor.profile?.schema !== 1 || !descriptor.residentHost)
+  throw new Error(`${HOST_DESCRIPTOR}: unsupported host descriptor`);
+ return descriptor;
+}
+
 /** Product identity for the generator: package, label and version from app.config.json. */
 export function hostIdentity(root = ROOT) {
- const {appId, appName, version, versionCode} = androidIdentity(root);
+ const {appId, appName, version, versionCode}: AppConfig = JSON.parse(fs.readFileSync(path.join(root, 'app.config.json'), 'utf8'));
  return {appId, appName, version, versionCode};
 }
 
@@ -62,36 +69,7 @@ export function hostProfile(root = ROOT, {patchedNativeRoot, canonical = false}:
   map = reference => ({root: 'consumer', path: reference.path === '.' ? relative : `${relative}/${reference.path}`});
  }
  // Reference replacement preserves the descriptor's fields and reference shape.
- const resolved = {...mapReferences(profile, map) as HostDescriptor['profile'], manifestPlaceholders: {appOrientation: app.orientation}};
- const projected = stageAndroidIdentity(root);
- if (!projected) return resolved;
- // Existing descriptor references keep ownership and variant policy. Only authored native
- // files with an authenticated projection are redirected; shared plugins stay pinned verbatim.
- const redirect = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(redirect);
-  if (isReference(value)) {
-   const included = Object.keys(projected.receipt.inputs).some(name => name === value.path || name.startsWith(value.path + '/'));
-   return value.root === 'consumer' && included
-    ? {...value, path: `${projected.relative}/${value.path.replaceAll(projected.receipt.sourceApplicationId.replaceAll('.', '/'), projected.receipt.applicationId.replaceAll('.', '/'))}`} : value;
-  }
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, redirect(child)]));
-  return value;
- };
- const result = redirect(resolved) as typeof resolved;
- // The in-place generator owns no authored manifest: keep those inputs in place.
- // product.gradle selects the authenticated projected manifest before compilation.
- result.manifest = resolved.manifest;
- result.flavors = resolved.flavors;
- for (const variant of ['main', 'launcher', 'debug', 'androidTest'] as const) {
-  const directory = `${projected.relative}/android/app/src/${variant}/java`;
-  if (!fs.existsSync(path.join(root, directory))) continue;
-  const sets = result.sourceSets as Record<string, Record<string, HostReference[]>>;
-  const current = sets[variant] || (sets[variant] = {});
-  current.java = [...(current.java || []), {root: 'consumer', path: directory}];
- }
- result.assetFiles.push({source: {root: 'consumer', path: `${projected.relative}/identity.json`}, name: 'android-identity.json'});
- result.generationInputs.push({root: 'consumer', path: `${projected.relative}/identity.json`});
- return result;
+ return {...mapReferences(profile, map) as HostDescriptor['profile'], manifestPlaceholders: {appOrientation: app.orientation}};
 }
 
 /** Write the generated table outside the authored tree, ready for the host's asset staging task. */
@@ -130,13 +108,10 @@ export function generateAlphaAndroidHost(root = ROOT) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
- if (process.argv.length === 3 && process.argv[2] === '--check-identity') {
-  console.log(`Verified the ${verifyAndroidIdentity()} Android identity`);
- } else if (process.argv.length > 2) {
-  console.error('Usage: bun scripts/android-host.ts [--check-identity]');
+ if (process.argv.length > 2) {
+  console.error('Usage: bun scripts/android-host.ts');
   process.exit(2);
- } else {
-  const result = generateAlphaAndroidHost();
-  console.log(`Generated the ${result.appId} Android host (${result.files.length} files, Gradle ${result.toolchain}) in ${path.relative(process.cwd(), result.directory) || '.'}`);
  }
+ const result = generateAlphaAndroidHost();
+ console.log(`Generated the ${result.appId} Android host (${result.files.length} files, Gradle ${result.toolchain}) in ${path.relative(process.cwd(), result.directory) || '.'}`);
 }

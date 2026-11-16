@@ -15,7 +15,6 @@ const SIGNING = Object.fromEntries(SIGNING_ENV.map(name => [name, `value-of-${na
 function build(t, {environment = {}, signed = false, release = true} = {}) {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-consumer-build-'));
  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
- fs.copyFileSync(new URL('../app.config.json',import.meta.url),path.join(root,'app.config.json'));
  const env = buildEnv({PATH: process.env.PATH, ...environment});
  const consumer = consumerBuildOptions(env, root, undefined, {release});
  const calls = [], seen = [];
@@ -70,7 +69,7 @@ test('a release build assembles the launcher APKs and instrumentation, lints and
  const {createdAt, ...record} = f.seen[0].record;
  assert.ok(!Number.isNaN(Date.parse(createdAt)));
  const updateChannel={kind:'public',manifestUrlSha256:createHash('sha256').update(JSON.parse(fs.readFileSync('app.config.json','utf8')).updateManifestUrl).digest('hex')};
- assert.deepEqual(record, {testMocks: false, release: true, runtimeProfile: 'native', applicationId: 'ai.alphacompute.alphaphone', updateChannel, mapsProvider: 'cloud', signingRequested: false, versionOverride: {code: null, name: null}});
+ assert.deepEqual(record, {testMocks: false, release: true, runtimeProfile: 'native', updateChannel, mapsProvider: 'cloud', signingRequested: false, versionOverride: {code: null, name: null}});
  assert.deepEqual(f.result.files.map(file => path.basename(file)), ['launcher-debug.apk', 'launcher-release-unsigned.apk']);
 });
 

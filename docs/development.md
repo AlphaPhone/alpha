@@ -152,22 +152,11 @@ not additional release distributions. The same launcher APK can be installed on
 stock Android or preinstalled in the Alpha image. It declares HOME.
 Phone, Contacts and SMS/MMS require an admitted AOSP image capability.
 
-Canonical builds use `app.config.json` unchanged. To prepare an update for an
-existing `ai.elizaresearch.alphaphone` installation, set the build value
-`ALPHA_ANDROID_APPLICATION_ID=ai.elizaresearch.alphaphone`. Only identities declared
-in `android/consumer-host.json` are accepted. This selects installation identity,
-not features or another flavor: the renderer, pinned SDK and native profile are
-the same current source. The generated native source view preserves the installed
-Java namespace, callback names, sockets and update channel without editing the
-canonical sources. Gradle refuses a stale view; APK verification compares the
-packaged identity receipt with that view. Native input receipts and signing
-approval must name the same package. The current native profile remains native;
-do not label a new build as the historical Cloud profile.
-
-The canonical package starts with its own private data. This compatibility path
-updates the existing package; it does not move data or keys between packages.
-Retain the existing signer lineage and prove account, Notes, journals and pending
-callbacks on a retained-data emulator upgrade before any physical update.
+Alpha Compute builds use the same ID for the installed package and native
+namespace. The retained Pixel v44 uses the former package ID. Android
+installs the new package separately, with its own private data, Keystore,
+permissions and roles. Establish a fresh baseline on each distribution form,
+then verify updates and data retention between builds with the new package ID.
 Qualify the native libraries and APKs for the exact product and SDK revisions.
 
 There is one runtime profile. Every build packages libelizainference with the
