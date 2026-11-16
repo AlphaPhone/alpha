@@ -219,7 +219,10 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     const submitQuery=()=>{
       if(queryTimer!==undefined)clearTimeout(queryTimer);queryTimer=undefined;
       if(!active()||!currentApi.isActive())return;
-      const text=queryDraft??screen.view().query;queryDraft=undefined;
+      const draft=queryDraft,text=draft??screen.view().query,state=mapsController?.snapshot();queryDraft=undefined;
+      // Enter after the debounce reuses this input's in-flight or ready search.
+      // A new edit, refused request or changed provider still admits a new search.
+      if(draft===undefined&&state?.query===text.trim()&&(state.search.phase==='loading'||state.search.phase==='ready'))return;
       screen.setQuery(text);if(text.trim())screen.submit();
     };
     const submitOrigin=()=>{
