@@ -68,6 +68,7 @@ function fixture() {
   const settle = run => {
     queue = [];
     let settledPatches = 0;
+    // No return in finally: an exception from the handler must reach the test.
     try { run(); } finally {
       const pending = queue; queue = null;
       settledPatches = pending.length;
