@@ -11,7 +11,7 @@
 // px kept clear above the panel at rest (non-full-bleed). Sized to clear an
 // edge-to-edge status bar; the real notch inset is layered on top via
 // `safeAreaTopPx` below so the header always clears a Dynamic Island too.
-export const SHEET_TOP_MARGIN = 72;
+const SHEET_TOP_MARGIN = 72;
 
 // Extra breathing room above the measured safe-area inset so the header row
 // doesn't butt directly against the Dynamic Island / status bar.
@@ -32,10 +32,10 @@ const MIN_PANEL_HEIGHT = 200;
 // the complete 44px drag target on-screen instead of clipping the close gesture
 // against the device edge. The composer itself wins if the visible viewport is
 // even tighter than that contract.
-export const SHEET_GRABBER_TOP_CLEARANCE = 22;
+const SHEET_GRABBER_TOP_CLEARANCE = 22;
 const MIN_COMPOSER_PANEL_HEIGHT = 52;
 
-export interface ChatPanelLayoutInput {
+interface ChatPanelLayoutInput {
   /** The visual-viewport height (px) the chat sizes itself to. */
   viewportH: number;
   /** The overlay's own bottom (safe-area / nav) padding, reserved from height. */
@@ -58,7 +58,7 @@ export interface ChatPanelLayoutInput {
   fullBleed: boolean;
 }
 
-export interface ChatPanelLayout {
+interface ChatPanelLayout {
   /** px of clearance reserved above the panel (0 when full-bleed). */
   topMargin: number;
   /** The panel's maximum height (px); the thread scrolls to fit under this. */

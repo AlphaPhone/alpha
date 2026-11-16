@@ -220,7 +220,7 @@ test('actual pinned client features retain shared voice source unchanged and exc
  const scan='plugins/plugin-native-camera/src/scan-document.ts';
  assert.equal(stamp.sourceFiles[scan],stamp.files[scan],'Scan state is copied from the pinned shared owner without a product patch');
  assert.deepEqual(fs.readFileSync(path.join(source,scan)),fs.readFileSync(path.join('vendor/eliza',scan)));
-assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,14);
+assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,15);
  // The browser parser stays byte-exact except its one Node-compatible value import.
  const browserCommand='plugins/plugin-browser/src/native-client-command.ts';
  const browserOriginal=fs.readFileSync(path.join('vendor/eliza',browserCommand),'utf8');
@@ -276,7 +276,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  const uiImports=[],dangling=[];
  for(const file of stagedCode){
   for(const spec of importsOf(fs.readFileSync(path.join(source,file),'utf8'))){
-   if(/^react(?:-dom)?(?:\/|$)/.test(spec)||(/^@elizaos\/ui(?:\/|$)/.test(spec)&&spec!=='@elizaos/ui/api/transport')||/(?:^|\/)components\//.test(spec))uiImports.push(file+': '+spec);
+   if(/^(?:react(?:-dom)?|maplibre-gl)(?:\/|$)/.test(spec)||(/^@elizaos\/ui(?:\/|$)/.test(spec)&&spec!=='@elizaos/ui/api/transport')||/(?:^|\/)components\//.test(spec))uiImports.push(file+': '+spec);
    // Upstream's own non-source helpers (e.g. a plugin's quint/ checks) may reference its monorepo tooling.
    if(spec.startsWith('.')&&/(?:^|\/)src\//.test(file)){
     const base=path.join(path.dirname(file),spec.split('?')[0]).replace(/\.js$/,'');
@@ -299,11 +299,17 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  // The WebView signal shim is upstream (elizaOS/eliza#37315); the relay is carried unchanged.
  assert.equal(stamp.sourceFiles[relayPath],stamp.files[relayPath]);
  assert.match(fs.readFileSync(path.join(source,relayPath),'utf8'),/host\.anySignal \? host\.anySignal\(signals\)/);
- // Alpha draws the map with its own renderer (apps/app/src/maps/map-plane.ts). The staged
- // plugin-maps renderer is there only for the overlay type upstream maps-screen.ts names;
- // test/ui-self-contained.test.mjs checks that no Alpha module loads it.
+ // Alpha draws the map with its own renderer (apps/app/src/maps/map-plane.ts). Upstream
+ // maps-screen.ts names only the renderer's overlay type, so map-plane.ts is staged as a type-only
+ // leaf: the upstream declarations up to the renderer class, with no maplibre-gl import.
  const mapScreen=fs.readFileSync(path.join(source,'plugins/plugin-maps/src/client/maps-screen.ts'),'utf8');
  assert.deepEqual([...mapScreen.matchAll(/^import .* from "\.\/map-plane\.ts";$/gm)].map(match=>match[0]),['import type { MapOverlay } from "./map-plane.ts";']);
+ const mapPlanePath='plugins/plugin-maps/src/client/map-plane.ts',mapPlane=fs.readFileSync(path.join(source,mapPlanePath),'utf8'),upstreamMapPlane=fs.readFileSync(path.join('vendor/eliza',mapPlanePath),'utf8');
+ assert.notEqual(stamp.files[mapPlanePath],stamp.sourceFiles[mapPlanePath],'the staged map-plane.ts is projected');
+ assert.deepEqual(importsOf(mapPlane),['./contracts.ts'],'the staged map-plane.ts imports nothing from maplibre-gl');
+ assert.doesNotMatch(mapPlane,/maplibre|\bclass\b|\bfunction\b|^(?:export )?(?:const|let|var) /m,'the staged map-plane.ts declares types only');
+ assert.match(mapPlane,/^import type \{ Coordinate, Route \} from "\.\/contracts\.ts";$/m);
+ assert.ok(upstreamMapPlane.replace(/^import \{[^}]*\} from "maplibre-gl";\n/,'').startsWith(mapPlane),'the staged declarations are the upstream ones, unchanged');
  const calendarPath='packages/contracts/src/calendar-linked-sync.ts';
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';

@@ -18,7 +18,7 @@ import type { TransientClientMediaInput } from "./chat-attachment-types";
  * client and server cannot drift. Applies to all attachment kinds, not just
  * images.
  */
-export const MAX_CHAT_IMAGES = MAX_CHAT_UPLOAD_ATTACHMENTS;
+const MAX_CHAT_IMAGES = MAX_CHAT_UPLOAD_ATTACHMENTS;
 /**
  * Per-file intake cap for an IMAGE attachment, in raw bytes (20 MB). Images
  * over the server's base64 cap ({@link MAX_CHAT_IMAGE_BASE64_BYTES}) are
@@ -28,14 +28,14 @@ export const MAX_CHAT_IMAGES = MAX_CHAT_UPLOAD_ATTACHMENTS;
  * capped at the server-derived {@link MAX_CHAT_MEDIA_RAW_BYTES} instead — see
  * {@link perFileByteCap}.
  */
-export const MAX_ATTACHMENT_BYTES = MAX_CHAT_IMAGE_INTAKE_BYTES;
+const MAX_ATTACHMENT_BYTES = MAX_CHAT_IMAGE_INTAKE_BYTES;
 /**
  * Per-file raw-byte intake cap for a candidate file. Images may exceed the
  * server cap at intake because the downscale pass re-encodes them under it;
  * everything else must already fit under the server's base64 media cap or the
  * send would be 400-rejected after the composer was cleared.
  */
-export function perFileByteCap(file: File): number {
+function perFileByteCap(file: File): number {
   return file.type.toLowerCase().startsWith("image/")
     ? MAX_ATTACHMENT_BYTES
     : Math.min(MAX_ATTACHMENT_BYTES, MAX_CHAT_MEDIA_RAW_BYTES);
@@ -46,19 +46,19 @@ export function perFileByteCap(file: File): number {
  * the batch as a whole is bounded so a handful of large-but-legal files can't
  * blow the request body.
  */
-export const MAX_ATTACHMENTS_TOTAL_BYTES = 60 * 1024 * 1024;
+const MAX_ATTACHMENTS_TOTAL_BYTES = 60 * 1024 * 1024;
 /** Human-readable MB for a byte cap, used in user-facing notices. */
-export function bytesToMb(bytes: number): number {
+function bytesToMb(bytes: number): number {
   return Math.round(bytes / (1024 * 1024));
 }
 /** A file that was rejected during intake, with the reason it was dropped. */
-export interface DroppedFile {
+interface DroppedFile {
   name: string;
   /** Why the file was rejected. */
   reason: "too-large" | "over-count";
 }
 /** Outcome of partitioning a candidate file list against the size/count caps. */
-export interface PartitionedAttachmentFiles {
+interface PartitionedAttachmentFiles {
   /** Files that passed every cap and should be read into attachments. */
   accepted: File[];
   /** Files rejected because they (or the running total) exceeded a byte cap. */
@@ -66,7 +66,7 @@ export interface PartitionedAttachmentFiles {
   /** Files rejected because they exceeded the per-message count cap. */
   droppedOverCount: DroppedFile[];
 }
-export interface PartitionAttachmentFilesOptions {
+interface PartitionAttachmentFilesOptions {
   /**
    * Per-file byte cap applied to every kind. Defaults to the kind-aware
    * {@link perFileByteCap} (images get {@link MAX_ATTACHMENT_BYTES}, other
@@ -93,7 +93,7 @@ export interface PartitionAttachmentFilesOptions {
  * count cap. A file that trips any byte cap is reported as `too-large`; a file
  * that only trips the count cap is reported as `over-count`.
  */
-export function partitionAttachmentFiles(
+function partitionAttachmentFiles(
   files: FileList | File[],
   options: PartitionAttachmentFilesOptions = {},
 ): PartitionedAttachmentFiles {
@@ -131,7 +131,7 @@ export function partitionAttachmentFiles(
  * server allowlist or the send would be 400-rejected after the composer was
  * cleared.
  */
-export function isSupportedChatUpload(file: File): boolean {
+function isSupportedChatUpload(file: File): boolean {
   const mime = file.type.toLowerCase();
   if (mime.startsWith("image/")) return true;
   return CHAT_UPLOAD_MIME_TYPE_SET.has(mime);
@@ -163,7 +163,7 @@ function readFileAsImageElement(file: File): Promise<HTMLImageElement> {
  * `<canvas>.toDataURL` is used for universal webview support (WebP/OffscreenCanvas
  * are not reliable on older WKWebView).
  */
-export async function createImageThumbnail(file: File): Promise<{
+async function createImageThumbnail(file: File): Promise<{
   data: string;
   mimeType: string;
 } | null> {
@@ -208,14 +208,14 @@ export async function createImageThumbnail(file: File): Promise<{
  * chat surfaces surface `err.message` from the intake rejection as a pre-send
  * toast, which must be clearer than the server 400 it replaces.
  */
-export class UnsendableAttachmentError extends Error {}
+class UnsendableAttachmentError extends Error {}
 /**
  * True when an image payload can NOT ship as-is: its subtype is outside the
  * server allowlist (HEIC/TIFF/SVG/…) or its base64 body is over the server's
  * image cap. Such a file must go through {@link reencodeImageToChatCap}.
  * Exported for unit tests.
  */
-export function imageNeedsReencode(
+function imageNeedsReencode(
   mimeType: string,
   base64Length: number,
 ): boolean {
@@ -244,7 +244,7 @@ const REENCODE_JPEG_QUALITIES = [0.85, 0.72, 0.6] as const;
  * first frame) — a still image that sends beats a 400 that destroys the
  * message.
  */
-export async function reencodeImageToChatCap(file: File): Promise<{
+async function reencodeImageToChatCap(file: File): Promise<{
   data: string;
   mimeType: string;
 }> {
@@ -344,7 +344,7 @@ async function fileToChatAttachment(
  * is left to the caller (it slices the merged pending list), and drop reporting
  * for a user-facing notice lives in {@link intakeAttachmentFiles}.
  */
-export function filesToImageAttachments(
+function filesToImageAttachments(
   files: FileList | File[],
 ): Promise<TransientClientMediaInput[]> {
   const supported = Array.from(files).filter(isSupportedChatUpload);
@@ -357,7 +357,7 @@ export function filesToImageAttachments(
   return Promise.all(accepted.map(fileToChatAttachment));
 }
 /** Result of {@link intakeAttachmentFiles}: the read attachments plus drops. */
-export interface AttachmentIntakeResult {
+interface AttachmentIntakeResult {
   attachments: TransientClientMediaInput[];
   droppedTooLarge: DroppedFile[];
   droppedOverCount: DroppedFile[];

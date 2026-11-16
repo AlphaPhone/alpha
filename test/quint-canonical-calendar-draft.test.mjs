@@ -84,7 +84,7 @@ async function checkCanonicalCalendarDraft(extraSources = []) {
     } finally {await fixture.close();}
   }
   return checkTraces(boundInputs({model: 'CanonicalCalendarDraft', sources, traces, scope: 'bounded-orchestration', assumptions: [
-    'Actual Alpha canonical Calendar adapter, current form codec, shared DurableDraftController and exact compareExchangeDraftStore execute with controlled owner, clock, raw-slot and recovery ports.',
+    'Actual Alpha canonical Calendar adapter, current form codec, Alpha DurableDraftController and exact compareExchangeDraftStore execute with controlled owner, clock, raw-slot and recovery ports.',
     'Two owners and six binding lifetimes are bounded, with at most one held read and write per owner. Lifetime labels come from the actual opaque binding token, pending job fields from the raw CAS request, and displayed form and actions from the real renderer adapter.',
     'Draft contents use fixed synthetic titles. No remote event dispatch, reminder destination conversion, arbitrary invalid fields, platform persistence or actual recovery export executes. Atomic raw CAS uses captured bytes, while revisions and the old clear undo are abstracted to final slot contents.',
   ]}));

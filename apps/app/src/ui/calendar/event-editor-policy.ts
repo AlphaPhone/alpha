@@ -1,12 +1,12 @@
 import type { LifeOpsCalendarEvent } from "@elizaos/contracts";
 
-export type EventEditorReadOnlyReason =
+type EventEditorReadOnlyReason =
   | "provider_version_missing"
   | "microsoft_read_only"
   | "ics_subscription"
   | "apple_read_only";
 
-export type EventEditorMutability =
+type EventEditorMutability =
   | { readonly kind: "editable"; readonly providerVersion: string }
   | { readonly kind: "read_only"; readonly reason: EventEditorReadOnlyReason };
 

@@ -4,7 +4,7 @@
  * typed voice pipeline.
  */
 
-export type RuntimeValidator<T> = (value: unknown) => value is T;
+type RuntimeValidator<T> = (value: unknown) => value is T;
 
 function invokeCleanupBestEffort(value: unknown, methodName: string): void {
   if ((typeof value !== "object" && typeof value !== "function") || !value) {

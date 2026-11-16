@@ -28,7 +28,7 @@ import type { VoiceContinuousStatus } from "./voice-session-status";
  * the client immediately folds back to `listening` (the machine emits it so a
  * caller can observe turn boundaries); `interrupted` is likewise transient.
  */
-export type VoiceSessionPhase =
+type VoiceSessionPhase =
   | "idle"
   | "connecting"
   | "ready"
@@ -78,7 +78,7 @@ export const INITIAL_VOICE_SESSION_STATE: VoiceSessionMachineState = {
  * Client-owned transitions. These NEVER come from the wire — they're driven by
  * the client's own lifecycle (open the socket, sent hello, user stopped).
  */
-export type VoiceSessionClientAction =
+type VoiceSessionClientAction =
   | { type: "client/connect" } // idle → connecting
   | { type: "client/reset" } // → idle (e.g. after a fatal error + re-mint)
   | { type: "client/local_barge_in" }; // optimistic: speaking → listening pre-ack

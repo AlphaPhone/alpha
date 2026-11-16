@@ -47,8 +47,6 @@ import {
 } from "@elizaos/host/voice/ui-context";
 import type { VoiceContinuousStatus } from "./voice-session-status";
 
-export type { VoiceContinuousStatus } from "./voice-session-status";
-
 import {
   type MicAudioContextLike,
   startVoiceMicCapture,
@@ -89,7 +87,7 @@ import {
   type VoiceSessionMachineState,
 } from "./voice-session-state";
 /** Minimal WebSocket surface the client drives (native or fake). */
-export interface VoiceWebSocketLike {
+interface VoiceWebSocketLike {
   binaryType: string;
   send(data: string | ArrayBufferLike | ArrayBufferView): void;
   close(code?: number, reason?: string): void;
@@ -138,14 +136,14 @@ function openNativeVoiceWebSocket(url: string): VoiceWebSocketLike {
   }
   return socket;
 }
-export type VoiceWebSocketFactory = (url: string) => VoiceWebSocketLike;
+type VoiceWebSocketFactory = (url: string) => VoiceWebSocketLike;
 /** A client playout trace mark, carrying the server-issued traceId. */
-export interface VoiceTraceMark {
+interface VoiceTraceMark {
   name: string;
   traceId: string | null;
   atMs: number;
 }
-export interface VoiceSessionClientOptions {
+interface VoiceSessionClientOptions {
   /** Require negotiated non-success outcomes; legacy/Cloud callers opt in explicitly. */
   requireTurnTerminal?: boolean;
   /** Read current renderer state, not the snapshot from session creation. */
@@ -243,7 +241,7 @@ export interface VoiceSessionClientOptions {
   preLiveRetryDelayMs?: number;
 }
 type ConnectionPhase = "idle" | "connecting" | "open" | "closing" | "closed";
-export interface VoiceSessionClient {
+interface VoiceSessionClient {
   /** Current machine state (immutable snapshot). */
   readonly state: VoiceSessionMachineState;
   /** Whether queued downlink audio is waiting for a user-gesture unlock. */
@@ -1670,14 +1668,14 @@ class VoiceSessionLifecycleCancelledError extends Error {
   }
 }
 /** Consent acquisition failed; the caller should fall back to batch voice. */
-export class VoiceSessionConsentError extends Error {
+class VoiceSessionConsentError extends Error {
   constructor(message: string, options?: unknown) {
     super(message, options === undefined ? undefined : { cause: options });
     this.name = "VoiceSessionConsentError";
   }
 }
 /** A mint failure the caller can branch on (404 = flag off → batch fallback). */
-export class VoiceSessionMintError extends Error {
+class VoiceSessionMintError extends Error {
   constructor(
     readonly status: number,
     message?: string,
@@ -1703,7 +1701,7 @@ export class VoiceSessionMintError extends Error {
 }
 
 /** A server admission refusal cannot be recovered by starting another capture. */
-export class VoiceSessionRefusedError extends Error {
+class VoiceSessionRefusedError extends Error {
   constructor(
     readonly code: string,
     readonly captureReleased: Promise<void> = Promise.resolve(),

@@ -17,7 +17,7 @@ export interface MapsCardPlace {
   categories: string[];
 }
 
-export type MapsTravelMode = "drive" | "walk" | "bicycle" | "transit";
+type MapsTravelMode = "drive" | "walk" | "bicycle" | "transit";
 
 export type MapsCardSpec =
   | { kind: "place"; place: MapsCardPlace; attribution: string | null }
@@ -49,11 +49,11 @@ export type MapsCardSpec =
     }
   | { kind: "locate"; intent: "place-near" | "route-origin"; prompt: string };
 
-export const MAPS_CARD_RE =
+const MAPS_CARD_RE =
   /\[[ \t]*MAPSCARD[ \t]*\][ \t]*\r?\n([\s\S]*?)\r?\n\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\]/g;
 
 /** Cards render at most this many search results; the rest stay paginated. */
-export const MAX_MAPS_CARD_PLACES = 10;
+const MAX_MAPS_CARD_PLACES = 10;
 
 const TRAVEL_MODES = new Set<MapsTravelMode>([
   "drive",
@@ -78,7 +78,7 @@ function finiteNumber(value: unknown, min: number, max: number): number | null {
 }
 
 /** Handoff links may only target the system geo handler or known map origins. */
-export function isAllowedMapsUri(uri: string): boolean {
+function isAllowedMapsUri(uri: string): boolean {
   if (/^geo:-?\d/.test(uri)) return true;
   try {
     const url = new URL(uri);
@@ -128,7 +128,7 @@ function parsePlace(raw: unknown): MapsCardPlace | null {
 }
 
 /** Parse one card body into a validated spec, or `null` if malformed. */
-export function parseMapsCardBody(body: string): MapsCardSpec | null {
+function parseMapsCardBody(body: string): MapsCardSpec | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -242,7 +242,7 @@ export function parseMapsCardBody(body: string): MapsCardSpec | null {
   }
 }
 
-export interface MapsCardMatch {
+interface MapsCardMatch {
   start: number;
   end: number;
   card: MapsCardSpec;

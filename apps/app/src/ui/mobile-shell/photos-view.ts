@@ -1,7 +1,7 @@
 /** Photos view rules (design/view-refresh-2026-11 section 2, specs/photos-library Design.cfg).
  * Dependency-free so test/photos-view.test.mjs runs them in node. */
 
-export type ViewRow = {
+type ViewRow = {
   id: string;
   date: number;
   taken?: number;
@@ -25,7 +25,7 @@ export const shotAt = (row: { date: number; taken?: number }) =>
   row.taken && row.taken > 0 ? row.taken : row.date;
 
 /** Days within this many days of today get their own header; older items group by month. */
-export const DAY_HEADER_WINDOW = 30;
+const DAY_HEADER_WINDOW = 30;
 /** "Today", "Yesterday", "Sat, Oct 31" (with the year when it differs), then "October 2026". */
 export function sectionKey(
   time: number,
@@ -238,7 +238,7 @@ export function changeBatches<T>(
   return batches(items, permitted ? sizes.permitted : sizes.owned);
 }
 
-export type BatchRun<T, R> = {
+type BatchRun<T, R> = {
   batch: T[];
   receipt?: R;
   error?: unknown;
@@ -329,7 +329,7 @@ const STOP = new Set([
   "show",
   "find",
 ]);
-export function filterWords(text: unknown): string[] {
+function filterWords(text: unknown): string[] {
   return String(text || "")
     .toLowerCase()
     .replace(/'s\b/g, "")
@@ -339,7 +339,7 @@ export function filterWords(text: unknown): string[] {
     .slice(0, 12);
 }
 /** On-device text match over date words, kind and orientation. Filenames are never matched. */
-export function textMatches(
+function textMatches(
   row: ViewRow,
   words: readonly string[],
   now = new Date(),
@@ -483,7 +483,7 @@ export function formatBytes(size: number | undefined): string {
 /** Virtualised grid: which rows of which day sections are on screen. Sections are laid out as a
  * header followed by rows of `columns` square tiles separated by `gap`; only rows within the
  * viewport (plus `overscan` rows each way) are rendered, the rest become padding. */
-export type GridMetrics = {
+type GridMetrics = {
   columns: number;
   width: number;
   gap: number;
@@ -492,7 +492,7 @@ export type GridMetrics = {
   viewport: number;
   overscan: number;
 };
-export type VirtualSection = {
+type VirtualSection = {
   index: number;
   from: number;
   to: number;

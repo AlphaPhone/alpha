@@ -11,11 +11,10 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 export const uiStagingHelper = 'test/support/quint-conformance-ui-staging.mjs';
 export const preparedProjection = '.eliza/client-features';
 export const preparedStamp = preparedProjection + '/.source.json';
-// Upstream UI: packages/ui, the React directories of plugins and packages/app, any component or
-// stylesheet, and the plugin-maps renderer Alpha replaced with apps/app/src/maps/map-plane.ts.
+// Upstream UI: packages/ui, the React directories of plugins and packages/app, and any component
+// or stylesheet. The plugin-maps renderer is staged only as a type-only leaf (checked in
+// test/client-feature-preparation.test.mjs), so no staged module imports maplibre-gl.
 const upstreamUi = path => /^(?:packages\/ui\/|packages\/app\/src\/(?:renderer|shims)\/|plugins\/[^/]+\/src\/(?:components|ui|hooks|views|companion)\/)|\.(?:[jt]sx|css)$/.test(path);
-// Upstream maps-screen.ts names that renderer's overlay type, so the file is staged; never bundled.
-const mapRenderer = 'plugins/plugin-maps/src/client/map-plane.ts';
 
 /** Asserts the prepared projection is at the pinned commit and stages no upstream UI, neither in its receipt nor on disk. */
 export function assertUpstreamUiNotStaged() {
@@ -40,7 +39,7 @@ export function assertBundlesLocalUi(metafile, ...local) {
   }
   const upstream = inputs.filter(path => {
     const relative = path.replace(/^(?:\.eliza\/client-features|vendor\/eliza)\//, '');
-    return relative !== path && (upstreamUi(relative) || relative === mapRenderer);
+    return relative !== path && upstreamUi(relative);
   });
   assert.deepEqual(upstream, [], 'the bundle reads no upstream UI');
 }

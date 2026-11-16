@@ -14,7 +14,7 @@ import {
   type MobileShellViewId,
 } from "./view-ids";
 
-export interface MobileViewProps {
+interface MobileViewProps {
   viewId: MobileShellViewId;
   /** Leaves the view the way Back does. */
   onClose: () => void;
@@ -26,7 +26,7 @@ export interface MobileViewProps {
   active?: boolean;
 }
 
-export type MobileViewLoader = () => Promise<{
+type MobileViewLoader = () => Promise<{
   default: ComponentType<MobileViewProps>;
 }>;
 
@@ -42,7 +42,7 @@ export interface MobileViewRegistration {
 }
 
 /** What a host adds to a product view, or a view outside the product order. */
-export interface MobileViewContribution {
+interface MobileViewContribution {
   id: MobileShellViewId;
   /** Required for a view the product registration does not order. */
   label?: string;
@@ -50,11 +50,11 @@ export interface MobileViewContribution {
   hidden?: boolean;
 }
 
-export type MobileViewTarget =
+type MobileViewTarget =
   | { kind: "home" }
   | { kind: "view"; view: MobileViewRegistration };
 
-export interface MobileViewRegistry {
+interface MobileViewRegistry {
   readonly product: MobileProductRegistration;
   /** Offered views in product order, filtered by current availability. */
   available(): MobileViewRegistration[];

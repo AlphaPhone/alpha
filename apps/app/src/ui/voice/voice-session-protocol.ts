@@ -33,7 +33,7 @@ export const DEFAULT_DOWNLINK_CODEC: VoiceSessionCodec = "pcm16";
 /** Canonical sample rate for both directions of the default codec path. */
 export const VOICE_SESSION_SAMPLE_RATE = 16000 as const;
 // ── Client -> server control frames ────────────────────────────────────
-export interface ClientHelloFrame {
+interface ClientHelloFrame {
   turnTerminal?: true;
   leaseRenewal?: true;
   t: "hello";
@@ -43,14 +43,14 @@ export interface ClientHelloFrame {
   downlinkCodec: VoiceSessionCodec;
   sampleRate: number;
 }
-export interface ClientAudioMetaFrame {
+interface ClientAudioMetaFrame {
   t: "audio_meta";
   seq: number;
   codec: VoiceSessionCodec;
   sampleRate: number;
   channels: number;
 }
-export interface ClientAudioCapabilitiesFrame {
+interface ClientAudioCapabilitiesFrame {
   t: "audio_capabilities";
   mode: "continuous_handoff";
   echoCancellation: boolean;
@@ -58,10 +58,10 @@ export interface ClientAudioCapabilitiesFrame {
   autoGainControl: boolean;
   referenceAwarePlayback: boolean;
 }
-export interface ClientBargeInFrame {
+interface ClientBargeInFrame {
   t: "barge_in";
 }
-export interface ClientByeFrame {
+interface ClientByeFrame {
   t: "bye";
   intent?: {
     version: 1;
@@ -70,7 +70,7 @@ export interface ClientByeFrame {
     successorSessionId?: string;
   };
 }
-export type ClientControlFrame =
+type ClientControlFrame =
   | {
       t: "ui_context";
       context: VoiceUiContext;
@@ -82,7 +82,7 @@ export type ClientControlFrame =
   | ClientBargeInFrame
   | ClientByeFrame;
 // ── Server -> client control / state events ────────────────────────────
-export interface ServerReadyEvent {
+interface ServerReadyEvent {
   turnTerminal?: true;
   leaseExpiresAt?: number;
   t: "ready";
@@ -91,67 +91,67 @@ export interface ServerReadyEvent {
   sessionId: string;
   traceId: string;
 }
-export interface ServerSttPartialEvent {
+interface ServerSttPartialEvent {
   t: "stt_partial";
   text: string;
   traceId: string;
 }
-export interface ServerSttEagerEotEvent {
+interface ServerSttEagerEotEvent {
   t: "stt_eager_eot";
   traceId: string;
 }
-export interface ServerSttFinalEvent {
+interface ServerSttFinalEvent {
   t: "stt_final";
   text: string;
   traceId: string;
 }
-export interface ServerLlmFirstTextEvent {
+interface ServerLlmFirstTextEvent {
   t: "llm_first_text";
   traceId: string;
 }
 /** Transient speech acknowledgement, never a saved assistant reply. */
-export interface ServerProgressEvent {
+interface ServerProgressEvent {
   t: "progress";
   text: string;
   traceId: string;
 }
 /** Content-free activity name shown while a turn works; never spoken or saved. */
-export interface ServerActivityEvent {
+interface ServerActivityEvent {
   t: "activity";
   label: string;
   traceId: string;
 }
-export interface ServerSpeakingStartEvent {
+interface ServerSpeakingStartEvent {
   t: "speaking_start";
   traceId: string;
 }
-export interface ServerSpeakingEndEvent {
+interface ServerSpeakingEndEvent {
   t: "speaking_end";
   traceId: string;
 }
-export interface ServerAssistantPlayingEvent {
+interface ServerAssistantPlayingEvent {
   t: "assistant_playing";
   active: boolean;
   traceId: string;
 }
-export interface ServerVoiceMetricEvent {
+interface ServerVoiceMetricEvent {
   t: "human_double_talk" | "echo_rejected" | "user_eos" | "next_reply_ready";
   traceId: string;
 }
-export interface ServerHandoffRequestedEvent {
+interface ServerHandoffRequestedEvent {
   t: "handoff_requested";
   fromTraceId: string;
   toTraceId: string;
   crossfadeMs: number;
   traceId: string;
 }
-export interface ServerHandoffCompletedEvent {
+interface ServerHandoffCompletedEvent {
   t: "handoff_completed";
   fromTraceId: string;
   toTraceId: string;
   traceId: string;
 }
-export interface ServerNavigateViewEvent {
+interface ServerNavigateViewEvent {
   t: "navigate_view";
   viewId: string;
   viewPath?: string;
@@ -162,12 +162,12 @@ export interface ServerNavigateViewEvent {
   navigationBinding?: ViewActionHandoff["navigationBinding"];
 }
 export type InterruptionReason = "acoustic" | "explicit";
-export interface ServerInterruptedEvent {
+interface ServerInterruptedEvent {
   t: "interrupted";
   reason: InterruptionReason;
   traceId: string;
 }
-export interface ServerErrorEvent {
+interface ServerErrorEvent {
   t: "error";
   code: string;
   retryable: boolean;
@@ -175,7 +175,7 @@ export interface ServerErrorEvent {
   /** Optional human-readable detail; never authoritative for control flow. */
   message?: string;
 }
-export interface ServerUsageEvent {
+interface ServerUsageEvent {
   t: "usage";
   sttMs?: number;
   ttsChars?: number;
@@ -211,9 +211,9 @@ export type ServerControlFrame =
   | ServerInterruptedEvent
   | ServerErrorEvent
   | ServerUsageEvent;
-export type ServerControlType = ServerControlFrame["t"];
+type ServerControlType = ServerControlFrame["t"];
 
-export interface VoiceSessionCodecOffer {
+interface VoiceSessionCodecOffer {
   codecs: VoiceSessionCodec[];
 }
 export interface VoiceSessionMintResponse {

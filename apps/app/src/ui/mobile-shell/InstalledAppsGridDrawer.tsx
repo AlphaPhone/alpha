@@ -38,7 +38,7 @@ export function appsDrawerEntries(
   }));
 }
 
-export interface InstalledAppsGridDrawerProps
+interface InstalledAppsGridDrawerProps
   extends HTMLAttributes<HTMLDivElement> {
   launcher: Launcher;
   builtinPrefix: string;

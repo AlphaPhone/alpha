@@ -2,7 +2,7 @@
 import { ElizaError } from "@elizaos/core/speech";
 
 /** Admission failure that callers can distinguish from microphone or transport errors. */
-export class VoiceSessionOwnershipError extends ElizaError {
+class VoiceSessionOwnershipError extends ElizaError {
   constructor(
     message: string,
     code: "VOICE_SESSION_BUSY" | "VOICE_SESSION_OWNERSHIP_UNAVAILABLE",

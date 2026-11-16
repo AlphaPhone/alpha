@@ -5,7 +5,7 @@ import {compareExchangeDraftStore,emptyDurableDraft,transactionalDraftStore} fro
 import type {DomainRecovery} from '../browser/domain-document';
 
 /**
- * Alpha's installed draft storage over the shared durable draft stores. The slot name
+ * Alpha's installed draft storage over Alpha's durable draft stores (ui/state/durable-draft.ts). The slot name
  * (`assistant-draft:v1:` + SHA-256 of the binding), the Android secure slot and the browser
  * document key under `alpha.browser.` are installed-data identifiers and stay unchanged.
  */

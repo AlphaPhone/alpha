@@ -17,7 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-export interface MailFolderOption {
+interface MailFolderOption {
   label: string;
   on?: boolean;
   disabled?: boolean;
@@ -26,7 +26,7 @@ export interface MailFolderOption {
   pick: () => void;
 }
 
-export interface MailFolderPickerProps {
+interface MailFolderPickerProps {
   folders: MailFolderOption[];
   /** DOM id of the portalled menu; unique per document. */
   menuId?: string;

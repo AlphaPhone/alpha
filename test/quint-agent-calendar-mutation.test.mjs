@@ -261,7 +261,7 @@ async function checkAgentCalendarMutation(extraSources = []) {
     } finally {f.retire();}
   }
   return checkTraces(boundInputs({model: 'AgentCalendarMutation', sources: compiled.sources, traces, scope: 'bounded-orchestration', assumptions: [
-    'The actual AgentCalendar controller and shared event-editor policy run against controlled preservation, AppRecordPort, refresh and provider promises. Dispatch checks read the actual transport body and exact captured owner/session.',
+    'The actual AgentCalendar controller and Alpha event-editor policy run against controlled preservation, AppRecordPort, refresh and provider promises. Dispatch checks read the actual transport body and exact captured owner/session.',
     'Two owner/session bindings, two windows, eight epochs, six attempts and one active mutation are bounded. The initial view is an actual settled read. The source and update/delete event policies are modeled before dispatch; acknowledgements observe the current client verification.',
     'Provider effects, idempotency/replay enforcement, linked control and Maps event readback remain outside this projection. Synthetic acknowledgements expose what this client accepts, including delegated blank update-key validation and create-agent-only result verification.',
   ]}));

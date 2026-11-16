@@ -15,7 +15,7 @@ import {reminderEvents,reminderWallTime} from '../runtime/reminder-creations';
 type Bag = Record<string, any>;
 const calendar = registerPlugin<any>('AlphaCalendar');
 const DAY=86400000;
-// Status strings stay parse-compatible with the shared overview state (daily-overview.ts); the calendar screen shows their short form.
+// Status strings stay parse-compatible with the overview state in ui/overview/daily-overview.ts; the calendar screen shows their short form.
 const STATUS_SHORT:Record<string,string>={'Device calendars are available in the Android app.':'','Calendar access denied':'No access','Connect device calendars':'Connect','Calendar range limited to 2,000 events':'2,000 max','Device calendar access allowed':'Allowed','No device calendars found':'No calendars','Calendar range could not be loaded. Open device calendars to retry.':'Couldn’t load','App calendar could not be loaded. Retry or open Calendar recovery.':'Couldn’t load'};
 const shortStatus=(text:string)=>STATUS_SHORT[text]??text;
 // Resolves when Alpha is shown again after another app covered it.

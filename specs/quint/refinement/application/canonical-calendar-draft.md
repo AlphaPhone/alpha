@@ -1,7 +1,7 @@
 # Canonical Calendar draft ownership
 
 `CanonicalCalendarDraft` follows Alpha's real canonical Calendar editor
-adapter, form codec and shared durable draft controller. The outer slot
+adapter, form codec and Alpha's durable draft controller. The outer slot
 and inner form owner both bind a saved draft. The editor retires its old
 text before reading another slot, and a new binding has a distinct
 lifetime even when the same account returns. Already-queued writes remain

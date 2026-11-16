@@ -7,7 +7,7 @@ preservation read and the captured owner/session. One active mutation
 defers the latest requested refresh without aborting its write.
 
 The source campaign checks 134 checkpoints in 24 schedules. It executes
-the actual controller and shared event-editor policy with controlled
+the actual controller and Alpha's event-editor policy with controlled
 preservation, read and provider replies. It compares actual dispatch
 targets, versions, cancellation modes and operation keys. It checks
 refusal before dispatch, unresolved create readback, changed preservation,

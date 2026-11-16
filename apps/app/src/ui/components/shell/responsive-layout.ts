@@ -83,7 +83,7 @@ export interface SurfaceLayout {
   agenda: boolean;
 }
 
-export interface SurfaceLayoutPolicy {
+interface SurfaceLayoutPolicy {
   /** Content width from which list-detail splits (default 1000). */
   splitWidth?: number;
   /** Narrowest readable day column at 100% text (default 240). */

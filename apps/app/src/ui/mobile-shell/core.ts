@@ -7,76 +7,19 @@
  * All apps or a domain view. The feature manifest is here too, so its tooling
  * needs no React.
  */
-export {
-  MOBILE_FEATURE_MANIFEST_SCHEMA,
-  MOBILE_FEATURE_MANIFEST_SCHEMA_VERSION,
-  type MobileFeatureBranding,
-  type MobileFeatureFunctional,
-  type MobileFeatureManifest,
-  type MobileFeatureView,
-  mobileFeatureManifest,
-} from "./feature-manifest";
+export { mobileFeatureManifest } from "./feature-manifest";
 export {
   MOBILE_SHELL_CANVAS_WIDTH,
   MOBILE_SHELL_EDGE,
   MOBILE_SHELL_HOME_BAR_TOP,
-  MOBILE_SHELL_SWIPE_THRESHOLD,
-  type MobileShellSwipeAction,
-  type MobileShellSwipeOptions,
-  type MobileShellSwipeStart,
-  type MobileShellSwipeState,
   resolveMobileShellSwipe,
 } from "./gestures";
-export {
-  MOBILE_SHELL_HOME,
-  MOBILE_SHELL_STACK_LIMIT,
-  type MobileAssistantDetent,
-  type MobileAssistantRest,
-  type MobileShellNavigation,
-  type MobileShellNavigationAction,
-  type MobileShellNavigationOptions,
-  mobileAssistantRest,
-  navigateMobileShell,
-} from "./navigation";
+export { navigateMobileShell } from "./navigation";
 export {
   defineMobileProductRegistration,
-  MOBILE_PRODUCT_SCHEMA,
-  MOBILE_PRODUCT_SCHEMA_VERSION,
-  MOBILE_SHELL_REQUIRED_COLORS,
-  type MobileProductBackgrounds,
-  type MobileProductFeatures,
-  type MobileProductIcons,
-  type MobileProductIdentity,
   type MobileProductRegistration,
-  type MobileProductStorage,
-  type MobileProductTheme,
-  type MobileProductViews,
   type MobileShellAppearance,
-  type MobileShellChromeColors,
-  type MobileShellPaletteColor,
-  type MobileShellThemeToken,
-  mobileShellIconUrl,
   mobileShellThemeVariables,
-  validateMobileProductRegistration,
 } from "./product-registration";
-export {
-  type LauncherViewIdMigration,
-  migrateLauncherViewIds,
-} from "./view-id-migration";
-export {
-  isMobileShellViewId,
-  MOBILE_SHELL_HOME_VIEW_ID,
-  MOBILE_SHELL_VIEW_IDS,
-  type MobileShellViewId,
-  mobileShellViewPath,
-  mobileShellViewPaths,
-} from "./view-ids";
-export {
-  createMobileViewRegistry,
-  type MobileViewContribution,
-  type MobileViewLoader,
-  type MobileViewProps,
-  type MobileViewRegistration,
-  type MobileViewRegistry,
-  type MobileViewTarget,
-} from "./view-registry";
+export { mobileShellViewPath, mobileShellViewPaths } from "./view-ids";
+export { createMobileViewRegistry } from "./view-registry";

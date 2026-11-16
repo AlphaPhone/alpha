@@ -39,7 +39,7 @@ import { useRafCoalescer } from "../../gestures/useRafCoalescer";
  * commit, so a vertical scroll inside a horizontally-swipeable panel still
  * scrolls natively (we only capture once the user clearly means to swipe).
  */
-export interface PullGestureOptions {
+interface PullGestureOptions {
   /** Pointer/finger press accepted as the start of a new gesture. */
   onStart?: () => void;
   /** Released after a drag/flick UP past threshold. */
@@ -81,7 +81,7 @@ export interface PullGestureOptions {
   velocityThresholdX?: number;
 }
 
-export interface PullGestureBinding {
+interface PullGestureBinding {
   onPointerDown: (event: React.PointerEvent) => void;
   onPointerMove: (event: React.PointerEvent) => void;
   onPointerUp: (event: React.PointerEvent) => void;

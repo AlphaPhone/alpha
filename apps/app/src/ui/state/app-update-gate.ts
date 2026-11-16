@@ -7,7 +7,7 @@ type StartupPort = {
   continueUpdate(input: Activation): Promise<unknown>;
 };
 type UpdateOutcome = "canceled" | "failed" | "installed";
-export type AppUpdatePresentation = {
+type AppUpdatePresentation = {
   dialogClass: string;
   dialogLabel: string;
   pendingLabel: string;
@@ -348,7 +348,7 @@ export async function watchMountedAppUpdates(
   void check();
 }
 
-export type AppUpdateSchedule = {
+type AppUpdateSchedule = {
   active: boolean;
   disposed: boolean;
   busy: boolean;

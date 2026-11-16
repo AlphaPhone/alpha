@@ -21,9 +21,9 @@ import {
 import { useEffect, useState } from "react";
 
 /** A Cloud limit together with the time this app observed it. */
-export type ObservedServiceLimit = ServiceLimit & { observedAt: number };
+type ObservedServiceLimit = ServiceLimit & { observedAt: number };
 
-export interface CloudSubscriptionSummaryOptions {
+interface CloudSubscriptionSummaryOptions {
   /** End of the plan window when known from another source (for example a redeemed grant). */
   planEndsAt?: number | null;
   /** The most recent Cloud refusal, if any. */

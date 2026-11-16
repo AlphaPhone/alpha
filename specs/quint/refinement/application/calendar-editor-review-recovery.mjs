@@ -322,7 +322,7 @@ export async function checkCalendarEditorReviewRecovery(owner) {
   return checkTraces({model: 'CalendarEditorDraft', id: 'CalendarEditorDraft-review-recovery',
     traces, sources: [...compiled.sources, driver, owner], driverHashes, scope: 'bounded-component',
     assumptions: [
-      'Whole modal editor, BrowserReviews, shared durable draft controller, actual store binding, domain capture and recovery UI are installed. Browser storage transactions, downloads, reload and event effects use closed host ports.',
+      'Whole modal editor, BrowserReviews, Alpha durable draft controller, actual store binding, domain capture and recovery UI are installed. Browser storage transactions, downloads, reload and event effects use closed host ports.',
       'Review scope is opening, denial, exact discard/replace, stale store rejection, and close with late approval. Storage scope is production Data kept and a dev-only captured reset, including identical bytes at a newer revision and parent abort.',
       'JSDOM paints dialog state and host input. It does not establish actual browser focus, native storage, or Event-provider acceptance.',
     ]});

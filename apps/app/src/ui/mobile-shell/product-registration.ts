@@ -17,13 +17,13 @@ import {
   type MobileShellViewId,
 } from "./view-ids";
 
-export const MOBILE_PRODUCT_SCHEMA = "elizaos.mobile-product";
-export const MOBILE_PRODUCT_SCHEMA_VERSION = 1;
+const MOBILE_PRODUCT_SCHEMA = "elizaos.mobile-product";
+const MOBILE_PRODUCT_SCHEMA_VERSION = 1;
 
 export type MobileShellAppearance = "light" | "dark";
 
 /** Shell surfaces that ThemeColorSet does not name. */
-export interface MobileShellChromeColors {
+interface MobileShellChromeColors {
   /** Dimming layer behind sheets and dialogs. */
   scrim: string;
   /** Shadow tint of floating controls. */
@@ -32,13 +32,13 @@ export interface MobileShellChromeColors {
   frame: string;
 }
 
-export type MobileShellThemeToken =
+type MobileShellThemeToken =
   | keyof ThemeColorSet
   | keyof MobileShellChromeColors
   | "fontBody"
   | "fontDisplay";
 
-export interface MobileProductTheme extends ThemeDefinition {
+interface MobileProductTheme extends ThemeDefinition {
   /** Appearance used until the owner chooses one. */
   defaultAppearance: MobileShellAppearance | "system";
   chrome: Record<MobileShellAppearance, MobileShellChromeColors>;
@@ -58,11 +58,11 @@ export interface MobileProductTheme extends ThemeDefinition {
 }
 
 /** One palette colour: the same in both appearances, or one per appearance. */
-export type MobileShellPaletteColor =
+type MobileShellPaletteColor =
   | string
   | Readonly<Record<MobileShellAppearance, string>>;
 
-export interface MobileProductIdentity {
+interface MobileProductIdentity {
   /** Display name; equals the product's app config name. */
   appName: string;
   /** Installed application id; never changes for an installed product. */
@@ -71,7 +71,7 @@ export interface MobileProductIdentity {
   characterName: string;
 }
 
-export interface MobileProductIcons {
+interface MobileProductIcons {
   /** URL prefix of single-color SVG glyphs, drawn as currentColor masks. */
   baseUrl: string;
   /** Glyph of each canonical view. */
@@ -80,12 +80,12 @@ export interface MobileProductIcons {
   allApps: string;
 }
 
-export interface MobileProductBackgrounds {
+interface MobileProductBackgrounds {
   /** CSS background of Home per appearance; the theme `bg` when absent. */
   home?: Readonly<Partial<Record<MobileShellAppearance, string>>>;
 }
 
-export interface MobileProductViews {
+interface MobileProductViews {
   /** Home and All apps order of the product's views. */
   order: readonly MobileShellViewId[];
   /** Product name of every ordered view. */
@@ -103,7 +103,7 @@ export interface MobileProductViews {
   >;
 }
 
-export interface MobileProductStorage {
+interface MobileProductStorage {
   /** Installed launcher favorites list. */
   launcherFavorites: string;
   /** Prefix of the product's own views in that list, e.g. `eliza:`. */
@@ -119,7 +119,7 @@ export interface MobileProductStorage {
  * brands of one shared application declare the same features; a difference
  * is a parity gap, never branding.
  */
-export interface MobileProductFeatures {
+interface MobileProductFeatures {
   /** Device and shell capabilities, e.g. `launcher.installed-apps`, `notes.local-record.v1`. */
   capabilities?: readonly string[];
   /** Canonical agent and device action names, e.g. `create_note`. */
@@ -141,7 +141,7 @@ export interface MobileProductRegistration {
 }
 
 /** Tokens every shell surface reads, required in both appearances. */
-export const MOBILE_SHELL_REQUIRED_COLORS = [
+const MOBILE_SHELL_REQUIRED_COLORS = [
   "bg",
   "surface",
   "bgHover",

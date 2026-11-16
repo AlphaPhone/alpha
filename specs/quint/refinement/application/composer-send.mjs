@@ -3,7 +3,7 @@
  * Product code, evaluated from source: `p.send`, `p.agentSay`, the dispatch helpers
  * (`dispatched`, `trackDispatch`, `transportSettled`, `releaseComposerSend`) and the connection
  * subscription that clears the chat on a session change (apps/app/src/prototype/agent-adapter.ts);
- * the real AlphaClient (apps/app/src/runtime/alpha-client.ts); and the shared durable draft
+ * the real AlphaClient (apps/app/src/runtime/alpha-client.ts); and Alpha's durable draft
  * controller the composer is bound to.
  *
  * Controlled ports: the connection (session, connect step), the transport under AlphaClient, the

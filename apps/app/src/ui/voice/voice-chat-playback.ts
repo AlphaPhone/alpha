@@ -38,7 +38,7 @@ function extractStructuredVoiceText(input: string): string | null {
   }
   return null;
 }
-export function extractVoiceText(input: string): string {
+function extractVoiceText(input: string): string {
   let text = extractStructuredVoiceText(input) ?? input;
   text = text.replace(HIDDEN_VOICE_BLOCK_RE, " ");
   text = text.replace(/<\/?[a-zA-Z][^>]*$|<\/?$/s, "");

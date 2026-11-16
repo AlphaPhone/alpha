@@ -22,7 +22,7 @@ import {
  * the last footprint is kept, so content does not jump when the dock returns.
  */
 
-export interface DockClearanceOptions {
+interface DockClearanceOptions {
   /**
    * Selector of the screen element the docks float over (the measurement
    * origin). It must be positioned (an `offsetParent` of every dock): a dock
@@ -44,7 +44,7 @@ export interface DockClearanceOptions {
   revealFocus?: DockFocusOptions;
 }
 
-export interface DockFocusOptions {
+interface DockFocusOptions {
   /** Host scroll regions; other vertical scroll ancestors remain a fallback. */
   scrollContainers: string;
   /** Space above the dock, in viewport CSS pixels. Defaults to 12. */
@@ -52,7 +52,7 @@ export interface DockFocusOptions {
 }
 
 /** Scroll the current control above covering docks without changing focus. */
-export function revealFocusAboveDocks(
+function revealFocusAboveDocks(
   target: EventTarget | null,
   screen: HTMLElement,
   docks: readonly HTMLElement[],
@@ -102,7 +102,7 @@ export function revealFocusAboveDocks(
   if (covered > 0) scroll.scrollTop += covered / scale;
 }
 
-export interface DockClearance {
+interface DockClearance {
   /** Everything the visible docks cover, in screen pixels. */
   clearance: number;
   /** The resting bars alone, never more than `clearance`. */
@@ -131,7 +131,7 @@ function coveredBelow(screen: HTMLElement, element: HTMLElement): number {
  * Measure the footprint of `docks` over `screen`, or null when nothing is
  * measurable (no dock, a dock outside the screen, or a zero-height result).
  */
-export function measureDockClearance(
+function measureDockClearance(
   screen: HTMLElement,
   docks: readonly HTMLElement[],
   bar?: string,
