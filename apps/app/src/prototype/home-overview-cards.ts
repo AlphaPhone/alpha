@@ -1,12 +1,12 @@
 import {createElement, type ReactElement} from 'react';
-import {OverviewAgendaCard, OverviewAttentionCard, OverviewBriefCard} from '../../../../.eliza/client-features/packages/ui/src/overview/OverviewCards.tsx';
+import {OverviewAgendaCard, OverviewAttentionCard, OverviewBriefCard} from '../ui/overview/OverviewCards.tsx';
 type Bag = Record<string, any>;
 
 const flag = (value: unknown) => (value === true ? 'true' : 'false');
 const maskIcon = (name: string, color: string) => createElement('span', {style: {display: 'block', flexShrink: 0, width: 24, height: 24, background: color,
   mask: `url('/icons/lucide/${name}.svg') center/contain no-repeat`, WebkitMask: `url('/icons/lucide/${name}.svg') center/contain no-repeat`}});
 
-/** The Home agenda card: the shared upstream card with Alpha's classes and installed selectors. */
+/** The Home agenda card: Alpha's overview card (ui/overview/OverviewCards.tsx) with Alpha's classes and installed selectors. */
 export function homeAgendaCard(out: Bag): ReactElement | null {
   if (out.homeShowCalendar === false || out.homeCalendarHasEvent !== true) return null;
   const next = out.homeCalendarHasNext ? {text: String(out.homeCalendarNext || ''), source: String(out.homeCalendarNextSource || '')} : null;
@@ -52,7 +52,7 @@ const ROW_CARD_PARTS = {
 
 const INBOX_STATES = new Set(['not-connected', 'idle', 'loading', 'ready', 'stale', 'error']);
 /**
- * The Home mail (attention) card: the shared upstream card with the values the Inbox adapter
+ * The Home mail (attention) card: Alpha's overview card with the values the Inbox adapter
  * computed from the page the user loaded (presentHomeInboxCard), Alpha's styles and its installed
  * selectors. It shows no message body and reads no mail.
  */
@@ -108,7 +108,7 @@ export function homeBriefCard(out: Bag): ReactElement | null {
 }
 
 /**
- * Renders Home's agenda, mail and brief cards with the shared upstream components from the values
+ * Renders Home's agenda, mail and brief cards with Alpha's overview card components (ui/overview/OverviewCards.tsx) from the values
  * the Home adapters computed. Install outermost among Home adapters (after the calendar, agent
  * calendar, Inbox and digest bindings) so the cards show their final values. It reads and runs nothing.
  */

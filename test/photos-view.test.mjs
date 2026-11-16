@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 // Photos view rules. Source-level: browser specs drive the rendered view.
-const v=await import('../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts');
+const v=await import('../apps/app/src/ui/mobile-shell/photos-view.ts');
 const now=new Date(2026,10,6,15,0).getTime(),DAY=86400000;
 const row=(id,date,extra={})=>({id,date,...extra});
 

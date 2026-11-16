@@ -251,7 +251,7 @@ export async function checkStoppedReplyReconciliation() {
     ],
     extraSources: [path, sourcePath, manifestPath],
     run: async () => {
-      const {findStoppedUserTurn} = await import('../../../../.eliza/client-features/packages/ui/src/api/conversation-turn-controller.ts');
+      const {findStoppedUserTurn} = await import('../../../../apps/app/src/ui/api/conversation-turn-controller.ts');
       const script = compile();
       const traces = modelTraces({path, module: model, scenarios: tests});
       return replayTraces(traces, () => createDriver(script, findStoppedUserTurn), {project});

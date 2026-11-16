@@ -2,23 +2,18 @@ import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {createHash} from 'node:crypto';
-import {readFileSync} from 'node:fs';
-import {resolve} from 'node:path';
 import {build} from 'esbuild';
 import {chromium} from 'playwright';
 import {captureInputs, checkTraces, qmap, qset} from '../specs/quint/refinement/check-traces.mjs';
 import {compilePhotosWindow, createPhotosWindowFixture} from '../specs/quint/refinement/application/photos-window.mjs';
 import {call, checkpoint, deferred, root, tick, trace} from '../specs/quint/refinement/application/support.mjs';
+import {assertBundlesLocalUi, assertUpstreamUiNotStaged, preparedStamp, uiStagingHelper} from './support/quint-conformance-ui-staging.mjs';
 
 const origin = 'https://closed-albums.invalid/';
 const camera = 'apps/app/src/prototype/browser-camera.ts';
 const documents = 'apps/app/src/browser/documents.ts';
 const preferences = 'apps/app/src/browser/preference-documents.ts';
-const projection = '.eliza/client-features';
-const upstreamPath = 'packages/ui/src/platform/browser-document-store.ts';
-const upstream = projection + '/' + upstreamPath;
-const stampPath = projection + '/.source.json';
+const store = 'apps/app/src/ui/platform/browser-document-store.ts';
 const lock = 'alpha.browser.photos.mutation.v1';
 const model = 'BrowserAlbumStorage';
 const modelPath = 'specs/quint/application/' + model + '.qnt';
@@ -26,12 +21,7 @@ const support = 'specs/quint/refinement/application/support.mjs';
 const windowDriver = 'specs/quint/refinement/application/photos-window.mjs';
 
 async function withBrowserAlbumStorage(browser, run, extraSources = []) {
-  const read = path => readFileSync(resolve(root, path));
-  const stamp = JSON.parse(read(stampPath));
-  const hash = createHash('sha256').update(read(upstream)).digest('hex');
-  assert.equal(stamp.baseCommit, JSON.parse(read('upstream.lock.json')).commit);
-  assert.equal(hash, stamp.sourceFiles[upstreamPath]);
-  assert.equal(hash, stamp.files[upstreamPath]);
+  assertUpstreamUiNotStaged();
   const built = await build({
     absWorkingDir: root,
     stdin: {resolveDir: root, contents: `
@@ -66,7 +56,8 @@ async function withBrowserAlbumStorage(browser, run, extraSources = []) {
     bundle: true, write: false, format: 'iife', platform: 'browser', metafile: true,
     loader: {'.css': 'empty'}, define: {'import.meta.env': JSON.stringify({DEV: false})},
   });
-  const sources = [...new Set([fileURLToPath(import.meta.url), camera, documents, preferences, upstream, stampPath,
+  assertBundlesLocalUi(built.metafile, store);
+  const sources = [...new Set([fileURLToPath(import.meta.url), camera, documents, preferences, store, preparedStamp, uiStagingHelper,
     modelPath, support, 'upstream.lock.json', ...Object.keys(built.metafile.inputs).filter(path => !path.startsWith('<') && !path.includes('node_modules/')),
     ...extraSources])];
   const driverHashes = captureInputs(sources);

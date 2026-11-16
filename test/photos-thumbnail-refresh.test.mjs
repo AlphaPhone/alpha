@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readWindow} from '../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts';
+import {readWindow} from '../apps/app/src/ui/mobile-shell/photos-view.ts';
 const photo=(n,image='')=>({id:'native-camera-'+n,date:n,image,revision:'r1'});
 test('library refresh keeps rows beyond the previous 240-row reload cap',async()=>{
  const rows=Array.from({length:650},(_,i)=>photo(i)),calls=[];

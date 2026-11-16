@@ -55,8 +55,8 @@ test('the organization credit balance is read only from an exact, fresh billing 
 
 test('the subscription sheet leads with the plan and reports its allowance and latest Cloud limit read-only', async () => {
   const {subscriptionSummary: sharedSummary, serviceLimitNextChange, alphaSubscriptionCopy} = await import('../apps/app/src/runtime/subscription-entitlement.ts');
-  // The sheet renders through the projected shared hook (elizaOS/eliza#38105), evaluated as shipped.
-  const hookSource = fs.readFileSync('.eliza/client-features/packages/ui/src/components/settings/cloud-subscription-summary.tsx', 'utf8');
+  // The sheet renders through Alpha's summary hook (apps/app/src/ui/components/settings), evaluated as shipped.
+  const hookSource = fs.readFileSync('apps/app/src/ui/components/settings/cloud-subscription-summary.tsx', 'utf8');
   const hookCompiled = transformSync(hookSource.replace(/^import [\s\S]*?;\n/gm, '').replaceAll('export ', ''), {loader: 'tsx', jsxFactory: 'React.createElement'}).code;
   const useCloudSubscriptionSummary = new Function('React', 'useEffect', 'useState', 'subscriptionSummary', 'serviceLimitNextChange', hookCompiled + ';return useCloudSubscriptionSummary;')(React, React.useEffect, React.useState, sharedSummary, serviceLimitNextChange);
   const source = fs.readFileSync('apps/app/src/runtime/cloud-membership-ui.tsx', 'utf8');

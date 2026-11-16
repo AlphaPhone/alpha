@@ -20,7 +20,7 @@ import { isMvpView, DEFERRED_MVP_VIEWS, deferredMvpPrompt } from "./mvp-features
 import { isAskSentence, proposalCanAct } from "../runtime/comms-bar";
 import { stageSessionStore } from "../runtime/stage-session-store";
 import { ALPHA_PRODUCT, alphaPaletteColor, alphaThemeVariables } from "../product/alpha-product";
-import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile-shell/core";
+import { MOBILE_SHELL_CANVAS_WIDTH, MOBILE_SHELL_EDGE, MOBILE_SHELL_HOME_BAR_TOP, navigateMobileShell, resolveMobileShellSwipe } from "../ui/mobile-shell/core.ts";
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
@@ -31,6 +31,12 @@ import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } 
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
 import { applyListFilter, clearListFilter, deviceEmergencyLive, endPlacement, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
 
+/* Canvas geometry shared by every pointer handler: the [data-screen] box and its CSS-px-per-canvas-px scale. */
+function canvasBox(el) { var sc = el && el.closest ? el.closest("[data-screen]") : null; var r = (sc || el).getBoundingClientRect(); return { r: r, s: r.width / MOBILE_SHELL_CANVAS_WIDTH || 1 }; }
+/* Top band (canvas px) reserved for the status bar and the system shade pull. */
+var SHELL_TOP_ZONE = 90;
+/* System gesture zones (edge Back, top shade, bottom HOME) belong to the shell (resolveMobileShellSwipe). */
+function inShellGestureZone(px, py) { return px < MOBILE_SHELL_EDGE || px > MOBILE_SHELL_CANVAS_WIDTH - MOBILE_SHELL_EDGE || py < SHELL_TOP_ZONE || py > MOBILE_SHELL_HOME_BAR_TOP; }
 
 var IC = {
   inbox: "M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z",
@@ -1919,7 +1925,7 @@ function brPos(name) {
   try {
     var el = document.querySelector('[data-bk="' + name + '"]'); var sc = document.querySelector("[data-screen]"); var box = document.querySelector("[data-bscroll]");
     if (!el || !sc) return null;
-    var k = sc.getBoundingClientRect().width / 412;
+    var k = sc.getBoundingClientRect().width / MOBILE_SHELL_CANVAS_WIDTH;
     if (box) { var br = box.getBoundingClientRect(), er = el.getBoundingClientRect(); var over = er.bottom - (br.bottom - 150 * k); if (over > 0) box.scrollTop += over / k; if (er.top < br.top + 60 * k) box.scrollTop -= (br.top + 60 * k - er.top) / k; }
     var r = el.getBoundingClientRect(), s = sc.getBoundingClientRect();
     return { cx: (r.left - s.left) / k + Math.min(r.width / k / 2, 70) - 11, cy: (r.top - s.top) / k + r.height / k / 2 - 11 };
@@ -3078,12 +3084,12 @@ registerView("maps", {
 
     /* map pan (release-based) */
     var mapDown = function (e) {
-      var sc = e.currentTarget.closest ? e.currentTarget.closest("[data-screen]") : null; var r = (sc || e.currentTarget).getBoundingClientRect(); var k = r.width / 412 || 1;
+      var o = canvasBox(e.currentTarget), r = o.r, k = o.s;
       MAPS_DRAG = { on: true, x: e.clientX, y: e.clientY, k: k, px: (e.clientX - r.left) / k, py: (e.clientY - r.top) / k, t: MAPS_DRAG.t };
     };
     var mapUp = function (e) {
       var d = MAPS_DRAG; if (!d.on) return; d.on = false;
-      if (d.px < 30 || d.px > 382 || d.py < 90 || d.py > 872) return;
+      if (inShellGestureZone(d.px, d.py)) return;
       var dx = (e.clientX - d.x) / d.k, dy = (e.clientY - d.y) / d.k;
       if (Math.abs(dx) + Math.abs(dy) < 12) return;
       d.t = Date.now(); var p0 = api.get("maps").pan || { x: 0, y: 0 }; api.set({ pan: { x: p0.x + dx, y: p0.y + dy } });
@@ -5948,7 +5954,7 @@ class Component extends DCLogic {
     this.setState(Object.assign(nav, { screen: "home", shade: false, heads: false }));
     this.homeHint();
   }
-  /* ---- navigation: the shared mobile shell reducer owns view, Back stack, drawer and the
+  /* ---- navigation: the mobile shell reducer (ui/mobile-shell/navigation.ts) owns view, Back stack, drawer and the
      assistant detent (Alpha's "hidden" chat is the shell's pill) ---- */
   shellNav() { var S = this.S(); return { view: S.view || null, stack: S.stack || [], drawer: !!S.drawer, drawerQuery: S.drawerQ || "", assistant: this.shellDetent(S.chat, S.view) || "input" }; }
   /** A chat state as a shell assistant detent; none for an absent request (the surface's rest).
@@ -6025,7 +6031,7 @@ class Component extends DCLogic {
   }
 
   /* ---- gestures ---- */
-  scale(el) { var sc = el && el.closest ? el.closest("[data-screen]") : null; var r = (sc || el).getBoundingClientRect(); return { r: r, s: r.width / 412 || 1 }; }
+  scale(el) { return canvasBox(el); }
   gDown(e) { if (e.target.closest?.("[data-alpha-transcript],[data-alpha-note-transcript]")) { this.g = null; return; } var o = this.scale(e.currentTarget); this.g = { x: (e.clientX - o.r.left) / o.s, y: (e.clientY - o.r.top) / o.s, cx: e.clientX, cy: e.clientY, s: o.s, pull: pullStart(e.target) }; }
   gUp(e) { var g = this.g; this.g = null; if (!g || window.getSelection()?.isCollapsed === false) return; this.swipe(g, (e.clientX - g.cx) / g.s, (e.clientY - g.cy) / g.s); }
   swipe(g, dx, dy) {
@@ -6053,7 +6059,7 @@ class Component extends DCLogic {
       down: function (e) {
         var o = self.scale(e.currentTarget);
         var px = (e.clientX - o.r.left) / o.s, py = (e.clientY - o.r.top) / o.s;
-        if (!opts.capture && (px < 30 || px > 382 || py < 90 || py > 872)) { self.cg = null; return; }   // system gesture zones belong to the shell
+        if (!opts.capture && inShellGestureZone(px, py)) { self.cg = null; return; }   // system gesture zones belong to the shell
         // A fresh pointer gesture is a deliberate action, not the previous swipe click.
         self.swallow = 0;
         if (opts.capture) e.currentTarget.setPointerCapture(e.pointerId);

@@ -5,7 +5,7 @@ import {inputFiles} from '../browser/file-picker';
 import type {NativeResult} from '../daily';
 import {library,libraryAvailable,type SavedPhoto} from './camera-adapter';
 import {compareFilesEntries} from './files-index';
-import {intakeAttachmentFiles} from '../../../../.eliza/client-features/packages/ui/src/utils/image-attachment.ts';
+import {intakeAttachmentFiles} from '../ui/utils/image-attachment.ts';
 import type {FilesStoragePort} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
 import {formatSize,parentOf,type StorageEntry,type StorageVolume} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts';
 import {

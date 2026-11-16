@@ -1,5 +1,5 @@
 import type {CreateLifeOpsCalendarEventRequest,LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,LifeOpsCalendarFeed,LifeOpsCalendarSummary,LifeOpsNextCalendarEventContext,GetLifeOpsCalendarFeedRequest,LifeOpsLinkedCalendarControl,LifeOpsLinkedCalendarEventView,UpdateLifeOpsLinkedCalendarControlRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
-import {eventEditorMutability,cancellationModeForEditorEvent} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy';
+import {eventEditorMutability,cancellationModeForEditorEvent} from '../ui/calendar/event-editor-policy';
 import {agentCalendarClient,type AgentCalendarClient,type AppRecordPort} from './agent-calendar-client';
 import type {ServiceReadCache} from './service-read-cache';
 export type AgentCalendarSyncReview={binding:string;control:LifeOpsLinkedCalendarControl;sources:LifeOpsCalendarSummary[];visibleLocalEventIds:string[]};

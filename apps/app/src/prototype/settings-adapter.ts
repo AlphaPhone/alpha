@@ -34,7 +34,7 @@ import { readNativeCloudStreamTiming } from '../runtime/cloud-voice';
 import { imageSenseAvailable, listenerStatus, openListenerSettings, pauseListener, turnOffListener, wakeListeningStopUnconfirmed, type ListenerStatus } from '../runtime/always-on-listener';
 import { reviewDataReset, type DataResetPlugin } from '@elizaos/capacitor-system/reset';
 import { androidRoleLabel, parseRoleStatuses } from '@elizaos/capacitor-system/settings';
-import {createAppUpdateScheduler} from '../../../../.eliza/client-features/packages/ui/src/state/app-update-gate';
+import {createAppUpdateScheduler} from '../ui/state/app-update-gate';
 import { leavePasswordEntry, leavePasswordManager, passwordEntryPage, passwordManagerGroups, passwordManagerLifecycle, refreshPasswordManager, PASSWORD_PAGES } from '../passwords/password-manager';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 

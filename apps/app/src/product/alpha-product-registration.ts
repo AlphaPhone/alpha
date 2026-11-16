@@ -1,6 +1,6 @@
-import type {MobileProductRegistration} from '@elizaos/ui/mobile-shell/core';
+import type {MobileProductRegistration} from '../ui/mobile-shell/core.ts';
 
-// Alpha's registration for the shared mobile shell. The agent and build tools also read it.
+// Alpha's registration for its mobile shell (apps/app/src/ui/mobile-shell). The agent and build tools also read it.
 export const ALPHA_PRODUCT_REGISTRATION = {
   schema: "elizaos.mobile-product",
   schemaVersion: 1,

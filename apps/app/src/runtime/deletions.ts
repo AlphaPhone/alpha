@@ -1,6 +1,6 @@
 import {registerPlugin} from '../platform-plugins';
 import {pendingDeletionNotices,reminderDeletionRefusal as sharedRefusal,undoConfirmed,type DeferredDeletionEntry,type DeferredDeletionsBridge} from '../../../../.eliza/client-features/packages/contracts/src/deletion-window';
-import type {DeferredDeletionIdentity} from '../../../../.eliza/client-features/packages/ui/src/components/composites/deferred-deletion-notice';
+import type {DeferredDeletionIdentity} from '../ui/components/composites/deferred-deletion-notice';
 /** A pending Calendar or reminder deletion row (the shared deletion-window contract). */
 export type DeletionEntry=DeferredDeletionEntry&{kind:'calendar'|'reminder'};
 /** Alpha's installed bridge name for the shared reviewed deletion Undo window. */

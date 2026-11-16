@@ -1,7 +1,7 @@
 import {nativeAssistantDraftRecovery} from './native-assistant-draft-recovery';
 import {Capacitor} from '@capacitor/core';
 import {secureConnectionStore} from './native-connection';
-import {compareExchangeDraftStore,emptyDurableDraft,transactionalDraftStore} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft.ts';
+import {compareExchangeDraftStore,emptyDurableDraft,transactionalDraftStore} from '../ui/state/durable-draft.ts';
 import type {DomainRecovery} from '../browser/domain-document';
 
 /**

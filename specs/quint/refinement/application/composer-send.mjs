@@ -37,7 +37,7 @@ export async function compile() {
   const send = between('  p.send = async function', '  p.agentSay = function'), say = between('  p.agentSay = function', '  p.reply = function');
   const subscription = between('this.connectionUnsubscribe = connectionController.subscribe(() => {', '    // Canonical is the default;');
   const code = ts(`${helpers}\n${plan}\n${notices}\nfunction methods(){const p={};\n${send}\n${say}\nreturn p;}\nglobalThis.methods=methods();`);
-  const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
+  const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/apps/app/src/ui/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
   const {DurableDraftController} = await import('data:text/javascript;base64,' + Buffer.from(controller).toString('base64'));
   const {AlphaClient, AlphaClientError} = await tsImport('../../../../apps/app/src/runtime/alpha-client.ts', import.meta.url);
   return {code, subscription: stripTypeScriptTypes(subscription, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};

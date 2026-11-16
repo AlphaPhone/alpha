@@ -4,7 +4,7 @@
  * each send, conversation and owner fencing by binding, and an unknown dispatch outcome that is
  * never offered for a second send. This name is kept for the existing call sites.
  */
-import {DurableDraftController} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';
+import {DurableDraftController} from '../ui/state/durable-draft-controller.ts';
 
 export class AssistantDraftController<Recovery=unknown> extends DurableDraftController<Recovery> {
   override async open(key:string):Promise<void> {
@@ -16,4 +16,4 @@ export class AssistantDraftController<Recovery=unknown> extends DurableDraftCont
   }
 }
 
-export {DEFAULT_DURABLE_DRAFT_MESSAGES} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';
+export {DEFAULT_DURABLE_DRAFT_MESSAGES} from '../ui/state/durable-draft-controller.ts';

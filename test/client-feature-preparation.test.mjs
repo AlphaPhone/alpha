@@ -251,32 +251,59 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  // Upstream runs its own notes tests; Alpha copies none of them.
  assert.equal(fs.existsSync(path.join(source,'plugins/plugin-notes/test')),false);
  for(const name of ['alpha-voice-core-types.ts','alpha-client-fetch-types.ts']) assert.equal(fs.existsSync(path.join(source,name)),false,name+' is no longer projected');
- for(const file of ['packages/core/src/schema-types.ts','packages/core/src/types/json.ts','packages/core/src/types/schema.ts','packages/core/src/types/surface-manifest.ts','packages/core/src/types/view-capability.ts','packages/core/src/types/view-kind.ts','packages/ui/src/api/transport.ts','plugins/plugin-calendar/src/meetings/auto-join-types.ts','plugins/plugin-calendar/src/api/calendar-api.ts','plugins/plugin-notes/src/types.ts','plugins/plugin-notes/src/capabilities.ts','plugins/plugin-notes/src/client/notes-api.ts']){
+ for(const file of ['packages/core/src/schema-types.ts','packages/core/src/types/json.ts','packages/core/src/types/schema.ts','packages/core/src/types/surface-manifest.ts','packages/core/src/types/view-capability.ts','packages/core/src/types/view-kind.ts','plugins/plugin-calendar/src/meetings/auto-join-types.ts','plugins/plugin-calendar/src/api/calendar-api.ts','plugins/plugin-notes/src/types.ts','plugins/plugin-notes/src/capabilities.ts','plugins/plugin-notes/src/client/notes-api.ts']){
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is not projected');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
  }
  for(const file of ['packages/core/src/types/plugin.ts','packages/core/src/types/components.ts','packages/core/src/types/model.ts','packages/core/src/types/primitives.ts','packages/ui/src/api/client-base.ts','plugins/plugin-calendar/src/meetings/auto-join-settings.ts']){
   assert.equal(stamp.files[file],undefined,file+' (runtime or class module) is not shipped to the browser');
  }
- const leafBundle=buildSync({entryPoints:[path.join(source,'plugins/plugin-notes/src/client/notes-api.ts')],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/ui/api/transport':path.join(source,'packages/ui/src/api/transport.ts')}});
+ const leafBundle=buildSync({entryPoints:[path.join(source,'plugins/plugin-notes/src/client/notes-api.ts')],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/ui/api/transport':path.resolve('apps/app/src/ui/api/transport.ts')}});
  assert.equal(Object.keys(leafBundle.metafile.inputs).some(file=>/client-base|core\/src\/types\/(plugin|components|model)\.ts/.test(file)),false,'Notes client loads no root core or ElizaClient module');
- // The shared mobile entry adds only the page registry, its store host, the application catalog
- // and MobileApplication (elizaOS/eliza#38276), copied exactly; it never reaches the app-shell barrel.
- const shellBundle=buildSync({entryPoints:[path.join(source,'packages/ui/src/mobile-shell/index.ts')],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,external:['react','react/jsx-runtime'],alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/capacitor-system/launcher':path.join(source,'plugins/plugin-native-system/src/client/launcher.ts'),'@elizaos/contracts':path.join(source,'client-contracts.ts')}});
- const shellInputs=Object.keys(shellBundle.metafile.inputs).map(file=>path.relative(source,path.resolve(file)));
- assert.deepEqual(shellInputs.filter(file=>!stamp.files[file]),[],'the mobile entry loads only projected files');
- assert.deepEqual(shellInputs.filter(file=>file.startsWith('packages/ui/src/')&&!file.startsWith('packages/ui/src/mobile-shell/')).sort(),['packages/ui/src/app-shell-pages.ts','packages/ui/src/components/pages/InstalledAppsLauncher.tsx','packages/ui/src/config/theme.ts','packages/ui/src/registry-host.ts'],'the mobile entry reaches no other shared UI module');
- for(const file of ['packages/ui/src/app-shell-pages.ts','packages/ui/src/registry-host.ts','packages/ui/src/mobile-shell/application-catalog.ts','packages/ui/src/mobile-shell/MobileApplication.tsx','packages/ui/src/mobile-shell/view-policy.ts']){
-  assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is not projected');
-  assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
+ assert.equal(Object.keys(leafBundle.metafile.inputs).some(file=>/packages\/ui\//.test(file)),false,'Notes client types its fetch with Alpha\'s transport module, not upstream UI');
+ // Alpha owns its renderer UI (apps/app/src/ui): no packages/ui source or plugin component is staged.
+ assert.deepEqual(Object.keys(stamp.files).filter(file=>file.startsWith('packages/ui/')||/^plugins\/[^/]+\/src\/components\//.test(file)),[]);
+ assert.equal(fs.existsSync(path.join(source,'packages/ui')),false,'no upstream UI package is staged');
+ for(const dir of ['plugin-notes','plugin-calendar','plugin-inbox'])assert.equal(fs.existsSync(path.join(source,'plugins',dir,'src/components')),false,dir+' components are not staged');
+ for(const file of ['plugins/plugin-calendar/src/api/client-calendar.ts','plugins/plugin-calendar/src/browser.ts','plugins/plugin-calendar/src/index.ts','plugins/plugin-notes/src/workspace.ts']){
+  assert.equal(stamp.files[file],undefined,file+' (an upstream UI entry) is not staged');
  }
+ // Nor is any other upstream UI entry: no JSX module, no React import, no upstream UI import
+ // (only the transport type, aliased to Alpha's module), and no relative import left dangling.
+ const stagedCode=Object.keys(stamp.files).filter(file=>/\.(?:[cm]?[jt]sx?)$/.test(file));
+ assert.deepEqual(stagedCode.filter(file=>/\.[jt]sx$/.test(file)),[],'no JSX module is staged');
+ const importsOf=text=>[...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+|\bexport\s+\*\s+from\s*)(['"])([^'"\n]+)\1/gm)].map(match=>match[2]);
+ const uiImports=[],dangling=[];
+ for(const file of stagedCode){
+  for(const spec of importsOf(fs.readFileSync(path.join(source,file),'utf8'))){
+   if(/^react(?:-dom)?(?:\/|$)/.test(spec)||(/^@elizaos\/ui(?:\/|$)/.test(spec)&&spec!=='@elizaos/ui/api/transport')||/(?:^|\/)components\//.test(spec))uiImports.push(file+': '+spec);
+   // Upstream's own non-source helpers (e.g. a plugin's quint/ checks) may reference its monorepo tooling.
+   if(spec.startsWith('.')&&/(?:^|\/)src\//.test(file)){
+    const base=path.join(path.dirname(file),spec.split('?')[0]).replace(/\.js$/,'');
+    if(!['','.ts','.tsx','.js','.mjs','.d.ts','.d.mts','/index.ts','/index.js'].some(suffix=>stamp.files[base+suffix]!==undefined||stamp.files[path.join(path.dirname(file),spec.split('?')[0])]!==undefined))dangling.push(file+': '+spec);
+   }
+  }
+ }
+ assert.deepEqual(uiImports,[],'no staged module imports React or upstream UI');
+ assert.deepEqual(dangling,[],'every relative import in a staged source module resolves to a staged file');
+ // Alpha's own mobile shell (registration, page registry, launcher, Home and app grid) loads only
+ // its local UI tree and staged non-UI upstream modules; it never reaches upstream UI.
+ const shellDir=path.resolve('apps/app/src/ui/mobile-shell');
+ const shellBundle=buildSync({entryPoints:fs.readdirSync(shellDir).filter(name=>/\.tsx?$/.test(name)).map(name=>path.join(shellDir,name)),bundle:true,write:false,outdir:path.join(os.tmpdir(),'alpha-shell-bundle'),platform:'browser',format:'esm',metafile:true,external:['react','react-dom','react/jsx-runtime'],alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/capacitor-system/launcher':path.join(source,'plugins/plugin-native-system/src/client/launcher.ts'),'@elizaos/contracts':path.join(source,'client-contracts.ts')}});
+ const shellInputs=Object.keys(shellBundle.metafile.inputs).map(file=>path.resolve(file));
+ const localUi=path.resolve('apps/app/src/ui')+path.sep;
+ assert.ok(shellInputs.some(file=>file.startsWith(shellDir+path.sep)),'the local mobile shell is bundled');
+ assert.deepEqual(shellInputs.filter(file=>!file.startsWith(localUi)&&!stamp.files[path.relative(source,file)]).map(file=>path.relative('.',file)),[],'the mobile shell loads only Alpha UI and staged non-UI modules');
+ assert.deepEqual(shellInputs.filter(file=>/packages\/ui\/|\/src\/components\//.test(path.relative(source,file))&&!file.startsWith(localUi)),[],'the mobile shell reaches no upstream UI module');
  const relayPath='plugins/plugin-maps/src/client/navigation-relay.ts';
  // The WebView signal shim is upstream (elizaOS/eliza#37315); the relay is carried unchanged.
  assert.equal(stamp.sourceFiles[relayPath],stamp.files[relayPath]);
  assert.match(fs.readFileSync(path.join(source,relayPath),'utf8'),/host\.anySignal \? host\.anySignal\(signals\)/);
- const mapPath='plugins/plugin-maps/src/client/map-plane.ts';
- assert.equal(stamp.sourceFiles[mapPath],stamp.files[mapPath]);
- assert.match(fs.readFileSync(path.join(source,mapPath),'utf8'),/export interface GlobalBasemap/);
+ // Alpha draws the map with its own renderer (apps/app/src/maps/map-plane.ts). The staged
+ // plugin-maps renderer is there only for the overlay type upstream maps-screen.ts names;
+ // test/ui-self-contained.test.mjs checks that no Alpha module loads it.
+ const mapScreen=fs.readFileSync(path.join(source,'plugins/plugin-maps/src/client/maps-screen.ts'),'utf8');
+ assert.deepEqual([...mapScreen.matchAll(/^import .* from "\.\/map-plane\.ts";$/gm)].map(match=>match[0]),['import type { MapOverlay } from "./map-plane.ts";']);
  const calendarPath='packages/contracts/src/calendar-linked-sync.ts';
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
@@ -286,25 +313,19 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(stamp.sourceFiles[name],stamp.files[name],name+' is copied directly from upstream');
   assert.deepEqual(fs.readFileSync(path.join(source,name)),fs.readFileSync(path.join('vendor/eliza',name)),name+' has exact raw upstream bytes');
  }
- const updatePath='packages/ui/src/state/app-update-gate.ts';
+ // The update scheduler is Alpha's own module; no upstream copy or resume patch is staged.
  assert.equal(stamp.appUpdateResumePatch,undefined);
- assert.equal(stamp.sourceFiles[updatePath],stamp.files[updatePath],'final reviewed update source is copied directly');
- assert.equal(stamp.files[updatePath],'89dc78042b8808e4bd264732ac06bb4fb43a3da35d397a5f126c73896f23eca5');
- assert.deepEqual(fs.readFileSync(path.join(source,updatePath)),fs.readFileSync(path.join('vendor/eliza',updatePath)));
- assert.match(fs.readFileSync(path.join(source,updatePath),'utf8'),/export function createAppUpdateScheduler/);
+ assert.equal(stamp.files['packages/ui/src/state/app-update-gate.ts'],undefined);
+ assert.match(fs.readFileSync('apps/app/src/ui/state/app-update-gate.ts','utf8'),/export function createAppUpdateScheduler/);
  for(const file of [
   calendarPath,
   'plugins/plugin-inbox/src/mailbox/review-controller.ts',
   'plugins/plugin-inbox/src/mailbox/drafts-controller.ts',
   'plugins/plugin-native-system/src/crash-log.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
-  'packages/ui/src/mobile-shell/view-registry.ts',
-  'packages/ui/src/accessibility/screen-focus.ts',
-  'packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx',
   'plugins/plugin-files/src/browser/files-browser-adapter.ts',
   'plugins/plugin-files/src/browser/storage-volume.ts',
   'plugins/plugin-files/src/browser/files.ts',
-  'packages/ui/src/mobile-shell/photos-view.ts',
   'plugins/plugin-assistant/src/services/device-actions/photo-library-contract.ts',
   'packages/voice/src/native-cloud-speech.ts',
   'packages/voice/src/cloud-speech-chunks.ts',
@@ -312,9 +333,14 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is staged directly');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
  }
+ // Their shell consumers are Alpha's own modules, never staged from upstream.
+ for(const file of ['mobile-shell/view-registry.ts','accessibility/screen-focus.ts','mobile-shell/InstalledAppsGridDrawer.tsx','mobile-shell/photos-view.ts']){
+  assert.ok(fs.existsSync(path.join('apps/app/src/ui',file)),file+' is Alpha-owned');
+  assert.equal(stamp.files['packages/ui/src/'+file],undefined,file+' is not staged from upstream');
+ }
  const calendarBundle=buildSync({entryPoints:[path.join(source,calendarPath)],bundle:true,write:false,platform:'browser',format:'esm',metafile:true});
  assert.equal(Object.keys(calendarBundle.metafile.inputs).length,1,'shared Calendar reconciliation has no Node, SQL, or runtime dependency');
- const voiceFiles=['packages/ui/src/voice/voice-session-client-core.ts','packages/ui/src/voice/voice-session-status.ts','packages/core/src/logging.ts','packages/core/src/view-interaction.ts','packages/host/src/voice/ui-context.ts'];
+ const voiceFiles=['packages/core/src/logging.ts','packages/core/src/view-interaction.ts','packages/host/src/voice/ui-context.ts'];
  for(const file of voiceFiles){
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is not projected');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
@@ -326,14 +352,15 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(projected,upstream.replace('import { randomId } from "./random-id.js";','import { randomId } from "./random-id.ts";'));
  }
  assert.deepEqual(fs.readFileSync(path.join(source,'packages/voice/src/random-id.ts')),fs.readFileSync('vendor/eliza/packages/voice/src/random-id.ts'));
- const client=voiceFiles[0],text=fs.readFileSync(path.join(source,client),'utf8');
+ // The voice session client is Alpha's own module over the staged shared voice contracts.
+ const client=path.resolve('apps/app/src/ui/voice/voice-session-client-core.ts'),text=fs.readFileSync(client,'utf8');
  assert.doesNotMatch(text,/import\("\.\/voice-session-fetch"\)/);
- for(const file of ['packages/core/src/logger.ts','packages/host/src/voice.ts','packages/ui/src/voice/voice-chat-types.ts','packages/ui/src/voice/voice-session-client.ts','packages/ui/src/voice/voice-session-fetch.ts']){
+ for(const file of ['packages/core/src/logger.ts','packages/host/src/voice.ts','packages/ui/src/voice/voice-chat-types.ts','packages/ui/src/voice/voice-session-client.ts','packages/ui/src/voice/voice-session-fetch.ts','packages/ui/src/voice/voice-session-client-core.ts','packages/ui/src/voice/voice-session-status.ts']){
   assert.equal(stamp.sourceFiles[file],undefined);assert.equal(stamp.files[file],undefined);
   assert.equal(fs.existsSync(path.join(source,file)),false,file+' is not staged');
  }
 
- const bundle=buildSync({entryPoints:[path.join(source,client)],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{
+ const bundle=buildSync({entryPoints:[client],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{
   '@elizaos/host/voice/ui-context':path.join(source,'packages/host/src/voice/ui-context.ts'),
   '@elizaos/core/view-interaction':path.join(source,'packages/core/src/view-interaction.ts'),
   '@elizaos/core/logging':path.join(source,'packages/core/src/logging.ts'),

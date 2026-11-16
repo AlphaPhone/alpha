@@ -22,8 +22,8 @@ import { CloudAccountBillingClient, CloudBillingError, type CloudBillingRequest,
  * sign-in. The Cloud sign-in hand-off (`login()`, v3's cloud/api/auth/cli-session) is a development
  * surface: it exists only in ELIZA_DEV_ALLOW_TEST_MOCKS=1 builds and the loopback browser Cloud host
  * (`cloudSignInHandOffAvailable`); product bundles fold it away. Contracts inspected
- * in cloud/api/v1/app-auth, cloud/api/auth/cli-session, cloud/api/v1/eliza/google and
- * ui/src/api/client-cloud.ts. Native composition owns HTTP and secure storage. This module never
+ * in cloud/api/v1/app-auth, cloud/api/auth/cli-session, cloud/api/v1/eliza/google and the
+ * upstream Cloud client. Native composition owns HTTP and secure storage. This module never
  * stores credentials in renderer persistence or logs them.
  * The agent always runs on the phone: this adapter has no hosted-agent discovery, runtime or
  * pairing route. The development-only hosted-agent fixture extends it in
