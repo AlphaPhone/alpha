@@ -91,6 +91,24 @@ export function assertImageLauncherManifest(tree: string, production: boolean, a
  * package hashes and the reviewed signer. An empty list means the lock is complete; it says nothing
  * about an image build or boot.
  */
+/** The include stage-aosp adds to a branded Pixel stage; the packet planner checks these exact bytes. */
+export const BRANDING_PRODUCT_INCLUDE = '\n# Alpha OS visual identity.\n$(call inherit-product, vendor/alphaphone/branding/branding.mk)\n';
+
+/**
+ * Pin the generated stage product.mk, add the branding include to that stage, and return the
+ * exact source-packet planner argv. The planner reads vendor/alphaphone files from this stage.
+ */
+export function brandingPacketCommand({output, source, assets, reportSha256, aapt, apksigner}:
+  {output: string; source: string; assets: string; reportSha256: string; aapt: string; apksigner: string}): string[] {
+  const product = path.join(output, 'product.mk');
+  const productMkSha256 = sha256File(product);
+  fs.appendFileSync(product, BRANDING_PRODUCT_INCLUDE);
+  return ['scripts/stage-alpha-os-branding.py', '--aosp-root', source,
+    '--assets-dir', assets, '--assets-report-sha256', reportSha256,
+    '--image-stage', output, '--product-mk-sha256', productMkSha256, '--aapt', aapt, '--apksigner', apksigner,
+    '--packet-output', path.join(output, 'source-packet.zip'), '--receipt', path.join(output, 'source-packet.json')];
+}
+
 export function aospProductLockProblems(root = process.cwd()) {
   const at = (rel: string) => path.join(root, rel);
   if (!fs.existsSync(at(PRODUCT_DESCRIPTOR))) return [`${PRODUCT_DESCRIPTOR} is missing`];
@@ -414,13 +432,10 @@ if (production && get('--branding-assets')) {
     handlerDefaultsSha256: sha256File(path.join(output, 'provisioning/alpha-telephony-components.xml')),
     provisionResourceSha256: sha256File(path.join(output, 'provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml')),
   };
-  fs.appendFileSync(path.join(output, 'product.mk'), '\n$(call inherit-product, vendor/alphaphone/branding/branding.mk)\n');
+  const packetCommand = brandingPacketCommand({output, source: source!, assets: get('--branding-assets')!,
+    reportSha256: get('--branding-assets-report-sha256')!, aapt: tool('aapt'), apksigner: tool('apksigner')});
   fs.writeFileSync(path.join(output, 'image-policy-admission.json'), JSON.stringify(admission, null, 2) + '\n', {flag:'wx'});
-  execFileSync('python3', ['scripts/stage-alpha-os-branding.py', '--aosp-root', source!,
-    '--assets-dir', get('--branding-assets')!, '--assets-report-sha256', get('--branding-assets-report-sha256')!,
-    '--image-stage', output, '--aapt', tool('aapt'), '--apksigner', tool('apksigner'),
-    '--packet-output', path.join(output, 'source-packet.zip'), '--receipt', path.join(output, 'source-packet.json')],
-    {stdio:'inherit', env});
+  execFileSync('python3', packetCommand, {stdio:'inherit', env});
   const packet = JSON.parse(fs.readFileSync(path.join(output, 'source-packet.json'), 'utf8'));
   const physicalReport = path.join(output, 'physical-product.json');
   const report = JSON.parse(fs.readFileSync(physicalReport, 'utf8'));

@@ -17,7 +17,8 @@ await loadListenerSystemuiTests();
 const appId = 'ai.alphacompute.alphaphone';
 const listener = `${appId}.sense`;
 
-test('Alpha stages the same reviewed listener bytes its tools inspected', t => {
+function stageFixtureListener(t, appId) {
+ const listener = `${appId}.sense`;
  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-listener-copy-'));
  t.after(() => fs.rmSync(temp, {recursive:true, force:true}));
  const apk = path.join(temp, 'input.apk');
@@ -34,11 +35,24 @@ test('Alpha stages the same reviewed listener bytes its tools inspected', t => {
   descriptorFile, production:false, aapt, apksigner, env:{...process.env, ALPHA_TEST_APK:apk}});
  assert.equal(fs.readFileSync(apk, 'utf8'), 'substituted source');
  assert.deepEqual(fs.readFileSync(path.join(temp, 'listener/AlphaSense.apk')), original);
+ return {temp, signer, result};
+}
+
+test('Alpha stages the same reviewed listener bytes its tools inspected', t => {
+ const {temp, signer, result} = stageFixtureListener(t, appId);
  assert.equal(result.speechIncluded, false);
  assert.equal(result.releaseQualified, false);
  const policy = stageAlphaSensePolicy({root:process.cwd(), output:temp, appId, certificateSha256:signer});
  assert.match(policy, /^[a-f0-9]{64}$/);
  assert.ok(fs.existsSync(path.join(temp, 'listener/sepolicy/mac_permissions.xml')));
+});
+
+test('a retained identity stages its listener from the same projected Pixel composition', t => {
+ const retained = 'ai.elizaresearch.alphaphone', selected = process.env.ALPHA_ANDROID_APPLICATION_ID;
+ process.env.ALPHA_ANDROID_APPLICATION_ID = retained;
+ t.after(() => { if (selected === undefined) delete process.env.ALPHA_ANDROID_APPLICATION_ID; else process.env.ALPHA_ANDROID_APPLICATION_ID = selected; });
+ assert.equal(stageFixtureListener(t, retained).result.releaseQualified, false);
+ assert.throws(() => stageFixtureListener(t, appId), /Sense product differs from the admitted launcher/);
 });
 
 function bootReads({processes = '', uidList = `package:${listener} uid:10145`, enforcement = '', selinux = ''} = {}) {
