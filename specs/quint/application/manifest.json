@@ -2869,7 +2869,8 @@
     ],
     "invariants": [
       "ExactDismissal",
-      "RenderOrder"
+      "RenderOrder",
+      "AccountOwnsExpiry"
     ],
     "sources": [
       "apps/app/src/runtime/connection-ui.tsx",
@@ -2878,7 +2879,7 @@
     ],
     "abstractions": [
       "The mounted chooser projects a running resident with needs-plan admission and a near-expiry key. Only the plan owns a Home notice and dismissal; Account owns expiry and Renew. Settings, Account and foreground apps suppress publication while retaining dismissal state.",
-      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, overflow-driven scrolling, plan dismissal and Account expiry controls. Account replacement, renewal effects, billing and installed WebView behavior remain separate."
+      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, overflow-driven scrolling, plan dismissal across Settings, Inbox, conversation and Account, and the expiry and Renew shown only in Account. Account replacement, renewal effects, billing and installed WebView behavior remain separate."
     ]
   },
   {
