@@ -130,7 +130,11 @@ that model and the models that import it, and nothing else. A reused phase says
 (`cache.recordedAt`). `--cache=off` or `ALPHA_QUINT_CACHE=off` runs everything. Entries
 unused for 30 days, or beyond 512 MiB, are removed. Registry loading likewise remembers
 each model's parser-backed metadata validation, which otherwise costs about 16 seconds
-per load.
+per load; its marker must name the exact key and model-text hash it vouches for.
+Entries carry no provenance, so the checker refuses a cache directory in which git tracks
+any file. Promotion CI runs every check with `ALPHA_QUINT_CACHE=off` and neither restores
+nor saves `.cache/quint`: anything a pull request runs can write the Actions cache its
+promotion runs read, under a key it can predict. The cache speeds up local runs only.
 `--timeout` sets the per-check timeout in seconds. Defaults are 1800 for model
 checking and 120 for the default gate; the qualified six-step NativeCrashJournal
 Apalache phase receives 10800 seconds. An explicit `--timeout` overrides that
