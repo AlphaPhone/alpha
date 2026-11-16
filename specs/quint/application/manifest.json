@@ -3181,13 +3181,15 @@
       "retiredJournalClearDoesNotRefreshReplacementTest",
       "oldCleanupKeepsNewSaveBusyTest",
       "lateRejectionCannotPublishToReplacementTest",
+      "currentScheduleRefusalClearsExactJournalTest",
       "unconfirmedRemoteKeepsExactRetryTest",
       "discardClearsOnlyAnUnsentReviewTest"
     ],
     "sources": [
       "apps/app/src/runtime/hosted-digest-ui.tsx",
       "apps/app/src/runtime/hosted-digests.ts",
-      ".eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts"
+      ".eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts",
+      ".eliza/client-features/packages/contracts/src/workflow-client.ts"
     ],
     "abstractions": [
       "Actual mounted digest journal review, dispatch, cleanup and publication across two exact session bindings, including a legacy record without a phase.",
