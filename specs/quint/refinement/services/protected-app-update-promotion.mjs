@@ -70,7 +70,7 @@ function checkWorkflows() {
   assert.equal(jobs.publish.steps.find(step => step.with?.path === 'qualified-product').with.ref,
     '$' + '{{ needs.admit-publication.outputs.source_commit }}');
   const reverify = jobs.publish.steps.find(runs('run android:verify --'));
-  assert.ok(reverify?.run.includes('cd qualified-product && bun run android:verify --'));
+  assert.match(reverify?.run ?? '', /application_id=\$\(jq -er '\.packageName'[\s\S]*export ALPHA_ANDROID_APPLICATION_ID="\$application_id"[\s\S]*cd qualified-product[\s\S]*bun scripts\/android-host\.ts[\s\S]*bun run android:verify --/);
   assert.ok(reverify?.run.includes('scripts/ci/verify-qualified-cloud-launcher.py'));
   assert.equal(JSON.parse(read('package.json')).scripts['android:verify'], 'bun scripts/verify-apks.ts');
   const qualifiedRow = jobs.publish.steps.find(step => step.name === 'Require the qualified launcher release row before publication');

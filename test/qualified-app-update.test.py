@@ -352,6 +352,19 @@ class QualifiedUpdateTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unexpected signed bundle members"):
                 self.stage_fixture(self.directory / "cloud-large")
 
+    def test_retained_native_restores_exact_large_debug_and_signed_members_under_native_contract(self):
+        payload = bytes(4097)
+        self.producer.write_retained_native({"launcher-debug.apk": payload})
+        self.signed_entries["signing-plan.json"] = encoded(self.record, "signingPlan", self.plan)
+        self.write_signed()
+        self.write_delivery_receipt()
+        self.set_signed_launcher(payload)
+        product = self.directory / "retained-native-large"
+        with patch.object(FIXTURES.PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            self.stage_fixture(product)
+        for mode in ("debug", "release"):
+            self.assertEqual((product / f"artifacts/launcher-{mode}.apk").read_bytes(), payload)
+
     def api(self, endpoint):
         if endpoint == f"repos/{BRIDGE.REPOSITORY}/git/ref/heads/main":
             return {"ref": "refs/heads/main", "object": {"type": "commit", "sha": "f" * 40}}
