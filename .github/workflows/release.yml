@@ -262,7 +262,9 @@ jobs:
           const { apkUpdateChannel, validateUpdateChannel } = await import(pathToFileURL(path.join(sourceRoot, 'scripts/update-channel' + suffix)).href);
           const directory = process.env.ALPHA_ADMITTED_APK_DIR;
           const plan = JSON.parse(fs.readFileSync(path.join(directory, '..', 'pins.json'), 'utf8'));
-          const expectedPackage = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'app.config.json'), 'utf8')).appId;
+          const expectedPackage = execFileSync('python3', ['-B', '-c',
+            'import json,sys;sys.path.insert(0,"scripts/ci");from app_update_producer import release_contract;print(release_contract(json.load(open(sys.argv[1])))["packageName"])',
+            path.join(directory, '..', 'pins.json')], { encoding: 'utf8' }).trim();
           const channel = validateUpdateChannel(plan.updateChannel);
           const aapt = path.join(process.env.ANDROID_HOME, 'build-tools', '36.0.0', 'aapt');
           for (const variant of process.env.ALPHA_RELEASE_VARIANTS.split(' ')) {
@@ -270,7 +272,7 @@ jobs:
             const badging = execFileSync(aapt, ['dump', 'badging', apk], { encoding: 'utf8' });
             const xml = execFileSync(aapt, ['dump', 'xmltree', apk, 'AndroidManifest.xml'], { encoding: 'utf8' });
             const facts = manifestFacts(xml, badging);
-            const compiledChannel = apkUpdateChannel(parseXmlTree(xml));
+            const compiledChannel = apkUpdateChannel(parseXmlTree(xml), {appId: expectedPackage});
             if (compiledChannel.kind !== channel.kind || compiledChannel.manifestUrlSha256 !== channel.manifestUrlSha256)
               throw new Error('The ' + variant + ' APK compiled update channel differs from the reviewed signing plan');
             if (facts.packageName !== expectedPackage || facts.versionCode !== plan.versionCode ||
@@ -467,7 +469,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(jq -er '.runtimeProfile' "$RUNNER_TEMP/qualified-stage/qualification-summary.json")" = native
-          (cd qualified-product && bun run android:verify -- --cloud-voice-evidence="$RUNNER_TEMP/qualified-stage/cloud-voice.json")
+          application_id=$(jq -er '.packageName' "$RUNNER_TEMP/qualified-stage/qualification-summary.json")
+          (export ALPHA_ANDROID_APPLICATION_ID="$application_id"
+           cd qualified-product
+           bun scripts/android-host.ts
+           bun run android:verify -- --cloud-voice-evidence="$RUNNER_TEMP/qualified-stage/cloud-voice.json")
       - name: Require the qualified launcher release row before publication
         run: |
           python3 - <<'PY'

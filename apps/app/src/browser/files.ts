@@ -68,7 +68,7 @@ export class BrowserFiles extends SharedFiles {
   if(selected.status!=='selected'||typeof selected.selectionId!=='string')throw changed();
   try{
    if(!await current())throw changed();
-   const value=await this.attachment({selectionId:selected.selectionId});
+   const value=await this.attachment({selectionId:selected.selectionId,purpose:'chat'});
    if(!await current())throw changed();
    return value;
   }finally{await this.forgetSelected({selectionId:selected.selectionId});}

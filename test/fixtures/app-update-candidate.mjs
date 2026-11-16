@@ -11,8 +11,8 @@ import {embeddingProducerInputPaths, nativeInputPaths, nativeJavaPath, nativeBin
 export const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const json = (file, value) => fs.writeFileSync(file, JSON.stringify(value));
 export const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
-export const legacyManifestUrl = 'https://github.com/eliza-research/alpha/releases/download/app-stable/alpha-update-stable.json';
-const repository = {id: 1396333361, full_name: 'eliza-research/alpha'};
+export const legacyManifestUrl = 'https://github.com/alphacompute/alpha/releases/download/app-stable/alpha-update-stable.json';
+const repository = {id: 1396333361, full_name: 'AlphaCompute/alpha'};
 export function candidateFixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-app-candidate-'));
   t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
@@ -34,8 +34,9 @@ export function candidateFixture(t) {
   commit(sdk);
   const sdkCommit = git(sdk, ['rev-parse', 'HEAD']);
   fs.mkdirSync(path.join(directory, 'android'));
+  fs.copyFileSync(new URL('../../android/consumer-host.json',import.meta.url),path.join(directory,'android/consumer-host.json'));
   const config = {appId: 'ai.alphacompute.alphaphone', versionCode: 1,
-    updateManifestUrl: 'https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json'};
+    updateManifestUrl: 'https://github.com/alphacompute/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json'};
   json(path.join(directory, 'app.config.json'), config);
   json(path.join(directory, 'upstream.lock.json'), {commit: sdkCommit});
   json(path.join(directory, 'android/release-signer.json'), {lastRelease: {versionCode: null}});
@@ -46,12 +47,12 @@ export function candidateFixture(t) {
   write('android/embedding-host/native-requirements.txt', 'synthetic pinned package==1');
   write('android/embedding-host/bootstrap-requirements.txt', 'synthetic pinned bootstrap==1');
   write('android/paradee-voice/asr-inputs.json', '{}');
-  for (const name of ['build-embedding-host', 'prepare-embedding-host', 'embedding-native-contract',
+  for (const name of ['android-identity', 'build-embedding-host', 'prepare-embedding-host', 'embedding-native-contract',
     'embedding-build-remap', 'native-build-inputs', 'android-stage-voice-models', 'local-agent-source', 'voice-host', 'paradee-runtime', 'android-abis', 'copy-file-clone', 'stage-embedding-host']) write(`scripts/${name}.ts`, 'synthetic recipe input');
   git(directory, ['init', '-q']); git(directory, ['add', 'app.config.json', 'upstream.lock.json', 'android', 'scripts']); commit(directory);
   const env = {...process.env, GITHUB_REPOSITORY: repository.full_name, GITHUB_EVENT_NAME: 'push',
     GITHUB_REPOSITORY_ID: String(repository.id),
-    GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW_REF: 'eliza-research/alpha/.github/workflows/resident-android.yml@refs/heads/main',
+    GITHUB_REF: 'refs/heads/main', GITHUB_WORKFLOW_REF: 'AlphaCompute/alpha/.github/workflows/resident-android.yml@refs/heads/main',
     GITHUB_SHA: git(directory, ['rev-parse', 'HEAD']), GITHUB_RUN_ID: '42885443022', GITHUB_RUN_NUMBER: '705', GITHUB_RUN_ATTEMPT: '1'};
   const state = {
     pages: [[{name: 'alpha-phone-24.apk'}]], pointer: null, missing: false,
@@ -63,14 +64,14 @@ export function candidateFixture(t) {
       path: '.github/workflows/resident-android.yml', event: 'push', head_branch: 'main', head_sha: env.GITHUB_SHA,
       repository, head_repository: repository, run_number: Number(env.GITHUB_RUN_NUMBER),
       run_attempt: Number(env.GITHUB_RUN_ATTEMPT), ...state.runChanges};
-    if (args[0] === 'repos/eliza-research/alpha') return {...repository, private: false};
+    if (args[0] === 'repos/alphacompute/alpha') return {...repository, private: false};
     if (args[0].endsWith('/tags/app-stable')) return state.legacyMissing ? null : {id: 15, draft: false};
     if (args[0].endsWith('/tags/app-stable-alphacompute')) return state.missing ? null : {id: 16, draft: false};
-    if (args[2] === 'repos/eliza-research/alpha/releases/15/assets?per_page=100') {
+    if (args[2] === 'repos/alphacompute/alpha/releases/15/assets?per_page=100') {
       assert.deepEqual(args.slice(0, 2), ['--paginate', '--slurp']);
       return state.legacyPages;
     }
-    assert.deepEqual(args, ['--paginate', '--slurp', 'repos/eliza-research/alpha/releases/16/assets?per_page=100']);
+    assert.deepEqual(args, ['--paginate', '--slurp', 'repos/alphacompute/alpha/releases/16/assets?per_page=100']);
     return state.pages;
   };
   const options = {root: directory, env, api, read: async url => {

@@ -14,6 +14,7 @@ before(() => {checkClientFeatures({root});}, {timeout: scaledTimeout(600000)});
 
 test('Browser Files placement preserves exact rows and Trash markers on IndexedDB refusal', {timeout: scaledTimeout(90000)}, async () => {
   const {outputFiles: [bundle]} = await build({
+    tsconfig: resolve(root, 'tsconfig.json'),
     stdin: {resolveDir: root, contents: `
       import {BrowserFiles} from './.eliza/client-features/plugins/plugin-files/src/browser/files.ts';
       import {BrowserStorageVolume} from './.eliza/client-features/plugins/plugin-files/src/browser/storage-volume.ts';
@@ -21,6 +22,10 @@ test('Browser Files placement preserves exact rows and Trash markers on IndexedD
     `},
     bundle: true, write: false, platform: 'browser', format: 'iife',
     external: ['pdfjs-dist'],
+    // The app resolves this specifier to Alpha's projected protocol module (tsconfig and Vite alias).
+    plugins: [{name: 'alpha-core-protocol', setup(builder) {
+      builder.onResolve({filter: /^@elizaos\/core\/protocol$/}, () => ({path: resolve(root, '.eliza/client-features/alpha-voice-core-protocol.ts')}));
+    }}],
   });
   const browser = await chromium.launch({headless: true, args: ['--no-sandbox']});
   try {

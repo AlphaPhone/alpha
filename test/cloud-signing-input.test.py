@@ -26,7 +26,7 @@ ADMISSION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ADMISSION)
 
 NATIVE_SOURCE_PATHS = ('packages/app/scripts', 'plugins/plugin-native-inference/src/model-catalog', 'bun.lock', 'package.json', 'packages/agent/package.json', 'packages/app/package.json', 'packages/app/platforms/android/app/src/main/elizavoice-jni/CMakeLists.txt', 'packages/app/platforms/android/app/src/main/elizavoice-jni/elizavoice-jni.cpp', 'packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaVoiceNative.java', 'packages/app/scripts/aosp/compile-libllama-paths.ts', 'packages/app/scripts/aosp/compile-libllama.ts', 'packages/app/scripts/aosp/compile-shim.ts', 'packages/app/scripts/aosp/vulkan-source-contract.ts', 'packages/app/scripts/aosp/zig-toolchain.ts', 'packages/app/scripts/build-helpers/arm64-simd.ts', 'packages/app/scripts/build-helpers/elizavoice-build-flags.ts', 'packages/app/scripts/build-helpers/omnivoice-merged.ts', 'packages/app/scripts/build-helpers/verify-fused-symbols.ts', 'packages/app/scripts/lib/repo-root.ts', 'packages/app/scripts/paradee-voice/build-native.ts', 'packages/app/scripts/stage-elizavoice-lib.ts', 'packages/app/scripts/voice/build-phonon2-gguf.ts', 'plugins/plugin-local-inference/native/android', 'plugins/plugin-native-inference/src/model-catalog/voice-model-versions.json')
-NATIVE_PRODUCT_PATHS = ('android/embedding-host/build-toolchain.json', 'android/embedding-host/native-requirements.txt', 'android/embedding-host/bootstrap-requirements.txt', 'android/paradee-voice/asr-inputs.json', 'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts', 'scripts/embedding-native-contract.ts', 'scripts/embedding-build-remap.ts', 'scripts/native-build-inputs.ts', 'scripts/android-stage-voice-models.ts', 'scripts/local-agent-source.ts', 'scripts/voice-host.ts', 'scripts/paradee-runtime.ts', 'scripts/android-abis.ts', 'scripts/copy-file-clone.ts', 'scripts/stage-embedding-host.ts')
+NATIVE_PRODUCT_PATHS = ('app.config.json', 'android/consumer-host.json', 'android/embedding-host/build-toolchain.json', 'android/embedding-host/native-requirements.txt', 'android/embedding-host/bootstrap-requirements.txt', 'android/paradee-voice/asr-inputs.json', 'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts', 'scripts/embedding-native-contract.ts', 'scripts/embedding-build-remap.ts', 'scripts/native-build-inputs.ts', 'scripts/android-identity.ts', 'scripts/android-stage-voice-models.ts', 'scripts/local-agent-source.ts', 'scripts/voice-host.ts', 'scripts/paradee-runtime.ts', 'scripts/android-abis.ts', 'scripts/copy-file-clone.ts', 'scripts/stage-embedding-host.ts')
 
 class CloudSigningInputTest(unittest.TestCase):
     def setUp(self):
@@ -154,6 +154,7 @@ class CloudSigningInputTest(unittest.TestCase):
         put(root, "android/voice-host/qualified-voice-host.json", b'{"models":[],"asrSlot":{}}')
         put(root, "upstream.lock.json", json.dumps({"commit": sdk_commit}).encode())
         put(root, "app.config.json", json.dumps({"appId": PRODUCER.CANDIDATE_PACKAGE}).encode())
+        put(root, "android/consumer-host.json", json.dumps({"installedIdentities": []}).encode())
         git(root, "init", "-q")
         git(root, "add", "android", "scripts", "upstream.lock.json", "app.config.json")
         git(root, "update-index", "--add", "--cacheinfo", "160000," + sdk_commit + ",vendor/eliza")
@@ -497,6 +498,21 @@ class CloudSigningInputTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "on-device voice with ASR"):
             ADMISSION.admit(self.archive, self.pin)
 
+    def test_canonical_native_recipe_preserves_legacy_and_complete_identity_inputs(self):
+        identity_inputs = ("app.config.json", "android/consumer-host.json", "scripts/android-identity.ts")
+        for removed in ((), identity_inputs, identity_inputs[:1], identity_inputs[:2]):
+            with self.subTest(removed=removed):
+                def change(native):
+                    for name in removed:
+                        native["recipe"]["productInputs"].pop(name)
+                    native["recipeSha256"] = ADMISSION.digest(json.dumps(native["recipe"], separators=(",", ":")).encode())
+                self.write_candidate(change_native=change)
+                if removed and removed != identity_inputs:
+                    with self.assertRaisesRegex(ValueError, "native recipe differs from frozen product inputs"):
+                        ADMISSION.admit(self.archive, self.pin)
+                else:
+                    self.assertTrue(ADMISSION.admit(self.archive, self.pin)["inputVerified"])
+
     def test_native_recipe_cannot_forge_self_consistent_source_or_model_pins(self):
         def rehash(value):
             value["recipeSha256"] = ADMISSION.digest(json.dumps(value["recipe"], separators=(",", ":")).encode())
@@ -595,6 +611,19 @@ class CloudSigningInputTest(unittest.TestCase):
                     PRODUCER.input_contract(pin)
         with self.assertRaisesRegex(ValueError, "no signing-key rotation"):
             PRODUCER.producer_kind({**self.pin, "rotation": {"lineageBase64": "", "lineageSHA256": "0" * 64}})
+        # The version 49 installation identity is no release target either, for any producer route.
+        for kind in (PRODUCER.PRIVATE_RUNNER, None):
+            with self.subTest(kind=kind, identity="retained"):
+                pin = {**copy.deepcopy(self.pin), "applicationId": "ai.elizaresearch.alphaphone",
+                       "purpose": "retained-installation-update"}
+                if kind:
+                    pin.update(producerKind=kind, privateStorage={}, privateProducerReceiptSHA256="2" * 64)
+                    for field in ("producerRunId", "producerRunAttempt", "artifactId", "candidateReceiptSHA256"):
+                        pin.pop(field, None)
+                with self.assertRaisesRegex(ValueError, "Unsupported installation identity"):
+                    PRODUCER.input_contract(pin)
+        self.assertEqual(PRODUCER.input_contract({**self.pin, "applicationId": PRODUCER.CANDIDATE_PACKAGE})["packageName"],
+                         PRODUCER.CANDIDATE_PACKAGE)
 
     def test_a_signer_record_with_a_rotation_names_the_edit_and_a_standalone_pin_is_inert(self):
         current = {"schema": 1, "signerSha256": "e" * 64, "privateProducerApproval": {"unsignedApkSHA256": {"launcher": "1" * 64}}}
@@ -726,7 +755,7 @@ class CloudSigningInputTest(unittest.TestCase):
 
 class PrivateProducerSourceReviewTest(unittest.TestCase):
     def test_isolated_source_requires_exact_committed_approval(self):
-        self.assertEqual(PRODUCER.REPOSITORY, "eliza-research/alpha")
+        self.assertEqual(PRODUCER.REPOSITORY, "alphacompute/alpha")
         with tempfile.TemporaryDirectory(prefix="alpha-source-review-") as directory:
             root = Path(directory)
             (root / "scripts/ci").mkdir(parents=True)

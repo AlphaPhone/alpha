@@ -28,7 +28,7 @@ and build-tools 36.0.0. Set
 `JAVA_HOME` and `ANDROID_HOME`; standard macOS SDK/JDK locations are also detected.
 
 ```sh
-git clone --recurse-submodules https://github.com/eliza-research/alpha.git
+git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url)"
 cd alpha
 bun install --frozen-lockfile
 bun run verify
@@ -96,6 +96,20 @@ requests. Its default URL is `http://127.0.0.1:5318`.
 resident profiles live under `~/.local/share/alphaphone/`. Existing accounts,
 credentials and histories are not copied or reset.
 
+### Maps input and navigation controls
+
+Automatic search and Enter share one accepted input generation for destination and origin
+fields. Loading, ready and successful empty results are reused; an explicit retry after a failed
+request remains available. New edits, provider/account changes, place/origin choices and navigation
+changes retire that ownership. Keep provider-effect counts in the owning browser/model checks.
+
+Maps navigation is visual for now, following the owner's voice deferral. Its footer keeps ETA,
+distance and End, with symmetric space around the centered ETA. The Maps-specific Ask, voice and
+manual Reroute controls and the empty-search Ask prompt are removed. The normal assistant speech
+lifecycle and the always-packaged resident/on-device speech runtime remain separate. Shared speech
+component contracts are retained; the Maps UI tests now verify silence, visual guidance, unrelated
+playback ownership and End rather than advertising deferred controls.
+
 ### Standalone Cloud (development)
 
 Distributed builds use the Cloud in `scripts/cloud-deployment-policy.ts` (Eliza Cloud
@@ -152,11 +166,26 @@ not additional release distributions. The same launcher APK can be installed on
 stock Android or preinstalled in the Alpha image. It declares HOME.
 Phone, Contacts and SMS/MMS require an admitted AOSP image capability.
 
-Alpha Compute builds use the same ID for the installed package and native
-namespace. The retained Pixel v44 uses the former package ID. Android
-installs the new package separately, with its own private data, Keystore,
-permissions and roles. Establish a fresh baseline on each distribution form,
-then verify updates and data retention between builds with the new package ID.
+Production and admitted Sense qualification images stage PackageManager component overrides for
+the exact validated Phone/SMS handlers. Their eligibility is an image default rather than something
+that first depends on opening the launcher after an APK update. The existing fresh-device Provision
+flow alone assigns default apps; these component overrides do not change an owner's role choices.
+This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
+retained-update qualification on the matching AOSP image remain separate release gates.
+
+Canonical builds use `app.config.json` unchanged. A local build can set
+`ALPHA_ANDROID_APPLICATION_ID` to an identity declared in `android/consumer-host.json`
+(the historical `ai.elizaresearch.alphaphone`). This selects installation identity,
+not features or another flavor: the renderer, pinned SDK and native profile are
+the same current source. The generated native source view preserves that Java
+namespace, callback names, sockets and update channel without editing the
+canonical sources. Gradle refuses a stale view; APK verification compares the
+packaged identity receipt with that view. No release path admits that identity:
+installations of the historical package carry the retired version 49 signer and
+Alpha signs with one key and no signing-key rotation, so signing admission,
+qualification and update publication accept only `ai.alphacompute.alphaphone`.
+Those phones are wiped and installed again, never upgraded in place.
+
 Qualify the native libraries and APKs for the exact product and SDK revisions.
 
 There is one runtime profile. Every build packages libelizainference with the
@@ -246,14 +275,20 @@ candidate, signed release and physical acceptance receipts with their exact buil
 
 `scripts/deliver-app-update.ts` publishes an admitted signed launcher APK and
 checks anonymous readback. Merging source does not publish an application update.
-New builds read the `app-stable-alphacompute` release. The previous package
-reads `app-stable`. Publication keeps each package on its own release and
-checks retained versions on both. Android may require installation confirmation.
-New builds use the live `eliza-research/alpha` URL. Previously issued
-`eliza-research/alphaphone` GitHub release URLs use its redirect.
-Protected release jobs check the immutable repository and owner IDs and bind
-dispatches to the reviewed commit on `main`. The
-release owner applies the reviewed workflow reference allowlist in
+Releases use `ai.alphacompute.alphaphone` only; an existing
+`ai.elizaresearch.alphaphone` installation is not updated in place (see above).
+The canonical package reads the `app-stable-alphacompute` release. The publisher
+still checks the version floor from `app-stable`. Android may require
+installation confirmation.
+
+The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
+available there before distribution. Verify anonymous readback of the app
+manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
+release pointers may need their APK URLs updated to the canonical repository.
+
+Protected release jobs bind dispatches to the reviewed commit on `main`.
+After the repository moves, the release owner applies the repository ID,
+Alpha Compute owner ID and workflow reference allowlist in
 [`scripts/ci/private-artifact-identity.json`](../scripts/ci/private-artifact-identity.json)
 to the existing Workload Identity Federation provider before protected signing
 or publication uses private artifact storage.
@@ -338,7 +373,10 @@ operation `sign`, the exact reviewed `workflow_commit` and `signing-plan.json`
 as the `plan` input. Preflight checks the official Actions ZIP. The protected
 job checks the same run attempt and artifact again, then stages the pinned
 private generation before accessing the signing key. Current builds produce one
-native launcher APK on the public update channel. Release tooling also retains
+native launcher APK on the public update channel. The private signing contract
+accepts the canonical package or an explicitly approved retained-installation
+update. The latter must bind its installed identity and purpose to the exact
+reviewed producer bytes. Release tooling also retains
 the reviewed private Cloud producer input contract: its complete original standalone
 and launcher pair must match the approved hashes, Cloud profile and historical
 package identity. Both members are authenticated archive inputs; only the launcher
@@ -351,7 +389,7 @@ For publication, set `delivery_artifact_id` to the numeric ID of the original
 Save its ZIP.
 
 ```sh
-gh api "repos/eliza-research/alpha/actions/artifacts/$delivery_artifact_id/zip" > delivery.zip
+gh api "repositories/1396333361/actions/artifacts/$delivery_artifact_id/zip" > delivery.zip
 ```
 
 Read `private-storage-receipt.json` from the ZIP and confirm its
@@ -416,7 +454,7 @@ signed `launcher-release.apk`. If you download the public APK asset, save it
 under that filename. For the baked launcher, use the post-signing manifest for
 the exact APK in the image. Both wireless captures verify the installed bytes
 against the reviewed `android/release-signer.json` policy, including for
-versions already recorded as released. The [wireless drill](https://github.com/eliza-research/alpha/issues/889)
+versions already recorded as released. The [wireless drill](https://github.com/alphacompute/alpha/issues/889)
 requires Android 14 or later for package installer provenance. Keep the phone
 offline from baseline installation through HOME selection, any one-time Android
 installation permission, and the `before` capture. Keep the host online and
@@ -654,9 +692,17 @@ probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
 The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
 Shell from browser-based Google sign-in and checks for an eligible browser
 when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
-The current pin `33c5ab4c004a396324994784c4bd76e8c8679286` matches the
+The pin `33c5ab4c004a396324994784c4bd76e8c8679286` matches the
 MMS receiver's MIME type when checking eligibility for the Android SMS role
 ([eliza#39686](https://github.com/elizaOS/eliza/pull/39686)).
+The pin `c25d0fca2561f9f604bee8e891be772fa678589f` takes the reviewed
+fix for restoring private action targets before resident execution
+([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)).
+The pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
+routes, keeps selected chat attachments through intake, binds the selected Cloud
+image model at launch and rechecks a live file selection after storage reads
+([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
+The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
