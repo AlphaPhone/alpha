@@ -7,7 +7,7 @@ import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
@@ -2255,14 +2255,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if (!receipt) throw error;
         }
         if (!this.live || JSON.stringify(connectionController.getSnapshot().session)!==JSON.stringify(session)||readLease&&!connectionController.readReplyCurrent(readLease.binding)) return;
-        this.setState((previous:Shell)=>this.live&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(session)&&(!readLease||connectionController.readReplyCurrent(readLease.binding))?{ msgs: previous.msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, sub: receipt.summary, title: receipt.status === 'succeeded' ? 'Completed' : 'Not completed' }) } : m) }:null);
+        const displaySummary=actionResultText(receipt.summary);
+        this.setState((previous:Shell)=>this.live&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(session)&&(!readLease||connectionController.readReplyCurrent(readLease.binding))?{ msgs: previous.msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, sub: displaySummary, title: receipt.status === 'succeeded' ? 'Completed' : receipt.status === 'unknown' ? 'Not confirmed' : 'Not completed' }) } : m) }:null);
         if(receipt.readReply&&this.readReplyLeases?.has(receipt.proposalId)){
           try{await completeReadReply(this,receipt);}
           catch{if(this.live&&readLease?.phase==='unconfirmed')this.setState((previous:Shell)=>this.live&&readLease.phase==='unconfirmed'&&connectionController.readReplyCurrent(readLease.binding)?{msgs:previous.msgs.map((m:Shell)=>m.id===message.id?{...m,card:{...m.card,sub:receipt.summary+' The answer is unconfirmed. Check conversation history before trying again.'}}:m)}:null);}
         }else {
           if(receipt.status!=='succeeded'){this.cancelReadReplyCompletions?.(receipt.proposalId);this.retireReadReplyVoice?.(receipt.proposalId);}
-          if (this.S().view !== beforeView) this.toast(receipt.summary);
-          else this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
+          if (this.S().view !== beforeView) this.toast(displaySummary);
+          else this.agentSay(displaySummary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
         }
         if(session)this.setState({},()=>{if(this.live&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(session)){
           // The receipt has reached the UI; refreshing earlier would invalidate
