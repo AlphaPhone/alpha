@@ -11251,6 +11251,7 @@
       "reopenedTest",
       "declinedReviewTest",
       "timePassedDuringReviewTest",
+      "tomorrowInDstGapTest",
       "retryReadsBackTest",
       "otherModeWaitsTest",
       "movedScheduleWaitsTest",
@@ -11401,7 +11402,8 @@
     },
     "abstractions": [
       "One completed one-off reminder and the revision its detail shows. Completing it again is one step that shows the new completed revision; the completion itself is ReminderDecision.",
-      "The review is answered in the step that opens it; the clock may pass the reviewed time during it. A local time skipped by a time-zone change is not modeled.",
+      "The review is answered in the step that opens it; the clock may pass the reviewed time during it.",
+      "A dedicated scenario models a nonexistent local time tomorrow and refuses that press before review. The source replay supplies New York's real spring-forward gap; the ordinary generated campaign uses valid wall times.",
       "The reopen schedule depends on the time of the press; time moving is one step after which a press computes a different operation from a journaled one.",
       "The binding hash, the record write and the outcome validation of the shared journal are one retained step; a full or unreadable journal is not modeled.",
       "Native applies or ignores an update atomically and keeps a receipt for every applied one; that contract is assumed. A change elsewhere keeps the reminder completed."
