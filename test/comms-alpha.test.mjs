@@ -105,3 +105,18 @@ test('the briefing is Alpha\'s first line for the opening, before rows that arri
   assert.deepEqual(A.briefingInserted([{id: 2}], b, null).map(r => r.id), ['b', 2], 'an empty chat at open: first');
   assert.deepEqual(A.briefingInserted([{id: 2}], b, 9).map(r => r.id), [2, 'b'], 'a vanished anchor appends');
 });
+
+test('the saved comms stage reads only its exact shape (AC-30)', async () => {
+  const {stageSessionFrom, stageSessionValue} = await import('../apps/app/src/runtime/stage-session-store.ts');
+  const good = {chat: 'sheet', sheetShare: 0.5, view: 'phone', stageFrom: [{view: 'messages', title: 'Messages', patch: {thread: 't1'}}]};
+  assert.deepEqual(stageSessionFrom(stageSessionValue(good)), good);
+  assert.deepEqual(stageSessionFrom(stageSessionValue({...good, chat: 'input', stageFrom: [], sheetShare: null})), {...good, chat: 'input', stageFrom: [], sheetShare: null});
+  const value = stageSessionValue(good);
+  for (const bad of [null, [], 'x', {...value, v: 2}, {...value, extra: 1}, {...value, chat: 'hidden'}, {...value, sheetShare: 0}, {...value, sheetShare: 1.5},
+    {...value, view: 'Phone!'}, {...value, stageFrom: [{view: 'messages', title: 'Messages', patch: null, more: 1}]},
+    {...value, stageFrom: Array.from({length: 9}, () => ({view: 'messages', title: 'M', patch: null}))},
+    // Stage history exists only while the chat is open.
+    {...value, chat: 'input'}])
+    assert.equal(stageSessionFrom(bad), null, JSON.stringify(bad)?.slice(0, 80));
+  assert.equal(stageSessionValue({...good, stageFrom: Array.from({length: 12}, (_, i) => ({view: 'v' + i, title: '', patch: null}))}).stageFrom.length, 8, 'history is capped');
+});

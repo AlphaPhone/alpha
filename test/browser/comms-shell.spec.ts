@@ -379,6 +379,30 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		expect(await shell(page, 'window.__shell().stageHold')).toBeNull();
 	});
 
+	test('AC-30: an open stage is saved and restored as data; a closed comms view is not saved', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'thread'});
+		await registerBar(page, 'calendar', {kind: 'call', field: 'alpha', end: true, app: 'Call'});
+		const saved = () => page.evaluate(async () => { const {stageSessionStore} = await import('/src/runtime/stage-session-store.ts'); return stageSessionStore().read(); });
+		await openSheet(page);
+		await shell(page, 'window.__shell().api("notes").stage("calendar", null, null)');
+		await expect.poll(saved).toEqual({chat: 'sheet', sheetShare: null, view: 'calendar', stageFrom: [{view: 'notes', title: 'Messages', patch: null}]});
+		const session = await saved();
+		// As after process death: Home, with the saved session in the store (leaving wrote it empty).
+		await shell(page, 'window.__shell().goHome()');
+		await expect.poll(saved).toBeNull();
+		await page.evaluate(async session => { const {stageSessionStore} = await import('/src/runtime/stage-session-store.ts'); await stageSessionStore().write(session); }, session);
+		await shell(page, 'window.__shell().restoreStageSession()');
+		await expect.poll(() => shell(page, 'window.__shell().S().view')).toBe('calendar');
+		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
+		expect(await shell(page, 'JSON.stringify(window.__shell().S().stageFrom.map(e => e.view))')).toBe('["notes"]');
+		// Restoring runs nothing: no End, Send or other bar action.
+		expect((await calls(page)).filter(call => call[1] !== 'onText')).toEqual([]);
+		// Closing the chat forgets the stage.
+		await shell(page, 'window.__shell().setState({chat: "input"})');
+		await expect.poll(saved).toBeNull();
+	});
+
 	for (const theme of ['light', 'dark']) test(`shell surfaces meet contrast in ${theme}`, async ({page}) => {
 		await openNotes(page, theme);
 		await registerBar(page, 'notes', {kind: 'call', field: 'alpha', end: true, app: 'Call', suggestion: null});
