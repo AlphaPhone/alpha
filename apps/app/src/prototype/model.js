@@ -5599,7 +5599,7 @@ class Component extends DCLogic {
       set: function (p) { self.vset(k, p); },
       get: function (other) { return self.vget(other); },
       setView: function (other, p) { self.vset(other, p); },
-      shell: function (p) { self.setState(p); },
+      shell: function (p, options) { self.setState(p, options?.afterCommit); },
       // Android only: shows the startup access panel again after its "Not now" (main.tsx).
       reopenStartupAccess: typeof (self.props || {}).onReopenStartupAccess === "function" ? function () { self.props.onReopenStartupAccess(); } : null,
       open: function (view, p, chat) { self.openView(view, p, chat, { push: self.S().view === k && view !== k }); },
