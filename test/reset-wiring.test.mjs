@@ -25,8 +25,7 @@ test('Alpha reset is the shared native review, coordinator and recovery under Al
   put('com/getcapacitor/annotation/ActivityCallback.java','package com.getcapacitor.annotation; @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME) public @interface ActivityCallback {}');
   put('androidx/activity/result/ActivityResult.java','package androidx.activity.result; public class ActivityResult { public int getResultCode(){return 0;} }');
   put('ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java','package ai.alphacompute.alphaphone; final class AlphaCloudSignInPlugin {static ai.eliza.auth.cloud.CloudSignInConfig REGISTRATION;}');
-  put('ai/alphacompute/alphaphone/LegacyCloudRecovery.java','package ai.alphacompute.alphaphone; final class LegacyCloudRecovery {static final String LEGACY_NAMESPACE="";}');
-  put('ai/alphacompute/alphaphone/AlphaCredentialStore.java','package ai.alphacompute.alphaphone; final class AlphaCredentialStore {static String readSlotBeforeAttach(android.content.Context c,String n)throws Exception{return null;}static String readLegacySlotBeforeAttach(android.content.Context c,String n)throws Exception{return null;}}');
+  put('ai/alphacompute/alphaphone/AlphaCredentialStore.java','package ai.alphacompute.alphaphone; final class AlphaCredentialStore {static String readSlotBeforeAttach(android.content.Context c,String n)throws Exception{return null;}}');
   put('ai/alphacompute/alphaphone/AlphaCalendarPlugin.java','package ai.alphacompute.alphaphone; final class AlphaCalendarPlugin {static ai.eliza.plugins.calendar.CalendarConfiguration CONFIGURATION;}');
   put('ai/alphacompute/alphaphone/WiringCheck.java',`package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.system.reset.*;
