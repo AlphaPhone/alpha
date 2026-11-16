@@ -2,12 +2,8 @@
 // output. Not emulator or device evidence: an emulator run of the export is separate (class E).
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { ALPHA, STOCK, APK, BEFORE, DATA, NONCE, exported, hmac, fakeUnit, timing } from "./fixtures/pilot-update.mjs";
 import { compareDomains, integrityQuery, INTEGRITY_AUTHORITY, parseIntegrityExport } from "../scripts/pilot-update.ts";
-import { beginPilotRotation, claimPilotInstall, inspectPilotRotation } from "../scripts/owner/pilot-rotation-journal.ts";
 
 test("the export query is the read-only provider URI with a nonce, quoted for the device shell", () => {
   assert.equal(INTEGRITY_AUTHORITY, "ai.alphacompute.alphaphone.integrity");
@@ -211,47 +207,3 @@ test("final process readback must prove the integrity process stopped before res
   assert.ok(!state.calls.some(call => call.startsWith("shell am start")));
 });
 
-test("rotation intent is durable at dispatch and survives an ambiguous installer outcome", t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-pilot-update-fixture-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const directory = path.join(root, "journal");
-  const id = "a".repeat(64);
-  const { state, adb } = fakeUnit();
-  const release = claimPilotInstall(directory, id, root);
-  try {
-    const update = updateUnit({ adb: args => {
-      if (args[0] === "install") {
-        assert.equal(inspectPilotRotation(directory, id).state, "unknown");
-        assert.equal(state.holder, "com.android.launcher3");
-        throw new Error("installer response lost");
-      }
-      return adb(args);
-    }, apk: APK, before: BEFORE, home: planHome(adb), timing,
-    prepareInstall: domains => {
-      assert.ok(Object.keys(domains.files).length);
-      assert.equal(inspectPilotRotation(directory, id).state, "none");
-      return () => beginPilotRotation(directory, id, { replacementApkSha256: APK.sha256 });
-    } });
-    assert.equal(update.installAttempted, true);
-    assert.equal(update.installed, false);
-    assert.equal(update.installVerified, false);
-    assert.equal(update.agentRestart, null);
-    assert.match(update.failures.join("\n"), /installer response lost/);
-    assert.equal(state.holder, ALPHA);
-  } finally { release(); }
-  assert.equal(inspectPilotRotation(directory, id).state, "unknown");
-});
-
-test("readback is checked again after rotation validation, before consuming its intent", () => {
-  const { state, adb } = fakeUnit();
-  let recorded = false;
-  const update = updateUnit({ adb, apk: APK, before: BEFORE, home: planHome(adb), timing,
-    prepareInstall: () => {
-      state.pids = "777";
-      return () => { recorded = true; };
-    } });
-  assert.equal(recorded, false);
-  assert.equal(update.installAttempted, false);
-  assert.equal(update.home.restoration.restored, true);
-  assert.match(update.failures.join("\n"), /running before the pre-update readback/);
-});

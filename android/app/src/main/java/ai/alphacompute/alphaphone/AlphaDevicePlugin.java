@@ -787,7 +787,7 @@ public final class AlphaDevicePlugin extends Plugin {
    org.json.JSONObject row=releases.getJSONObject(i);
    String flavor=row.optString("variant"),root=row.optString("signerSha256");
    if(!"alpha-update/v1".equals(row.opt("schema"))||
-      !("launcher".equals(flavor)||"standalone".equals(flavor))||
+      !"launcher".equals(flavor)||
       !root.matches("[0-9a-f]{64}")||!pairs.add(flavor+":"+root))return null;
    if(variant.equals(flavor)&&signer.equals(root))selected=row;
   }

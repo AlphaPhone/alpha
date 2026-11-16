@@ -346,7 +346,7 @@ async function reroute(page) {
   await route(page, t);
   await start(page, t);
   await geo(page, far);
-  await expect(status(page)).toContainText('Off route. Tap Reroute from here.');
+  await expect(status(page)).toContainText('Off route. End navigation to plan a new route.');
   await expect(button(page, 'Reroute')).toHaveCount(0);
   await page.waitForFunction(() => !!window.closedMaps.agentPort.current);
   assert.equal((await requests(page)).filter(row => row.endpoint === 'routes').length, 1);
