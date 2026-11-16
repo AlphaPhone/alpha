@@ -55,9 +55,10 @@ module MessageThreads {
   }
   // The owner asked the agent to draft for the open thread (AC-14). The draft replaces whatever the
   // slot holds, the owner's own text included (the displaced text is kept for one Undo, which is not
-  // modelled here); it is still only a draft, and a newer message does not retire it.
+  // modelled here); it is still only a draft, and a newer message does not retire it. A draft whose
+  // send outcome is unknown stays bound to that operation, so no asked draft replaces it.
   action placeAskedDraft = all {
-    s.ready, s.open, s.review != "showing",
+    s.ready, s.open, s.review != "showing", not(s.uncertain),
     s' = {draft: "asked", draftText: 1 - s.draftText, draftBase: -1, suggest: "idle",
       declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, ...s}
   }
@@ -143,6 +144,9 @@ module MessageThreads {
     .then(check(safety and s.draft == "asked" and s.draftText == 0 and s.sends == 0 and s.taps == 0))
   run askedDraftNeedsReadinessTest = init.then(becomeReady).then(openThread).then(typeText).then(loseReady)
     .then(check(safety and s.draft == "owner")).then(placeAskedDraft.fail())
+  run askedDraftKeepsUnknownSendTest = init.then(becomeReady).then(openThread).then(typeText).then(tapSend)
+    .then(confirmReview("unknown")).then(check(safety and s.draft == "owner" and s.uncertain))
+    .then(placeAskedDraft.fail())
   run askedDraftSentOnlyAfterTapTest = init.then(becomeReady).then(openThread).then(placeAskedDraft)
     .then(check(safety and s.draft == "asked" and s.sends == 0 and s.taps == 0)).then(receive)
     .then(check(safety and s.draft == "asked")).then(tapSend).then(confirmReview("sent"))

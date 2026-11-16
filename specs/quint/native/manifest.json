@@ -4422,6 +4422,7 @@
       "inboundDuringAgentReviewClosesItTest",
       "askedDraftReplacesOwnerTextTest",
       "askedDraftNeedsReadinessTest",
+      "askedDraftKeepsUnknownSendTest",
       "askedDraftSentOnlyAfterTapTest",
       "askedDraftReplacesSuggestionTest",
       "dismissedSuggestionIsNotOfferedAgainTest"
