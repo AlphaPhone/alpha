@@ -1,24 +1,27 @@
 # Cloud connection notices
 
-The plan and expiring sign-in notices are independent. In the mounted
-baseline at 412×915 they had the same position and width. The sign-in
-notice took the touch centers of Redeem code, Choose a plan and Dismiss
-plan notice. Settings hid both mounted notices. Back restored the
-overlap, and dismissing the sign-in notice revealed the plan actions.
+Home publishes one passive Cloud notice: the plan notice, shown while
+the resident needs a plan. An expiring sign-in key no longer has a Home
+notice of its own. Its expiry and the Renew control live in the Account
+dialog. Earlier, a separate sign-in aside shared the stack with the plan
+notice and took the touch centers of its actions; that aside is gone.
 
-The chooser now places both asides in one bounded, scrollable stack
-between the measured app header and assistant dock. Each aside keeps
-its own controls and dismissal. Settings suppresses the stack while its
-actual app page is active. An empty stack is removed after the last
-dismissal.
+The chooser places the plan aside in a bounded, scrollable stack between
+the measured app header and assistant dock. Settings, Inbox, an open
+conversation and the Account dialog suppress the stack while they cover
+Home. Dismissal removes the plan aside and the empty stack, and it
+survives every one of those covers.
 
 The Quint replay mounts the actual flag-off Alpha in Chromium. A signed
-synthetic no-plan result and an admitted five-day key make both notices
-eligible under one stable resident session. The replay observes the
-actual mounted and laid-out notices through Settings and Back and
-executes both dismissal orders. At 360×480 it uses the browser display
-adapter to enlarge the actual notice font to 150%, scrolls the bounded
-stack and checks the center of each action.
+synthetic no-plan result and an admitted five-day key make the plan
+notice eligible and the key near expiry under one stable resident
+session. The replay observes the actual mounted and laid-out notices
+through Settings, Inbox, conversation and Back. It opens Account,
+observes the expiry and Renew there, and closes it, both before and
+after dismissing the plan notice; no sign-in region appears on Home. At
+360×480 it uses the browser display adapter to enlarge the actual notice
+font to 150%, scrolls the bounded stack and checks the center of each
+action.
 
 The source replay uses closed native and network ports. It covers the
 renderer after admission, with a fixed synthetic account and expiry
