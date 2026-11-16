@@ -1,5 +1,6 @@
 import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import {BrowserReviews} from '../browser/review';
+import {settingsSectionPatch} from './settings-sections';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
 import {cloudServiceName} from '../runtime/cloud-protocol';
 import {browserDevProfile as devProfileQuery,developerTools} from '../browser/dev-profile';
@@ -276,19 +277,6 @@ export function settingsNavigationRows<T extends NavigationRow>(rows: T[], devel
   //@ ensures developerSurfaces ==> \result === rows
   //@ ensures !developerSurfaces ==> forall(k, 0 <= k && k < \result.length ==> \result[k].label !== 'Developer' && \result[k].lbl !== 'Developer')
   return developerSurfaces ? rows : rows.filter(row => row.label !== 'Developer' && row.lbl !== 'Developer');
-}
-/** Sections another surface may open directly (alpha:settings-page), with the category whose page
- * Back returns to. Developer, password and credential pages are never addressable this way. */
-const SETTINGS_SECTIONS: Record<string, string | null> = {
-  display: 'settings-general', sound: 'settings-general', notifications: 'settings-general', battery: 'settings-general', 'settings-general': 'settings-general',
-  privacy: 'settings-privacy', 'settings-permissions': 'settings-privacy', 'settings-privacy': 'settings-privacy',
-  'settings-account': 'settings-account',
-  'settings-apps': 'settings-apps', calendar: 'settings-apps', 'app-settings-workflows': 'settings-apps', 'app-settings-inbox': 'settings-apps',
-  about: null,
-};
-/** The view-state patch that opens a section, or null for anything outside the allowlist. */
-export function settingsSectionPatch(section: unknown): { page: string; settingsCategory: string | null } | null {
-  return typeof section === 'string' && Object.hasOwn(SETTINGS_SECTIONS, section) ? { page: section, settingsCategory: SETTINGS_SECTIONS[section] } : null;
 }
 // settings-facts:end
 /** Saved appearance choice. 'system' follows prefers-color-scheme, which Android WebView also reports. */

@@ -7,6 +7,7 @@ import {
 import { createCompletedActionNavigationState } from "../../../../.eliza/client-features/packages/core/src/views/completed-action-navigation.ts";
 import { findViewActionHandoff } from "../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts";
 import { alphaCanonicalViewId, alphaViewKey, alphaViewPaths } from "../product/alpha-product";
+import { settingsSectionPatch } from "../prototype/settings-sections";
 import { AlphaClientError, type ContextEnvelope } from "./alpha-client";
 
 type Request = (
@@ -252,7 +253,7 @@ export class ViewNavigationClient {
 	async deliver(
 		results: readonly unknown[] | undefined,
 		attempt: NavigationAttempt,
-		navigate: (view: string, current: () => void) => Promise<boolean>,
+		navigate: (view: string, current: () => void, patch?: Record<string, unknown>) => Promise<boolean>,
 	): Promise<{ status: "none" | "delivered" | "unknown" | "unavailable"; label?: string; parentView?: string }> {
 		const views = results?.filter(
 			(result) => findViewActionHandoff([result])?.navigationPrepared === true,
@@ -273,8 +274,14 @@ export class ViewNavigationClient {
 		// stands, and nothing is claimed or acknowledged for it.
 		// A page inside a view this phone does have is named as such (`parentView`), so the chat can
 		// say where to look instead of claiming the screen does not exist. Still nothing is claimed.
+		// A Settings section on the allowlist opens as that page; any other page inside a view is
+		// still refused.
+		const section =
+			target === "settings" && handoff.subview
+				? settingsSectionPatch(handoff.subview)
+				: null;
 		if (
-			handoff.subview ||
+			(handoff.subview && !section) ||
 			!target ||
 			(handoff.viewPath &&
 				!alphaViewPaths(handoff.viewId).includes(handoff.viewPath))
@@ -299,6 +306,7 @@ export class ViewNavigationClient {
 						"mode",
 						"viewId",
 						"viewPath",
+						...(section ? ["subview"] : []),
 						"viewType",
 						"label",
 						"completedActionDelivered",
@@ -354,7 +362,7 @@ export class ViewNavigationClient {
 			)
 				return { status: "none" };
 			// The existing shell executor waits for its React commit, not just setState dispatch.
-			switched = await navigate(target, attempt.current);
+			switched = await navigate(target, attempt.current, section ?? undefined);
 		} catch {
 			switched = false;
 		} finally {

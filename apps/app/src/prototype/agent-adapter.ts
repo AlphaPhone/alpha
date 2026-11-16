@@ -523,18 +523,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       return {msgs:at<0?[...msgs,bubble]:msgs.map((message:Shell,index:number)=>index===at?bubble:message)};
     });
   }
-  function openInternalView(shell:Shell,target:string,chat?:string):boolean {
+  function openInternalView(shell:Shell,target:string,chat?:string,patch?:Record<string,unknown>):boolean {
     const view=alphaViewKey(target);
     if(!view||view!=='home'&&!views[view])return false;
-    if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
+    if(view==='home')shell.goHome(chat);else shell.openView(view,patch,chat);
     return true;
   }
   async function deliverChatNavigation(shell:Shell,navigation:ReturnType<typeof connectionController.captureViewNavigation>,results:readonly unknown[]|undefined,current?:()=>void,continuation?:import('../runtime/alpha-client').VoiceNavigationContinuation){
     if(!navigation||!results?.length)return false;
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
-    const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
+    const delivered=await navigation.client.deliver(results,attempt,(view,check,patch)=>{
       const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
+        try{check();if(!openInternalView(shell,view,chat,patch)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
       });
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
