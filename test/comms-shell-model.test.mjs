@@ -25,12 +25,12 @@ function method(name) {
   }
   assert.fail(`${name} has a closed body`);
 }
-const METHODS = ['isCommsView', 'commsSpec', 'defaultChat', 'shellDetent', 'nextMessageId', 'stage', 'stageBack', 'stageSwitched', 'propose', 'emergencyLive', 'keepEmergencyLayout', 'fillCommsBar', 'cardAct', 'back'];
+const METHODS = ['isCommsView', 'commsSpec', 'defaultChat', 'shellDetent', 'nextMessageId', 'stage', 'stageBack', 'stageSwitched', 'propose', 'emergencyLive', 'keepEmergencyLayout', 'fillCommsBar', 'send', 'cardAct', 'back'];
 
 /** A shell over plain state with recorded navigation; setState applies at once, like a committed update. */
 function shell(state, views) {
   const log = {opened: [], navigated: [], toasts: [], acted: []};
-  const ctx = vm.createContext({Object, JSON, Number, Date, isMvpView: () => true, proposalCanAct, isAskSentence, DEFERRED_MVP_VIEWS: new Set(), VIEWS: views});
+  const ctx = vm.createContext({Object, JSON, Number, Date, isMvpView: () => true, proposalCanAct, isAskSentence, deferredMvpPrompt: () => false, DEFERRED_MVP_VIEWS: new Set(), VIEWS: views});
   vm.runInContext(`globalThis.shell={${METHODS.map(method).join(',\n')}};`, ctx);
   const s = ctx.shell;
   state = {screen: 'home', chat: 'input', msgs: [], stack: [], stageFrom: [], vs: {}, voice: 'off', ...state};
@@ -161,4 +161,19 @@ test('a short command on the Contacts list is not taken as a list filter, so Pho
   for (const command of ['Call Maya', 'Text Maya hi', 'Email Maya', 'ring Priya', 'Message Maya'])
     assert.equal(ask(command), null, command);
   same([ask('Maya'), ask('design lead'), ask('who works at Lumen?'), ask('Show people from Lumen')], ['Maya', 'design lead', 'Lumen?'.replace('?', ''), 'Lumen']);
+});
+
+test('a scripted reply never shares an id with a line added while it was pending (the briefing)', () => {
+  const {s, state} = shell({view: 'notes', chat: 'input'}, {notes: {}});
+  const now = Date.now;
+  Date.now = () => 1000;
+  try {
+    // The briefing lands on the opening update, at the next id, before the reply arrives.
+    s.later = run => { state().msgs = state().msgs.concat([{id: s.nextMessageId(state().msgs), from: 'agent', text: 'Briefing', local: true}]); run(); };
+    s.reply = () => ({text: 'Done.'});
+    s.send('hello');
+  } finally { Date.now = now; }
+  const ids = state().msgs.map(m => m.id);
+  same(state().msgs.map(m => m.text), ['hello', 'Briefing', 'Done.']);
+  assert.equal(new Set(ids).size, ids.length, `unique ids ${ids}`);
 });

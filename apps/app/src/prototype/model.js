@@ -6067,7 +6067,8 @@ class Component extends DCLogic {
       var r = self.reply(text); var S2 = self.S();
       // A view's reply never acts: an action comes back as a proposal the owner approves (D8).
       if (r.proposal) { self.setState({ typing: false }); self.propose(r.proposal, r.text); }
-      else self.setState({ typing: false, msgs: S2.msgs.concat([{ id: id + 1, from: "agent", text: r.text, card: r.card || null }]) });
+      // A local line (the briefing) can take id + 1 meanwhile: the reply's id follows every row shown.
+      else self.setState({ typing: false, msgs: S2.msgs.concat([{ id: self.nextMessageId(S2.msgs), from: "agent", text: r.text, card: r.card || null }]) });
       if (r.nav) self.later(function () { var n = typeof r.nav === "string" ? { view: r.nav } : r.nav; self.openView(n.view, n.patch, n.chat || self.defaultChat(n.view)); }, 1300);
       if (r.then) self.later(function () { r.then(); }, 700);
     }, 800);
@@ -6111,7 +6112,7 @@ class Component extends DCLogic {
           var S2 = self.S(); var lockedNow = S2.screen === "lock";
           var r = lockedNow ? { text: VOICE.lockedAnswer } : self.reply(phrase);
           var patch = { voice: "speaking", vcap: r.text };
-          if (!lockedNow) { var id = Date.now(); patch.msgs = S2.msgs.concat([{ id: id, from: "user", text: phrase }].concat(r.proposal ? [] : [{ id: id + 1, from: "agent", text: r.text, card: r.card || null }])); }
+          if (!lockedNow) { var id = self.nextMessageId(S2.msgs); patch.msgs = S2.msgs.concat([{ id: id, from: "user", text: phrase }].concat(r.proposal ? [] : [{ id: id + 1, from: "agent", text: r.text, card: r.card || null }])); }
           self.setState(patch);
           if (!lockedNow && r.proposal) self.propose(r.proposal, r.text);
           if (!lockedNow && r.then) r.then();
