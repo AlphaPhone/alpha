@@ -22,7 +22,9 @@ module FilesFilter {
     val op = s.operations.get(id)
     if (op.aborted)
       s' = {...s, operations: s.operations.set(id, Settle({...op, kind: kind}, "aborted", 0))}
-    // A filter requested after Files was left fails before admission.
+    // After Files was left, the runner asks the agent host to reopen Files. This model
+    // covers only a refused reopen, which reports unavailable before admission. A
+    // successful reopen is FilesAgentActions.directFilterOpensFilesTest.
     else if (not(s.active))
       s' = {...s, operations: s.operations.set(id, Settle({...op, kind: kind}, "failed", 0))}
     else
@@ -99,6 +101,6 @@ module FilesFilter {
   run leftQueryCannotPublishTest = init.then(begin(1, 1)).then(accessReply(1, "granted"))
     .then(leave).then(queryReply(1, true, RowIds))
     .expect(s.rows == List() and s.filter == 0 and s.operations.get(1).result == "failed" and safety)
-  run leftViewCannotAdmitFilterTest = init.then(leave).then(begin(1, 1))
+  run refusedReopenCannotAdmitFilterTest = init.then(leave).then(begin(1, 1))
     .expect(s.pending == 0 and s.filter == 0 and s.filterGeneration == 0 and s.operations.get(1).result == "failed" and safety)
 }

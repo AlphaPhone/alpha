@@ -2,7 +2,7 @@ import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {checkFilesFilter, checkRetiredFilesFilterReload} from '../specs/quint/refinement/application/files-filter.mjs';
+import {checkFilesFilter, checkHiddenFilesFilterReload, checkRetiredFilesFilterReload} from '../specs/quint/refinement/application/files-filter.mjs';
 
 const source = fileURLToPath(import.meta.url);
 test('actual Files filters discard late replies from replaced, cleared, left or cancelled requests', {timeout: scaledTimeout(120000)}, async () => {
@@ -15,4 +15,8 @@ test('actual Files filters discard late replies from replaced, cleared, left or 
 
 test('a reload retired by view leave cannot publish filter rows', async () => {
   await checkRetiredFilesFilterReload([source]);
+});
+
+test('a reload retired while its filter stays shown cannot publish rows', async () => {
+  await checkHiddenFilesFilterReload([source]);
 });

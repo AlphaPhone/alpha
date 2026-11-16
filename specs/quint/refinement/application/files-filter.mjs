@@ -35,6 +35,9 @@ async function compile(extraSources) {
 }
 
 async function fixture(compiled) {
+  // The agent host's request to reopen Files after leave. The campaign covers only a refused reopen.
+  let reopens = 0;
+  const openFiles = async () => {reopens++; return false;};
   const document = Object.assign(new EventTarget(), {hidden: false, querySelector: () => null});
   const context = new AsyncLocalStorage(), port = {}, operations = new Map();
   const owners = new Map(), queries = [], allRequests = [];
@@ -103,11 +106,11 @@ async function fixture(compiled) {
       }]))};
   };
   return {
-    observe, inspect: port.inspect,
+    observe, inspect: port.inspect, reopens: () => reopens,
     begin(id, kind) {
       const operation = operations.get(id);
       operation.kind = kind;
-      void context.run(id, () => runner.run({type: 'files_filter', text: kinds[kind - 1]}, operation.controller.signal)).then(
+      void context.run(id, () => runner.run({type: 'files_filter', text: kinds[kind - 1]}, operation.controller.signal, openFiles)).then(
         result => {
           operation.phase = 'done';
           operation.result = result.status;
@@ -147,6 +150,8 @@ async function fixture(compiled) {
     },
     reload() {document.dispatchEvent(new Event('visibilitychange'));},
     leave() {active = false; view.onLeave(api);},
+    // The host hides Files without its leave handler: the adapter deactivates and keeps the filter.
+    hide() {active = false; render();},
     assertSettled() {
       assert.ok(allRequests.every(task => task.settled), 'Every concrete request settled');
       assert.ok([...operations.values()].every(op => ['idle', 'done'].includes(op.phase)));
@@ -187,7 +192,7 @@ const schedules = [
   ['leave-retires-shown-filter', [...start(1, 1), query(1, 'ready', [1]), ['leave']]],
   ['leave-during-admission', [begin(1, 1), ['leave'], access(1)]],
   ['leave-during-query', [...start(1, 1), ['leave'], query(1)]],
-  ['filter-after-leave-fails', [['leave'], begin(1, 1)]],
+  ['filter-after-leave-refused-reopen', [['leave'], begin(1, 1)]],
 ];
 
 export async function checkFilesFilter(extraSources = []) {
@@ -203,6 +208,7 @@ export async function checkFilesFilter(extraSources = []) {
         checkpoint(t, [operation, ...args].join(' '), action, f.observe());
       }
       f.assertSettled();
+      assert.equal(f.reopens(), name === 'filter-after-leave-refused-reopen' ? 1 : 0, 'Only a filter after leave asks to reopen Files');
       traces.push(t);
     } finally {await f.close();}
   }
@@ -231,6 +237,26 @@ export async function checkRetiredFilesFilterReload(extraSources = []) {
     f.queryReply(0, 'ready', [3]); await tick();
     assert.equal(f.inspect().filter, null, 'A retired reload cannot restore the filter');
     assert.deepEqual(f.observe()['s.rows'], [], 'A retired reload cannot publish filter rows');
+    f.assertSettled();
+  } finally {await f.close();}
+}
+
+/** A reload retired while its filter stays shown is stopped only by the reload's own admission fence. */
+export async function checkHiddenFilesFilterReload(extraSources = []) {
+  const f = await fixture(await compile(extraSources));
+  try {
+    f.begin(1, 1); await tick();
+    f.accessReply(1, 'granted'); await tick();
+    f.queryReply(1, 'ready', [1]); await tick();
+    f.reload(); await tick();
+    f.hide(); await tick();
+    const hidden = f.inspect();
+    assert.equal(hidden.active, false);
+    assert.ok(hidden.filter, 'Hiding Files without leave keeps the filter');
+    assert.deepEqual(f.observe()['s.rows'], [1]);
+    f.queryReply(0, 'ready', [3]); await tick();
+    assert.ok(f.inspect().filter, 'The filter survives the retired reload');
+    assert.deepEqual(f.observe()['s.rows'], [1], 'A reload retired by deactivation cannot publish its rows');
     f.assertSettled();
   } finally {await f.close();}
 }
