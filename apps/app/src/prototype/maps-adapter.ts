@@ -389,7 +389,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
        start:()=>{retireSearch();screen.start();},
        nav:{going:!nav?.arrived,arrived:!!nav?.arrived,dist:nav?.distance||'Locating…',street:nav?.instruction||'Waiting for location',icon:nav?.maneuverIcon||PIN,hasThen:!!nav?.following,thenD:nav?.following?.icon||'',thenText:nav?.following?.text||'',
         left:nav?.remainingTime||'Guidance',meta:nav?.remaining&&nav.remaining===nav.meta?'':nav?.meta||'',remaining:nav?.remaining||'',
-        offRoute:!!nav?.offRoute,background:!!nav?.background,
+        offRoute:!!nav?.offRoute,canReroute:!!nav?.canReroute,reroute:()=>{retireSearch();screen.reroute();},rerouteLabel:'Reroute from here',background:!!nav?.background,
         end:()=>{retireSearch();screen.end();}}};
     }
     const eventOrigin=mapsEventReturnOffered(st.fromEvent,currentApi.S.stack,isNav);

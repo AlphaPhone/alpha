@@ -1,8 +1,9 @@
+import {setTextScale} from './accessibility-states';
 import {agentBrowserVoice} from './voice-fixture';
 import {genericCloudSpeechFixture} from './generic-cloud-speech-fixture';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
-test.use({locale:'en-GB'});
+test.use({locale:'en-GB',hasTouch:true,isMobile:true,viewport:{width:390,height:740}});
 const spoken=(page:Page)=>page.evaluate(()=>(window as any).speechTest.spoken);
 async function fix(page:Page,latitude=43.738,accuracy=5){await page.evaluate(({latitude,accuracy})=>(window as any).geoFix({coords:{latitude,longitude:7.424,accuracy},timestamp:Date.now()}),{latitude,accuracy});}
 test.beforeEach(async({page})=>{
@@ -21,6 +22,14 @@ test('Maps keeps visual guidance with centered ETA and one End control',async({p
  const offset=()=>controls.evaluate(el=>{const a=el.getBoundingClientRect(),b=el.querySelector(':scope > div')!.getBoundingClientRect();return Math.abs((a.left+a.right-b.left-b.right)/2);});
  await expect.poll(offset).toBeLessThan(1);expect(await spoken(page)).toEqual([]);
  await page.screenshot({path:info.outputPath('maps-centered-visual-guidance.png'),animations:'disabled'});
+ await fix(page,43.75);await expect(page.getByRole('status').filter({hasText:'Off route'})).toBeVisible();
+ await expect(controls.getByRole('button')).toHaveCount(1);expect(await spoken(page)).toEqual([]);
+ await page.setViewportSize({width:915,height:412});await expect(page.locator('html')).toHaveClass(/alpha-landscape/);await setTextScale(page,2);
+ await expect.poll(offset).toBeLessThan(1);
+ const end=controls.getByRole('button',{name:'End navigation',exact:true});
+ const box=await end.boundingBox();expect(box).not.toBeNull();expect(box!.width).toBeGreaterThanOrEqual(44);
+ expect(box!.height).toBeGreaterThanOrEqual(44);expect(box!.y).toBeGreaterThanOrEqual(0);expect(box!.y+box!.height).toBeLessThanOrEqual(412);
+ await end.click();await expect(controls).toHaveCount(0);
 });
 test('repeated, inaccurate and arrival fixes remain silent and release the navigation watch',async({page})=>{
  await fix(page,43.738,100);await fix(page);await fix(page);await fix(page,43.739);
