@@ -17,18 +17,20 @@ import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,camer
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
+import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
+import {EMERGENCY_REFUSAL,imageDialHandoff,imageSmsSend,imageTelephonyAction} from './image-telephony';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,phoneDialResultText,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {executeTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,type TelephonyPorts} from '../runtime/telephony-executor';
 import {normalizePhoneNumber,reviewSms} from '../runtime/aosp-telephony';
 import {parseContactDetail,parseContactRemove,parseContactSave} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {askTelephonyReview} from './telephony-review';
-import {displayNumber} from './telephony-presenters';
-import {proposalCanAct,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
+import {displayNumber,numberKey} from './telephony-presenters';
+import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
 import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
@@ -270,8 +272,28 @@ export async function declineProposal(id:string):Promise<{ok:boolean;message:str
   if(after.error)return {ok:false,message:after.error};
   return {ok:true,message:'Declined. No phone action was performed.'};
 }
+/** AC-19: a fresh Telecom reading right before a telephony side effect; fails closed (image-telephony.ts). */
+const imageEffectAllowed=():Promise<boolean>=>telephonyEffectAllowed(registerPlugin<CallStatePlugin>('AlphaCallState'));
 export function installAgentAdapter(Component: Shell, views: Shell) {
   const p = Component.prototype;
+  // AC-20: on the image, a call proposal's person and number come from the phone's own contacts,
+  // read only while Contacts access is granted. Nothing here dials; the card still needs the tap.
+  if(aospImage)setCallPartyResolver(async target=>{
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    if((await client.status()).permissions.contacts!=='granted')return null;
+    if('number' in target){
+      // Android's own number matching over the whole address book (AlphaTelephonyPlugin.contactForNumber).
+      // An unparseable number names nobody, and says nothing about Contacts.
+      if(!numberKey(target.number))return null;
+      const found=await registerPlugin<{contactForNumber(input:{number:string}):Promise<unknown>}>('AlphaTelephony').contactForNumber({number:target.number});
+      const name=(found as {name?:unknown}|null)?.name;
+      if(name!==null&&(typeof name!=='string'||!name.trim()))return null;
+      return {name:name||null,numbers:[target.number]};
+    }
+    // The same options the in-card review offers before the dial (telephony-executor).
+    const options=contactCallOptions(await client.searchContacts(target.contact,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber),names=new Set(options.map(option=>option.id));
+    return {name:names.size===1?options[0].name:null,numbers:options.map(option=>option.number)};
+  });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
   function modalPanels(){
@@ -402,12 +424,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
    * approval, decline, expiry and recovery below are unchanged; `state` is what the card shows.
    * A call to a number names the formatted number: that card is the approval before the dial.
    */
+  function callTargetOf(proposal:import('../runtime/alpha-client').ActionProposal):CallTarget|null{
+    if(proposal.title!=='Place call')return null;
+    const first=proposal.description.split('\n')[0]||'';
+    return first.startsWith('Number: ')?{number:first.slice(8).trim()}:first.startsWith('Contact: ')?{contact:first.slice(9).trim()}:null;
+  }
   function commsProposal(proposal:import('../runtime/alpha-client').ActionProposal):CommsProposal&Record<string,unknown>{
     const {type:_type,title:_title,...review}=proposalCard(proposal);
-    const lines=proposal.description.split('\n'),first=lines[0]||'',call=proposal.title==='Place call';
-    const number=call&&first.startsWith('Number: ')?first.slice(8).trim():null,contact=call&&first.startsWith('Contact: ')?first.slice(9).trim():null;
-    const detail=number!==null?displayNumber(number):contact!==null?contact:proposal.description;
-    return {...review,id:proposal.id,kind:call?'call':'other',title:call?`Call ${number!==null?displayNumber(number):contact||'contact'}`:proposal.title,detail,sub:detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
+    const call=proposal.title==='Place call',target=callTargetOf(proposal);
+    // AC-20: name and number; the phone's contacts fill in what the proposal leaves out (sayProposal).
+    const text=target?callCardText(target,null,displayNumber):{title:call?'Call contact':proposal.title,detail:proposal.description};
+    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
   }
   /** A card update that also moves a proposal card's shown detail and state. */
   function cardWith(card:Shell,patch:Shell){
@@ -419,13 +446,26 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   /** One pending action in the chat: a proposal card on a comms screen, otherwise the action review card. */
   function sayProposal(shell:Shell,proposal:import('../runtime/alpha-client').ActionProposal,belongs?:()=>boolean){
+    // AC-19: over a live emergency call no action is offered on any screen; it is declined so
+    // recovery never offers it again.
+    if(shell.emergencyLive?.()===true){if(!belongs||belongs())void declineProposal(proposal.id);return;}
     if(!activeCommsSpec(shell,views)){shell.agentSay(proposal.description,proposalCard(proposal),undefined,belongs);return;}
     if(belongs&&!belongs())return;
     // Recovery and a chat reply can publish the same pending action; one card keeps it.
     if((shell.S().msgs||[]).some((message:Shell)=>message.card?.proposalId===proposal.id))return;
     const result:CommsProposeResult=shell.propose(commsProposal(proposal),proposal.description);
+    // AC-19: a proposal dropped over an emergency call is declined, so recovery never offers it again.
+    if(!result.shown){void declineProposal(proposal.id);return;}
+    const target=callTargetOf(proposal);
+    if(target)void resolveCallParty(target).then(party=>{
+      if(!party||!shell.live)return;
+      const text=callCardText(target,party,displayNumber);
+      shell.setState((previous:Shell)=>({msgs:(previous.msgs||[]).map((message:Shell)=>message.card?.type==='proposal'&&message.card.id===proposal.id&&message.card.state==='open'
+        ?{...message,card:{...message.card,title:text.title,detail:text.detail,sub:text.detail}}:message)}));
+    });
     // AC-26: a replaced proposal is declined, so it can never be approved later.
-    for(const replaced of result.replaced){const id=replaced.args?.proposalId;if(typeof id==='string'&&id)void declineProposal(id);}
+    // A replaced card being approved right now stops: its review (a contact's numbers) closes unchosen.
+    for(const replaced of result.replaced){const id=replaced.args?.proposalId;if(typeof id!=='string'||!id)continue;if(shell.pendingActionApprovalProposalId===id)shell.pendingActionApproval?.abort();void declineProposal(id);}
   }
   /**
    * AC-26: alphaClient drops its pending proposals when the screen's subject changes. Open proposal
@@ -991,9 +1031,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // approved number and the owner places the call there. Contact targets are not negotiated.
         if(!aospImage||operation.target.kind!=='number'||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was dialed. Keep Alpha open and unlocked, then ask again.'};
         const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
-        signal.throwIfAborted();context(this);
-        if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');
-        const handoff=await client.dial(operation.target.number);
+        const fence=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');};
+        // AC-19: Telecom is read right before the dial screen opens, and the review fence runs again after it.
+        const handoff=await imageDialHandoff(operation.target.number,number=>client.dial(number),{allowed:imageEffectAllowed,fence});
+        if(!handoff)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const dialResult:PhoneDialResult={kind:'phone-dial',status:handoff.status,handler:handoff.status==='handed-off'?handoff.handler:null,contact:false};
         return {status:dialDeviceStatus(dialResult),summary:phoneDialResultText(dialResult),dialResult};
       }
@@ -1028,7 +1069,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
         };
-        return executeTelephonyAction(operation,operationId,ports,signal);
+        // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
+        return imageTelephonyAction(operation,operationId,ports,{allowed:imageEffectAllowed},signal);
       }
       if(isSmsSend(operation)){
         if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent. Open Messages, choose the SIM, then ask again.'};
@@ -1040,7 +1082,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!selectedSim||expectedContext.selectedObject.revision!==smsSubscriptionRevision(selectedSim))return {status:'failed' as const,summary:'Nothing was sent because the SIM changed. Open Messages, choose the SIM, then ask again.'};
         const cancel=()=>{void plugin.cancelSmsReview({operationId}).catch(()=>{});};
         signal.addEventListener('abort',cancel,{once:true});
-        try{current();const native=await client.sendSms(operation,operationId);const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:receiptLabel(smsResult.status)};}
+        try{
+          // AC-19: Telecom is read right before the send, and the review fence runs again after it.
+          const native=await imageSmsSend(()=>client.sendSms(operation,operationId),{allowed:imageEffectAllowed,fence:current});
+          if(!native)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:receiptLabel(smsResult.status)};}
         finally{signal.removeEventListener('abort',cancel);}
       }
       if(isClockOperation(operation)){
@@ -1681,9 +1726,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const message=live.find(item=>item.card===c);if(!message)return m;
       // Only the card being approved or declined shows progress; the others stay readable but wait.
       const ic=out.ic||{},busy=!!this.decliningProposal||!!this.pendingActionApproval,approving=busy&&this.pendingActionApprovalProposalId===c.proposalId,declining=this.decliningProposal===c.proposalId;
+      // AC-19: during an emergency call the card can still be declined but not approved.
+      const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',rows:[
-        {ini:'',who:approving?'Working…':c.title,text:typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving?'':c.reviewDestination?'Open':'Approve',icon:ic.right,open:()=>{if(!busy)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
@@ -2151,7 +2198,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const card = message.card || {};
     // AC-26: a replaced or finished proposal never acts. A view's own proposal (a fixture call or
     // "Screen it") is dispatched by the shell to that view's action; live ones are approved below.
-    if(!proposalCanAct(card))return;
+    if(!proposalCanAct(card,this.emergencyLive?.()===true))return;
     if(card.type==='proposal'&&card.act?.mod!=='alpha')return originalCardAct.call(this,message);
     if(card.systemNotice)return;
     if(card.managePlan){void connectionController.residentManagePlan();return;}

@@ -29,7 +29,7 @@ import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWee
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
-import { applyListFilter, clearListFilter, setListFilterHandler } from "../runtime/comms-bar";
+import { applyListFilter, clearListFilter, deviceEmergencyLive, endPlacement, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
 
 
 var IC = {
@@ -157,6 +157,15 @@ IC.phoneDel = IC.phoneDel || "M9 6h11v12H9l-6-6zM12 9.5l5 5M17 9.5l-5 5";
 var PN = { live: null, boot: null, lastTab: "recents" };
 function pnScript(call) { return PN_SCRIPT[call] || PN_SCRIPT._ || { lines: [], sum: "" }; }
 
+/* AC-20, development fixture only: call proposals name the fixture person and number. The image
+   installs its contacts lookup instead (agent-adapter.ts). */
+if (testMocksEnabled) setCallPartyResolver(function (target) {
+  /* exact numbers only, as the image's lookup (US fixture numbers: a national number is its +1 form) */
+  var e164 = function (n) { var d = pnDigits(n); return d.length === 10 ? "1" + d : d; };
+  if (target.number) { var d = e164(target.number), hit = PEOPLE.filter(function (p) { return !!pnDigits(p.phone) && e164(p.phone) === d; })[0]; return Promise.resolve({ name: hit ? hit.name : null, numbers: [target.number] }); }
+  var q = String(target.contact || "").toLowerCase(), found = PEOPLE.filter(function (p) { return p.phone && p.name.toLowerCase().indexOf(q) >= 0; });
+  return Promise.resolve({ name: found.length === 1 ? found[0].name : null, numbers: found.map(function (p) { return p.phone; }) });
+});
 function pnPeople(api) { var c = api.get("contacts"); return (c && c.list) || PEOPLE; }
 function pnWho(api, id) { if (!id) return null; var l = pnPeople(api); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return person(id); }
 function pnDigits(s) { return String(s || "").replace(/\D/g, ""); }
@@ -204,16 +213,23 @@ function pnStart(api, pid, num, opt) {
   opt = opt || {};
   var id = pnCallId(pid, num);
   if (!id) return;
+  /* AC-19: nothing ends or replaces an emergency call, not even an approved proposal: only End does. */
+  if (PN.live && PN.live !== id && pnLiveEmergency(api)) {
+    /* a drawn party that is not the live call goes back to it, so render never arms this start again */
+    var kept = pnLiveParty();
+    if (pnWant(api.get("phone")) !== PN.live) api.set({ call: kept.call, num: kept.num });
+    api.toast("End the emergency call first"); return;
+  }
   /* calling the party already on the line returns to that call: its clock and recents row are kept */
   if (PN.live === id && api.get("phone").callWho === id) { api.set({ min: false }); return; }
   /* pnEnd's patch is queued, not applied yet: the ended call's return target is not read back below */
   var replaced = !!PN.live;
   if (replaced) pnEnd(api, { quiet: true });
-  pnStop(api); api.stopBg();
+  pnStop(api); api.stopBg(); api.stopRing();
   PN.live = id;
   var now = Date.now();
   api.set({ call: pid || null, num: pid ? "" : pnFmt(num), callWho: id, callAt: now, liveAt: opt.live ? now : null, dir: opt.dir || "out",
-    mute: false, spk: false, hold: false, kp: false, kpd: "", ai: !!opt.ai, aiN: 0, aiC: 0, min: false, incoming: null, ring: null, rs: false, tick: now, ret: opt.ret || (replaced ? null : api.get("phone").ret) || null });
+    mute: false, spk: false, hold: false, kp: false, kpd: "", ai: !!opt.ai, aiN: 0, aiC: 0, min: false, incoming: null, ringId: null, ring: null, rs: false, tick: now, ret: opt.ret || (replaced ? null : api.get("phone").ret) || null });
   if (!opt.live) api.laterBg(function () { var s = api.get("phone"); if (s.callWho === id && !s.liveAt) api.set({ liveAt: Date.now() }); }, 2400);
   api.everyBg(function () {
     var s = api.get("phone"); if (s.callWho !== id) return;
@@ -229,7 +245,9 @@ function pnEnd(api, opt) {
   var dur = s.liveAt ? Math.round((Date.now() - s.liveAt) / 1000) : 0;
   var sc = pnScript(s.call);
   var note = s.ai && s.aiN > 0 ? sc.sum : "";
-  var e = { id: "r" + Date.now(), pid: s.call || null, num: s.num || "", dir: s.dir || "out", at: Date.now(), dur: dur, note: note };
+  /* AC-19: an emergency call's row names the emergency call, whatever party the view holds. */
+  var party = pnLiveEmergency(api) && pnWant(s) !== PN.live ? pnLiveParty() : { call: s.call, num: s.num };
+  var e = { id: "r" + Date.now(), pid: party.call || null, num: party.num || "", dir: s.dir || "out", at: Date.now(), dur: dur, note: note };
   api.set({ recents: [e].concat(s.recents || []), call: null, num: "", callWho: null, callAt: null, liveAt: null, ai: false, aiN: 0, kp: false, min: false, hold: false, mute: false, spk: false, ret: null, tab: PN.lastTab || s.tab });
   PN.live = null; api.stopBg();
   if (opt.quiet) return;
@@ -242,8 +260,9 @@ function pnEnd(api, opt) {
 function pnRingEnd(api, entry, patch) {
   var s = api.get("phone");
   if (!s.incoming) return;
-  api.set(Object.assign({}, patch || {}, { incoming: null, ring: null, rs: false, scrN: 0, recents: [Object.assign({ id: "r" + crypto.randomUUID(), pid: s.incoming, at: Date.now(), dur: 0 }, entry)].concat(s.recents || []) }));
-  api.stopBg();
+  api.set(Object.assign({}, patch || {}, { incoming: null, ringId: null, ring: null, rs: false, scrN: 0, recents: [Object.assign({ id: "r" + crypto.randomUUID(), pid: s.incoming, at: Date.now(), dur: 0 }, entry)].concat(s.recents || []) }));
+  /* only the ring's own timers: a call live under the ring keeps its clock and connect */
+  api.stopRing();
   /* AC-21: a call that rang over another stage hands it back */
   if (api.isActive()) api.stageBack();
 }
@@ -251,7 +270,7 @@ function pnRingEnd(api, entry, patch) {
    open the stage turns into the incoming card and the sheet keeps its height (AC-21). */
 function pnRing(api, pid) {
   if (!pid) return;
-  var patch = { incoming: pid, ring: "ring", rs: false, scrN: 0 };
+  var patch = { incoming: pid, ringId: crypto.randomUUID(), ring: "ring", rs: false, scrN: 0 };
   if (api.S.chat === "sheet" || api.S.chat === "full") api.stage("phone", patch, null);
   else api.open("phone", patch);
 }
@@ -265,8 +284,8 @@ function pnAnswer(api) {
 function pnScreen(api) {
   var s = api.get("phone");
   if (!s.incoming || s.ring === "screen") return;
-  api.stopBg(); api.set({ ring: "screen", scrN: 1 });
-  api.everyBg(function () { var s2 = api.get("phone"); if (s2.ring !== "screen") return; if ((s2.scrN || 0) < PN_SCREEN.length) api.set({ scrN: (s2.scrN || 0) + 1 }); }, 1900);
+  api.stopRing(); api.set({ ring: "screen", scrN: 1 });
+  api.everyRing(function () { var s2 = api.get("phone"); if (s2.ring !== "screen") return; if ((s2.scrN || 0) < PN_SCREEN.length) api.set({ scrN: (s2.scrN || 0) + 1 }); }, 1900);
 }
 function pnEndScreen(api) {
   if (!api.get("phone").incoming) return;
@@ -276,6 +295,20 @@ function pnEndScreen(api) {
 /* AC-19: emergency short codes keep the full-screen call and no acting proposal. */
 function pnEmergency(num) {
   return ["112", "911", "999", "000", "08", "100", "101", "102", "108", "110", "118", "119", "120", "122", "15", "17", "18"].indexOf(pnDigits(num)) >= 0;
+}
+/* AC-19: the live (or connecting) call is to an emergency number. It reads the module's live call,
+   not the call drawn, which a handover can change before the live call ends. */
+function pnLiveEmergency(api) {
+  var id = PN.live; if (!id) return false;
+  if (id.charAt(0) === "#") return pnEmergency(id.slice(1));
+  var p = pnWho(api, id); return !!p && pnEmergency(p.phone);
+}
+/* AC-19: while an emergency call is live it is the call drawn, whatever party the view holds (only a
+   development jump can leave another there): the card, bar, strip, End and recents belong to it. */
+function pnLiveParty() { var id = PN.live; return id.charAt(0) === "#" ? { call: null, num: id.slice(1) } : { call: id, num: "" }; }
+function pnDrawn(api, st) {
+  if (PN.live && pnWant(st) !== PN.live && pnLiveEmergency(api)) return pnLiveParty();
+  return { call: st.call, num: st.num };
 }
 function pnDecline(api, why) {
   var s = api.get("phone"); var pid = s.incoming;
@@ -297,19 +330,31 @@ registerView("phone", {
     if (sub === "voicemail") return { tab: "voicemail", vmOpen: "v1" };
     var who = copy("phone").presetPerson;
     if (sub === "call") return who ? { call: who } : null;
-    if (sub === "incoming") return who ? { incoming: who, ring: "ring" } : null;
+    if (sub === "incoming") return who ? { incoming: who, ringId: crypto.randomUUID(), ring: "ring" } : null;
   },
   badge: function (st) { return (st.vms || []).some(function (v) { return !v.heard; }); },
+  /* AC-19: an emergency call is live, whichever view or chat height is on screen. */
+  emergency: function (st, api) { return pnLiveEmergency(api); },
+  /* AC-19: a patch that would draw another call (Call in a thread or on a contact, a calendar
+     place, an approved proposal) is refused while an emergency call is live: the drawn call stays
+     the emergency call, so its card, layout and End stay its own. Only End ends it. */
+  incoming: function (st, patch, api) {
+    if (!patch || !("call" in patch || "num" in patch) || !PN.live || !pnLiveEmergency(api)) return;
+    if (pnCallId(patch.call, patch.num) === PN.live) return;
+    delete patch.call; delete patch.num; delete patch.ret;
+    api.toast("End the emergency call first");
+  },
   back: function (st, api) {
     if (st.incoming) { if (st.rs) api.set({ rs: false }); return true; }
     if (pnWant(st) && !st.min) { if (st.kp) api.set({ kp: false }); else api.set({ min: true }); return true; }
     if (st.vmOpen) { if (st.playing) pnStop(api); api.set({ vmOpen: null, playing: null, vpos: 0 }); return true; }
     return false;
   },
-  /* calls and ringing keep going in the background: status-bar chip returns here */
+  /* calls and ringing keep going in the background: status-bar chip returns here. Its white text sits
+     on the text-safe call green (AC-28, 4.5:1). */
   ongoing: function (st, api) {
-    if (st.incoming) { var ip = pnWho(api, st.incoming); return { label: (st.ring === "screen" ? api.name + " · " : "Incoming · ") + (ip ? pnFirst(ip) : "Unknown"), icon: "phone", color: "var(--alpha-call-green)" }; }
-    if (st.callWho) return { label: st.liveAt ? (st.hold ? "Hold " : "") + pnClock((Date.now() - st.liveAt) / 1000) : "Calling…", icon: "phone", color: "var(--alpha-call-green)" };
+    if (st.incoming) { var ip = pnWho(api, st.incoming); return { label: (st.ring === "screen" ? api.name + " · " : "Incoming · ") + (ip ? pnFirst(ip) : "Unknown"), icon: "phone", color: "var(--alpha-call-green-text)" }; }
+    if (st.callWho) return { label: st.liveAt ? (st.hold ? "Hold " : "") + pnClock((Date.now() - st.liveAt) / 1000) : "Calling…", icon: "phone", color: "var(--alpha-call-green-text)" };
     return null;
   },
   onLeave: function (api) {
@@ -332,13 +377,18 @@ registerView("phone", {
     /* AC-20: the owner's tap on the proposal card is the only path from Alpha to a dial. The stage
        switches to the call and the sheet keeps its height; Back or End returns to the stage before. */
     callApproved: function (card, api) { api.stage("phone", { call: card.args.pid || null, num: card.args.pid ? "" : card.args.num }, null); },
-    screenIncoming: function (card, api) { pnScreen(api); },
+    /* AC-21: a "Screen it" card screens only the ring it was made for. */
+    screenIncoming: function (card, api) { var s = api.get("phone"); if (!s.incoming || !card.args || card.args.ring !== (s.ringId || "phone:incoming:" + s.incoming)) return api.toast("That call has ended"); pnScreen(api); },
     /* fixture only: a call rings, over the open chat when it is open */
     ring: function (card, api) { pnRing(api, card.args && card.args.pid); }
   },
   reply: function (t, raw, api) {
     var st = api.st;
-    if (PN.live && /\b(hang up|end (the )?call)\b/.test(t)) return { text: "Ended.", then: function () { pnEnd(api); } };
+    /* Only End ends an emergency call (AC-19); a negated request ("don't hang up") ends nothing. */
+    if (PN.live && /\b(hang up|end (the )?call)\b/.test(t) && !/\b(don'?t|do not|never|not)\b/.test(t)) {
+      if (pnLiveEmergency(api)) return { text: "Use End on the call screen to end an emergency call." };
+      return { text: "Ended.", then: function () { pnEnd(api); } };
+    }
     if (PN.live && /\b(take notes|transcri)/.test(t)) return { text: "Taking notes. You'll find them in Recents.", then: function () { api.set({ ai: true, min: false }); } };
     if (/\b(voice ?mail)/.test(t)) {
       var vms = st.vms || [];
@@ -392,25 +442,29 @@ registerView("phone", {
     var none = { end: null, incoming: null, emergency: false, fit: null, briefing: null };
     if (st.incoming) {
       var ip = pnWho(api, st.incoming), rn = ip ? ip.name : "Unknown", screening = st.ring === "screen";
+      var over = !!PN.live && !!st.callWho, hangLive = function () { pnEnd(api); };
       var decline = screening ? function () { pnEndScreen(api); } : function () { pnDecline(api); };
       var answer = function () { pnAnswer(api); };
       return Object.assign({}, none, {
         target: { kind: "incoming", app: "Phone", name: rn, first: ip ? pnFirst(ip) : rn, initials: ip ? ip.ini : "#" },
         closed: ask, left: left, context: rn + " · Incoming call", contextKey: "phone:incoming:" + st.incoming,
-        strip: { title: rn, subtitle: "Incoming call", initials: ip ? ip.ini : "#", live: false, actions: [{ id: "answer", label: "Answer", run: answer }, { id: "decline", label: "Decline", run: decline }] },
-        incoming: { answer: answer, decline: decline, screen: screening ? null : function () { pnScreen(api); } }
+        strip: { title: rn, subtitle: "Incoming call", initials: ip ? ip.ini : "#", live: false, actions: [{ id: "answer", label: "Answer", run: answer }, { id: "decline", label: "Decline", run: decline }].concat(over ? [{ id: "end", label: "End call", run: hangLive }] : []) },
+        /* AC-18: a ring over a live call keeps that call's End reachable at every height; AC-19: over a
+           live emergency call nothing compacts it or replaces its strip */
+        end: over ? hangLive : null, emergency: pnLiveEmergency(api),
+        incoming: { id: st.ringId || "phone:incoming:" + st.incoming, answer: answer, decline: decline, screen: screening ? null : function () { pnScreen(api); } }
       });
     }
     var want = pnWant(st);
     if (want && !st.min) {
-      var cp = pnWho(api, st.call), cn = cp ? cp.name : (st.num || ""), hang = function () { pnEnd(api); };
+      var drawn = pnDrawn(api, st), cp = pnWho(api, drawn.call), cn = cp ? cp.name : (drawn.num || ""), hang = function () { pnEnd(api); };
       return Object.assign({}, none, {
         target: { kind: "call", app: "Phone", name: cn, first: cp ? pnFirst(cp) : cn, initials: cp ? cp.ini : "#" },
-        closed: ask, left: left, context: cn + " · Call", contextKey: "phone:call:" + want,
+        closed: ask, left: left, context: cn + " · Call", contextKey: "phone:call:" + pnCallId(drawn.call, drawn.num),
         strip: { title: cn + " · " + pnClock(st.liveAt ? (now - st.liveAt) / 1000 : 0), subtitle: "On call", initials: cp ? cp.ini : "#", live: true, actions: [
           { id: "mute", label: st.mute ? "Unmute" : "Mute", pressed: !!st.mute, run: function () { api.set({ mute: !api.get("phone").mute }); } },
           { id: "end", label: "End call", run: hang }] },
-        end: hang, emergency: pnEmergency(cp ? cp.phone : st.num)
+        end: hang, emergency: pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : drawn.num)
       });
     }
     /* Recents, Keypad and Voicemail: typing filters Recents on the device (AC-22); a typed sentence or
@@ -433,7 +487,8 @@ registerView("phone", {
     var tab = st.tab === "favorites" ? "recents" : (st.tab || "recents");
     var want = pnWant(st);
     /* deep link {call} / {num}: start the call once */
-    if (want && st.callWho !== want && !st.incoming && PN.boot !== want) {
+    /* AC-19: a different call is never armed over a live emergency call (pnStart would refuse it). */
+    if (want && st.callWho !== want && !st.incoming && PN.boot !== want && !(PN.live && PN.live !== want && pnLiveEmergency(api))) {
       PN.boot = want;
       api.later(function () { PN.boot = null; var s = api.get("phone"); if (pnWant(s) === want && s.callWho !== want) { PN.lastTab = tab; pnStart(api, s.call, s.num); } }, 0);
     }
@@ -521,8 +576,9 @@ registerView("phone", {
 
     /* call screen */
     var inCall = !!want;
-    var cp = inCall ? pnWho(api, st.call) : null;
-    var cnum = cp ? "" : (st.num || "");
+    var drawn = inCall ? pnDrawn(api, st) : null;
+    var cp = inCall ? pnWho(api, drawn.call) : null;
+    var cnum = cp ? "" : ((drawn && drawn.num) || "");
     var live = !!st.liveAt;
     var el = live ? (Date.now() - st.liveAt) / 1000 : 0;
     var status = !live ? "Calling…" : (st.hold ? "On hold · " : "") + pnClock(el);
@@ -576,7 +632,7 @@ registerView("phone", {
 
       inCall: inCall, callFull: inCall && !st.min && !st.incoming, banner: inCall && !!st.min,
       cName: cp ? cp.name : cnum, cIni: cp ? cp.ini : "#", cStatus: status, calling: inCall && !live, live: inCall && live,
-      emergency: inCall && pnEmergency(cp ? cp.phone : st.num),
+      emergency: inCall && (pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : drawn.num)),
       showAvatar: inCall && !st.kp && !(st.ai && lines.length), showLines: inCall && !st.kp && st.ai && lines.length > 0, lines: lines,
       aiOn: inCall && st.ai, aiWait: inCall && st.ai && !lines.length && !st.kp,
       notesLabel: st.ai ? api.name + " notes off" : api.name + " takes notes", notesText: st.ai ? "Notes on" : "Take notes", toggleNotes: toggle("ai"),
@@ -584,6 +640,7 @@ registerView("phone", {
       endCall: function () { pnEnd(api); },
       restore: function () { api.set({ min: false }); },
 
+      ringOverCall: !!st.incoming && !!PN.live && !!st.callWho, endLive: function () { pnEnd(api); },
       ringing: !!st.incoming, rName: ip ? ip.name : "Unknown", rIni: ip ? ip.ini : "#", rSub: ip ? ip.phone : "",
       rCtx: copy("phone").ringContext || "", hasCtx: !!copy("phone").ringContext,
       isRing: !!st.incoming && !screening, isScreen: screening, scrLines: scrLines, scrDone: scrDone, scrLive: screening && !scrDone,
@@ -3564,6 +3621,9 @@ function ctListAsk(raw) {
   var text = String(raw || "").trim();
   var m = text.match(/\b(?:who|show|find|list|filter|people|contacts|anyone|everyone)\b.*?\b(?:at|from|in|named|called|with)\s+(.+?)[\s?.!]*$/i);
   if (m) return m[1].trim();
+  /* A short phrase is a list query unless it is a request for another app ("Call Maya", "Text Maya
+     hi", "Email Maya"): those reach Phone, Messages or Mail through their own replies. */
+  if (/^(call|ring|dial|phone|text|message|msg|sms|email|e-mail|mail|reply|answer|tell|ask|remind|schedule|book|navigate|directions|play|open)\b/i.test(text)) return null;
   return text && !/\?$/.test(text) && text.split(/\s+/).length <= 3 ? text : null;
 }
 /* The list filter as runtime/comms-bar.ts reports it: the owner's typed query shows no chip, Alpha's
@@ -5470,6 +5530,7 @@ class Component extends DCLogic {
     if (prev && prev.initial !== this.props.initial) this.preset(this.props.initial || "boot");
     this.syncShadeFocus();
     this.settleStageSession();
+    this.keepEmergencyLayout();
     var list = document.querySelector("[data-alpha-transcript]"), saved = this.chatScrollSnapshot;
     this.chatWindowCommitted = this.chatWindowRows;
     if (list && saved && saved.list === list && saved.fromBottom !== undefined) list.scrollTop = list.scrollHeight - saved.fromBottom;
@@ -5608,6 +5669,9 @@ class Component extends DCLogic {
       everyBg: function (fn, ms) { return self.every(fn, ms, "bg_" + k); },
       laterBg: function (fn, ms) { return self.later(fn, ms, "bg_" + k); },
       stopBg: function () { self.clear("bg_" + k); self.stopEvery("bg_" + k); },
+      // A ring's own timers (screening), apart from a live call's, so ending the ring leaves the call running.
+      everyRing: function (fn, ms) { return self.every(fn, ms, "ring_" + k); },
+      stopRing: function () { self.clear("ring_" + k); self.stopEvery("ring_" + k); },
       secure: !!S.secure,
       chat: function (draft) { self.setState({ chat: "sheet", draft: draft || "" }); },
       send: function (t) { self.send(t); },
@@ -5685,6 +5749,21 @@ class Component extends DCLogic {
       var end = field.value.length; try { field.setSelectionRange(end, end); } catch (error) {}
     });
   }
+  /**
+   * AC-12/AC-22: dictated text lands in the closed bar's own field exactly as if typed: appended to
+   * the text for the person, or as the list query (a sentence waits for Enter, which asks Alpha).
+   * Nothing is sent. False when the bar on screen has no such field.
+   */
+  fillCommsBar(text) {
+    var spec = this.commsSpec(), c = spec && spec.closed;
+    text = String(text || "").trim();
+    if (!c || typeof c.onText !== "function" || !text) return false;
+    if (c.kind === "person") { var before = String(c.value || ""); c.onText(before ? before + " " + text : text); }
+    else if (c.kind === "filter") { this.barFilter = { key: spec.contextKey, text: text }; if (!isAskSentence(text)) c.onText(text); }
+    else return false;
+    this.setState({});
+    return true;
+  }
   /** A local line in the chat ("Sent to Maya", the briefing). It never moves the chat. */
   note(text, opts) {
     var self = this;
@@ -5698,8 +5777,7 @@ class Component extends DCLogic {
    * AC-19: no acting proposal is shown over an emergency call.
    */
   propose(p, text) {
-    var spec = this.commsSpec();
-    if (p.acts && spec && spec.emergency === true) return { shown: false, replaced: [] };
+    if (p.acts !== false && this.emergencyLive()) return { shown: false, replaced: [] };
     var self = this, replaced = [], card = Object.assign({ type: "proposal" }, p, { state: "open" });
     var close = function (msgs, found) {
       return msgs.map(function (m) {
@@ -5716,6 +5794,27 @@ class Component extends DCLogic {
       return { chat: prev && prev.chat === "full" ? "full" : "sheet", msgs: msgs.concat([{ id: self.nextMessageId(msgs), from: "agent", text: text || p.title, card: card }]) };
     });
     return { shown: true, replaced: replaced };
+  }
+  /**
+   * AC-19: an emergency call is live. The view on screen says so in its bar; a view that holds a
+   * call (Phone) also says so while another view is on screen or its card is minimized.
+   */
+  emergencyLive() {
+    // On the image Telecom reports it (runtime/call-state.ts); the fixture's Phone view below.
+    if (deviceEmergencyLive()) return true;
+    var spec = this.commsSpec();
+    if (spec && spec.emergency === true) return true;
+    var self = this;
+    return Object.keys(VIEWS).some(function (k) {
+      if (!self.isCommsView(k) || typeof VIEWS[k].emergency !== "function") return false;
+      try { return VIEWS[k].emergency(self.vget(k), self.api(k)) === true; } catch (error) { return false; }
+    });
+  }
+  /** AC-19: an emergency call keeps its full-screen layout; the chat never covers it at full height. */
+  keepEmergencyLayout() {
+    if (this.S().chat !== "full") return;
+    var urgent = this.commsSpec();
+    if (urgent && urgent.emergency === true) this.setState({ chat: "sheet" });
   }
   /** Stage history exists only while the chat is open (D11); the comms stage is kept for AC-30. */
   settleStageSession() {
@@ -5827,7 +5926,19 @@ class Component extends DCLogic {
     if (opts && opts.keepStack) { var S0 = this.S(); if (S0.view !== k) { this.leave(); } this.setState({ screen: "home", view: k, shade: false, heads: false, chat: chat || this.defaultChat(k) }); return; }
     if (!VIEWS[k]) return;
     var S = this.S(); opts = opts || {};
-    var nav = this.shellNavigate({ type: "open", view: k, history: opts.push ? "push" : "reset", assistant: this.shellDetent(chat, k) });
+    // AC-05/AC-06: a comms view opening another one (Call in a thread header, Call or Message on a
+    // contact) while the chat is open is a stage switch: the sheet keeps its height, the stage slides
+    // and "‹ <app>" returns to where it came from.
+    var staged = chat == null && (S.chat === "sheet" || S.chat === "full") && !!S.view && S.view !== k && this.isCommsView(S.view) && this.isCommsView(k);
+    if (staged) {
+      var fromSpec = this.commsSpec(S.view);
+      var entry = { view: S.view, title: (fromSpec && fromSpec.target && fromSpec.target.app) || (VIEWS[S.view] && VIEWS[S.view].title) || "", patch: null };
+      this.setState(function (prev) { return { stageFrom: (prev.stageFrom || []).concat([entry]) }; });
+      this.stageSwitched("left");
+      chat = S.chat;
+    }
+    // A stage switch keeps the Back stack, as Component.stage does: stageFrom is its way back (D11).
+    var nav = this.shellNavigate({ type: "open", view: k, history: staged ? "keep" : opts.push ? "push" : "reset", assistant: this.shellDetent(chat, k) });
     if (S.view !== k) {
       this.leave();
       var m = this.mod(k), cur = this.vget(k);
@@ -6000,8 +6111,9 @@ class Component extends DCLogic {
     this.later(function () {
       var r = self.reply(text); var S2 = self.S();
       // A view's reply never acts: an action comes back as a proposal the owner approves (D8).
-      if (r.proposal) { self.setState({ typing: false }); self.propose(r.proposal, r.text); }
-      else self.setState({ typing: false, msgs: S2.msgs.concat([{ id: id + 1, from: "agent", text: r.text, card: r.card || null }]) });
+      if (r.proposal) { self.setState({ typing: false }); if (!self.propose(r.proposal, r.text).shown) self.note("Not during an emergency call.", { quiet: false }); }
+      // A local line (the briefing) can take id + 1 meanwhile: the reply's id follows every row shown.
+      else self.setState({ typing: false, msgs: S2.msgs.concat([{ id: self.nextMessageId(S2.msgs), from: "agent", text: r.text, card: r.card || null }]) });
       if (r.nav) self.later(function () { var n = typeof r.nav === "string" ? { view: r.nav } : r.nav; self.openView(n.view, n.patch, n.chat || self.defaultChat(n.view)); }, 1300);
       if (r.then) self.later(function () { r.then(); }, 700);
     }, 800);
@@ -6013,7 +6125,7 @@ class Component extends DCLogic {
   cardAct(m) {
     var S = this.S(); var c = m.card || {}; var self = this;
     // AC-26: a replaced or finished proposal never acts, however it is reached.
-    if (!proposalCanAct(c)) return;
+    if (!proposalCanAct(c, this.emergencyLive())) return;
     if ((c.act && DEFERRED_MVP_VIEWS.has(c.act.mod)) || (c.go && DEFERRED_MVP_VIEWS.has(c.go.view))) return this.toast("This action is not available on this phone yet.");
     var markDone = function () { self.setState({ msgs: self.S().msgs.map(function (x) { return x.id === m.id ? Object.assign({}, x, { card: Object.assign({}, x.card, m.card, { done: true }, c.type === "proposal" ? { state: "done" } : null) }) : x; }) }); };
     if (c.act && VIEWS[c.act.mod] && VIEWS[c.act.mod].actions && VIEWS[c.act.mod].actions[c.act.fn]) {
@@ -6045,9 +6157,9 @@ class Component extends DCLogic {
           var S2 = self.S(); var lockedNow = S2.screen === "lock";
           var r = lockedNow ? { text: VOICE.lockedAnswer } : self.reply(phrase);
           var patch = { voice: "speaking", vcap: r.text };
-          if (!lockedNow) { var id = Date.now(); patch.msgs = S2.msgs.concat([{ id: id, from: "user", text: phrase }].concat(r.proposal ? [] : [{ id: id + 1, from: "agent", text: r.text, card: r.card || null }])); }
+          if (!lockedNow) { var id = self.nextMessageId(S2.msgs); patch.msgs = S2.msgs.concat([{ id: id, from: "user", text: phrase }].concat(r.proposal ? [] : [{ id: id + 1, from: "agent", text: r.text, card: r.card || null }])); }
           self.setState(patch);
-          if (!lockedNow && r.proposal) self.propose(r.proposal, r.text);
+          if (!lockedNow && r.proposal && !self.propose(r.proposal, r.text).shown) self.note("Not during an emergency call.", { quiet: false });
           if (!lockedNow && r.then) r.then();
           if (!lockedNow && r.nav) self.later(function () { var n = typeof r.nav === "string" ? { view: r.nav } : r.nav; self.openView(n.view, n.patch, n.chat || self.defaultChat(n.view)); }, 2600, "v");
         }, 1500, "v");
@@ -6126,9 +6238,9 @@ class Component extends DCLogic {
     var chatMode = S.chat === "hidden" && comms ? "input" : S.chat;
     var commsOpen = comms && (chatMode === "sheet" || chatMode === "full");
     var landscape = typeof document !== "undefined" && document.documentElement.classList.contains("alpha-landscape");
-    // Short landscape keeps its side-by-side layout: no stage compaction there (AC-29).
-    var stage = { on: isOn && comms && chatMode === "sheet" && !spec.emergency && !landscape, compact: false, full: isOn && comms && chatMode === "full" };
-    stage.compact = stage.on;
+    // Short landscape keeps its side-by-side layout: no stage compaction there (AC-29). An emergency
+    // call is never compacted, at open or full height (AC-19): no live strip replaces it.
+    var stage = { on: isOn && comms && chatMode === "sheet" && !spec.emergency && !landscape, full: isOn && comms && chatMode === "full" && !spec.emergency };
     out.stage = stage;
     if (v === "inbox" && out.inbox && !out.inbox.folderTitle) out.inbox.folderTitle = "Inbox";
     // Compose attach copy follows the provider adapter's attachment limit (c.attachLabel); one
@@ -6257,6 +6369,8 @@ class Component extends DCLogic {
       [IC.lock, "Side key: tap · lock or wake"]
     ].map(function (l) { return { d: l[0], t: l[1] }; });
 
+    var endPlace = isOn && comms && !S.secure ? endPlacement(spec, chatMode, voiceOn) : "none";
+    var barEnd = endPlace === "bar";
     var showPill = isOn && chatMode === "hidden" && !voiceOn;
     var showComposer = isOn && chatMode === "input" && !voiceOn;
     var sbColor = isView && imm.dark && !S.shade && S.chat !== "full" && S.chat !== "sheet" ? "var(--alpha-white)" : "var(--fg)";
@@ -6324,10 +6438,14 @@ class Component extends DCLogic {
       panelFieldClass: comms ? "alpha-chat-composer alpha-bar-field-alpha" : "alpha-chat-composer",
       faint: faint, faintSw: faintSw,
       sheetContext: comms && isOn ? spec.context : "",
-      showEnd: isOn && comms && !commsOpen && !voiceOn && !S.secure && typeof spec.end === "function",
+      // AC-18: one End at every height. Closed: beside the bar, except over an emergency call, whose
+      // full-screen card keeps its own End (AC-19). Open: the call card. Full: the strip. During a
+      // voice turn the voice panel covers all three, so it carries End itself.
+      showEnd: barEnd,
+      voiceEnd: endPlace === "voice",
       endCall: function () { if (spec && spec.end) spec.end(); },
       // The closed bar makes room for End: 44 wide and 8 apart, centred on the 62 tall bar.
-      cmpRight: isOn && comms && !commsOpen && !voiceOn && !S.secure && typeof spec.end === "function" ? 68 : 16, endBottom: 37,
+      cmpRight: barEnd ? 68 : 16, endBottom: 37,
       showStrip: stage.full && !voiceOn,
       strip: stripSpec ? { title: stripSpec.title, subtitle: stripSpec.subtitle, initials: stripSpec.initials || "", hasInitials: !!stripSpec.initials, live: !!stripSpec.live,
         tap: function () { if (self.swallowed()) return; self.setState({ chat: "sheet" }); },

@@ -194,6 +194,11 @@ public class Activity {
  public boolean isFinishing(){return closing;}
  public boolean isDestroyed(){return destroyed;}
 }`,
+  // The AC-20 number lookup is not part of the SMS dispatch contract: it names nobody here.
+  'ai/alphacompute/alphaphone/AlphaContactLookup.java': `package ai.alphacompute.alphaphone;
+final class AlphaContactLookup {
+ static String name(android.content.Context context, String number, android.os.CancellationSignal cancel) { return null; }
+}`,
   'ai/alphacompute/alphaphone/MainActivity.java': `package ai.alphacompute.alphaphone;
 import android.app.Activity;
 import android.content.Context;

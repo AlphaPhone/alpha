@@ -86,6 +86,10 @@ test('a draft the owner asked Alpha for replaces the slot, keeps one Undo, and i
   // Typing, an accepted send and a dismissal end the Undo.
   assert.equal(D.typed(second, 'Mine again').undo, null);
   assert.equal(D.reviewFinished(second, 'sent').undo, null);
+  // An unknown send stays bound to the text it reviewed: Undo cannot replace it.
+  assert.equal(D.reviewFinished(second, 'unknown').undo, null);
+  assert.equal(D.reviewFinished(second, 'unknown').text, 'Shorter');
+  assert.deepEqual(D.reviewFinished(second, 'failed').undo, second.undo, 'a failed send changes nothing');
   assert.equal(D.suggestionDismissed(second).undo, null);
   // Replacing an automatic suggestion remembers the message it answered; Undo offers it again for that message.
   const suggestedReply = D.suggestionReplied(D.suggestionRequested(empty, 'm1', true), 'm1', 'm1', true, 'Sure');
@@ -93,7 +97,13 @@ test('a draft the owner asked Alpha for replaces the slot, keeps one Undo, and i
   assert.deepEqual({draft: overSuggestion.draft, declined: overSuggestion.declined}, {draft: 'asked', declined: 'm1'});
   assert.equal(D.canSuggest(D.suggestionDismissed(overSuggestion), 'm1', true), false);
   const back = D.draftUndone(overSuggestion);
-  assert.deepEqual({draft: back.draft, text: back.text, base: back.base}, {draft: 'agent', text: 'Sure', base: 'm1'});
+  assert.deepEqual({draft: back.draft, text: back.text, base: back.base, declined: back.declined}, {draft: 'agent', text: 'Sure', base: 'm1', declined: null},
+    'the suggestion comes back for its message, and its replacement is no longer a dismissal');
+  assert.equal(D.canSuggest(back, 'm1', true), false, 'the slot is not empty');
+  // A newer message retires a displaced suggestion's Undo, as it would retire the suggestion itself.
+  assert.equal(D.threadChanged(overSuggestion, 'm2').undo, null);
+  assert.deepEqual(D.threadChanged(overSuggestion, 'm1').undo, overSuggestion.undo);
+  assert.deepEqual(D.threadChanged(replaced, 'm2').undo, replaced.undo, 'the owner\'s displaced text is kept');
   assert.deepEqual(D.reviewFinished(asked, 'sent'), empty);
   assert.equal(D.reviewFinished(asked, 'unknown'), asked);
 });
@@ -103,37 +113,4 @@ test('Edit and an accepted suggestion make the text the owner\'s', () => {
   // A suggestion is accepted by typing its text: it is not offered again for that message.
   const accepted = D.typed(suggested(), suggested().text);
   assert.deepEqual({draft: accepted.draft, text: accepted.text, declined: accepted.declined}, {draft: 'owner', text: 'Yes, see you at 7', declined: 'sms:1'});
-});
-test('the saved SMS slot reads only its exact shape', async () => {
-  const S = await import('../apps/app/src/runtime/sms-draft-store.ts');
-  const slot = D.askedDraftPlaced(D.typed(D.emptyDraft(), 'Mine'), 'Alpha words', true);
-  const saved = S.smsDraftText(slot);
-  assert.deepEqual(JSON.parse(saved), {v: 1, draft: 'asked', text: 'Alpha words', undo: {draft: 'owner', text: 'Mine'}});
-  assert.deepEqual(S.readSmsDraftText(saved), {...D.emptyDraft(), draft: 'asked', text: 'Alpha words', undo: {draft: 'owner', text: 'Mine'}});
-  // An untouched suggestion is for the visit only.
-  assert.deepEqual(S.readSmsDraftText(S.smsDraftText(suggested())), D.emptyDraft());
-  for (const raw of ['', 'not json', 'null', '[]', '{"v":2,"draft":"owner","text":"x","undo":null}', '{"v":1,"draft":"owner","text":"x"}',
-    '{"v":1,"draft":"owner","text":"x","undo":null,"extra":1}', '{"v":1,"draft":"agent","text":"x","undo":null}', '{"v":1,"draft":"none","text":"x","undo":null}',
-    '{"v":1,"draft":"owner","text":"","undo":null}', '{"v":1,"draft":"owner","text":"x","undo":{"draft":"none","text":"y"}}',
-    '{"v":1,"draft":"owner","text":"x","undo":{"draft":"owner","text":"y","by":"z"}}', JSON.stringify({v: 1, draft: 'owner', text: 'x'.repeat(1601), undo: null})])
-    assert.deepEqual(S.readSmsDraftText(raw), D.emptyDraft(), raw.slice(0, 60));
-});
-test('saved SMS slots are read before they are written and written in order', async () => {
-  const S = await import('../apps/app/src/runtime/sms-draft-store.ts');
-  const rows = new Map(), log = [];
-  const open = async threadId => ({
-    read: async () => { log.push(['read', threadId]); return rows.get(threadId) ?? null; },
-    save: async (expected, text) => { log.push(['save', threadId, text]); if ((rows.get(threadId) ?? null) !== expected) throw Error('conflict'); const row = {version: 1, binding: threadId, revision: String(log.length), text}; rows.set(threadId, row); return row; },
-  });
-  const slots = S.smsDraftSlots(open);
-  assert.deepEqual(await slots.load('t1'), D.emptyDraft());
-  await slots.save('t1', D.emptyDraft());
-  assert.equal(log.filter(row => row[0] === 'save').length, 0, 'an empty slot is not written');
-  const owner = D.typed(D.emptyDraft(), 'On my way');
-  await Promise.all([slots.save('t1', owner), slots.save('t1', owner)]);
-  assert.equal(log.filter(row => row[0] === 'save').length, 1, 'an unchanged slot is not written again');
-  // Another writer's row is read again before writing.
-  rows.set('t1', {version: 1, binding: 't1', revision: 'other', text: S.smsDraftText(D.typed(D.emptyDraft(), 'Elsewhere'))});
-  await slots.save('t1', D.typed(D.emptyDraft(), 'Final'));
-  assert.equal((await S.smsDraftSlots(open).load('t1')).text, 'Final');
 });

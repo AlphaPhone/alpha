@@ -200,6 +200,8 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await settled(page);
 		// Open: End leaves the bar (the call card has it); full: End is in the strip.
 		await expect(end).toHaveCount(0);
+		// A size tap right after a drag is that drag's own release, so the next tap waits it out.
+		await page.waitForTimeout(400);
 		await page.getByRole('button', {name: 'Expand chat', exact: true}).click();
 		await page.locator('[data-alpha-strip-action="end"]').click();
 		expect((await calls(page)).filter(call => call[1] === 'stripEnd')).toHaveLength(1);
@@ -275,6 +277,145 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		expect(await shell(page, `window.__shell().propose(${proposal('c')})`)).toEqual({shown: false, replaced: []});
 	});
 
+	test('AC-19: an emergency call keeps its layout: no strip at full height, one End, and no proposal button', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'call', field: 'alpha', end: true, app: 'Call'});
+		await page.evaluate(async () => {
+			const {VIEWS} = await import('/src/prototype/model.js');
+			(VIEWS.notes.actions ||= {}).testCall = () => { (window as any).__calls.push(['notes', 'acted']); };
+		});
+		// A call proposal made before the emergency call started.
+		await shell(page, 'window.__shell().propose({id: "before", kind: "call", title: "Call Ada", detail: "(415) 555-0101", button: "Call", acts: true, act: {mod: "notes", fn: "testCall"}, args: {}})');
+		await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
+		await page.evaluate(() => { (window as any).__bar.notes.emergency = true; (window as any).__shell().setState({}); });
+		await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(0);
+		await shell(page, 'window.__shell().cardAct(window.__shell().S().msgs.find(m => m.card && m.card.id === "before"))');
+		expect((await calls(page)).filter(call => call[1] === 'acted')).toHaveLength(0);
+		// Full height is refused: the chat stays open and no live strip replaces the call.
+		await shell(page, 'window.__shell().setState({chat: "full"})');
+		await expect.poll(() => shell(page, 'window.__shell().S().chat')).toBe('sheet');
+		await expect(page.locator('[data-alpha-strip]')).toHaveCount(0);
+		// Closed: the emergency card keeps End among its controls, so the bar shows none of its own.
+		await shell(page, 'window.__shell().setState({chat: "input"})');
+		await expect(page.locator('[data-alpha-input-bar]')).toBeVisible();
+		await expect(page.locator('[data-alpha-bar-end]')).toHaveCount(0);
+	});
+
+	test('AC-18: during a voice turn on a call End stays reachable', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'call', field: 'alpha', end: true, app: 'Call'});
+		for (const chat of ['input', 'sheet', 'full']) {
+			await shell(page, `window.__shell().setState({chat: "${chat}", voice: "listening"})`);
+			const end = page.locator('[data-alpha-voice-end]');
+			await expect(end).toBeVisible();
+			expect(await end.evaluate(button => { const box = button.getBoundingClientRect(); return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest('[data-alpha-voice-end]') === button; })).toBe(true);
+			await end.click();
+			await shell(page, 'window.__shell().setState({voice: "off"})');
+		}
+		expect((await calls(page)).filter(call => call[1] === 'end')).toHaveLength(3);
+	});
+
+	test('AC-12: holding the Alpha mark in the open sheet starts voice; Alpha-target bars dictate instead of Talk', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'call', field: 'alpha', end: true, app: 'Call'});
+		await page.evaluate(() => { const w = window as any; w.__voice = 0; w.__dictate = 0; const s = w.__shell(); s.startVoice = () => { w.__voice++; }; s.startTranscription = () => { w.__dictate++; }; s.setState({}); });
+		// Closed, addressing Alpha during a call: the right-hand control dictates.
+		await expect(page.getByRole('button', {name: 'Talk', exact: true})).toHaveCount(0);
+		await page.locator('[data-alpha-input-bar] [data-alpha-bar-dictate]').click();
+		expect(await page.evaluate(() => (window as any).__dictate)).toBe(1);
+		await openSheet(page);
+		await expect(page.getByRole('button', {name: 'Talk', exact: true})).toHaveCount(0);
+		const mark = page.locator('[data-alpha-sheet-alpha]');
+		const box = (await mark.boundingBox())!;
+		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+		await page.mouse.down();
+		await page.waitForTimeout(800);
+		await page.mouse.up();
+		expect(await page.evaluate(() => (window as any).__voice)).toBe(1);
+		// The release that ends the hold is not the header's Home tap.
+		expect(await shell(page, 'window.__shell().S().view')).toBe('notes');
+		await shell(page, 'window.__shell().setState({chat: "full"})');
+		await expect(page.locator('[data-alpha-strip]')).toBeVisible();
+		await settled(page);
+		await page.waitForTimeout(500);
+		const full = (await mark.boundingBox())!;
+		await page.mouse.move(full.x + full.width / 2, full.y + full.height / 2);
+		await page.mouse.down();
+		await page.waitForTimeout(800);
+		await page.mouse.up();
+		expect(await page.evaluate(() => (window as any).__voice)).toBe(2);
+		// A short press that slides off the mark and is released elsewhere never starts voice later.
+		const again = (await mark.boundingBox())!;
+		await page.mouse.move(again.x + again.width / 2, again.y + again.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(again.x + 200, again.y + 300, {steps: 4});
+		await page.mouse.up();
+		await page.waitForTimeout(800);
+		expect(await page.evaluate(() => (window as any).__voice)).toBe(2);
+		// An open thread keeps the voice button ("send or voice").
+		await page.evaluate(() => { (window as any).__bar.notes.kind = 'thread'; (window as any).__bar.notes.field = 'person'; (window as any).__shell().setState({chat: 'sheet'}); });
+		await expect(page.getByRole('button', {name: 'Talk', exact: true})).toBeVisible();
+	});
+
+	test('a comms view opening another one with the chat open slides the stage and keeps the sheet', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'thread'});
+		await registerBar(page, 'calendar', {kind: 'call', field: 'alpha', end: true, app: 'Call'});
+		await openSheet(page);
+		const before = await sheetHeight(page);
+		await shell(page, 'window.__shell().api("notes").open("calendar", null)');
+		await expect.poll(() => shell(page, 'window.__shell().S().view')).toBe('calendar');
+		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
+		await expect(page.locator('[data-alpha-stage-return]')).toHaveText('‹ Messages');
+		await settled(page);
+		expect(Math.abs(await sheetHeight(page) - before)).toBeLessThan(1);
+		await shell(page, 'window.__shell().back()');
+		await expect.poll(() => shell(page, 'window.__shell().S().view')).toBe('notes');
+		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
+	});
+
+	test('a drag released between snap points after a stage switch ends the held height', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'thread'});
+		await registerBar(page, 'calendar', {kind: 'thread'});
+		await openSheet(page);
+		await shell(page, 'window.__shell().api("notes").stage("calendar", null, null)');
+		await settled(page);
+		expect(await shell(page, '!!window.__shell().stageHold')).toBe(true);
+		const grab = (await page.getByRole('button', {name: 'Resize chat', exact: true}).boundingBox())!;
+		await page.mouse.move(grab.x + grab.width / 2, grab.y + grab.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(grab.x + grab.width / 2, grab.y - 90, {steps: 8});
+		await page.mouse.up();
+		await settled(page);
+		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
+		expect(await shell(page, 'window.__shell().stageHold')).toBeNull();
+	});
+
+	test('AC-30: an open stage is saved and restored as data; a closed comms view is not saved', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'thread'});
+		await registerBar(page, 'calendar', {kind: 'call', field: 'alpha', end: true, app: 'Call'});
+		const saved = () => page.evaluate(async () => { const {stageSessionStore} = await import('/src/runtime/stage-session-store.ts'); return stageSessionStore().read(); });
+		await openSheet(page);
+		await shell(page, 'window.__shell().api("notes").stage("calendar", null, null)');
+		await expect.poll(saved).toEqual({chat: 'sheet', sheetShare: null, view: 'calendar', stageFrom: [{view: 'notes', title: 'Messages', patch: null}]});
+		const session = await saved();
+		// As after process death: Home, with the saved session in the store (leaving wrote it empty).
+		await shell(page, 'window.__shell().goHome()');
+		await expect.poll(saved).toBeNull();
+		await page.evaluate(async session => { const {stageSessionStore} = await import('/src/runtime/stage-session-store.ts'); await stageSessionStore().write(session); }, session);
+		await shell(page, 'window.__shell().restoreStageSession()');
+		await expect.poll(() => shell(page, 'window.__shell().S().view')).toBe('calendar');
+		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');
+		expect(await shell(page, 'JSON.stringify(window.__shell().S().stageFrom.map(e => e.view))')).toBe('["notes"]');
+		// Restoring runs nothing: no End, Send or other bar action.
+		expect((await calls(page)).filter(call => call[1] !== 'onText')).toEqual([]);
+		// Closing the chat forgets the stage.
+		await shell(page, 'window.__shell().setState({chat: "input"})');
+		await expect.poll(saved).toBeNull();
+	});
+
 	for (const theme of ['light', 'dark']) test(`shell surfaces meet contrast in ${theme}`, async ({page}) => {
 		await openNotes(page, theme);
 		await registerBar(page, 'notes', {kind: 'call', field: 'alpha', end: true, app: 'Call', suggestion: null});
@@ -289,6 +430,7 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 			const out: string[] = [];
 			for (const [selector, min] of [['[data-alpha-sheet-context]', 4.5], ['.alpha-strip-text b', 4.5], ['.alpha-strip-text span', 4.5], ['[data-alpha-stage-return]', 4.5], ['[data-alpha-input-bar] textarea', 4.5]] as const)
 				for (const element of document.querySelectorAll(selector)) { const r = ratio(rgb(getComputedStyle(element).color), background(element)); if (r < min) out.push(`${selector} text ${r.toFixed(2)}`); }
+			for (const element of document.querySelectorAll('[data-alpha-proposal-act]')) { const r = ratio(rgb(getComputedStyle(element).color), background(element)); if (r < 4.5) out.push(`proposal button text ${r.toFixed(2)}`); }
 			for (const selector of ['[data-alpha-bar-end]', '.alpha-strip-action.alpha-end-button'])
 				for (const element of document.querySelectorAll(selector)) { const r = ratio(background(element), background(element, true)); if (r < 3) out.push(`${selector} control ${r.toFixed(2)}`); }
 			return out;
@@ -297,6 +439,9 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await openSheet(page);
 		await shell(page, 'window.__shell().api("notes").stage("notes", null, null)');
 		await expect(page.locator('[data-alpha-stage-return]')).toBeVisible();
+		// AC-28: a call proposal's white "Call" on green.
+		await shell(page, 'window.__shell().propose({id: "c", kind: "call", title: "Call Ada", detail: "(415) 555-0101", button: "Call", acts: true, act: {mod: "notes", fn: "none"}, args: {}})');
+		await expect(page.locator('[data-alpha-proposal-act]')).toBeVisible();
 		expect(await audit()).toEqual([]);
 		await page.getByRole('button', {name: 'Expand chat', exact: true}).click();
 		await expect(page.locator('[data-alpha-strip]')).toBeVisible();

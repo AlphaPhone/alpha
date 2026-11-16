@@ -33,7 +33,7 @@ export function shellCore({views, globals = {}}) {
   const arm = kind => (run, delay) => { timers.set(++nextTimer, {run, delay, kind}); return nextTimer; };
   const disarm = id => { timers.delete(id); };
   const context = vm.createContext({
-    VIEWS: views, DEFERRED_MVP_VIEWS: new Set(), isMvpView: key => key in views, navigateMobileShell,
+    VIEWS: views, DEFERRED_MVP_VIEWS: new Set(), isMvpView: key => key in views, navigateMobileShell, deviceEmergencyLive: () => false,
     accessibilityTimeoutScale: () => 1, shadeFallback: outcome => `shade:${outcome}`, externalVoiceInvocationEnabled: true,
     VOICE: {locked: 'ab', fallback: 'cd', lockedAnswer: 'locked answer'}, QUICK_SETTINGS: {mic: true},
     ALPHA_PRODUCT: {identity: {characterName: 'Alpha'}}, IC: {}, PEOPLE: [], person: () => null,
