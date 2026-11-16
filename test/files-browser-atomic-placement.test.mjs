@@ -21,6 +21,10 @@ test('Browser Files placement preserves exact rows and Trash markers on IndexedD
     `},
     bundle: true, write: false, platform: 'browser', format: 'iife',
     external: ['pdfjs-dist'],
+    // The app resolves this specifier to Alpha's projected protocol module (tsconfig and Vite alias).
+    plugins: [{name: 'alpha-core-protocol', setup(builder) {
+      builder.onResolve({filter: /^@elizaos\/core\/protocol$/}, () => ({path: resolve(root, '.eliza/client-features/alpha-voice-core-protocol.ts')}));
+    }}],
   });
   const browser = await chromium.launch({headless: true, args: ['--no-sandbox']});
   try {
