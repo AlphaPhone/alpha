@@ -632,8 +632,8 @@ export async function auditReadingOrder(page: Page): Promise<Violation[]> {
         for(const node of nodes){
           const el=node&&node.nodeType===1?node:node&&node.parentElement;
           if(!el||!el.isConnected){out.push(null);continue;}
-          // The phone screen and what is drawn over it in the top layer. A shell without the phone
-          // frame (the shared upstream shell) is judged whole, never skipped.
+          // The phone screen and what is drawn over it in the top layer. A page without the phone
+          // frame is judged whole, never skipped.
           const framed=!!document.querySelector('[data-screen]');
           const screen=!framed||el.closest('[data-screen]')||el.closest('dialog[open],:popover-open');
           // Names painted on the pannable map have a place, not an order; its pins are also listed in the results sheet.

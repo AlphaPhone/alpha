@@ -1,5 +1,5 @@
 /** Shared reminder presentation only. The canonical service owns all state and mutations. */
-export interface ReminderPresentationRow {
+interface ReminderPresentationRow {
   definition: { status: string; cadence?: { kind: string; dueAt?: string } };
   occurrence: {
     state: string;

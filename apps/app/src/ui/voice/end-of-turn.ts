@@ -25,7 +25,7 @@ import { scoreEndOfTurnHeuristic } from "@elizaos/voice/turn";
  * Re-exported from the canonical `@elizaos/voice` so the shell and
  * the plugin score identically.
  */
-export const scoreEndOfTurn = scoreEndOfTurnHeuristic;
+const scoreEndOfTurn = scoreEndOfTurnHeuristic;
 
 export interface TurnAggregatorOptions {
   /**

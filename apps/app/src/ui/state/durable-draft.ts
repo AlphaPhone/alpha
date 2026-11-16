@@ -36,15 +36,15 @@ export interface DurableDraft {
 }
 
 /** Whether a saved row is a message that was being sent when it was written. */
-export function isSendingDurableDraft(draft: DurableDraft | null): boolean {
+function isSendingDurableDraft(draft: DurableDraft | null): boolean {
   return draft?.sending === true;
 }
 
 /** Default bound on a draft's UTF-8 text, in bytes. */
-export const DURABLE_DRAFT_TEXT_LIMIT = 64_000;
+const DURABLE_DRAFT_TEXT_LIMIT = 64_000;
 
 /** The saved bytes are not a draft for this binding. Recovery is required. */
-export class DurableDraftInvalid extends Error {
+class DurableDraftInvalid extends Error {
   constructor(message = "Saved draft needs recovery.") {
     super(message);
     this.name = "DurableDraftInvalid";
@@ -52,7 +52,7 @@ export class DurableDraftInvalid extends Error {
 }
 
 /** Another writer replaced the draft since it was read. Nothing was written. */
-export class DurableDraftConflict extends Error {
+class DurableDraftConflict extends Error {
   constructor(
     message = "This draft changed in another view. Review the saved copy before replacing it.",
   ) {
@@ -62,14 +62,14 @@ export class DurableDraftConflict extends Error {
 }
 
 /** The text exceeds the store's bound. Nothing was written. */
-export class DurableDraftTooLarge extends Error {
+class DurableDraftTooLarge extends Error {
   constructor(message = "Draft is too large to save locally.") {
     super(message);
     this.name = "DurableDraftTooLarge";
   }
 }
 
-export interface DurableDraftOptions {
+interface DurableDraftOptions {
   /** UTF-8 byte bound on the text (default {@link DURABLE_DRAFT_TEXT_LIMIT}). */
   textLimit?: number;
   /** Fresh revision for each write (default `crypto.randomUUID`). */
@@ -77,7 +77,7 @@ export interface DurableDraftOptions {
 }
 
 /** How a write marks the saved text (see {@link DurableDraft.sending}). */
-export interface DurableDraftWriteOptions {
+interface DurableDraftWriteOptions {
   /** Mark the text as a message being sent; any other write clears the mark. */
   sending?: boolean;
 }
@@ -93,7 +93,7 @@ const SENDING_DRAFT_KEYS = "binding,revision,sending,text,version";
  * anything else that is not exactly a version-1 row for this binding throws
  * {@link DurableDraftInvalid}, so another identity's text is never adopted.
  */
-export function readDurableDraft(
+function readDurableDraft(
   value: unknown,
   binding: string,
   textLimit: number = DURABLE_DRAFT_TEXT_LIMIT,
@@ -198,7 +198,7 @@ export interface DurableDraftRawSlot {
   ): Promise<{ status: "saved" | "conflict" }>;
 }
 
-export interface DurableDraftStoreOptions<Recovery>
+interface DurableDraftStoreOptions<Recovery>
   extends DurableDraftOptions {
   recovery?: Recovery;
 }
@@ -258,7 +258,7 @@ export function compareExchangeDraftStore<Recovery = undefined>(
  * A JSON document whose `editJson` runs `update` once inside one transaction
  * and writes its result, or writes nothing when `update` throws.
  */
-export interface DurableDraftDocument {
+interface DurableDraftDocument {
   readJson(signal?: AbortSignal): Promise<unknown>;
   editJson(
     update: (actual: unknown) => unknown,
@@ -301,7 +301,7 @@ export function transactionalDraftStore<Recovery = undefined>(
 }
 
 /** What a raw-slot recovery captured: the exact bytes, never re-serialised. */
-export interface DurableDraftRawCapture {
+interface DurableDraftRawCapture {
   /** Opaque receipt; only this capture's reset may replace these bytes. */
   snapshot: { revision: string; raw: string | null };
   raw: string | null;

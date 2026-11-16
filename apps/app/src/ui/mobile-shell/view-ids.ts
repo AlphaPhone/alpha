@@ -3,7 +3,7 @@
  * action, the builtin route registry and plugin view declarations already
  * use, so a product maps its own older keys once instead of keeping aliases.
  */
-export const MOBILE_SHELL_VIEW_IDS = [
+const MOBILE_SHELL_VIEW_IDS = [
   "chat",
   "inbox",
   "calendar",

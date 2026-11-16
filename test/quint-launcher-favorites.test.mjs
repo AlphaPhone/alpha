@@ -198,7 +198,7 @@ async function checkLauncherFavorites(extraSources = []) {
     traces.push(t);
   }
   return checkTraces(boundInputs({model: 'LauncherFavorites', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
-    'Actual shared MobileShellLauncher, local favorites store, registry, and product registration execute against a synthetic Storage port and deferred installed-app reads.',
+    'Actual Alpha MobileShellLauncher (ui/mobile-shell) over the shared launcher bridge, local favorites store, registry, and product registration execute against a synthetic Storage port and deferred installed-app reads.',
     'Two Alpha views, their legacy alias, and three installed package/activity/profile keys form the bounded identity set. A source inspection seam reads the original captured favorites and migration flags. Home visibility comes from actual homeEntries().',
     'One held inventory read and a later load or controller recreation are covered. Independent writes use an external port. Browser storage errors are represented as thrown reads or writes; OS package effects and actual browser persistence remain external.',
   ]}));

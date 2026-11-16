@@ -10,7 +10,7 @@ export type StoppedUserTurn = {
   sentAt: number;
 };
 /** How far before the local send time an agent clock may stamp the same user row. */
-export const STOPPED_TURN_CLOCK_SKEW_MS = 120_000;
+const STOPPED_TURN_CLOCK_SKEW_MS = 120_000;
 
 /**
  * Finds the user row of a stopped turn in a conversation read (oldest first).

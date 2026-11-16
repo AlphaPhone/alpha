@@ -13,7 +13,7 @@
  * targeted formatter is enough.
  */
 
-export interface CronPreset {
+interface CronPreset {
   label: string;
   expression: string;
 }
@@ -49,7 +49,7 @@ function formatTime(hour: number, minute: number): string {
  * set of well-known cron shapes. Returns `null` for anything we don't
  * recognise — callers should fall back to displaying the raw expression.
  */
-export function describeCron(expression: string): string | null {
+function describeCron(expression: string): string | null {
   const trimmed = expression.trim();
   if (!trimmed) return null;
   const parts = trimmed.split(/\s+/);

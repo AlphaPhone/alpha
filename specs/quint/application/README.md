@@ -36,7 +36,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `PhotosWindow` | Native catalog reads in the Alpha Photos adapter and shared window helper | Paginated window merge, reload coalescing and hidden/disposed read fencing |
 | `PhotosTrash` | Native Trash reads in the Alpha Photos adapter | Coalesced pagination, resume reload and stale completion fencing |
 | `CalendarPresentation` | `calendar-adapter` `refresh(request, force)`, `generation`, `calendarReturnDay`, `calendarFormCommitted`, `calendar-month-focus`, Google Calendar selection | Selected month/day, views and menu/delete/search Back order, query-range generations with forced reads where the newest wins, visible calendars, owner-scoped rows, creation draft identity and a confirmed save closing the form |
-| `CanonicalCalendarDraft` | Canonical Calendar editor and shared durable draft | Bound slot ownership, stale reads/writes, held clears, same-account replacement and recovery |
+| `CanonicalCalendarDraft` | Canonical Calendar editor and Alpha's durable draft | Bound slot ownership, stale reads/writes, held clears, same-account replacement and recovery |
 | `AgentCalendarRefresh` | Current Agent Calendar read controller | Range and session fencing, coalesced readback, legacy gate and next-event freshness |
 | `AgentCalendarMutation` | Current Agent Calendar write controller | Edit admission, preservation and owner checks, exact dispatch and deferred refresh |
 | `AgentCalendarSyncControl` | Current Agent Calendar linked control client | Captured review, selected source version, current draft and owner fence, exact control dispatch and linked-event read |
@@ -53,7 +53,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `HomeFailureNotice` | Home host and the shared installed launcher | Launch and inventory failure notices, surface ownership and duplicate suppression |
 | `LauncherOwnership` | Shared launcher and system bridge | Inventory and default read generations, exact component/profile handoff and retired launch fencing |
 | `LauncherObserver` | Shared launcher watcher and system bridge | Package and document events, refresh debounce, late listener settlement and idempotent retirement |
-| `LauncherFavorites` | Shared mobile launcher and Alpha view registry | Ordered favorites, legacy migration, storage refusal, external choice ownership and visible reordering |
+| `LauncherFavorites` | Alpha mobile-shell launcher, shared launcher bridge and Alpha view registry | Ordered favorites, legacy migration, storage refusal, external choice ownership and visible reordering |
 | `HomeGesture` | Alpha Home adapter and shared launcher | Pointer ownership, held and dragged activation, keyboard focus and edit-layer retirement |
 | `DrawerInteraction` | Mounted Alpha Apps drawer | Current press, query and menu identity, focus restoration and exact App Info handoff |
 | `CallbackLanding` | Static delegation-return page | Query multiplicity, state shape, result exclusivity, size/description limits, early URL scrubbing and exact app-link exposure |

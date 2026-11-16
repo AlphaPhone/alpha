@@ -7,11 +7,11 @@
  */
 
 /** Where the assistant sits over the shell. */
-export type MobileAssistantDetent = "pill" | "input" | "sheet" | "full";
+type MobileAssistantDetent = "pill" | "input" | "sheet" | "full";
 /** A detent a surface rests in while the conversation is closed. */
-export type MobileAssistantRest = "pill" | "input";
+type MobileAssistantRest = "pill" | "input";
 
-export interface MobileShellNavigation {
+interface MobileShellNavigation {
   /** Open view key; null is Home. */
   view: string | null;
   /** Views Back returns to, oldest first. */
@@ -45,14 +45,14 @@ export type MobileShellNavigationAction =
   /** Move the assistant; `rest` returns it to the open surface's rest detent. */
   | { type: "assistant"; detent: MobileAssistantDetent | "rest" };
 
-export interface MobileShellNavigationOptions {
+interface MobileShellNavigationOptions {
   /** Rest detent of an open view; the pill when absent. */
   assistantRest?: (view: string) => MobileAssistantRest;
 }
 
-export const MOBILE_SHELL_STACK_LIMIT = 6;
+const MOBILE_SHELL_STACK_LIMIT = 6;
 
-export const MOBILE_SHELL_HOME: MobileShellNavigation = Object.freeze({
+const MOBILE_SHELL_HOME: MobileShellNavigation = Object.freeze({
   view: null,
   stack: Object.freeze([]) as readonly string[],
   drawer: false,
@@ -61,7 +61,7 @@ export const MOBILE_SHELL_HOME: MobileShellNavigation = Object.freeze({
 });
 
 /** The detent `view` rests in; Home (null) rests in the composer. */
-export function mobileAssistantRest(
+function mobileAssistantRest(
   view: string | null,
   options: MobileShellNavigationOptions = {},
 ): MobileAssistantRest {

@@ -109,7 +109,7 @@ export interface WalkthroughMemory {
   reviewed?: Record<string, true>;
 }
 
-export interface WalkthroughMemoryStore {
+interface WalkthroughMemoryStore {
   read(): WalkthroughMemory;
   /** Best effort: false when storage is unavailable (the session keeps its in-memory behaviour). */
   write(patch: Partial<WalkthroughMemory>): boolean;

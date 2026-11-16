@@ -33,12 +33,12 @@ export interface PlaybackAudioContextLike {
   close(): Promise<void>;
 }
 
-export interface PlaybackNodeLike {
+interface PlaybackNodeLike {
   connect(target: PlaybackNodeLike): PlaybackNodeLike;
   disconnect(): void;
 }
 
-export interface PlaybackScriptNodeLike extends PlaybackNodeLike {
+interface PlaybackScriptNodeLike extends PlaybackNodeLike {
   onaudioprocess:
     | ((event: {
         outputBuffer: {
@@ -49,7 +49,7 @@ export interface PlaybackScriptNodeLike extends PlaybackNodeLike {
     | null;
 }
 
-export interface PlaybackWorkletNodeLike extends PlaybackNodeLike {
+interface PlaybackWorkletNodeLike extends PlaybackNodeLike {
   port: {
     onmessage: ((event: { data: unknown }) => void) | null;
     postMessage(data: unknown, transfer?: Transferable[]): void;
@@ -99,7 +99,7 @@ type WorkletCapablePlaybackContext = PlaybackAudioContextLike & {
   audioWorklet: { addModule(url: string): Promise<void> };
 };
 
-export interface VoiceSessionPlaybackOptions {
+interface VoiceSessionPlaybackOptions {
   createAudioContext?: () => PlaybackAudioContextLike;
   /** Cancels provisional setup and closes any live playback graph. */
   signal?: AbortSignal;
@@ -127,16 +127,16 @@ export interface VoiceSessionPlaybackOptions {
 }
 
 const PLAYBACK_WORKLET_NAME = "eliza-voice-session-downlink";
-export const DEFAULT_VOICE_PLAYBACK_PRE_ROLL_MS = 120;
+const DEFAULT_VOICE_PLAYBACK_PRE_ROLL_MS = 120;
 
-export type VoiceSessionPlaybackStatsReason =
+type VoiceSessionPlaybackStatsReason =
   | "started"
   | "underrun"
   | "finished"
   | "flushed"
   | "stopped";
 
-export interface VoiceSessionPlaybackStats {
+interface VoiceSessionPlaybackStats {
   readonly backend: "audioworklet" | "scriptprocessor";
   readonly preRollMs: number;
   readonly framesEnqueued: number;
@@ -192,7 +192,7 @@ function awaitPlaybackSetup<T>(
   });
 }
 
-export function hasPlaybackWorkletSupport(
+function hasPlaybackWorkletSupport(
   ctx: PlaybackAudioContextLike,
 ): ctx is WorkletCapablePlaybackContext {
   return (

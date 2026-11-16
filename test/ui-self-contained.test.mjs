@@ -5,11 +5,12 @@
 // prepared upstream source selection names no UI. The staged tree itself is checked in
 // test/client-feature-preparation.test.mjs.
 //
-// Upstream UI is recognised two ways. By name: packages/ui, @elizaos/ui, the React directories
-// of plugins and packages/app, and the plugin-maps renderer Alpha replaced. By what it is: the
-// resolved module graph of every apps/app/src module (bundled with the vite.config.ts aliases)
-// loads no upstream JSX/TSX, React, @elizaos/ui, stylesheet or DOM-building module, whatever
-// its path.
+// Upstream UI is recognised two ways. By name: packages/ui, @elizaos/ui and the React directories
+// of plugins and packages/app. By what it is: the resolved module graph of every apps/app/src
+// module (bundled with the vite.config.ts aliases) loads no upstream JSX/TSX, React, @elizaos/ui,
+// MapLibre, stylesheet or DOM-building module, whatever its path; the TypeScript program reached
+// from apps/app/src (type-only imports included) does the same; Vite asset and worker queries
+// never load upstream files; and every staged upstream file, bundled or not, builds no DOM.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,17 +26,41 @@ const listed = (...paths) => execFileSync('git', ['ls-files', '-z', '--cached', 
 const sources = listed('apps/app/src').filter(file => /\.(?:ts|tsx|js|mjs)$/.test(file));
 const specifiers = file => [...fs.readFileSync(file, 'utf8')
   .matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+|\bexport\s+\*\s+from\s*)(['"])([^'"\n]+)\1/gm)].map(match => match[2]);
-// Upstream UI by name: packages/ui (and its @elizaos/ui package name), the React directories of
-// plugins and of packages/app, and the plugin-maps renderer that Alpha's map-plane replaced.
-const UPSTREAM_UI = /(?:^@elizaos\/ui(?:\/|$)|(?:^|\/)packages\/ui\/|(?:^|\/)packages\/app\/src\/(?:renderer|shims)\/|(?:^|\/)plugins\/[^/]+\/src\/(?:components|ui|hooks|views|companion)\/|(?:^|\/)plugins\/plugin-maps\/src\/client\/map-plane\b)/;
+/** Files referenced as URLs (`new URL('…', import.meta.url)`), which a bundler emits as assets. */
+const urlReferences = file => [...fs.readFileSync(file, 'utf8')
+  .matchAll(/\bnew\s+URL\(\s*(['"`])([^'"`\n]+)\1\s*,\s*import\.meta\.url/g)].map(match => match[2]);
+const UPSTREAM_TREE = /(?:^|\/)(?:vendor\/eliza|\.eliza\/client-features)\//;
+// Upstream UI by name: packages/ui (and its @elizaos/ui package name) and the React directories
+// of plugins and of packages/app.
+const UPSTREAM_UI = /(?:^@elizaos\/ui(?:\/|$)|(?:^|\/)packages\/ui\/|(?:^|\/)packages\/app\/src\/(?:renderer|shims)\/|(?:^|\/)plugins\/[^/]+\/src\/(?:components|ui|hooks|views|companion)\/)/;
 // The one upstream-facing name kept for UI: upstream plugin-notes types its fetch with
 // @elizaos/ui/api/transport, which both resolvers map to Alpha's own module.
 const TRANSPORT_SPECIFIER = '@elizaos/ui/api/transport';
 const TRANSPORT = 'apps/app/src/ui/api/transport.ts';
 const NOTES_API = '.eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts';
 const STAGED = '.eliza/client-features';
-const MAP_PLANE_TYPE_SOURCE = 'plugins/plugin-maps/src/client/map-plane.ts';
 const stamp = JSON.parse(fs.readFileSync(path.join(STAGED, '.source.json'), 'utf8'));
+/** The package a bare specifier names. */
+const packageName = specifier => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
+const CODE = /\.(?:[cm]?[jt]sx?)$/;
+/**
+ * What a module is, whatever its path: upstream logic may make offscreen helpers (a canvas, a
+ * download link, a file input, a parsing template or textarea); it never builds visible elements,
+ * styles them or writes markup, and never imports React, MapLibre or upstream UI.
+ */
+function uiShapeOffences(file, text) {
+  const offences = [];
+  for (const match of text.matchAll(/createElement(?:NS)?\(\s*(?:"[^"]*",\s*)?["'`]([^"'`]+)["'`]/g))
+    if (!['canvas', 'a', 'input', 'template', 'textarea'].includes(match[1])) offences.push(`${file}: creates <${match[1]}>`);
+  if (/\.style\.(?:cssText|setProperty\b|[a-zA-Z]+\s*=(?!=))/.test(text)) offences.push(`${file}: sets inline styles`);
+  if (/\.(?:innerHTML|outerHTML)\s*=(?!=)|insertAdjacentHTML\(/.test(text) && !/document\.createElement\(\s*["'](?:template|textarea)["']\s*\)/.test(text))
+    offences.push(`${file}: writes markup`);
+  for (const spec of [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+|\bexport\s+\*\s+from\s*)(['"])([^'"\n]+)\1/gm)].map(match => match[2])) {
+    if (/^(?:react|react-dom|preact|maplibre-gl)(?:\/|$)/.test(spec)) offences.push(`${file}: imports ${spec}`);
+    if (/^@elizaos\/ui(?:\/|$)/.test(spec) && !(file === NOTES_API && spec === TRANSPORT_SPECIFIER)) offences.push(`${file}: imports ${spec}`);
+  }
+  return offences;
+}
 // Upstream files an app module loads straight from the submodule. Each is reviewed framework-free
 // logic (no DOM, no React); anything else from vendor/eliza has to be staged or copied into Alpha.
 const VENDOR_RUNTIME = new Map([
@@ -43,6 +68,15 @@ const VENDOR_RUNTIME = new Map([
   ['vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts', 'password binding helpers'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/client.ts', 'native passwords bridge client'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts', 'password transfer bridge client'],
+]);
+// Upstream submodule files the TypeScript program reaches from app modules only through type-only
+// imports (erased from the bundle). Each is reviewed framework-free declarations or logic.
+const VENDOR_TYPES = new Map([
+  ...['index', 'definitions', 'sense', 'sense-bridge', 'sense-web', 'web'].map(name =>
+    [`vendor/eliza/plugins/plugin-native-system/src/${name}.ts`, 'System plugin type (apps/app/src/native.ts)']),
+  ['vendor/eliza/plugins/plugin-native-passwords/src/definitions.ts', 'password plugin declarations'],
+  ...['types/primitives', 'types/interactions', 'types/json', 'types/reminder-presentation', 'types/system-notice', 'ambient-context', 'errors', 'utils/errors'].map(name =>
+    [`vendor/eliza/packages/core/src/${name}.ts`, 'UUID type behind the UUID validation helper']),
 ]);
 // Runtime dependencies that no app module imports, with where each one is used instead.
 const UNIMPORTED_DEPENDENCIES = new Map([
@@ -53,9 +87,11 @@ const UNIMPORTED_DEPENDENCIES = new Map([
 
 test('no app module imports upstream UI', () => {
   assert.ok(sources.some(file => file.startsWith('apps/app/src/ui/')), 'the local UI tree is scanned');
-  const offenders = sources.flatMap(file => specifiers(file)
-    .filter(spec => UPSTREAM_UI.test(spec) || (/(?:^|\/)(?:vendor\/eliza|\.eliza\/client-features)\//.test(spec) && /\.[jt]sx$/.test(spec)))
-    .map(spec => `${file}: ${spec}`));
+  const offenders = sources.flatMap(file => [
+    ...specifiers(file).filter(spec => UPSTREAM_UI.test(spec) || (UPSTREAM_TREE.test(spec) && (/\.[jt]sx(?:\?|$)/.test(spec) || spec.includes('?')))),
+    // An upstream file loaded as an asset, worker or raw text is outside the module graph.
+    ...urlReferences(file).filter(spec => UPSTREAM_UI.test(spec) || UPSTREAM_TREE.test(spec)),
+  ].map(spec => `${file}: ${spec}`));
   assert.deepEqual(offenders, []);
 });
 
@@ -66,61 +102,105 @@ async function appGraph() {
   const {config} = await loadConfigFromFile({command: 'build', mode: 'production'}, path.resolve('vite.config.ts'), undefined, 'silent');
   const alias = config.resolve.alias;
   const keys = Object.keys(alias).sort((a, b) => b.length - a.length);
-  const result = await build({
-    entryPoints: sources.filter(file => !file.endsWith('.d.ts')), bundle: true, write: false, metafile: true,
-    outdir: path.join(ROOT, 'test-results/ui-self-contained'), format: 'esm', splitting: true, platform: 'browser', logLevel: 'silent',
-    jsx: 'automatic', packages: 'external',
-    loader: {'.html': 'text', '.css': 'empty', '.svg': 'empty', '.woff2': 'empty', '.png': 'empty'},
-    plugins: [{name: 'vite-aliases', setup(builder) {
-      // Vite asset queries (?url, ?raw, ?worker) are not module code.
-      builder.onResolve({filter: /\?/}, args => ({path: args.path, external: true}));
-      builder.onResolve({filter: /^[@a-z]/}, args => {
-        const key = keys.find(name => args.path === name || args.path.startsWith(name + '/'));
-        return key ? {path: alias[key] + args.path.slice(key.length)} : undefined;
-      });
-    }}],
-  });
   // A worktree may share the prepared tree through a symlink; name its files by the local path.
   const stagedReal = fs.realpathSync(STAGED);
   const local = file => {
     const absolute = path.resolve(file);
     return path.relative(ROOT, absolute.startsWith(stagedReal + path.sep) ? path.join(ROOT, STAGED, path.relative(stagedReal, absolute)) : absolute);
   };
+  const queried = [];
+  const result = await build({
+    entryPoints: sources.filter(file => !file.endsWith('.d.ts')), bundle: true, write: false, metafile: true,
+    outdir: path.join(ROOT, 'test-results/ui-self-contained'), format: 'esm', splitting: true, platform: 'browser', logLevel: 'silent',
+    jsx: 'automatic', packages: 'external',
+    loader: {'.html': 'text', '.css': 'empty', '.svg': 'empty', '.woff2': 'empty', '.png': 'empty'},
+    plugins: [{name: 'vite-aliases', setup(builder) {
+      // Vite asset queries (?url, ?raw, ?worker) are not module code here, but Vite still ships
+      // their target: one that resolves into the submodule or the staged tree is an offender.
+      builder.onResolve({filter: /\?/}, args => {
+        const bare = args.path.split('?')[0];
+        const key = keys.find(name => bare === name || bare.startsWith(name + '/'));
+        const target = bare.startsWith('.') ? path.resolve(args.resolveDir, bare) : key ? alias[key] + bare.slice(key.length) : path.isAbsolute(bare) ? bare : null;
+        if (target && !/^(?:apps|node_modules)\//.test(local(target))) queried.push(`${local(args.importer)}: ${args.path}`);
+        return {path: args.path, external: true};
+      });
+      builder.onResolve({filter: /^[@a-z]/}, args => {
+        const key = keys.find(name => args.path === name || args.path.startsWith(name + '/'));
+        return key ? {path: alias[key] + args.path.slice(key.length)} : undefined;
+      });
+    }}],
+  });
   const inputs = Object.entries(result.metafile.inputs).map(([file, meta]) => ({file: local(file), imports: meta.imports}));
-  return graph = {inputs, upstream: inputs.filter(input => !input.file.startsWith('apps/'))};
+  return graph = {inputs, queried, upstream: inputs.filter(input => !input.file.startsWith('apps/'))};
 }
 
 test('the resolved app module graph loads no upstream UI', async () => {
-  const {inputs, upstream} = await appGraph();
+  const {inputs, queried, upstream} = await appGraph();
   assert.ok(inputs.length > sources.length / 2 && upstream.length > 50, 'the app graph and its upstream modules were bundled');
+  assert.deepEqual(queried, [], 'no asset, raw or worker query loads an upstream file');
   const offenders = [];
   for (const {file, imports} of upstream) {
     if (UPSTREAM_UI.test(file)) offenders.push(`${file}: upstream UI path`);
     if (/\.(?:[jt]sx|css)$/.test(file)) offenders.push(`${file}: upstream component or stylesheet`);
     for (const {path: target} of imports) {
-      if (/^(?:react|react-dom|preact)(?:\/|$)/.test(target)) offenders.push(`${file}: imports ${target}`);
+      if (/^(?:react|react-dom|preact|maplibre-gl)(?:\/|$)/.test(target)) offenders.push(`${file}: imports ${target}`);
       if (/^@elizaos\/ui(?:\/|$)/.test(target) && !(file === NOTES_API && target === TRANSPORT_SPECIFIER)) offenders.push(`${file}: imports ${target}`);
-      if (/^maplibre-gl(?:\/|$)/.test(target)) offenders.push(`${file}: imports the map renderer ${target}`);
     }
-    // Upstream logic may make offscreen helpers (a canvas, a download link, a file input, a
-    // parsing template); it never builds visible elements or styles them.
-    const text = fs.readFileSync(file, 'utf8');
-    for (const match of text.matchAll(/createElement(?:NS)?\(\s*(?:"[^"]*",\s*)?["'`]([^"'`]+)["'`]/g))
-      if (!['canvas', 'a', 'input', 'template', 'textarea'].includes(match[1])) offenders.push(`${file}: creates <${match[1]}>`);
-    if (/\.style\.(?:cssText|setProperty\b|[a-zA-Z]+\s*=(?!=))/.test(text)) offenders.push(`${file}: sets inline styles`);
-    if (/\.(?:innerHTML|outerHTML)\s*=(?!=)|insertAdjacentHTML\(/.test(text) && !/document\.createElement\(\s*["'](?:template|textarea)["']\s*\)/.test(text))
-      offenders.push(`${file}: writes markup`);
+    offenders.push(...uiShapeOffences(file, fs.readFileSync(file, 'utf8')));
   }
-  assert.deepEqual(offenders, []);
+  assert.deepEqual([...new Set(offenders)], []);
+  // Every upstream package name is aliased to an Alpha module or a staged file; any other bare
+  // import is a declared package of this repository.
+  const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const declared = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.devDependencies ?? {})]);
+  const externals = inputs.flatMap(({file, imports}) => imports.filter(entry => entry.external && /^[@a-z]/.test(entry.path)).map(entry => [file, entry.path.split('?')[0]]));
+  assert.ok(externals.length > 20, 'the external package imports were listed');
+  assert.deepEqual(externals.filter(([, spec]) => spec.startsWith('@elizaos/') || !declared.has(packageName(spec))).map(([file, spec]) => `${file}: ${spec}`), [],
+    'every external import is a declared package, never an unaliased @elizaos name');
   // Upstream modules come from the prepared non-UI tree, or are reviewed submodule files.
   assert.deepEqual(upstream.map(input => input.file).filter(file => file.startsWith(STAGED + '/')
     ? !stamp.files[path.relative(STAGED, file)] : !VENDOR_RUNTIME.has(file)), []);
   assert.deepEqual([...VENDOR_RUNTIME.keys()].filter(file => !upstream.some(input => input.file === file)), [], 'a reviewed submodule file that is no longer loaded is removed from the list');
 });
 
+test('the TypeScript program reached from app modules loads no upstream UI, type-only imports included', () => {
+  // The bundle drops type-only imports; tsc keeps them. Walk the import edges tsc reports.
+  const explained = execFileSync(path.join('node_modules', '.bin', 'tsc'), ['-p', 'tsconfig.json', '--listFilesOnly', '--explainFiles'], {encoding: 'utf8', maxBuffer: 64 << 20});
+  const importers = new Map();
+  let current;
+  for (const line of explained.split('\n')) {
+    if (!line.trim()) continue;
+    if (!/^\s/.test(line)) { current = path.relative(ROOT, path.resolve(line.trim())); importers.set(current, []); continue; }
+    const edge = line.match(/^\s+Imported via .* from file '([^']+)'/);
+    if (edge && current) importers.get(current).push(path.relative(ROOT, path.resolve(edge[1])));
+  }
+  const reached = new Set([...importers.keys()].filter(file => file.startsWith('apps/app/src/')));
+  assert.ok(reached.size > sources.length / 2, 'tsc listed the app modules');
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [file, by] of importers) if (!reached.has(file) && by.some(importer => reached.has(importer))) { reached.add(file); grew = true; }
+  }
+  const upstream = [...reached].filter(file => !file.startsWith('apps/') && !/(?:^|\/)node_modules\//.test(file));
+  assert.ok(upstream.length > 50, 'tsc reached the staged upstream modules');
+  const offenders = [];
+  for (const file of upstream) {
+    if (file.startsWith(STAGED + '/') ? !stamp.files[path.relative(STAGED, file)] : !VENDOR_RUNTIME.has(file) && !VENDOR_TYPES.has(file))
+      offenders.push(`${file}: neither staged nor a reviewed submodule file`);
+    if (UPSTREAM_UI.test(file) || /\.(?:[jt]sx|css)$/.test(file)) offenders.push(`${file}: upstream UI path`);
+    offenders.push(...uiShapeOffences(file, fs.readFileSync(file, 'utf8')));
+  }
+  assert.deepEqual(offenders, []);
+  assert.deepEqual([...VENDOR_TYPES.keys()].filter(file => !reached.has(file)), [], 'a reviewed submodule type file that is no longer reached is removed from the list');
+});
+
+test('no staged upstream file builds DOM, bundled or not', () => {
+  const staged = Object.keys(stamp.files).filter(file => CODE.test(file));
+  assert.ok(staged.length > 100, 'the staged code was listed');
+  assert.deepEqual(staged.flatMap(file => uiShapeOffences(path.join(STAGED, file), fs.readFileSync(path.join(STAGED, file), 'utf8'))), []);
+});
+
 test('every runtime dependency is reached by the app graph or has a recorded use', async () => {
   const {inputs} = await appGraph();
-  const packageName = specifier => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
   const imported = new Set(inputs.flatMap(input => input.imports.filter(entry => entry.external && /^[@a-z]/.test(entry.path)).map(entry => packageName(entry.path.split('?')[0]))));
   const dependencies = Object.keys(JSON.parse(fs.readFileSync('package.json', 'utf8')).dependencies);
   assert.deepEqual(dependencies.filter(name => !imported.has(name) && !UNIMPORTED_DEPENDENCIES.has(name)), [], 'no runtime dependency is left over from removed UI');
@@ -132,7 +212,7 @@ test('every runtime dependency is reached by the app graph or has a recorded use
 
 // Text, not import syntax: this catches every form (static, side-effect, dynamic or template
 // imports, require, new URL, CSS/HTML references, esbuild entry points and file reads in tests).
-const UPSTREAM_UI_TEXT = /(?:client-features|vendor\/eliza)\/packages\/ui\b|\bpackages\/ui\/src\b|\bui\/src\/|@elizaos\/ui(?!\/api\/transport\b)|plugins\/plugin-[a-z-]+\/src\/(?:components|ui|hooks|views|companion)\/|packages\/app\/src\/(?:renderer|shims)\/|plugins\/plugin-maps\/src\/client\/map-plane\b/g;
+const UPSTREAM_UI_TEXT = /(?:client-features|vendor\/eliza)\/packages\/ui\b|\bpackages\/ui\/src\b|\bui\/src\/|@elizaos\/ui(?!\/api\/transport\b)|plugins\/plugin-[a-z-]+\/src\/(?:components|ui|hooks|views|companion)\/|packages\/app\/src\/(?:renderer|shims)\//g;
 // Each exemption names the exact reference text it allows. A whole file is exempt only when it is
 // documentation or a test that names upstream UI to assert it is absent; never app code.
 const TEXT_EXEMPT = new Map([
@@ -146,8 +226,6 @@ const TEXT_EXEMPT = new Map([
   ['test/resident-build-output.test.mjs', {reason: 'synthetic fixture', file: true}],
   // Asserts the prepared tree stages no upstream UI.
   ['test/client-feature-preparation.test.mjs', {reason: 'negative assertion', file: true}],
-  // Names the replaced map renderer to assert that no conformance bundle reads it.
-  ['test/support/quint-conformance-ui-staging.mjs', {reason: 'negative assertion', text: ["const mapRenderer = 'plugins/plugin-maps/src/client/map-plane.ts';"]}],
   ['test/ui-self-contained.test.mjs', {reason: 'this guard', file: true}],
 ]);
 const scanned = () => listed('apps', 'scripts', 'specs', 'test', 'android', 'docs', 'cloud', '.github',
@@ -224,7 +302,10 @@ test('the prepared upstream source selection names no UI', () => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^GIT_(?:DIR|INDEX_FILE|WORK_TREE)$/.test(name)));
   const tracked = execFileSync('git', ['-C', 'vendor/eliza', 'ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', ...CLIENT_FEATURE_PATHS], {encoding: 'utf8', env}).split('\0').filter(Boolean);
   assert.ok(tracked.length > CLIENT_FEATURE_PATHS.length / 2, 'the pinned selection is listed');
-  // Upstream maps-screen.ts names the plugin-maps renderer's overlay type, so that one file is
-  // staged with its directory; the graph test above shows that no Alpha module loads it.
-  assert.deepEqual(tracked.filter(file => /\.(?:[jt]sx|css)$/.test(file) || (UPSTREAM_UI.test(file) && file !== MAP_PLANE_TYPE_SOURCE)), []);
+  assert.deepEqual(tracked.filter(file => /\.(?:[jt]sx|css)$/.test(file) || UPSTREAM_UI.test(file)), []);
+  // Nor a module that builds DOM, read as it is staged: pinned, or as projected when the receipt
+  // records a projection (a selected file not staged yet is read from the pin).
+  const pinned = file => execFileSync('git', ['-C', 'vendor/eliza', 'show', `HEAD:${file}`], {encoding: 'utf8', env, maxBuffer: 64 << 20});
+  const asStaged = file => stamp.files[file] && stamp.files[file] !== stamp.sourceFiles[file] ? fs.readFileSync(path.join(STAGED, file), 'utf8') : pinned(file);
+  assert.deepEqual(tracked.filter(file => CODE.test(file)).flatMap(file => uiShapeOffences(path.join(STAGED, file), asStaged(file))), []);
 });

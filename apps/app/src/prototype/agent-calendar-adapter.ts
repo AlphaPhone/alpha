@@ -328,7 +328,7 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   const home=homeCalendarSelection(model,zone(),hidden,new Date(now)),event=home.event;
   const syncedAt=Date.parse(model?.feed?.syncedAt??'');
   const confirmedEmpty=home.verified&&!event&&Number.isFinite(syncedAt)&&syncedAt>0&&syncedAt<=now&&!homeReadIsStale(syncedAt,now);
-  // Shared daily-overview states for the agent calendar feed: reading, not connected, failed, stale and fresh.
+  // Daily-overview states (ui/overview/daily-overview.ts) for the agent calendar feed: reading, not connected, failed, stale and fresh.
   // A saved feed may show an upcoming item, but only a current complete read proves empty.
   const failed=!!model?.error||model?.status==='error'||model?.status==='unavailable',unverified=model?.status==='partial';
   // Keep the source in the accessible description of a verified event.

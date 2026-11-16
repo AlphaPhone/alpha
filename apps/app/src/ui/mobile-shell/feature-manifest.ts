@@ -9,17 +9,17 @@ import type {
 } from "./product-registration";
 import type { MobileShellViewId } from "./view-ids";
 
-export const MOBILE_FEATURE_MANIFEST_SCHEMA = "elizaos.mobile-feature-manifest";
-export const MOBILE_FEATURE_MANIFEST_SCHEMA_VERSION = 1;
+const MOBILE_FEATURE_MANIFEST_SCHEMA = "elizaos.mobile-feature-manifest";
+const MOBILE_FEATURE_MANIFEST_SCHEMA_VERSION = 1;
 
 /** One view the product offers, with the canonical ids it also serves. */
-export interface MobileFeatureView {
+interface MobileFeatureView {
   id: MobileShellViewId;
   serves: MobileShellViewId[];
 }
 
 /** What a product does: identical across brands of one shared application. */
-export interface MobileFeatureFunctional {
+interface MobileFeatureFunctional {
   /** Offered views, sorted by id (Home order is presentation). */
   views: MobileFeatureView[];
   /** Device and shell capabilities, sorted. */
@@ -29,7 +29,7 @@ export interface MobileFeatureFunctional {
 }
 
 /** How a product looks and which installed identifiers it keeps. */
-export interface MobileFeatureBranding {
+interface MobileFeatureBranding {
   appName: string;
   appId: string;
   characterName: string;
@@ -48,7 +48,7 @@ export interface MobileFeatureBranding {
   legacyIds: Record<string, MobileShellViewId>;
 }
 
-export interface MobileFeatureManifest {
+interface MobileFeatureManifest {
   schema: typeof MOBILE_FEATURE_MANIFEST_SCHEMA;
   schemaVersion: typeof MOBILE_FEATURE_MANIFEST_SCHEMA_VERSION;
   branding: MobileFeatureBranding;

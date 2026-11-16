@@ -14,7 +14,7 @@
 /** Post-TTS cooldown window (ms) during which the raised gate stays on —
  * the `VOICE_WORKBENCH.md` half-duplex recommendation. The server side reads
  * `ELIZA_VOICE_POST_TTS_COOLDOWN_MS`; the renderer uses this default. */
-export const DEFAULT_POST_TTS_COOLDOWN_MS = 1500;
+const DEFAULT_POST_TTS_COOLDOWN_MS = 1500;
 
 function nowMsDefault(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();

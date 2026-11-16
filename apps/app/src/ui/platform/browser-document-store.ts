@@ -1,5 +1,5 @@
 /** An opaque document receipt. Null is a retained reset tombstone, not absence. */
-export interface BrowserDocumentSnapshot {
+interface BrowserDocumentSnapshot {
   revision: string;
   raw: string | null;
 }

@@ -38,10 +38,10 @@
  */
 
 /** Marks an element this module focused as a screen name. */
-export const SCREEN_FOCUS_ATTRIBUTE = "data-screen-focus";
+const SCREEN_FOCUS_ATTRIBUTE = "data-screen-focus";
 
 /** Inline modal surfaces drawn in the page: they take dropped focus when they open. */
-export const INLINE_MODAL_SELECTOR =
+const INLINE_MODAL_SELECTOR =
   '[role="dialog"][aria-modal="true"]:not(dialog),[role="alertdialog"]:not(dialog)';
 
 /** An open native dialog focuses itself, so it always manages its own focus. */
@@ -82,7 +82,7 @@ export function isExposed(element: Element | null): element is HTMLElement {
  * True when focus is nowhere a person could be: on the page body, on a
  * detached element, or inside content that is retired or not painted.
  */
-export function isFocusDropped(doc: Document = document): boolean {
+function isFocusDropped(doc: Document = document): boolean {
   const active = doc.activeElement;
   if (!active || active === doc.body || active === doc.documentElement)
     return true;
@@ -113,7 +113,7 @@ function hasLabel(element: Element): boolean {
  * with SCREEN_FOCUS_ATTRIBUTE and focused without scrolling. Returns whether
  * it now holds focus.
  */
-export function focusScreenElement(target: HTMLElement): boolean {
+function focusScreenElement(target: HTMLElement): boolean {
   if (!target.hasAttribute("tabindex") && target.tabIndex < 0)
     target.setAttribute("tabindex", "-1");
   target.setAttribute(SCREEN_FOCUS_ATTRIBUTE, "");
@@ -121,7 +121,7 @@ export function focusScreenElement(target: HTMLElement): boolean {
   return target.ownerDocument.activeElement === target;
 }
 
-export interface ScreenFocusOptions {
+interface ScreenFocusOptions {
   /**
    * The element that names the screen in front once it has rendered: the
    * visible title of the view, else its labelled region (Home). Null while the
@@ -147,7 +147,7 @@ export interface ScreenFocusOptions {
   document?: Document;
 }
 
-export interface ScreenFocus {
+interface ScreenFocus {
   /**
    * The screen in front changed (a view opened or closed, HOME, Back): once it
    * has rendered, dropped focus moves to its name.

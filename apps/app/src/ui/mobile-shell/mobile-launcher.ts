@@ -23,12 +23,12 @@ import {
 import type { MobileViewRegistration } from "./view-registry";
 
 /** A view projected from the owning application registry. */
-export interface MobileLauncherView {
+interface MobileLauncherView {
   id: string;
   label: string;
 }
 
-export interface MobileLauncherRegistry<View extends MobileLauncherView> {
+interface MobileLauncherRegistry<View extends MobileLauncherView> {
   readonly product: MobileProductRegistration;
   available(): View[];
   hostKey(view: View): string;
@@ -43,7 +43,7 @@ export type MobileHomeEntry<
   | { kind: "view"; key: string; view: View }
   | { kind: "app"; key: string; app: InstalledApp };
 
-export interface MobileShellLauncher<
+interface MobileShellLauncher<
   View extends MobileLauncherView = MobileViewRegistration,
 > {
   launcher: Launcher;

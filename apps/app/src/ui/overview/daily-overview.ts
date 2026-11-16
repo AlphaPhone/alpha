@@ -18,7 +18,7 @@
  * Shorten display text to at most `max` characters, marking any cut with an
  * ellipsis so a shortened brief, label or message never reads as complete.
  */
-export function overviewClip(text: string, max: number): string {
+function overviewClip(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
@@ -32,7 +32,7 @@ export interface OverviewFormat {
 }
 
 /** Epoch milliseconds of a positive numeric or parseable time, otherwise null. */
-export function overviewInstant(value: unknown): number | null {
+function overviewInstant(value: unknown): number | null {
   const at =
     typeof value === "number"
       ? value
@@ -380,7 +380,7 @@ const BRIEF_VERB = {
   "not-run": "Did not run",
 } as const;
 
-export interface OverviewBrief {
+interface OverviewBrief {
   title: string;
   time: string;
   source: string;
@@ -467,7 +467,7 @@ export function presentOverviewBriefCard(
 // ---------------------------------------------------------------------------
 
 /** Calendar adapter status strings mapped to card states. */
-export type OverviewCalendarState =
+type OverviewCalendarState =
   | "ready"
   | "loading"
   | "denied"
@@ -530,7 +530,7 @@ export function overviewAgendaEmptyTitle(
 }
 
 /** Read provenance of one agenda item. */
-export interface OverviewAgendaProvenance {
+interface OverviewAgendaProvenance {
   /** Which calendar, or that the item is a reminder, beside the date. */
   origin: string;
   /** Visible read line: retry or staleness; empty when fresh. */
@@ -682,7 +682,7 @@ export function overviewOverdueDueLabel(
   return `Due ${overviewWhenLabel(at, now, format)}`;
 }
 
-export interface OverviewAgendaPresentation {
+interface OverviewAgendaPresentation {
   title: string;
   begin: number;
   allDay: boolean;
@@ -760,7 +760,7 @@ export function presentOverviewCalendar(
 }
 
 /** At most three attendee initials, with a "+N" overflow, derived only from names. */
-export function overviewAttendeeInitials(names: unknown[]): string[] {
+function overviewAttendeeInitials(names: unknown[]): string[] {
   const initials = names
     .filter((name): name is string => typeof name === "string" && !!name.trim())
     .map((name) => {
@@ -782,7 +782,7 @@ export function overviewAttendeeInitials(names: unknown[]): string[] {
 }
 
 /** One calendar event or reminder considered for the agenda card. */
-export interface OverviewAgendaCandidate<T = unknown> {
+interface OverviewAgendaCandidate<T = unknown> {
   /** Host record, returned unchanged with the selection. */
   item: T;
   /** Start (event) or due time (reminder), epoch milliseconds. */
@@ -794,7 +794,7 @@ export interface OverviewAgendaCandidate<T = unknown> {
   overdue?: boolean;
 }
 
-export interface OverviewAgendaSelection<T = unknown> {
+interface OverviewAgendaSelection<T = unknown> {
   /** The item the card shows: an overdue reminder first, then the soonest. */
   agenda: OverviewAgendaCandidate<T> | null;
   /** Under an overdue reminder, the next item that is not overdue. */
@@ -840,7 +840,7 @@ export function selectOverviewAgenda<T>(
 }
 
 /** Status of an agent calendar feed controller (the LifeOps calendar contract). */
-export type OverviewAgendaFeedStatus =
+type OverviewAgendaFeedStatus =
   | "disconnected"
   | "transition-required"
   | "legacy-recovery"
@@ -850,7 +850,7 @@ export type OverviewAgendaFeedStatus =
   | "unavailable"
   | "error";
 
-export interface OverviewAgendaFeedPresentation {
+interface OverviewAgendaFeedPresentation {
   /** Title when no item is shown; the item's own title otherwise. */
   title: string;
   /** Visible line beside the item time: the source when fresh, retry or staleness. */
@@ -963,7 +963,7 @@ export function presentOverviewAgendaFeed(
 }
 
 /** One agenda item as the card shows it. Hosts map their own records to this. */
-export interface OverviewAgendaCardItem {
+interface OverviewAgendaCardItem {
   title: string;
   /**
    * Start (event) or due time (reminder), epoch milliseconds. An all-day item

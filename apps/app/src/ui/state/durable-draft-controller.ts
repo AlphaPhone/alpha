@@ -43,7 +43,7 @@
 import type { DurableDraft, DurableDraftStore } from "./durable-draft";
 
 /** Product copy for every state the controller publishes or throws. */
-export interface DurableDraftMessages {
+interface DurableDraftMessages {
   /** The store could not be opened at all (host-reported). */
   openFailed: string;
   /** The saved draft could not be read after retries. */
@@ -86,7 +86,7 @@ export interface DurableDraftMessages {
   changedNothingSent: string;
 }
 
-export const DEFAULT_DURABLE_DRAFT_MESSAGES: Readonly<DurableDraftMessages> =
+const DEFAULT_DURABLE_DRAFT_MESSAGES: Readonly<DurableDraftMessages> =
   Object.freeze({
     openFailed:
       "Local draft could not be opened. Your current text is retained.",
@@ -114,7 +114,7 @@ export const DEFAULT_DURABLE_DRAFT_MESSAGES: Readonly<DurableDraftMessages> =
     changedNothingSent: "The draft changed. Nothing was sent.",
   });
 
-export interface DurableDraftState {
+interface DurableDraftState {
   /** Status text for the editor; empty when there is nothing to say. */
   message: string;
   /** The binding's saved draft is still being read. */
@@ -135,7 +135,7 @@ export interface DurableDraftState {
 }
 
 /** How a held send ended, as far as the host can tell. */
-export type DurableDraftSendOutcome =
+type DurableDraftSendOutcome =
   | "dispatched"
   | "not-dispatched"
   /** The request may have reached its recipient; never offered again. */
@@ -149,7 +149,7 @@ export type DurableDraftSendOutcome =
  * apply the change only if the editor still shows exactly that text, and
  * only while `current()` still returns true.
  */
-export type DurableDraftRestore = (
+type DurableDraftRestore = (
   text: string,
   expectedText?: string,
   current?: () => boolean,

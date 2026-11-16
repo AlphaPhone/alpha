@@ -8,8 +8,8 @@
 
 import { HORIZONTAL_DOMINANCE_RATIO } from "./constants";
 
-export type PullDirection = "up" | "down";
-export type SwipeDirection = "left" | "right";
+type PullDirection = "up" | "down";
+type SwipeDirection = "left" | "right";
 
 /**
  * Decide whether a release should fire a pull, and in which direction. `deltaUp`

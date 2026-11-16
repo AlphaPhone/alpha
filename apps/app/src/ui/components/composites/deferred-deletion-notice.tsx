@@ -27,7 +27,7 @@ export interface DeferredDeletionIdentity {
   subscribe(listener: () => void): () => void;
 }
 
-export interface DeferredDeletionNoticeProps {
+interface DeferredDeletionNoticeProps {
   bridge: DeferredDeletionsBridge;
   identity?: DeferredDeletionIdentity;
   /** True while rows must not be shown or read (for example a locked screen). */
@@ -42,7 +42,8 @@ export interface DeferredDeletionNoticeProps {
   refreshEvents?: readonly string[];
   /** Poll interval while a deletion is pending. */
   pollMs?: number;
-  className?: string;
+  /** The host's own class for the notice; the component carries no styling of its own. */
+  className: string;
   label?: string;
 }
 
@@ -60,9 +61,6 @@ const ACTION_FAILURES: ReadonlySet<string> = new Set([
   DELETION_NOTICE_TEXT.undoUnconfirmed,
   DELETION_NOTICE_TEXT.dismissFailed,
 ]);
-/** Neutral default placement; hosts with their own theme pass `className`. */
-const DEFAULT_CLASS =
-  "fixed inset-x-3 bottom-24 z-50 max-h-[30vh] overflow-auto rounded-md border border-border bg-card px-3 py-2 text-txt shadow-lg [&>div]:flex [&>div]:items-center [&>div]:gap-3 [&_p]:flex-1 [&_p]:break-words [&_button]:min-h-12 [&_button]:min-w-16";
 
 export function DeferredDeletionNotice({
   bridge,
@@ -72,7 +70,7 @@ export function DeferredDeletionNotice({
   onChanged,
   refreshEvents = [],
   pollMs = 500,
-  className = DEFAULT_CLASS,
+  className,
   label = "Pending deletions",
 }: DeferredDeletionNoticeProps) {
   const [noticeRead, setNoticeRead] = useState<{

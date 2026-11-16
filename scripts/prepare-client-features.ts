@@ -298,11 +298,25 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     project(name, content.replace(specifier, '} from "../../../../packages/contracts/src/calendar-linked-sync.ts";'));
   }
 
+  // Upstream maps-screen.ts names the overlay type of the plugin-maps MapLibre renderer
+  // (`import type { MapOverlay } from "./map-plane.ts"`). Alpha draws the map with its own
+  // renderer (apps/app/src/maps/map-plane.ts), so map-plane.ts is staged as a type-only leaf: the
+  // upstream declarations above the renderer class, without the maplibre-gl import or the class.
+  {
+    const name = 'plugins/plugin-maps/src/client/map-plane.ts';
+    const content = text(name), renderer = content.indexOf('\n/** Renderer only'), library = /^import \{[^}]*\} from "maplibre-gl";\n/;
+    const types = content.slice(0, renderer + 1).replace(library, '');
+    if (renderer < 0 || !library.test(content) || content.split('from "maplibre-gl"').length !== 2 || types.includes('maplibre') ||
+      /^(?![ }]|\/\*\*|import type [^;]* from "\.\/contracts\.ts";$|export (?:type|interface) |$)/m.test(types) || !/^export type MapOverlay = /m.test(types))
+      throw Error('Review changed map renderer type declarations: ' + name);
+    project(name, types);
+  }
+
   project('alpha-voice-core-protocol.ts','export {ElizaError} from "./packages/core/src/errors";\nexport {redactTrailingArgs} from "./packages/core/src/security/log-redaction";\nexport {parseViewInteractionClientId, AGENT_SURFACE_CAPABILITY_IDS} from "./packages/core/src/views/view-interact-protocol";\nexport {findViewActionHandoff, type ViewActionHandoff} from "./packages/core/src/views/view-action-handoff";\nexport type {PermissionState} from "./packages/core/src/types/permissions";\nexport * from "./packages/core/src/chat-upload-limits";\n');
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {
-    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?14:0, files,
+    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?15:0, files,
   };
   const parent = path.join(root, '.eliza'), destination = path.join(parent, 'client-features');
   regularPath(parent, true);

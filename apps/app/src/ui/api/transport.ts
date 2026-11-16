@@ -3,7 +3,7 @@
  * incremental SSE line framer the streaming transports share.
  */
 /** Per-call options accepted by `ElizaClient.fetch`. */
-export interface ElizaClientFetchOptions<T> {
+interface ElizaClientFetchOptions<T> {
   allowNonOk?: boolean;
   timeoutMs?: number;
   /** Skip the 202 resume-retry loop (see `rawRequest.skipResume`). */

@@ -18,7 +18,7 @@ const ranks: Record<string, number> = {
   silent: Infinity,
 };
 
-export function createLogger(
+function createLogger(
   bindings: LoggerBindings | boolean = false,
 ): Logger {
   const context = typeof bindings === "boolean" ? {} : bindings;
@@ -61,5 +61,3 @@ export function createLogger(
 }
 
 export const logger = createLogger();
-export type { Logger, LoggerBindings };
-export { logger as default };

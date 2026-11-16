@@ -193,7 +193,7 @@ installHomeCardVisibility(Component, () => googleConnectionController.open());
 if(isAndroid&&!fixture){installTelephonyAttention(Component);installTelephonyReview(Component);installVoicemailTranscription();}
 installHomeOverviewCards(Component);
 installClockAdapter(Component, VIEWS, { simulated: testMocksEnabled && fixture, browser: !isAndroid });
-// Home and its app grid from the shared mobile shell, and Alpha's Apps drawer. Apps reads
+// Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer. Apps reads
 // ElizaSystem on Android; the browser device inventory remains available in test-mocks builds only.
 // Outermost so Home composes with every binding above. App info exists on Android only.
 const appInventory = isAndroid ? 'android' : testMocksEnabled ? 'simulated' : undefined;

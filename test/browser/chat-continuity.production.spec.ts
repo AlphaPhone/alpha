@@ -1,5 +1,5 @@
 // AP-05 continuity on the flag-off renderer with the resident agent: the composer draft lives in
-// the device's secure slot (the shared durable draft controller over a compare-and-exchange slot)
+// the device's secure slot (Alpha's durable draft controller over a compare-and-exchange slot)
 // and survives HOME, Back, a keyboard-sized resize and a restart; a reply in flight survives Back
 // from full to sheet and HOME on Home; a message in flight when the app stops is offered for review
 // after the restart, never restored as a draft; the transcript keeps its reading position through

@@ -19,7 +19,7 @@ import {
 import { toSpeakableText } from "./voice-chat-playback";
 
 /** The same semantic/echo gate used by the OG converse surface and injected hosts. */
-export function createVoiceTurnAggregator(
+function createVoiceTurnAggregator(
   options: Omit<TurnAggregatorOptions, "onCommit"> & {
     responseContext: () => ShouldRespondContext;
     onCommit: (text: string, signal: VoiceTurnSignal) => void;
@@ -34,7 +34,7 @@ export function createVoiceTurnAggregator(
     },
   });
 }
-export type BatchVoicePhase =
+type BatchVoicePhase =
   | "idle"
   | "starting"
   | "listening"
@@ -45,7 +45,7 @@ export type BatchVoicePhase =
   | "speaking"
   | "error";
 /** Exact delivery correlation only; the host still owns approval and authority. */
-export interface BatchVoiceAwaitingUserInput {
+interface BatchVoiceAwaitingUserInput {
   proposalId: string;
   digest: string;
   requestId: string;
@@ -60,11 +60,11 @@ export interface BatchVoiceState {
   error?: unknown;
   awaitingUserInput?: BatchVoiceAwaitingUserInput;
 }
-export interface BatchVoiceCapture<Clip> {
+interface BatchVoiceCapture<Clip> {
   stop(): Promise<Clip>;
   cancel(): Promise<void> | void;
 }
-export interface BatchVoiceReply {
+interface BatchVoiceReply {
   requestId: string;
   conversationId: string;
   userMessageId: string;
@@ -78,7 +78,7 @@ export interface BatchVoiceReply {
     "proposalId" | "digest"
   >;
 }
-export interface BatchVoicePorts<Clip> {
+interface BatchVoicePorts<Clip> {
   /** Canonical room established by the host before opening the microphone. */
   readonly conversationId: string;
   /** Must reject hidden, retired, changed account/session/room/context or draft/edit bindings. */
@@ -106,12 +106,12 @@ export interface BatchVoicePorts<Clip> {
   }): Promise<void>;
   onState?: (state: BatchVoiceState) => void;
 }
-export interface BatchVoiceClock {
+interface BatchVoiceClock {
   now: () => number;
   setTimer: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
 }
-export interface BatchVoiceOptions {
+interface BatchVoiceOptions {
   clock?: BatchVoiceClock;
   activity?: VoiceActivityOptions;
   captureTimeoutMs?: number;
@@ -119,7 +119,7 @@ export interface BatchVoiceOptions {
   postSpeechCooldownMs?: number;
   maxHoldMs?: number;
 }
-export class BatchVoiceError extends Error {
+class BatchVoiceError extends Error {
   constructor(
     readonly code: "binding" | "capture" | "reply" | "speech",
     message: string,

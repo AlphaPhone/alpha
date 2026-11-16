@@ -13,7 +13,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { OverviewInboxCardState } from "./daily-overview";
 
 /** Extra attributes for one rendered part (for example `data-*` hooks). */
-export type OverviewPartAttributes = Record<string, string | undefined>;
+type OverviewPartAttributes = Record<string, string | undefined>;
 
 interface OverviewCardBaseProps<Part extends string> {
   /** Stable accessible name of the card button. */
@@ -66,7 +66,7 @@ function flag(value: boolean): string {
   return value ? "true" : "false";
 }
 
-export type OverviewAgendaPart =
+type OverviewAgendaPart =
   | "head"
   | "heading"
   | "origin"
@@ -80,7 +80,7 @@ export type OverviewAgendaPart =
   | "nextText"
   | "nextSource";
 
-export interface OverviewAgendaCardProps
+interface OverviewAgendaCardProps
   extends OverviewCardBaseProps<OverviewAgendaPart> {
   /** The item's day, or that reminders are overdue. */
   heading: string;
@@ -160,7 +160,7 @@ export function OverviewAgendaCard(props: OverviewAgendaCardProps) {
   );
 }
 
-export type OverviewAttentionPart =
+type OverviewAttentionPart =
   | "head"
   | "count"
   | "icon"
@@ -173,7 +173,7 @@ export type OverviewAttentionPart =
   | "people"
   | "person";
 
-export interface OverviewAttentionCardProps
+interface OverviewAttentionCardProps
   extends OverviewCardBaseProps<OverviewAttentionPart> {
   /** Unread count line, "—" when unknown, "!" after a failure. */
   count: string;
@@ -243,14 +243,14 @@ export function OverviewAttentionCard(props: OverviewAttentionCardProps) {
   );
 }
 
-export type OverviewBriefPart =
+type OverviewBriefPart =
   | "head"
   | "heading"
   | "icon"
   | "title"
   | "status";
 
-export interface OverviewBriefCardProps
+interface OverviewBriefCardProps
   extends OverviewCardBaseProps<OverviewBriefPart> {
   /** Card heading. */
   heading?: string;

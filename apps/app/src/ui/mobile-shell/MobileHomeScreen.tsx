@@ -26,13 +26,13 @@ export interface MobileHomeTile {
 }
 
 /** Element props a host adds to a Home part, such as its own test hooks. */
-export type MobileShellPartProps<Element extends HTMLElement = HTMLElement> =
+type MobileShellPartProps<Element extends HTMLElement = HTMLElement> =
   HTMLAttributes<Element> & {
     ref?: Ref<Element>;
     [attribute: `data-${string}`]: string | boolean | undefined;
   };
 
-export interface MobileHomeScreenProps extends MobileShellPartProps {
+interface MobileHomeScreenProps extends MobileShellPartProps {
   tiles: readonly MobileHomeTile[];
   /** Notices and system controls shown above the cards. */
   header?: ReactNode;

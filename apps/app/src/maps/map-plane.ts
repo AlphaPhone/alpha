@@ -1,7 +1,8 @@
 // Alpha's map renderer: MapLibre with the product palette, pins, the position puck and route
 // line. MapLibrePlane started as a copy of the elizaOS plugin-maps renderer (provenance in
 // ../ui/README.md); Alpha owns it now. The shared maps screen controller (./screen.ts) names the
-// overlay it hands this renderer, so its MapOverlay type matches the one here.
+// overlay it hands this renderer through the staged type-only map-plane leaf; the compile-time
+// check below the MapOverlay declaration keeps the two overlay types identical.
 import 'maplibre-gl/dist/maplibre-gl.css';
 import fontUrl from '@fontsource/public-sans/files/public-sans-latin-400-normal.woff2?url';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
@@ -17,6 +18,7 @@ import {
   setWorkerUrl,
 } from "maplibre-gl";
 import type { Coordinate, Route } from './contracts';
+import type { MapOverlay as ScreenMapOverlay } from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/map-plane.ts';
 type RegionalMap = {
   kind?: "regional";
   base: string;
@@ -73,12 +75,18 @@ type MapPosition = Readonly<{
   accuracyMeters: number;
   headingDegrees?: number;
 }>;
-type MapOverlay = Readonly<{
+export type MapOverlay = Readonly<{
   pins?: readonly MapPin[];
   position?: MapPosition | null;
   /** Keep the camera on the position, rotated to its heading (navigation). */
   follow?: boolean;
 }>;
+// Compile-time check: the overlay the shared screen hands over and the one this renderer draws
+// are the identical type (optional fields included), so neither side can drift without failing
+// typecheck.
+type SameType<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+type MapOverlayMatchesScreen = Assert<SameType<MapOverlay, ScreenMapOverlay>>;
 interface MapPlaneOptions {
   /** Called when the user taps a result pin. */
   onPin?(id: string): void;

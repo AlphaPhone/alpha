@@ -15,7 +15,7 @@
 
 import * as React from "react";
 
-export interface RafCoalescer<T> {
+interface RafCoalescer<T> {
   /** Queue `value`; it is delivered to the sink on the next animation frame. */
   schedule: (value: T) => void;
   /** If a frame is pending, run it NOW (cancels the queued frame first). */

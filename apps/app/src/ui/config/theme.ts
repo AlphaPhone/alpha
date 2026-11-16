@@ -1,7 +1,8 @@
 /**
  * Alpha's theme tokens: the colour, radius, shadow and font tokens a product theme sets for each
  * appearance, the CSS custom property each one drives, and the shape check a registration runs.
- * Started as a copy of elizaOS packages/contracts/src/contracts/theme.ts (see ../README.md);
+ * Started as a copy of the elizaOS theme declarations (packages/contracts/src/contracts/theme.ts)
+ * combined with themeCssVariables from the elizaOS UI theme config (provenance in ../README.md);
  * Alpha owns it now.
  */
 
@@ -116,7 +117,7 @@ export interface ThemeColorSet {
 
 // ── Fonts ──────────────────────────────────────────────────────────
 
-export interface ThemeFonts {
+interface ThemeFonts {
   /** Body text font-family stack */
   body?: string;
   /** Display / heading font-family stack */
@@ -224,7 +225,7 @@ export const THEME_CSS_VAR_MAP: Record<keyof ThemeColorSet, string> = {
 };
 
 /** Font CSS variable names set by ThemeFonts. */
-export const THEME_FONT_CSS_VARS = {
+const THEME_FONT_CSS_VARS = {
   body: "--font-body",
   display: "--font-display",
   chat: "--font-chat",

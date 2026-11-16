@@ -16,7 +16,7 @@
  * gesture navigation; the shell only answers what reaches the page.
  */
 
-export type MobileShellSwipeAction =
+type MobileShellSwipeAction =
   | "unlock"
   | "close-shade"
   | "open-system-shade"
@@ -25,7 +25,7 @@ export type MobileShellSwipeAction =
   | "raise-assistant"
   | "back";
 
-export interface MobileShellSwipeState {
+interface MobileShellSwipeState {
   /** `lock`, `home` (Home and every view) or another screen that takes no swipe. */
   screen: string;
   /** A stand-in shade is open. */
@@ -38,7 +38,7 @@ export interface MobileShellSwipeState {
   launcher: boolean;
 }
 
-export interface MobileShellSwipeStart {
+interface MobileShellSwipeStart {
   /** Start position on the canvas. */
   x: number;
   y: number;
@@ -46,7 +46,7 @@ export interface MobileShellSwipeStart {
   onShadeControl: boolean;
 }
 
-export interface MobileShellSwipeOptions {
+interface MobileShellSwipeOptions {
   /** Travel that makes a swipe, in canvas pixels. */
   threshold?: number;
   /** Canvas width. */
@@ -62,7 +62,7 @@ export interface MobileShellSwipeOptions {
   pullOpensShade?: (dx: number, dy: number, threshold: number) => boolean;
 }
 
-export const MOBILE_SHELL_SWIPE_THRESHOLD = 46;
+const MOBILE_SHELL_SWIPE_THRESHOLD = 46;
 export const MOBILE_SHELL_CANVAS_WIDTH = 412;
 export const MOBILE_SHELL_EDGE = 30;
 export const MOBILE_SHELL_HOME_BAR_TOP = 872;

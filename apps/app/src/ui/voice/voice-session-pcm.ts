@@ -21,7 +21,7 @@ export const VOICE_PCM_SAMPLE_RATE = 16_000;
  * ±Infinity saturates to the corresponding rail (±1) rather than dropping to
  * silence, matching how a real ADC clips a hot signal.
  */
-export function clampFloatSample(value: number): number {
+function clampFloatSample(value: number): number {
   if (Number.isNaN(value)) return 0;
   if (value >= 1) return 1;
   if (value <= -1) return -1;
@@ -32,7 +32,7 @@ export function clampFloatSample(value: number): number {
  * Convert one Float32 sample in [-1, 1] to a signed 16-bit integer.
  * Negative uses the full -32768 depth (× 0x8000); positive uses 0x7fff.
  */
-export function floatSampleToInt16(value: number): number {
+function floatSampleToInt16(value: number): number {
   const clamped = clampFloatSample(value);
   const scaled = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
   // Round toward nearest; then hard-clamp to the Int16 range so a rounding
@@ -44,7 +44,7 @@ export function floatSampleToInt16(value: number): number {
 }
 
 /** Convert one signed 16-bit integer back to a Float32 sample in [-1, 1]. */
-export function int16SampleToFloat(value: number): number {
+function int16SampleToFloat(value: number): number {
   return value < 0 ? value / 0x8000 : value / 0x7fff;
 }
 

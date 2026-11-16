@@ -84,12 +84,12 @@ export interface MicAudioContextLike {
   removeEventListener?(type: "statechange", listener: () => void): void;
 }
 
-export interface AudioNodeLike {
+interface AudioNodeLike {
   connect(target: AudioNodeLike): AudioNodeLike;
   disconnect(): void;
 }
 
-export interface ScriptProcessorNodeLike extends AudioNodeLike {
+interface ScriptProcessorNodeLike extends AudioNodeLike {
   onaudioprocess:
     | ((event: {
         inputBuffer: { getChannelData(channel: number): Float32Array };
@@ -97,7 +97,7 @@ export interface ScriptProcessorNodeLike extends AudioNodeLike {
     | null;
 }
 
-export interface AudioWorkletNodeLike extends AudioNodeLike {
+interface AudioWorkletNodeLike extends AudioNodeLike {
   port: {
     onmessage: ((event: { data: unknown }) => void) | null;
     postMessage(data: unknown): void;
@@ -144,7 +144,7 @@ type WorkletCapableMicContext = MicAudioContextLike & {
   audioWorklet: { addModule(url: string): Promise<void> };
 };
 
-export interface VoiceMicCaptureOptions {
+interface VoiceMicCaptureOptions {
   /** Emitted for every framed Int16 PCM chunk (little-endian, 16 kHz mono). */
   onFrame: (bytes: Uint8Array) => void;
   /** Called when capture pauses (page hidden / AudioContext suspended). */
@@ -261,7 +261,7 @@ function runTeardownSteps(steps: ReadonlyArray<() => void>): void {
 }
 
 /** Runtime AudioWorklet availability probe — never assumed (WebView 113). */
-export function hasAudioWorkletSupport(
+function hasAudioWorkletSupport(
   ctx: MicAudioContextLike,
 ): ctx is WorkletCapableMicContext {
   return (

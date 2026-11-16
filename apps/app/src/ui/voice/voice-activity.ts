@@ -3,7 +3,7 @@ export interface VoiceActivityMetrics {
   peak: number;
   rms?: number;
 }
-export interface VoiceActivityConfig {
+interface VoiceActivityConfig {
   startGraceMs: number;
   minSpeechMs: number;
   silenceMs: number;
@@ -14,7 +14,7 @@ export interface VoiceActivityConfig {
 export interface VoiceActivityOptions extends Partial<VoiceActivityConfig> {
   isTtsEchoGateActive?: (atMs: number) => boolean;
 }
-export interface VoiceActivityUpdate {
+interface VoiceActivityUpdate {
   shouldBuffer: boolean;
   shouldStop: boolean;
 }
@@ -23,9 +23,9 @@ export type VoiceActivityDetector = ((
   sampleTimeMs?: number,
 ) => VoiceActivityUpdate) & { readonly hasSpeech: boolean };
 
-export const POST_TTS_ECHO_THRESHOLD_MULTIPLIER = 4;
+const POST_TTS_ECHO_THRESHOLD_MULTIPLIER = 4;
 
-export const DEFAULT_VOICE_ACTIVITY: VoiceActivityConfig = {
+const DEFAULT_VOICE_ACTIVITY: VoiceActivityConfig = {
   startGraceMs: 250,
   minSpeechMs: 180,
   // Trailing-silence window that ends a hands-free turn (#voice-V6). 900 → 650:

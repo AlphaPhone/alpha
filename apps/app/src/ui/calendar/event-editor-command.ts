@@ -4,10 +4,10 @@ import type {
   LifeOpsCalendarEvent,
   LifeOpsCalendarEventUpdate,
 } from "@elizaos/contracts";
-export type CalendarEditorRange =
+type CalendarEditorRange =
   | { allDay: { startDate: string; endDateExclusive: string } }
   | { startAt: string; endAt: string };
-export type CalendarEditorFields = {
+type CalendarEditorFields = {
   title: string;
   notes?: string;
   location?: string;
@@ -33,10 +33,10 @@ type Update = Common & {
   source?: Pick<LifeOpsCalendarEventUpdate, "side" | "grantId" | "calendarId">;
   expectedProviderVersion?: string;
 };
-export type CalendarEditorCreateCommand = CreateLifeOpsCalendarEventRequest & {
+type CalendarEditorCreateCommand = CreateLifeOpsCalendarEventRequest & {
   idempotencyKey: string;
 };
-export type CalendarEditorUpdateCommand = LifeOpsCalendarEventUpdate & {
+type CalendarEditorUpdateCommand = LifeOpsCalendarEventUpdate & {
   idempotencyKey: string;
   expectedProviderVersion?: string;
 };
