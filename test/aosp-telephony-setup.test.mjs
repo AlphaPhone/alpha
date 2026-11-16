@@ -49,7 +49,7 @@ test("fresh telephony preparation acknowledges only complete image component rea
         import java.util.HashMap;
         import java.util.Map;
         public class PackageManager {
-          public static final int COMPONENT_ENABLED_STATE_DEFAULT = 0, COMPONENT_ENABLED_STATE_ENABLED = 1, DONT_KILL_APP = 1;
+          public static final int COMPONENT_ENABLED_STATE_DEFAULT = 0, COMPONENT_ENABLED_STATE_ENABLED = 1, COMPONENT_ENABLED_STATE_DISABLED = 2, DONT_KILL_APP = 1;
           public final Map<Class<?>, Integer> states = new HashMap<>();
           public Class<?> denied, ignored;
           public int writes;
@@ -114,7 +114,7 @@ test("fresh telephony preparation acknowledges only complete image component rea
             check(receiver.result == Activity.RESULT_OK && context.packages.writes == writes, "repeated preparation is idempotent");
             context.image = false;
             AlphaTelephonyRoles.sync(context);
-            check(context.packages.states.values().stream().allMatch(state -> state == 0), "launcher still restores stock defaults");
+            check(context.packages.states.values().stream().allMatch(state -> state == 2), "failed admission disables handlers even when SystemConfig enables the manifest default");
           }
         }`,
     };
