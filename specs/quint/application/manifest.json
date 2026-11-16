@@ -6313,6 +6313,9 @@
       "remountClearsLatchTest",
       "latchBlocksEditSaveTest",
       "supersededSaveTest",
+      "supersededReceiptDoesNotPublishTest",
+      "closedFormKeepsReceiptViewTest",
+      "replacedFormKeepsReceiptViewTest",
       "changedEventNotDeletedTest"
     ],
     "invariants": [
@@ -6428,7 +6431,8 @@
       }
     ],
     "stateMapping": {
-      "form/separate/formEpoch/opEpoch": "Calendar form identity, creationDraftEpoch and the ownsForm check of a running save",
+      "form/separate/formEpoch/opEpoch": "Calendar form identity and the exact form object in ownsForm",
+      "draftEpoch/opDraftEpoch": "creationDraftEpoch and the draft epoch captured by readCreations",
       "saving/stage/opKind": "calendarSaving and the awaited step of the one create, edit or delete",
       "unknownReceipts/unknownExists/savedReceipts/pendingShown/recoveryFailed": "Native creation journal as read by readCreations, creationPending and creationRecoveryFailed",
       "selected/events": "The selected device event and the provider event count",
@@ -6436,7 +6440,8 @@
     },
     "abstractions": [
       "One form, one selected event and at most two unknown creation receipts stand for the journal and the event list.",
-      "formEpoch merges creationDraftEpoch with the form object identity that ownsForm compares; any replacement or close of the form changes it.",
+      "A new event increments creationDraftEpoch, which fences publication of a previous journal read. Form close or a replacement object can retire ownsForm without advancing creationDraftEpoch. A native read can settle the journal without publishing its response to the recovery notice.",
+      "The exact read-token and owner checks are outside this single outstanding save-read projection. The whole adapter replay uses held native replies and a synthetic CalendarProvider/journal.",
       "The permission request, the option-event readback and note-origin linking are folded into the write step; a failed readback is a lost answer.",
       "The native creation journal (written unknown before the insert, settled to saved by a later read, acknowledged only when saved) lives in the shared calendar plugin and is modeled at its contract.",
       "checkCreations is modeled only while no save runs; the code has no such guard, and the check only reads and acknowledges saved receipts.",
