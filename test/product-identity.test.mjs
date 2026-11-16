@@ -2,6 +2,7 @@
 // built-APK identity is checked by scripts/apk.ts and is separate evidence.
 import {ALPHA_PRODUCT_REGISTRATION as record} from '../apps/app/src/product/alpha-product-registration.ts';
 import test from 'node:test';
+import {androidIdentity} from '../scripts/android-identity.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,9 +68,10 @@ test('app.config.json carries the Alpha Compute package identity', () => {
   assert.equal(identity.appName, 'Alpha Phone');
 });
 
-test('the Android build derives namespace, applicationId and app_name from app.config.json', () => {
+test('the Android build derives namespace, applicationId and app_name from the selected declared identity', () => {
   // scripts/android-host.ts hands app.config.json to the generator; the descriptor carries no identity.
-  assert.deepEqual(hostIdentity('.'), {appId: identity.appId, appName: identity.appName, version: identity.version, versionCode: identity.versionCode});
+  const selected = androidIdentity('.');
+  assert.deepEqual(hostIdentity('.'), {appId: selected.appId, appName: selected.appName, version: selected.version, versionCode: selected.versionCode});
   const {profile} = readHostDescriptor('.');
   assert.doesNotMatch(JSON.stringify(profile), /applicationId|appName|"identity"/);
 });

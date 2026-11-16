@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -80,17 +81,17 @@ function fixture({currentOnly=false,producerInputs=false}={}){
  fs.writeFileSync(path.join(dir,'android/voice-host/qualified-voice-host.json'),JSON.stringify({abis:[{abi:'arm64-v8a',libraries:[manifest.libraries.find(row=>row.name==='libelizainference.so')]}]}));
  return {dir,vendor,manifest,lock(commit){const file=path.join(dir,'upstream.lock.json'),lock=JSON.parse(fs.readFileSync(file,'utf8'));lock.commit=commit;fs.writeFileSync(file,JSON.stringify(lock));},write(){fs.writeFileSync(path.join(dir,'android/embedding-host/qualified-host.json'),JSON.stringify(manifest));},close(){fs.rmSync(dir,{recursive:true,force:true});}};
 }
-test('missing and corrupted native host bytes fail before APK packaging',()=>{
+fixtureTest('missing and corrupted native host bytes fail before APK packaging',()=>{
  for(const name of qualified.libraries.map(row=>row.name)){
   const f=fixture();try{const file=path.join(f.dir,'android/app/src/main/jniLibs/arm64-v8a',name);fs.unlinkSync(file);assert.throws(()=>verifyEmbeddingHost(f.dir),/missing or changed/);fs.writeFileSync(file,'tampered');assert.throws(()=>verifyEmbeddingHost(f.dir),/missing or changed/);}finally{f.close();}
  }
 });
-test('partial native set, changed identity and wrong model dimensions are refused',()=>{
+fixtureTest('partial native set, changed identity and wrong model dimensions are refused',()=>{
  for(const mutation of [m=>m.libraries.pop(),m=>m.identity='other.product',m=>m.model.dimensions=1536,m=>m.pin='0'.repeat(40)]){
   const f=fixture();try{mutation(f.manifest);f.write();assert.throws(()=>verifyEmbeddingHost(f.dir),/admission changed|Incomplete/);}finally{f.close();}
  }
 });
-test('embedding and voice host records that name different arm64 engines are refused, naming both files',()=>{
+fixtureTest('embedding and voice host records that name different arm64 engines are refused, naming both files',()=>{
  const f=fixture();try{
   const file=path.join(f.dir,'android/voice-host/qualified-voice-host.json'),voice=JSON.parse(fs.readFileSync(file,'utf8'));
   assert.throws(()=>verifyEmbeddingHost(f.dir),/BGE384 model missing/,'matching records pass the engine check');
@@ -103,10 +104,10 @@ test('embedding and voice host records that name different arm64 engines are ref
   fs.unlinkSync(file);assert.throws(()=>verifyEmbeddingHost(f.dir),/qualified-voice-host\.json is missing/);
  }finally{f.close();}
 });
-test('a valid native set does not bypass the pinned local model admission',()=>{
+fixtureTest('a valid native set does not bypass the pinned local model admission',()=>{
  const f=fixture();try{assert.throws(()=>verifyEmbeddingHost(f.dir),/BGE384 model missing/);const model=path.join(f.dir,qualified.model.path);fs.mkdirSync(path.dirname(model),{recursive:true});fs.writeFileSync(model,'incorrect model');assert.throws(()=>verifyEmbeddingHost(f.dir),/BGE384 model missing or changed/);}finally{f.close();}
 });
-test('text-only pin change reuses exact reviewed native bytes without relabeling the built pin',()=>{
+fixtureTest('text-only pin change reuses exact reviewed native bytes without relabeling the built pin',()=>{
  const f=fixture();try{
   git(f.vendor,'commit','--allow-empty','-m','Advance runtime without changing native inputs');f.lock(git(f.vendor,'rev-parse','HEAD'));
   const current=JSON.parse(fs.readFileSync(path.join(f.dir,'upstream.lock.json'),'utf8')).commit;
@@ -114,7 +115,7 @@ test('text-only pin change reuses exact reviewed native bytes without relabeling
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,'android/embedding-host/qualified-host.json'),'utf8')).pin,qualified.pin);
  }finally{f.close();}
 });
-test('every changed committed native build input is refused even when the runtime lock matches',()=>{
+fixtureTest('every changed committed native build input is refused even when the runtime lock matches',()=>{
  for(const producerInputs of [false,true])for(const input of qualified.inputs){
   const f=fixture({producerInputs});try{
    fs.appendFileSync(path.join(f.vendor,input.path),'\n// changed native build input\n');git(f.vendor,'add',input.path);git(f.vendor,'commit','-m','Change native input');f.lock(git(f.vendor,'rev-parse','HEAD'));
@@ -123,7 +124,7 @@ test('every changed committed native build input is refused even when the runtim
   }finally{f.close();}
  }
 });
-test('changed engine gitlink, dirty JNI and mismatched locked vendor checkout are refused',()=>{
+fixtureTest('changed engine gitlink, dirty JNI and mismatched locked vendor checkout are refused',()=>{
  const fork='plugins/plugin-local-inference/native/llama.cpp';
  for(const mutation of [
   f=>{git(f.vendor,'update-index','--cacheinfo','160000,'+'1'.repeat(40)+','+fork);git(f.vendor,'commit','-m','Change engine pin');f.lock(git(f.vendor,'rev-parse','HEAD'));},
@@ -131,7 +132,7 @@ test('changed engine gitlink, dirty JNI and mismatched locked vendor checkout ar
   f=>{git(f.vendor,'commit','--allow-empty','-m','Advance checkout without updating runtime lock');},
  ]){const f=fixture();try{mutation(f);assert.throws(()=>verifyEmbeddingHost(f.dir),/source admission changed/);}finally{f.close();}}
 });
-test('missing, incomplete or altered native qualification cannot admit a new source pin',()=>{
+fixtureTest('missing, incomplete or altered native qualification cannot admit a new source pin',()=>{
  for(const mutation of [
   m=>delete m.inputs,m=>m.inputs.pop(),m=>m.inputs.push(m.inputs[0]),
   m=>m.inputs[0].sourceSha256='0'.repeat(64),m=>m.inputs.at(-1).generatedSha256='0'.repeat(64),
@@ -139,7 +140,7 @@ test('missing, incomplete or altered native qualification cannot admit a new sou
  ]){const f=fixture();try{mutation(f.manifest);f.write();assert.throws(()=>verifyEmbeddingHost(f.dir),/qualification missing or changed|admission changed|Native build input changed|JNI identity missing or changed/);}finally{f.close();}}
 });
 
-test('current-only shallow native inputs admit reviewed bytes without fetching the historical build pin',()=>{
+fixtureTest('current-only shallow native inputs admit reviewed bytes without fetching the historical build pin',()=>{
  const f=fixture({currentOnly:true,producerInputs:true});try{
   assert.equal(git(f.vendor,'rev-parse','--is-shallow-repository'),'true');
   assert.throws(()=>git(f.vendor,'cat-file','-e',qualified.pin));
@@ -147,18 +148,18 @@ test('current-only shallow native inputs admit reviewed bytes without fetching t
  }finally{f.close();}
 });
 
-test('complete producer closure is required for new embedding-capable admission and preserves the built pin',()=>{
+fixtureTest('complete producer closure is required for new embedding-capable admission and preserves the built pin',()=>{
  const legacy=fixture();try{assert.throws(()=>verifyEmbeddingInputs(legacy.dir,legacy.manifest,{requireProducerInputs:true}),/producer input qualification missing/);}finally{legacy.close();}
  const f=fixture({producerInputs:true});try{
   const built=f.manifest.pin;assert.doesNotThrow(()=>verifyEmbeddingInputs(f.dir,f.manifest,{requireProducerInputs:true}));assert.equal(f.manifest.pin,built);
  }finally{f.close();}
 });
-test('missing, duplicated or changed producer records cannot qualify embeddings',()=>{
+fixtureTest('missing, duplicated or changed producer records cannot qualify embeddings',()=>{
  for(const mutate of [r=>r.producerInputs.pop(),r=>r.producerInputs.push(r.producerInputs[0]),r=>r.producerInputs[0].sha256='0'.repeat(64)]){
   const f=fixture({producerInputs:true});try{mutate(f.manifest);assert.throws(()=>verifyEmbeddingInputs(f.dir,f.manifest,{requireProducerInputs:true}),/producer input/);}finally{f.close();}
  }
 });
-test('producer helper drift is rejected both dirty and after a committed source change',()=>{
+fixtureTest('producer helper drift is rejected both dirty and after a committed source change',()=>{
  const f=fixture({producerInputs:true});try{
   const helper='packages/app/scripts/aosp/compile-libllama.ts';fs.appendFileSync(path.join(f.vendor,helper),'\n// changed producer helper\n');
   assert.throws(()=>verifyEmbeddingInputs(f.dir,f.manifest,{requireProducerInputs:true}),/source admission changed/);

@@ -11696,5 +11696,32 @@
       "maxSteps": 60,
       "seed": "1"
     }
+  },
+  {
+    "path": "specs/quint/application/ChatSearch.qnt",
+    "module": "ChatSearch",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "currentReplyTest",
+      "retiredReplyTest",
+      "cancelledReplyTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/chat-tools-adapter.ts",
+      "apps/app/src/runtime/connection-ui.tsx",
+      "apps/app/src/runtime/conversation-read-path.ts",
+      "apps/app/src/runtime/local-agent.ts",
+      "apps/app/src/runtime/remote-protocol.ts"
+    ],
+    "stateMapping": {
+      "owner/held": "Controlled connection owner and owner at request dispatch",
+      "open/pending/results": "Actual adapter search visibility, busy flag and result rows"
+    },
+    "abstractions": [
+      "One read request and three owner generations; no provider or carrier effects.",
+      "Whole adapter runs with controlled shell, search transport, timer and modal ports. History restoration, DOM and Android route authority remain separate."
+    ]
   }
 ]

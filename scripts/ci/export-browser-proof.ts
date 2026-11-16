@@ -69,7 +69,7 @@ function allowed(path: string){
   // This is compiler-only and still bound to the exact verified worker inventory.
   ||(/^compiler\/(?:node_modules|types)\/.+\.(?:ts|tsx|mts|cts|jsx)$/.test(path))
   ||(/^licenses\/[a-f0-9]+\//.test(path)&&license(path));
- return ['index.html','delegation-return.html','build-flags.json','logo.svg','logo-mark.svg','denton-300.woff2'].includes(path)
+ return ['index.html','delegation-return.html','build-flags.json','logo.svg','logo-mark.svg','logo-symbol.svg','denton-300.woff2'].includes(path)
   ||(/^(?:assets|icons|fonts|licenses)\//.test(path)&&/\.(?:js|mjs|css|json|txt|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|otf|wasm)$/.test(path))
   ||(/^pdfjs-assets\/(?:cmaps|standard_fonts|wasm)\/[^/]+\.(?:bcmap|pfb|ttf|wasm|js|json)$/.test(path))
   ||path==='pdfjs-assets/LICENSE'

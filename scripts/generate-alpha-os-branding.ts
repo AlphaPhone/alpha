@@ -28,8 +28,9 @@ for(let i=0;i<18;i++){
 }
 fs.copyFileSync(path.join(output,'part0','0017.png'),path.join(output,'part1','0000.png'));
 fs.writeFileSync(path.join(output,'desc.txt'),`${width} ${height} 30\np 1 0 part0\np 0 0 part1\n`);
-// Clear upper area for Android's lock-screen clock and notifications.
-await sharp(frame('#050505',`<circle cx="540" cy="1410" r="250" fill="#0000FF"/>${mark(378,1248,324)}`)).png().toFile(path.join(output,'default_wallpaper.png'));
+// "Ink": true black with no artwork. The native clock and the blue fingerprint carry the identity,
+// nothing sits under the keyguard lock icon or shortcuts, and OLED pixels stay off.
+await sharp(frame('#000000','')).png().toFile(path.join(output,'default_wallpaper.png'));
 const osRoot=process.env.ALPHA_OS_SOURCE_ROOT;
 if(!osRoot)throw Error('Set ALPHA_OS_SOURCE_ROOT to the pinned elizaOS/os checkout.');
 const toolLock: {files: Record<string, string>}=JSON.parse(fs.readFileSync(path.join(root,'android/aosp/branding/tools.lock.json'),'utf8'));
@@ -39,6 +40,6 @@ for(const [relative,expected] of Object.entries(toolLock.files)){
 }
 const {buildBootAnimationZip}: {buildBootAnimationZip(options: {framesDir: string; outPath: string}): unknown}=await import(pathToFileURL(path.join(osRoot,'scripts/distro-android/build-bootanimation.mjs')).href);
 buildBootAnimationZip({framesDir:output,outPath:path.join(output,'bootanimation.zip')});
-const report={schema:1,sourceLogo:'apps/app/public/logo-mark.svg',sourceLogoSha256:hash(logo),width,height,fps:30,accent:'#0000FF',wallpaperBackground:'#050505',bootAnimationSha256:hash(path.join(output,'bootanimation.zip')),wallpaperSha256:hash(path.join(output,'default_wallpaper.png')),firmwareSplashModified:false,imageBuilt:false,deviceVerified:false};
+const report={schema:1,sourceLogo:'apps/app/public/logo-mark.svg',sourceLogoSha256:hash(logo),width,height,fps:30,accent:'#0000FF',wallpaperBackground:'#000000',bootAnimationSha256:hash(path.join(output,'bootanimation.zip')),wallpaperSha256:hash(path.join(output,'default_wallpaper.png')),firmwareSplashModified:false,imageBuilt:false,deviceVerified:false};
 fs.writeFileSync(path.join(output,'branding-assets.json'),JSON.stringify(report,null,2)+'\n');
 console.log(JSON.stringify(report,null,2));

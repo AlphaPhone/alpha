@@ -139,7 +139,7 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.producer.verification["results"].append(release)
         for row in self.producer.verification["results"]:
             if row["mode"] == "release":
-                row["packageName"] = "ai.alphacompute.alphaphone"
+                row["packageName"] = "ai.elizaresearch.alphaphone"
         for record in (self.producer.verification, self.producer.build, self.producer.producer):
             record["runtimeProfile"] = "cloud"
         debug = {variant + "-debug.apk": (variant + " debug fixture").encode() for variant in ("standalone", "launcher")}
@@ -303,7 +303,7 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.assertEqual(calls[0], [str(tools / "zipalign"), "-c", "-P", "16", "4", str(self.signed_tar)])
         self.assertEqual(calls[1][1:4], ["-cp", str(jar), str(ROOT / "scripts/owner/VerifyApkRotation.java")])
         self.assertIn("--signed-output", calls[1])
-        self.assertEqual(calls[1][-4:], ["ai.alphacompute.alphaphone", "29", "37", "--preserve-signature-permissions"])
+        self.assertEqual(calls[1][-4:], ["ai.elizaresearch.alphaphone", "29", "37", "--preserve-signature-permissions"])
         self.assertIn(self.record["signedApkSHA256"]["launcher"], calls[1])
         self.assertIn(descriptor["signerSha256"], calls[1])
         calls.clear()
@@ -351,6 +351,19 @@ class QualifiedUpdateTest(unittest.TestCase):
         with patch.object(FIXTURES.PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
             with self.assertRaisesRegex(ValueError, "Unexpected signed bundle members"):
                 self.stage_fixture(self.directory / "cloud-large")
+
+    def test_retained_native_restores_exact_large_debug_and_signed_members_under_native_contract(self):
+        payload = bytes(4097)
+        self.producer.write_retained_native({"launcher-debug.apk": payload})
+        self.signed_entries["signing-plan.json"] = encoded(self.record, "signingPlan", self.plan)
+        self.write_signed()
+        self.write_delivery_receipt()
+        self.set_signed_launcher(payload)
+        product = self.directory / "retained-native-large"
+        with patch.object(FIXTURES.PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            self.stage_fixture(product)
+        for mode in ("debug", "release"):
+            self.assertEqual((product / f"artifacts/launcher-{mode}.apk").read_bytes(), payload)
 
     def api(self, endpoint):
         if endpoint == f"repos/{BRIDGE.REPOSITORY}/git/ref/heads/main":

@@ -11,6 +11,7 @@ REPOSITORY_ID = 1396333361
 WORKFLOW = ".github/workflows/resident-android.yml"
 WORKFLOW_ID = 373209004
 CANDIDATE_PACKAGE = "ai.alphacompute.alphaphone"
+RETAINED_PACKAGE = "ai.elizaresearch.alphaphone"
 CANDIDATE = "github-main-candidate"
 PRIVATE_RUNNER = "root-reviewed-private-runner"
 HOSTED_DISPATCH = "github-dispatch"
@@ -80,11 +81,18 @@ def input_contract(plan):
     pins = plan.get("unsignedApkSHA256")
     require(isinstance(pins, dict), "Missing unsigned APK pins")
     if kind == PRIVATE_RUNNER and set(pins) == {"standalone", "launcher"}:
+        require(plan.get("applicationId", RETAINED_PACKAGE) == RETAINED_PACKAGE,
+                "Historical Cloud pair requires its retained identity")
         return {"variants": ("standalone", "launcher"), "runtimeProfile": "cloud",
-                "packageName": CANDIDATE_PACKAGE}
+                "packageName": RETAINED_PACKAGE}
     require(set(pins) == {"launcher"}, "Unexpected release variants")
+    package = plan.get("applicationId", CANDIDATE_PACKAGE)
+    require(package == CANDIDATE_PACKAGE or
+            kind == PRIVATE_RUNNER and package == RETAINED_PACKAGE and
+            plan.get("purpose") == "retained-installation-update",
+            "Unsupported native installation identity")
     return {"variants": ("launcher",), "runtimeProfile": "native",
-            "packageName": CANDIDATE_PACKAGE}
+            "packageName": package}
 
 
 def release_contract(plan):
@@ -121,8 +129,10 @@ def validate_private_storage(plan):
     return storage
 
 
-def apk_member_limit(kind):
-    return MAX_ARCHIVE_BYTES if kind == CANDIDATE else LEGACY_APK_MEMBER_BYTES
+def apk_member_limit(kind, contract=None):
+    retained_native = kind == PRIVATE_RUNNER and contract is not None and \
+        contract.get("runtimeProfile") == "native" and contract.get("packageName") == RETAINED_PACKAGE
+    return MAX_ARCHIVE_BYTES if kind == CANDIDATE or retained_native else LEGACY_APK_MEMBER_BYTES
 
 
 def copy_verified(source, size, expected_digest, failure, destination=None):

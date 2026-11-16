@@ -1,3 +1,4 @@
+import {androidIdentity} from './android-identity.ts';
 import {ANDROID_ABIS, selectedAndroidAbis, abiArguments, type AndroidAbi} from './android-abis.ts';
 /**
  * On-device voice host record (android/voice-host/qualified-voice-host.json, schema 2).
@@ -116,7 +117,7 @@ export function readVoiceHost(root: string): VoiceHostRecord {
   if (problems.length) throw Error(problems.join('\n'));
   const pin = readJson(root, 'upstream.lock.json').commit;
   if (record.pin !== pin) throw Error(`${VOICE_HOST_MANIFEST} records pin ${record.pin}; upstream.lock.json pins ${pin}`);
-  const identity = readJson(root, 'app.config.json').appId;
+  const identity = androidIdentity(root).appId;
   if (record.identity !== identity) throw Error(`${VOICE_HOST_MANIFEST} identity changed`);
   // Model-agnostic ASR slot: the record's asr rows must be exactly the reviewed slot record.
   const slot: AsrSlot = readJson(root, VOICE_ASR_SLOT);
