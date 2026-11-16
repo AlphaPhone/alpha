@@ -389,8 +389,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         if(comms){
           // AC-12/AC-22: the transcript goes into the bar's own field (the text to the person, or the
           // list filter) exactly as typing would; nothing is sent and the chat stays on the bar.
+          // cleanup() clears the reviewed text, so it is read first.
+          const text=draft;
           cleanup();
-          shell.fillCommsBar?.(draft);
+          shell.fillCommsBar?.(text);
           shell.setState({chat:'input',voice:'off'});
           return;
         }
