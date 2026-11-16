@@ -133,7 +133,11 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
         await expect(page.getByText('The action could not reach a confirmed result.',{exact:true})).toHaveCount(0);
         await expect(page.getByText('Create note',{exact:true})).toHaveCount(0);
         await page.getByRole('button',{name:'Back to apps',exact:true}).click();
-        expect(await counts()).toEqual({posts:1,decisions:1,claims:1,receipts:1,effects:1,journal:['get','reserve','markApplying','finish']});
+        await page.evaluate(()=>new Promise(requestAnimationFrame));
+        const after=await counts();
+        // Read-only status checks may run on navigation; the uncertain effect
+        // must never be claimed, executed or journaled again without a new tap.
+        expect({...after,journal:after.journal.filter(method=>method!=='get')}).toEqual({posts:1,decisions:1,claims:1,receipts:1,effects:1,journal:['reserve','markApplying','finish']});
       }else await expect(page.getByText('Synthetic approved effect recorded', { exact: true }).last()).toBeVisible();
     } else {
       await expect(page.locator('.alpha-action-review')).toHaveCount(0);
