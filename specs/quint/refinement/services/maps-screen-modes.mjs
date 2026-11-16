@@ -59,8 +59,10 @@ async function driver(code) {
   const watch = () => harness.locations.length > 2 ? harness.locations.at(-1) : null;
   const originText = () => ({'': 'empty', [locatedLabel]: 'location', [hereLabel]: 'coordinates', [typedPoint]: 'coordinates', [typedName]: 'typed', [chosenName]: 'chosen'})[screen().originText];
   const act = async run => { await run(); await tick(); };
-  // Count actual provider effects created by an origin input control, not a duplicated driver implementation.
-  const originInput = async run => { const before=routes.length+searches.filter(q=>q===typedName||q===chosenName).length;await act(run);originRequests+=routes.length+searches.filter(q=>q===typedName||q===chosenName).length-before; };
+  // Count actual provider and location effects created by an origin input control, not a duplicated driver implementation.
+  const originEffects = () => routes.length+searches.filter(q=>q===typedName||q===chosenName).length+harness.locationStarts;
+  const originInput = async run => { const before=originEffects();await act(run);originRequests+=originEffects()-before; };
+  const originEnter = () => { const bindings = data(); if (bindings.mode === 'origin') bindings.qKey(enter); else bindings.originKey(enter); };
   m.render(); await tick();
   return {
     focusSearch: () => act(() => data().focusQ()),
@@ -87,7 +89,8 @@ async function driver(code) {
       const bindings = data(), event = {target: {value: coordinates ? typedPoint : typedName}};
       if (bindings.mode === 'origin') bindings.onQ(event); else bindings.onOrigin(event);
     }),
-    searchOrigin: () => originInput(() => { const bindings = data(); if (bindings.mode === 'origin') bindings.qKey(enter); else bindings.originKey(enter); }),
+    searchOrigin: () => originInput(originEnter),
+    submitLocatedOrigin: () => { assert.equal(screen().originText, locatedLabel, 'the starting point shows the located position'); return originInput(originEnter); },
     async chooseOrigin() {
       const bindings = data();
       if (bindings.mode !== 'origin') return originInput(() => bindings.originKey(enter));
@@ -126,7 +129,8 @@ async function driver(code) {
       const view = m.render(); await tick();
       const s = screen(), background = harness.host.background, state = s.state, selected = s.selected, input=harness.inspect();
       const queryAccepted=input.submittedQueryEpoch===input.searchEpoch, originAccepted=input.submittedOriginEpoch===input.searchEpoch;
-      const originPhase=input.submittedOriginKind==='search'?state?.originSearch.phase:input.submittedOriginKind==='location'?state?.position.phase:state?.route.phase;
+      // A submitted located origin fails with its fix, or with the route planned from that fix.
+      const originPhase=input.submittedOriginKind==='search'?state?.originSearch.phase:input.submittedOriginKind==='location'?(state?.position.phase==='ready'?state.route.phase:state?.position.phase):state?.route.phase;
       assert.equal(m.render().mode, view.mode, 'a render changes nothing');
       return {
         queryAccepted,originAccepted,queryFailed:queryAccepted&&state?.search.phase==='error',originFailed:originAccepted&&originPhase==='error',
@@ -145,7 +149,7 @@ async function driver(code) {
 }
 
 const project = state => {
-  const {lastChoice, responseMode, ...compared} = state;
+  const {lastChoice, responseMode, originSearch, ...compared} = state;
   return {...compared, mode: modeOf(state)};
 };
 

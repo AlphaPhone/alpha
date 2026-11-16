@@ -8,6 +8,17 @@ test('the folder wire format permits only opaque selections scoped to Files',()=
  assert.throws(()=>sanitizePhoneContext({...context,selectedObject:{...selectedObject,revision:'Private folder|vnd.android.document/directory|-1|1|8'}}));
 });
 
+test('the canonical Notes list marker carries only its exact source revision',()=>{
+ const selectedObject={kind:'canonical-note-source',id:'notes',revision:'0'};
+ const context={view:'notes',revision:1,sensitive:false,selectedObject};
+ assert.deepEqual(sanitizePhoneContext(context),context);
+ assert.throws(()=>sanitizePhoneContext({...context,view:'home'}));
+ assert.throws(()=>sanitizePhoneContext({...context,sensitive:true}));
+ for(const patch of [{id:'note-1'},{revision:'01'},{revision:'9007199254740992'},{accountId:'account'},{sourceRevision:'private-source'}]){
+  assert.throws(()=>sanitizePhoneContext({...context,selectedObject:{...selectedObject,...patch}}));
+ }
+});
+
 test('only an unredacted own notification is reviewable, and only while that exact revision is listed',()=>{
  const own={id:'reminder-1',revision:'occ-1',source:'own',appLabel:'Alpha Phone',title:'Call the clinic',text:'Before noon'};
  assert.equal(m.noticeReviewable(own),true);

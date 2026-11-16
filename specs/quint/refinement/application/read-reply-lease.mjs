@@ -12,6 +12,7 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const self = fileURLToPath(import.meta.url);
 const adapterPath = 'apps/app/src/prototype/agent-adapter.ts';
 const connectionPath = 'apps/app/src/runtime/connection-ui.tsx';
+const documentsPath = 'apps/app/src/browser/documents.ts';
 const sourcePaths = [adapterPath, connectionPath, 'package.json', 'bun.lock', 'upstream.lock.json'];
 const session = {sessionId:'reader-session', ownerId:'reader-owner', agentId:'reader-agent', origin:'https://reader.invalid'};
 const origin = {version:1, requestId:'read-request', conversationId:'read-conversation', inReplyTo:'original-question'};
@@ -50,17 +51,22 @@ async function compileModules(extraSources, rewrite) {
             assert.notEqual(next, contents, 'The mutation changes the actual adapter');
             contents = next;
           }
-          contents = contents.replace(observed, `  globalThis.readReplyFixture.observeAdapter({retainReadReply,proposalCard,completeReadReply});\n${observed}`);
+          contents = contents.replace(observed, `  globalThis.readReplyFixture.observeAdapter({retainReadReply,proposalCard,completeReadReply,context});\n${observed}`);
         } else if (source === connectionPath) {
           // Initialize only this test window's verified state and defer the external receipt.
           // The controller's actual binding, completion and cancellation methods stay installed.
           contents += `\nglobalThis.readReplyFixture.observeConnection((ports) => {
-            state = {...state, session: ports.session};
+            state = {...state, session: ports.session,
+              ...(ports.readChoice ? {phoneActionsAvailable:true, history:{revision:"fixture-initial"}} : {})};
             active = {kind:'resident', origin:ports.session.origin, actions:ports.actions, remote:ports.remote};
             conversationMemory.set(conversationKey(ports.session), ports.conversationId);
             connectionController.approvePendingAction = ports.approve;
-            return {controller:connectionController, retire(){epoch++;}};
+            return {controller:connectionController, retire(){epoch++;}, history(revision){
+              state = {...state, history:{revision}};
+            }};
           });`;
+        } else if (source === documentsPath) {
+          contents += `\nglobalThis.readReplyFixture.observeDocuments(browserDocuments);`;
         }
         const extension = extname(path).substring(1);
         const assetLoader = {css:'empty', svg:'text', html:'text'};
@@ -78,16 +84,18 @@ async function compileModules(extraSources, rewrite) {
 
 async function withInstalledModules(script, ports, run) {
   const dom = new JSDOM('', {url:session.origin, runScripts:'outside-only', pretendToBeVisual:true});
-  let adapter, connect;
+  let adapter, connect, documents;
   const network = [];
   function refuseNetwork() { network.push('Unexpected network access'); throw Error(network.at(-1)); }
   Object.assign(dom.window, {
     TextEncoder, TextDecoder, structuredClone, AbortController, AbortSignal,
     fetch:refuseNetwork, XMLHttpRequest:refuseNetwork, WebSocket:refuseNetwork,
-    readReplyFixture:{observeAdapter(value) { adapter = value; }, observeConnection(value) { connect = value; }},
+    readReplyFixture:{observeAdapter(value) { adapter = value; }, observeConnection(value) { connect = value; },
+      observeDocuments(value) { documents = value; }},
   });
   try {
     script.runInContext(dom.getInternalVMContext());
+    if (ports.readChoice) documents.read = ports.readChoice;
     class Shell {}
     dom.window.readReplyModule.installAgentAdapter(Shell, {notes:{}});
     return await run({adapter, connection:connect({...ports, remote:{request:refuseNetwork}}), shell:new Shell()});
@@ -129,6 +137,8 @@ async function runScenario(script, name, steps) {
       return approval.promise;
     },
     actions: {
+      // Real DeviceActions always carry their credential; no Notes list-filter capability keeps the filter unavailable.
+      credential: {capabilities: []},
       completeReadReply(value, signal) {
         assert.deepEqual(structuredClone(value), hint);
         assert.equal(signal.aborted, false);
@@ -265,14 +275,172 @@ async function runScenario(script, name, steps) {
   });
 }
 
+async function runRecoveredScenario(script, name) {
+  const requests = [], approvals = [], completions = [], resumed = [], cancellations = [];
+  const approval = deferred(), completion = deferred();
+  const proposal = {id:proposalId, title:'Recovered note read', description:'Read the reviewed fixture note',
+    expiresAt:Date.now() + 600_000, privateNotesRead:true, readReply:{origin, digest}};
+  const question = {id:origin.inReplyTo, from:'user', text:'What is in the reviewed note?',
+    messageBinding:{conversationId:origin.conversationId, session}};
+  const selectionKey = JSON.stringify([session.origin, session.ownerId, session.agentId]);
+  const choice = {version:1, legacy:null, value:JSON.stringify({raw:JSON.stringify({
+    [selectionKey]:{id:origin.conversationId, revision:'fixture-choice'},
+  })})};
+  const ports = {
+    session, conversationId:origin.conversationId,
+    async readChoice(key, signal) {
+      assert.equal(key, 'alpha.connection.conversations.v1');
+      signal?.throwIfAborted();
+      return {revision:'fixture-document', raw:JSON.stringify(choice)};
+    },
+    approve(id, context, signal) {
+      assert.equal(id, proposalId);
+      assert.equal(context.view, 'notes');
+      assert.equal(context.sensitive, false);
+      assert.equal(signal.aborted, false);
+      approvals.push(id);
+      return approval.promise;
+    },
+    actions: {
+      // Real DeviceActions always carry their credential; no Notes list-filter capability keeps the filter unavailable.
+      credential: {capabilities: []},
+      pending(context, signal) {
+        assert.equal(context.view, 'notes');
+        assert.equal(context.sensitive, false);
+        const result = deferred();
+        requests.push({result, signal});
+        return result.promise;
+      },
+      completeReadReply(value, signal) {
+        assert.deepEqual(structuredClone(value), hint);
+        assert.equal(signal.aborted, false);
+        completions.push(value);
+        return completion.promise;
+      },
+      async cancelReadReply(id) { cancellations.push(id); },
+    },
+  };
+  return withInstalledModules(script, ports, async ({adapter, connection, shell}) => {
+    const missing = name === 'recover exact original';
+    Object.assign(shell, {
+      live:true, state:{view:'notes', msgs:missing ? [] : [question]}, notesSourceMode:'canonical',
+      S() { return this.state; },
+      vget() { return {list:[]}; },
+      setState(update, done) {
+        const patch = typeof update === 'function' ? update(this.state) : update;
+        if (patch) this.state = {...this.state, ...patch};
+        done?.();
+      },
+      resumeReadReplyVoice(value, answer) {
+        assert.deepEqual(structuredClone(value), hint);
+        assert.deepEqual(structuredClone(answer), reply);
+        resumed.push(answer.messageId);
+      },
+      agentSay() {}, toast() {},
+    });
+    const lease = () => shell.readReplyLeases?.get(proposalId);
+    const cards = () => shell.S().msgs.filter(message => message.card?.proposalId === proposalId);
+    const binding = {connectionEpoch:0, conversationId:origin.conversationId, session};
+    const observe = () => {
+      const answers = shell.S().msgs.filter(message => message.id === reply.messageId);
+      for (const message of answers) {
+        assert.equal(message.inReplyTo, question.id);
+        assert.deepEqual(structuredClone(message.messageBinding), question.messageBinding);
+      }
+      return {'s.lease':lease()?.phase ?? 'none', 's.bindingCurrent':connection.controller.voiceConversationCurrent(binding, false),
+        's.approval':shell.pendingActionApproval ? 'running' : 'none',
+        's.completions':completions.length + Number(completions.length > 0 && !shell.pendingActionApproval),
+        's.answers':answers.length, 's.voiceResumed':resumed.length, 's.taps':approvals.length, 's.cancelRequests':cancellations.length};
+    };
+    const trace = {name, expect:observe(), steps:[]};
+    const point = (label, action) => trace.steps.push({label, action, expect:observe()});
+    const request = async () => {
+      const before = requests.length;
+      connection.history('fixture-history-' + (before + 1));
+      adapter.context(shell);
+      await flush();
+      assert.equal(requests.length, before + 1, 'Current shell context reads the authenticated pending port');
+      return requests.at(-1);
+    };
+    const recover = async originalCurrent => {
+      const pending = await request();
+      assert.equal(pending.signal.aborted, false);
+      pending.result.resolve([proposal]);
+      await flush();
+      assert.equal(cards().length, 1, 'The real recovery route publishes one card');
+      assert.equal(cards()[0].card.recovered, true);
+      assert.deepEqual(structuredClone(cards()[0].card.proposalSession), session);
+      point('Pending list applies with original current = ' + originalCurrent, {name:'recover', args:[originalCurrent]});
+    };
+    if (missing) {
+      await recover(false);
+      assert.equal(lease(), undefined, 'The card alone cannot mint a completion lease');
+      const wrongOwner = {...session, ownerId:'different-fixture-owner'};
+      shell.setState(previous => ({msgs:[{...question, messageBinding:{...question.messageBinding, session:wrongOwner}}, ...previous.msgs]}));
+      await recover(false);
+      assert.equal(lease(), undefined, 'A matching message id from the wrong owner still cannot mint the lease');
+      shell.setState(previous => ({msgs:[question, ...previous.msgs.slice(1)]}));
+      await recover(true);
+      assert.equal(lease()?.phase, 'pending');
+      assert.deepEqual(structuredClone(lease().origin), origin);
+      assert.equal(approvals.length, 0);
+      return trace;
+    }
+    if (name === 'retire held pending read') {
+      const pending = await request();
+      connection.retire();
+      point('The selected connection epoch changes while the read waits', {name:'bindingChanged'});
+      pending.result.resolve([proposal]);
+      await flush();
+      assert.equal(lease(), undefined);
+      assert.equal(cards().length, 0);
+      point('Stale pending response cannot admit a lease or card', {name:'recover', args:[true], reject:true});
+      return trace;
+    }
+
+    await recover(true);
+    const originalLease = lease();
+    assert.equal(originalLease?.phase, 'pending');
+    await recover(true);
+    assert.equal(lease(), originalLease, 'Fresh pending list preserves the exact active lease');
+    const approving = shell.cardAct(cards()[0]);
+    await flush();
+    assert.deepEqual(approvals, [proposalId]);
+    point('The actual recovered card enters approval', {name:'approveTap'});
+    approval.resolve({proposalId, status:'succeeded', summary:'Reviewed read', readReply:hint});
+    await flush();
+    assert.equal(completions.length, 1);
+    point('The recovered approval starts its owned answer', {name:'receipt', args:[true]});
+    completion.resolve(reply);
+    await approving;
+    point('The answer is inserted once for its original turn', {name:'completionSettles', args:[true]});
+    await recover(true);
+    assert.equal(lease(), originalLease);
+    assert.equal(lease()?.phase, 'done');
+    assert.equal(cards()[0].card.done, true);
+    assert.equal(await adapter.completeReadReply(shell, {proposalId, status:'succeeded', summary:'Reviewed read', readReply:hint}), false);
+    assert.equal(completions.length, 1);
+    assert.equal(approvals.length, 1);
+    assert.deepEqual(resumed, [reply.messageId]);
+    point('Recovered redelivery cannot trigger another completion', {name:'duplicateCompletion'});
+    return trace;
+  });
+}
+
 export async function checkReadReplyLease(extraSources = [], {rewrite, only} = {}) {
   const {script, sources, driverHashes} = await compileModules(extraSources, rewrite);
   const traces = [];
   for (const [name, steps] of scenarios) {
     if (!only || name === only) traces.push(await runScenario(script, name, steps));
   }
+  if (!only) {
+    for (const name of ['recover exact original', 'redeliver settled recovery', 'retire held pending read']) {
+      traces.push(await runRecoveredScenario(script, name));
+    }
+  }
   return checkTraces({model:'ReadReplyLease', sources, driverHashes, traces, scope:'bounded-component', assumptions:[
     'Compile and execute the whole agent adapter, connection controller and their runtime imports in an isolated DOM with test mocks disabled.',
+    'The recovered-card cases use real context and pending-list admission with a synthetic saved conversation document. The original-turn identity and stale read are observed before any completion.',
     'The test window supplies synthetic verified connection state, a controlled approval receipt, agent results, the shell commit scheduler and a voice callback. It does not exercise device approval execution, native voice playback or Cloud credential IO.',
   ]});
 }

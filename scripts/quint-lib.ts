@@ -1,7 +1,8 @@
 import {sha256} from './sha256.ts';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readUpstreamPin } from './upstream-pin.ts';
 
@@ -154,6 +155,121 @@ export const sourcePaths = () => [...new Set([
     path => sourceExtensions.has(extname(path)) || extname(path) === '.css')).map(relativePath),
   ...runtimeScriptPaths, ...runtimeAssetPaths, ...sharedSourcePaths(),
 ])].sort();
+/**
+ * Where remembered Quint results live, for local runs: outside node_modules so a reinstall keeps them. CI never
+ * restores them; promotion runs with ALPHA_QUINT_CACHE=off (see .github/workflows/promotion.yml).
+ */
+export function quintCacheDirectory(root: string = repositoryRoot) {
+  return resolve(root, process.env.ALPHA_QUINT_CACHE_DIR || '.cache/quint');
+}
+export function quintCacheDisabled() {
+  return ['0', 'off', 'false', 'no'].includes((process.env.ALPHA_QUINT_CACHE || '').toLowerCase());
+}
+
+/**
+ * Remembered results carry no provenance: an entry is trusted because only this checker writes it. A file committed
+ * into the cache directory (`git add -f`) would instead be trusted as a past accepted run, so a cache directory in
+ * which git tracks anything, or which git cannot inspect inside this repository, is refused outright. Checked once
+ * per directory and process.
+ */
+const inspectedCaches = new Set<string>();
+export function assertQuintCacheUntracked(root: string = repositoryRoot) {
+  const directory = quintCacheDirectory(root);
+  if (inspectedCaches.has(directory)) return;
+  const paths = [directory];
+  try { if (existsSync(directory)) paths.push(realpathSync(directory)); } catch { /* inspected by its own path */ }
+  for (const path of new Set(paths)) {
+    const listed = spawnSync('git', ['ls-files', '-z', '--', path], {cwd: root, encoding: 'utf8', timeout: 30000});
+    if (listed.status === 0) {
+      const tracked = listed.stdout.split('\0').filter(Boolean);
+      if (tracked.length) throw Error(`Refusing the Quint cache ${directory}: git tracks ${tracked.length} file(s) in it, such as ${tracked[0]}. Remembered results must be written by this checker; remove them from git.`);
+      continue;
+    }
+    // Outside a git checkout, or outside this repository, nothing in it can be committed with the change under check.
+    if (listed.error?.message.includes('ENOENT') || /not a git repository|is outside repository/.test(listed.stderr || '')) continue;
+    throw Error(`Refusing the Quint cache ${directory}: git cannot tell whether it tracks files there: ${(listed.stderr || listed.error?.message || '').trim()}`);
+  }
+  inspectedCaches.add(directory);
+}
+
+/** Every file of the installed Quint package, by relative name and bytes. Computed once per process. */
+const packageDigests = new Map<string, string>();
+export function quintPackageDigest(root: string = repositoryRoot) {
+  const directory = realpathSync(join(root, 'node_modules/@informalsystems/quint'));
+  const known = packageDigests.get(directory);
+  if (known) return known;
+  const parts: string[] = [];
+  const walk = (path: string) => {
+    for (const entry of readdirSync(path, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); }
+      else if (entry.isFile()) parts.push(`${relative(directory, child)}\0${sha256(readFileSync(child))}`);
+    }
+  };
+  walk(directory);
+  const digest = sha256(parts.join('\n'));
+  packageDigests.set(directory, digest);
+  return digest;
+}
+
+/** The repository-relative models a model imports. Quint resolves `from "./X"` beside the importing file. */
+export function importedModelPaths(model: Pick<ModelDefinition, 'path'>, text: string, root: string = repositoryRoot) {
+  const source = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  return [...source.matchAll(/\bimport\s+[\s\S]*?\bfrom\s+["']([^"']+)["']/g)].map(match =>
+    relative(root, resolve(root, dirname(model.path), match[1].endsWith('.qnt') ? match[1] : match[1] + '.qnt')).split('\\').join('/'));
+}
+
+/**
+ * Parsing every model with Quint's ANTLR parser costs about 40 ms each, 16 s per registry load. The validation is a
+ * pure function of this file, the pinned Quint, the model's metadata and its text, so a success is remembered under
+ * exactly those and a failure is never remembered.
+ */
+let metadataCacheBase: string | null | undefined;
+function metadataCacheKey(model: ModelDefinition, text: string) {
+  if (metadataCacheBase === undefined) {
+    if (!quintCacheDisabled()) assertQuintCacheUntracked();
+    try {
+      // This file's validation code and the parser's bytes: a changed parser with the same version is a different key.
+      metadataCacheBase = quintCacheDisabled() ? null : sha256(JSON.stringify([
+        readFileSync(fileURLToPath(import.meta.url)).toString('utf8'), quintPackageDigest()]));
+    } catch { metadataCacheBase = null; }
+  }
+  if (metadataCacheBase === null) return undefined;
+  // The whole manifest entry, so a field a later validation reads cannot be left out of the key.
+  return sha256(JSON.stringify([metadataCacheBase, model, text]));
+}
+
+/**
+ * Where a remembered validation is kept and what it must say: the key, which hashes the validation code, the parser,
+ * the manifest entry and the model text, and the hash of that text. A marker vouches only by these contents, so an
+ * empty or otherwise foreign file at the same path is a miss, not a pass.
+ */
+export function quintMetadataMarker(model: ModelDefinition, text: string) {
+  const key = metadataCacheKey(model, text);
+  if (!key) return undefined;
+  return {file: join(quintCacheDirectory(), 'metadata', `metadata-${key}`),
+    contents: `${JSON.stringify({schema: 1, module: model.module, textSha256: sha256(text), key})}\n`};
+}
+
+function validateQuintModelMetadataCached(model: ModelDefinition, text: string) {
+  const marker = quintMetadataMarker(model, text);
+  if (marker) {
+    try {
+      if (readFileSync(marker.file, 'utf8') === marker.contents) {
+        const now = new Date(); utimesSync(marker.file, now, now); return;
+      }
+    } catch { /* a miss */ }
+  }
+  validateQuintModelMetadata(model, text);
+  if (!marker) return;
+  try {
+    mkdirSync(dirname(marker.file), { recursive: true });
+    const temporary = `${marker.file}.${process.pid}.tmp`;
+    writeFileSync(temporary, marker.contents);
+    renameSync(temporary, marker.file);
+  } catch { /* the cache is a convenience */ }
+}
+
 export function readJson<T = unknown>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
@@ -301,7 +417,7 @@ export function loadModels(): QuintModel[] {
     for (const field of ['init', 'step', 'invariant'] as const) if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(model[field])) throw Error(`Invalid ${field} in ${model.module}`);
     if (!Array.isArray(model.tests) || model.tests.length === 0) throw Error(`No scenarios declared for ${model.module}`);
     const text = readFileSync(join(repositoryRoot, model.path), 'utf8');
-    validateQuintModelMetadata(model, text);
+    validateQuintModelMetadataCached(model, text);
     for (const test of model.tests) if (!new RegExp(`\\brun\\s+${test}\\s*=`).test(text)) throw Error(`Missing scenario ${model.module}.${test}`);
     for (const source of model.sources || []) readFileSync(join(repositoryRoot, source));
     for (const name of model.witnesses || []) {

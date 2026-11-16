@@ -5611,7 +5611,9 @@ class Component extends DCLogic {
   vset(k, p, options) {
     this.setState(function (prev) {
       var vs = Object.assign({}, (prev && prev.vs) || {});
-      vs[k] = Object.assign({}, (VIEWS[k] && VIEWS[k].state) || {}, vs[k] || {}, p);
+      var current = Object.assign({}, (VIEWS[k] && VIEWS[k].state) || {}, vs[k] || {});
+      if (options?.when && !options.when(prev, current)) return null;
+      vs[k] = Object.assign(current, p);
       return { vs: vs };
     }, options?.afterCommit);
   }
@@ -5634,7 +5636,7 @@ class Component extends DCLogic {
       set: function (p) { self.vset(k, p); },
       get: function (other) { return self.vget(other); },
       setView: function (other, p) { self.vset(other, p); },
-      shell: function (p) { self.setState(p); },
+      shell: function (p, options) { self.setState(p, options?.afterCommit); },
       // Android only: shows the startup access panel again after its "Not now" (main.tsx).
       reopenStartupAccess: typeof (self.props || {}).onReopenStartupAccess === "function" ? function () { self.props.onReopenStartupAccess(); } : null,
       open: function (view, p, chat) { self.openView(view, p, chat, { push: self.S().view === k && view !== k }); },
@@ -6149,6 +6151,10 @@ class Component extends DCLogic {
     // The product record (apps/app/src/product/alpha-product-registration.ts) supplies every color and font.
     var VM = alphaThemeVariables(theme);
     var vars = Object.keys(VM).map(function (k) { return k + ":" + VM[k]; }).join(";");
+    /* "Ink" lock screen: the dark palette on true black in either theme, so the clock and the blue
+       fingerprint carry the identity (matches the true-black AOSP wallpaper). */
+    var DM = alphaThemeVariables("dark");
+    var lockVars = Object.keys(DM).map(function (k) { return k + ":" + DM[k]; }).join(";");
     var rootRef = function (el) {
       if (!el || !el.style) return;
       Object.keys(VM).forEach(function (k) { el.style.setProperty(k, VM[k]); });
@@ -6352,7 +6358,7 @@ class Component extends DCLogic {
     return Object.assign(out, {
       assistantSurface: assistantOnly, notAssistantSurface: !assistantOnly, closeAssistant: closeAssistant,
       mvpMessages: isMvpView("messages"),
-      ic: IC, iconAssets: ICON_ASSETS, vars: vars, rootRef: rootRef, frame: VM["--mobile-shell-frame"], clock: clock, dateStr: dateStr, name: name,
+      ic: IC, iconAssets: ICON_ASSETS, vars: vars, lockVars: lockVars, rootRef: rootRef, frame: VM["--mobile-shell-frame"], clock: clock, dateStr: dateStr, name: name,
       isBoot: S.screen === "boot", isOff: S.screen === "off", isLock: S.screen === "lock", isOn: isOn, isView: isView,
       viewBg: imm.dark ? "var(--alpha-black)" : "var(--bg)", viewFg: imm.dark ? "var(--alpha-white)" : "var(--fg)", sbColor: sbColor, homeIndicatorColor: out.photos && out.photos.albumManager ? "var(--fg)" : sbColor,
       systemShell: P.systemShell !== false,

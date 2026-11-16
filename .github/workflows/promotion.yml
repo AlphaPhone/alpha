@@ -16,6 +16,12 @@ on:
         default: ''
 permissions:
   contents: read
+# Every Quint check here runs; none is answered from remembered results. A remembered run (scripts/quint-cache.ts) is
+# trusted by its content key alone, and anything a pull request runs can write to the Actions cache scope its
+# promotion runs read from, under a key it can predict. So promotion neither restores nor saves .cache/quint, and the
+# checker's own run and metadata caches are off for every job. Local `quint:check` runs keep the cache.
+env:
+  ALPHA_QUINT_CACHE: 'off'
 concurrency:
   group: promotion-${{ github.ref }}
   cancel-in-progress: true

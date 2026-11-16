@@ -222,7 +222,8 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
   const setMode=(useRunDay:boolean)=>{
    if(step!==selected()||step.range!==range||relative===useRunDay||(useRunDay&&!canAuthorRunDay()))return;
    const {calendarIds,timeZone,maximumEvents}=range;
-   const fromDay={calendarIds,timeZone,maximumEvents,days:1};
+   // Fixed dates keep the run-day span the owner chose; a fixed range starts as one day from the run day.
+   const fromDay={calendarIds,timeZone,maximumEvents,days:'days' in range?range.days:1};
    change(()=>{step.range=useRunDay?fromDay:resolvePhoneCalendarRange(fromDay);});
   };
   return {modes:admitted||relative?[

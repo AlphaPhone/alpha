@@ -15,8 +15,7 @@ import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {modelTraces, replay} from '../specs/quint/refinement/application/shell-model-traces.mjs';
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
-import {callsBriefing, matchesCallQuery} from '../apps/app/src/prototype/telephony-presenters.ts';
-import {applyListFilter, clearListFilter, proposalCanAct, setListFilterHandler} from '../apps/app/src/runtime/comms-bar.ts';
+import {tsImport} from './support/ts-import.mjs';
 
 // PhoneCall traces from the simulator, replayed on the development Phone fixture itself: the
 // module-level call latch, pnStart/pnEnd/pnDecline and the registered view's render, back,
@@ -36,6 +35,11 @@ assert.ok(swallowed, 'the shell swallowed() source');
 const cardActFrom = model.indexOf('\n  cardAct(m) {'), cardActTo = model.indexOf('\n  startVoice() {', cardActFrom);
 assert.ok(cardActFrom >= 0 && cardActTo > cardActFrom, 'the shell cardAct() source');
 const cardAct = model.slice(cardActFrom, cardActTo);
+// The render registers the Recents list filter and filters rows by the bar's query (AC-22): the
+// real comms-bar registry and call-query matcher the view imports, plus the AP-16 briefing and the
+// emergency-aware proposal gate.
+const {setListFilterHandler, clearListFilter, applyListFilter, proposalCanAct} = await tsImport('../apps/app/src/runtime/comms-bar.ts', import.meta.url);
+const {matchesCallQuery, callsBriefing} = await tsImport('../apps/app/src/prototype/telephony-presenters.ts', import.meta.url);
 const PEOPLE = [{id: 'ada', name: 'Ada Lovelace', first: 'Ada', ini: 'AL', phone: '(415) 555-0101'}];
 const SEEDS = [{id: 's1', pid: 'ada', num: '', dir: 'out', ago: 5}, {id: 's2', pid: null, num: '555', dir: 'out', ago: 9}];
 

@@ -303,7 +303,7 @@ test("APK voice admission requires the complete recorded bundle and every record
     { packaged: false, asr: false, differences: [], qualified: false });
   assert.throws(() => voiceBundleAdmission(apk(), () => { throw Error("stale qualification"); }), /stale qualification/);
   assert.deepEqual(voiceBundleAdmission(apk(), () => host), voiceBundleAdmission(apk(), host));
-  // Without the ASR slot the bundle is admitted, but asr:false keeps a release distributable:false (verify-apks).
+  // Without the ASR slot the bundle is admitted, but asr:false is a release blocker (scripts/release-blockers.ts).
   const noAsr = voiceBundleAdmission(apk(undefined, Object.keys(bytes).filter(file => !file.startsWith("asr/"))), host);
   assert.deepEqual(noAsr.differences, []);
   assert.equal(noAsr.asr, false);

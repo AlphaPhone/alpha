@@ -1,4 +1,5 @@
 import {NOTE_ID_REGEXP} from '../../../../.eliza/client-features/plugins/plugin-notes/src/note-id.ts';
+import {canonicalNotesListContextAllowed,NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {parseClientTurnObservation,parseClientCalendarDayObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
 import {CAMERA_CAPTURE_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -13,7 +14,7 @@ import { validateMapsSelectedObject } from '../maps/agent-context.ts';
 import type { ContextEnvelope } from './alpha-client';
 
 const views = new Set(['home', 'assistant', 'apps', 'maps', 'camera', 'photos', 'notes', 'calendar', 'notifications', 'reminders', 'workflows', 'files', 'inbox', 'browser', 'phone', 'messages', 'contacts', 'settings']);
-const kinds = new Set(['legacy-app-notes-source','note-source','canonical-note','canonical-calendar-event','canonical-calendar-source','legacy-app-calendar-source','legacy-app-calendar-event','note', 'document', 'photo', 'video', 'browser-tab', 'calendar-event', 'calendar-source', 'event', 'reminder', 'contact', 'email', 'file', 'workflow', 'workflow-run', 'map-place', 'map-route', 'map-search','clock-draft','folder','notification','settings','sms-subscription']);
+const kinds = new Set(['legacy-app-notes-source','note-source','canonical-note','canonical-note-source','canonical-calendar-event','canonical-calendar-source','legacy-app-calendar-source','legacy-app-calendar-event','note', 'document', 'photo', 'video', 'browser-tab', 'calendar-event', 'calendar-source', 'event', 'reminder', 'contact', 'email', 'file', 'workflow', 'workflow-run', 'map-place', 'map-route', 'map-search','clock-draft','folder','notification','settings','sms-subscription']);
 /** Marker for Alpha Phone's own notifications; other apps' and hosted notices never become context. */
 export const OWN_NOTIFICATION_SOURCE = 'own';
 const SETTINGS_SECTION = /^[a-z][a-z0-9-]{0,63}$/;
@@ -89,6 +90,7 @@ export function sanitizePhoneContext(input: ContextEnvelope): ContextEnvelope {
     if(selected.kind==='canonical-note'){
       if(input.view!=='notes'||typeof selected.id!=='string'||!NOTE_ID_REGEXP.test(selected.id)||typeof selected.revision!=='string'||!Number.isSafeInteger(Number(selected.revision))||Number(selected.revision)<0||String(Number(selected.revision))!==selected.revision||selected.accountId!==undefined||selected.sourceRevision!==undefined||selected.occurrenceId!==undefined||selected.timingVersion!==undefined)throw Error('The canonical Notes observation is no longer current.');
     }
+    if(selected.kind==='canonical-note-source'&&!canonicalNotesListContextAllowed(input))throw Error('The canonical Notes list changed.');
     if(selected.kind==='note'&&selected.accountId!==undefined){if(input.view!=='notes')throw Error('Notes context changed');notesTarget({sourceId:selected.accountId,sourceRevision:selected.sourceRevision,noteId:selected.id,revision:selected.revision});}
     result.selectedObject = { kind: selected.kind, id: opaque(selected.id),
       ...(selected.revision === undefined ? {} : { revision: opaque(selected.revision) }),
@@ -132,8 +134,9 @@ export function phoneContextMessage(text: string, input: ContextEnvelope): { tex
 export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
 /** What this phone can run, for the capability negotiation. `native`: a Capacitor app (Android or
  * iOS); `camera`: a camera it can capture with; `foregroundReview`: the shell supplied the review
- * executor; `files`: the native Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
-export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
+ * executor; `canonicalNotes`: the same resident session owns canonical app records; `files`: the native
+ * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
+export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
 /** The X-Eliza-Device-Capabilities list for every runtime (remote, resident, Cloud): the base
  * local-record contracts plus each capability the agent offers that this phone supports. Clock
  * handoffs are Android-only; v2 (repeat days) also needs the native repeat-days support. */
@@ -143,8 +146,7 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   if(agent.includes(CAMERA_CAPTURE_CAPABILITY)&&profile.camera)capabilities.push(CAMERA_CAPTURE_CAPABILITY);
   if(agent.includes('reminders.local-record.v2'))capabilities.push('reminders.local-record.v2');else if(agent.includes('reminders.local-record.v1'))capabilities.push('reminders.local-record.v1');
   // Browser chat reminders use the runtime scheduler; do not offer a second device-creation lifecycle.
-  // notes.organize.v1 (Notes folders, filter, restore, record) waits for the pin to carry
-  // the shared coordinator requires an explicit operation and view binding.
+  if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);
   for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),'notes.query.v1',...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
   // Free/busy is negotiated only when the agent offers it.

@@ -148,8 +148,8 @@ export function installedRows(updatedAt: unknown, format: (at: number) => string
 /**
  * Software update manifest (app.config.json updateManifestUrl, fetched by AlphaDevice.checkForUpdate):
  * {schema: "alpha-update/v1", versionCode, versionName (optional; shown only as 1 to 64 characters without
- * control characters), variant ("launcher" or "standalone"), signerSha256 (the original certificate of the
- * signing lineage, AlphaDevice appSigner, which APK Signature Scheme v3 key rotation never changes), apkUrl
+ * control characters), variant ("launcher", the only APK), signerSha256 (the release certificate,
+ * AlphaDevice appSigner; Alpha signs with one key and no rotation), apkUrl
  * (HTTPS), sha256 (64 lowercase hex), sizeBytes, notes (optional; shown only as a string of at most 500
  * characters)}.
  */
@@ -169,7 +169,7 @@ function updateManifestRows(value: unknown): Array<Record<string, unknown>> | nu
   for (const entry of document.releases) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
     const row = entry as Record<string, unknown>;
-    if (row.schema !== UPDATE_SCHEMA || (row.variant !== 'launcher' && row.variant !== 'standalone') || typeof row.signerSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.signerSha256)) return null;
+    if (row.schema !== UPDATE_SCHEMA || row.variant !== 'launcher' || typeof row.signerSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.signerSha256)) return null;
     const pair = row.variant + ':' + row.signerSha256;
     if (pairs.has(pair)) return null;
     pairs.add(pair);
@@ -179,14 +179,14 @@ function updateManifestRows(value: unknown): Array<Record<string, unknown>> | nu
 }
 /**
  * The update a manifest offers this install, or null unless it is complete and HTTPS, newer than the
- * installed versionCode, and for this flavor and signer. Android refuses another signer after the whole
- * download, and the other flavor would silently change what the phone admits (HOME, Phone, SMS).
+ * installed versionCode, and for the launcher and this signer. Android refuses another signer after the
+ * whole download, and an install without the launcher flavor is offered nothing.
  */
 export function parseUpdateManifest(value: unknown, installed: {versionCode: unknown; launcher: unknown; signerSha256: unknown}): AppUpdate | null {
-  // One canonical feed can serve distinct APK flavors and installed signing families.
-  // Select an exact pair only; never fall back to another signer or an ambiguous offer.
-  if (typeof installed.launcher !== 'boolean') return null;
-  const offer = updateManifestRows(value)?.find(row => row.variant === (installed.launcher ? 'launcher' : 'standalone') && row.signerSha256 === installed.signerSha256);
+  // Alpha ships one launcher APK. An index row names its variant and signer; select the exact
+  // launcher pair only, never another signer or an ambiguous offer.
+  if (installed.launcher !== true) return null;
+  const offer = updateManifestRows(value)?.find(row => row.variant === 'launcher' && row.signerSha256 === installed.signerSha256);
   if (!offer) return null;
   const {schema, versionCode, versionName, signerSha256, apkUrl, sha256, sizeBytes, notes} = offer;
   if (schema !== UPDATE_SCHEMA || !Number.isSafeInteger(installed.versionCode) || !Number.isSafeInteger(versionCode) || (versionCode as number) <= (installed.versionCode as number)) return null;
@@ -438,6 +438,8 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   let gmailAccounts: GmailAccount[] = [];
   let roles: Record<string, RoleRow> | null = null, launcher: boolean | null = null, roleBusy = false;
   let crashLog: CrashLog | null = null, crashBusy = false, diagnosticsBusy = false;
+  // Advanced by every crash-log publish outside refresh(), so a refresh that read the log earlier keeps it.
+  let crashLogVersion = 0;
   let updateBusy: '' | 'check' | 'install' = '', updateResult='';
   const reviews=new BrowserReviews();
   async function review(id:string,title:string,details:string,label:string,guard:()=>boolean=()=>true){
@@ -509,7 +511,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     try{
       const status=await connectionController.readResidentDiagnostics(abort.signal);
       if(abort.signal.aborted||owner!==instance||inferenceAbort!==abort)return;
-      if(recordCloudInferenceFailure(status?.cloudInferenceFailure)){const problems=await readCrashLog();if(!abort.signal.aborted&&owner===instance&&inferenceAbort===abort){crashLog=problems;changed();}}
+      if(recordCloudInferenceFailure(status?.cloudInferenceFailure)){const problems=await readCrashLog();if(!abort.signal.aborted&&owner===instance&&inferenceAbort===abort){crashLog=problems;++crashLogVersion;changed();}}
       if(!abort.signal.aborted&&owner===instance&&inferenceAbort===abort)return status;
     }catch{/* Support diagnostics never replace the original inference failure. */}
     finally{clearTimeout(timer);if(inferenceAbort===abort)inferenceAbort=null;}
@@ -625,7 +627,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if (crashBusy || !await review('clear-problems','Clear problem log?','','Clear')||crashBusy) return;
     inferenceAbort?.abort();inferenceAbort=null;
     const instance = owner; crashBusy = true; changed();
-    try { await clearCrashLog(); crashLog = await readCrashLog(); }
+    try { await clearCrashLog(); crashLog = await readCrashLog(); ++crashLogVersion; }
     catch { if (owner === instance) api.toast('Couldn’t clear'); }
     finally { crashBusy = false; if (owner === instance) changed(); }
   }
@@ -642,7 +644,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   // Show a text-size result on the instance that requested it.
   const showTextScale=(instance:any,result:Bag|null)=>{if(result&&owner===instance){facts={...facts,...result};instance?.vset('settings',{nativeReadAt:Date.now()});}};
   async function refresh() {
-    const instance = owner, token = ++generation, scaleAtRead = scaleVersion;
+    const instance = owner, token = ++generation, scaleAtRead = scaleVersion, logAtRead = crashLogVersion;
     if (!instance) return;
     resumedUnread = false;
     const native = Capacitor.isNativePlatform();
@@ -652,7 +654,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if (owner !== instance || generation !== token) return;
     roles = roleState.status === 'fulfilled' ? readRoles(roleState.value) : null;
     if (build.status === 'fulfilled' && build.value) launcher = build.value.launcher === true;
-    crashLog = problems.status === 'fulfilled' ? problems.value : null;
+    if (logAtRead === crashLogVersion) crashLog = problems.status === 'fulfilled' ? problems.value : null;
     photoAccess = photos.status === 'fulfilled' ? photos.value : null;
     fileAccess = storage.status === 'fulfilled' && (storage.value?.access === 'granted' || storage.value?.access === 'denied') ? storage.value.access : null;
     const previousFacts = facts;

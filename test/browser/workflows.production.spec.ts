@@ -381,6 +381,11 @@ test.describe('Calendar range authoring',()=>{
   await expect(button(page,'From run day')).toBeDisabled();
   await expect(page.getByRole('combobox',{name:'Days to read'})).toHaveValue('3');
   await button(page,'Fixed dates').click();
+  // The fixed range keeps the three days chosen from the run day: local midnight to local midnight three days later.
+  const fixedStart=await page.getByLabel('Range start',{exact:true}).inputValue();
+  const fixedEnd=await page.getByLabel('Range end',{exact:true}).inputValue();
+  expect(fixedStart).toMatch(/T00:00$/);
+  expect((Date.parse(fixedEnd+'Z')-Date.parse(fixedStart+'Z'))/86400000).toBe(3);
   await page.getByLabel('Range start',{exact:true}).fill('2027-03-14T00:00');
   await page.getByLabel('Range end',{exact:true}).fill('2027-03-15T00:00');
   await button(page,'Done').click();

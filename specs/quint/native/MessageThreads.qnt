@@ -58,9 +58,11 @@ module MessageThreads {
   }
   // The owner asked the agent to draft for the open thread (AP-16 AC-14). The draft takes the one
   // draft slot whatever it holds, the owner's own text included; the displaced draft is kept for one
-  // Undo. A newer message does not retire it, and it is still only a draft: nothing is sent.
+  // Undo. A newer message does not retire it, and it is still only a draft: nothing is sent. A draft
+  // whose send outcome is unknown stays bound to that operation, so no asked draft replaces it (and
+  // Undo can never bring back an unknown send's text without its binding).
   action placeAskedDraft = all {
-    s.ready, s.open, s.review != "showing",
+    s.ready, s.open, s.review != "showing", not(s.uncertain),
     s' = {draft: "asked", draftText: 1 - s.draftText, draftBase: -1, suggest: "idle",
       declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, undo: s.draft,
       undoBase: if (s.draft == "agent") s.draftBase else -1, undoDeclined: if (s.draft == "agent") s.declined else -1, ...s}
@@ -155,6 +157,14 @@ module MessageThreads {
     .then(check(safety and s.draft == "asked" and s.undo == "owner" and s.sends == 0))
     .then(undoAskedDraft).then(check(safety and s.draft == "owner" and s.undo == "none"))
     .then(undoAskedDraft.fail())
+  run askedDraftReplacesOwnerTextTest = init.then(becomeReady).then(openThread).then(typeText)
+    .then(check(safety and s.draft == "owner" and s.draftText == 1)).then(placeAskedDraft)
+    .then(check(safety and s.draft == "asked" and s.draftText == 0 and s.sends == 0 and s.taps == 0))
+  run askedDraftNeedsReadinessTest = init.then(becomeReady).then(openThread).then(typeText).then(loseReady)
+    .then(check(safety and s.draft == "owner")).then(placeAskedDraft.fail())
+  run askedDraftKeepsUnknownSendTest = init.then(becomeReady).then(openThread).then(typeText).then(tapSend)
+    .then(confirmReview("unknown")).then(check(safety and s.draft == "owner" and s.uncertain))
+    .then(placeAskedDraft.fail())
   run askedDraftSentOnlyAfterTapTest = init.then(becomeReady).then(openThread).then(placeAskedDraft)
     .then(check(safety and s.draft == "asked" and s.sends == 0 and s.taps == 0)).then(receive)
     .then(check(safety and s.draft == "asked")).then(tapSend).then(confirmReview("sent"))

@@ -95,7 +95,7 @@ function fixture() {
 }
 
 test("partial source contract: simulated SettingsCapabilityReads traces agree with the capability read and licence loader after every step", {timeout: scaledTimeout(170000)}, async () => {
-  const traces = modelTraces({module: 'SettingsCapabilityReads', traces: 200, steps: 40});
+  const traces = modelTraces({module: 'SettingsCapabilityReads', step: 'capabilityStep', traces: 200, steps: 40});
   const result = await replay(traces, {
     start: fixture,
     project: s => ({gmail: s.gmail, reads: s.reads.map(read => read.token).sort(), limits: [...s.limits].sort(), licenses: s.licenses,
@@ -103,4 +103,13 @@ test("partial source contract: simulated SettingsCapabilityReads traces agree wi
   });
   assert.deepEqual([...result.exercised].sort(), ['accountsSettle', 'leaveSettings', 'licensesSettle', 'limit', 'mount', 'openLicenses',
     'openSettings', 'refresh', 'sessionChanges', 'unmount']);
+});
+
+test('mounted Problem log keeps only the current resident diagnostics result', {timeout: scaledTimeout(240000)}, async () => {
+  const {checkSettingsResidentDiagnostics} = await import('../specs/quint/refinement/application/settings-resident-diagnostics.mjs');
+  const receipt = await checkSettingsResidentDiagnostics([partialContractFile(import.meta.url)]);
+  assert.equal(receipt.traces, 5);
+  assert.equal(receipt.checkpoints, 43);
+  assert.equal(receipt.inputsUnchanged, true);
+  assert.equal(receipt.driverInputsBound, true);
 });

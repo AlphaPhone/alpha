@@ -26,7 +26,7 @@ const slice = (from, to) => { const a = source.indexOf(from), b = source.indexOf
 const unmount = slice('if (owner === this) { capabilityAbort?.abort();', '\n');
 const code = stripTypeScriptTypes(`
 let owner = null, facts = {}, controls = {}, delivery = {}, generation = 0, scaleGeneration = 0, scaleVersion = 0, scalePending = false, updateBusy = '', updateResult = '', cross = {}, choices = null, history = null;
-let roles = null, crashLog = null, photoAccess = null, launcher = false, recovery = [], resumedUnread = false, capabilityAbort = null, inferenceAbort = null;
+let roles = null, crashLog = null, crashLogVersion = 0, photoAccess = null, launcher = false, recovery = [], resumedUnread = false, capabilityAbort = null, inferenceAbort = null;
 ${slice('export function textScaleSettlement(', '/** Keep the reference settings components').replace(/export function/g, 'function')}
 let scaleResults = textScaleSettlement();
 ${slice('  const showTextScale=', '  async function refresh() {')}

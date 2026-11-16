@@ -418,6 +418,7 @@ public final class UpdateStagingHarness {
  }
  public static void main(String[] args)throws Exception{
   if(args[0].equals("deadline")){System.out.println(deadline());return;}
+  if(args[0].equals("index")){System.out.println(UpdateFlowTest.mixedIndexSelections());return;}
   URL.setURLStreamHandlerFactory(protocol->!protocol.equals("https")?null:new URLStreamHandler(){
    @Override protected URLConnection openConnection(URL url){return new Response(url);}
   });
