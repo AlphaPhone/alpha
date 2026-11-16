@@ -29,3 +29,24 @@ test('canceling or retiring a canonical deletion review dispatches no record mut
  await chooseCalendarEventAction(page,'Delete event');await expect(review).toBeVisible();const before=await state(page);await state(page,{open:null});await expect(review).toHaveCount(0);await state(page,{open:before.open});
  expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'))).toEqual([]);
 });
+test('a managed Google event says where to delete it, and Join opens its meeting link',async({page})=>{
+ await page.clock.setFixedTime(new Date('2027-06-10T12:00Z'));
+ await openCanonicalCalendar(page,{eventTitle:'Team sync',begin:Date.parse('2027-06-10T13:00Z'),end:Date.parse('2027-06-10T14:00Z'),organizerSelf:true,managedGoogle:true,conferenceLink:'https://meet.google.com/abc-defg-hij'});
+ await page.getByRole('button',{name:/^Team sync,/}).click();
+ const detail=page.locator('[data-alpha-subview="calendar-detail"]');
+ await expect(detail.getByText('Fixture Calendar · Delete in Google',{exact:true})).toBeVisible();
+ await detail.getByLabel('Event actions',{exact:true}).click();
+ await expect(detail.getByRole('button',{name:'Edit event',exact:true})).toBeVisible();await expect(detail.getByRole('button',{name:'Delete event',exact:true})).toHaveCount(0);
+ await expect(detail.getByText('meet.google.com/abc-defg-hij',{exact:true})).toBeVisible();
+ await page.evaluate(()=>{(window as any).openedMeetings=[];window.open=((url:string,target:string,features:string)=>{(window as any).openedMeetings.push([url,target,features]);return null;}) as typeof window.open;});
+ await detail.getByRole('button',{name:'Join',exact:true}).click();
+ expect(await page.evaluate(()=>(window as any).openedMeetings)).toEqual([['https://meet.google.com/abc-defg-hij','_blank','noopener,noreferrer']]);
+ expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.every((r:any)=>r.method==='GET'))).toBe(true);
+});
+test('an event without a meeting link shows no Join row',async({page})=>{
+ await page.clock.setFixedTime(new Date('2027-06-10T12:00Z'));
+ await openCanonicalCalendar(page,{eventTitle:'Quiet hour',begin:Date.parse('2027-06-10T13:00Z'),end:Date.parse('2027-06-10T14:00Z'),organizerSelf:true});
+ await page.getByRole('button',{name:/^Quiet hour,/}).click();
+ const detail=page.locator('[data-alpha-subview="calendar-detail"]');
+ await expect(detail.getByText('Fixture Calendar',{exact:true})).toBeVisible();await expect(detail.getByRole('button',{name:'Join',exact:true})).toHaveCount(0);
+});

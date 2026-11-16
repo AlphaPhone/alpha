@@ -3,7 +3,7 @@ import test from 'node:test';
 import {AgentCalendar,calendarSourceKey,type CalendarPreservation} from '../apps/app/src/runtime/agent-calendar';
 import {assertAppRecordRequestAllowed} from '../apps/app/src/runtime/app-record-route-policy';
 import type {AppRecordPort} from '../apps/app/src/runtime/agent-calendar-client';
-import {canonicalCalendarRow,canonicalCalendarEditorTiming,calendarFormMinutes,calendarFormPatch,type CanonicalCalendarForm} from '../apps/app/src/runtime/agent-calendar-view';
+import {canonicalCalendarRow,calendarMeetingLink,canonicalCalendarEditorTiming,calendarFormMinutes,calendarFormPatch,type CanonicalCalendarForm} from '../apps/app/src/runtime/agent-calendar-view';
 
 function deferred<T>(){
  let resolve!:(value:T)=>void, reject!:(error:Error)=>void;
@@ -128,6 +128,15 @@ test('moving an event that starts at an awkward minute to another day keeps its 
   assert.equal(Date.parse(patch.startAt as string),Date.parse(`2026-11-08T${start}:00Z`));assert.equal(Date.parse(patch.endAt as string),Date.parse(`2026-11-08T${end}:00Z`));
  }
  const row=canonicalCalendarRow(timed('2026-11-07T16:20:00Z','2026-11-07T17:35:00Z'),'UTC',now);assert.equal(calendarFormMinutes(row.d),75);
+});
+
+// The detail's Join row reads the provider's meeting link; recurrence stays with the provider's listed occurrences.
+test('an event row shows its meeting link and never re-expands a recurring event',()=>{
+ const now=new Date('2026-11-07T00:00:00Z'),event:object=timed('2026-11-07T16:00:00Z','2026-11-07T16:30:00Z'),row=(patch:object)=>canonicalCalendarRow({...event,...patch} as never,'UTC',now);
+ assert.equal(row({conferenceLink:'https://meet.google.com/abc-defg-hij'}).video,'meet.google.com/abc-defg-hij');
+ assert.equal(calendarMeetingLink('https://zoom.example/j/1?pwd=secret')?.href,'https://zoom.example/j/1?pwd=secret');
+ for(const conferenceLink of [null,'','not a link','javascript:alert(1)','tel:+15551234567'])assert.equal(row({conferenceLink}).video,false);
+ assert.equal(row({recurrence:['RRULE:FREQ=WEEKLY'],recurringEventId:'series'}).repeat,'none');
 });
 
 // A layout row uses elapsed duration. A civil editor must derive both displayed endpoints instead.

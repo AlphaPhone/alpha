@@ -5,10 +5,14 @@ import {calendarEventKey,calendarSourceKey} from './agent-calendar';
 const DAY=86400000;
 const civil=(p:{year:number;month:number;day:number})=>Date.UTC(p.year,p.month-1,p.day);
 const date=(p:{year:number;month:number;day:number})=>`${p.year}-${String(p.month).padStart(2,'0')}-${String(p.day).padStart(2,'0')}`;
-/** Presentation keys never become provider IDs or native selections. */
+/** The event's meeting link when it is one the detail can open (http or https), otherwise null. */
+export function calendarMeetingLink(link:string|null|undefined){try{const url=new URL(link??'');return url.protocol==='https:'||url.protocol==='http:'?url:null;}catch{return null;}}
+const meetingLabel=(url:URL|null)=>url?url.host+url.pathname.replace(/\/$/,''):false;
+/** Presentation keys never become provider IDs or native selections. The row's repeat stays 'none': the feed
+ * already lists each occurrence, and a repeating row would be expanded again by the shared Calendar grid. */
 export function canonicalCalendarRow(event:LifeOpsCalendarEvent,displayZone:string,now=new Date()){
  const today=getZonedDateParts(now,displayZone),start=getZonedDateParts(new Date(event.startAt),event.isAllDay?'UTC':displayZone),end=getZonedDateParts(new Date(event.endAt),event.isAllDay?'UTC':displayZone);
- return{id:'canonical-calendar:'+calendarEventKey(event),canonicalEvent:structuredClone(event),canonicalEventKey:calendarEventKey(event),off:(civil(start)-civil(today))/DAY,t:event.isAllDay?0:start.hour+start.minute/60,d:event.isAllDay?0:(Date.parse(event.endAt)-Date.parse(event.startAt))/3600000,allDay:event.isAllDay,allDayEndOff:(civil(end)-civil(today))/DAY,title:event.title,notes:event.description,where:event.location,who:[],video:false,repeat:'none',alert:null,cal:calendarSourceKey({provider:event.provider,side:event.side,grantId:event.grantId??'',connectorAccountId:event.connectorAccountId??'',calendarId:event.calendarId})};
+ return{id:'canonical-calendar:'+calendarEventKey(event),canonicalEvent:structuredClone(event),canonicalEventKey:calendarEventKey(event),off:(civil(start)-civil(today))/DAY,t:event.isAllDay?0:start.hour+start.minute/60,d:event.isAllDay?0:(Date.parse(event.endAt)-Date.parse(event.startAt))/3600000,allDay:event.isAllDay,allDayEndOff:(civil(end)-civil(today))/DAY,title:event.title,notes:event.description,where:event.location,who:[],video:meetingLabel(calendarMeetingLink(event.conferenceLink)),repeat:'none',alert:null,cal:calendarSourceKey({provider:event.provider,side:event.side,grantId:event.grantId??'',connectorAccountId:event.connectorAccountId??'',calendarId:event.calendarId})};
 }
 /** Editors use wall minutes; layout keeps elapsed duration and original instants separately. */
 export function canonicalCalendarEditorTiming(event:LifeOpsCalendarEvent,displayZone:string,now=new Date()){

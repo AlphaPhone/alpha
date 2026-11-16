@@ -9,6 +9,9 @@ export interface CanonicalCalendarFixtureOptions {
   launcher?: boolean;
   organizerSelf?: boolean;
   guestEmails?: string[];
+  conferenceLink?: string;
+  /** Serve the event from a Google calendar reached through Alpha's managed account. */
+  managedGoogle?: boolean;
 }
 /** Closed read-only CalendarService transport. Install before navigation when another
  * native fixture adds event handoffs. The current client, controller and UI run unchanged. */
@@ -37,9 +40,9 @@ export async function installCanonicalCalendarFixture(page: Page, options: Canon
       window as Window & { canonicalCalendarAccessibility: typeof f }
     ).canonicalCalendarAccessibility = f;
     const calendar = {
-      provider: "eliza",
+      provider: options.managedGoogle ? "google" : "eliza",
       side: "owner",
-      grantId: "eliza-calendar",
+      grantId: options.managedGoogle ? "alpha-google:" + "a".repeat(64) : "eliza-calendar",
       connectorAccountId: "fixture-account",
       accountEmail: null,
       calendarId: "primary",
@@ -61,7 +64,7 @@ export async function installCanonicalCalendarFixture(page: Page, options: Canon
       connectorAccountId:calendar.connectorAccountId,calendarId:calendar.calendarId,
       title:options.eventTitle,description:'',location:options.location??'',status:'confirmed',
       startAt:new Date(begin).toISOString(),endAt:new Date(end).toISOString(),isAllDay:false,
-      timezone:'UTC',htmlLink:null,conferenceLink:null,organizer:options.organizerSelf?{email:'owner@example.org',displayName:'Owner',self:true}:null,attendees:(options.guestEmails??[]).map(email=>({email,displayName:null,responseStatus:'accepted',self:false,organizer:false,optional:false})),
+      timezone:'UTC',htmlLink:null,conferenceLink:options.conferenceLink??null,organizer:options.organizerSelf?{email:'owner@example.org',displayName:'Owner',self:true}:null,attendees:(options.guestEmails??[]).map(email=>({email,displayName:null,responseStatus:'accepted',self:false,organizer:false,optional:false})),
       metadata:{etag:'"fixture-event-v1"'},syncedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),
     }:null;
     const client = {
