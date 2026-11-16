@@ -130,9 +130,10 @@ def validate_private_storage(plan):
 
 
 def apk_member_limit(kind, contract=None):
-    retained_native = kind == PRIVATE_RUNNER and contract is not None and \
-        contract.get("runtimeProfile") == "native" and contract.get("packageName") == RETAINED_PACKAGE
-    return MAX_ARCHIVE_BYTES if kind == CANDIDATE or retained_native else LEGACY_APK_MEMBER_BYTES
+    private_native = kind == PRIVATE_RUNNER and contract is not None and \
+        contract.get("runtimeProfile") == "native" and \
+        contract.get("packageName") in (CANDIDATE_PACKAGE, RETAINED_PACKAGE)
+    return MAX_ARCHIVE_BYTES if kind == CANDIDATE or private_native else LEGACY_APK_MEMBER_BYTES
 
 
 def copy_verified(source, size, expected_digest, failure, destination=None):
