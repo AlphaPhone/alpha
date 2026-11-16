@@ -91,6 +91,7 @@ bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha
 # add the provider values to that file, then run `secrets` again until nothing is MISSING
 CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provision --environment staging --env-file ~/.config/alpha-cloud/staging.env --write
 bun run cloud:worker -- check --environment staging   # render and bundle, no network
+CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging
 bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
@@ -104,7 +105,8 @@ bun run cloud:worker -- smoke --environment staging
 records for the API and blob hosts, and writes their ids to `cloud/resources.json` (commit that
 file). The login and web hosts are Worker custom domains, which Cloudflare creates on deploy.
 After the first deployment, the **Cloud deploy** workflow does the same from `main` with
-`--frozen` secrets. Then:
+`--frozen` secrets. Before migrating or seeding, `preflight` checks for provisioned account,
+Hyperdrive and KV IDs in the selected environment and an explicit Cloudflare API token. Then:
 
 - In Stripe, send a test webhook and check that it returns 200.
 - `bun run cloud:worker -- pricing --environment staging --env-file …` fills the model price

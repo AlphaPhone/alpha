@@ -8,11 +8,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {migrationOutcome,workerDeployment,edgeConfig,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
+import {migrationOutcome,workerDeployment,deployResources,edgeConfig,prepare,preparedTree,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
  WORKER_SECRETS,LOGIN_SECRETS,OPERATOR_SECRETS,GENERATED_SECRETS} from '../scripts/cloud-worker.ts';
 import {registrationRows,registrationFor,registrationAppId,colonFingerprint,releaseSignerFingerprints} from '../scripts/cloud-registration.ts';
 import {edgeRoute} from '../cloud/edge/worker.ts';
-import {SHIPPED_CLOUD_DEPLOYMENT} from '../scripts/cloud-deployment-policy.ts';
 import {validateCloudDeployment,storageFingerprint,STORAGE_NAMESPACES} from '../scripts/cloud-deployment.ts';
 import {leakedElizaHost} from '../scripts/local-cloud.ts';
 
@@ -21,7 +20,7 @@ const example={policy:read('cloud/policy.example.json'),resources:read('cloud/re
 const alpha={policy:read('cloud/policy.json'),resources:read('cloud/resources.json')};
 const identity=read('app.config.json');
 
-test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.ai and is not a shipped namespace',()=>{
+test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.ai',()=>{
  validateCloudDeployment(alpha.policy);
  assert.equal(identity.appId,'ai.alphacompute.alphaphone');
  for(const environment of ['production','staging']){
@@ -33,7 +32,6 @@ test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacom
   assert.equal(ids.zone,'alphacompute.ai');
   for(const host of [ids.blobHost,new URL(ids.loginApiUrl).hostname])assert.match(host,/\.alphacompute\.ai$/);
  }
- assert.ok(!STORAGE_NAMESPACES.includes(storageFingerprint(alpha.policy)));
  assert.equal(leakedElizaHost(alpha),null);
 });
 
@@ -74,18 +72,68 @@ for(const [name,{policy,resources}] of Object.entries({example,alpha}))test(`the
  assert.equal(leakedElizaHost(deployment),null);
 });
 
-test('shipped, Eliza-naming or incomplete input is refused',()=>{
+test('the same Alpha Cloud configuration remains deployable after application cutover',()=>{
+ const before=workerDeployment(alpha.policy,alpha.resources);
+ STORAGE_NAMESPACES.push(storageFingerprint(alpha.policy));
+ try { assert.deepEqual(workerDeployment(alpha.policy,alpha.resources),before); }
+ finally { STORAGE_NAMESPACES.pop(); }
+});
+
+test('only the selected environment needs provisioned resources before deployment writes',()=>{
+ const resources=structuredClone(alpha.resources);
+ const auth={CLOUDFLARE_API_TOKEN:'synthetic-token'};
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',auth),/resources\.staging\.accountId is not provisioned/);
+ resources.staging.accountId='a'.repeat(32);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',auth),/resources\.staging\.hyperdriveId is not provisioned/);
+ resources.staging.hyperdriveId='b'.repeat(32);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',auth),/resources\.staging\.kvNamespaceId is not provisioned/);
+ resources.staging.kvNamespaceId='c'.repeat(32);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',{}),/CLOUDFLARE_API_TOKEN is required/);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',{...auth,CLOUDFLARE_ACCOUNT_ID:'d'.repeat(32)}),/does not match the selected resources/);
+ assert.equal(deployResources(alpha.policy,resources,'staging',auth),resources.staging);
+ assert.throws(()=>deployResources(alpha.policy,resources,'production',auth),/resources\.production\.accountId is not provisioned/);
+});
+
+test('shared Eliza, foreign services or incomplete input is refused',()=>{
  const {policy,resources}=example;
  for(const name of [...WORKER_SECRETS,...LOGIN_SECRETS])assert.match(name,/^[A-Z][A-Z0-9_]+$/);
- assert.throws(()=>workerDeployment(SHIPPED_CLOUD_DEPLOYMENT,resources),/shipped Cloud deployment/);
+ const shared=structuredClone(policy);shared.production.api='https://api.eliza.app';
+ assert.throws(()=>workerDeployment(shared,resources),/must not name api\.eliza\.app/);
  const naming=structuredClone(resources);naming.production.loginApiUrl='https://login.eliza.app';
  assert.throws(()=>workerDeployment(policy,naming),/must not name login\.eliza\.app/);
  const missing=structuredClone(resources);delete missing.staging.hyperdriveId;
  assert.throws(()=>workerDeployment(policy,missing),/resources\.staging\.hyperdriveId is required/);
  const otherZone=structuredClone(resources);otherZone.production.zone='example.net';
  assert.throws(()=>workerDeployment(policy,otherZone),/is not in zone example\.net/);
+ const otherServices=structuredClone(policy);otherServices.production.services='https://services.example.net';
+ assert.throws(()=>workerDeployment(otherServices,resources),/services\.example\.net is not in zone/);
  const insecure=structuredClone(policy);insecure.production.api='http://api.cloud.example.org';
  assert.throws(()=>workerDeployment(insecure,resources),/canonical HTTPS origins/);
+});
+
+test('prepare preserves unrelated directories and admits only its marked pinned export',async()=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-cloud-prepare-test-'));
+ try {
+  const tree=path.join(directory,'tree');
+  fs.mkdirSync(tree);
+  const foreign=path.join(tree,'keep.txt');
+  fs.writeFileSync(foreign,'keep');
+  await assert.rejects(prepare(tree),/not an Alpha Cloud export/);
+  assert.equal(fs.readFileSync(foreign,'utf8'),'keep');
+
+  const record=path.join(tree,'.alpha-cloud-tree.json');
+  fs.writeFileSync(record,'{}');
+  await assert.rejects(prepare(tree),/not an Alpha Cloud export/);
+  assert.equal(fs.readFileSync(foreign,'utf8'),'keep');
+
+  fs.writeFileSync(record,JSON.stringify({commit:read('upstream.lock.json').commit,built:true}));
+  assert.equal(await prepare(tree),fs.realpathSync(tree));
+  assert.equal(preparedTree(tree),fs.realpathSync(tree));
+  fs.writeFileSync(path.join(tree,'.git'),'gitdir: elsewhere');
+  await assert.rejects(prepare(tree),/not an Alpha Cloud export/);
+  assert.equal(fs.readFileSync(foreign,'utf8'),'keep');
+  assert.throws(()=>preparedTree(path.resolve('vendor/eliza')), /outside the pinned vendor checkout/);
+ } finally { fs.rmSync(directory,{recursive:true,force:true}); }
 });
 
 test('the app registration is the rows upstream admits: approved app, exact https callback, release signers',()=>{
