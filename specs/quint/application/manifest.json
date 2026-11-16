@@ -8842,6 +8842,7 @@
       "proposalNeedsApprovalTest",
       "emergencyKeptTest",
       "emergencyNeverCompactedTest",
+      "emergencyHandoverNotCompactedTest",
       "endDuringVoiceTest"
     ],
     "invariants": [
@@ -8865,7 +8866,8 @@
       "StaleStartWitness",
       "HeldBeforeStartWitness",
       "EmergencyProposalRefusedWitness",
-      "VoiceEndWitness"
+      "VoiceEndWitness",
+      "EmergencyHandoverWitness"
     ],
     "sources": [
       "apps/app/src/prototype/model.js"
@@ -8926,6 +8928,14 @@
       {
         "path": "apps/app/src/prototype/model.js",
         "name": "propose(p, text)"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "function pnLiveParty"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "function pnDrawn"
       }
     ],
     "stateMapping": {

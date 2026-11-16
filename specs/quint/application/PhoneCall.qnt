@@ -41,12 +41,15 @@ module PhoneCall {
   pure val Heights = Set("closed", "open", "full")
   pure def emergency(id: str): bool = id == "#911"
   pure def emergencyLive(v: State): bool = v.live != "" and emergency(v.live)
-  /// The call card drawn is to an emergency number (the bar's AC-19 flag).
-  pure def emergencyCard(v: State): bool = v.active and v.want != "" and not(v.min) and not(v.incoming) and emergency(v.want)
+  /// The call card drawn is to an emergency number (the bar's AC-19 flag). While an emergency call
+  /// is live it is the call drawn, whatever party a handover wrote into the view (model.js pnDrawn).
+  pure def emergencyCard(v: State): bool = v.active and v.want != "" and not(v.min) and not(v.incoming) and
+    (emergency(v.want) or emergencyLive(v))
   /// Proposals are dropped and none can act while either holds (Component.emergencyLive).
   pure def emergencyNow(v: State): bool = emergencyLive(v) or emergencyCard(v)
   /// Phone shows the running call's card (not minimised, no ring over it).
-  pure def callScreen(v: State): bool = v.active and v.live != "" and v.want == v.live and not(v.min) and not(v.incoming)
+  pure def callScreen(v: State): bool = v.active and v.live != "" and v.want != "" and (v.want == v.live or emergencyLive(v)) and
+    not(v.min) and not(v.incoming)
   /// AC-18: where End is on the call screen. A voice turn covers the screen, so its panel carries
   /// End; an emergency card keeps End among its controls; otherwise the bar, the card or the strip.
   /// "none": covered by a full sheet with no strip.
@@ -89,8 +92,9 @@ module PhoneCall {
   /// one first, does not inherit its return target, and cancels every armed start.
   pure def startCall(v: State, id: str, answered: bool): State =
     if (v.live == id and v.callWho == id) { ...v, min: false }
-    // AC-19: an emergency call is never replaced; the start is refused and changes nothing.
-    else if (emergencyLive(v)) v
+    // AC-19: an emergency call is never replaced. The start is refused and the drawn party goes
+    // back to the live call, so the refused start is not armed again (model.js pnStart).
+    else if (emergencyLive(v)) { ...v, want: v.live }
     else
       val replaced = v.live != ""
       val base = endCall(v, true)
@@ -208,6 +212,8 @@ module PhoneCall {
   val HeldBeforeStartWitness = s.hold and s.callWho == ""
   val EmergencyProposalRefusedWitness = emergencyLive(s) and s.proposal != "" and s.approvals == 0
   val VoiceEndWitness = callScreen(s) and s.voice and s.chat == "full"
+  /// A handover written over a live emergency call before its start is refused.
+  val EmergencyHandoverWitness = emergencyLive(s) and s.want != s.live and s.want != ""
 
   run digitlessDialStartsNothingTest = init.then(keypadCall(false))
     .expect(s.live == "" and s.callWho == "" and s.started == 0 and s.tickFor == "" and safety)
@@ -257,12 +263,17 @@ module PhoneCall {
     .expect(s.live == "#911" and s.proposal == "ada" and safety)
     .then(approve).expect(s.live == "#911" and s.want == "#911" and s.approvals == 0 and safety)
     .then(propose("#555")).expect(s.proposal == "ada" and safety)
-    .then(openCall("ada", "")).then(bootStart).expect(s.live == "#911" and s.started == 1 and safety)
+    .then(openCall("ada", "")).expect(EmergencyHandoverWitness and emergencyCard(s) and safety)
+    .then(bootStart).expect(s.live == "#911" and s.want == "#911" and s.bootTimers.length() == 0 and s.started == 1 and safety)
     .then(hangUp).expect(s.live == "" and not(s.emergencyCut) and safety)
   // AC-19: the chat cannot compact an emergency call to the strip; AC-18: End stays reachable.
   run emergencyNeverCompactedTest = init.then(openCall("#911", "")).then(bootStart).then(resize("full"))
     .expect(s.chat == "open" and endAt(s) == "card" and safety)
     .then(resize("closed")).expect(endAt(s) == "card" and safety)
+  // AC-19: a handover over a live emergency call does not lift its layout, even before it is refused.
+  run emergencyHandoverNotCompactedTest = init.then(openCall("#911", "")).then(bootStart).then(openCall("ada", ""))
+    .then(resize("full")).expect(s.chat == "open" and endAt(s) == "card" and safety)
+    .then(bootStart).expect(s.want == "#911" and s.chat == "open" and safety)
   run endDuringVoiceTest = init.then(openCall("ada", "")).then(bootStart).then(resize("full")).then(voiceTurn(true))
     .expect(VoiceEndWitness and endAt(s) == "voice" and safety)
     .then(voiceTurn(false)).expect(endAt(s) == "strip" and safety)
