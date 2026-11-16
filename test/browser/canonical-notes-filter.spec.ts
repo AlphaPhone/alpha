@@ -65,6 +65,25 @@ async function holdFilterUpdate(page:Page){
   };
  });
 }
+// Run the mounted component's filter write unchanged (its `when` updater runs and React commits
+// the state) but hold the completion callback, so success can only come from the commit callback.
+async function holdFilterCommit(page:Page){
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const original=Component.prototype.vset;
+  Component.prototype.vset=function(key:any,patch:any,options:any){
+   if(key==='notes'&&options?.when&&Object.hasOwn(patch,'filter')){
+    Component.prototype.vset=original;
+    const w=window as any;let release!:()=>void;const released=new Promise<void>(resolve=>release=resolve);
+    w.notesFilterCommitted=false;
+    w.releaseNotesFilter=()=>new Promise<void>(resolve=>{release();released.then(()=>setTimeout(resolve));});
+    return original.call(this,key,patch,{...options,afterCommit:()=>{w.notesFilterCommitted=true;void released.then(()=>options.afterCommit());}});
+   }
+   return original.call(this,key,patch,options);
+  };
+ });
+}
+const filterCommitted=(page:Page)=>page.evaluate(()=>(window as any).notesFilterCommitted===true);
 const filterHeld=(page:Page)=>page.evaluate(()=>typeof (window as any).releaseNotesFilter==='function');
 const releaseFilter=(page:Page)=>page.evaluate(async()=>{
  const release=(window as any).releaseNotesFilter;
@@ -81,11 +100,17 @@ async function canonicalStateUnchanged(page:Page){
 
 test('the approved canonical Notes filter receives success after the active list commits',async({page})=>{
  const {foreign,errors}=await setup(page,{text:'checklist',kind:'list'});
- await holdFilterUpdate(page);
+ await holdFilterCommit(page);
  await (await requestFilter(page)).click();
- await expect.poll(()=>filterHeld(page)).toBe(true);
- await expect(rows(page)).toHaveCount(2);
+ // The admitted list has committed; only its completion callback is held. A receipt written
+ // before that callback runs is a failure, not a wait condition.
+ await expect.poll(async()=>await filterCommitted(page)||(await actionState(page)).journal.length>0).toBe(true);
  expect((await actionState(page)).journal).not.toContainEqual(['terminal','succeeded']);
+ expect(await filterCommitted(page)).toBe(true);
+ await expect(rows(page)).toHaveCount(1);
+ for(const deadline=Date.now()+1500;Date.now()<deadline;await page.waitForTimeout(100)){
+  expect((await actionState(page)).journal).not.toContainEqual(['terminal','succeeded']);
+ }
  await releaseFilter(page);
 
  const clear=list(page).getByRole('button',{name:'Clear filter',exact:true});
