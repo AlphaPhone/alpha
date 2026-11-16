@@ -4060,6 +4060,24 @@
               <input value="{{workflows.b.sp.text}}" onChange="{{workflows.b.sp.onText}}" placeholder="In your words" aria-label="Step text" style="flex-grow: 1; min-width: 0; font-size: 16px; border: none; outline: none; background: transparent; color: var(--fg); height: 44px">
             </div>
             <sc-if value="{{workflows.b.sp.typed}}">
+              <sc-if value="{{workflows.b.sp.isCalendar}}">
+                <sc-if value="{{workflows.b.sp.calendarRange.modes.length}}">
+                  <div role="group" aria-label="Calendar range" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:14px">
+                    <sc-for list="{{workflows.b.sp.calendarRange.modes}}" as="mode">
+                      <button aria-pressed="{{mode.pressed}}" disabled="{{mode.disabled}}" onClick="{{mode.pick}}" style="min-height:44px;padding:8px 14px;border-radius:22px;{{mode.css}}">{{mode.label}}</button>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{workflows.b.sp.calendarRange.relative}}">
+                  <label style="display:block;margin-top:14px;font-size:14px">Days to read
+                    <select aria-label="Days to read" disabled="{{workflows.b.sp.calendarRange.limited}}" value="{{workflows.b.sp.calendarRange.dayCount}}" onChange="{{workflows.b.sp.calendarRange.changeDays}}" style="display:block;width:100%;min-height:44px;padding:8px;border:0;border-radius:16px;background:var(--s2);color:var(--fg)">
+                      <sc-for list="{{workflows.b.sp.calendarRange.dayChoices}}" as="day"><option value="{{day.value}}">{{day.label}}</option></sc-for>
+                    </select>
+                  </label>
+                  <p>{{workflows.b.sp.calendarRange.timeZone}}</p>
+                </sc-if>
+                <sc-if value="{{workflows.b.sp.calendarRange.limited}}"><p>{{workflows.b.sp.calendarRange.limitMessage}}</p></sc-if>
+              </sc-if>
               <sc-for list="{{workflows.b.sp.fields}}" as="f">
                 <label style="display:block;margin-top:14px;font-size:14px">{{f.label}}
                   <sc-if value="{{f.single}}"><input aria-label="{{f.label}}" type="{{f.type}}" value="{{f.value}}" onChange="{{f.change}}" style="display:block;width:100%;box-sizing:border-box;min-height:44px;padding:12px;border:0;border-radius:16px;background:var(--s2);color:var(--fg)"></sc-if>
