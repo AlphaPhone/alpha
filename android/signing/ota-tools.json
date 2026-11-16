@@ -24,6 +24,14 @@
       "sdkCommit": "30b4844152673243f1faf2d68a4f707a7a7da543",
       "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_wireless_delivery_20261113_15:userdebug/test-keys",
       "buildTimestamp": 1794608471
+    },
+    {
+      "targetFilesSha256": "fc87fa30dded43ec105f64625d4f4bd12cdc9be15fe6afe612d49bfd34bd7c36",
+      "sourceCommit": "100ba673676ef20ac9bb4726bbf00f40dc7db223",
+      "sdkCommit": "30b4844152673243f1faf2d68a4f707a7a7da543",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_wireless_delivery_20261114_16:userdebug/test-keys",
+      "buildTimestamp": 1794704054,
+      "apkSignerMappingsSha256": "290da9f391d643ec1f25564c865f68890bbe16e5ca875c57a0a1b1a3f3e3ef2c"
     }
   ]
 }

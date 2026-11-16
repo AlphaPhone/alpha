@@ -1,6 +1,7 @@
 package ai.alphacompute.alphaphone;
 
 import java.util.function.Predicate;
+import java.util.function.IntFunction;
 
 /**
  * What to do after the page's WebView renderer dies (MainActivity.onRenderProcessGone). The first
@@ -76,5 +77,41 @@ final class RendererRecoveryBudget {
  /** 'Choose Home app': the Home picker, else default apps, else Settings itself. */
  static String homeChoiceAction(Predicate<String> resolves){
   return firstResolved(resolves,ACTION_HOME_SETTINGS,ACTION_MANAGE_DEFAULT_APPS_SETTINGS,ACTION_SETTINGS);
+ }
+ /**
+  * Capacitor catches layout inflation failures before it creates a bridge. Preserve only public
+  * exception types, framework locations and resource names for Android's DUMP diagnostic; never
+  * retain an exception message, filename, URL or application value.
+  */
+ static String startupFailure(int layout,Throwable failure,IntFunction<String> resourceName){
+  StringBuilder out=new StringBuilder("layout=0x").append(Integer.toHexString(layout));
+  java.util.Set<Throwable> seen=java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+  java.util.Set<String> resources=new java.util.LinkedHashSet<>();
+  java.util.regex.Pattern ids=java.util.regex.Pattern.compile("#?0x(?:7f|01)[0-9a-fA-F]{6}\\b");
+  for(int depth=0;failure!=null&&depth<6&&seen.add(failure);depth++,failure=failure.getCause()){
+   out.append("; cause=").append(failure.getClass().getName());
+   int frames=0;
+   for(StackTraceElement frame:failure.getStackTrace()){
+    String type=frame.getClassName();
+    if(!(type.startsWith("android.")||type.startsWith("androidx.")||type.startsWith("com.getcapacitor.")))continue;
+    out.append(" at=").append(type).append('.').append(frame.getMethodName()).append(':').append(frame.getLineNumber());
+    if(++frames==3)break;
+   }
+   // The message is inspected only to resolve an actual public resource-table identifier. Its
+   // text is never emitted; an unknown identifier or non-resource mapper result is discarded.
+   String message=failure.getMessage();
+   if(message!=null&&resources.size()<4){
+    java.util.regex.Matcher match=ids.matcher(message);
+    while(match.find()&&resources.size()<4){
+     try{
+      String token=match.group().replace("#","");
+      String name=resourceName.apply((int)Long.parseLong(token.substring(2),16));
+      if(name!=null&&name.matches("[a-z][a-z0-9_.]*:[a-z][a-z0-9_]*/[a-z][a-z0-9_]*"))resources.add(name);
+     }catch(RuntimeException unavailable){/* Not an admitted resource name. */}
+    }
+   }
+  }
+  for(String name:resources)out.append("; resource=").append(name);
+  return out.length()>2048?out.substring(0,2048):out.toString();
  }
 }

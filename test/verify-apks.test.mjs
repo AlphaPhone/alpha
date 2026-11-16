@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // Integration checks of packaging CLIs and archived APK bytes.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -197,7 +198,7 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
 // Exercise the archive CLI, its child environments and real ZIP retention without
 // running Gradle. Only the Android builder and source snapshot are fixture commands.
 // `inherited` starts from an environment that still carries the mock flags: the archive strips them.
-for (const mode of ['native', 'inherited', 'wrong-profile', 'wrong-channel']) test(`build archive keeps the one runtime profile and its update channel: ${mode}`, t => {
+for (const mode of ['native', 'inherited', 'wrong-profile', 'wrong-channel']) fixtureTest(`build archive keeps the one runtime profile and its update channel: ${mode}`, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-build-archive-'));
   t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
   for (const name of ['scripts', 'bin']) fs.mkdirSync(path.join(dir, name));
@@ -325,47 +326,53 @@ test("APK voice admission requires the complete recorded bundle and every record
 
 test('merged-manifest check requires the launcher permissions and components', () => {
   // Stand-in for aapt's merged xmltree.
-  const identity = {appId: 'ai.alphacompute.alphaphone'};
-  const required = ['READ_CONTACTS', 'READ_SMS', 'SEND_SMS', 'CALL_PHONE', 'READ_PHONE_STATE', 'EXPAND_STATUS_BAR', 'RECEIVE_SMS', 'RECEIVE_MMS', 'RECEIVE_WAP_PUSH', 'READ_CALL_LOG', 'WRITE_CONTACTS', 'READ_PHONE_NUMBERS', 'READ_PRIVILEGED_PHONE_STATE']
-    .map(name => `android.permission.${name}`)
-    .concat(['AlphaInCallService', 'AlphaCallActivity', 'AlphaDialPadActivity', 'AlphaSmsDeliverReceiver', 'AlphaSmsSendReceiver', 'AlphaMmsWapPushReceiver', 'AlphaMmsResultReceiver', 'AlphaRespondViaMessageService', 'AlphaSmsComposeActivity', 'AlphaTelephonySetupReceiver'].map(name => `ai.alphacompute.alphaphone.${name}`));
-  const apk = (home, entries) => () => {
-    const setup = `${identity.appId}.AlphaTelephonySetupReceiver`;
-    const xml = ['E: manifest', '  E: application', ...['android.permission.CAMERA', ...entries].map(name =>
-      name === setup
-        ? `    E: receiver\n      A: android:name="${name}"\n      A: android:exported=(type 0x12)0xffffffff\n      A: android:permission="android.permission.MANAGE_ROLE_HOLDERS"`
-        : `    A: android:name="${name}"`)].join('\n');
-    return {packageName: identity.appId, home, launcher: true, webPayload: true, badging: '', xml};
-  };
-  assert.doesNotThrow(() => validateApk('launcher.apk', identity, apk(true, required)));
-  for (const entry of ['android.permission.READ_PHONE_STATE', 'android.permission.EXPAND_STATUS_BAR', 'ai.alphacompute.alphaphone.AlphaSmsSendReceiver', 'ai.alphacompute.alphaphone.AlphaTelephonySetupReceiver', 'android.permission.WRITE_CONTACTS', 'android.permission.READ_PRIVILEGED_PHONE_STATE']) {
-    const name = entry.split('.').at(-1);
-    assert.throws(() => validateApk('launcher.apk', identity, apk(true, required.filter(other => other !== entry))), new RegExp(`Invalid.*${name}.*launcher\\.apk`));
-  }
-  for (const entry of ['com.android.voicemail.permission.ADD_VOICEMAIL', 'android.telephony.VisualVoicemailService', 'android.permission.BIND_VISUAL_VOICEMAIL_SERVICE']) {
-    assert.throws(() => validateApk('launcher.apk', identity, apk(true, [...required, entry])), /Unexpected carrier voicemail manifest entry/);
+  for (const appId of ['ai.alphacompute.alphaphone', 'ai.elizaresearch.alphaphone']) {
+    const identity = {appId};
+    const required = ['READ_CONTACTS', 'READ_SMS', 'SEND_SMS', 'CALL_PHONE', 'READ_PHONE_STATE', 'EXPAND_STATUS_BAR', 'RECEIVE_SMS', 'RECEIVE_MMS', 'RECEIVE_WAP_PUSH', 'READ_CALL_LOG', 'WRITE_CONTACTS', 'READ_PHONE_NUMBERS', 'READ_PRIVILEGED_PHONE_STATE']
+      .map(name => `android.permission.${name}`)
+      .concat(['AlphaInCallService', 'AlphaCallActivity', 'AlphaDialPadActivity', 'AlphaSmsDeliverReceiver', 'AlphaSmsSendReceiver', 'AlphaMmsWapPushReceiver', 'AlphaMmsResultReceiver', 'AlphaRespondViaMessageService', 'AlphaSmsComposeActivity', 'AlphaTelephonySetupReceiver'].map(name => `${identity.appId}.${name}`));
+    const apk = (home, entries) => () => {
+      const setup = `${identity.appId}.AlphaTelephonySetupReceiver`;
+      const xml = ['E: manifest', '  E: application', ...['android.permission.CAMERA', ...entries].map(name =>
+        name === setup
+          ? `    E: receiver\n      A: android:name="${name}"\n      A: android:exported=(type 0x12)0xffffffff\n      A: android:permission="android.permission.MANAGE_ROLE_HOLDERS"`
+          : `    A: android:name="${name}"`)].join('\n');
+      return {packageName: identity.appId, home, launcher: true, webPayload: true, badging: '', xml};
+    };
+    assert.doesNotThrow(() => validateApk('launcher.apk', identity, apk(true, required)));
+    for (const entry of ['android.permission.READ_PHONE_STATE', 'android.permission.EXPAND_STATUS_BAR', `${identity.appId}.AlphaSmsSendReceiver`, `${identity.appId}.AlphaTelephonySetupReceiver`, 'android.permission.WRITE_CONTACTS', 'android.permission.READ_PRIVILEGED_PHONE_STATE']) {
+      const name = entry.split('.').at(-1);
+      assert.throws(() => validateApk('launcher.apk', identity, apk(true, required.filter(other => other !== entry))), new RegExp(`Invalid.*${name}.*launcher\\.apk`));
+    }
+    for (const entry of ['com.android.voicemail.permission.ADD_VOICEMAIL', 'android.telephony.VisualVoicemailService', 'android.permission.BIND_VISUAL_VOICEMAIL_SERVICE']) {
+      assert.throws(() => validateApk('launcher.apk', identity, apk(true, [...required, entry])), /Unexpected carrier voicemail manifest entry/);
+    }
+    const other = appId === 'ai.alphacompute.alphaphone' ? 'ai.elizaresearch.alphaphone' : 'ai.alphacompute.alphaphone';
+    const foreign = required.map(entry => entry.startsWith(appId + '.') ? other + entry.slice(appId.length) : entry);
+    assert.throws(() => validateApk('launcher.apk', identity, apk(true, foreign)), /Invalid telephony-role component/);
+    assert.throws(() => validateApk('launcher.apk', identity, () => ({...apk(true, required)(), packageName: other})), /Wrong package/);
   }
 });
 
 test("release accepts only a sender-protected telephony setup receiver without granting role authority to Alpha", () => {
   const rolePermission = "android.permission.MANAGE_ROLE_HOLDERS";
-  function assess({ permission = rolePermission, tag = "receiver", requested = false,
+  function assess({ appId = "ai.alphacompute.alphaphone", policyAppId = appId, receiverName = ".AlphaTelephonySetupReceiver", permission = rolePermission, tag = "receiver", requested = false,
       exported = true, enabled = true, present = true, implicit = false } = {}) {
     const xml = [
       "E: manifest",
-      '  A: package="ai.alphacompute.alphaphone"',
+      `  A: package="${appId}"`,
       ...(requested ? ["  E: uses-permission", `    A: android:name="${rolePermission}"`] : []),
       "  E: application",
       ...(present ? [
         `    E: ${tag}`,
-        '      A: android:name=".AlphaTelephonySetupReceiver"',
+        `      A: android:name="${receiverName}"`,
         `      A: android:exported=(type 0x12)${exported ? "0xffffffff" : "0x0"}`,
         ...(enabled ? [] : ["      A: android:enabled=(type 0x12)0x0"]),
         ...(permission ? [`      A: android:permission="${permission}"`] : []),
         ...(implicit ? ["      E: intent-filter"] : []),
       ] : []),
     ].join("\n");
-    return telephonySetupReceiverProblems(parseXmlTree(xml));
+    return telephonySetupReceiverProblems(parseXmlTree(xml), {appId: policyAppId});
   }
   assert.deepEqual(assess(), []);
   for (const invalid of [{ present: false }, { permission: "" }, { permission: "android.permission.INTERNET" },
@@ -373,6 +380,13 @@ test("release accepts only a sender-protected telephony setup receiver without g
     assert.match(assess(invalid).join("\n"), /AlphaTelephonySetupReceiver/);
   }
   assert.match(assess({ requested: true }).join("\n"), /must not request MANAGE_ROLE_HOLDERS/);
+  const retained = 'ai.elizaresearch.alphaphone';
+  assert.deepEqual(assess({appId: retained, receiverName: retained + '.AlphaTelephonySetupReceiver'}), []);
+  assert.match(assess({appId:retained,policyAppId:'ai.alphacompute.alphaphone'}).join(), /package differs from selected application identity/);
+  assert.match(assess({appId: retained, receiverName: 'ai.alphacompute.alphaphone.AlphaTelephonySetupReceiver'}).join(), /AlphaTelephonySetupReceiver/);
+  for (const invalid of [{permission: ''}, {tag: 'service'}, {exported: false}, {enabled: false}, {implicit: true}, {requested: true}])
+    assert.ok(assess({appId: retained, ...invalid}).length, JSON.stringify(invalid));
+
 });
 
 // A merged-manifest xmltree with the main manifest's two web returns on MainActivity.

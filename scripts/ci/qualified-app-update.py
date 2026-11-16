@@ -26,7 +26,7 @@ import zipfile
 from app_update_producer import HOSTED_DISPATCH, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
 
 ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY = "eliza-research/alpha"
+REPOSITORY = "alphacompute/alpha"
 REPOSITORY_ID = 1396333361
 SIGNING_WORKFLOW = ".github/workflows/release.yml"
 HEX = re.compile(r"[0-9a-f]{64}")
@@ -196,7 +196,7 @@ def check_signing_run(record, plan, workflow_commit, api):
             run.get("display_title") == f"Release sign on {record['signingWorkflowCommit']}" and
             run.get("event") == "workflow_dispatch" and run.get("head_branch") == "main" and
             run.get("head_sha") == record["signingWorkflowCommit"] and
-            all(repo.get("id") == REPOSITORY_ID and repo.get("full_name") == REPOSITORY for repo in repos) and
+            all(repo.get("id") == REPOSITORY_ID and str(repo.get("full_name")).lower() == REPOSITORY for repo in repos) and
             run.get("path") == SIGNING_WORKFLOW and
             run.get("run_attempt") == record["signingRunAttempt"], "Signing run identity differs")
 
@@ -287,10 +287,10 @@ def restore_file(root, name, source, size, digest, failure):
             temporary.unlink(missing_ok=True)
 
 
-def restore_producer_evidence(unsigned, product, kind, variants=VARIANTS):
+def restore_producer_evidence(unsigned, product, kind, variants=VARIANTS, *, contract=None):
     with zipfile.ZipFile(unsigned) as archive:
         verified = decode(archive.read("apk-verification.json"))
-        debug = PRODUCER.debug_apk_members(archive, verified, kind, variants)
+        debug = PRODUCER.debug_apk_members(archive, verified, kind, variants, contract=contract)
         producer = decode(archive.read("producer-evidence/manifest.json"))
         names = PRODUCER.archive_members(archive)
         for name, entry, expected in PRODUCER.producer_evidence_members(names, producer["files"]):
@@ -324,7 +324,7 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
             members = list(islice(archive, len(expected) + 1))
             # The exact uncompressed TAR receipt authenticates its member sizes.
             # APKs may fill that envelope. Metadata keeps the historical ceiling.
-            signed_limit = min(size, apk_member_limit(producer_kind(plan)))
+            signed_limit = min(size, apk_member_limit(producer_kind(plan), input_contract(plan)))
             metadata_limit = apk_member_limit(HOSTED_DISPATCH)
             require(len(members) == len(expected) and {item.name for item in members} == expected and
                     all(item.isfile() and 0 < item.size <= (signed_limit if item.name in signed_apks else metadata_limit)
@@ -353,7 +353,7 @@ def stage(record, plan, work, product, fetch_unsigned=STORAGE.download, fetch_si
     plan_bytes = read_bounded(work / "signing-plan.json", PLAN_LIMIT)
     with signed_bundle(signed, record["signedBundle"], plan, plan_bytes) as (archive, entries, apks):
         require(apks == record["signedApkSHA256"], "Signed checksum receipt differs")
-        restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"])
+        restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"], contract=inputs)
         # The historical verifier requires the complete unsigned pair. They are
         # verification inputs, never signed/exported release outputs. Keep the
         # signed launcher separate until its unchanged payload is verified.
@@ -433,7 +433,7 @@ def main():
     require(args.record.is_file() and not args.record.is_symlink() and args.record.stat().st_size <= 131072, "Bounded regular qualification record required")
     record_bytes = args.record.read_bytes()
     record = decode(record_bytes)
-    require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY and
+    require(os.environ.get("GITHUB_REPOSITORY", "").lower() == REPOSITORY and
             os.environ.get("GITHUB_REPOSITORY_ID") == str(REPOSITORY_ID) and
             os.environ.get("GITHUB_REF") == "refs/heads/main" and
             os.environ.get("GITHUB_SHA") == args.workflow_commit, "Publication runs only on exact reviewed Alpha main")

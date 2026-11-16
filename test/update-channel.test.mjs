@@ -46,3 +46,23 @@ test('production provisioning checks compiled channel against release evidence w
   assert.throws(()=>compiled(...fields),/missing or duplicated/);
  assert.throws(()=>apkUpdateChannelOrLegacy(parseXmlTree('E: manifest\n')),/application manifest/);
 });
+
+test('compiled channel metadata follows only the explicitly selected identity, with strict legacy absence',()=>{
+ const canonical='ai.alphacompute.alphaphone',retained='ai.elizaresearch.alphaphone';
+ const meta=(name,value)=>`    E: meta-data\n      A: android:name="${name}"\n      A: android:value="${value}"\n`;
+ for(const appId of [canonical,retained]){
+  const manifest=`E: manifest\n  A: package="${appId}"\n  E: application\n`;
+  const channel=meta(appId+'.UPDATE_CHANNEL','public'),digest=meta(appId+'.UPDATE_MANIFEST_SHA256','sha256:'+hash(publicUrl));
+  const read=(...fields)=>apkUpdateChannelOrLegacy(parseXmlTree(manifest+fields.join('')),{appId});
+  assert.deepEqual(read(channel,digest),{kind:'public',manifestUrlSha256:hash(publicUrl)});
+  assert.equal(read(),null);
+  for(const fields of [[channel],[digest],[channel,channel,digest],[channel,digest,digest]])
+   assert.throws(()=>read(...fields),/missing or duplicated/);
+  const foreign=appId===canonical?retained:canonical;
+  const foreignChannel=meta(foreign+'.UPDATE_CHANNEL','public'),foreignDigest=meta(foreign+'.UPDATE_MANIFEST_SHA256','sha256:'+hash(publicUrl));
+  for(const fields of [[foreignChannel],[foreignDigest],[foreignChannel,foreignDigest],[channel,digest,foreignChannel],[meta('UPDATE_CHANNEL','public')],[meta('UPDATE_MANIFEST_SHA256','sha256:'+hash(publicUrl))]])
+   assert.throws(()=>read(...fields),/another application/);
+  assert.throws(()=>apkUpdateChannelOrLegacy(parseXmlTree(manifest+channel+digest),{appId:foreign}),/package differs/);
+  assert.throws(()=>apkUpdateChannel(parseXmlTree(manifest),{appId}),/metadata missing/);
+ }
+});

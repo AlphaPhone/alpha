@@ -12,7 +12,7 @@ import { androidEnv, tool } from "./toolchain.ts";
 import { verifySecureCameraSource, writeSecureCameraOverlay, assertNoAlphaLockScreenSurface } from "./aosp-secure-camera-contract.ts";
 import { clockProductRequirement } from "./aosp-clock-contract.ts";
 import { provisioningComponents, writeProvisioningOverlay } from "./aosp-provisioning-overlay.ts";
-import { aospTelephonyRoleComponents } from "./aosp-telephony-roles.ts";
+import { aospTelephonyRoleComponents, writeAospTelephonyRoleOverrides } from "./aosp-telephony-roles.ts";
 import { writeImageCapability } from "./aosp-image-capability.ts";
 import { releaseBlockers } from "./release-blockers.ts";
 import {parseXmlTree, signerDigest, telephonySetupReceiverProblems} from "./apk.ts";
@@ -339,7 +339,7 @@ assertImageLauncherManifest(provisioningTree, production);
 if (production) aospTelephonyRoleComponents(provisioningTree, identity.appId);
 if (senseImage) assertSenseLauncher(provisioningTree, identity.appId);
 if (production || senseImage)
-  assertProvisioningUpdateChannel(apkUpdateChannelOrLegacy(parseXmlTree(provisioningTree)), reviewedUpdateChannel);
+  assertProvisioningUpdateChannel(apkUpdateChannelOrLegacy(parseXmlTree(provisioningTree), identity), reviewedUpdateChannel);
 fs.appendFileSync(path.join(output, "product.mk"), clockProductRequirement);
 // The image system feature Alpha Phone requires, with a system-partition install, before it offers
 // Phone, Contacts or SMS (P-36). Every image declares it, but the app also requires a release
@@ -380,6 +380,9 @@ if (listenerApk) {
 if (production || senseActivation) {
   const components = provisioningComponents(provisioningTree, identity.appId, {assistant: senseActivation !== null});
   writeProvisioningOverlay(output, identity.appId, components, {freshTelephony: production});
+  // Keep role eligibility image-owned on production and admitted Sense qualification images.
+  // The existing fresh-device Provision flow alone assigns defaults; owner choices stay untouched.
+  writeAospTelephonyRoleOverrides(output, provisioningTree, identity.appId);
   // Pixel production adds its launcher overlay inside shared composition. A Sense qualification
   // image also needs the same capability to exercise the guarded source on its userdebug build.
   if (!physical || !production) writeAospCapabilityOverlay(output, identity.appId);

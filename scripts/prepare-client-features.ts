@@ -98,6 +98,8 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-notes/src/workspace.ts',
 
   'packages/ui/src/api/transport.ts',
+  'packages/ui/src/utils/image-attachment.ts',
+  'packages/ui/src/utils/chat-attachment-types.ts',
   'packages/core/src/chat-upload-limits.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
   'plugins/plugin-native-system/src/client/shade.ts',
@@ -212,6 +214,7 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/core/src/runtime/single-flight-memo.ts',
   'packages/core/src/view-interaction.ts',
   'packages/core/src/security/log-redaction.ts',
+  'packages/core/src/chat-upload-limits.ts',
   'packages/host/src/voice/ui-context.ts',
 
   'packages/ui/src/voice/voice-activity.ts',
@@ -400,7 +403,7 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     project(name, content.replace(specifier, '} from "../../../../packages/contracts/src/calendar-linked-sync.ts";'));
   }
 
-  project('alpha-voice-core-protocol.ts','export {ElizaError} from "./packages/core/src/errors";\nexport {redactTrailingArgs} from "./packages/core/src/security/log-redaction";\nexport {parseViewInteractionClientId, AGENT_SURFACE_CAPABILITY_IDS} from "./packages/core/src/views/view-interact-protocol";\nexport {findViewActionHandoff, type ViewActionHandoff} from "./packages/core/src/views/view-action-handoff";\nexport type {PermissionState} from "./packages/core/src/types/permissions";\n');
+  project('alpha-voice-core-protocol.ts','export {ElizaError} from "./packages/core/src/errors";\nexport {redactTrailingArgs} from "./packages/core/src/security/log-redaction";\nexport {parseViewInteractionClientId, AGENT_SURFACE_CAPABILITY_IDS} from "./packages/core/src/views/view-interact-protocol";\nexport {findViewActionHandoff, type ViewActionHandoff} from "./packages/core/src/views/view-action-handoff";\nexport type {PermissionState} from "./packages/core/src/types/permissions";\nexport * from "./packages/core/src/chat-upload-limits";\n');
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {
