@@ -165,16 +165,15 @@ export class CanonicalNotesUi {
  private resolve(id:string):string{const draft=this.editor.draft;return draft&&id==='draft-'+draft.token?draft.id??id:id;}
  /** Opens one record (or closes the editor) after the current draft is saved. */
  select(id:string|null):void{void this.leave(id).catch(()=>this.needsReview());}
- /** A new note; one created while a folder is selected starts in that folder (format data folderId). */
- async create(kind:'text'|'list'='text',folderId:string|null=null):Promise<boolean>{
+ /** A new note. */
+ async create(kind:'text'|'list'='text'):Promise<boolean>{
   try{
    if(!await this.leave(null))return false;
    if(this.controller.revision===null)await this.controller.refresh();
    this.editor.begin(kind);
    const title=nextDefaultNoteTitle([...(this.controller.snapshot?.notes??[]),...(this.controller.snapshot?.trash??[]).map(entry=>entry.note)],'New note');
    this.defaultTitle={token:this.editor.draft!.token,title};
-   const folder:Record<string,string>=folderId?{folderId}:{};
-   this.editor.edit({title,...(kind==='list'?{format:{kind:'list' as const,data:{items:[],pinned:false,...folder}}}:folderId?{format:{kind:'text' as const,data:folder}}:{})});
+   this.editor.edit({title,...(kind==='list'?{format:{kind:'list' as const,data:{items:[],pinned:false}}}:{})});
    return true;}
   catch{if(this.controller.current)this.needsReview();return false;}
  }

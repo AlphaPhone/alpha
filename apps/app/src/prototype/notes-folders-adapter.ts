@@ -1,4 +1,4 @@
-import {addNotesFolder,editNotesFolders,findNotesFolderByName,newNotesFolderId,readNotesFolders,releaseNotesFolder,removeNotesFolder,renameNotesFolder,type NotesFolder} from '../runtime/notes-folders';
+import {editNotesFolders,readNotesFolders,releaseNotesFolder,removeNotesFolder,renameNotesFolder} from '../runtime/notes-folders';
 type Bag=Record<string,any>;
 type Shell=any;
 
@@ -6,8 +6,8 @@ type Shell=any;
  * Notes folders kept from the earlier folder layout. The folder list is its own
  * encrypted slot (runtime/notes-folders); a note names its folder by `folderId` in the notes
  * collection. The Notes view is one flat list with no folder controls: it only reads `folders`
- * from the view state for the agent's list filter. api.notesFolders still creates, renames or
- * deletes a stored folder; renaming keeps the id, so membership is unchanged. Deleting a folder removes it first, so nothing can be
+ * from the view state for the agent's list filter. api.notesFolders still renames or deletes a
+ * stored folder; renaming keeps the id, so membership is unchanged. Deleting a folder removes it first, so nothing can be
  * moved into it, then moves its notes to no folder (specs/notes-view DeleteFolder,
  * FolderRefsValid): a reference left behind by an interrupted release reads as no folder.
  */
@@ -19,13 +19,6 @@ export function installNotesFoldersAdapter(Component:Shell,views:Record<string,B
  async function load(shell:Shell){
   try{const doc=await readNotesFolders();if(shell.live)shell.vset('notes',{folders:doc.folders,foldersLoaded:true});}
   catch{if(shell.live)shell.vset('notes',{folders:[],foldersLoaded:true});}
- }
- async function create(shell:Shell,name:string):Promise<NotesFolder|null>{
-  try{
-   const doc=await editNotesFolders(current=>addNotesFolder(current,{id:newNotesFolderId(),name,createdAt:Date.now()}));
-   if(shell.live)shell.vset('notes',{folders:doc.folders,foldersLoaded:true});
-   return findNotesFolderByName(doc,name)??null;
-  }catch{shell.toast('Not created');void load(shell);return null;}
  }
  async function rename(shell:Shell,id:string,name:string):Promise<boolean>{
   try{
@@ -48,7 +41,7 @@ export function installNotesFoldersAdapter(Component:Shell,views:Record<string,B
 
  p.api=function(key:string){
   const api=originalApi.call(this,key);
-  if(key==='notes'){const shell=this;api.notesFolders={create:(name:string)=>create(shell,name),rename:(id:string,name:string)=>rename(shell,id,name),remove:(id:string)=>remove(shell,id),reload:()=>load(shell)};}
+  if(key==='notes'){const shell=this;api.notesFolders={rename:(id:string,name:string)=>rename(shell,id,name),remove:(id:string)=>remove(shell,id),reload:()=>load(shell)};}
   return api;
  };
  notes.render=(state:Bag,api:Bag)=>{

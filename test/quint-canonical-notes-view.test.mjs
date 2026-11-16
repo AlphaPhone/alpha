@@ -88,7 +88,7 @@ async function checkCanonicalNotesView(extraSources = []) {
   captureSources([driver, ...extraSources]);
   const compiled = await compileCanonicalNotesUi([driver, ...extraSources], [observationPlugin]), traces = [];
   const cases = ['text', 'list', 'empty-voice', 'rich-voice', 'empty-link', 'rich-link', 'local-handles',
-    'forged-view-fields', 'pin-folder', 'open-second', 'edit-title', 'new-text', 'new-list', 'new-folder',
+    'forged-view-fields', 'pin-folder', 'open-second', 'edit-title', 'new-text', 'new-list',
     'clean-refresh', 'dirty-refresh', 'clean-removal', 'dirty-removal', 'save-new-id', 'save-newer-edit',
     'convert-to-text', 'clear-format-preserves-base', 'owner-loss', 'retire', 'wait-navigation',
     'wait-two-navigations', 'wait-queued-save', 'retire-waiting', 'failed-save-waiting', 'blank-new-delete'];
@@ -105,8 +105,8 @@ async function checkCanonicalNotesView(extraSources = []) {
       const first = note(1, format), second = note(2, undefined, 'Second');
       f.run('refresh'); await f.resolveRequest(state(name === 'save-new-id' ? [first] : [first, second]));
       if (['local-handles', 'forged-view-fields'].includes(name)) await f.ui.leave('note-one');
-      if (['new-text', 'new-list', 'new-folder', 'save-new-id', 'blank-new-delete'].includes(name)) {
-        await f.ui.create(name === 'new-list' ? 'list' : 'text', name === 'new-folder' ? 'folder-two' : null);
+      if (['new-text', 'new-list', 'save-new-id', 'blank-new-delete'].includes(name)) {
+        await f.ui.create(name === 'new-list' ? 'list' : 'text');
         if (name === 'save-new-id') {
           f.ui.editor.edit({title: 'New'}); f.run('update', f.ui.open, {title: 'New'}); await tick();
           const saved = note(2, undefined, 'New', ''); await f.resolveRequest(state([first, saved], 2), saved);
@@ -155,5 +155,5 @@ test('canonical Notes rows and navigation waiters refine actual view callbacks',
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 30);
+  assert.equal(receipt.traces, 29);
 });

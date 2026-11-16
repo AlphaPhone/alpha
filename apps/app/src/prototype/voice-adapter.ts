@@ -21,7 +21,7 @@ import {createNotesRecordingEffects,type NotesRecordingEffects} from '../../../.
 import {addNotesTrashEntry,editNotesTrash,isNotesTrashFull,notesTrashExpired,readNotesTrash,removeNotesTrashEntries,savedNotes,type NotesTrashEntry} from '../runtime/notes-trash';
 import type {NotesTarget} from '../runtime/notes-contract';
 import {sameDeletionRow,leasedDeletionRow,claimDeletion,releaseDeletionClaim,deletionClaimedElsewhere} from '../runtime/permanent-voice-deletion';
-import { installLocalSpeechPlayback, stopLocalSpeechPlayback, currentNoteReading, stopSpeaking, readNoteAloud, noteVoiceDraft } from './local-speech-playback';
+import { installLocalSpeechPlayback, stopLocalSpeechPlayback, currentNoteReading, stopSpeaking, noteVoiceDraft } from './local-speech-playback';
 import { registerPlugin } from '../platform-plugins';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { createOnDeviceVoice } from '../runtime/local-voice';
@@ -48,9 +48,6 @@ const voiceServiceName = () => connectionController.getSnapshot().residentInfere
 // Reading a note aloud sends only that note's text, never recordings or replies, so Notes names it.
 // Data leaving the phone stays named at the Read action, in four words or fewer.
 // The route is the one in use now (voice-selection.ts); on this phone nothing is sent, so nothing is said.
-const noteSpeechDisclosure = () => { const route = speechRoute(); return route==='direct' ? 'Text → Cartesia' : route==='cloud' ? `Text → ${voiceServiceName()}` : ''; };
-const noteReadLabel = () => speechRoute()==='cloud' ? `Read with ${voiceServiceName()}` : 'Read aloud';
-const noteReadUnavailable = () => speechRoute()==='device' ? 'On-device speech is unavailable. The note is unchanged.' : `${voiceServiceName()} speech and on-device speech are unavailable. Check your account and connection. The note is unchanged.`;
 type Bag = Record<string, any>;
 type Clip = { recordingId: string; durationMs: number };
 const CALL_PAUSED = 'Voice paused for a phone call.';
@@ -1333,19 +1330,6 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       vo.toEvent=()=>{vo.closeMenu?.();void draftFromNote('event');};
       vo.eventLabel='Review calendar event draft';vo.eventText='Review event';
 
-      // A saved recording's reviewed transcript uses the same disclosed speech route as text notes.
-      const voText = noteSpeechText(selected), voReading = currentNoteReading()?.noteId === selected.id;
-      vo.readLabel = noteReadLabel();
-      vo.cloudSpeechDisclosure = noteSpeechDisclosure();
-      vo.stopReading = voReading ? () => stopSpeaking() : undefined;
-      vo.readAloud = voText && !voReading ? () => {
-        stopSaved();
-        void readNoteAloud(voText, { noteId: selected.id }).then(({outcome, message}) => {
-          if (outcome === 'unavailable') current.toast(noteReadUnavailable());
-          else if (outcome === 'unsupported') current.toast('This note has text that cannot be read aloud. Nothing was read.');
-          else if (outcome === 'failed') current.toast(message);
-        });
-      } : undefined;
       vo.hasPlayback = true;
       vo.playbackAudioId = selected.audio.audioId;
       vo.activity=React.createElement(VoiceActivity,{phase:savedPlaying===selected.audio.audioId?(savedPlaybackReady?'speaking':'connecting'):'idle',theme:current.theme==='dark'?'dark':'light'});
@@ -1376,7 +1360,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       };
     }
     result.record = startNoteRecorder;
-    // Read aloud follows the runtime profile. Closing, leaving or editing the note stops it.
+    // Alpha may read a note aloud. Closing, leaving or editing the note stops it.
     const readNote = (current.get('notes').list || []).find((item: Bag) => item.id === state.open);
     const readText = noteSpeechText(readNote), activeReading = currentNoteReading();
     // The read note was closed or changed. Stop after this render: stopping updates the view state.
@@ -1385,24 +1369,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       void Promise.resolve().then(() => { const now = currentNoteReading(); if (now && now.noteId === stale.noteId && now.text === stale.text) stopSpeaking(); });
     }
     if (result.ed) {
-      const note = readNote, text = readText, mine = !!note && currentNoteReading()?.noteId === note.id;
+      const note = readNote;
       const ed = result.ed, onBody = ed.onBody, onTitle = ed.onTitle;
       const editing = (handler: unknown) => typeof handler === 'function' ? (...args: unknown[]) => { if (currentNoteReading()?.noteId === note?.id) stopSpeaking(); return (handler as (...a: unknown[]) => unknown)(...args); } : handler;
       ed.onBody = editing(onBody); ed.onTitle = editing(onTitle);
-      const live = mine && currentNoteReading()?.noteId === note.id;
-      ed.reading = live; ed.readAvailable = !!note && !!text;
-      ed.readLabel = live ? 'Stop reading' : noteReadLabel();
-      ed.cloudSpeechDisclosure = noteSpeechDisclosure();
-      ed.stopReading = live ? () => stopSpeaking() : undefined;
-      ed.readAloud = ed.readAvailable && !live ? () => {
-        if (!note || !text) return;
-        if (currentNoteReading()?.noteId === note.id) { stopSpeaking(); return; }
-        void readNoteAloud(text, { noteId: note.id }).then(({outcome, message}) => {
-          if (outcome === 'unavailable') current.toast(noteReadUnavailable());
-          else if (outcome === 'unsupported') current.toast('This note has text that cannot be read aloud. Nothing was read.');
-          else if (outcome === 'failed') current.toast(message);
-        });
-      } : undefined;
     }
     if (noteRecorder.open) { result.noteRecorder = noteRecorderView(current.ic); return result; }
     return result;
