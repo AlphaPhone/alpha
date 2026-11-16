@@ -23,7 +23,6 @@ import { CUTTLEFISH_TARGETS, cuttlefishProductProblems } from "../vendor/eliza/p
 import { assertSenseLauncher, assertSenseQualification, readSenseQualification, senseLauncherDigest, writeSenseImageActivation, type SenseImageActivation } from './aosp-sense-image.ts';
 import { stageAlphaSensePolicy } from './aosp-sense-policy.ts';
 import { verifyPinnedUpstream } from './pinned-upstream-source.ts';
-import {androidIdentity} from './android-identity.ts';
 
 export const PRODUCT_DESCRIPTOR = "android/aosp/product.json";
 /**
@@ -76,7 +75,7 @@ interface ImageApkOptions {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** Require the first-run contract from the APK itself, including when reusing an old admission receipt. */
-export function assertImageLauncherManifest(tree: string, production: boolean, appId = androidIdentity().appId) {
+export function assertImageLauncherManifest(tree: string, production: boolean, appId?: string) {
   assertNoAlphaLockScreenSurface(tree);
   if (!production) return;
   const problems = telephonySetupReceiverProblems(parseXmlTree(tree), {appId});
@@ -254,16 +253,13 @@ if (!apk)
   throw new Error(development
     ? "Development staging: supply --apk PATH to a flag-off debug launcher APK."
     : "Production staging: supply --apk PATH to the signed launcher release APK that verify-apks recorded as distributable.");
-const identity = androidIdentity(process.cwd());
-const canonicalIdentity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
-if (identity.appId !== canonicalIdentity.appId && (!physical || !production))
-  throw Error('Retained image identity requires the production Pixel image admission');
+const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
 if ((get('--branding-assets') === null) !== (get('--branding-assets-report-sha256') === null))
   throw Error('Branding assets require their exact report SHA-256');
 if (!physical && get('--branding-assets'))
   throw Error('The source/asset policy packet belongs to the Pixel image contract');
-if (identity.appId !== canonicalIdentity.appId && !get('--branding-assets'))
-  throw Error('Retained image staging requires the matching source/asset policy packet');
+if (!production && get('--branding-assets'))
+  throw Error('The source/asset policy packet requires production launcher admission');
 const hash = sha256File(apk);
 const manifestFile = get('--apk-manifest') || 'artifacts/apk-manifest.json';
 const reviewedUpdateChannel = admitApk({
@@ -428,9 +424,7 @@ if (production && get('--branding-assets')) {
     launcherDescriptorSha256: sha256File(path.join(output, 'launcher.json')),
     sourceLockSha256: physicalSource?.sourceLockSha256,
     platformCertificateSha256,
-    catalogSha256: sha256File('android/consumer-host.json'),
     handlerDefaultsSha256: sha256File(path.join(output, 'provisioning/alpha-telephony-components.xml')),
-    provisionResourceSha256: sha256File(path.join(output, 'provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml')),
   };
   const packetCommand = brandingPacketCommand({output, source: source!, assets: get('--branding-assets')!,
     reportSha256: get('--branding-assets-report-sha256')!, aapt: tool('aapt'), apksigner: tool('apksigner')});
@@ -440,8 +434,7 @@ if (production && get('--branding-assets')) {
   const physicalReport = path.join(output, 'physical-product.json');
   const report = JSON.parse(fs.readFileSync(physicalReport, 'utf8'));
   report.sourcePolicyPacket = {file:'source-packet.json', sha256:sha256File(path.join(output, 'source-packet.json')),
-    archiveSha256:packet.packetSha256, packageName:identity.appId, apkSha256:hash,
-    installedPolicyProjectionSha256:packet.installedPolicyProjectionSha256};
+    archiveSha256:packet.packetSha256, packageName:identity.appId, apkSha256:hash};
   fs.writeFileSync(physicalReport, JSON.stringify(report, null, 2) + '\n');
 }
 if (fs.existsSync(destination)) throw Error('Output appeared during staging: ' + destination);

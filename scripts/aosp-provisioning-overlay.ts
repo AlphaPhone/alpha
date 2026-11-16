@@ -21,7 +21,7 @@ export function provisioningComponents(xmltree: string, packageName: string, opt
 }
 
 export function renderProvisioningOverlay(packageName: string, components: ReturnType<typeof sharedComponents>, {freshTelephony}: {freshTelephony: boolean}) {
-  const files: Record<string, string> = sharedRender(packageName, components);
+  const files = sharedRender(packageName, components);
   const readme = files['provisioning/README.md'], tail = '\nThe stock launcher is not removed.';
   if (!readme.includes(tail)) throw new Error('Unexpected shared provisioning README');
   const telephonyNote = freshTelephony
@@ -31,10 +31,6 @@ export function renderProvisioningOverlay(packageName: string, components: Retur
   preinstalled launcher; the app-op stays at its default, which reads that grant.
 ${telephonyNote}${tail}`);
   if (freshTelephony) {
-    // sharedRender validates packageName and the admitted APK-derived components first.
-    files['provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml'] =
-      `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n`
-      + `    <string name="alpha_launcher_package" translatable="false">${packageName}</string>\n</resources>\n`;
     const telephonyFeature = `${packageName}.fresh_telephony_setup`;
     files.productMakefile += `PRODUCT_COPY_FILES += $(dir $(launcher_provisioning_dir))branding/provision/fresh-telephony.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/permissions/${telephonyFeature}.xml\n`;
   }

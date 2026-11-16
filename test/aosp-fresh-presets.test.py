@@ -59,47 +59,10 @@ public class FreshTest {
   before=self.fixture(root)
   return stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,product_mk_hash=before,core_baseline=core_baseline)
 
- def test_retained_packet_projects_verified_policy_outputs_and_preserves_canonical_packet(self):
-  with tempfile.TemporaryDirectory(prefix='alpha-retained-policy-') as d, patch.object(stage,'check_revision'):
-   root=Path(d)/'aosp';root.mkdir();before=self.fixture(root)
-   retained='ai.elizaresearch.alphaphone'
-   kwargs=dict(product_mk_hash=before,core_baseline=core_baseline,
-               entry_baseline=lambda rel:(BRAND/'system-entry/.cache/baseline'/rel).read_bytes())
-   plan,rows=stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,
-                             image_admission={'packageName':retained},**kwargs)
-   metadata=json.loads((BRAND/'installed-image-policies.json').read_text())['cohorts'][retained]
-   for name,expected in metadata['files'].items():
-    self.assertEqual(stage.digest(plan[name]),expected['projectedSha256'])
-    row=next(row for row in rows if row['path']==name)
-    self.assertEqual(row['canonicalSha256'],expected['canonicalSha256'])
-   # The canonical image plan is checked against the reviewed policy manifests, not recomputed from itself.
-   canonical_plan,_=stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,**kwargs)
-   for policy in ['core-launcher','system-entry']:
-    for file in json.loads((BRAND/policy/'manifest.json').read_text())['files']:
-     name='frameworks/base/'+file['path']
-     self.assertEqual(metadata['files'][name]['canonicalSha256'],file['afterSha256'])
-     if policy=='core-launcher':
-      self.assertEqual(stage.digest(canonical_plan[name]),file['afterSha256'],'canonical policy output bytes stay unchanged')
-   self.assertEqual([name for name,value in canonical_plan.items() if retained.encode() in value],[],
-                    'the canonical plan carries no retained package token')
-   feature=ET.fromstring(plan['vendor/alphaphone/branding/provision/fresh-telephony.xml'])
-   self.assertEqual(feature.find('feature').attrib['name'],retained+'.fresh_telephony_setup')
-   strings=ET.fromstring(plan['packages/apps/Provision/res/values/alpha.xml'])
-   self.assertEqual(strings.find("string[@name='alpha_launcher_package']").text,retained)
-   stage.apply_plan(root,plan,rows,Path(d)/'backup')
-   for row in rows:self.assertEqual(stage.digest((root/row['path']).read_bytes()),row['sha256'])
-   with patch.object(stage,'project_policy_bytes',return_value=b'unreviewed projection'):
-    with self.assertRaisesRegex(AssertionError,'projection drift'):
-     stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,
-                      image_admission={'packageName':retained},**kwargs)
-   with self.assertRaisesRegex(AssertionError,'Undeclared installed policy cohort'):
-    stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,
-                     image_admission={'packageName':'unknown.package'},**kwargs)
-
- def test_image_identity_rechecks_catalogue_signed_apk_and_all_admission_bindings(self):
+ def test_image_identity_rechecks_canonical_signed_apk_and_all_admission_bindings(self):
   bun=os.environ.get('ALPHA_BUN','bun')
-  selected='ai.elizaresearch.alphaphone'
-  # A real nine-handler retained launcher manifest runs through the production TS qualifiers.
+  selected='ai.alphacompute.alphaphone'
+  # A real nine-handler canonical launcher manifest runs through the production TS qualifiers.
   tree=lambda *flags:subprocess.check_output([bun,'test/fixtures/telephony-launcher-tree.mjs',selected,*flags],text=True,cwd=REPO)
   manifest={'tree':tree()}
   with tempfile.TemporaryDirectory(prefix='alpha-image-identity-') as d:
@@ -110,12 +73,9 @@ public class FreshTest {
    descriptor_file=root/'launcher.json';descriptor_file.write_text(json.dumps(descriptor))
    admission={'schema':1,'packageName':selected,'apkSha256':descriptor['apkSha256'],
     'launcherDescriptorSha256':stage.digest(descriptor_file.read_bytes()),'sourceLockSha256':product['sourceLock']['sha256'],
-    'platformCertificateSha256':product['signer']['platformCertificateSha256'],
-    'catalogSha256':stage.digest((REPO/'android/consumer-host.json').read_bytes())}
-   for field,rel in [('handlerDefaultsSha256','provisioning/alpha-telephony-components.xml'),
-                     ('provisionResourceSha256','provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml')]:
-    output=root/rel;output.parent.mkdir(parents=True,exist_ok=True);output.write_text('isolated normal-stage file binding fixture')
-    admission[field]=stage.digest(output.read_bytes())
+    'platformCertificateSha256':product['signer']['platformCertificateSha256']}
+   output=root/'provisioning/alpha-telephony-components.xml';output.parent.mkdir(parents=True,exist_ok=True)
+   output.write_text('isolated normal-stage file binding fixture');admission['handlerDefaultsSha256']=stage.digest(output.read_bytes())
    file=root/'image-policy-admission.json';file.write_text(json.dumps(admission))
    generated=b'# Generated Pixel launcher stage product\n';(root/'product.mk').write_bytes(generated)
    aosp=root/'aosp';aosp.mkdir();self.fixture(aosp,vendor=False)
@@ -133,14 +93,14 @@ public class FreshTest {
    with patch.object(stage.subprocess,'check_output',side_effect=tools):
     self.assertEqual(stage.image_identity(root,'aapt-fixture','apksigner-fixture'),admission)
     for broken in [tree('--without-setup-receiver'),manifest['tree'].replace('BIND_INCALL_SERVICE','UNRELATED'),
-                   manifest['tree'].replace(selected,'ai.alphacompute.alphaphone')]:
+                   manifest['tree'].replace(selected,'other.package')]:
      with self.subTest(manifest=broken[-80:]):
       manifest['tree']=broken
       with self.assertRaises(subprocess.CalledProcessError):stage.image_identity(root,'aapt-fixture','apksigner-fixture')
     manifest['tree']=tree()
     policy_plan=stage.core_policy_plan
-    def policy(root,read_baseline=None,policy='core-launcher'):
-     return policy_plan(root,lambda rel:(BRAND/policy/'.cache/baseline'/rel).read_bytes(),policy)
+    def policy(root,read_baseline=None):
+     return policy_plan(root,core_baseline)
     # The exact production invocation: stage-aosp pins and brands the stage product.mk itself.
     command=json.loads(run([bun,'-e','const [output, source, assets, reportSha256] = process.argv.slice(-4);'
       'console.log(JSON.stringify((await import("./scripts/stage-aosp.ts")).brandingPacketCommand('
@@ -163,10 +123,11 @@ public class FreshTest {
     (root/'product.mk').write_bytes(b'# other\n'+(root/'product.mk').read_bytes())
     with patch.object(stage,'check_revision'), patch.object(stage,'core_policy_plan',side_effect=policy), patch.object(sys,'argv',command):
      with self.assertRaisesRegex(AssertionError,'pinned preimage'):stage.main()
-    for key,value in [('packageName','unknown.package'),('apkSha256','0'*64),('launcherDescriptorSha256','0'*64),
-                      ('sourceLockSha256','0'*64),('platformCertificateSha256','0'*64),('catalogSha256','0'*64),
-                      ('handlerDefaultsSha256','0'*64),('provisionResourceSha256','0'*64)]:
-     with self.subTest(key=key):
+    # Only the canonical identity is admitted; the former installed identity is not an image identity.
+    for key,value in [('packageName','ai.elizaresearch.alphaphone'),('packageName','unknown.package'),('apkSha256','0'*64),
+                      ('launcherDescriptorSha256','0'*64),('sourceLockSha256','0'*64),('platformCertificateSha256','0'*64),
+                      ('handlerDefaultsSha256','0'*64)]:
+     with self.subTest(key=key,value=value):
       file.write_text(json.dumps({**admission,key:value}))
       with self.assertRaises(AssertionError):stage.image_identity(root,'aapt-fixture','apksigner-fixture')
     file.write_text(json.dumps(admission))
@@ -295,7 +256,7 @@ import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 public class CompletionTest {
- static final String ALPHA=System.getProperty("alpha.test.launcher", "ai.alphacompute.alphaphone"), OTHER="other.app";
+ static final String ALPHA="ai.alphacompute.alphaphone", OTHER="other.app";
  static final String HOME="home", DIALER="dialer", SMS="sms";
  static void check(boolean result,String message){if(!result)throw new AssertionError(message);}
  static class R { static class string {'''+ids+'''} }
@@ -362,7 +323,6 @@ public class CompletionTest {
   boolean isFinishing(){return false;}
   boolean isDestroyed(){return destroyed;}
   <T> T getSystemService(Class<T> type){return missingRoles ? null : type.cast(roles);}
-  String getString(int id){check(id==R.string.alpha_launcher_package,"image launcher resource");return ALPHA;}
   PackageManager getPackageManager(){return new PackageManager(this);}
   Executor getMainExecutor(){return Runnable::run;}
   Activity getContentResolver(){return this;}
@@ -528,9 +488,7 @@ public class CompletionTest {
    compiled=subprocess.run([java_binary('javac'),'--release','11','-d',d,
                             str(BRAND/'provision/AlphaFreshSetupPolicy.java'),str(file)],capture_output=True,text=True)
    self.assertEqual(compiled.returncode,0,compiled.stderr)
-   for launcher in ['ai.alphacompute.alphaphone', 'ai.elizaresearch.alphaphone']:
-    with self.subTest(launcher=launcher):
-     self.assertIn('PASS actual setup completion and recovery',
-                   subprocess.check_output([java_binary('java'),'-Dalpha.test.launcher='+launcher,'-cp',d,'com.android.provision.CompletionTest'],text=True))
+   self.assertIn('PASS actual setup completion and recovery',
+                 subprocess.check_output([java_binary('java'),'-cp',d,'com.android.provision.CompletionTest'],text=True))
 
 if __name__=='__main__':unittest.main(verbosity=2)

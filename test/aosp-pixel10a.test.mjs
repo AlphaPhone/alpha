@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readPixel10aComposition, pixel10aSourceLayout, pixel10aVendorApi, writePixel10aProduct} from '../scripts/aosp-pixel10a.ts';
+import {pixel10aSourceLayout, pixel10aVendorApi, writePixel10aProduct} from '../scripts/aosp-pixel10a.ts';
 
 test('consumer composition retains installed product, vendor and Pixel provider identities',()=>{
   const product=JSON.parse(fs.readFileSync('android/aosp/pixel10a-composition.json','utf8'));
@@ -15,21 +15,6 @@ test('consumer composition retains installed product, vendor and Pixel provider 
   assert.equal(product.sense.componentPackage,'ai.alphacompute.alphaphone.sense');
   assert.deepEqual(product.pixelConfig,{moduleName:'AlphaPixelConfig',packageName:'ai.alphacompute.pixelconfig',mimeType:'vnd.android.cursor.dir/vnd.alpha.pixel-flags'});
   assert.equal(product.releaseQualified,false);
-  const before = fs.readFileSync('android/aosp/pixel10a-composition.json');
-  const selected = process.env.ALPHA_ANDROID_APPLICATION_ID;
-  try {
-    process.env.ALPHA_ANDROID_APPLICATION_ID = 'ai.elizaresearch.alphaphone';
-    const retained = readPixel10aComposition();
-    assert.equal(retained.launcher.packageName, 'ai.elizaresearch.alphaphone');
-    assert.equal(retained.sense.componentPackage, 'ai.elizaresearch.alphaphone.sense');
-    assert.deepEqual(retained.pixelConfig, product.pixelConfig);
-    process.env.ALPHA_ANDROID_APPLICATION_ID = 'undeclared.package';
-    assert.throws(() => readPixel10aComposition(), /supported installed identity/);
-  } finally {
-    if (selected === undefined) delete process.env.ALPHA_ANDROID_APPLICATION_ID;
-    else process.env.ALPHA_ANDROID_APPLICATION_ID = selected;
-  }
-  assert.deepEqual(fs.readFileSync('android/aosp/pixel10a-composition.json'), before);
 });
 
 function assertSingleProductRegistration(output) {

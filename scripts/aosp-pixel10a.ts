@@ -7,16 +7,13 @@ import {assertStockVendorApi} from '../vendor/eliza/packages/os/scripts/android/
 import type {SenseImageActivation} from './aosp-sense-image.ts';
 import {stageAndroidNative, finalizeAndroidNative} from '../vendor/eliza/packages/os/scripts/android/android-native-admission.mjs';
 import {alphaNativeOptions} from './aosp-native-admission.ts';
-import {androidIdentity, projectAndroidPackage} from './android-identity.ts';
 
 export {placeholderFields};
 /** The production descriptor for Pixel 10a (stallion) on Android 17. */
 export const PIXEL10A_PRODUCT = 'android/aosp/pixel10a-product.json';
 export const PIXEL10A_COMPOSITION = 'android/aosp/pixel10a-composition.json';
 export function readPixel10aComposition(root = process.cwd()) {
-  const canonical = JSON.parse(fs.readFileSync(path.join(root, 'app.config.json'), 'utf8'));
-  const identity = androidIdentity(root);
-  return JSON.parse(projectAndroidPackage(fs.readFileSync(path.join(root, PIXEL10A_COMPOSITION), 'utf8'), canonical.appId, identity.appId));
+  return JSON.parse(fs.readFileSync(path.join(root, PIXEL10A_COMPOSITION), 'utf8'));
 }
 /** Call only after the complete source inventory has passed admission. */
 export function pixel10aSourceLayout({root = process.cwd(), source}: {root?: string; source: string}) {

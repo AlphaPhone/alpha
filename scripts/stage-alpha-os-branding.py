@@ -47,9 +47,9 @@ def project_manifest(original):
         '    <application android:label="@string/alpha_name" android:icon="@drawable/alpha_mark" android:theme="@android:style/Theme.Material.NoActionBar">\n'
         '        <activity android:name="AlphaAppearance" android:exported="true" android:label="@string/alpha_name"/>',1)
 
-def core_policy_plan(root, read_baseline=None, policy='core-launcher'):
+def core_policy_plan(root, read_baseline=None):
     """Materialize the reviewed policy packet in scratch space, never in the build checkout."""
-    packet = BRAND / policy
+    packet = BRAND / 'core-launcher'
     manifest = json.loads((packet / 'manifest.json').read_text())
     revision = next(row['revision'] for row in LOCK['files'] if row['project'] == 'frameworks/base')
     assert manifest['revision'] == revision and manifest['project'] == 'frameworks/base', 'Core policy source pin drift'
@@ -80,17 +80,13 @@ def core_policy_plan(root, read_baseline=None, policy='core-launcher'):
         return output
 
 def image_identity(image_stage, aapt, apksigner):
-    """Recheck the normal signed launcher stage before it can select any OS policy bytes."""
+    """Recheck the normal signed canonical launcher stage before its source packet is planned."""
     admission = json.loads(safe(image_stage, 'image-policy-admission.json').read_text())
     config = json.loads((REPO/'app.config.json').read_text())
-    catalog_bytes = (REPO/'android/consumer-host.json').read_bytes()
-    catalog = json.loads(catalog_bytes)
-    permitted = [config['appId']] + [row['appId'] for row in catalog.get('installedIdentities', [])]
-    assert admission['schema'] == 1 and admission['packageName'] in permitted, 'Undeclared installed image identity'
-    assert admission['catalogSha256'] == digest(catalog_bytes), 'Installed identity catalogue drift'
-    for field, relative in [('handlerDefaultsSha256','provisioning/alpha-telephony-components.xml'),
-                            ('provisionResourceSha256','provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml')]:
-        assert admission[field] == digest(safe(image_stage,relative).read_bytes()), 'Image provisioning packet drift: '+relative
+    # OS images are staged only for the canonical application identity.
+    assert admission['schema'] == 1 and admission['packageName'] == config['appId'], 'Image identity differs from the canonical application'
+    relative = 'provisioning/alpha-telephony-components.xml'
+    assert admission['handlerDefaultsSha256'] == digest(safe(image_stage,relative).read_bytes()), 'Image provisioning packet drift: '+relative
     descriptor_bytes = safe(image_stage, 'launcher.json').read_bytes()
     descriptor = json.loads(descriptor_bytes)
     assert admission['launcherDescriptorSha256'] == digest(descriptor_bytes), 'Launcher descriptor hash drift'
@@ -113,7 +109,7 @@ def image_identity(image_stage, aapt, apksigner):
     badging = subprocess.check_output([aapt, 'dump', 'badging', str(apk)], text=True)
     assert 'application-debuggable' not in badging, 'A debuggable launcher cannot select production image policy'
     package = re.search(r"^package: name='([^']+)'", badging, re.M)
-    assert package and package.group(1) == admission['packageName'], 'Staged APK package differs from catalogue identity'
+    assert package and package.group(1) == admission['packageName'], 'Staged APK package differs from the canonical identity'
     # The standalone source stage must retain the same receiver and nine-handler qualification
     # as stage-aosp. Reuse the actual product qualifiers rather than a second Python manifest model.
     tree = subprocess.check_output([aapt, 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
@@ -127,11 +123,7 @@ const tree = await Bun.file(file).text();
             admission['packageName'], str(REPO/'scripts/stage-aosp.ts'), str(REPO/'scripts/aosp-telephony-roles.ts')], text=True, cwd=REPO)
     return admission
 
-def project_policy_bytes(data, canonical, selected):
-    return re.sub(rb'(?<![A-Za-z0-9_$])' + re.escape(canonical.encode()) + rb'(?![A-Za-z0-9_$])',
-                  lambda _: selected.encode(), data)
-
-def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None, image_admission=None, entry_baseline=None, image_stage=None):
+def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None, image_stage=None):
     # A source packet publishes beside its admitted image stage, which becomes vendor/alphaphone.
     # Its vendor/alphaphone preimages are that stage, never an older install in the source tree.
     def existing(name):
@@ -146,34 +138,15 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     assert (report['width'],report['height'],report['accent'],report['wallpaperBackground']) == (1080,2424,'#0000FF','#000000')
     for name,key in [('bootanimation.zip','bootAnimationSha256'),('default_wallpaper.png','wallpaperSha256')]:
         assert digest((assets/name).read_bytes()) == report[key], 'Asset payload drift: ' + name
-    canonical_app = json.loads((BRAND/'core-launcher/manifest.json').read_text()).get('targetAppId')
-    if canonical_app != 'ai.alphacompute.alphaphone': raise ValueError('Current OS policy must bind the reviewed Alpha Compute package')
-    selected = image_admission['packageName'] if image_admission else canonical_app
-    projection = None
-    if selected != canonical_app:
-        catalog = json.loads((REPO/'android/consumer-host.json').read_text())
-        assert selected in [row['appId'] for row in catalog.get('installedIdentities', [])], 'Undeclared installed policy cohort'
-        projection = json.loads((BRAND/'installed-image-policies.json').read_text())['cohorts'][selected]
-        assert projection['canonicalAppId'] == canonical_app, 'Canonical policy identity drift'
+    target = json.loads((BRAND/'core-launcher/manifest.json').read_text()).get('targetAppId')
+    if target != 'ai.alphacompute.alphaphone': raise ValueError('Current OS policy must bind the reviewed Alpha Compute package')
     plan = {}; allowed = {}
-    canonical_outputs = {}
     def put(path, value, preimages=()):
         plan[path] = value
         allowed[path] = set(preimages)
     # This is part of normal OS staging for every fresh image and update, not a phone-side edit.
-    policies = [('core-launcher', core_baseline)]
-    if image_admission: policies.append(('system-entry', entry_baseline))
-    for policy, baseline in policies:
-        manifest_sha = digest((BRAND/policy/'manifest.json').read_bytes())
-        if projection: assert projection['canonicalManifests'][policy] == manifest_sha, 'Canonical policy manifest drift'
-        for name, (data, before) in core_policy_plan(root, baseline, policy).items():
-            canonical_outputs[name] = digest(data)
-            projected = project_policy_bytes(data, canonical_app, selected)
-            if projection:
-                expected = projection['files'][name]
-                assert expected['canonicalSha256'] == digest(data) and expected['projectedSha256'] == digest(projected), 'Installed policy projection drift: '+name
-            put(name, projected, tuple(value for value in (before, digest(data)) if value is not None))
-    if projection: assert set(projection['files']) == set(canonical_outputs), 'Installed policy projection scope differs'
+    for name, (data, before) in core_policy_plan(root, core_baseline).items():
+        put(name, data, (before,) if before is not None else ())
     # Stage only the source-owned visual/resource directories, including independent hardware
     # invocation defaults. No app APK, assistant implementation or listener source is modified.
     for name in ['Android.bp','branding.mk','secure-camera-inputs.json']:
@@ -181,7 +154,7 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     for folder in ['overlay','keyboard-overlay','manifests']:
         for path in sorted((BRAND/folder).rglob('*')):
             assert not path.is_symlink(), 'Symlink in branding source'
-            if path.is_file(): put('vendor/alphaphone/branding/'+str(path.relative_to(BRAND)),project_policy_bytes(path.read_bytes(), canonical_app, selected))
+            if path.is_file(): put('vendor/alphaphone/branding/'+str(path.relative_to(BRAND)),path.read_bytes())
     # Consume reviewed presets through the existing overlay identity; never rewrite device choices.
     entry = json.loads((BRAND/'system-entry/manifest.json').read_text())['productOverlay']
     entry_path = BRAND/'system-entry'/entry['path']
@@ -203,7 +176,7 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     for name in ['AlphaWelcome.java','AlphaAppearance.java','AlphaFreshPresets.java','AlphaFreshSetupPolicy.java']:
         target = project+'/src/com/android/provision/'+name
         put(target,(BRAND/'provision'/name).read_bytes(),previous.get(name,[]))
-    put(project+'/res/values/alpha.xml',project_policy_bytes((BRAND/'provision/strings.xml').read_bytes(), canonical_app, selected),previous.get('strings.xml',[]))
+    put(project+'/res/values/alpha.xml',(BRAND/'provision/strings.xml').read_bytes(),previous.get('strings.xml',[]))
     # Reuse the already reviewed product icon, including its blue circle, inset and clipping.
     # Generating a bare logo vector here would silently change the installed setup identity.
     icon_source = REPO / LOCK['productIcon']['path']
@@ -214,7 +187,7 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     put(project+'/res/drawable-nodpi/alpha_wallpaper.png',(assets/'default_wallpaper.png').read_bytes())
     # The production product copies this feature only after the matching Provision sources are staged.
     put('vendor/alphaphone/branding/provision/fresh-telephony.xml',
-        project_policy_bytes((BRAND/'provision/fresh-telephony.xml').read_bytes(), canonical_app, selected))
+        (BRAND/'provision/fresh-telephony.xml').read_bytes())
     product = existing('vendor/alphaphone/product.mk'); current = product.read_bytes()
     include = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
     suffix = b'\n# Alpha OS visual identity.\n'+include.encode()+b'\n'
@@ -232,7 +205,6 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
         after=digest(value)
         assert actual is None or actual==after or actual in allowed[name] or actual==prior_rows.get(name), 'Unreviewed existing stage file: '+name
         rows.append({'path':name,'beforeSha256':actual,'sha256':after,'changed':actual!=after})
-        if name in canonical_outputs: rows[-1]['canonicalSha256'] = canonical_outputs[name]
     return plan,rows
 
 def apply_plan(root,plan,rows,backup):
@@ -284,7 +256,7 @@ def main():
                 data=subprocess.check_output(['git','-C',str(root/'packages/apps/Provision'),'show',row['revision']+':'+filename])
                 assert digest(data)==row['sha256'], 'Pinned Provision source drift'
                 output=safe(inputs, 'packages/apps/Provision/'+filename);output.parent.mkdir(parents=True,exist_ok=True);output.write_bytes(data)
-        plan,rows=build_plan(root,args.assets_dir.resolve(strict=True),args.assets_report_sha256,inputs,prior,args.product_mk_sha256,image_admission=admission,
+        plan,rows=build_plan(root,args.assets_dir.resolve(strict=True),args.assets_report_sha256,inputs,prior,args.product_mk_sha256,
                           image_stage=args.image_stage.resolve(strict=True) if args.packet_output else None)
     args.receipt.parent.mkdir(parents=True,exist_ok=True)
     assert not args.receipt.exists(),'Preserve existing receipt; use a new path'
@@ -298,8 +270,6 @@ def main():
     record={'schema':1,'state':'ALPHA_BRANDING_SOURCE_STAGED_NOT_BUILT'if args.apply else'ADMITTED_SOURCE_PLAN_NOT_APPLIED','applied':args.apply,'assetReportSha256':args.assets_report_sha256,'productIconSha256':LOCK['productIcon']['sha256'],'sourceLockSha256':digest((BRAND/'provision/source-inputs.json').read_bytes()),'corePolicyManifestSha256':digest((BRAND/'core-launcher/manifest.json').read_bytes()),'files':rows,'backup':str(backup)if args.apply else None,'userDataTouched':False,'settingsWrittenDuringStaging':False,'assistantOrPowerImplementationChanged':False,'coreLauncherTrayAndSharedFilesPolicyIncluded':True,'imageBuilt':False,'deviceQualified':False,'productionQualified':False}
     if admission:
         record['imageIdentityAdmission'] = admission
-        record['installedPolicyProjectionSha256'] = digest((BRAND/'installed-image-policies.json').read_bytes())
-        record['systemEntryManifestSha256'] = digest((BRAND/'system-entry/manifest.json').read_bytes())
     if args.packet_output:
         record['state']='SIGNED_IMAGE_SOURCE_PACKET_NOT_APPLIED'
         record['packetOutput']=args.packet_output.name

@@ -63,8 +63,6 @@ function keyDirectory(t) {
 function completeRoot(t, { platform, releasekey, avb }) {
   const dir = temporary(t, "alpha-release-root-");
   const write = (rel, value) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), typeof value === "string" ? value : JSON.stringify(value, null, 2)); };
-  write("app.config.json", read("app.config.json"));
-  write("android/consumer-host.json", read("android/consumer-host.json"));
   const lock = JSON.stringify({ schema: 1, target: "pixel10a", device: { codename: "stallion", androidRelease: "17" }, developmentOnly: false, releaseQualified: false, factory: read(LOCK).factory });
   write(LOCK, lock);
   write(PIXEL10A_COMPOSITION, read(PIXEL10A_COMPOSITION));

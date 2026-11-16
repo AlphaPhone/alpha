@@ -19,7 +19,7 @@ interface ListenerStageOptions {
 
 // The shared adapter verifies and stages a single private copy of the listener APK.
 export function stageListener({root,output,apk,launcherSigner,appId,descriptorFile,production,aapt,apksigner,env}: ListenerStageOptions) {
- // The same package-projected composition the Pixel product and signer use for this identity.
+ // The same composition reader the Pixel product and signer use.
  const product=readPixel10aComposition(root);
  if(product.launcher.packageName!==appId)throw Error('Sense product differs from the admitted launcher');
  const voiceHost=JSON.parse(fs.readFileSync(path.join(root,VOICE_HOST_RECORD),'utf8'));
