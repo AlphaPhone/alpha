@@ -65,6 +65,7 @@ keys for staging and live keys for production.
 |---|---|---|
 | **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.ai` zone, on Workers Paid with Containers | `CLOUDFLARE_ACCOUNT_ID` and an API token: Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone DNS edit on `alphacompute.ai`. Your current wrangler login is the Eliza Labs account; do not deploy there. |
 | `DATABASE_URL` | Postgres for Cloud (Neon, Supabase or Railway) | Its own database. Hyperdrive is created from it. |
+| `DATABASE_IDENTITY_EXPECTED_CLUSTER_SHA256`, `DATABASE_IDENTITY_EXPECTED_AUTHORITY_SHA256` | Reviewed output of `database-identity` for that environment | Migration and registration both verify these receipts against the connection they use. |
 | `STEWARD_DATABASE_URL` | A second Postgres database for Steward | Must differ from `DATABASE_URL`. Steward migrates it at start. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis → REST API | Rate limits, auth denylist, speech sessions. |
 | `CEREBRAS_API_KEY` | cloud.cerebras.ai → API keys | Serves `qwen-3.8-27b`. `OPENROUTER_API_KEY` (optional) adds other models. |
@@ -89,7 +90,8 @@ and `ALPHA_CLOUD_ENV` (the whole completed env file).
 ```bash
 bun run cloud:worker -- prepare                       # export, install and build the pin (about 2 GB, once per pin)
 bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha-cloud/staging.env
-# add the provider values to that file, then run `secrets` again until nothing is MISSING
+# add the provider values, report and verify the database receipts, then rerun `secrets`
+bun run cloud:worker -- database-identity --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provision --environment staging --env-file ~/.config/alpha-cloud/staging.env --write
 bun run cloud:worker -- check --environment staging   # render and bundle, no network
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging
@@ -112,6 +114,14 @@ public entitlement keys, the exact native client and S256 callback binding, the 
 providers, the enrolled release certificate's App Links grant, and the hosted callback page.
 
 Exercise the live integrations after these checks pass.
+
+For each environment, check the target database and role against the operator's database record
+before accepting the reported digests into its env file. Use a direct or session-pinned connection
+whose migration role can read `pg_catalog.pg_control_system()`. `database-identity` only reports
+redacted digests. `migrate` verifies them under the upstream migration lock, and `seed` verifies
+them again inside its write transaction. If an interrupted initial migration hits the upstream
+compatibility barrier before 0282, resolve it with the database owner before continuing. The tool
+requires explicit migration completion before the workflow proceeds.
 
 - In Stripe, send a test webhook and check that it returns 200.
 - Run `POST https://api.alphacompute.ai/api/v1/cron/refresh-pricing` with
