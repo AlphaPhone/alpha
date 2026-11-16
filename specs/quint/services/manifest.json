@@ -4954,6 +4954,7 @@
       "partialListSettlesNothingTest",
       "runRequestNeedsOwnerTest",
       "refusedChangeReleasedTest",
+      "definiteRefusalBeforeReadbackTest",
       "unreadConnectionBlocksChangeTest",
       "lateEnableOverridesTest"
     ],
