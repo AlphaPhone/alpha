@@ -13,12 +13,14 @@ const secureUrl = 'https://bookmark-fixture.example/saved';
 const main = resolve(repositoryRoot, 'apps/app/src/main.tsx');
 
 export async function checkBrowserWebBookmarks(owningTest) {
+  const driverHashes = captureReplayClosure([owningTest, 'vendor/eliza/packages/core/src/utils/uuid.ts',
+    ...['bindings.ts', 'client.ts', 'transfer.ts'].map(name => 'vendor/eliza/plugins/plugin-native-passwords/src/' + name)]);
   const profile = mkdtempSync(join(tmpdir(), 'alpha-bookmark-replay-'));
-  const driverHashes = captureReplayClosure([owningTest, 'vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts']);
   const traces = [];
   let server, browser;
   try {
-    const env = {ELIZA_DEV_ALLOW_TEST_MOCKS: '', ALPHA_BROWSER_CLOUD_PROFILE: join(profile, 'synthetic-cloud')};
+    const env = {ELIZA_DEV_ALLOW_TEST_MOCKS: '', VITE_LOCAL_AGENT: '', VITE_ALPHA_CLOUD_RESIDENT: '',
+      ALPHA_BROWSER_CLOUD_PROFILE: join(profile, 'synthetic-cloud')};
     const prior = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
     try {
       Object.assign(process.env, env);
