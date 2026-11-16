@@ -3583,6 +3583,9 @@ function ctListAsk(raw) {
   var text = String(raw || "").trim();
   var m = text.match(/\b(?:who|show|find|list|filter|people|contacts|anyone|everyone)\b.*?\b(?:at|from|in|named|called|with)\s+(.+?)[\s?.!]*$/i);
   if (m) return m[1].trim();
+  /* A short phrase is a list query unless it is a request for another app ("Call Maya", "Text Maya
+     hi", "Email Maya"): those reach Phone, Messages or Mail through their own replies. */
+  if (/^(call|ring|dial|phone|text|message|msg|sms|email|e-mail|mail|reply|answer|tell|ask|remind|schedule|book|navigate|directions|play|open)\b/i.test(text)) return null;
   return text && !/\?$/.test(text) && text.split(/\s+/).length <= 3 ? text : null;
 }
 /* The list filter as runtime/comms-bar.ts reports it: the owner's typed query shows no chip, Alpha's

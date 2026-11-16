@@ -152,3 +152,13 @@ test('AC-12/AC-22: dictation fills the bar\'s own field: appended to the text, o
   const alpha = shell({view: 'phone', chat: 'input'}, {phone: {bar: bar({closed: {kind: 'alpha', value: '', onText: null}})}});
   assert.equal(alpha.s.fillCommsBar('hello'), false);
 });
+
+test('a short command on the Contacts list is not taken as a list filter, so Phone and Messages still get it', () => {
+  const from = model.indexOf('\nfunction ctListAsk('), to = model.indexOf('\n}\n', from) + 3;
+  const ctx = vm.createContext({});
+  vm.runInContext(model.slice(from, to), ctx);
+  const ask = ctx.ctListAsk;
+  for (const command of ['Call Maya', 'Text Maya hi', 'Email Maya', 'ring Priya', 'Message Maya'])
+    assert.equal(ask(command), null, command);
+  same([ask('Maya'), ask('design lead'), ask('who works at Lumen?'), ask('Show people from Lumen')], ['Maya', 'design lead', 'Lumen?'.replace('?', ''), 'Lumen']);
+});
