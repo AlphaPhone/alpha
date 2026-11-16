@@ -4328,26 +4328,30 @@
       "recordingRefusesTest",
       "leaveWhileQueuedTest",
       "unconfirmedSaveTest",
-      "reopenedChatCoversShutterTest"
+      "reopenedChatRefusesCaptureTest",
+      "expandedChatRefusesCaptureTest"
     ],
     "sources": [
       "apps/app/src/prototype/camera-adapter.ts",
-      "apps/app/src/prototype/agent-adapter.ts"
+      "apps/app/src/prototype/agent-adapter.ts",
+      "apps/app/src/prototype/model.js",
+      "apps/app/src/prototype/template.html",
+      "apps/app/src/prototype/chat-overlay-motion-adapter.ts"
     ],
     "sharedSources": [
       "plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"
     ],
     "abstractions": [
-      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; one shutter. `takeRequestedPhoto` is the modeled function: admission closes the chat and holds the preview, a starting preview is awaited, and the context is checked again right before the shutter.",
+      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; one shutter. Admission represents the committed chat close in `takeRequestedPhoto`. The hold keeps the preview available during the close and while preview startup settles. Compositor transition frames are abstracted by the model and observed at the shutter in the mounted replay.",
       "Current-source successor of the agent actions in the historical legacy CameraSession design model. Settlement after the preview settles is checked by scenarios (queued capture, start failure, leave while queued), not as a temporal property; no fairness assumption is made.",
-      "RESIDUAL GAP: the request closes the chat once. If the owner opens it again while the preview is still starting, the preview hold keeps the camera active and the shutter fires behind the chat. ShutterNeverCovered is registered under expectedViolations with the required witness CoveredShutter. Found by reading the source; not reproduced on a device.",
+      "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter refuses a sheet, full chat, or painted panel that still overlaps the viewfinder. The context is checked again before dispatch.",
       "A recording that starts while a request is queued, lens, flash, zoom, video and scan are outside this model. A context change that the phone executor detects before it reaches the camera adapter is journaled as unknown by the coordinator (see DeviceActionReview).",
-      "Model-only: no refinement adapter drives the source. The rules were read from the listed source at the pinned revision; model safety checks do not establish implementation refinement or device acceptance. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
+      "The owning mounted Camera replay drives the real capture adapter with synthetic preview and shutter ports. It checks the sheet and full chat refusals, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
     ],
     "invariants": [
       "CaptureNeedsVisibleCamera",
       "RequestUncoversViewfinder",
-      "ShutterUncoveredUnlessOwnerReopened",
+      "ShutterNeverCovered",
       "AtMostOneShutter",
       "UncertainCaptureNeverRepeats",
       "UnknownOnlyAfterShutter",
@@ -4357,15 +4361,7 @@
       "NoCaptureWhileRecording"
     ],
     "witnesses": [
-      "CoveredShutter"
-    ],
-    "expectedViolations": [
-      {
-        "init": "init",
-        "step": "step",
-        "invariant": "ShutterNeverCovered",
-        "expected": "violation"
-      }
+      "ReopenedChatRefusedWitness"
     ],
     "bounds": {
       "maxSamples": 400,

@@ -42,7 +42,8 @@ module CameraAgentCapture {
   action previewFails = all {s.phase == "starting", s' = {...s, phase: "failed",
     request: if (s.request == "queued") "armed" else s.request}}
   /// While the request waits, the owner or the shell may change anything.
-  action ownerReopensChat = all {s.request != "none", s' = {...s, chat: "sheet", ownerReopenedChat: true}}
+  action ownerCoversChat(panel: str): bool = all {s.request != "none", panel.in(Set("sheet", "full")),
+    s' = {...s, chat: panel, ownerReopenedChat: true}}
   action ownerLeaves = s' = {...s, view: "home", current: false,
     phase: if (s.holds > 0) s.phase else "off"}
   action contextChanges = s' = {...s, current: false}
@@ -50,9 +51,9 @@ module CameraAgentCapture {
   action becomeHidden = s' = {...s, hidden: true}
   /// The second check, right before the shutter.
   action recheckFails = all {s.request == "armed",
-    not(admitted) or s.phase != "ready",
+    not(admitted) or s.phase != "ready" or covered,
     s' = {...s, request: "none", holds: s.holds - 1, outcome: "failed"}}
-  action shutter = all {s.request == "armed", admitted, s.phase == "ready", s.shutters == 0,
+  action shutter = all {s.request == "armed", admitted, not(covered), s.phase == "ready", s.shutters == 0,
     s' = {...s, request: "writing", shutters: 1,
       shotVisible: visible, shotReady: s.phase == "ready", shotCovered: covered, shotCurrent: s.current}}
   /// A saved photo with its identity is success; a write without one, or a thrown write, is unknown.
@@ -64,13 +65,13 @@ module CameraAgentCapture {
     place("camera", "full", "starting", false), place("camera", "hidden", "ready", true),
     place("home", "sheet", "off", false), place("camera", "sheet", "failed", false),
     refuse("changed"), refuse("closed"), refuse("busy"), admit, previewReady, previewFails,
-    ownerReopensChat, ownerLeaves, contextChanges, abort, becomeHidden,
+    ownerCoversChat("sheet"), ownerCoversChat("full"), ownerLeaves, contextChanges, abort, becomeHidden,
     recheckFails, shutter, written("succeeded"), written("unknown")}
 
   val CaptureNeedsVisibleCamera = s.shutters == 1 implies (s.shotVisible and s.shotReady and s.shotCurrent)
   /// The request itself uncovers the viewfinder before it waits or fires.
   val RequestUncoversViewfinder = (s.request != "none" and not(s.ownerReopenedChat)) implies not(covered)
-  val ShutterUncoveredUnlessOwnerReopened = (s.shutters == 1 and s.shotCovered) implies s.ownerReopenedChat
+  val ShutterNeverCovered = s.shutters == 1 implies not(s.shotCovered)
   val AtMostOneShutter = s.shutters <= 1
   val UncertainCaptureNeverRepeats = s.outcome == "unknown" implies (s.shutters == 1 and s.request == "none")
   val UnknownOnlyAfterShutter = s.outcome == "unknown" implies s.shutters == 1
@@ -79,16 +80,11 @@ module CameraAgentCapture {
   val HoldReleased = (s.request == "none") implies s.holds == 0
   val NoCaptureWhileRecording = s.shutters == 1 implies not(s.recording)
   val safety = CaptureNeedsVisibleCamera and RequestUncoversViewfinder and
-    ShutterUncoveredUnlessOwnerReopened and AtMostOneShutter and UncertainCaptureNeverRepeats and
+    ShutterNeverCovered and AtMostOneShutter and UncertainCaptureNeverRepeats and
     UnknownOnlyAfterShutter and FailedMeansNoShutter and SuccessMeansSavedPhoto and HoldReleased and
     NoCaptureWhileRecording
 
-  /// RESIDUAL GAP, registered as an expected violation: the request closes the chat once. If the
-  /// owner opens it again while the preview is still starting, the preview hold keeps the camera
-  /// active and the shutter still fires behind the chat. Found by reading `takeRequestedPhoto`
-  /// and `active()`; not reproduced on a device.
-  val ShutterNeverCovered = s.shutters == 1 implies not(s.shotCovered)
-  val CoveredShutter = s.shutters == 1 and s.shotCovered
+  val ReopenedChatRefusedWitness = s.ownerReopenedChat and covered and s.outcome == "failed"
   /// Every admitted request settles once the preview settles (checked as scenarios, not liveness).
   val Waiting = s.request == "queued"
 
@@ -108,6 +104,8 @@ module CameraAgentCapture {
     .expect(safety and s.outcome == "failed" and s.shutters == 0)
   run unconfirmedSaveTest = init.then(place("camera", "hidden", "ready", false)).then(admit).then(shutter)
     .then(written("unknown")).expect(safety and s.outcome == "unknown" and s.shutters == 1)
-  run reopenedChatCoversShutterTest = init.then(admit).then(ownerReopensChat).then(previewReady)
-    .then(shutter).expect(safety and CoveredShutter and not(ShutterNeverCovered))
+  run reopenedChatRefusesCaptureTest = init.then(admit).then(ownerCoversChat("sheet")).then(previewReady)
+    .then(recheckFails).expect(safety and ReopenedChatRefusedWitness and s.shutters == 0)
+  run expandedChatRefusesCaptureTest = init.then(admit).then(ownerCoversChat("full")).then(previewReady)
+    .then(recheckFails).expect(safety and s.chat == "full" and s.shutters == 0)
 }
