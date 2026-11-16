@@ -24,7 +24,7 @@ export async function entitlements(overrides:Record<string,unknown>={}){
  return {keys:[jwk],tokens};
 }
 
-type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits?:'active'|'none'|'canceled'|'balance-only'|'absent'|'503';identity?:'ok'|'offline'|'401';
+type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits?:'active'|'past_due'|'none'|'canceled'|'balance-only'|'absent'|'503';identity?:'ok'|'offline'|'401';
  redeem?:'ok'|'invalid'|'rate'|'already'|'transport-once';redeemPlan?:string;saved?:boolean;expiresAt?:number;holdProvider?:boolean;providerFailure?:string;
  /** Exact USD organization credit balance in the billing snapshot (data.v2.balance); absent when unset. */
  credits?:string;storage?:Record<string,string>;fullApp?:boolean;
@@ -97,7 +97,8 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
      ? {status:'unavailable',source:'subscriptions',observedAt,error:{code:'subscription_unavailable',retryable:true}}
      : f.limits==='none'
       ? {status:'not_applicable',reason:'no_organization_subscription'}
-      : {status:'available',value:{planKey:'plus_monthly',state:f.limits,currentPeriodEnd:'2099-01-01T00:00:00.000Z'}};
+      : {status:'available',value:{subscriptionId:'sub_synthetic',planKey:'plus_monthly',lifecycleRevision:'1',state:f.limits,currentPeriodEnd:'2099-01-01T00:00:00.000Z',cancelAtPeriodEnd:false,pendingPlanKey:null,
+        cancellationControl:{action:'cancel',expectedSubscriptionRevision:1,eligible:f.limits!=='canceled'}}};
     const balance=f.credits===undefined?{}:{balance:{status:'available',source:'organizations',observedAt,value:{balance:{value:f.credits,unit:'usd',currency:'USD'},revision:'1'}}};
     return {status:200,data:{success:true,data:{schemaVersion:2,v2:{subscription,...balance}}}};
    }
@@ -111,6 +112,13 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
     return {status:200,data:{success:true,replayed:f.bodies.length>1,grant:{id:'synthetic-grant',planKey:'plus_monthly',startsAt:'2026-10-13T00:00:00.000Z',endsAt:'2027-04-14T00:00:00.000Z',revoked:false,paidPlanTakesPrecedence:false},entitlement:{plan:{id:'plus_monthly',name:'Plus',status:'active'},source:'grant',effectiveUntil:'2027-04-14T00:00:00.000Z'}}};
    }
    if(path==='/api/auth/cli-session')return {status:503,data:{}};
+   // In-app plans (cloud-plans.ts): synthetic catalogue, device-key checkout on a synthetic Stripe URL
+   // (the browser opening is the recorded openExternal call; nothing is bought), and referrals.
+   if(path==='/api/v1/subscriptions/plans')return {status:200,data:{success:true,data:{plans:[{key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25.00'}},{key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90.00'}}]}}};
+   if(path==='/api/v1/subscriptions/checkout'){f.bodies.push(JSON.parse(input.body));return {status:200,data:{success:true,data:{status:'open',commandId:'cmd_synthetic',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_synthetic',sessionId:'cs_test_synthetic',expiresAt:new Date(Date.now()+1_800_000).toISOString()}}};}
+   // Cloud confirms only from its own payment evidence: here, once the synthetic plan became active.
+   if(path==='/api/v1/subscriptions/checkout/confirm')return {status:200,data:{success:true,data:{subscriptionId:f.plan==='active'?'sub_synthetic':null}}};
+   if(path==='/api/v1/referrals')return {status:200,data:{code:'SYNTHETIC1',total_referrals:0,is_active:true}};
    throw Error('Unexpected Cloud route '+path);
   }};
  },initial);
