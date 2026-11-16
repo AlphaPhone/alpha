@@ -173,6 +173,18 @@ flow alone assigns default apps; these component overrides do not change an owne
 This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
 retained-update qualification on the matching AOSP image remain separate release gates.
 
+Pixel production image staging admits only `ai.alphacompute.alphaphone`. Supply
+`--branding-assets DIR` and `--branding-assets-report-sha256 HASH` to stage its matching
+branding source packet. After the normal signed-release, launcher descriptor, platform
+certificate, source lock and native checks pass, staging publishes the packet as
+`source-packet.zip` with its hash-bound `source-packet.json` receipt beside the launcher;
+it does not apply source, build or flash an image. The packet binds the canonical APK,
+descriptor, signer and qualified Phone/SMS handlers. The planner reads the
+`vendor/alphaphone` preimages from the image stage being published, whose generated
+`product.mk` is pinned before staging adds the branding include, never from an earlier
+install in the source tree. Apply the packet through the existing guarded branding stage
+with a new receipt; preserve any required prior source receipt.
+
 Canonical builds use `app.config.json` unchanged. A local build can set
 `ALPHA_ANDROID_APPLICATION_ID` to an identity declared in `android/consumer-host.json`
 (the historical `ai.elizaresearch.alphaphone`). This selects installation identity,

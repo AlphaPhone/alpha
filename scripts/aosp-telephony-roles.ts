@@ -1,6 +1,7 @@
 import {parseXmlTree, type ManifestNode} from './apk.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import appConfig from '../app.config.json' with {type: 'json'};
 
 type RoleFilter = {
   action: string;
@@ -64,6 +65,9 @@ function matchesFilter(filter: ManifestNode, required: RoleFilter) {
 
 /** Read the privately staged release APK's manifest before making the roles eligible at boot. */
 export function aospTelephonyRoleComponents(xmltree: string, packageName: string) {
+  // OS images enable default handlers only for the canonical application identity.
+  if (packageName !== appConfig.appId)
+    throw Error(`Alpha telephony roles are staged only for ${appConfig.appId}`);
   const manifest = parseXmlTree(xmltree).children.find(node => node.name === 'manifest');
   const application = manifest?.children.find(node => node.name === 'application');
   if (manifest?.attrs.package !== packageName || !application ||

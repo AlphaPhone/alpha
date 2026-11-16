@@ -75,10 +75,10 @@ interface ImageApkOptions {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** Require the first-run contract from the APK itself, including when reusing an old admission receipt. */
-export function assertImageLauncherManifest(tree: string, production: boolean) {
+export function assertImageLauncherManifest(tree: string, production: boolean, appId?: string) {
   assertNoAlphaLockScreenSurface(tree);
   if (!production) return;
-  const problems = telephonySetupReceiverProblems(parseXmlTree(tree));
+  const problems = telephonySetupReceiverProblems(parseXmlTree(tree), {appId});
   if (problems.length) throw Error(`Production launcher cannot be staged: ${problems.join("; ")}`);
 }
 
@@ -146,6 +146,72 @@ export function writeOwnerImageTelephony(output: string, tree: string, packageNa
  * package hashes and the reviewed signer. An empty list means the lock is complete; it says nothing
  * about an image build or boot.
  */
+/** The include stage-aosp adds to a branded Pixel stage; the packet planner checks these exact bytes. */
+export const BRANDING_PRODUCT_INCLUDE = '\n# Alpha OS visual identity.\n$(call inherit-product, vendor/alphaphone/branding/branding.mk)\n';
+
+/**
+ * Pin the generated stage product.mk, add the branding include to that stage, and return the
+ * exact source-packet planner argv. The planner reads vendor/alphaphone files from this stage.
+ */
+export function brandingPacketCommand({output, source, assets, reportSha256, aapt, apksigner}:
+  {output: string; source: string; assets: string; reportSha256: string; aapt: string; apksigner: string}): string[] {
+  const product = path.join(output, 'product.mk');
+  const productMkSha256 = sha256File(product);
+  fs.appendFileSync(product, BRANDING_PRODUCT_INCLUDE);
+  return ['scripts/stage-alpha-os-branding.py', '--aosp-root', source,
+    '--assets-dir', assets, '--assets-report-sha256', reportSha256,
+    '--image-stage', output, '--product-mk-sha256', productMkSha256, '--aapt', aapt, '--apksigner', apksigner,
+    '--packet-output', path.join(output, 'source-packet.zip'), '--receipt', path.join(output, 'source-packet.json')];
+}
+
+/** CLI refusals for the branding source packet, checked before any source or APK is read. */
+export function brandingPacketProblems({physical, production, assets, reportSha256}:
+  {physical: boolean; production: boolean; assets: string | null; reportSha256: string | null}): string[] {
+  const problems: string[] = [];
+  if ((assets === null) !== (reportSha256 === null)) problems.push('Branding assets require their exact report SHA-256');
+  if (assets !== null && !physical) problems.push('The source/asset policy packet belongs to the Pixel image contract');
+  if (assets !== null && !production) problems.push('The source/asset policy packet requires production launcher admission');
+  return problems;
+}
+
+/**
+ * The admission the source-packet planner re-checks, built from the published stage only after
+ * normal APK, descriptor, source, platform and native admission. Only the canonical identity.
+ */
+export function imagePolicyAdmission({output, appId, apkSha256, sourceLockSha256, platformCertificateSha256}:
+  {output: string; appId: string; apkSha256: string; sourceLockSha256?: string; platformCertificateSha256?: string}) {
+  const canonical = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../app.config.json'), 'utf8')).appId;
+  if (appId !== canonical) throw Error(`The source/asset policy packet is staged only for ${canonical}`);
+  for (const [name, value] of Object.entries({apkSha256, sourceLockSha256, platformCertificateSha256}))
+    if (!/^[0-9a-f]{64}$/.test(value ?? '')) throw Error(`The source/asset policy packet requires an admitted ${name}`);
+  return {
+    schema: 1, packageName: appId, apkSha256,
+    launcherDescriptorSha256: sha256File(path.join(output, 'launcher.json')),
+    sourceLockSha256, platformCertificateSha256,
+    handlerDefaultsSha256: sha256File(path.join(output, 'provisioning/alpha-telephony-components.xml')),
+  };
+}
+
+/** Write the admission, run the planner beside the stage, and record the packet in the Pixel report. */
+export function stageBrandingPacket({output, source, assets, reportSha256, aapt, apksigner, admission,
+  runPlanner = argv => { execFileSync('python3', argv, {stdio:'inherit'}); }}:
+  {output: string; source: string; assets: string; reportSha256: string; aapt: string; apksigner: string;
+   admission: ReturnType<typeof imagePolicyAdmission>; runPlanner?: (argv: string[]) => void}) {
+  fs.writeFileSync(path.join(output, 'image-policy-admission.json'), JSON.stringify(admission, null, 2) + '\n', {flag:'wx'});
+  runPlanner(brandingPacketCommand({output, source, assets, reportSha256, aapt, apksigner}));
+  const packet = JSON.parse(fs.readFileSync(path.join(output, 'source-packet.json'), 'utf8'));
+  if (packet.imageIdentityAdmission?.packageName !== admission.packageName || packet.imageIdentityAdmission?.apkSha256 !== admission.apkSha256)
+    throw Error('Source packet receipt differs from its image admission');
+  if (packet.packetSha256 !== sha256File(path.join(output, 'source-packet.zip')))
+    throw Error('Source packet archive differs from its receipt');
+  const physicalReport = path.join(output, 'physical-product.json');
+  const report = JSON.parse(fs.readFileSync(physicalReport, 'utf8'));
+  report.sourcePolicyPacket = {file:'source-packet.json', sha256:sha256File(path.join(output, 'source-packet.json')),
+    archiveSha256:packet.packetSha256, packageName:admission.packageName, apkSha256:admission.apkSha256};
+  fs.writeFileSync(physicalReport, JSON.stringify(report, null, 2) + '\n');
+  return report.sourcePolicyPacket;
+}
+
 export function aospProductLockProblems(root = process.cwd()) {
   const at = (rel: string) => path.join(root, rel);
   if (!fs.existsSync(at(PRODUCT_DESCRIPTOR))) return [`${PRODUCT_DESCRIPTOR} is missing`];
@@ -232,12 +298,12 @@ const get = (key: string) => {
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--development" || args[i] === "--owner-telephony") continue;
   if (
-    !["--apk", "--output", "--descriptor", "--apk-manifest", "--aosp-source", "--listener-apk", "--listener-descriptor", "--listener-qualification", "--target", "--factory-image", "--applied-systemui-patch", "--applied-build-patch", "--boot-animation"].includes(args[i]) ||
+    !["--apk", "--output", "--descriptor", "--apk-manifest", "--aosp-source", "--listener-apk", "--listener-descriptor", "--listener-qualification", "--target", "--factory-image", "--applied-systemui-patch", "--applied-build-patch", "--boot-animation", "--branding-assets", "--branding-assets-report-sha256"].includes(args[i]) ||
     !args[i + 1] ||
     args[i + 1].startsWith("--")
   )
     throw new Error(
-      "Use --target cuttlefish | --target pixel10a --factory-image FILE, with --aosp-source PATH --apk FILE --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE (required without --development)] [--apk-manifest FILE] [--listener-apk FILE [--listener-descriptor FILE] [--listener-qualification FILE]] [--applied-systemui-patch chip|ops|assist|alpha-protected-power ...] [--applied-build-patch soong-memory|alpha-sense-policy ...] [--boot-animation ZIP (pixel10a, when the composition pins one)]",
+      "Use --target cuttlefish | --target pixel10a --factory-image FILE, with --aosp-source PATH --apk FILE --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE (required without --development)] [--apk-manifest FILE] [--listener-apk FILE [--listener-descriptor FILE] [--listener-qualification FILE]] [--applied-systemui-patch chip|ops|assist|alpha-protected-power ...] [--applied-build-patch soong-memory|alpha-sense-policy ...] [--boot-animation ZIP (pixel10a, when the composition pins one)] [--branding-assets DIR --branding-assets-report-sha256 HASH (matching Pixel source packet)]",
     );
   if (args[i] === '--applied-systemui-patch') appliedPatchNames.push(args[i + 1]);
   if (args[i] === '--applied-build-patch') appliedBuildNames.push(args[i + 1]);
@@ -253,6 +319,9 @@ const factory = get('--factory-image');
 const cuttlefish = cuttlefishOptions({target:get('--target'), source, factory});
 const physical = !cuttlefish && pixel10aOptions({target:get('--target'), source, factory});
 if (get('--boot-animation') && !physical) throw new Error('--boot-animation belongs to --target pixel10a');
+const brandingProblems = brandingPacketProblems({physical: Boolean(physical), production,
+  assets: get('--branding-assets'), reportSha256: get('--branding-assets-report-sha256')});
+if (brandingProblems.length) throw Error(brandingProblems.join('; '));
 const listenerApk = get('--listener-apk');
 const listenerDescriptor = get('--listener-descriptor');
 const qualificationFile = get('--listener-qualification');
@@ -397,7 +466,7 @@ const stagedLauncher = path.join(output, 'Launcher.apk');
 if (updateArtifactDigest(stagedLauncher).sha256 !== hash)
   throw Error("Staged launcher differs from the admitted APK");
 const provisioningTree = aaptManifestTree(stagedLauncher, {aapt: tool("aapt"), env});
-assertImageLauncherManifest(provisioningTree, production);
+assertImageLauncherManifest(provisioningTree, production, identity.appId);
 if (production) aospTelephonyRoleComponents(provisioningTree, identity.appId);
 if (ownerTelephony) assertOwnerTelephonyLauncher(provisioningTree, identity.appId);
 if (senseImage) assertSenseLauncher(provisioningTree, identity.appId);
@@ -459,6 +528,15 @@ if (ownerTelephony) {
 if (cuttlefish) writeCuttlefishNatives({root:process.cwd(), output, apk:stagedLauncher, module:identity.moduleName, launcher:reviewed});
 if (physical) {
   writePixel10aProduct({root:process.cwd(), output, apk:stagedLauncher, identity, launcher:reviewed, sourceEvidence:physicalSource, production, bootAnimation:get('--boot-animation'), vendorApi, senseActivation});
+}
+if (production && get('--branding-assets')) {
+  // This happens only after normal APK/signature, descriptor, source, platform and native admission.
+  // The packet and launcher publish together; an error leaves the destination absent.
+  const admission = imagePolicyAdmission({output, appId: identity.appId, apkSha256: hash,
+    sourceLockSha256: physicalSource?.sourceLockSha256, platformCertificateSha256});
+  stageBrandingPacket({output, source: source!, assets: get('--branding-assets')!,
+    reportSha256: get('--branding-assets-report-sha256')!, aapt: tool('aapt'), apksigner: tool('apksigner'), admission,
+    runPlanner: argv => { execFileSync('python3', argv, {stdio:'inherit', env}); }});
 }
 if (fs.existsSync(destination)) throw Error('Output appeared during staging: ' + destination);
 fs.renameSync(output, destination);

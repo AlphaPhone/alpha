@@ -137,6 +137,8 @@ async function runScenario(script, name, steps) {
       return approval.promise;
     },
     actions: {
+      // Real DeviceActions always carry their credential; no Notes list-filter capability keeps the filter unavailable.
+      credential: {capabilities: []},
       completeReadReply(value, signal) {
         assert.deepEqual(structuredClone(value), hint);
         assert.equal(signal.aborted, false);
@@ -300,6 +302,8 @@ async function runRecoveredScenario(script, name) {
       return approval.promise;
     },
     actions: {
+      // Real DeviceActions always carry their credential; no Notes list-filter capability keeps the filter unavailable.
+      credential: {capabilities: []},
       pending(context, signal) {
         assert.equal(context.view, 'notes');
         assert.equal(context.sensitive, false);
