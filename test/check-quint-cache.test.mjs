@@ -293,7 +293,20 @@ test('a cache directory with files tracked by git is refused, whatever they say'
     git('add', 'specs');
     git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture');
     assert.equal(f.check('test', '--models=Fixture').receipt.cache.hits, 1, 'an untracked cache in a checkout is used');
+    // The run cache guards itself, apart from the registry's metadata check that a full check reaches first: open it
+    // alone, in a fresh process, as any caller of the run cache would.
+    f.write('scripts/open-run-cache.ts', `import { openQuintCache } from './quint-cache.ts';
+console.log('opened ' + openQuintCache(process.cwd(), true).enabled);
+`);
+    const openRunCache = () => spawnSync(process.execPath, ['scripts/open-run-cache.ts'], {cwd: f.root, encoding: 'utf8', env: f.env});
+    const untracked = openRunCache();
+    assert.equal(untracked.status, 0, untracked.stderr);
+    assert.match(untracked.stdout, /opened true/);
     // A committed entry (here a genuine one, force-added past the ignore rule) carries no provenance.
+    git('add', '-f', '.cache/quint/runs');
+    const direct = openRunCache();
+    assert.notEqual(direct.status, 0, direct.stdout);
+    assert.match(direct.stderr, /Refusing the Quint cache .*git tracks 1 file\(s\) in it, such as \.cache\/quint\/runs\/run-/);
     git('add', '-f', '.cache/quint');
     const refused = spawnSync(process.execPath, ['scripts/check-quint.ts', 'test', '--models=Fixture', `--out=${join(f.root, 'refused.json')}`],
       {cwd: f.root, encoding: 'utf8', env: f.env, timeout: scaledTimeout(60000)});

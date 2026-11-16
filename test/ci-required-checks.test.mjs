@@ -152,10 +152,10 @@ test('promotion partitions every safety and temporal phase exactly once without 
     const model = byModule.get(name);return [[name, model.init, model.step, model.temporal]];
   }).sort(), temporalModels.map(model => [model.module, model.init, model.step, model.temporal]).sort());
   assert.equal(jobs.comparison.if, '$' + '{{ !inputs.models }}');
-  assert.equal(jobs.comparison.steps[6].run, 'bun scripts/check-quint.ts compare');
-  assert.equal(safety.steps[5].run, 'bun run upstream:prepare-client');
+  assert.equal(jobs.comparison.steps[5].run, 'bun scripts/check-quint.ts compare');
+  assert.equal(safety.steps[4].run, 'bun run upstream:prepare-client');
   for (const job of [safety, jobs.comparison, temporal]) {
-    assert.deepEqual(job.steps.slice(0, 6), safety.steps.slice(0, 6), 'All pinned prerequisites, through upstream:prepare-client, remain identical');
+    assert.deepEqual(job.steps.slice(0, 5), safety.steps.slice(0, 5), 'All pinned prerequisites, through upstream:prepare-client, remain identical');
     assert.equal(job.needs, undefined);assert.equal(job['timeout-minutes'], 240);assert.equal(job['runs-on'], 'ubuntu-24.04');
     assert.equal(job.steps.at(-1).if, 'always()');assert.equal(job.steps.at(-1).with.path, 'test-results/quint/');
   }
@@ -167,28 +167,33 @@ test('promotion partitions every safety and temporal phase exactly once without 
   assert.equal(new Set(artifacts).size, 12);
 });
 
-test('promotion Quint caches are readable only by later attempts of the same workflow run', () => {
-  const jobs = YAML.parse(read('.github/workflows/promotion.yml')).jobs;
-  const run = 'quint-$' + '{{ github.job }}-$' + '{{ strategy.job-index }}-$' + '{{ github.sha }}-$' + '{{ github.run_id }}-';
-  let checked = 0;
-  for (const [name, job] of Object.entries(jobs)) {
-    const caches = job.steps.filter(step => step.uses?.startsWith('actions/cache'));
-    if (!caches.length) continue;
-    const restore = caches.filter(step => step.uses.startsWith('actions/cache/restore@'));
-    const save = caches.filter(step => step.uses.startsWith('actions/cache/save@'));
-    assert.equal(restore.length, 1, name);assert.equal(save.length, 1, name);
-    assert.equal(caches.length, 2, `${name} uses only the explicit restore and save actions`);
-    for (const step of caches) {
-      assert.equal(step.with.path, '.cache/quint', name);
-      assert.equal(step.with.key, run + '$' + '{{ github.run_attempt }}', `${name} keys entries by commit, run and attempt`);
+test('promotion runs every Quint check: no remembered result is restored, saved or read', async () => {
+  const workflow = YAML.parse(read('.github/workflows/promotion.yml'));
+  // Anything a pull request runs can write the Actions cache scope its promotion runs read, under a predictable key,
+  // and a remembered run carries no provenance. So the cache is off for every job, and nothing restores it.
+  assert.equal(workflow.env?.ALPHA_QUINT_CACHE, 'off');
+  const {quintCacheDisabled} = await import('../scripts/quint-lib.ts');
+  const previous = process.env.ALPHA_QUINT_CACHE;
+  try { process.env.ALPHA_QUINT_CACHE = workflow.env.ALPHA_QUINT_CACHE; assert.equal(quintCacheDisabled(), true); }
+  finally { if (previous === undefined) delete process.env.ALPHA_QUINT_CACHE; else process.env.ALPHA_QUINT_CACHE = previous; }
+  const consumers = [];
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    for (const scope of [job, ...job.steps]) {
+      for (const variable of ['ALPHA_QUINT_CACHE', 'ALPHA_QUINT_CACHE_DIR']) assert.equal(scope.env?.[variable], undefined, `${name} does not override ${variable}`);
     }
-    // No fallback to another commit, run or pull request push: those entries may have been written by other code.
-    assert.equal(restore[0].with['restore-keys'].trim(), run, `${name} falls back only to earlier attempts of this run`);
-    assert.ok(job.steps.indexOf(restore[0]) < job.steps.findIndex(step => /check-quint|quint:tests/.test(step.run || '')), name);
-    assert.equal(save[0].if, 'always()', name);
-    checked++;
+    for (const step of job.steps) {
+      if (step.uses?.startsWith('actions/cache')) assert.doesNotMatch(String(step.with?.path), /quint|\.cache/, `${name} restores or saves no Quint results`);
+      if (/check-quint|quint:|lemma:check/.test(step.run || '')) {
+        assert.doesNotMatch(step.run, /--cache=on|ALPHA_QUINT_CACHE/, `${name} does not re-enable the cache`);
+        consumers.push(`${name}: ${step.run.trim().split('\n').at(-1)}`);
+      }
+    }
   }
-  assert.equal(checked, 4, 'symbolic, comparison, temporal and Quint test jobs each restore and save');
+  // Each step that checks models or loads the registry, so a new one must be looked at here.
+  assert.deepEqual(consumers.map(consumer => consumer.split(' ').filter((word, index, words) => !words.slice(0, index + 1).some(part => /^[-$]/.test(part))).join(' ')).sort(), [
+    'comparison: bun scripts/check-quint.ts compare', 'conformance: bun run lemma:check', 'conformance: bun run quint:check',
+    'conformance: bun run quint:tests', 'symbolic: bun scripts/check-quint.ts verify', 'temporal: bun scripts/check-quint.ts temporal',
+  ], `every Quint consumer is covered:\n${consumers.join('\n')}`);
 });
 
 test('the actual promotion selectors preserve manual filters and refuse empty or invalid partitions', () => {
