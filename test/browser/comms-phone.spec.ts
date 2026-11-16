@@ -157,6 +157,10 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     expect(await page.evaluate(() => (window as any).toasts)).toEqual(['End the emergency call first', 'End the emergency call first']);
     expect(await page.evaluate(() => { const st = (window as any).alphaShell().vget('phone'); return [st.call, st.num, st.callWho]; })).toEqual([null, '911', '#911']);
     await expect(card).toHaveAttribute('data-emergency', 'true');
+    // A write that bypasses the refusal (as a development jump can) still draws the emergency call.
+    await page.evaluate(() => (window as any).alphaShell().vset('phone', {call: 'maya', num: ''}));
+    await expect(card).toHaveAttribute('aria-label', 'Call with 911');
+    await expect(card).toHaveAttribute('data-emergency', 'true');
     // End ends the emergency call and logs it as 911, not as the refused contact.
     await page.locator('[data-alpha-call-end]').click();
     expect(await page.evaluate(() => { const r = (window as any).alphaShell().vget('phone').recents[0]; return [r.pid, r.num]; })).toEqual([null, '911']);

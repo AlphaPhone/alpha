@@ -212,7 +212,12 @@ function pnStart(api, pid, num, opt) {
   var id = pnCallId(pid, num);
   if (!id) return;
   /* AC-19: nothing ends or replaces an emergency call, not even an approved proposal: only End does. */
-  if (PN.live && PN.live !== id && pnLiveEmergency(api)) { api.toast("End the emergency call first"); return; }
+  if (PN.live && PN.live !== id && pnLiveEmergency(api)) {
+    /* a drawn party that is not the live call goes back to it, so render never arms this start again */
+    var kept = pnLiveParty();
+    if (pnWant(api.get("phone")) !== PN.live) api.set({ call: kept.call, num: kept.num });
+    api.toast("End the emergency call first"); return;
+  }
   /* calling the party already on the line returns to that call: its clock and recents row are kept */
   if (PN.live === id && api.get("phone").callWho === id) { api.set({ min: false }); return; }
   /* pnEnd's patch is queued, not applied yet: the ended call's return target is not read back below */
@@ -238,7 +243,9 @@ function pnEnd(api, opt) {
   var dur = s.liveAt ? Math.round((Date.now() - s.liveAt) / 1000) : 0;
   var sc = pnScript(s.call);
   var note = s.ai && s.aiN > 0 ? sc.sum : "";
-  var e = { id: "r" + Date.now(), pid: s.call || null, num: s.num || "", dir: s.dir || "out", at: Date.now(), dur: dur, note: note };
+  /* AC-19: an emergency call's row names the emergency call, whatever party the view holds. */
+  var party = pnLiveEmergency(api) && pnWant(s) !== PN.live ? pnLiveParty() : { call: s.call, num: s.num };
+  var e = { id: "r" + Date.now(), pid: party.call || null, num: party.num || "", dir: s.dir || "out", at: Date.now(), dur: dur, note: note };
   api.set({ recents: [e].concat(s.recents || []), call: null, num: "", callWho: null, callAt: null, liveAt: null, ai: false, aiN: 0, kp: false, min: false, hold: false, mute: false, spk: false, ret: null, tab: PN.lastTab || s.tab });
   PN.live = null; api.stopBg();
   if (opt.quiet) return;
@@ -292,6 +299,13 @@ function pnLiveEmergency(api) {
   var id = PN.live; if (!id) return false;
   if (id.charAt(0) === "#") return pnEmergency(id.slice(1));
   var p = pnWho(api, id); return !!p && pnEmergency(p.phone);
+}
+/* AC-19: while an emergency call is live it is the call drawn, whatever party the view holds (only a
+   development jump can leave another there): the card, bar, strip, End and recents belong to it. */
+function pnLiveParty() { var id = PN.live; return id.charAt(0) === "#" ? { call: null, num: id.slice(1) } : { call: id, num: "" }; }
+function pnDrawn(api, st) {
+  if (PN.live && pnWant(st) !== PN.live && pnLiveEmergency(api)) return pnLiveParty();
+  return { call: st.call, num: st.num };
 }
 function pnDecline(api, why) {
   var s = api.get("phone"); var pid = s.incoming;
@@ -431,14 +445,14 @@ registerView("phone", {
     }
     var want = pnWant(st);
     if (want && !st.min) {
-      var cp = pnWho(api, st.call), cn = cp ? cp.name : (st.num || ""), hang = function () { pnEnd(api); };
+      var drawn = pnDrawn(api, st), cp = pnWho(api, drawn.call), cn = cp ? cp.name : (drawn.num || ""), hang = function () { pnEnd(api); };
       return Object.assign({}, none, {
         target: { kind: "call", app: "Phone", name: cn, first: cp ? pnFirst(cp) : cn, initials: cp ? cp.ini : "#" },
-        closed: ask, left: left, context: cn + " · Call", contextKey: "phone:call:" + want,
+        closed: ask, left: left, context: cn + " · Call", contextKey: "phone:call:" + pnCallId(drawn.call, drawn.num),
         strip: { title: cn + " · " + pnClock(st.liveAt ? (now - st.liveAt) / 1000 : 0), subtitle: "On call", initials: cp ? cp.ini : "#", live: true, actions: [
           { id: "mute", label: st.mute ? "Unmute" : "Mute", pressed: !!st.mute, run: function () { api.set({ mute: !api.get("phone").mute }); } },
           { id: "end", label: "End call", run: hang }] },
-        end: hang, emergency: pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : st.num)
+        end: hang, emergency: pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : drawn.num)
       });
     }
     /* Recents, Keypad and Voicemail: typing filters Recents on the device (AC-22); a typed sentence or
@@ -550,8 +564,9 @@ registerView("phone", {
 
     /* call screen */
     var inCall = !!want;
-    var cp = inCall ? pnWho(api, st.call) : null;
-    var cnum = cp ? "" : (st.num || "");
+    var drawn = inCall ? pnDrawn(api, st) : null;
+    var cp = inCall ? pnWho(api, drawn.call) : null;
+    var cnum = cp ? "" : ((drawn && drawn.num) || "");
     var live = !!st.liveAt;
     var el = live ? (Date.now() - st.liveAt) / 1000 : 0;
     var status = !live ? "Calling…" : (st.hold ? "On hold · " : "") + pnClock(el);
@@ -605,7 +620,7 @@ registerView("phone", {
 
       inCall: inCall, callFull: inCall && !st.min && !st.incoming, banner: inCall && !!st.min,
       cName: cp ? cp.name : cnum, cIni: cp ? cp.ini : "#", cStatus: status, calling: inCall && !live, live: inCall && live,
-      emergency: inCall && (pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : st.num)),
+      emergency: inCall && (pnLiveEmergency(api) || pnEmergency(cp ? cp.phone : drawn.num)),
       showAvatar: inCall && !st.kp && !(st.ai && lines.length), showLines: inCall && !st.kp && st.ai && lines.length > 0, lines: lines,
       aiOn: inCall && st.ai, aiWait: inCall && st.ai && !lines.length && !st.kp,
       notesLabel: st.ai ? api.name + " notes off" : api.name + " takes notes", notesText: st.ai ? "Notes on" : "Take notes", toggleNotes: toggle("ai"),
