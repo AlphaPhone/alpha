@@ -147,6 +147,13 @@ test('the local account check records an authorization denial and still revokes 
    case '/api/v1/user':if(revoked)status=401;else body={id:'fixture-account'};break;
    case '/api/v1/subscription/entitlement':status=403;break;
    case '/api/v1/api-keys/current':assert.equal(init.method,'DELETE');revoked=true;break;
+   case '/api/v1/billing/limits':body={success:true,data:{schemaVersion:2}};break;
+   case '/api/v1/referrals':body={code:'FIXTURE1',total_referrals:0,is_active:true};break;
+   case '/api/v1/referrals/apply':status=404;body={error:'Invalid referral code'};break;
+   // Session-only billing: the Steward session is accepted, the phone's key is refused.
+   case '/api/v1/subscriptions/commands':status=init.headers.Authorization==='Bearer fixture-session'?200:401;break;
+   case '/.well-known/assetlinks.json':body=[{target:{package_name:cloud.registration.clientId}}];break;
+   case '/api/v1/app-auth/mobile/hosted-route':status=parsed.searchParams.get('url').startsWith(cloud.registration.redirectUri+'?')?200:404;break;
    default:if(parsed.pathname.startsWith('/auth/test/inbox/'))body={code:'123456'};
   }
   return new Response(JSON.stringify(body),{status});

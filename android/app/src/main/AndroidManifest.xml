@@ -142,6 +142,8 @@
         scheme above: no https cloud-delegation filter exists, since no handler accepts one. -->
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/auth/callback"/></intent-filter>
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/gmail/callback"/></intent-filter>
+   <!-- /alphaphone/billing/return: Cloud returns an in-app checkout here (cloud-plans.ts); opening the app is the whole job, the renderer then confirms the checkout. -->
+   <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/billing/return"/></intent-filter>
   </activity>
  </application>
 </manifest>

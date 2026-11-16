@@ -78,6 +78,8 @@ import { cloudCredentialStore, cloudSelfRevocationSupported, cloudSignIn, cloudS
 import { findStoppedUserTurn, type StoppedUserTurn as StoppedTurn } from '../../../../.eliza/client-features/packages/ui/src/api/conversation-turn-controller.ts';
 import './connection-ui.css';
 import {CloudMembershipControls,FUNDING_NEEDED,fundingRefusedReply,type MembershipBalance} from './cloud-membership-ui';
+import {CloudPlanManager} from './cloud-plan-ui';
+import type {BillingAuthorityPort} from './cloud-plans';
 
 /** `offline` and `none` exist only where no resident agent runs (test-mocks builds and the flag-off
  * web preview). Android production and browser development migrate them to `resident` on read
@@ -117,6 +119,8 @@ export interface ConnectionSnapshot {
   fundingRefused?: boolean;
   /** Ephemeral explicit code entry, retired when its current account or panel changes. */
   membershipCodeEntry?: boolean;
+  /** The in-app plan manager (cloud-plan-ui.tsx) is open; retired with the panel or account like the code entry. */
+  planManager?: boolean;
   residentSavedCredential?: boolean;
   legacySignInRecovery?: boolean;
   /**
@@ -508,6 +512,15 @@ async function deviceCapabilities(offered:unknown):Promise<string>{
 }
 let deviceReadReview:((proposal:ActionProposal,context:ContextEnvelope,signal:AbortSignal)=>Promise<void>)|undefined;
 const actionJournal = registerPlugin<ActionJournal>('AlphaActionJournal');
+/** Native account-session authority for plan changes and cancellation (AlphaBillingAuthorityPlugin). The
+ * browser build has none: plan changes there answer that this device cannot make them. */
+const billingAuthority = registerPlugin<BillingAuthorityPort>('AlphaBillingAuthority',{web:()=>({
+  status:async()=>({status:'required' as const}),
+  start:async()=>{throw new Error('Plan changes need the phone');},
+  verify:async()=>{throw new Error('Plan changes need the phone');},
+  clear:async()=>{},
+  perform:async()=>{throw new Error('Plan changes need the phone');},
+})});
 let savedCloudEnvironment: unknown;
 try { savedCloudEnvironment = localStorage.getItem(CLOUD_SERVICE); } catch { /* Use the explicit public preview default when storage is unavailable. */ }
 let cloud = makeCloud(resolveCloudEnvironment(cloudEnvironmentPolicy, savedCloudEnvironment));
@@ -846,7 +859,7 @@ function update(patch: Partial<ConnectionSnapshot>) {
   if('message' in patch&&!('previousSignInUnconfirmed' in patch)&&patch.message!==state.message)next.previousSignInUnconfirmed=false;
   if('providerStatus' in patch&&ownProviderSelected(next)!==ownProviderSelected(state))networkLostUnder&&='';
   if (state.purpose === 'cloud-account' && patch.cloudAccount && !state.cloudAccount) { next.open = false; next.purpose = 'agent'; }
-  if(next.purpose!=='plan'||patch.open===false||next.cloudAccount?.sessionId!==state.cloudAccount?.sessionId)next.membershipCodeEntry=false;
+  if(next.purpose!=='plan'||patch.open===false||next.cloudAccount?.sessionId!==state.cloudAccount?.sessionId){next.membershipCodeEntry=false;next.planManager=false;}
   // Modal ownership follows production presentation. Automatic restore only suppresses rendering
   // temporarily; it must not erase an explicitly opened account or plan panel.
   state = isAndroid && !testMocksEnabled ? { ...next, open: connectionChooserVisible({ ...next, automaticRestore: false },!!sending) } : next;
@@ -3190,19 +3203,18 @@ export const connectionController = {
     await ensureResident();
     }
   },
-  /** Open the existing account billing page. No purchase or account change happens here. */
+  /** Opens the in-app plan manager (cloud-plan-ui.tsx): plans, checkout, plan changes, cancellation and
+   * referrals all happen in Alpha Phone. Nothing is bought or changed until the owner acts there. */
   async residentManagePlan() {
     if(operation)return;
-    const account=service;
-    if(!account?.identity.email){update({open:true,error:'Sign in first'});return;}
-    await work('Opening billing',async signal=>{
-      if(service!==account)throw Error(ACCOUNT_CHANGED);
-      await account.client.openSubscriptionManagement(signal);
-      signal.throwIfAborted();
-      if(service!==account)throw Error(ACCOUNT_CHANGED);
-      planManagementReturn=true;
-      update({message:''});
-    });
+    if(!service?.identity.email){update({open:true,error:'Sign in first'});return;}
+    update({open:true,automaticRestore:false,purpose:'plan',membershipDismissed:false,planManager:true,message:'',error:''});
+  },
+  /** A plan action finished in the plan manager: read the account and plan again now. */
+  planChanged() {
+    planManagementReturn=true;
+    void refreshMembershipBalance();
+    connectionController.recheckPlanOnReturn();
   },
   /**
    * Redeems a subscription code for the signed-in account, then checks the plan again and admits
@@ -4064,7 +4076,7 @@ export function ConnectionChooser() {
     <div className="alpha-membership-drag-handle" aria-hidden="true"/>
     <header>{accountSection&&<button aria-label="Back to Account" onClick={()=>setAccountSection(null)}><span aria-hidden="true" data-alpha-icon="/icons/lucide/chevron-left.svg" style={iconStyle('chevron-left')}/></button>}<h1 id="alpha-membership-title">{signOutAccount?'Sign out?':accountSection?'AI connection':'Account'}</h1><button aria-label="Close Account" onClick={()=>{if(signOutAccount)setSignOutAccount(null);else dismiss();}}><span aria-hidden="true" data-alpha-icon="/icons/lucide/x.svg" style={iconStyle('x')}/></button></header>
     {signOutAccount?<><p><span aria-hidden="true" data-alpha-icon="/icons/lucide/phone.svg" style={iconStyle('phone')}/> Data stays on device</p><div className="alpha-membership-secondary-actions"><button className="alpha-account-confirm" disabled={snapshot.busy} onClick={()=>{const expected=signOutAccount;setSignOutAccount(null);const current=connectionController.getSnapshot().cloudAccount;if(current&&expected&&current.environment===expected.environment&&current.userId===expected.userId&&current.organizationId===expected.organizationId&&current.credentialId===expected.credentialId&&current.sessionId===expected.sessionId)void connectionController.cloudSignOut();}}>Sign out</button></div></>:accountSection?providerChoiceFor(false,snapshot.error):<>
-      {accountCreatedNotice}{membershipControls}
+      {accountCreatedNotice}{membershipControls}{snapshot.planManager&&service&&snapshot.cloudAccount&&service.identity.sessionId===snapshot.cloudAccount.sessionId&&<CloudPlanManager key={service.identity.credentialId} account={{client:service.client,identity:service.identity}} authority={billingAuthority} serviceName={serviceName} onChanged={()=>connectionController.planChanged()}/>}
       {snapshot.cloudAccount?.expiresAt!==undefined&&snapshot.cloudAccount.expiresAt-Date.now()<=CLOUD_KEY_EXPIRY_WARNING_MS&&<div className="alpha-account-expiry"><p><span aria-hidden="true" data-alpha-icon="/icons/lucide/clock.svg" style={iconStyle('clock')}/> <StatusDot tone="warn">Expires {new Date(snapshot.cloudAccount.expiresAt).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</StatusDot></p><button disabled={snapshot.busy} onClick={()=>void connectionController.residentCloudLogin()}><span aria-hidden="true" data-alpha-icon="/icons/lucide/rotate-cw.svg" style={iconStyle('rotate-cw')}/>Renew</button></div>}
       {!snapshot.cloudAccount&&<><p className="alpha-membership-account"><span aria-hidden="true" data-alpha-icon="/icons/lucide/user-round.svg" style={iconStyle('user-round')}/><span className="alpha-sr">Not signed in</span></p><button className="alpha-account-confirm" disabled={snapshot.busy} onClick={()=>void connectionController.residentCloudLogin()}>Sign in</button></>}
       <div className="alpha-account-links">
