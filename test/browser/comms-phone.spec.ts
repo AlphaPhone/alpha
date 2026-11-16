@@ -195,6 +195,25 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await page.evaluate(() => (window as any).alphaShell().vset('phone', {call: 'maya', num: ''}));
     await expect(card).toHaveAttribute('aria-label', 'Call with 911');
     await expect(card).toHaveAttribute('data-emergency', 'true');
+    // Only End ends it: free text asking to hang up, or not to, ends nothing (AC-19).
+    for (const text of ['hang up', "don't hang up"]) {
+      await askAlpha(page, text);
+      await page.waitForTimeout(2500);
+      expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBe('#911');
+    }
+    // A ring over the emergency call: no compaction or strip replaces it, and declining or
+    // screening it leaves the emergency call's clock running.
+    await page.evaluate(() => { const shell = (window as any).alphaShell(); shell.mod('phone').actions.ring({args: {pid: 'maya'}}, shell.api('phone')); });
+    await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
+    await page.evaluate(() => (window as any).alphaShell().setState({chat: 'full'}));
+    await expect.poll(() => page.evaluate(() => (window as any).alphaShell().S().chat)).toBe('sheet');
+    await expect(page.locator('[data-alpha-layer="app"][data-alpha-stage="true"]')).toHaveCount(0);
+    await page.evaluate(() => (window as any).alphaShell().mod('phone').actions.screenIncoming({args: {ring: (window as any).alphaShell().vget('phone').ringId}}, (window as any).alphaShell().api('phone')));
+    await page.locator('[data-alpha-incoming-decline]').click();
+    await expect(page.locator('[data-alpha-incoming-card]')).toHaveCount(0);
+    const tick = await page.evaluate(() => (window as any).alphaShell().vget('phone').tick);
+    await expect.poll(() => page.evaluate(() => (window as any).alphaShell().vget('phone').tick), {timeout: 5000}).toBeGreaterThan(tick);
+    expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBe('#911');
     // End ends the emergency call and logs it as 911, not as the refused contact.
     await page.locator('[data-alpha-call-end]').click();
     expect(await page.evaluate(() => { const r = (window as any).alphaShell().vget('phone').recents[0]; return [r.pid, r.num]; })).toEqual([null, '911']);

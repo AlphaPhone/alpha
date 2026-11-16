@@ -44,6 +44,8 @@ module PhoneCall {
   /// The call card drawn is an emergency call (the bar's AC-19 flag): its number is one, or the
   /// live call is one.
   pure def emergencyCard(v: State): bool = v.active and v.want != "" and not(v.min) and not(v.incoming) and (emergency(v.want) or emergencyLive(v))
+  /// Phone's bar flags an emergency: its card, or a ring over a live emergency call.
+  pure def emergencyShown(v: State): bool = emergencyCard(v) or (v.active and v.incoming and emergencyLive(v))
   /// AC-19: over a live emergency call no other call is drawn or armed.
   pure def blocked(v: State, id: str): bool = emergencyLive(v) and id != v.live
   /// Proposals are dropped and none can act while either holds (Component.emergencyLive).
@@ -52,14 +54,18 @@ module PhoneCall {
   /// While an emergency call is live it is the call drawn, whatever party the view holds (pnDrawn).
   pure def callScreen(v: State): bool = v.active and v.live != "" and v.want != "" and (v.want == v.live or emergencyLive(v)) and
     not(v.min) and not(v.incoming)
-  /// AC-18: where End is on the call screen. A voice turn covers the screen, so its panel carries
-  /// End; an emergency card keeps End among its controls; otherwise the bar, the card or the strip.
-  /// "none": covered by a full sheet with no strip.
+  /// Phone's bar carries End: its call card (a call drawn and not minimised), or a ring over a live call.
+  pure def barEnd(v: State): bool = v.active and (if (v.incoming) v.live != "" and v.callWho != "" else v.want != "" and not(v.min))
+  /// AC-18: where End is (comms-bar.ts endPlacement, replayed against the shell's own bar). A voice
+  /// turn covers the screen, so its panel carries End; closed, End is beside the bar unless the
+  /// emergency card keeps its own; open, the card; full, the strip, and "none" for an emergency call
+  /// at full height, which the clamp never allows.
   pure def endAt(v: State): str =
-    if (not(callScreen(v))) "none"
+    if (not(barEnd(v))) "none"
     else if (v.voice) "voice"
-    else if (emergency(v.live)) (if (v.chat == "full") "none" else "card")
-    else if (v.chat == "closed") "bar" else if (v.chat == "open") "card" else "strip"
+    else if (v.chat == "full") (if (emergencyShown(v)) "none" else "strip")
+    else if (v.chat == "open") "card"
+    else if (emergencyShown(v)) "card" else "bar"
   /// The person the development jumps ring from and call.
   pure val PresetPerson = "ada"
   pure val MaxCalls = 4
@@ -69,7 +75,7 @@ module PhoneCall {
   /// The view draws after every state change while it is in front. A drawn call that is not the
   /// running one, with no ring showing, arms its start once per latch value.
   /// AC-19: the shell lowers a full chat to open while an emergency card is drawn.
-  pure def kept(v: State): State = if (v.chat == "full" and emergencyCard(v)) { ...v, chat: "open" } else v
+  pure def kept(v: State): State = if (v.chat == "full" and emergencyShown(v)) { ...v, chat: "open" } else v
   /// Closing the chat ends its stage history (D11).
   pure def settled(v: State): State = kept(if (v.chat == "closed") { ...v, staged: 0 } else v)
   pure def shown(v: State): State = settled(
@@ -154,10 +160,10 @@ module PhoneCall {
     s' = { ...devReset(s), incoming: true, rings: s.rings + 1 } }
   action presetCall = all { s.started < MaxCalls, s' = shown({ ...devReset(s), want: PresetPerson }) }
   action accept = all { s.active, s.incoming, s.started < MaxCalls, s' = shown(startCall(s, PresetPerson, true)) }
-  /// Declining logs the ring's row and stops the view's background timers; a call handed over
-  /// during the ring is armed once the ring is gone.
+  /// Declining logs the ring's row and stops only the ring's own timers: a call live under the ring
+  /// keeps its clock and connect. A call handed over during the ring is armed once the ring is gone.
   action decline = all { s.active, s.incoming,
-    s' = shown({ ...s, incoming: false, ringRows: s.ringRows + 1, connectFor: "", tickFor: "",
+    s' = shown({ ...s, incoming: false, ringRows: s.ringRows + 1,
       staged: if (s.staged > 0) s.staged - 1 else 0 }) }
   /// AC-20/AC-26: Alpha proposes a call. It dials nothing; a newer proposal replaces the open one.
   /// AC-19: over an emergency call the proposal is dropped.
@@ -201,9 +207,9 @@ module PhoneCall {
   /// its emergency layout are its own (not another person's).
   val EmergencyDrawn = emergencyLive(s) and s.callWho != "" implies s.want == s.live
   /// AC-19: no compaction: the emergency card is never under a full sheet.
-  val EmergencyNotCompacted = emergencyCard(s) implies s.chat != "full"
+  val EmergencyNotCompacted = emergencyShown(s) implies s.chat != "full"
   /// AC-18/AC-04: with the call on screen, End is reachable at every height and during a voice turn.
-  val EndReachable = callScreen(s) implies endAt(s) != "none"
+  val EndReachable = barEnd(s) implies endAt(s) != "none"
   val safety = SingleSource and NoPhantomCall and BootOwned and TimersOwned and ControlsNeedCall and
     OneRowPerCall and RingsAccounted and EmergencyKept and EmergencyDrawn and EmergencyNotCompacted and EndReachable
 

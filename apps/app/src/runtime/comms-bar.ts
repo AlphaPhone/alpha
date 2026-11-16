@@ -195,3 +195,19 @@ export function deviceEmergencyLive(): boolean {
 		return true;
 	}
 }
+
+/** AC-18: where End is for a comms view's bar at a chat height and during a voice turn. */
+export type EndPlace = 'bar' | 'card' | 'strip' | 'voice' | 'none';
+/**
+ * The one rule the shell draws End by. Closed: beside the bar, except over an emergency call whose
+ * full-screen card keeps its own. Open: the call (or incoming) card. Full: the live strip; an
+ * emergency call is never at full height (AC-19), so there it would be covered ('none'). A voice turn
+ * covers all three, so its panel carries End.
+ */
+export function endPlacement(spec: Pick<CommsBarSpec, 'end' | 'emergency'> | null, chat: string, voice: boolean): EndPlace {
+	if (!spec || typeof spec.end !== 'function') return 'none';
+	if (voice) return 'voice';
+	if (chat === 'full') return spec.emergency ? 'none' : 'strip';
+	if (chat === 'sheet') return 'card';
+	return spec.emergency ? 'card' : 'bar';
+}

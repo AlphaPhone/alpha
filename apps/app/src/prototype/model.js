@@ -29,7 +29,7 @@ import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWee
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
-import { applyListFilter, clearListFilter, deviceEmergencyLive, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
+import { applyListFilter, clearListFilter, deviceEmergencyLive, endPlacement, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
 
 
 var IC = {
@@ -223,7 +223,7 @@ function pnStart(api, pid, num, opt) {
   /* pnEnd's patch is queued, not applied yet: the ended call's return target is not read back below */
   var replaced = !!PN.live;
   if (replaced) pnEnd(api, { quiet: true });
-  pnStop(api); api.stopBg();
+  pnStop(api); api.stopBg(); api.stopRing();
   PN.live = id;
   var now = Date.now();
   api.set({ call: pid || null, num: pid ? "" : pnFmt(num), callWho: id, callAt: now, liveAt: opt.live ? now : null, dir: opt.dir || "out",
@@ -259,7 +259,8 @@ function pnRingEnd(api, entry, patch) {
   var s = api.get("phone");
   if (!s.incoming) return;
   api.set(Object.assign({}, patch || {}, { incoming: null, ringId: null, ring: null, rs: false, scrN: 0, recents: [Object.assign({ id: "r" + crypto.randomUUID(), pid: s.incoming, at: Date.now(), dur: 0 }, entry)].concat(s.recents || []) }));
-  api.stopBg();
+  /* only the ring's own timers: a call live under the ring keeps its clock and connect */
+  api.stopRing();
   /* AC-21: a call that rang over another stage hands it back */
   if (api.isActive()) api.stageBack();
 }
@@ -281,8 +282,8 @@ function pnAnswer(api) {
 function pnScreen(api) {
   var s = api.get("phone");
   if (!s.incoming || s.ring === "screen") return;
-  api.stopBg(); api.set({ ring: "screen", scrN: 1 });
-  api.everyBg(function () { var s2 = api.get("phone"); if (s2.ring !== "screen") return; if ((s2.scrN || 0) < PN_SCREEN.length) api.set({ scrN: (s2.scrN || 0) + 1 }); }, 1900);
+  api.stopRing(); api.set({ ring: "screen", scrN: 1 });
+  api.everyRing(function () { var s2 = api.get("phone"); if (s2.ring !== "screen") return; if ((s2.scrN || 0) < PN_SCREEN.length) api.set({ scrN: (s2.scrN || 0) + 1 }); }, 1900);
 }
 function pnEndScreen(api) {
   if (!api.get("phone").incoming) return;
@@ -381,7 +382,11 @@ registerView("phone", {
   },
   reply: function (t, raw, api) {
     var st = api.st;
-    if (PN.live && /\b(hang up|end (the )?call)\b/.test(t)) return { text: "Ended.", then: function () { pnEnd(api); } };
+    /* Only End ends an emergency call (AC-19); a negated request ("don't hang up") ends nothing. */
+    if (PN.live && /\b(hang up|end (the )?call)\b/.test(t) && !/\b(don'?t|do not|never|not)\b/.test(t)) {
+      if (pnLiveEmergency(api)) return { text: "Use End on the call screen to end an emergency call." };
+      return { text: "Ended.", then: function () { pnEnd(api); } };
+    }
     if (PN.live && /\b(take notes|transcri)/.test(t)) return { text: "Taking notes. You'll find them in Recents.", then: function () { api.set({ ai: true, min: false }); } };
     if (/\b(voice ?mail)/.test(t)) {
       var vms = st.vms || [];
@@ -442,8 +447,9 @@ registerView("phone", {
         target: { kind: "incoming", app: "Phone", name: rn, first: ip ? pnFirst(ip) : rn, initials: ip ? ip.ini : "#" },
         closed: ask, left: left, context: rn + " · Incoming call", contextKey: "phone:incoming:" + st.incoming,
         strip: { title: rn, subtitle: "Incoming call", initials: ip ? ip.ini : "#", live: false, actions: [{ id: "answer", label: "Answer", run: answer }, { id: "decline", label: "Decline", run: decline }].concat(over ? [{ id: "end", label: "End call", run: hangLive }] : []) },
-        /* AC-18: a ring over a live call keeps that call's End reachable at every height */
-        end: over ? hangLive : null,
+        /* AC-18: a ring over a live call keeps that call's End reachable at every height; AC-19: over a
+           live emergency call nothing compacts it or replaces its strip */
+        end: over ? hangLive : null, emergency: pnLiveEmergency(api),
         incoming: { id: st.ringId || "phone:incoming:" + st.incoming, answer: answer, decline: decline, screen: screening ? null : function () { pnScreen(api); } }
       });
     }
@@ -5661,6 +5667,9 @@ class Component extends DCLogic {
       everyBg: function (fn, ms) { return self.every(fn, ms, "bg_" + k); },
       laterBg: function (fn, ms) { return self.later(fn, ms, "bg_" + k); },
       stopBg: function () { self.clear("bg_" + k); self.stopEvery("bg_" + k); },
+      // A ring's own timers (screening), apart from a live call's, so ending the ring leaves the call running.
+      everyRing: function (fn, ms) { return self.every(fn, ms, "ring_" + k); },
+      stopRing: function () { self.clear("ring_" + k); self.stopEvery("ring_" + k); },
       secure: !!S.secure,
       chat: function (draft) { self.setState({ chat: "sheet", draft: draft || "" }); },
       send: function (t) { self.send(t); },
@@ -6354,8 +6363,8 @@ class Component extends DCLogic {
       [IC.lock, "Side key: tap · lock or wake"]
     ].map(function (l) { return { d: l[0], t: l[1] }; });
 
-    var callEnd = comms && !S.secure && typeof spec.end === "function";
-    var barEnd = isOn && callEnd && !commsOpen && !voiceOn && !spec.emergency;
+    var endPlace = isOn && comms && !S.secure ? endPlacement(spec, chatMode, voiceOn) : "none";
+    var barEnd = endPlace === "bar";
     var showPill = isOn && chatMode === "hidden" && !voiceOn;
     var showComposer = isOn && chatMode === "input" && !voiceOn;
     var sbColor = isView && imm.dark && !S.shade && S.chat !== "full" && S.chat !== "sheet" ? "var(--alpha-white)" : "var(--fg)";
@@ -6427,7 +6436,7 @@ class Component extends DCLogic {
       // full-screen card keeps its own End (AC-19). Open: the call card. Full: the strip. During a
       // voice turn the voice panel covers all three, so it carries End itself.
       showEnd: barEnd,
-      voiceEnd: isOn && voiceOn && callEnd,
+      voiceEnd: endPlace === "voice",
       endCall: function () { if (spec && spec.end) spec.end(); },
       // The closed bar makes room for End: 44 wide and 8 apart, centred on the 62 tall bar.
       cmpRight: barEnd ? 68 : 16, endBottom: 37,

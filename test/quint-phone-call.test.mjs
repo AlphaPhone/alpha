@@ -123,9 +123,24 @@ function fixture() {
         incoming: !!st.incoming, ended: added.length - rings, ringRows: rings,
         proposal: (open => open ? (open.card.args.pid || '#' + open.card.args.num) : '')(shell.S().msgs.findLast(m => m.card?.type === 'proposal' && m.card.state === 'open')),
         approvals: shell.S().msgs.filter(m => m.card?.type === 'proposal' && m.card.state === 'done').length,
-        chat: {input: 'closed', hidden: 'closed', sheet: 'open', full: 'full'}[shell.S().chat], voice: shell.S().voice !== 'off', staged: (shell.S().stageFrom || []).length};
+        chat: {input: 'closed', hidden: 'closed', sheet: 'open', full: 'full'}[shell.S().chat], voice: shell.S().voice !== 'off', staged: (shell.S().stageFrom || []).length,
+        // AC-18: where the shell draws End for Phone's own bar right now (comms-bar endPlacement).
+        endAt: shell.S().view === 'phone' ? commsBar.endPlacement(shell.commsSpec('phone'), shell.S().chat === 'hidden' ? 'input' : shell.S().chat, shell.S().voice !== 'off') : 'none'};
     },
   };
+}
+
+/** PhoneCall.qnt endAt over a trace state (the same definition, read off the state's fields). */
+function modelEndAt(s) {
+  const emergency = id => id === '#911', live = s.live !== '' && emergency(s.live);
+  const card = s.active && s.want !== '' && !s.min && !s.incoming && (emergency(s.want) || live);
+  const shown = card || (s.active && s.incoming && live);
+  const bar = s.active && (s.incoming ? s.live !== '' && s.callWho !== '' : s.want !== '' && !s.min);
+  if (!bar) return 'none';
+  if (s.voice) return 'voice';
+  if (s.chat === 'full') return shown ? 'none' : 'strip';
+  if (s.chat === 'open') return 'card';
+  return shown ? 'card' : 'bar';
 }
 
 test("partial source contract: simulated PhoneCall traces agree with the Phone fixture after every step", {timeout: scaledTimeout(180000)}, async () => {
@@ -135,7 +150,7 @@ test("partial source contract: simulated PhoneCall traces agree with the Phone f
     project: s => ({live: s.live, want: s.want, callWho: s.callWho, bootFor: s.bootFor, boot: s.bootTimers.length > 0, active: s.active, connected: s.connected,
       min: s.min, kp: s.kp, hold: s.hold, connecting: s.connectFor !== '', ticking: s.tickFor !== '', ret: s.ret,
       incoming: s.incoming, ended: s.ended, ringRows: s.ringRows,
-      proposal: s.proposal, approvals: s.approvals, chat: s.chat, voice: s.voice, staged: s.staged}),
+      proposal: s.proposal, approvals: s.approvals, chat: s.chat, voice: s.voice, staged: s.staged, endAt: modelEndAt(s)}),
   });
   assert.deepEqual([...result.exercised].sort(), ['accept', 'approve', 'back', 'bootStart', 'callFrom', 'connect', 'decline', 'hangUp',
     'keypadCall', 'leave', 'openCall', 'openKeypad', 'presetCall', 'presetIncoming', 'propose', 'reopen', 'resize', 'toggleHold', 'voiceTurn']);
