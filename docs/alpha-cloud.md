@@ -80,7 +80,7 @@ keys for staging and live keys for production.
 | `STRIPE_PUBLISHABLE_KEY` (optional) | Stripe → API keys | Not needed for the app's hosted checkout. |
 
 GitHub (for the deploy workflow): create environments `alpha-cloud-staging` and
-`alpha-cloud-production` in `eliza-research/alphaphone`, each with secrets `CLOUDFLARE_API_TOKEN`
+`alpha-cloud-production` in this repository (`eliza-research/alpha`; the workflow runs only there), each with secrets `CLOUDFLARE_API_TOKEN`
 and `ALPHA_CLOUD_ENV` (the whole completed env file).
 
 ## 4. First deployment (per environment)
