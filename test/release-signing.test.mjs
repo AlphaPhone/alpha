@@ -9,6 +9,7 @@ import { auditWebBundle } from "../scripts/audit-production-bundle.ts";
 import { appLinkFilters, assetLinksProblems, fingerprint, PLACEHOLDER, renderAssetLinks, TEMPLATE } from "../scripts/render-assetlinks.ts";
 import { buildEnv, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
 import { releaseBlockers } from "../scripts/release-blockers.ts";
+import { fontCheckFailedItem, fontLicenceLine } from "../scripts/font-license-blockers.ts";
 import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
 
 const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZAOS_KEY_ALIAS: "a", ELIZAOS_KEY_PASSWORD: "q" };
@@ -90,7 +91,7 @@ test("a release is distributable only when releaseBlockers names nothing", () =>
     "bundle audit failed": [{ bundleAudit: "failed" }, /flag-off bundle audit/],
     "licence check not recorded": [{ licenceBlockers: undefined }, /font licence check was not recorded/],
     // verify-apks records a font check that threw as this item; an unknown result never admits a release.
-    "licence check failed to run": [{ licenceBlockers: ["font licence check failed: EIO"] }, /^font licence check failed: EIO$/],
+    "licence check failed to run": [{ licenceBlockers: [fontCheckFailedItem("EIO")] }, /^font licence check failed: EIO$/],
   };
   for (const [name, [change, expected]] of Object.entries(broken))
     assert.match(releaseBlockers({ ...DISTRIBUTABLE, ...change }).join("\n"), expected, name);
@@ -102,8 +103,16 @@ test("a release is distributable only when releaseBlockers names nothing", () =>
     assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false, voiceHost: { ...voiceHost, asr: false } }), ["on-device voice has no ASR"]);
   }
   // A failed font check blocks under either licence policy; an unresolved font only under the blocking one.
+  // verify-apks records the failure with the same fontCheckFailedItem and blocksDistribution true,
+  // so it also prints as a release blocker.
+  const failed = fontCheckFailedItem("EIO");
+  assert.match(fontLicenceLine(failed, true), /^RELEASE BLOCKER /);
+  // verify-apks builds that item only through the shared helper, recorded as blocking.
+  const verifier = fs.readFileSync(new URL("../scripts/verify-apks.ts", import.meta.url), "utf8");
+  assert.match(verifier, /catch \(error\) \{ const items = \[fontCheckFailedItem\(message\(error\)\)\]; fontCheck = \{[^}]*blocksDistribution: true, items, blockers: items \}/);
+  assert.doesNotMatch(verifier, /font licence check failed/, "the failure text lives only in font-license-blockers.ts");
   for (const fontLicenceBlocks of [true, false]) {
-    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: ["font licence check failed: EIO"] }, { fontLicenceBlocks }), ["font licence check failed: EIO"]);
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: [failed] }, { fontLicenceBlocks }), [failed]);
     assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: ["unresolved-font-licence: x"] }, { fontLicenceBlocks }), fontLicenceBlocks ? ["unresolved-font-licence: x"] : []);
   }
   // The image path also requires a reviewed platform certificate.

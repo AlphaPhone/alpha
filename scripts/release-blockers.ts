@@ -14,19 +14,18 @@
  *   is the separately named `unresolved-font-licence` check for a proprietary font with no
  *   recorded licence, and only while UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION
  *   (scripts/licence-policy.ts) is true. A font licence check that failed to run
- *   (`font licence check failed: `) always blocks: an unknown result never admits a release;
+ *   (fontCheckFailedItem) always blocks: an unknown result never admits a release;
  * - a row verify-apks did not record as distributable is never admitted, even while the only
  *   other item, pending device qualification of the voice host, is not a build gate.
  *
  */
 import { apkReleaseBlockers } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
 import { UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION } from "./licence-policy.ts";
+import { FONT_BLOCKER, isFontCheckFailure } from "./font-license-blockers.ts";
 import { releaseAdmission } from "./build-android.ts";
 
 // The shared judgement's generic item, named only when nothing else is.
 const NOT_RECORDED = "verify-apks did not record this release as distributable";
-const UNRESOLVED_FONT = /^unresolved-font-licence: /;
-const FONT_CHECK_FAILED = /^font licence check failed: /;
 const QUALIFICATION_PENDING = 'unqualified on-device voice (device qualification pending)';
 
 interface ReleaseBlockerOptions {
@@ -48,7 +47,7 @@ export function releaseBlockers(row: Record<string, unknown>, { fontLicenceBlock
     admitSigner: releaseAdmission,
     signerFile: "android/release-signer.json",
     cloudVoiceProvider: "cartesia",
-    licenceBlocks: item => FONT_CHECK_FAILED.test(item) || fontLicenceBlocks && UNRESOLVED_FONT.test(item),
+    licenceBlocks: item => isFontCheckFailure(item) || fontLicenceBlocks && item.startsWith(`${FONT_BLOCKER}: `),
   });
   const voice = row.voiceHost as {packaged?: unknown; asr?: unknown} | undefined;
   const named = (row.runtimeProfile ?? "native") === "native" && voice?.packaged === true && voice.asr !== true
