@@ -35,7 +35,7 @@ import { CLOUD_DEPLOYMENT } from "./cloud-deployment-policy.ts";
 import { readUpstreamPin } from "./upstream-pin.ts";
 import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
-import {nativeCartesiaBlockers, releaseDistributable} from './release-distributable.ts';
+import {releaseBlockers} from './release-blockers.ts';
 import {
   auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
 } from "./apk.ts";
@@ -110,7 +110,9 @@ if (signerApiLevel !== undefined && !Number.isSafeInteger(signerApiLevel)) throw
 // The one profile's name in records; a build record naming another profile is refused below.
 const runtimeProfile="native";
 // Optional Cloud speech (Cartesia) evidence for these exact release bytes. When supplied it is
-// recorded and must pass; on-device voice is required of every distributable release regardless.
+// recorded as row.cloudVoice. It does not decide `distributable` for the native profile:
+// releaseBlockers judges Cloud voice evidence only for a cloud-profile row, and release.yml
+// admits the evidence itself (scripts/ci/qualified-app-update.py) before publication.
 const cloudEvidenceArgs=args.filter(arg=>arg.startsWith('--cloud-voice-evidence='));
 if(cloudEvidenceArgs.length>1)throw Error('Specify --cloud-voice-evidence only once');
 const directory = "artifacts";
@@ -315,24 +317,22 @@ function checkedVoiceHost(file: string) {
     throw new Error(`On-device voice in ${file} is not admitted:\n  - ${voiceHost.differences.join("\n  - ")}`);
   return voiceHost;
 }
+const blockersByApk = new Map<string, string[]>();
 for (const row of release) {
   if (!row.releaseAdmission) throw new Error(`Missing release signing admission for ${row.file}`);
-  const runtime = checkedRuntime(row.file);
-  row.runtime = runtime.runtime;
+  row.runtime = checkedRuntime(row.file).runtime;
   // Signing is recorded separately (row.signed). The packaged voice
   // bundle must match android/voice-host/qualified-voice-host.json byte for byte.
-  // A supplied Cloud speech receipt must also pass for these exact APK bytes.
+  // A supplied Cloud speech receipt is recorded for these exact APK bytes.
   row.voiceHost = checkedVoiceHost(row.file);
   if (row.voiceHost.differences.length)
     throw new Error(`On-device voice in ${row.file} is not admitted:\n  - ${row.voiceHost.differences.join("\n  - ")}`);
-  const cartesia = cloudEvidenceSha256 === undefined ? undefined : {
-    apkSha256: row.sha256,
-    admission: cloudVoiceAdmission(row.sha256, cloudEvidence, cloudEvidenceSha256),
-  };
-  if (cartesia) row.cloudVoice = cartesia.admission;
-  // releaseDistributable requires packaged on-device voice with ASR (voiceHost.packaged and .asr).
-  row.distributable = releaseDistributable({signed: row.signed, releaseAdmission: row.releaseAdmission,
-      runtime, runtimeNotices: row.runtimeNotices, voiceHost: row.voiceHost, licenceBlockers: row.licenceBlockers, cartesia});
+  if (cloudEvidenceSha256 !== undefined) row.cloudVoice = cloudVoiceAdmission(row.sha256, cloudEvidence, cloudEvidenceSha256);
+  // The one admission decision (scripts/release-blockers.ts). The row is judged as the verdict
+  // being recorded, so the shared "not recorded as distributable" item cannot refer to itself.
+  const blockers = releaseBlockers({...row, distributable: true});
+  blockersByApk.set(row.file, blockers);
+  row.distributable = blockers.length === 0;
 }
 for (const row of results.filter(row => row.mode === "debug")) {
   row.runtime = checkedRuntime(row.file).runtime;
@@ -439,19 +439,8 @@ fs.writeFileSync(
 console.log(JSON.stringify(results, null, 2));
 const undistributable = release.filter(row => !row.distributable);
 if (undistributable.length)
-  console.warn(`Not distributable: ${undistributable.map(row => {
-    const cartesia = cloudEvidenceSha256 === undefined ? [] : nativeCartesiaBlockers(row.sha256, row.cloudVoice);
-    const blockers = [
-      row.runtime !== "PACKAGED" && "no packaged runtime",
-      !row.runtimeNotices && "notices lack the packaged runtime (run bun scripts/generate-licenses.ts --packaged-runtime after staging)",
-      !row.voiceHost?.packaged && "no on-device voice packaged",
-      row.voiceHost?.packaged && !row.voiceHost.asr && "on-device voice has no ASR",
-      ...cartesia,
-      ...(row.releaseAdmission?.blockers ?? []),
-      ...row.licenceBlockers,
-    ];
-    return `${row.file} (${blockers.filter(Boolean).join(", ")})`;
-  }).join("; ")}`);
+  console.warn(`Not distributable: ${undistributable.map(row => `${row.file} (${(blockersByApk.get(row.file) ?? []).map(item =>
+    item === "notices lack the packaged runtime" ? `${item} (run bun scripts/generate-licenses.ts --packaged-runtime after staging)` : item).join(", ")})`).join("; ")}`);
 // Licence flags are warnings: recorded per APK above, printed once here, never a failure.
 for (const line of flagLines) console.warn(line);
 const fontItems = new Map(release.flatMap(row => [...row.fontLicenceCheck.items, ...row.fontLicenceCheck.resolved].map(item => [item, row.fontLicenceCheck.blocksDistribution] as const)));
