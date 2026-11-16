@@ -34,11 +34,13 @@ module BrowserAgentOpen {
   action openDirect = all {s.card, idle, not(asks), s.typed, not(s.autoUsed),
     s' = {...s, card: false, authority: "request", autoUsed: true}}
   action openReviewed = all {s.card, idle, s' = {...s, card: false, authority: "review"}}
-  /// The executor re-checks the scheme and records creation of the new tab.
+  /// The executor re-checks the scheme and creates the new tab without selecting it.
   action execute = all {not(idle), s.journal == "empty", not(s.tab), s.scheme == "https",
-    s' = {...s, tab: true, tabReceipt: true,
+    s' = {...s, tab: true,
       autoOpens: s.autoOpens + (if (s.authority == "request") 1 else 0)}}
-  action journalFinish = all {s.tab, s.journal == "empty", s' = {...s, journal: "terminal"}}
+  /// The terminal journal entry records the receipt summary, which names the created tab
+  /// and makes no claim that Browser was shown.
+  action journalFinish = all {s.tab, s.journal == "empty", s' = {...s, journal: "terminal", tabReceipt: true}}
   action receipt(ok: bool): bool = all {s.journal == "terminal", not(s.receiptTried),
     s' = {...s, receiptTried: true, synced: ok}}
   action leaveForeground = s' = {...s, foreground: false}
@@ -81,7 +83,9 @@ module BrowserAgentOpen {
   val HttpsNoUserinfo = (s.card or s.tab) implies s.scheme == "https"
   val AutoOpenMatchesTypedAddress = (s.authority == "request") implies s.typed
   val OneAutoOpenPerMessage = s.autoOpens <= 1
-  val ReceiptReportsTabCreation = s.tabReceipt iff s.tab
+  /// The journaled receipt names tab creation exactly when the effect is terminal, and only
+  /// after the tab exists.
+  val ReceiptReportsTabCreation = (s.tabReceipt iff s.journal == "terminal") and (s.tabReceipt implies s.tab)
   val PresentationAfterReceiptAttempt = s.presented implies
     (s.tab and s.journal == "terminal" and s.receiptTried)
   val ViewCommandNeedsToggleOff = s.command.in(Set("bound", "sent")) implies not(s.commandAsked)
