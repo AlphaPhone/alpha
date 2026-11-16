@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
+import {verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
 import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import {checkReadReplyLease} from '../specs/quint/refinement/application/read-reply-lease.mjs';
 
@@ -10,7 +11,9 @@ test('the real Notes read-reply lease follows approval, completion and retiremen
   const receipt = await checkReadReplyLease([source]);
   assert.equal(receipt.traces, 9);
   assert.equal(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound, true);
-  assert.ok(receipt.actions.completionSettles >= 5);
+  assert.equal(verifyRefinementReceiptInputs(receipt), true);
+  assert.equal(receipt.actions.retireStaleLease, 3);
+  assert.equal(receipt.actions.completionSettles, 5);
 });
 
 test('the read-reply replay catches stale answer insertion at the renderer commit', {timeout:scaledTimeout(120000)}, async () => {

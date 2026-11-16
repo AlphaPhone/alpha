@@ -24,7 +24,7 @@ module ReadReplyLease {
   action rejectHint = all { s.approval == "running", s.lease == "pending", s.completions == 0,
     s' = s.with("approval", "none") }
   // A duplicate completion does not dispatch another request after the first one settled.
-  action duplicateCompletion = all { s.lease.in(Set("done", "unconfirmed")), s' = s }
+  action duplicateCompletion = all { s.lease.in(Set("done", "unconfirmed", "cancelled")), s' = s }
   // The agent's answer arrives. It is shown and voice resumes only if the lease is still
   // completing for the current binding; otherwise the outcome is unconfirmed, never retried.
   action completionSettles(ok: bool): bool = all { s.completions == 1, s.lease.in(Set("completing", "cancelled")),
@@ -39,9 +39,11 @@ module ReadReplyLease {
     s' = if (s.lease.in(Set("cancelled", "done"))) s
       else { ...s, lease: "cancelled", wasCancelled: true, cancelRequests: s.cancelRequests + 1 } }
   action bindingChanged = all { s.bindingCurrent, s' = { ...s, bindingCurrent: false } }
+  // The shell's context refresh runs after the approval unwinds and retires a stale lease.
+  action retireStaleLease = all { not(s.bindingCurrent), cancel }
   action step = {
     nondet flag = Set(false, true).oneOf()
-    any { retain, approveTap, receipt(flag), rejectHint, duplicateCompletion, completionSettles(flag), cancel, bindingChanged, s' = s }
+    any { retain, approveTap, receipt(flag), rejectHint, duplicateCompletion, completionSettles(flag), cancel, bindingChanged, retireStaleLease, s' = s }
   }
 
   val PhaseKnown = s.lease.in(Set("none", "pending", "completing", "done", "cancelled", "unconfirmed"))
@@ -70,7 +72,8 @@ module ReadReplyLease {
     .expect(s.lease == "cancelled" and s.answers == 0 and s.voiceResumed == 0 and safety)
   run bindingChangeLeavesUnconfirmedTest = init.then(retain).then(approveTap).then(receipt(true)).then(bindingChanged)
     .then(completionSettles(true)).expect(s.lease == "unconfirmed" and s.answers == 0 and safety)
-    .then(duplicateCompletion).expect(s.lease == "unconfirmed" and s.completions == 2 and safety)
+    .then(retireStaleLease).then(duplicateCompletion)
+    .expect(s.lease == "cancelled" and s.cancelRequests == 1 and s.completions == 2 and safety)
   run failedActionCancelsLeaseTest = init.then(retain).then(approveTap).then(receipt(false))
     .expect(s.lease == "cancelled" and s.completions == 0 and safety)
   run mismatchedHintNeverStartsCompletionTest = init.then(retain).then(approveTap).then(rejectHint)
@@ -78,6 +81,7 @@ module ReadReplyLease {
   run failedCompletionRemainsUnconfirmedTest = init.then(retain).then(approveTap).then(receipt(true))
     .then(completionSettles(false)).then(duplicateCompletion)
     .expect(s.lease == "unconfirmed" and s.completions == 2 and s.answers == 0 and safety)
-  run staleReceiptLeavesLeasePendingTest = init.then(retain).then(approveTap).then(bindingChanged).then(receipt(true))
+  run staleReceiptRetiresLeaseTest = init.then(retain).then(approveTap).then(bindingChanged).then(receipt(true))
     .expect(s.lease == "pending" and s.completions == 0 and s.approval == "none" and safety)
+    .then(retireStaleLease).expect(s.lease == "cancelled" and s.cancelRequests == 1 and safety)
 }

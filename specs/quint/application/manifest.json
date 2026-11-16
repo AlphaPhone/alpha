@@ -5061,7 +5061,7 @@
       "cancelledWhileCompletingTest",
       "bindingChangeLeavesUnconfirmedTest",
       "failedActionCancelsLeaseTest",
-      "staleReceiptLeavesLeasePendingTest",
+      "staleReceiptRetiresLeaseTest",
       "mismatchedHintNeverStartsCompletionTest",
       "failedCompletionRemainsUnconfirmedTest"
     ],
@@ -5133,6 +5133,7 @@
     "abstractions": [
       "One rendered lease, an exact synthetic proposal and its original user message. The source replay supplies the local connection epoch and conversation, while expiry, account credential checks and the voice-media implementation have separate scopes.",
       "A successful approved read carries a hint. A mismatched digest or origin is refused before completion, and a failed approval without a hint cancels the lease.",
+      "After the approval settles, the shell context refresh retires a stale lease and requests exact cancellation.",
       "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls."
     ]
   },
