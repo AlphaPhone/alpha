@@ -156,6 +156,7 @@ public class PackageManager {
 public class Configuration {}`,
     'android/content/res/Resources.java': `package android.content.res;
 public class Resources {
+  public String getResourceName(int id) {throw new AssertionError("Unexercised resource-name lookup");}
   public android.util.DisplayMetrics getDisplayMetrics() {
     return new android.util.DisplayMetrics();
   }
@@ -447,12 +448,15 @@ public class Bridge {
 }`,
     'com/getcapacitor/android/R.java': `package com.getcapacitor.android;
 public class R {
+  public static class layout {public static final int capacitor_bridge_layout_main=2;}
   public static class id {
     public static final int webview = 1;
   }
 }`,
     'com/getcapacitor/BridgeActivity.java': `package com.getcapacitor;
 public class BridgeActivity {
+  public void setContentView(int layout) {throw new AssertionError("Unexercised layout inflation");}
+  public void dump(String prefix,java.io.FileDescriptor descriptor,java.io.PrintWriter out,String[] args) {throw new AssertionError("Unexercised activity dump");}
   protected Bridge bridge;
   public boolean finishing, destroyed, removedTask;
   public int recreates, loads;
@@ -553,6 +557,7 @@ public class BridgeActivity {
 }`,
     'ai/alphacompute/alphaphone/BuildConfig.java': `package ai.alphacompute.alphaphone;
 public class BuildConfig {
+  public static final int VERSION_CODE=1;
   public static boolean DEBUG = false;
 }`,
     // The composer port's actual WebView listener is covered by messages-composer-port.test.mjs.

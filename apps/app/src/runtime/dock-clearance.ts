@@ -55,7 +55,9 @@ let installed: (() => void) | null = null;
  */
 export function installDockClearance(): () => void {
   if (installed) return installed;
-  const uninstall = installSharedDockClearance({ screen: '[data-screen]', docks: DOCK, bar: '[data-alpha-input-bar]', clearanceProperty: DOCK_CLEARANCE_PROPERTY, restProperty: DOCK_REST_PROPERTY });
+  const uninstall = installSharedDockClearance({ screen: '[data-screen]', docks: DOCK, bar: '[data-alpha-input-bar]', clearanceProperty: DOCK_CLEARANCE_PROPERTY, restProperty: DOCK_REST_PROPERTY,
+    revealFocus: {scrollContainers: '[data-alpha-app-scroll],[data-installed-apps-scroll],[data-alpha-layer="home"],.calendar-timeline,.calendar-draft-fields'},
+  });
   const uninstallHeader = installHeaderClearance();
   const stop = () => {
     if (installed !== stop) return;
