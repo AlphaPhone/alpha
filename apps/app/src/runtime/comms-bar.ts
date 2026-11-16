@@ -140,12 +140,14 @@ export function isAskSentence(text: string): boolean {
 /** AC-26: a proposal card's lifecycle in the transcript. Only 'open' may act. */
 export type CommsProposalState = 'open' | 'replaced' | 'done';
 /** The one check every card dispatcher (shell cardAct and the live agent override) runs first, and
- * the one that decides whether a proposal card shows its button: a card that is not a proposal is
- * unaffected; a proposal acts only while open, and an acting proposal never acts while an emergency
- * call is live (AC-19), however old the card is or whether it was restored (AC-30). */
-export function proposalCanAct(card: { type?: unknown; state?: unknown; acts?: unknown } | null | undefined, emergency = false): boolean {
-	if (!card || card.type !== 'proposal') return true;
-	return card.state === 'open' && !(emergency && card.acts !== false);
+ * the one that decides whether a proposal card shows its button. A proposal acts only while open.
+ * While an emergency call is live (AC-19) nothing that acts may act, however old the card is or
+ * whether it was restored (AC-30): an acting proposal card, and a live pending action shown as an
+ * action review card off the comms screens (it carries a proposalId). Other cards are unaffected. */
+export function proposalCanAct(card: { type?: unknown; state?: unknown; acts?: unknown; proposalId?: unknown } | null | undefined, emergency = false): boolean {
+	if (!card) return true;
+	if (card.type === 'proposal') return card.state === 'open' && !(emergency && card.acts !== false);
+	return !(emergency && typeof card.proposalId === 'string');
 }
 
 /** AC-20: who a call proposal would reach, from the phone's own contacts. `numbers` lists every

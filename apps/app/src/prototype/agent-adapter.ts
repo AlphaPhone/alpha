@@ -23,7 +23,7 @@ import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-tel
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,phoneDialResultText,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {executeTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,executeTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
 import {normalizePhoneNumber,reviewSms} from '../runtime/aosp-telephony';
 import {parseContactDetail,parseContactRemove,parseContactSave} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {askTelephonyReview} from './telephony-review';
@@ -281,8 +281,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const key=numberKey(target.number),rows=await client.searchContacts('',100);
       return {name:rows.find(row=>row.phoneNumbers.some(value=>numberKey(value)===key))?.displayName||null,numbers:[target.number]};
     }
-    const rows=await client.searchContacts(target.contact,10),numbers=[...new Set(rows.flatMap(row=>row.phoneNumbers))];
-    return {name:rows.length===1?rows[0].displayName:null,numbers};
+    // The same options the in-card review offers before the dial (telephony-executor).
+    const options=contactCallOptions(await client.searchContacts(target.contact,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber),names=new Set(options.map(option=>option.id));
+    return {name:names.size===1?options[0].name:null,numbers:options.map(option=>option.number)};
   });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
@@ -436,6 +437,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   /** One pending action in the chat: a proposal card on a comms screen, otherwise the action review card. */
   function sayProposal(shell:Shell,proposal:import('../runtime/alpha-client').ActionProposal,belongs?:()=>boolean){
+    // AC-19: over a live emergency call no action is offered on any screen; it is declined so
+    // recovery never offers it again.
+    if(shell.emergencyLive?.()===true){if(!belongs||belongs())void declineProposal(proposal.id);return;}
     if(!activeCommsSpec(shell,views)){shell.agentSay(proposal.description,proposalCard(proposal),undefined,belongs);return;}
     if(belongs&&!belongs())return;
     // Recovery and a chat reply can publish the same pending action; one card keeps it.
@@ -1708,9 +1712,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const message=live.find(item=>item.card===c);if(!message)return m;
       // Only the card being approved or declined shows progress; the others stay readable but wait.
       const ic=out.ic||{},busy=!!this.decliningProposal||!!this.pendingActionApproval,approving=busy&&this.pendingActionApprovalProposalId===c.proposalId,declining=this.decliningProposal===c.proposalId;
+      // AC-19: during an emergency call the card can still be declined but not approved.
+      const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',rows:[
-        {ini:'',who:approving?'Working…':c.title,text:typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving?'':c.reviewDestination?'Open':'Approve',icon:ic.right,open:()=>{if(!busy)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });

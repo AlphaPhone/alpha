@@ -84,6 +84,11 @@ test('a replaced or finished proposal can never act; other cards are unaffected 
   assert.equal(B.proposalCanAct({type: 'proposal', state: 'replaced'}), false);
   assert.equal(B.proposalCanAct({type: 'proposal', state: 'done'}), false);
   assert.equal(B.proposalCanAct({type: 'generic'}), true);
+  // AC-19: off the comms screens a live pending action is an action review card; it never acts
+  // during an emergency call either, while other cards are unaffected.
+  assert.equal(B.proposalCanAct({type: 'generic', proposalId: 'p9'}, true), false);
+  assert.equal(B.proposalCanAct({type: 'generic', proposalId: 'p9'}, false), true);
+  assert.equal(B.proposalCanAct({type: 'generic'}, true), true);
 });
 
 test('a contact call is chosen inside the approved card, never in a separate dialog (D8)', () => {
