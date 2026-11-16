@@ -43,7 +43,8 @@ const nativeInputs = {
   offer2: [200, JSON.stringify(secondFeed)],
   withdrawn: [404, ''],
   malformed: [200, '{bad json'],
-  invalid: [200, JSON.stringify({...offered, variant: 'standalone'})],
+  // Well formed, but offered to another signer: never this install's update.
+  invalid: [200, JSON.stringify({...offered, signerSha256: sha(Buffer.of(8))})],
   transport: [503, ''],
   exactLimit: [200, offerJson.padEnd(65536)],
   oversized: [200, offerJson.padEnd(65537)],
