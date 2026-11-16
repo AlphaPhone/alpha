@@ -200,6 +200,8 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await settled(page);
 		// Open: End leaves the bar (the call card has it); full: End is in the strip.
 		await expect(end).toHaveCount(0);
+		// As above, wait past the drag's own compatibility-click guard before a new toolbar tap.
+		await page.waitForTimeout(400);
 		await page.getByRole('button', {name: 'Expand chat', exact: true}).click();
 		await page.locator('[data-alpha-strip-action="end"]').click();
 		expect((await calls(page)).filter(call => call[1] === 'stripEnd')).toHaveLength(1);
