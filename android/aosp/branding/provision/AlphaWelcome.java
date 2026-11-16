@@ -70,9 +70,7 @@ final class AlphaWelcome {
     }
 
     private static final class Completion {
-        private static final String ALPHA = "ai.alphacompute.alphaphone";
-        private static final String PREPARE_TELEPHONY = ALPHA + ".action.PREPARE_TELEPHONY_ROLES";
-        private static final String FRESH_TELEPHONY = ALPHA + ".fresh_telephony_setup";
+        private final String alpha;
         private static final long STEP_TIMEOUT_MS = 15000;
         private final Activity activity;
         private final Runnable completed;
@@ -84,11 +82,12 @@ final class AlphaWelcome {
         private int step;
         Completion(Activity activity, Runnable completed, Button next, Button settings, TextView notice) {
             this.activity = activity; this.completed = completed; this.next = next;
+            this.alpha = activity.getString(R.string.alpha_launcher_package);
             this.settings = settings; this.notice = notice;
         }
         static boolean hasFreshTelephony(Activity activity) {
             PackageManager packages = activity.getPackageManager();
-            return packages.hasSystemFeature(FRESH_TELEPHONY)
+            return packages.hasSystemFeature(activity.getString(R.string.alpha_launcher_package) + ".fresh_telephony_setup")
                     && packages.hasSystemFeature(PackageManager.FEATURE_TELEPHONY);
         }
 
@@ -118,8 +117,8 @@ final class AlphaWelcome {
         private void prepareTelephony(RoleManager roles, String[] required, int attempt) {
             if (!eligible()) return;
             int operation = beginStep(attempt, R.string.alpha_roles_failed);
-            Intent request = new Intent(PREPARE_TELEPHONY)
-                    .setClassName(ALPHA, ALPHA + ".AlphaTelephonySetupReceiver")
+            Intent request = new Intent(alpha + ".action.PREPARE_TELEPHONY_ROLES")
+                    .setClassName(alpha, alpha + ".AlphaTelephonySetupReceiver")
                     .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             try {
                 activity.sendOrderedBroadcast(request, null, new BroadcastReceiver() {
@@ -143,7 +142,7 @@ final class AlphaWelcome {
                     if (!eligible()) return;
                     int nextRole = index + 1;
                     int operation = beginStep(attempt, failureMessage);
-                    roles.addRoleHolderAsUser(role, ALPHA, 0, Process.myUserHandle(),
+                    roles.addRoleHolderAsUser(role, alpha, 0, Process.myUserHandle(),
                             activity.getMainExecutor(), accepted -> {
                                 if (!current(attempt, operation)) return;
                                 ++step;
@@ -196,7 +195,7 @@ final class AlphaWelcome {
         }
 
         private boolean held(RoleManager roles, String role) {
-            return roles.getRoleHoldersAsUser(role, Process.myUserHandle()).equals(java.util.Collections.singletonList(ALPHA));
+            return roles.getRoleHoldersAsUser(role, Process.myUserHandle()).equals(java.util.Collections.singletonList(alpha));
         }
 
         private void finishPresets(RoleManager roles, String[] required) {

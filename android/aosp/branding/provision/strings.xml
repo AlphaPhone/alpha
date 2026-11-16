@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Image staging overrides this from the admitted launcher package. -->
+    <string name="alpha_launcher_package" translatable="false">ai.alphacompute.alphaphone</string>
     <string name="alpha_name">Alpha Phone</string>
     <string name="alpha_welcome">Welcome to Alpha Phone</string>
     <string name="alpha_setup_description">Make this phone yours. Connect to a network, secure your screen, then continue to Alpha.</string>
