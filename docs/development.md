@@ -676,7 +676,16 @@ probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
 The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
 Shell from browser-based Google sign-in and checks for an eligible browser
 when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
-The reviewed pin `aee57131613d6758dbe007e53cdb791f109bdb1c` includes MMS role eligibility ([eliza#39686](https://github.com/elizaOS/eliza/pull/39686)), private action target restoration ([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)), and shared media intake ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)). The engine, voice assets and UUID inputs are unchanged. Native receipts and signed retained-data qualification remain separate.
+The pin `33c5ab4c004a396324994784c4bd76e8c8679286` matches the
+MMS receiver's MIME type when checking eligibility for the Android SMS role
+([eliza#39686](https://github.com/elizaOS/eliza/pull/39686)).
+The pin `c25d0fca2561f9f604bee8e891be772fa678589f` takes the reviewed
+fix for restoring private action targets before resident execution
+([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)).
+The current pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
+routes, keeps selected chat attachments through intake, binds the selected Cloud
+image model at launch and rechecks a live file selection after storage reads
+([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
