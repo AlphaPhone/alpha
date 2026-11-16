@@ -9,11 +9,13 @@ const source = fileURLToPath(import.meta.url);
 
 test('the real Notes read-reply lease follows approval, completion and retirement', {timeout:scaledTimeout(120000)}, async () => {
   const receipt = await checkReadReplyLease([source]);
-  assert.equal(receipt.traces, 9);
+  assert.equal(receipt.traces, 12);
+  assert.equal(receipt.checkpoints, 65);
   assert.equal(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound, true);
   assert.equal(verifyRefinementReceiptInputs(receipt), true);
   assert.equal(receipt.actions.retireStaleLease, 3);
-  assert.equal(receipt.actions.completionSettles, 5);
+  assert.equal(receipt.actions.completionSettles, 6);
+  assert.equal(receipt.actions.recover, 7);
 });
 
 test('the read-reply replay catches stale answer insertion at the renderer commit', {timeout:scaledTimeout(120000)}, async () => {

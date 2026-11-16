@@ -132,6 +132,7 @@ public class ApplicationInfo {
  public boolean getBoolean(int id){if(id!=206)throw new AssertionError(id);return android.content.Context.provisioned;}`);
     put('ai/alphacompute/alphaphone/BuildConfig.java',`package ai.alphacompute.alphaphone;
 public class BuildConfig {
+ public static final int VERSION_CODE=1;
  public static final String APPLICATION_ID="fixture.alpha";
  public static boolean DEBUG=false;
 }`);
