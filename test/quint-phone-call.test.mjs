@@ -47,6 +47,8 @@ function fixture() {
     formatTime: () => 'now', formatMonthDay: () => 'day', DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     pad2: value => String(value).padStart(2, '0'), crypto: {randomUUID},
     setListFilterHandler, clearListFilter, matchesCallQuery,
+    // The development Phone fixture runs only behind test mocks; this replay is that fixture.
+    testMocksEnabled: true,
   }});
   core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };`);
   const {PN} = core.context, phone = views.phone;
@@ -60,11 +62,14 @@ function fixture() {
   let shown = null;
   const settle = run => {
     queue = [];
+    let settledPatches = 0;
+    // No return in finally: an exception from the handler must reach the test.
     try { run(); } finally {
       const pending = queue; queue = null;
+      settledPatches = pending.length;
       for (const [patch, done] of pending) settleNow.call(shell, patch, done);
-      return pending.length > 0;
     }
+    return settledPatches > 0;
   };
   // A state change redraws the view while it is in front; its render arms the start of a handed-over call.
   const act = run => {
