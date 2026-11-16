@@ -42,3 +42,13 @@ test('the agent must offer a capability, and platform gates still apply', () => 
   assert.ok(image.includes('sms.send.v1'));
   assert.ok(image.includes('phone.dial.v1'));
 });
+
+test('canonical Notes negotiates only the exact foreground list filter', () => {
+  const capability = 'notes.list-filter.v1';
+  const offer = [capability, 'notes.organize.v1', 'notes.search.v1'];
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, canonicalNotes: true}),
+    ['calendar.local-event.v1', 'notes.local-record.v1', capability]);
+  assert.ok(!selectDeviceCapabilities(offer, apk).includes(capability));
+  assert.ok(!selectDeviceCapabilities(offer, {...apk,canonicalNotes:true,foregroundReview:false}).includes(capability));
+  assert.ok(!selectDeviceCapabilities([], {...apk,canonicalNotes:true}).includes(capability));
+});

@@ -1,5 +1,6 @@
 import {googleConnectionController} from './google-connection-ui';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+import {NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isCalendarReadFailureCode} from "../../../../.eliza/client-features/packages/contracts/src/calendar.ts";
 import {SingleFlightMemo} from "@elizaos/core/read-memo";
 import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
@@ -496,11 +497,11 @@ async function calendarAgendaObservation(actions:DeviceActions,context:ContextEn
 }
 /** The X-Eliza-Device-Capabilities value for every runtime (remote, resident, Cloud), selected by
  * selectDeviceCapabilities for this phone's platform. */
-async function deviceCapabilities(offered:unknown):Promise<string>{
+async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<string>{
   const android=Capacitor.getPlatform()==='android';
   return selectDeviceCapabilities(offered,{android,native:Capacitor.isNativePlatform(),
     camera:Capacitor.isPluginAvailable('ElizaCamera')||!android&&typeof navigator!=='undefined'&&typeof navigator.mediaDevices?.getUserMedia==='function',
-    foregroundReview:typeof foregroundExecutor==='function',
+    foregroundReview:typeof foregroundExecutor==='function',canonicalNotes,
     photoLibrary:Capacitor.isNativePlatform()&&Capacitor.isPluginAvailable('AlphaPhotoLibrary'),
     files:Capacitor.isPluginAvailable('AlphaFiles'),
     clockRepeatDays:android&&Array.isArray(offered)&&offered.includes('clock.handoff.v2')&&await clockRepeatDaysSupported(),
@@ -1244,7 +1245,7 @@ async function connectRemote(kind: 'remote' | 'local', origin: string, code: str
 async function connectDevelopment(profile:DevelopmentProfile,signal:AbortSignal){
  if(!browserDevProfile)throw Error('Development mode required.');
  // This explicitly gated browser fixture implements reminder v2; real peers still negotiate it.
- const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY]},scope=await actionScope(JSON.stringify([client.origin,session.ownerId,session.agentId,credential.installationId]));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=3 as const;save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});developmentVoiceExpiresAt=Date.now()+3600000;activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
+ const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY,NOTES_LIST_FILTER_CAPABILITY]},scope=await actionScope(JSON.stringify([client.origin,session.ownerId,session.agentId,credential.installationId]));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=3 as const;save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});developmentVoiceExpiresAt=Date.now()+3600000;activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
  await restoreSavedHistory(signal);
 }
 /** Native's identity read during a bind failed without Cloud refusing the key (transport, 408, 429, 5xx). */
@@ -1554,7 +1555,7 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
     if(registered.installationId!==credential.installationId||typeof registered.enrollmentId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId))throw Error('Device registration was not verified');
     if(registered.userTextFormatVersion===1)userTextFormatVersion=1;
     reason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
-    headers['X-Eliza-Device-Capabilities']=await deviceCapabilities(registered.capabilities);
+    headers['X-Eliza-Device-Capabilities']=await deviceCapabilities(registered.capabilities,true);
     credential.enrollmentId=registered.enrollmentId;await store.write(slot,credential);signal.throwIfAborted();
     // Cost: one authenticated read after durable enrollment, not per message.
     // Its existing native enrollment entry wakes notifications only after the complete slot exists.
@@ -2507,6 +2508,7 @@ export const connectionController = {
     };
     ownerReminderBindingCache={selected,session,generation,port};return port;
   },
+  canonicalNotesFilterAvailable(){return active?.kind==='resident'&&active.actions?.credential.capabilities?.includes(NOTES_LIST_FILTER_CAPABILITY)===true;},
   /** Canonical app records belong to the same resident agent as chat, on Android and in DEV. */
   getAppRecordClient():AppRecordPort|null {
     const selected=active,session=state.session,generation=epoch;
