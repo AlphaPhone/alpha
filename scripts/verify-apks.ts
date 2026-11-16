@@ -126,12 +126,14 @@ if(cloudEvidenceArgs.length){
 
 const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
 const callbackHost = new URL(CLOUD_DEPLOYMENT.production.web).hostname;
-// The only web VIEW filters an APK may carry: the main manifest's two returns on the production web
+// The only web VIEW filters an APK may carry: the main manifest's three returns on the production web
 // host (android/app/product.gradle supplies appLinkHost). Add a new app link here deliberately.
 const mainActivity = `${identity.appId}.MainActivity`;
 const webViewFiltersAllowed = [
   `${mainActivity} https://${callbackHost}/alphaphone/auth/callback`,
   `${mainActivity} https://${callbackHost}/alphaphone/gmail/callback`,
+  // The in-app checkout's return (apps/app/src/runtime/cloud-plans.ts): opening the app is its whole job.
+  `${mainActivity} https://${callbackHost}/alphaphone/billing/return`,
 ];
 const buildRecordFile = path.join(directory, "build-config.json");
 if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run bun run android:build first.`);

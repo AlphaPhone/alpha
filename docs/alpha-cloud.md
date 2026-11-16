@@ -46,7 +46,7 @@ in the app, and the API Worker hosts both Durable Objects itself. Staging uses `
 | `cloud/resources.json` | Cloudflare account, zone, worker names and resource ids. Zero ids are placeholders until `provision`. |
 | `cloud/edge/worker.ts` | The web-host Worker (about 40 lines). |
 | `scripts/cloud-worker.ts` (`bun run cloud:worker`) | The operator tool: `prepare`, `check`, `secrets`, `provision`, `migrate`, `seed`, `deploy`, `tenant`, `smoke`. |
-| `scripts/cloud-registration.ts`, `scripts/cloud-seed-registration.mjs` | The app's native client as upstream reads it: an `apps` row and a `mobile_app_auth_clients` row (callback, package, release signer fingerprints). |
+| `scripts/cloud-registration.ts`, `scripts/cloud-seed-registration.ts` | The app's native client as upstream reads it: an `apps` row and a `mobile_app_auth_clients` row (callback, package, release signer fingerprints). |
 | `scripts/local-cloud.ts` (`bun run cloud:local`) | The same Cloud on this computer, for development and contract checks. |
 | `.github/workflows/cloud-deploy.yml` | Manual, main-only deploy per environment. |
 | `apps/app/src/runtime/cloud-plans.ts`, `cloud-plan-ui.tsx` | In-app plans, checkout, plan change, cancellation and referrals. |
