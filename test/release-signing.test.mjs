@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { auditWebBundle } from "../scripts/audit-production-bundle.ts";
 import { appLinkFilters, assetLinksProblems, fingerprint, PLACEHOLDER, renderAssetLinks, TEMPLATE } from "../scripts/render-assetlinks.ts";
 import { buildEnv, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
-import { nativeCartesiaBlockers, releaseDistributable } from "../scripts/release-distributable.ts";
+import { releaseBlockers } from "../scripts/release-blockers.ts";
 import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
 
 const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZAOS_KEY_ALIAS: "a", ELIZAOS_KEY_PASSWORD: "q" };
@@ -58,55 +58,54 @@ test("only a release signed by the recorded signer with an advancing versionCode
   assert.match(staleUnsigned.blockers.join(), /not greater/);
 });
 
-// Every fact a distributable release row carries; each test below breaks exactly one.
+// Every fact verify-apks records on a distributable native release row; each case below breaks one.
+// verify-apks records distributable = releaseBlockers(row) is empty (scripts/release-blockers.ts).
+const SHA = "b".repeat(64);
 const DISTRIBUTABLE = {
-  testMocks: false, signed: true, releaseAdmission: { signerMatches: true, blockers: [], failures: [] },
-  runtime: { distributable: true }, runtimeNotices: true, voiceHost: { packaged: true, asr: true, qualified: true }, licenceBlockers: [],
+  mode: "release", sha256: SHA, runtimeProfile: "native", distributable: true, testMocks: false, bundleAudit: "passed", signed: true,
+  releaseAdmission: { signerMatches: true, blockers: [], failures: [] }, runtime: "PACKAGED", runtimeNotices: true,
+  voiceHost: { packaged: true, asr: true, differences: [], qualified: true }, licenceBlockers: [],
 };
 
-test("a release is distributable only when every term holds", () => {
-  assert.equal(releaseDistributable(DISTRIBUTABLE), true);
-  assert.equal(releaseDistributable({...DISTRIBUTABLE, voiceHost: {...DISTRIBUTABLE.voiceHost, qualified: false}}), true, "device approval flags are separate from build integrity");
+test("a release is distributable only when releaseBlockers names nothing", () => {
+  assert.deepEqual(releaseBlockers(DISTRIBUTABLE), []);
+  assert.deepEqual(releaseBlockers({...DISTRIBUTABLE, voiceHost: {...DISTRIBUTABLE.voiceHost, qualified: false}}), [], "device approval flags are separate from build integrity");
   const broken = {
-    "unsigned": { signed: false },
-    "signed is not exactly true": { signed: "true" },
-    "signer does not match the descriptor": { releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, signerMatches: false } },
-    "admission blocker": { releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, blockers: ["versionCode not greater"] } },
-    "admission failure": { releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, failures: ["test-mocks APK signed with the release key"] } },
-    "no packaged runtime": { runtime: { distributable: false } },
+    "unsigned": [{ signed: false }, /unsigned release/],
+    "signed is not exactly true": [{ signed: "true" }, /unsigned release/],
+    "signer does not match the descriptor": [{ releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, signerMatches: false } }, /does not match android\/release-signer\.json/],
+    "admission blocker": [{ releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, blockers: ["versionCode not greater"] } }, /versionCode not greater/],
+    "admission failure": [{ releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, failures: ["test-mocks APK signed with the release key"] } }, /test-mocks APK signed/],
+    "no packaged runtime": [{ runtime: "UNPACKAGED" }, /unpackaged runtime/],
     // A PACKAGED distribution must ship the regenerated runtime notices (Bun and bundled packages).
-    "notices lack the runtime": { runtimeNotices: false },
-    "no on-device voice": { voiceHost: { ...DISTRIBUTABLE.voiceHost, packaged: false } },
-    "no on-device ASR": { voiceHost: { ...DISTRIBUTABLE.voiceHost, asr: false } },
-    "licence blocker": { licenceBlockers: ["unresolved-font-licence: x"] },
+    "notices lack the runtime": [{ runtimeNotices: false }, /notices lack the packaged runtime/],
+    "no on-device voice": [{ voiceHost: { ...DISTRIBUTABLE.voiceHost, packaged: false } }, /no on-device voice packaged/],
+    "no on-device ASR": [{ voiceHost: { ...DISTRIBUTABLE.voiceHost, asr: false } }, /^on-device voice has no ASR$/],
+    "voice bytes differ from the record": [{ voiceHost: { ...DISTRIBUTABLE.voiceHost, differences: ["x"] } }, /bytes differ from the voice-host record/],
+    "test mocks": [{ testMocks: true }, /test-mocks build/],
+    "bundle audit failed": [{ bundleAudit: "failed" }, /flag-off bundle audit/],
+    "licence check not recorded": [{ licenceBlockers: undefined }, /font licence check was not recorded/],
   };
-  for (const [name, change] of Object.entries(broken))
-    assert.equal(releaseDistributable({ ...DISTRIBUTABLE, ...change }), false, name);
+  for (const [name, [change, expected]] of Object.entries(broken))
+    assert.match(releaseBlockers({ ...DISTRIBUTABLE, ...change }).join("\n"), expected, name);
+  // A recorded row that verify-apks did not mark distributable is never admitted.
+  assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false }), ["verify-apks did not record this release as distributable"]);
+  assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false, voiceHost: { ...DISTRIBUTABLE.voiceHost, asr: false } }), ["on-device voice has no ASR"]);
+  // The image path also requires a reviewed platform certificate.
+  assert.match(releaseBlockers(DISTRIBUTABLE, { image: { platformCertificateSha256: "unset" } }).join(), /not a reviewed release certificate/);
 });
 
-test("native OTA releases require both on-device ASR and exact supplied Cartesia evidence", () => {
-  const hashes = ["b".repeat(64), "c".repeat(64)];
-  const evidenceSha256 = "d".repeat(64);
+test("supplied Cartesia evidence is recorded on a native release but does not decide distributable", () => {
   const checks = Object.fromEntries(CLOUD_VOICE_CHECKS.map(name => [name, true]));
-  const evidence = {format: "alpha-cloud-voice-qualification-v1", results: hashes.map(apkSha256 => ({
-    apkSha256, provider: "cartesia", outcome: "passed", checks,
-  }))};
-  const assess = (apkSha256, input, options = {}) => {
-    const admission = cloudVoiceAdmission(apkSha256, input, options.evidenceSha256 ?? evidenceSha256);
-    return releaseDistributable({...DISTRIBUTABLE, ...(options.facts ?? {}), cartesia: {apkSha256, admission}});
-  };
-  for (const hash of hashes) assert.equal(assess(hash, evidence), true);
-  assert.equal(assess(hashes[0], evidence, {facts: {voiceHost: {packaged: false, asr: false}}}), false);
-  assert.equal(assess(hashes[0], evidence, {facts: {voiceHost: {packaged: true, asr: false}}}), false);
-  assert.equal(assess(hashes[0], evidence, {evidenceSha256: "invalid"}), false);
-  assert.equal(assess(hashes[0], null), false);
-  assert.equal(assess(hashes[0], {...evidence, results: [evidence.results[1]]}), false);
-  assert.equal(assess(hashes[0], {...evidence, results: [evidence.results[0], evidence.results[0]]}), false);
-  for (const change of [{provider: "other"}, {outcome: "failed"}, {checks: {...checks, stopReleased: false}}]) {
-    assert.equal(assess(hashes[0], {...evidence, results: [{...evidence.results[0], ...change}]}), false);
-  }
-  const admission = cloudVoiceAdmission(hashes[0], evidence, evidenceSha256);
-  assert.match(nativeCartesiaBlockers(hashes[1], admission).join("\n"), /does not match this APK/);
+  const evidence = {format: "alpha-cloud-voice-qualification-v1", results: [{ apkSha256: SHA, provider: "cartesia", outcome: "passed", checks }]};
+  const withVoice = input => ({ ...DISTRIBUTABLE, cloudVoice: cloudVoiceAdmission(SHA, input, "d".repeat(64)) });
+  assert.deepEqual(releaseBlockers(withVoice(evidence)), []);
+  // release.yml admits the receipt itself (scripts/ci/qualified-app-update.py) before verify-apks runs.
+  assert.deepEqual(releaseBlockers(withVoice({ ...evidence, results: [{ ...evidence.results[0], outcome: "failed" }] })), []);
+  assert.deepEqual(releaseBlockers(withVoice(null)), []);
+  // On-device voice with ASR is still required of the same row.
+  assert.match(releaseBlockers({ ...withVoice(evidence), voiceHost: { packaged: false, asr: false, differences: [] } }).join(), /no on-device voice packaged/);
+  assert.match(releaseBlockers({ ...withVoice(evidence), voiceHost: { packaged: true, asr: false, differences: [], qualified: true } }).join(), /on-device voice has no ASR/);
 });
 
 test("assetlinks.json is rendered only from the recorded release signer, never unset, a placeholder or a debug key", () => {
