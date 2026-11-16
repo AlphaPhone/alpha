@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts';
+import {readFileSync} from 'node:fs';
 
 const everything = [
   'calendar.local-event.v1', 'notes.local-record.v1', 'camera.capture-photo.v1', 'reminders.local-record.v1', 'reminders.local-record.v2',
@@ -51,4 +52,18 @@ test('canonical Notes negotiates only the exact foreground list filter', () => {
   assert.ok(!selectDeviceCapabilities(offer, apk).includes(capability));
   assert.ok(!selectDeviceCapabilities(offer, {...apk,canonicalNotes:true,foregroundReview:false}).includes(capability));
   assert.ok(!selectDeviceCapabilities([], {...apk,canonicalNotes:true}).includes(capability));
+});
+
+// Source contract on connection-ui.tsx: only the resident connection, which owns canonical app
+// records, selects with canonicalNotes. Remote and Cloud enrollments never advertise the filter.
+test('only the resident connection may negotiate the canonical Notes filter', () => {
+  const ui = readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx', import.meta.url), 'utf8');
+  const body = name => { const from = ui.indexOf(`\nasync function ${name}(`); assert.ok(from >= 0, name); const to = ui.indexOf('\nasync function ', from + 1); return ui.slice(from, to < 0 ? undefined : to); };
+  const calls = name => [...body(name).matchAll(/deviceCapabilities\(([^()]*(?:\([^()]*\))?[^()]*)\)/g)].map(match => match[1]);
+  assert.deepEqual(calls('connectResident'), ['registered.capabilities,true']);
+  assert.deepEqual(calls('connectRemote'), ['registered.capabilities']);
+  assert.deepEqual(calls('connectCloud'), ['device?.capabilities']);
+  assert.equal([...ui.matchAll(/deviceCapabilities\([^)]*,\s*true\)/g)].length, 1);
+  assert.ok(!body('connectRemote').includes('NOTES_LIST_FILTER_CAPABILITY') && !body('connectCloud').includes('NOTES_LIST_FILTER_CAPABILITY'));
+  assert.ok(!body('connectRemote').includes('notes.list-filter.v1') && !body('connectCloud').includes('notes.list-filter.v1'));
 });
