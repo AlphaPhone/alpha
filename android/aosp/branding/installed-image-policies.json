@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "description": "Exact product-only package-token projections of hash-verified canonical policy outputs. This is not signing, source-lock, image or device approval. Canonical policy manifests and patches remain unchanged.",
+  "cohorts": {
+    "ai.elizaresearch.alphaphone": {
+      "canonicalAppId": "ai.alphacompute.alphaphone",
+      "canonicalManifests": {
+        "core-launcher": "f73a1e60417f5f5ec19d62d767e2abe4df9524832d3f20906261f885d81bf17f",
+        "system-entry": "aeebf36ceb298f2336b0b3b2c8dff329f5a9152dc396b21958d99ac73cae59cd"
+      },
+      "files": {
+        "frameworks/base/packages/SystemUI/res/values/config.xml": {
+          "canonicalSha256": "0a15919109351f3578f3ede7ae4b4eaa3530eca71f11a8d1b1b1c0ef2fc7a46e",
+          "projectedSha256": "c09bbcdf4434410f6d42e12525e25e2ae56b43a5e2d3dbc17a4a7874f1239f76"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/qs/AlphaCoreLauncherPolicy.java": {
+          "canonicalSha256": "c7c3ac19f09068424fec8922644bc7bfc86bf0ed052d2fa906a779af62986256",
+          "projectedSha256": "c2076451cfdfaf8e71dcf5f7367ec0b6f2065d8b9592043ad6cbeb6162f98fa7"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/qs/FgsManagerController.kt": {
+          "canonicalSha256": "8e6663c16dca10e91b25acb146d0a1841e8ef3ead551921e7ee7ae302051f46f",
+          "projectedSha256": "8e6663c16dca10e91b25acb146d0a1841e8ef3ead551921e7ee7ae302051f46f"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/qs/pipeline/data/repository/AlphaQsDefaultsPolicy.java": {
+          "canonicalSha256": "dbf617b8c12fce928fd4cfcba33ee36a1e7cdcf1f5e1638549a4969159753e0d",
+          "projectedSha256": "dbf617b8c12fce928fd4cfcba33ee36a1e7cdcf1f5e1638549a4969159753e0d"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/qs/pipeline/data/repository/UserTileSpecRepository.kt": {
+          "canonicalSha256": "96befaa60ad87935ab920bac05c22088b58cd6ab5f01a0c085fda52ded44d73c",
+          "projectedSha256": "96befaa60ad87935ab920bac05c22088b58cd6ab5f01a0c085fda52ded44d73c"
+        },
+        "frameworks/base/services/core/java/com/android/server/pm/permission/AlphaSharedStoragePolicy.java": {
+          "canonicalSha256": "1618ccb567c91f0a6cf96f2e959d2bf1523c04482752f37c8babe9570c14e25e",
+          "projectedSha256": "71fcbf26572a4383d02e8af2ca110467a7915c1bdfaa36e7df711e2234d4a1d1"
+        },
+        "frameworks/base/services/core/java/com/android/server/pm/permission/DefaultPermissionGrantPolicy.java": {
+          "canonicalSha256": "b2206dea1227975ef8e4178d26ddd9598feb894081f99a256ea70fa824c1446f",
+          "projectedSha256": "b2206dea1227975ef8e4178d26ddd9598feb894081f99a256ea70fa824c1446f"
+        },
+        "frameworks/base/packages/SystemUI/compose/features/src/com/android/systemui/shade/ui/composable/ShadeHeader.kt": {
+          "canonicalSha256": "64192b2b3e9e4327273f98922eedddb6399110c0a44b37dea116c56e0b58ccfe",
+          "projectedSha256": "64192b2b3e9e4327273f98922eedddb6399110c0a44b37dea116c56e0b58ccfe"
+        },
+        "frameworks/base/packages/SystemUI/res/drawable/ic_alpha_system_mark.xml": {
+          "canonicalSha256": "413370aeb9e855612c60d07f4d699dc8fcf474bef78792cd0de66e169b2e68c4",
+          "projectedSha256": "413370aeb9e855612c60d07f4d699dc8fcf474bef78792cd0de66e169b2e68c4"
+        },
+        "frameworks/base/packages/SystemUI/res/layout/combined_qs_header.xml": {
+          "canonicalSha256": "4b134c2e0d39e0fb85f900a0311accbcfb8b189135dd4e17a5938cd32eae9858",
+          "projectedSha256": "4b134c2e0d39e0fb85f900a0311accbcfb8b189135dd4e17a5938cd32eae9858"
+        },
+        "frameworks/base/packages/SystemUI/res/values/alpha_system_entry.xml": {
+          "canonicalSha256": "017b042d5be6f1bd091ca24b7a61265afaf5b23e84c840cfe45786d3f5ad71b2",
+          "projectedSha256": "017b042d5be6f1bd091ca24b7a61265afaf5b23e84c840cfe45786d3f5ad71b2"
+        },
+        "frameworks/base/packages/SystemUI/res/xml/large_screen_shade_header.xml": {
+          "canonicalSha256": "7c492812fb7d1eb2f199690d248f732de0b3cbce3156edf43536b854802cbe36",
+          "projectedSha256": "7c492812fb7d1eb2f199690d248f732de0b3cbce3156edf43536b854802cbe36"
+        },
+        "frameworks/base/packages/SystemUI/res/xml/qqs_header.xml": {
+          "canonicalSha256": "1046d08e5ede177b921ad098f2ee59878eb2bf7ca0b9ad1e28b30fea4d7586c2",
+          "projectedSha256": "1046d08e5ede177b921ad098f2ee59878eb2bf7ca0b9ad1e28b30fea4d7586c2"
+        },
+        "frameworks/base/packages/SystemUI/res/xml/qs_header.xml": {
+          "canonicalSha256": "6ee7e3e3e9bb56018276cdd2e694faaf92d24c0b3b6ffad3935d8d98b5b12a18",
+          "projectedSha256": "6ee7e3e3e9bb56018276cdd2e694faaf92d24c0b3b6ffad3935d8d98b5b12a18"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/AlphaAssistantQuickAffordanceConfig.kt": {
+          "canonicalSha256": "983cfe131720fc40df1aefcf0aa86cccad4ed28349cc2e89d91bb31bc559106a",
+          "projectedSha256": "983cfe131720fc40df1aefcf0aa86cccad4ed28349cc2e89d91bb31bc559106a"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/AlphaSystemEntryPolicy.java": {
+          "canonicalSha256": "95eff5f69afc33b47fc167b14f3afd43fe4884eaa3b980a971e4800946be6953",
+          "projectedSha256": "e0fbd39cc500f426421ebca915c467557b90f0406ba5d1eefde6b5d006536be2"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/KeyguardDataQuickAffordanceModule.kt": {
+          "canonicalSha256": "9df336ad14fadf4e3fab8aa92aadaa080f655ee41a58763e6295811e8b3eb245",
+          "projectedSha256": "9df336ad14fadf4e3fab8aa92aadaa080f655ee41a58763e6295811e8b3eb245"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/shade/AlphaShadeWordmarkPolicy.java": {
+          "canonicalSha256": "fb9084f5b3df4974bb35370e605695bee7fe2a9ff631c05eaa40d1f71e79ea15",
+          "projectedSha256": "fb9084f5b3df4974bb35370e605695bee7fe2a9ff631c05eaa40d1f71e79ea15"
+        },
+        "frameworks/base/packages/SystemUI/src/com/android/systemui/shade/AlphaShadeWordmarkView.java": {
+          "canonicalSha256": "6f913f7b37c0897bcef2cb73fed0fc5ed19630efe918a318877e31677c63b693",
+          "projectedSha256": "6f913f7b37c0897bcef2cb73fed0fc5ed19630efe918a318877e31677c63b693"
+        }
+      }
+    }
+  }
+}

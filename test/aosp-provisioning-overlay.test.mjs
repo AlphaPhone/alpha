@@ -70,6 +70,14 @@ test("the overlay sets default HOME, assistant and Autofill offer additively", t
   writeProvisioningOverlay(out, PKG, components, {freshTelephony: true});
   assert.match(fs.readFileSync(path.join(out, "product.mk"), "utf8"), /PRODUCT_PACKAGE_OVERLAYS \+= \$\(launcher_provisioning_dir\)\/overlay/);
   assert.ok(fs.existsSync(path.join(out, "provisioning/preferred-apps/launcher-home.xml")));
+  assert.match(files['provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml'],
+    /<string name="alpha_launcher_package" translatable="false">ai\.alphacompute\.alphaphone<\/string>/);
+  const retained = 'ai.elizaresearch.alphaphone';
+  const retainedFiles = renderProvisioningOverlay(retained, {
+    ...components, home: `${retained}.MainActivity`, assistant: `${retained}.AlphaAssistActivity`,
+  }, {freshTelephony: true});
+  assert.ok(retainedFiles['provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml']
+    .includes(`>${retained}</string>`));
   const feature = `${PKG}.fresh_telephony_setup`;
   assert.ok(fs.readFileSync(path.join(out, "product.mk"), "utf8")
     .includes(`$(dir $(launcher_provisioning_dir))branding/provision/fresh-telephony.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/permissions/${feature}.xml`));
@@ -84,6 +92,7 @@ test("Sense qualification provisioning leaves fresh telephony assignment disable
   const files = renderProvisioningOverlay(PKG, components, {freshTelephony: false});
   assert.match(files["provisioning/overlay/frameworks/base/core/res/res/values/config.xml"], /config_defaultAssistant/);
   assert.doesNotMatch(files.productMakefile, /fresh-telephony|fresh_telephony_setup/);
+  assert.equal(files['provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml'], undefined);
   assert.doesNotMatch(files["provisioning/README.md"], /Fresh telephony setup/);
 });
 
@@ -100,6 +109,10 @@ test("production staging refuses an old or unprotected launcher manifest even wi
   assert.throws(() => assertImageLauncherManifest(withReceiver("android.permission.INTERNET"), true), /MANAGE_ROLE_HOLDERS/);
   assert.throws(() => assertImageLauncherManifest(withReceiver(rolePermission, "(type 0x12)0x0"), true), /AlphaTelephonySetupReceiver/);
   assert.doesNotThrow(() => assertImageLauncherManifest(withReceiver(rolePermission), true));
+  const retained = 'ai.elizaresearch.alphaphone';
+  const retainedTree = withReceiver(rolePermission).replaceAll(PKG, retained);
+  assert.doesNotThrow(() => assertImageLauncherManifest(retainedTree, true, retained));
+  assert.throws(() => assertImageLauncherManifest(retainedTree, true, PKG), /AlphaTelephonySetupReceiver/);
 });
 
 test("the image grants the launcher its runtime permissions on first boot, revocably, alongside the one privileged permission", async () => {

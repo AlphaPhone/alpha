@@ -23,6 +23,7 @@ import { CUTTLEFISH_TARGETS, cuttlefishProductProblems } from "../vendor/eliza/p
 import { assertSenseLauncher, assertSenseQualification, readSenseQualification, senseLauncherDigest, writeSenseImageActivation, type SenseImageActivation } from './aosp-sense-image.ts';
 import { stageAlphaSensePolicy } from './aosp-sense-policy.ts';
 import { verifyPinnedUpstream } from './pinned-upstream-source.ts';
+import {androidIdentity} from './android-identity.ts';
 
 export const PRODUCT_DESCRIPTOR = "android/aosp/product.json";
 /**
@@ -75,10 +76,10 @@ interface ImageApkOptions {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** Require the first-run contract from the APK itself, including when reusing an old admission receipt. */
-export function assertImageLauncherManifest(tree: string, production: boolean) {
+export function assertImageLauncherManifest(tree: string, production: boolean, appId = androidIdentity().appId) {
   assertNoAlphaLockScreenSurface(tree);
   if (!production) return;
-  const problems = telephonySetupReceiverProblems(parseXmlTree(tree));
+  const problems = telephonySetupReceiverProblems(parseXmlTree(tree), {appId});
   if (problems.length) throw Error(`Production launcher cannot be staged: ${problems.join("; ")}`);
 }
 
@@ -176,12 +177,12 @@ const get = (key: string) => {
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--development") continue;
   if (
-    !["--apk", "--output", "--descriptor", "--apk-manifest", "--aosp-source", "--listener-apk", "--listener-descriptor", "--listener-qualification", "--target", "--factory-image", "--applied-systemui-patch", "--applied-build-patch", "--boot-animation"].includes(args[i]) ||
+    !["--apk", "--output", "--descriptor", "--apk-manifest", "--aosp-source", "--listener-apk", "--listener-descriptor", "--listener-qualification", "--target", "--factory-image", "--applied-systemui-patch", "--applied-build-patch", "--boot-animation", "--branding-assets", "--branding-assets-report-sha256"].includes(args[i]) ||
     !args[i + 1] ||
     args[i + 1].startsWith("--")
   )
     throw new Error(
-      "Use --target cuttlefish | --target pixel10a --factory-image FILE, with --aosp-source PATH --apk FILE --output NEW_DIR [--development] [--descriptor FILE (required without --development)] [--apk-manifest FILE] [--listener-apk FILE [--listener-descriptor FILE] [--listener-qualification FILE]] [--applied-systemui-patch chip|ops|assist|alpha-protected-power ...] [--applied-build-patch soong-memory|alpha-sense-policy ...] [--boot-animation ZIP (pixel10a, when the composition pins one)]",
+      "Use --target cuttlefish | --target pixel10a --factory-image FILE, with --aosp-source PATH --apk FILE --output NEW_DIR [--development] [--descriptor FILE (required without --development)] [--apk-manifest FILE] [--listener-apk FILE [--listener-descriptor FILE] [--listener-qualification FILE]] [--applied-systemui-patch chip|ops|assist|alpha-protected-power ...] [--applied-build-patch soong-memory|alpha-sense-policy ...] [--boot-animation ZIP (pixel10a, when the composition pins one)] [--branding-assets DIR --branding-assets-report-sha256 HASH (matching Pixel source packet)]",
     );
   if (args[i] === '--applied-systemui-patch') appliedPatchNames.push(args[i + 1]);
   if (args[i] === '--applied-build-patch') appliedBuildNames.push(args[i + 1]);
@@ -235,7 +236,16 @@ if (!apk)
   throw new Error(development
     ? "Development staging: supply --apk PATH to a flag-off debug launcher APK."
     : "Production staging: supply --apk PATH to the signed launcher release APK that verify-apks recorded as distributable.");
-const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
+const identity = androidIdentity(process.cwd());
+const canonicalIdentity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
+if (identity.appId !== canonicalIdentity.appId && (!physical || !production))
+  throw Error('Retained image identity requires the production Pixel image admission');
+if ((get('--branding-assets') === null) !== (get('--branding-assets-report-sha256') === null))
+  throw Error('Branding assets require their exact report SHA-256');
+if (!physical && get('--branding-assets'))
+  throw Error('The source/asset policy packet belongs to the Pixel image contract');
+if (identity.appId !== canonicalIdentity.appId && !get('--branding-assets'))
+  throw Error('Retained image staging requires the matching source/asset policy packet');
 const hash = sha256File(apk);
 const manifestFile = get('--apk-manifest') || 'artifacts/apk-manifest.json';
 const reviewedUpdateChannel = admitApk({
@@ -335,7 +345,7 @@ const stagedLauncher = path.join(output, 'Launcher.apk');
 if (updateArtifactDigest(stagedLauncher).sha256 !== hash)
   throw Error("Staged launcher differs from the admitted APK");
 const provisioningTree = aaptManifestTree(stagedLauncher, {aapt: tool("aapt"), env});
-assertImageLauncherManifest(provisioningTree, production);
+assertImageLauncherManifest(provisioningTree, production, identity.appId);
 if (production) aospTelephonyRoleComponents(provisioningTree, identity.appId);
 if (senseImage) assertSenseLauncher(provisioningTree, identity.appId);
 if (production || senseImage)
@@ -391,6 +401,33 @@ if (production || senseActivation) {
 if (cuttlefish) writeCuttlefishNatives({root:process.cwd(), output, apk:stagedLauncher, module:identity.moduleName, launcher:reviewed});
 if (physical) {
   writePixel10aProduct({root:process.cwd(), output, apk:stagedLauncher, identity, launcher:reviewed, sourceEvidence:physicalSource, production, bootAnimation:get('--boot-animation'), vendorApi, senseActivation});
+}
+if (production && get('--branding-assets')) {
+  // This happens only after normal APK/signature, descriptor, source, platform and native admission.
+  // The packet and launcher publish together; an error leaves the destination absent.
+  const admission = {
+    schema: 1, packageName: identity.appId, apkSha256: hash,
+    launcherDescriptorSha256: sha256File(path.join(output, 'launcher.json')),
+    sourceLockSha256: physicalSource?.sourceLockSha256,
+    platformCertificateSha256,
+    catalogSha256: sha256File('android/consumer-host.json'),
+    handlerDefaultsSha256: sha256File(path.join(output, 'provisioning/alpha-telephony-components.xml')),
+    provisionResourceSha256: sha256File(path.join(output, 'provisioning/overlay/packages/apps/Provision/res/values/alpha-launcher.xml')),
+  };
+  fs.appendFileSync(path.join(output, 'product.mk'), '\n$(call inherit-product, vendor/alphaphone/branding/branding.mk)\n');
+  fs.writeFileSync(path.join(output, 'image-policy-admission.json'), JSON.stringify(admission, null, 2) + '\n', {flag:'wx'});
+  execFileSync('python3', ['scripts/stage-alpha-os-branding.py', '--aosp-root', source!,
+    '--assets-dir', get('--branding-assets')!, '--assets-report-sha256', get('--branding-assets-report-sha256')!,
+    '--image-stage', output, '--aapt', tool('aapt'), '--apksigner', tool('apksigner'),
+    '--packet-output', path.join(output, 'source-packet.zip'), '--receipt', path.join(output, 'source-packet.json')],
+    {stdio:'inherit', env});
+  const packet = JSON.parse(fs.readFileSync(path.join(output, 'source-packet.json'), 'utf8'));
+  const physicalReport = path.join(output, 'physical-product.json');
+  const report = JSON.parse(fs.readFileSync(physicalReport, 'utf8'));
+  report.sourcePolicyPacket = {file:'source-packet.json', sha256:sha256File(path.join(output, 'source-packet.json')),
+    archiveSha256:packet.packetSha256, packageName:identity.appId, apkSha256:hash,
+    installedPolicyProjectionSha256:packet.installedPolicyProjectionSha256};
+  fs.writeFileSync(physicalReport, JSON.stringify(report, null, 2) + '\n');
 }
 if (fs.existsSync(destination)) throw Error('Output appeared during staging: ' + destination);
 fs.renameSync(output, destination);

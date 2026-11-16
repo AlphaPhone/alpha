@@ -111,7 +111,9 @@ function fixture({bindings, installer, context, leave, routes, browser, testMock
   const alphaClient = {setViewContext(value) {selected = value;}, getState: () => ({context: selected})};
   const readContext = vm.runInNewContext(`${context}\ncontext`, {...bindings, document, alphaClient,
     connectionController: {getSnapshot: () => ({open: false})}, syncPreviousNotesAvailability() {},
-    updateBackAvailability() {}, recoverPendingActions() {}});
+    updateBackAvailability() {}, recoverPendingActions() {},
+    // This Clock fixture has no assistant transcript or proposal cards to retire.
+    retireProposalCards(shell) {assert.equal(shell.S().msgs,undefined);}});
   class Shell {
     componentDidMount() {}
     componentWillUnmount() {}

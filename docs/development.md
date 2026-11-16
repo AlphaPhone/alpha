@@ -173,6 +173,23 @@ flow alone assigns default apps; these component overrides do not change an owne
 This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
 retained-update qualification on the matching AOSP image remain separate release gates.
 
+Retained Pixel images use the same declared installation identity as their APK build.
+The production image stage still checks the signed release, reviewed launcher descriptor,
+platform certificate, source lock and native inputs. Supply `--branding-assets DIR` and
+`--branding-assets-report-sha256 HASH` for the matching source packet. Staging publishes
+that packet as `source-packet.zip`, with its hash-bound `source-packet.json` receipt,
+with the launcher only after all checks pass; it does not apply source, build
+or flash an image. The packet binds the catalogue identity, APK, descriptor, qualified
+Phone/SMS handlers and Provision resource. The source planner verifies the canonical
+core and system-entry preimages and outputs before it checks the exact declared retained
+projection hashes in `android/aosp/branding/installed-image-policies.json`. Canonical
+policy packets stay unchanged. Apply the source packet through the existing guarded
+branding stage, with `--image-stage` pointing at the admitted image stage and a new
+receipt; preserve any required prior source receipt. A retained update must preserve
+actual Phone/SMS holders and show no setup prompts. Manual role restoration does not
+pass that gate. Completed setup and explicit alternative defaults are not reassigned.
+
+
 Canonical builds use `app.config.json` unchanged. To prepare an update for an
 existing `ai.elizaresearch.alphaphone` installation, set the build value
 `ALPHA_ANDROID_APPLICATION_ID=ai.elizaresearch.alphaphone`. Only identities declared
