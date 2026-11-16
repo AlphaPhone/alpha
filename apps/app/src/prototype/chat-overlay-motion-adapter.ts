@@ -826,6 +826,8 @@ export function installChatOverlayMotion(Component: Shell) {
 		});
 		if (next.height !== undefined)
 			this.chatSheetShare = next.height / Math.max(1, d.full);
+		// A drag the owner released is their height now: a stage switch's held height no longer applies.
+		this.stageHold = null;
 		retire(this, false);
 		this.swallow = Date.now();
 		this.chatSettledByDrag = true;
@@ -1110,6 +1112,36 @@ export function installChatOverlayMotion(Component: Shell) {
 		// a second action (including Type/Talk) after committing its detent.
 		const startVoice = out.startVoice;
 		out.holdVoice = () => startVoice?.();
+		// AC-12: in the open and full sheet the Alpha mark in its header is the Alpha button. Holding it
+		// (550ms) starts a voice turn with Alpha; the release that ends a hold is not the header's tap.
+		out.sheetAlphaHold = {
+			down(event: PointerEvent) {
+				if (event.isPrimary === false || event.button !== 0) return;
+				clearTimeout(shell.sheetHold?.timer);
+				const hold = { id: event.pointerId, fired: false, timer: 0 as unknown as ReturnType<typeof setTimeout> };
+				hold.timer = setTimeout(() => {
+					// A press that became a drag of the sheet is not a hold.
+					if (shell.sheetHold !== hold || shell.live === false || shell.chatMotion?.moved) return;
+					hold.fired = true;
+					shell.swallow = Date.now();
+					out.holdVoice?.();
+				}, 550);
+				shell.sheetHold = hold;
+			},
+			up(event: PointerEvent) {
+				const hold = shell.sheetHold;
+				if (!hold || hold.id !== event.pointerId) return;
+				clearTimeout(hold.timer);
+				shell.sheetHold = undefined;
+				if (hold.fired) shell.swallow = Date.now();
+			},
+			cancel() {
+				clearTimeout(shell.sheetHold?.timer);
+				shell.sheetHold = undefined;
+			},
+			// A long press must not open the system context menu over the hold.
+			menu(event: Event) { event.preventDefault(); },
+		};
 		for (const name of ["openSheet", "toInput", "startVoice"]) {
 			const action = out[name];
 			out[name] = (...args: unknown[]) => {

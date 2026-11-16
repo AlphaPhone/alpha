@@ -27,8 +27,8 @@ import {executeTelephonyAction,type TelephonyPorts} from '../runtime/telephony-e
 import {normalizePhoneNumber,reviewSms} from '../runtime/aosp-telephony';
 import {parseContactDetail,parseContactRemove,parseContactSave} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {askTelephonyReview} from './telephony-review';
-import {displayNumber} from './telephony-presenters';
-import {proposalCanAct,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
+import {displayNumber,numberKey} from './telephony-presenters';
+import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
 import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
@@ -270,6 +270,18 @@ export async function declineProposal(id:string):Promise<{ok:boolean;message:str
 }
 export function installAgentAdapter(Component: Shell, views: Shell) {
   const p = Component.prototype;
+  // AC-20: on the image, a call proposal's person and number come from the phone's own contacts,
+  // read only while Contacts access is granted. Nothing here dials; the card still needs the tap.
+  if(aospImage)setCallPartyResolver(async target=>{
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    if((await client.status()).permissions.contacts!=='granted')return null;
+    if('number' in target){
+      const key=numberKey(target.number),rows=await client.searchContacts('',100);
+      return {name:rows.find(row=>row.phoneNumbers.some(value=>numberKey(value)===key))?.displayName||null,numbers:[target.number]};
+    }
+    const rows=await client.searchContacts(target.contact,10),numbers=[...new Set(rows.flatMap(row=>row.phoneNumbers))];
+    return {name:rows.length===1?rows[0].displayName:null,numbers};
+  });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
   function modalPanels(){
@@ -400,12 +412,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
    * approval, decline, expiry and recovery below are unchanged; `state` is what the card shows.
    * A call to a number names the formatted number: that card is the approval before the dial.
    */
+  function callTargetOf(proposal:import('../runtime/alpha-client').ActionProposal):CallTarget|null{
+    if(proposal.title!=='Place call')return null;
+    const first=proposal.description.split('\n')[0]||'';
+    return first.startsWith('Number: ')?{number:first.slice(8).trim()}:first.startsWith('Contact: ')?{contact:first.slice(9).trim()}:null;
+  }
   function commsProposal(proposal:import('../runtime/alpha-client').ActionProposal):CommsProposal&Record<string,unknown>{
     const {type:_type,title:_title,...review}=proposalCard(proposal);
-    const lines=proposal.description.split('\n'),first=lines[0]||'',call=proposal.title==='Place call';
-    const number=call&&first.startsWith('Number: ')?first.slice(8).trim():null,contact=call&&first.startsWith('Contact: ')?first.slice(9).trim():null;
-    const detail=number!==null?displayNumber(number):contact!==null?contact:proposal.description;
-    return {...review,id:proposal.id,kind:call?'call':'other',title:call?`Call ${number!==null?displayNumber(number):contact||'contact'}`:proposal.title,detail,sub:detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
+    const call=proposal.title==='Place call',target=callTargetOf(proposal);
+    // AC-20: name and number; the phone's contacts fill in what the proposal leaves out (sayProposal).
+    const text=target?callCardText(target,null,displayNumber):{title:call?'Call contact':proposal.title,detail:proposal.description};
+    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
   }
   /** A card update that also moves a proposal card's shown detail and state. */
   function cardWith(card:Shell,patch:Shell){
@@ -422,6 +439,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // Recovery and a chat reply can publish the same pending action; one card keeps it.
     if((shell.S().msgs||[]).some((message:Shell)=>message.card?.proposalId===proposal.id))return;
     const result:CommsProposeResult=shell.propose(commsProposal(proposal),proposal.description);
+    // AC-19: a proposal dropped over an emergency call is declined, so recovery never offers it again.
+    if(!result.shown){void declineProposal(proposal.id);return;}
+    const target=callTargetOf(proposal);
+    if(target)void resolveCallParty(target).then(party=>{
+      if(!party||!shell.live)return;
+      const text=callCardText(target,party,displayNumber);
+      shell.setState((previous:Shell)=>({msgs:(previous.msgs||[]).map((message:Shell)=>message.card?.type==='proposal'&&message.card.id===proposal.id&&message.card.state==='open'
+        ?{...message,card:{...message.card,title:text.title,detail:text.detail,sub:text.detail}}:message)}));
+    });
     // AC-26: a replaced proposal is declined, so it can never be approved later.
     for(const replaced of result.replaced){const id=replaced.args?.proposalId;if(typeof id==='string'&&id)void declineProposal(id);}
   }
@@ -2107,7 +2133,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const card = message.card || {};
     // AC-26: a replaced or finished proposal never acts. A view's own proposal (a fixture call or
     // "Screen it") is dispatched by the shell to that view's action; live ones are approved below.
-    if(!proposalCanAct(card))return;
+    if(!proposalCanAct(card,this.emergencyLive?.()===true))return;
     if(card.type==='proposal'&&card.act?.mod!=='alpha')return originalCardAct.call(this,message);
     if(card.systemNotice)return;
     if(card.managePlan){void connectionController.residentManagePlan();return;}

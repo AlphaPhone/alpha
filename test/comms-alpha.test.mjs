@@ -51,9 +51,13 @@ test('a briefing is shown once per subject, only when the chat opens and somethi
   assert.equal(A.briefingDue(true, null, null), null);
 });
 
-test('a ringing call is offered as one "Screen it" proposal dispatched to Phone (AC-21)', () => {
-  const p = A.screenProposal(spec({target: {kind: 'incoming', app: 'Phone', name: 'Maya Chen', first: 'Maya', initials: 'MC'}, contextKey: 'phone:incoming:c1'}));
-  assert.deepEqual(p, {id: 'screen:phone:incoming:c1', kind: 'screen', title: 'Screen it', detail: 'Maya Chen', button: 'Screen it', acts: true, act: {mod: 'phone', fn: 'screenIncoming'}, args: {}});
+test('a ringing call is offered as one "Screen it" proposal dispatched to Phone, keyed by the ring (AC-21)', () => {
+  const ringing = id => spec({target: {kind: 'incoming', app: 'Phone', name: 'Maya Chen', first: 'Maya', initials: 'MC'}, contextKey: 'phone:incoming:c1',
+    incoming: {id, answer() {}, decline() {}, screen() {}}});
+  const p = A.screenProposal(ringing('ring-1'));
+  assert.deepEqual(p, {id: 'screen:ring-1', kind: 'screen', title: 'Screen it', detail: 'Maya Chen', button: 'Screen it', acts: true, act: {mod: 'phone', fn: 'screenIncoming'}, args: {ring: 'ring-1'}});
+  // The same caller ringing again is a new ring: a new card, never the old one.
+  assert.notEqual(A.screenProposal(ringing('ring-2')).id, p.id);
 });
 
 test('only an open view proposal is kept for restore, as data (AC-30)', () => {
@@ -93,4 +97,11 @@ test('a contact call is chosen inside the approved card, never in a separate dia
   assert.deepEqual(digest[0].rows.map(row => row.who), ['Maya Chen', 'Not now']);
   assert.equal(R.placeTelephonyReview([{id: 3, isUser: true}], review, 'p1'), null, 'no card: the caller dismisses it');
   assert.equal(R.placeTelephonyReview(msgs, R.presentTelephonyReview(null), 'p1'), msgs);
+});
+
+test('the briefing is Alpha\'s first line for the opening, before rows that arrived after it (AC-25)', () => {
+  const b = {id: 'b'};
+  assert.deepEqual(A.briefingInserted([{id: 1}, {id: 2}, {id: 3}], b, 1).map(r => r.id), [1, 'b', 2, 3], 'after the rows that existed at open');
+  assert.deepEqual(A.briefingInserted([{id: 2}], b, null).map(r => r.id), ['b', 2], 'an empty chat at open: first');
+  assert.deepEqual(A.briefingInserted([{id: 2}], b, 9).map(r => r.id), [2, 'b'], 'a vanished anchor appends');
 });

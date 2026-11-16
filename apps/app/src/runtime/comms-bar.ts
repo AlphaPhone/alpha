@@ -44,7 +44,8 @@ export type CommsClosedField = {
 
 export type CommsStripAction = { id: CommsStripActionId; label: string; run: (event?: MouseEvent) => void; pressed?: boolean };
 export type CommsStrip = { title: string; subtitle: string; initials: string | null; live: boolean; actions: CommsStripAction[] };
-export type CommsIncoming = { answer: () => void; decline: () => void; screen: (() => void) | null };
+/** AC-21: `id` names this ring, not the caller: the same caller ringing again is a new ring. */
+export type CommsIncoming = { id: string; answer: () => void; decline: () => void; screen: (() => void) | null };
 
 export type CommsBarSpec = {
 	target: CommsTarget;
@@ -138,8 +139,41 @@ export function isAskSentence(text: string): boolean {
 
 /** AC-26: a proposal card's lifecycle in the transcript. Only 'open' may act. */
 export type CommsProposalState = 'open' | 'replaced' | 'done';
-/** The one check every card dispatcher (shell cardAct and the live agent override) runs first:
- * a card that is not a proposal is unaffected; a proposal acts only while open. */
-export function proposalCanAct(card: { type?: unknown; state?: unknown } | null | undefined): boolean {
-	return !card || card.type !== 'proposal' || card.state === 'open';
+/** The one check every card dispatcher (shell cardAct and the live agent override) runs first, and
+ * the one that decides whether a proposal card shows its button: a card that is not a proposal is
+ * unaffected; a proposal acts only while open, and an acting proposal never acts while an emergency
+ * call is live (AC-19), however old the card is or whether it was restored (AC-30). */
+export function proposalCanAct(card: { type?: unknown; state?: unknown; acts?: unknown } | null | undefined, emergency = false): boolean {
+	if (!card || card.type !== 'proposal') return true;
+	return card.state === 'open' && !(emergency && card.acts !== false);
+}
+
+/** AC-20: who a call proposal would reach, from the phone's own contacts. `numbers` lists every
+ * dialable number found (one for a number target). Null when the phone cannot tell. */
+export type CallParty = { name: string | null; numbers: string[] };
+export type CallTarget = { number: string } | { contact: string };
+let callPartyResolver: ((target: CallTarget) => Promise<CallParty | null>) | null = null;
+/** The device (or the development fixture) installs how a call target is looked up; null removes it. */
+export function setCallPartyResolver(next: ((target: CallTarget) => Promise<CallParty | null>) | null): void {
+	callPartyResolver = next;
+}
+export async function resolveCallParty(target: CallTarget): Promise<CallParty | null> {
+	try {
+		return callPartyResolver ? await callPartyResolver(target) : null;
+	} catch {
+		return null;
+	}
+}
+/**
+ * AC-20: the approval card names the person and the number. A number target shows the contact's
+ * name when the phone knows it; a contact target shows its one number, or says the owner picks
+ * among several before anything dials (the in-card telephony review).
+ */
+export function callCardText(target: CallTarget, party: CallParty | null, format: (number: string) => string): { title: string; detail: string } {
+	if ('number' in target) {
+		const shown = format(target.number);
+		return { title: `Call ${party?.name || shown}`, detail: party?.name ? shown : `${shown} · not in Contacts` };
+	}
+	const name = party?.name || target.contact, numbers = party?.numbers || [];
+	return { title: `Call ${name}`, detail: numbers.length === 1 ? format(numbers[0]) : numbers.length > 1 ? `${numbers.length} numbers · you choose one before it dials` : 'You confirm the number before it dials' };
 }
