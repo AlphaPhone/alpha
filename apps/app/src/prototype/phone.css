@@ -866,7 +866,7 @@ html.alpha-large-text .alpha-google-sources { display:block; }
 .mail-sender-avatar{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--s2);font-size:14px;font-weight:700;overflow:hidden}
 .mail-sender-avatar img{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;object-fit:contain;padding:9px;background:var(--s2)}
 
-.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none}
+.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
 .content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
 .content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}

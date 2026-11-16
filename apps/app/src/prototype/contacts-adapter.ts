@@ -3,7 +3,7 @@ import { watchReturnToApp } from './native-adapter';
 import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
 import { applyListFilter, clearListFilter, setListFilterHandler } from '../runtime/comms-bar';
-import {contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
+import {CONTACT_MAX_NAME,CONTACT_MAX_NOTES,contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
 const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z';
@@ -13,21 +13,21 @@ export function contactActs(phones:readonly string[],api:Bag){
   ...(isMvpView('phone')?[{d:PHONE,label:`Call ${number}`,go:()=>api.open('phone',{prefill:number})}]:[]),
   ...(isMvpView('messages')?[{d:BUBBLE,label:`Message ${number}`,go:()=>api.open('messages',{prefill:number})}]:[])]);
 }
-const PROBLEM:Record<string,string>={'empty-contact':'Add a name, number or email.','invalid-name':'Check the name.','too-many-fields':'Too many numbers or emails.','invalid-number':'Check the phone numbers.','invalid-address':'Check the email addresses.','invalid-type':'Check the phone numbers.'};
+const PROBLEM:Record<string,string>={'empty-contact':'Add a name, number or email.','invalid-name':'Check the name.','invalid-notes':'Check the notes.','too-many-fields':'Too many numbers or emails.','invalid-number':'Check the phone numbers.','invalid-address':'Check the email addresses.','invalid-type':'Check the phone numbers.'};
 const TYPE_LABEL=(type:string)=>type.startsWith('custom:')?type.slice(7):type.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
 /** The contact editor of the image Contacts view (specs/quint/native/ContactsBook.qnt). */
-type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:ContactDraft;dirty:boolean;stale:boolean;notice:string};
+type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:ContactDraft;givenName:string;familyName:string;notes:string;initialText:{givenName:string;familyName:string;notes:string};nameEdited:boolean;notesEdited:boolean;dirty:boolean;stale:boolean;notice:string};
 /** Native address-book rows stay in memory, never in prototype persistence or agent context. */
 export function installContactsAdapter(Component:any,views:Bag){
  const render=views.contacts.render,p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  // A dispatched provider write outlives the view; only a later explicit read clears uncertainty.
  let uncertain=false,pendingWrite=false,writeEpoch=0;
- let owner:any,rows:Bag[]=[],rowsQuery='',status='Off',readable=false,writable=false,loading=false,more=false,limit=50,epoch=0,visit=0,active=false;
+ let owner:any,rows:Bag[]=[],rowsQuery='',status='Off',readable=false,writable=false,loading=false,loaded=false,more=false,limit=50,epoch=0,visit=0,active=false;
  /* The open contact as the phone holds it now, the in-app editor and a pending delete confirmation. */
  let detail:ContactDetail|null=null,detailFor='',detailEpoch=0,form:Editor|null=null,confirming=false,saving=false,opening=false,api:Bag|null=null;
  const changed=()=>owner?.setState({contactsNativeRevision:Date.now()});
  const setApi=(next:Bag)=>{api=next;};
- const clear=()=>{epoch++;visit++;rows=[];rowsQuery='';readable=false;writable=false;more=false;loading=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
+ const clear=()=>{epoch++;visit++;rows=[];rowsQuery='';readable=false;writable=false;more=false;loading=false;loaded=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
  const available=()=>!!owner&&owner.S().view==='contacts'&&isMvpView('contacts')&&!document.hidden;
  const sync=()=>{const next=available();if(next===active)return;active=next;if(next)void refresh();else clear();};
  async function refresh(request=false,queryOverride?:string,confirmUnknown=false){
@@ -39,12 +39,12 @@ export function installContactsAdapter(Component:any,views:Bag){
    const access=request?await contacts.requestPermissions():await contacts.status();
    if(token!==epoch||target!==owner||!available())return;
    readable=access.available===true&&access.readable===true;writable=readable&&access.writable===true;
-   if(!readable){rows=[];more=false;status='Off';return;}
+   if(!readable){rows=[];more=false;loaded=false;status='Off';return;}
    const value=await contacts.list({query,limit});
    if(token!==epoch||target!==owner||!available())return;
-   if(!Array.isArray(value.contacts))throw Error();rows=value.contacts;rowsQuery=query;more=value.more===true;if(confirmUnknown&&!pendingAtStart&&!pendingWrite&&writeAtStart===writeEpoch)uncertain=false;
+   if(!Array.isArray(value.contacts))throw Error();rows=value.contacts;rowsQuery=query;more=value.more===true;loaded=true;if(confirmUnknown&&!pendingAtStart&&!pendingWrite&&writeAtStart===writeEpoch)uncertain=false;
    status=uncertain?'Outcome unknown · refresh Contacts':more&&limit>=200?'200 shown. Search to find other contacts.':rows.length?`${rows.length} contacts${more?' · more available':''}`:'No contacts found.';
-  }catch{if(token===epoch){rows=[];more=false;status='Couldn’t load';}}
+  }catch{if(token===epoch){rows=[];more=false;loaded=false;status='Couldn’t load';}}
   finally{if(token===epoch){loading=false;changed();}}
  }
  async function editor(selected?:Bag){
@@ -63,7 +63,7 @@ export function installContactsAdapter(Component:any,views:Bag){
   catch{/* An incomplete or unreadable contact keeps the list fields and the system editor. */}
  }
  const unknownWrite=()=>{uncertain=true;form=null;confirming=false;detail=null;detailFor='';detailEpoch++;api?.set?.({open:null});status='Outcome unknown · refresh Contacts';owner?.toast('Outcome unknown. Refresh Contacts before trying again.');changed();};
- const blank=():ContactDraft=>({displayName:'',phoneNumbers:[],emailAddresses:[]});
+ const blank=():ContactDraft=>({displayName:'',phoneNumbers:[{number:'',type:'mobile'}],emailAddresses:[{address:'',type:'home'}]});
  async function openEditor(selected?:Bag){
   if(pendingWrite){owner?.toast('Contact change pending');return;}
   if(uncertain){owner?.toast('Refresh Contacts first');return;}
@@ -82,16 +82,26 @@ export function installContactsAdapter(Component:any,views:Bag){
     catch{if(current())void editor(selected);return;}
     if(!current())return;
    }
-   form=record?{mode:'editing',id:record.id,version:record.version,draft:{displayName:record.displayName,phoneNumbers:record.phoneNumbers.map(row=>({...row})),emailAddresses:record.emailAddresses.map(row=>({...row}))},dirty:false,stale:false,notice:''}
-    :{mode:'creating',id:null,version:null,draft:blank(),dirty:false,stale:false,notice:''};
+   const structured=!!(record?.givenName||record?.familyName),givenName=record?(structured?record.givenName||'':record.displayName):'',familyName=record?.familyName||'',notes=record?.notes||'';
+   const draft=record?{displayName:record.displayName,phoneNumbers:record.phoneNumbers.length?record.phoneNumbers.map(row=>({...row})):[{number:'',type:'mobile'}],emailAddresses:record.emailAddresses.length?record.emailAddresses.map(row=>({...row})):[{address:'',type:'home'}]}:blank();
+   form={mode:record?'editing':'creating',id:record?.id||null,version:record?.version||null,draft,givenName,familyName,notes,initialText:{givenName,familyName,notes},nameEdited:false,notesEdited:false,dirty:false,stale:false,notice:''};
    changed();
   }finally{if(token===visit)opening=false;}
  }
  const touch=(change:(draft:ContactDraft)=>void)=>{if(!form||saving)return;change(form.draft);form.dirty=true;if(!form.stale)form.notice='';changed();};
- const tidy=(draft:ContactDraft):ContactDraft=>({displayName:draft.displayName.trim(),phoneNumbers:draft.phoneNumbers.map(row=>({number:row.number.trim(),type:row.type})).filter(row=>row.number),emailAddresses:draft.emailAddresses.map(row=>({address:row.address.trim(),type:row.type})).filter(row=>row.address)});
+ const setText=(field:'givenName'|'familyName'|'notes',event:Event)=>{if(!form||saving)return;form[field]=(event.target as HTMLInputElement).value;form.dirty=true;if(field==='notes')form.notesEdited=form.notes!==form.initialText.notes;else form.nameEdited=form.givenName!==form.initialText.givenName||form.familyName!==form.initialText.familyName;if(!form.stale)form.notice='';changed();};
+ const tidy=(editor:Editor):ContactDraft=>{
+  const draft:ContactDraft={displayName:editor.draft.displayName,phoneNumbers:editor.draft.phoneNumbers.filter(row=>row.number.trim()).map(row=>({...row})),emailAddresses:editor.draft.emailAddresses.filter(row=>row.address.trim()).map(row=>({...row}))};
+  if(editor.nameEdited||editor.mode==='creating'){
+   draft.givenName=editor.givenName;draft.familyName=editor.familyName;
+   draft.displayName=[editor.givenName,editor.familyName].filter(value=>value.trim()).join(' ').trim()||draft.phoneNumbers[0]?.number||draft.emailAddresses[0]?.address||'';
+  }
+  if(editor.notesEdited||editor.mode==='creating'&&editor.notes)draft.notes=editor.notes;
+  return draft;
+ };
  /* A save names the version that was shown. A contact that changed since keeps the editor and says so; nothing is written. */
  async function save(){
-  if(pendingWrite||!form||saving||!form.dirty||form.stale||!available())return;const token=visit,ownerAtStart=owner,current=form,draft=tidy(current.draft),problem=contactDraftProblem(draft);
+  if(pendingWrite||!form||saving||!form.dirty||form.stale||!available())return;const token=visit,ownerAtStart=owner,current=form,draft=tidy(current),problem=contactDraftProblem(draft);
   if(problem){current.notice=PROBLEM[problem]||'Check the contact.';changed();return;}
   let unconfirmed=true;pendingWrite=true;writeEpoch++;saving=true;changed();
   try{
@@ -154,6 +164,8 @@ export function installContactsAdapter(Component:any,views:Bag){
   const local=model.filter;
   setListFilterHandler('contacts',{...local,apply:(filter:Bag)=>{const applied=local?.apply?local.apply(filter):true;limit=50;void refresh(false,String(filter.query||''));return applied;},clear:()=>{local?.clear?.();limit=50;void refresh(false,'');}});
   model.nativeManaged=true;model.nativeStatus=uncertain?'Outcome unknown · refresh Contacts':pendingWrite?'Contact change pending':loading&&!matchesQuery?'Searching contacts':status;model.nativeStatusDot=!status?'':!readable?'warn':'';model.nativeBusy=loading||pendingWrite;model.nativeAccess=!readable;model.nativeMore=matchesQuery&&more&&limit<200;
+  model.nativeEmpty=readable&&loaded&&!loading&&!pendingWrite&&!uncertain&&matchesQuery&&rows.length===0;
+  model.nativeEmptyText=query?'No contacts found':'No contacts yet';if(model.nativeEmpty)model.nativeStatus='';
   model.nativeRefresh=()=>void refresh(false,undefined,true);model.nativeRequest=()=>void refresh(true);model.nativeLoadMore=()=>{limit=Math.min(200,limit+50);void refresh();};
   model.noHits=false;model.addNew=()=>void openEditor();
   /* A short list needs no letter headings. */
@@ -167,9 +179,10 @@ export function installContactsAdapter(Component:any,views:Bag){
   }
   const current=form;
   model.ed={open:!!current,busy:saving,cannotSave:saving||!current?.dirty||current.stale,notice:current?.notice||'',hasNotice:!!current?.notice,
-   name:current?.draft.displayName||'',onName:(event:Event)=>touch(draft=>{draft.displayName=(event.target as HTMLInputElement).value.slice(0,256);}),
-   phones:(current?.draft.phoneNumbers||[]).map((row,index)=>({value:row.number,label:TYPE_LABEL(row.type),onChange:(event:Event)=>touch(draft=>{draft.phoneNumbers[index].number=(event.target as HTMLInputElement).value.slice(0,64);}),remove:()=>touch(draft=>{draft.phoneNumbers.splice(index,1);}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} number`})),
-   emails:(current?.draft.emailAddresses||[]).map((row,index)=>({value:row.address,label:`${TYPE_LABEL(row.type)} email`,onChange:(event:Event)=>touch(draft=>{draft.emailAddresses[index].address=(event.target as HTMLInputElement).value.slice(0,320);}),remove:()=>touch(draft=>{draft.emailAddresses.splice(index,1);}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} email`})),
+   givenName:current?.givenName||'',familyName:current?.familyName||'',notes:current?.notes||'',maxName:CONTACT_MAX_NAME,maxNotes:CONTACT_MAX_NOTES,
+   onGivenName:(event:Event)=>setText('givenName',event),onFamilyName:(event:Event)=>setText('familyName',event),onNotes:(event:Event)=>setText('notes',event),
+   phones:(current?.draft.phoneNumbers||[]).map((row,index)=>({value:row.number,label:index===0&&row.type==='mobile'?'Phone':`${TYPE_LABEL(row.type)} phone`,canRemove:!!row.number||(current?.draft.phoneNumbers.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.phoneNumbers[index].number=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.phoneNumbers.splice(index,1);if(!draft.phoneNumbers.length)draft.phoneNumbers.push({number:'',type:'mobile'});}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} number`})),
+   emails:(current?.draft.emailAddresses||[]).map((row,index)=>({value:row.address,label:index===0&&row.type==='home'?'Email':`${TYPE_LABEL(row.type)} email`,canRemove:!!row.address||(current?.draft.emailAddresses.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.emailAddresses[index].address=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.emailAddresses.splice(index,1);if(!draft.emailAddresses.length)draft.emailAddresses.push({address:'',type:'home'});}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} email`})),
    addPhone:()=>touch(draft=>{if(draft.phoneNumbers.length<32)draft.phoneNumbers.push({number:'',type:'mobile'});}),addEmail:()=>touch(draft=>{if(draft.emailAddresses.length<32)draft.emailAddresses.push({address:'',type:'home'});}),
    save:()=>void save(),cancel:()=>{if(saving)return;form=null;changed();}};
   return model;
