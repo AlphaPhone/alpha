@@ -38,12 +38,13 @@ function modeOf(v) {
 }
 
 async function driver(code) {
-  const now = Date.now(), routes = [];
+  const now = Date.now(), routes = [], searches = [];
+  let responseMode = 'ready', originRequests = 0;
   const place = {providerId, id: 'cafe-1', name: 'Cafe', coordinate: {latitude: 1.01, longitude: 1.01}, attribution, fetchedAt: now};
   const start = {providerId, id: 'start-1', name: chosenName, coordinate: {latitude: 1.03, longitude: 1.03}, attribution, fetchedAt: now};
   const provider = {
     providerId, connectionId,
-    async search(text) { return text === typedName || text === chosenName ? [start] : [place]; },
+    async search(text) { searches.push(text);if(responseMode==='error')throw Error('The search failed.');if(responseMode==='pending')return new Promise(()=>{});if(responseMode==='empty')return [];return text === typedName || text === chosenName ? [start] : [place]; },
     async detail(id) { return id === start.id ? start : place; },
     route(from, to, mode, signal) { const request = {...deferred(), from, to, mode, signal, settled: false}; routes.push(request); return request.promise; },
   };
@@ -58,13 +59,15 @@ async function driver(code) {
   const watch = () => harness.locations.length > 2 ? harness.locations.at(-1) : null;
   const originText = () => ({'': 'empty', [locatedLabel]: 'location', [hereLabel]: 'coordinates', [typedPoint]: 'coordinates', [typedName]: 'typed', [chosenName]: 'chosen'})[screen().originText];
   const act = async run => { await run(); await tick(); };
+  // Count actual provider effects created by an origin input control, not a duplicated driver implementation.
+  const originInput = async run => { const before=routes.length+searches.filter(q=>q===typedName||q===chosenName).length;await act(run);originRequests+=routes.length+searches.filter(q=>q===typedName||q===chosenName).length-before; };
   m.render(); await tick();
   return {
     focusSearch: () => act(() => data().focusQ()),
     typeQuery: () => act(() => data().onQ({target: {value: 'cafe'}})),
     clearQuery: () => act(() => data().clearQ()),
     submitSearch: () => act(() => data().qKey(enter)),
-    debounceInput: () => act(() => harness.flushInputTimers()),
+    debounceInput: () => harness.inspect().originDraft!==undefined ? originInput(() => harness.flushInputTimers()) : act(() => harness.flushInputTimers()),
     lateInputTimer: () => act(() => harness.flushRetiredInputTimers()),
     pickResult: () => act(() => { const rows = data().results; assert.equal(rows.length, 1, 'one result row'); rows[0].go(); }),
     pickSaved: () => act(() => data().chips[0].go()),
@@ -84,11 +87,11 @@ async function driver(code) {
       const bindings = data(), event = {target: {value: coordinates ? typedPoint : typedName}};
       if (bindings.mode === 'origin') bindings.onQ(event); else bindings.onOrigin(event);
     }),
-    searchOrigin: () => act(() => { const bindings = data(); if (bindings.mode === 'origin') bindings.qKey(enter); else bindings.originKey(enter); }),
+    searchOrigin: () => originInput(() => { const bindings = data(); if (bindings.mode === 'origin') bindings.qKey(enter); else bindings.originKey(enter); }),
     async chooseOrigin() {
       const bindings = data();
-      if (bindings.mode !== 'origin') return act(() => bindings.originKey(enter));
-      if (originText() === 'coordinates') return act(() => bindings.qKey(enter));
+      if (bindings.mode !== 'origin') return originInput(() => bindings.originKey(enter));
+      if (originText() === 'coordinates') return originInput(() => bindings.qKey(enter));
       if (!bindings.results.length) await act(() => bindings.qKey(enter));
       await act(() => { const rows = data().results; assert.equal(rows.length, 1, 'one starting point row'); rows[0].go(); });
     },
@@ -114,14 +117,20 @@ async function driver(code) {
     agentShowPlace: () => act(() => { void harness.surface.showPlace(place, true).catch(() => {}); }),
     agentShowDirections: () => act(() => { void harness.surface.showDirections(place, 'drive', true).catch(() => {}); }),
     agentPlanFrom: () => act(() => { void harness.surface.planFrom(here).catch(() => {}); }),
+    providerResponse: outcome => {responseMode=outcome;},
+    providerChanged: () => act(()=>m.app.configureMapsProvider({...providerConfig,revision:'replacement'}, {...provider})),
     crossAppQuery: () => act(() => { requests++; m.mapsState.query = 'Event place'; }),
     offerHandoff: () => act(() => { harness.held = []; m.render({offer: true}); offered.push(...harness.held); harness.held = null; }),
     consumeHandoff: () => act(() => { for (const run of offered.splice(0)) run(); }),
     async observe() {
       const view = m.render(); await tick();
-      const s = screen(), background = harness.host.background, state = s.state, selected = s.selected;
+      const s = screen(), background = harness.host.background, state = s.state, selected = s.selected, input=harness.inspect();
+      const queryAccepted=input.submittedQueryEpoch===input.searchEpoch, originAccepted=input.submittedOriginEpoch===input.searchEpoch;
+      const originPhase=input.submittedOriginKind==='search'?state?.originSearch.phase:input.submittedOriginKind==='location'?state?.position.phase:state?.route.phase;
       assert.equal(m.render().mode, view.mode, 'a render changes nothing');
       return {
+        queryAccepted,originAccepted,queryFailed:queryAccepted&&state?.search.phase==='error',originFailed:originAccepted&&originPhase==='error',
+        queryRequests:searches.filter(q=>q!==typedName&&q!==chosenName).length,originRequests,
         pendingInput: harness.inspect().queryDraft!==undefined||harness.inspect().originDraft!==undefined?(screen().directions?'origin':'query'):'none',
         mode: modes[view.mode] ?? view.mode, searching: s.searching, hasQuery: !!s.query, results: state?.search.phase === 'ready',
         selected: !selected ? 'none' : selected.origin === 'location' ? 'location' : selected.origin === 'saved' ? 'saved' : 'place',
@@ -136,7 +145,7 @@ async function driver(code) {
 }
 
 const project = state => {
-  const {lastChoice, ...compared} = state;
+  const {lastChoice, responseMode, ...compared} = state;
   return {...compared, mode: modeOf(state)};
 };
 
