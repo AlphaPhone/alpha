@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {workerDeployment,WORKER_SECRETS} from '../scripts/cloud-worker.ts';
 import {SHIPPED_CLOUD_DEPLOYMENT} from '../scripts/cloud-deployment-policy.ts';
+import {nativeAuthCallbackRegistration} from '../scripts/cloud-deployment.ts';
 import {leakedElizaHost} from '../scripts/local-cloud.ts';
 
 const policy=JSON.parse(fs.readFileSync('cloud/policy.example.json','utf8'));
@@ -25,7 +26,8 @@ test('the Worker deployment takes every authority from the app policy and every 
   assert.deepEqual(worker.routes,[{pattern:new URL(row.api).host+'/*',zone:ids.zone},{pattern:ids.blobHost+'/*',zone:ids.zone}]);
   assert.equal(worker.accountId,ids.accountId);
   assert.equal(worker.resources.hyperdriveId,ids.hyperdriveId);
-  const [callback]=worker.components.web.nativeAuthCallbacks;
+  // The app's native sign-in client is registered upstream as a row, never carried in Worker config.
+  const callback=nativeAuthCallbackRegistration(policy,identity,environment);
   assert.equal(callback.redirectUri,row.web+'/alphaphone/auth/callback');
   assert.equal(callback.androidPackage,identity.appId);
   assert.equal(callback.browserSignIn.apiOrigin,row.api);
@@ -36,7 +38,7 @@ test('the Worker deployment takes every authority from the app policy and every 
   assert.deepEqual([login.vars.APP_URL,login.vars.PASSKEY_ORIGIN,login.vars.PASSKEY_RP_ID,login.vars.STEWARD_DEFAULT_TENANT_ID,login.vars.EMAIL_FROM],[row.web,row.web,new URL(row.web).hostname,row.tenant,ids.mailFrom]);
   for(const component of [login,speech,admission])assert.ok(component.workerName.startsWith(ids.workerName+'-'),component.workerName);
   assert.equal(worker.durableObjectTransfers.InferenceAdmissionGate,admission.workerName);
-  assert.deepEqual(web.nativeAuthCallbacks,[callback]);
+  assert.deepEqual(web,{projectName:ids.workerName+'-web'});
  }
  assert.equal(leakedElizaHost(deployment),null);
 });
