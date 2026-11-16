@@ -29,6 +29,10 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     const sendResults = new Map<string, unknown>();
     const smsDrafts = new Map<string, string>();
     let listenerSequence = 0;
+    const callStateListeners: ((data: unknown) => void)[] = [];
+    w.deviceCallState = {inCall: false, emergency: false, emergencyLive: false};
+    /** A call-state change, as Telephony reports it to AlphaDevice. */
+    w.setDeviceCallState = (state: unknown) => { w.deviceCallState = state; for (const listener of callStateListeners) listener(state); };
     w.smsProviderChanged = () => {
       for (const listener of messageListeners.values()) {
         if (listener.eventName === 'messagesChanged') listener.callback({});
@@ -114,8 +118,11 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.Capacitor = {Plugins: {}, PluginHeaders: names.map(name => ({name, methods: methods.map(name => ({name, rtype: name === 'addListener' ? 'callback' : 'promise'}))})), nativeCallback: (plugin: string, method: string, input: any, callback: (data: unknown) => void) => {
       const id = String(++listenerSequence);
       if (plugin === 'AlphaTelephony' && method === 'addListener') messageListeners.set(id, {eventName: input.eventName, callback});
+      if (plugin === 'AlphaDevice' && method === 'addListener' && input.eventName === 'callState') callStateListeners.push(callback);
       return id;
     }, nativePromise: async (plugin: string, method: string, input: any) => {
+      // AC-19: Telecom's call state as AlphaDevice reports it (AlphaCallState.java); none by default.
+      if (plugin === 'AlphaDevice' && method === 'callState') return w.deviceCallState;
       if (plugin === 'AlphaTelephony') {
         w.telephonyCalls.push(method); w.telephonyInputs.push([method, input]);
         if (w.telephonyAnswers?.[method]) return w.telephonyAnswers[method](input);

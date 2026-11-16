@@ -49,6 +49,27 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
+  test('AC-19 on the image: while Telecom reports a call that may be an emergency call, no proposal acts', async ({page}) => {
+    await setupTelephony(page);
+    await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
+    await page.getByRole('button', {name: /^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    const shell = `(() => { const el = document.querySelector('[data-screen]'); let f = el[Object.keys(el).find(k => k.startsWith('__reactFiber$'))]; while (f && !(f.stateNode && typeof f.stateNode.cardAct === 'function')) f = f.return; return f.stateNode; })()`;
+    const proposal = (id: string) => `({id: "${id}", kind: "other", title: "Save Ada", detail: "Ada Okafor", button: "Save", acts: true, act: {mod: "messages", fn: "none"}, args: {}})`;
+    expect(await page.evaluate(`${shell}.propose(${proposal('before')}).shown`)).toBe(true);
+    await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
+    // Telecom reports a live call whose kind it cannot tell: AC-19 holds, through the image's own path.
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: null, emergencyLive: true}));
+    await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(0);
+    expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(true);
+    expect(await page.evaluate(`JSON.stringify(${shell}.propose(${proposal('during')}))`)).toBe(JSON.stringify({shown: false, replaced: []}));
+    // An ordinary call does not hold it; neither does the call ending.
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: false, emergencyLive: false}));
+    await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: false, emergency: false, emergencyLive: false}));
+    expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(false);
+  });
+
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
     await setupTelephony(page);
     // The first send fails in transport; the retry returns a receipt bound to the reviewed text.

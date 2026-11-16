@@ -180,3 +180,18 @@ export function callCardText(target: CallTarget, party: CallParty | null, format
 	const name = party?.name || target.contact, numbers = party?.numbers || [];
 	return { title: `Call ${name}`, detail: numbers.length === 1 ? format(numbers[0]) : numbers.length > 1 ? `${numbers.length} numbers · you choose one before it dials` : 'You confirm the number before it dials' };
 }
+
+let emergencySource: (() => boolean) | null = null;
+/** AC-19: the device installs how a live emergency call is known (runtime/call-state.ts on the image). */
+export function setEmergencySource(next: (() => boolean) | null): void {
+	emergencySource = next;
+}
+/** True while the device reports a live call that may be an emergency call. A throw counts as live. */
+export function deviceEmergencyLive(): boolean {
+	if (!emergencySource) return false;
+	try {
+		return emergencySource() === true;
+	} catch {
+		return true;
+	}
+}

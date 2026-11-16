@@ -1,11 +1,11 @@
 /// The image Phone view: the foreground-only recent-calls read with its epoch fence, and the dial
 /// handoff with its own latch, which belongs to the showing of Phone it started in.
-/// Not modelled here (AP-16): a call Alpha asks for. On the image it is approved on its card and run
-/// by the telephony executor (test/telephony-executor.test.mjs, test/phone-dial-agent-flow.test.mjs);
-/// the PhoneCall model replays approval before dial on the shell itself. The WebView is told nothing
-/// about live calls, so on the image AC-19 rests on the native plugin: an emergency number only opens
-/// the system dial screen, and placeCall refuses while any call is in progress ("busy").
-/// The WebView's own emergency gate needs an upstream call-state contract.
+/// AP-16 AC-19 on the image: Telecom's call state reaches the renderer (AlphaCallState.java through
+/// AlphaDevice, runtime/call-state.ts). A live call that cannot be ruled out as an emergency call
+/// holds the gate: the shell offers no acting proposal and the telephony executor runs no side
+/// effect (dial, dial handoff, SMS, contact write) while it holds. The replay
+/// (test/quint-phone-session.test.mjs) drives the real call-state watch and the executor's guard.
+/// Approval before dial itself is replayed by PhoneCall on the shell and tested in the executor.
 module PhoneSession {
   type State = {
     viewOpen: bool, hidden: bool, active: bool,
@@ -14,13 +14,19 @@ module PhoneSession {
     // The showing of Phone, the showings whose dial handoff is still in flight, and the dial latch.
     session: int, dials: Set[int], dialing: bool, handoffs: int,
     calls: bool, needsAccess: bool,
-    notice: str
+    notice: str,
+    // Telecom's last report: in a call ("yes", "no", "unknown" without phone-state access) and the
+    // call's kind ("emergency", "ordinary", "unknown"); Alpha's telephony side effects run and refused.
+    inCall: str, callKind: str, effects: int, refused: int
   }
   var s: State
   action init = s' = {
     viewOpen: false, hidden: false, active: false, epoch: 0, reads: Set(), reading: false,
-    session: 0, dials: Set(), dialing: false, handoffs: 0, calls: false, needsAccess: false, notice: "none"
+    session: 0, dials: Set(), dialing: false, handoffs: 0, calls: false, needsAccess: false, notice: "none",
+    inCall: "no", callKind: "ordinary", effects: 0, refused: 0
   }
+  /// The gate (AlphaCallState.emergencyLive): in a call whose kind is not known to be ordinary.
+  pure def gate(v: State): bool = v.inCall == "yes" and v.callKind != "ordinary"
   pure def availableIn(v: State): bool = v.viewOpen and not(v.hidden)
   pure def busy(v: State): bool = v.reading or v.dialing
   /// Becoming available starts a read; becoming unavailable ends the showing: the rows, the
@@ -63,12 +69,23 @@ module PhoneSession {
     s' = if (token != s.session) { ...s, dials: s.dials.exclude(Set(token)) }
       else { ...s, dials: s.dials.exclude(Set(token)), dialing: false, notice: if (opened) "handed-off" else "failed" }
   }
+  /// Telecom reports a call-state change. Without a call the kind is ordinary; without phone-state
+  /// access both are unknown.
+  action telecom(inCall: str, kind: str): bool = all { inCall.in(Set("yes", "no", "unknown")), kind.in(Set("emergency", "ordinary", "unknown")),
+    s' = { ...s, inCall: inCall, callKind: if (inCall == "yes") kind else if (inCall == "no") "ordinary" else "unknown" } }
+  /// An approved Alpha action reaches the executor's guard, which reads Telecom again first. The
+  /// replay runs the real guard (call-state.ts telephonyEffectAllowed) and compares runs and refusals.
+  action alphaEffect = all { s.effects + s.refused < 6,
+    s' = if (gate(s)) { ...s, refused: s.refused + 1 }
+      else { ...s, effects: s.effects + 1 } }
   action step = {
     nondet token = 0.to(6).oneOf()
     nondet outcome = Set("unsupported", "no-access", "rows", "error").oneOf()
     nondet flag = Set(true, false).oneOf()
+    nondet inCall = Set("yes", "no", "unknown").oneOf()
+    nondet kind = Set("emergency", "ordinary", "unknown").oneOf()
     any { openView, closeView, hide, show, refresh, readCompletes(token, outcome), dial(flag), invalidNumber,
-      dialCompletes(token, flag), s' = s }
+      dialCompletes(token, flag), telecom(inCall, kind), alphaEffect, s' = s }
   }
   val ActiveMatchesAvailability = s.active == availableIn(s)
   val InactiveHoldsNothing = not(s.active) implies not(s.calls or s.needsAccess or busy(s)) and s.notice == "none"
@@ -119,4 +136,12 @@ module PhoneSession {
     .expect(s.reading and not(s.needsAccess)).then(readCompletes(2, "rows")).expect(s.calls and safety)
   run typedNumberClearsNoticeTest = init.then(openView).then(readCompletes(1, "unsupported")).then(invalidNumber)
     .expect(s.notice == "invalid").then(dial(false)).expect(s.notice == "none" and s.dialing and safety)
+  val EmergencyRefusalWitness = s.refused > 0 and s.callKind == "emergency"
+  val UnknownCallRefusalWitness = s.refused > 0 and s.callKind == "unknown" and s.inCall == "yes"
+  run emergencyCallRefusesEffectsTest = init.then(telecom("yes", "emergency")).then(alphaEffect)
+    .expect(s.refused == 1 and s.effects == 0 and safety)
+    .then(telecom("yes", "unknown")).then(alphaEffect).expect(s.refused == 2 and safety)
+    .then(telecom("yes", "ordinary")).then(alphaEffect).expect(s.effects == 1 and safety)
+    .then(telecom("unknown", "unknown")).then(alphaEffect).expect(s.effects == 2 and safety)
+    .then(telecom("no", "emergency")).then(alphaEffect).expect(s.effects == 3 and s.callKind == "ordinary" and safety)
 }

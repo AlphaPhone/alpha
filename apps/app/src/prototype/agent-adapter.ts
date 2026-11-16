@@ -17,6 +17,7 @@ import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,camer
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
+import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
@@ -269,6 +270,12 @@ export async function declineProposal(id:string):Promise<{ok:boolean;message:str
   const after=connectionController.getSnapshot();
   if(after.error)return {ok:false,message:after.error};
   return {ok:true,message:'Declined. No phone action was performed.'};
+}
+/** AC-19 defence in depth: a fresh Telecom reading right before a telephony side effect. */
+const EMERGENCY_REFUSAL='Nothing was done during a call that may be an emergency call.';
+async function emergencyCallBlocks():Promise<boolean>{
+  if(!aospImage)return false;
+  return !(await telephonyEffectAllowed(registerPlugin<CallStatePlugin>('AlphaDevice')));
 }
 export function installAgentAdapter(Component: Shell, views: Shell) {
   const p = Component.prototype;
@@ -1021,6 +1028,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Reviewed dial handoff on the verified image only: the system dial screen opens with the
         // approved number and the owner places the call there. Contact targets are not negotiated.
         if(!aospImage||operation.target.kind!=='number'||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was dialed. Keep Alpha open and unlocked, then ask again.'};
+        if(await emergencyCallBlocks())return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
         signal.throwIfAborted();context(this);
         if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');
@@ -1033,18 +1041,20 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // phone; the owner confirms the exact number or the before and after before anything
         // calls, sends or writes, and the agent receives only the outcome.
         if(!aospImage||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was done. Keep Alpha open and unlocked, then ask again.'};
+        if(await emergencyCallBlocks())return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true),book=registerPlugin<any>('AlphaContacts');
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
-          placeCall:number=>client.placeCall(number),
+          placeCall:async number=>await emergencyCallBlocks()?{status:'busy' as const}:client.placeCall(number),
           getContact:async id=>parseContactDetail(await book.get({id}),id),
-          saveContact:async(draft,target)=>{const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};},
-          removeContact:async(id,version)=>parseContactRemove(await book.remove({id,version})),
+          saveContact:async(draft,target)=>{if(await emergencyCallBlocks())return {status:'failed' as const};const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};},
+          removeContact:async(id,version)=>await emergencyCallBlocks()?{status:'failed' as const}:parseContactRemove(await book.remove({id,version})),
           // The same native review and journalled send as a text to a number; the review shows the resolved number and the text.
           sendSms:async(number,body,id,sendSignal)=>{
+            if(await emergencyCallBlocks())return 'cancelled';
             const status=await client.status();current();
             const sim=expectedContext.view==='messages'&&expectedContext.selectedObject?.kind==='sms-subscription'?expectedContext.selectedObject:null;
             const selected=sim&&status.subscriptions?.find(row=>String(row.id)===sim.id&&smsSubscriptionRevision(row)===sim.revision);
@@ -1063,6 +1073,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(isSmsSend(operation)){
         if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent. Open Messages, choose the SIM, then ask again.'};
+        if(await emergencyCallBlocks())return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true);
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('SMS review context changed');};

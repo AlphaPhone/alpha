@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {modelTraces, replayTraces, settle, sourceModule} from '../specs/quint/refinement/services/identity-comms-traces.mjs';
 import {createAospTelephony} from '../apps/app/src/runtime/aosp-telephony.ts';
+import {currentCallState, telephonyEffectAllowed, watchCallState} from '../apps/app/src/runtime/call-state.ts';
 
 /** Existing source-executing MBT harness, shared by its original owning tests and the strict services receipt. */
 // PhoneSession traces replayed against the image Phone adapter. The telephony plugin is a held
@@ -11,8 +12,10 @@ import {createAospTelephony} from '../apps/app/src/runtime/aosp-telephony.ts';
 
 const MODEL = {path: 'specs/quint/services/PhoneSession.qnt', module: 'PhoneSession'};
 const SCENARIOS = ['recentCallsTest', 'refreshDuringDialTest', 'leaveDuringDialTest', 'staleHandoffLeavesLaterDialTest',
-  'dialRefusedWhileReadingTest', 'dialRefusedDuringHandoffTest', 'accessNeededTest', 'supersededReadTest', 'typedNumberClearsNoticeTest'];
-const WITNESSES = ['ReadDuringHandoffWitness', 'AccessNeededWitness', 'DialNoticeWitness', 'RowsKeptWhileReadingWitness', 'StaleHandoffBesideLaterDialWitness'];
+  'dialRefusedWhileReadingTest', 'dialRefusedDuringHandoffTest', 'accessNeededTest', 'supersededReadTest', 'typedNumberClearsNoticeTest',
+  'emergencyCallRefusesEffectsTest'];
+const WITNESSES = ['ReadDuringHandoffWitness', 'AccessNeededWitness', 'DialNoticeWitness', 'RowsKeptWhileReadingWitness', 'StaleHandoffBesideLaterDialWitness',
+  'EmergencyRefusalWitness', 'UnknownCallRefusalWitness'];
 const OPENED = 'Your phone app is open with the number.';
 const NOTICES = {'': 'none', 'Invalid number': 'invalid', [OPENED]: 'handed-off', 'Couldn’t open': 'failed'};
 const status = callLog => ({version: 2, voiceCapable: true, smsCapable: true,
@@ -30,7 +33,13 @@ const {installPhoneAdapter} = await sourceModule('apps/app/src/prototype/phone-a
 
 /** The model state as far as the adapter shows it: the busy flag is the disjunction of both latches. */
 const project = s => ({busy: s.reading || s.dialing, calls: s.calls, needsAccess: s.needsAccess, notice: s.notice,
-  reads: s.reads.length, dials: s.dials.length, handoffs: s.handoffs});
+  reads: s.reads.length, dials: s.dials.length, handoffs: s.handoffs,
+  inCall: s.inCall, callKind: s.callKind, effects: s.effects, refused: s.refused});
+/** AlphaDevice's callState payload for a Telecom report, as AlphaCallState.java builds it. emergencyLive is
+ * sent false so the renderer's own re-derivation of the rule is what the replay checks. */
+const nativeCallState = (inCall, kind) => ({inCall: inCall === 'yes' ? true : inCall === 'no' ? false : null,
+  emergency: inCall === 'yes' ? (kind === 'emergency' ? true : kind === 'ordinary' ? false : null) : inCall === 'no' ? false : null, emergencyLive: false});
+const word = (value, yes, no) => value === true ? yes : value === false ? no : 'unknown';
 
 function create() {
   const reads = [], dials = [];
@@ -48,6 +57,11 @@ function create() {
   const shell = new Shell();
   shell.componentDidMount();
   const page = () => views.phone.render({}, {});
+  // AC-19: the real call-state watch and executor guard over a stub AlphaDevice plugin.
+  let deviceAnswer = nativeCallState('no', 'ordinary'), effects = 0, refusedEffects = 0;
+  const deviceListeners = [];
+  const device = {callState: async () => deviceAnswer, addListener: async (event, listener) => { deviceListeners.push(listener); return {remove() {}}; }};
+  const stopCallState = watchCallState(device, () => {});
   const visibility = async hidden => { globalThis.document.hidden = hidden; shell.phoneHide(); await settle(); };
   const view = async name => { shell.view = name; shell.componentDidUpdate(); await settle(); };
   return {
@@ -70,13 +84,16 @@ function create() {
       if (opened) handoff.resolve({status: 'handed-off', target: 'dialer', handler: null, message: OPENED}); else handoff.reject(Error('no activity'));
       await settle();
     },
+    async telecom(inCall, kind) { deviceAnswer = nativeCallState(inCall, kind); for (const listener of deviceListeners) listener(deviceAnswer); await settle(); },
+    async alphaEffect() { if (await telephonyEffectAllowed(device)) effects++; else refusedEffects++; await settle(); },
     observe() {
-      const model = page();
+      const model = page(), call = currentCallState();
       assert.ok(model.nativeNotice in NOTICES, model.nativeNotice);
       return {busy: model.nativeBusy, calls: model.nativeRows.length > 0, needsAccess: model.nativeAccess, notice: NOTICES[model.nativeNotice],
-        reads: reads.length, dials: dials.length, handoffs};
+        reads: reads.length, dials: dials.length, handoffs,
+        inCall: word(call.inCall, 'yes', 'no'), callKind: word(call.emergency, 'emergency', 'ordinary'), effects, refused: refusedEffects};
     },
-    close() { shell.componentWillUnmount(); delete globalThis.document; },
+    close() { stopCallState(); shell.componentWillUnmount(); delete globalThis.document; },
   };
 }
 
@@ -91,7 +108,7 @@ async function runPhoneSessionCase1(t, {canaries=true}={}) {
   const merged = state => ({...project(state), busy: state.reading});
   await assert.rejects(replayTraces(traces.filter(trace => trace.name === 'refreshDuringDialTest'), create, {project: merged}), /refreshDuringDialTest step/);
   }
-  for (const action of ['openView', 'closeView', 'hide', 'show', 'refresh', 'readCompletes', 'dial', 'invalidNumber', 'dialCompletes']) assert.ok(receipt.actions[action] > 0, action);
+  for (const action of ['openView', 'closeView', 'hide', 'show', 'refresh', 'readCompletes', 'dial', 'invalidNumber', 'dialCompletes', 'telecom', 'alphaEffect']) assert.ok(receipt.actions[action] > 0, action);
   return receipt;
 }
 

@@ -7,7 +7,7 @@ import vm from 'node:vm';
 // proposals, stage switches and the Back order (docs/agentic-comms.md AC-05, AC-06, AC-19, AC-26).
 // Browser behaviour is in test/browser/comms-shell.spec.ts.
 const model = readFileSync('apps/app/src/prototype/model.js', 'utf8');
-const {isAskSentence, proposalCanAct} = await import('../apps/app/src/runtime/comms-bar.ts');
+const {deviceEmergencyLive, isAskSentence, proposalCanAct} = await import('../apps/app/src/runtime/comms-bar.ts');
 const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected)), message);
 /** Source of one shell class method: from its name to the brace that closes its body. */
 function method(name) {
@@ -30,7 +30,7 @@ const METHODS = ['isCommsView', 'commsSpec', 'defaultChat', 'shellDetent', 'next
 /** A shell over plain state with recorded navigation; setState applies at once, like a committed update. */
 function shell(state, views) {
   const log = {opened: [], navigated: [], toasts: [], acted: []};
-  const ctx = vm.createContext({Object, JSON, Number, Date, isMvpView: () => true, proposalCanAct, isAskSentence, deferredMvpPrompt: () => false, DEFERRED_MVP_VIEWS: new Set(), VIEWS: views});
+  const ctx = vm.createContext({Object, JSON, Number, Date, isMvpView: () => true, proposalCanAct, isAskSentence, deviceEmergencyLive, deferredMvpPrompt: () => false, DEFERRED_MVP_VIEWS: new Set(), VIEWS: views});
   vm.runInContext(`globalThis.shell={${METHODS.map(method).join(',\n')}};`, ctx);
   const s = ctx.shell;
   state = {screen: 'home', chat: 'input', msgs: [], stack: [], stageFrom: [], vs: {}, voice: 'off', ...state};

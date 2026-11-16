@@ -33,6 +33,38 @@ public final class AlphaDevicePlugin extends Plugin {
   android.os.UserManager users=activity.getSystemService(android.os.UserManager.class);
   return lock!=null&&users!=null&&!lock.isDeviceLocked()&&users.isUserUnlocked()&&activity instanceof androidx.lifecycle.LifecycleOwner&&((androidx.lifecycle.LifecycleOwner)activity).getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED);
  }
+ /** AP-16 AC-19: whether a call is live and whether it may be an emergency call (AlphaCallState). Read-only. */
+ @PluginMethod public void callState(PluginCall call){call.resolve(callStatePayload(AlphaCallState.read(getContext())));}
+ static JSObject callStatePayload(AlphaCallState.Reading reading){
+  JSObject out=new JSObject();
+  out.put("inCall",reading.inCall==null?JSObject.NULL:reading.inCall);
+  out.put("emergency",reading.emergency==null?JSObject.NULL:reading.emergency);
+  out.put("emergencyLive",reading.emergencyLive());
+  return out;
+ }
+ /** Telephony reports each call-state change; the renderer reads the full state again on each. */
+ private Object callStateListener;
+ private void watchCallState(){
+  if(android.os.Build.VERSION.SDK_INT<31)return;
+  Context context=getContext();
+  if(context.checkSelfPermission("android.permission.READ_PHONE_STATE")!=PackageManager.PERMISSION_GRANTED)return;
+  android.telephony.TelephonyManager phone=context.getSystemService(android.telephony.TelephonyManager.class);
+  if(phone==null)return;
+  CallStateWatch watch=new CallStateWatch(this);
+  try{phone.registerTelephonyCallback(context.getMainExecutor(),watch);callStateListener=watch;}catch(SecurityException|IllegalStateException unavailable){}
+ }
+ private void unwatchCallState(){
+  if(android.os.Build.VERSION.SDK_INT<31||!(callStateListener instanceof CallStateWatch))return;
+  android.telephony.TelephonyManager phone=getContext().getSystemService(android.telephony.TelephonyManager.class);
+  try{if(phone!=null)phone.unregisterTelephonyCallback((CallStateWatch)callStateListener);}catch(RuntimeException ignored){}
+  callStateListener=null;
+ }
+ @android.annotation.TargetApi(31)
+ private static final class CallStateWatch extends android.telephony.TelephonyCallback implements android.telephony.TelephonyCallback.CallStateListener{
+  private final java.lang.ref.WeakReference<AlphaDevicePlugin> bridge;
+  CallStateWatch(AlphaDevicePlugin bridge){this.bridge=new java.lang.ref.WeakReference<>(bridge);}
+  @Override public void onCallStateChanged(int state){AlphaDevicePlugin owner=bridge.get();if(owner!=null)owner.notifyListeners("callState",callStatePayload(AlphaCallState.read(owner.getContext())));}
+ }
  @PluginMethod public void shareText(PluginCall call){
   final String text,title;try{text=boundedShareText(call.getString("text"));title=call.getString("title","");if(title.length()>200||title.chars().anyMatch(c->c<32||c==127))throw new IllegalArgumentException();}catch(Exception invalid){call.reject("Choose valid text of at most 64 KiB.");return;}
   android.app.Activity activity=getActivity();if(activity==null){call.reject("Open and unlock Alpha before sharing.");return;}
@@ -289,22 +321,12 @@ public final class AlphaDevicePlugin extends Plugin {
    if(!AlphaImageCapability.verified(context))return true;
    android.telecom.TelecomManager calls=context.getSystemService(android.telecom.TelecomManager.class);
    // A grant arriving after Telecom returned false cannot authenticate that read.
-   if(calls==null||!canReadUpdateCallState(context,calls))return false;
+   if(calls==null||!AlphaCallState.canRead(context,calls))return false;
    // Lint cannot infer the privileged, default-dialer and AppOps checks in the helper.
    @android.annotation.SuppressLint("MissingPermission") boolean inCall=calls.isInCall();
-   return !inCall&&canReadUpdateCallState(context,calls);
+   return !inCall&&AlphaCallState.canRead(context,calls);
   }catch(SecurityException denied){return false;}
   catch(RuntimeException unknown){return false;}
- }
- /** Telecom can report false when phone-state access is denied. Only use a negative with known access. */
- private static boolean canReadUpdateCallState(Context context,android.telecom.TelecomManager calls){
-  String packageName=context.getPackageName();
-  if(context.checkSelfPermission("android.permission.READ_PRIVILEGED_PHONE_STATE")==PackageManager.PERMISSION_GRANTED||
-     packageName.equals(calls.getDefaultDialerPackage()))return true;
-  if(context.checkSelfPermission("android.permission.READ_PHONE_STATE")!=PackageManager.PERMISSION_GRANTED)return false;
-  android.app.AppOpsManager ops=context.getSystemService(android.app.AppOpsManager.class);
-  return ops!=null&&ops.noteOpNoThrow(android.app.AppOpsManager.OPSTR_READ_PHONE_STATE,context.getApplicationInfo().uid,packageName)
-    ==android.app.AppOpsManager.MODE_ALLOWED;
  }
  /** SHA-256 of the original certificate of Alpha's one signer (apksigner's digest), which key rotation never changes: an update manifest offers an APK only to installs of that signing lineage. */
  static String appSigner(Context context)throws Exception{
@@ -684,6 +706,7 @@ public final class AlphaDevicePlugin extends Plugin {
   // keep this process's deferred verified file, never a file another attempt owns.
   if(updating.compareAndSet(false,true)){if(updateVerified==null||!java.nio.file.Files.isRegularFile(updateApk().toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS)){updateVerified=null;updateApk().delete();}updating.set(false);}
   androidx.core.content.ContextCompat.registerReceiver(getContext(),updateStatus,new android.content.IntentFilter(UPDATE_STATUS),androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
+  watchCallState();
  }
  /** The connection updateWorker opened last, for handleOnDestroy: interrupting a worker does not stop its socket I/O. */
  private volatile javax.net.ssl.HttpsURLConnection updateActive;
@@ -989,7 +1012,7 @@ public final class AlphaDevicePlugin extends Plugin {
   },()->call.reject("Update unavailable"));
  }
  /** Stops an update download too: disconnect only closes the raw socket, which Android allows on this main thread. A session outlives its owner, for a later tap on any bridge. */
- @Override protected void handleOnDestroy(){retireUpdateBridge();UpdateActivation pending=activation;if(pending!=null&&pending.owner==this)pending.ready.complete(false);diagnosticsWorker.shutdown();updateWorker.shutdownNow();javax.net.ssl.HttpsURLConnection active=updateActive;if(active!=null)active.disconnect();getContext().unregisterReceiver(updateStatus);if(updateOwner==this){updateOwner=null;updateDue=false;updateOpen=false;}super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){unwatchCallState();retireUpdateBridge();UpdateActivation pending=activation;if(pending!=null&&pending.owner==this)pending.ready.complete(false);diagnosticsWorker.shutdown();updateWorker.shutdownNow();javax.net.ssl.HttpsURLConnection active=updateActive;if(active!=null)active.disconnect();getContext().unregisterReceiver(updateStatus);if(updateOwner==this){updateOwner=null;updateDue=false;updateOpen=false;}super.handleOnDestroy();}
  // End of updater methods for host replay.
  /** Status and navigation icon colors follow Alpha's drawn theme, not only Android's night mode. */
  @PluginMethod public void setSystemBarAppearance(PluginCall call){

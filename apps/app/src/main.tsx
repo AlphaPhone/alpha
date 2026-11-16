@@ -6,6 +6,8 @@ import {installCanonicalCalendarDrafts} from './prototype/canonical-calendar-dra
 import {installAgentCalendarAdapter,deviceCalendarScope} from './prototype/agent-calendar-adapter';
 import {Capacitor} from '@capacitor/core';
 import {registerPlugin} from './platform-plugins';
+import {aospImage} from './runtime/aosp-image';
+import {installCallStateWatch,type CallStatePlugin} from './runtime/call-state';
 import {holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates} from '../../../.eliza/client-features/packages/ui/src/state/app-update-gate';
 import {ownerReminderNotifications} from './runtime/owner-reminder-notification-port';
 import {installCalendarApprovalAdapter} from './prototype/calendar-approval-adapter';
@@ -133,6 +135,8 @@ if (!fixture) {
   installReminderAdapter(Component, VIEWS);
   installCalendarAdapter(Component, VIEWS, {active:deviceCalendarScope});
   if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS,secureConnectionStore);installPhoneAdapter(Component,VIEWS);}
+  // AC-19 on the image: Telecom tells the shell when a call that may be an emergency call is live.
+  if(isAndroid&&aospImage)installCallStateWatch(Component,registerPlugin<CallStatePlugin>('AlphaDevice'));
   installCalendarFormDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installCalendarEditDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installNoteOriginAdapter(Component, VIEWS);

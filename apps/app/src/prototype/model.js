@@ -29,7 +29,7 @@ import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWee
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
-import { applyListFilter, clearListFilter, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
+import { applyListFilter, clearListFilter, deviceEmergencyLive, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
 
 
 var IC = {
@@ -5789,6 +5789,8 @@ class Component extends DCLogic {
    * call (Phone) also says so while another view is on screen or its card is minimized.
    */
   emergencyLive() {
+    // On the image Telecom reports it (runtime/call-state.ts); the fixture's Phone view below.
+    if (deviceEmergencyLive()) return true;
     var spec = this.commsSpec();
     if (spec && spec.emergency === true) return true;
     var self = this;
