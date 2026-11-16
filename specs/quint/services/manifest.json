@@ -3246,9 +3246,7 @@
       "dialRefusedDuringHandoffTest",
       "accessNeededTest",
       "supersededReadTest",
-      "typedNumberClearsNoticeTest",
-      "approvalBeforeDialTest",
-      "emergencyRefusesProposalsTest"
+      "typedNumberClearsNoticeTest"
     ],
     "invariants": [
       "TypeOK",
@@ -3258,8 +3256,7 @@
       "DialingTracksHandoff",
       "RowsNeedAccess",
       "HandoffsCounted",
-      "SessionWithinEpoch",
-      "ApprovalBeforeDial"
+      "SessionWithinEpoch"
     ],
     "witnesses": [
       "ReadDuringHandoffWitness",
@@ -3334,8 +3331,7 @@
       "Six epochs, three handoffs and one row class. busy() is the disjunction of the read and dial latches; a typed number clears the notice, a recent-call row does not.",
       "The shared telephony profile (status, requestAccess, recentCalls, dial) is a controlled port. No call is placed, simulated or reported by the view.",
       "Replayed against installPhoneAdapter with a held telephony plugin (test/quint-phone-session.test.mjs); no installed-image, Telecom or call-log claim.",
-      "The dial handoff branch after a role-required or permission-required refusal is modeled here. Direct Telecom placement is covered separately by PhoneCalls and the Phone adapter tests.",
-      "AP-16 Alpha call proposals, approval, the emergency handoff and the system call screen End are model-only actions outside step; the adapter replay does not drive them."
+      "The dial handoff branch after a role-required or permission-required refusal is modeled here. Direct Telecom placement is covered separately by PhoneCalls and the Phone adapter tests."
     ],
     "sharedSources": [
       "packages/contracts/src/native-telephony.ts"

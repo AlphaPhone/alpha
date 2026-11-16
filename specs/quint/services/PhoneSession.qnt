@@ -1,12 +1,11 @@
 /// The image Phone view: the foreground-only recent-calls read with its epoch fence, and the dial
 /// handoff with its own latch, which belongs to the showing of Phone it started in.
-/// AP-16 (docs/agentic-comms.md AC-18 to AC-20): on the image a call Alpha asks for is one proposal
-/// card; only the owner's tap on it reaches the telephony executor, which places the call or, for an
-/// emergency number, hands it to the system dial screen. The system call screen owns every live
-/// call, so its End is never under the WebView's sheet; no acting proposal is approved while an
-/// emergency call is live. These actions are not part of `step`: the adapter replay
-/// (test/quint-phone-session.test.mjs) drives the Phone view only, and the approval path is covered
-/// by the agent adapter and telephony executor tests.
+/// Not modelled here (AP-16): a call Alpha asks for. On the image it is approved on its card and run
+/// by the telephony executor (test/telephony-executor.test.mjs, test/phone-dial-agent-flow.test.mjs);
+/// the PhoneCall model replays approval before dial on the shell itself. The WebView is told nothing
+/// about live calls, so on the image AC-19 rests on the native plugin: an emergency number only opens
+/// the system dial screen, and placeCall refuses while any call is in progress ("busy").
+/// The WebView's own emergency gate needs an upstream call-state contract.
 module PhoneSession {
   type State = {
     viewOpen: bool, hidden: bool, active: bool,
@@ -15,17 +14,12 @@ module PhoneSession {
     // The showing of Phone, the showings whose dial handoff is still in flight, and the dial latch.
     session: int, dials: Set[int], dialing: bool, handoffs: int,
     calls: bool, needsAccess: bool,
-    notice: str,
-    // AP-16: the open Alpha call proposal (none, "number" or "emergency"), the owner's approvals,
-    // calls Alpha's path placed, emergency numbers it handed to the system dial screen, and whether
-    // the system call screen holds an emergency call.
-    proposal: str, approvals: int, alphaPlaced: int, emergencyHandoffs: int, emergencyLive: bool
+    notice: str
   }
   var s: State
   action init = s' = {
     viewOpen: false, hidden: false, active: false, epoch: 0, reads: Set(), reading: false,
-    session: 0, dials: Set(), dialing: false, handoffs: 0, calls: false, needsAccess: false, notice: "none",
-    proposal: "none", approvals: 0, alphaPlaced: 0, emergencyHandoffs: 0, emergencyLive: false
+    session: 0, dials: Set(), dialing: false, handoffs: 0, calls: false, needsAccess: false, notice: "none"
   }
   pure def availableIn(v: State): bool = v.viewOpen and not(v.hidden)
   pure def busy(v: State): bool = v.reading or v.dialing
@@ -69,17 +63,6 @@ module PhoneSession {
     s' = if (token != s.session) { ...s, dials: s.dials.exclude(Set(token)) }
       else { ...s, dials: s.dials.exclude(Set(token)), dialing: false, notice: if (opened) "handed-off" else "failed" }
   }
-  /// Alpha proposes a call (AC-20). Nothing dials. Over a live emergency call it is dropped (AC-19).
-  action alphaPropose(emergency: bool): bool = all { s.approvals < 3,
-    s' = if (s.emergencyLive) s else { ...s, proposal: if (emergency) "emergency" else "number" } }
-  /// The owner taps Call on the card: an ordinary number is placed; an emergency number opens the
-  /// system dial screen. During a live emergency call the card has no button and the tap does nothing.
-  action alphaApprove = all { s.proposal != "none",
-    s' = if (s.emergencyLive) s
-      else if (s.proposal == "emergency") { ...s, proposal: "none", approvals: s.approvals + 1, emergencyHandoffs: s.emergencyHandoffs + 1, emergencyLive: true }
-      else { ...s, proposal: "none", approvals: s.approvals + 1, alphaPlaced: s.alphaPlaced + 1 } }
-  /// End on the system call screen, always reachable there.
-  action systemEnd = all { s.emergencyLive, s' = { ...s, emergencyLive: false } }
   action step = {
     nondet token = 0.to(6).oneOf()
     nondet outcome = Set("unsupported", "no-access", "rows", "error").oneOf()
@@ -97,9 +80,7 @@ module PhoneSession {
   val SessionWithinEpoch = s.session <= s.epoch
   val TypeOK = s.epoch.in(0.to(6)) and s.session.in(0.to(6)) and s.reads.subseteq(1.to(6)) and s.dials.subseteq(0.to(6))
     and s.handoffs.in(0.to(3)) and s.notice.in(Set("none", "invalid", "handed-off", "failed"))
-  /// AC-20: every call Alpha's path placed or handed over followed one approval tap.
-  val ApprovalBeforeDial = s.alphaPlaced + s.emergencyHandoffs == s.approvals
-  val safety = ApprovalBeforeDial and TypeOK and ActiveMatchesAvailability and InactiveHoldsNothing and ReadingHasCurrentRead and
+  val safety = TypeOK and ActiveMatchesAvailability and InactiveHoldsNothing and ReadingHasCurrentRead and
     DialingTracksHandoff and RowsNeedAccess and HandoffsCounted and SessionWithinEpoch
 
   val ReadDuringHandoffWitness = s.reading and s.dialing
@@ -138,11 +119,4 @@ module PhoneSession {
     .expect(s.reading and not(s.needsAccess)).then(readCompletes(2, "rows")).expect(s.calls and safety)
   run typedNumberClearsNoticeTest = init.then(openView).then(readCompletes(1, "unsupported")).then(invalidNumber)
     .expect(s.notice == "invalid").then(dial(false)).expect(s.notice == "none" and s.dialing and safety)
-  run approvalBeforeDialTest = init.then(alphaPropose(false))
-    .expect(s.alphaPlaced == 0 and s.handoffs == 0 and safety)
-    .then(alphaApprove).expect(s.alphaPlaced == 1 and s.approvals == 1 and safety)
-  run emergencyRefusesProposalsTest = init.then(alphaPropose(false)).then(alphaPropose(true)).then(alphaApprove)
-    .expect(s.emergencyLive and s.emergencyHandoffs == 1 and s.alphaPlaced == 0 and safety)
-    .then(alphaPropose(false)).expect(s.proposal == "none" and safety)
-    .then(systemEnd).then(alphaPropose(false)).then(alphaApprove).expect(s.alphaPlaced == 1 and safety)
 }

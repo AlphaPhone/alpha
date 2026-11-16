@@ -195,7 +195,19 @@ test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA
       await composer.press('Enter');
       await expect(page.locator('[data-alpha-sheet-context]')).toHaveText('Maya Chen · Messages', {timeout: 10_000});
       await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'alpha');
-      await expect(page.locator(bubble)).toContainText(ask.startsWith('tell') ? "I'm running ten minutes late." : '');
+      // Each request's own draft is in the slot: the reply replaces the first draft, kept for one Undo.
+      const draft = await page.evaluate(() => {
+        const el = document.querySelector('[data-screen]') as any;
+        let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+        while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+        return fiber.stateNode.vget('messages').drafts.maya;
+      });
+      if (ask.startsWith('tell')) expect(draft.text).toBe("I'm running ten minutes late.");
+      else {
+        expect(draft.text).not.toBe("I'm running ten minutes late.");
+        expect(draft.undo).toEqual({draft: 'asked', text: "I'm running ten minutes late."});
+      }
+      await expect(page.locator(bubble)).toContainText(draft.text.slice(0, 40));
       await page.evaluate(() => {
         const el = document.querySelector('[data-screen]') as any;
         let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
