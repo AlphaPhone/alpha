@@ -4487,7 +4487,19 @@
       "lateFixReplacesUnsubmittedChoiceTest",
       "debouncedDestinationTest",
       "debouncedOriginTest",
-      "cancelledInputTimerTest"
+      "cancelledInputTimerTest",
+      "originAutomaticPendingReuseTest",
+      "originAutomaticReadyReuseTest",
+      "originAutomaticFailureRetryTest",
+      "originEmptyReuseTest",
+      "originSearchFailureRetryTest",
+      "destinationEmptyReuseTest",
+      "originNewEditRetiresReuseTest",
+      "originProviderChangeRetiresReuseTest",
+      "originAutomaticSearchPendingReuseTest",
+      "destinationFailureRetryTest",
+      "locatedOriginReuseTest",
+      "locatedOriginRetryTest"
     ],
     "invariants": [
       "TypeOK",
@@ -4573,14 +4585,17 @@
       "originText/origin/routeReady": "MapsScreenController.originText (empty, a typed name, coordinates, a chosen candidate's name or \"Your location\"), MapsController origin and a ready route",
       "screenOff/hidden": "BackgroundNavigation.active() without and with the screen's confirmed session, and document visibility as seen by screen.hidden",
       "lastChoice": "history only: the destination's most recent explicit choice, for the property outside safety",
-      "handoffQuery/handoffPending/requests/handoffs": "the Maps view's one-use query, the adapter's pendingHandoff and the searches screen.handoff ran"
+      "handoffQuery/handoffPending/requests/handoffs": "the Maps view's one-use query, the adapter's pendingHandoff and the searches screen.handoff ran",
+      "queryAccepted/originAccepted/queryFailed/originFailed": "the adapter's submitted query or origin epoch equals its current search epoch, and that input's search, route or located fix (then its route) failed",
+      "queryRequests/originRequests": "provider searches for destination text, and provider searches, route requests and location starts created by an origin input control"
     },
     "abstractions": [
       "One provider place, one saved place and one origin candidate. Place detail, travel modes, route choices, renaming, sharing, recentering, the map plane and the installed maps app hand-off are not modeled.",
       "openDirections is the route sheet opened without the location permission, or with a starting point typed before the permission read settles; openGrantedDirections is the granted read, which asks for one fix when the starting point is empty and no route exists.",
       "leave is another launcher view taking the screen with Maps coming straight back: settled places, the route sheet and guidance are kept, a pending location request and any request in flight are not. Guidance away from Maps is in MapsNavigationGuidanceReadback.",
       "A hidden page keeps guidance only while its screen-off session is reserved or running; otherwise guidance ends and the route sheet stays. A full release happens for a cross-app search and when the session ends or is refused on a hidden page. A location-permission prompt that keeps a hidden Maps screen is in NavigationProgress and NativeMapsLocation.",
-      "Enter on the located position's text, the fifteen-second location time limit, reroutes and arrival are not modeled. The route request is one outcome action; leaving and hiding abort it and the replay plans again before settling one.",
+      "submitLocatedOrigin is Enter on the located position's text: it asks for one new fix unless this input generation's fix, or the route planned from it, is pending or ready. Enter while a fix requested by another control is pending, and a route for an earlier origin settling while a submitted fix is pending, are not modeled. The fifteen-second location time limit, reroutes and arrival are not modeled. The route request is one outcome action; leaving and hiding abort it and the replay plans again before settling one.",
+      "The provider is a closed port: providerResponse sets how later searches answer (ready, empty, failed or never) and providerChanged replaces the provider, releasing the view and retiring inputs while keeping a cross-app search that has not run. Both are in step at a low rate, so sampled traces also reach hidden guidance. originSearch records the latest starting-point search's answer; a candidate pick is modeled only when that search, or the new one Enter would start, answers with rows.",
       "The hand-off microtask is an action that can be delayed. Every newer explicit action discards the pending hand-off, so a delayed one finds nothing to run.",
       "LateFixKeepsNewerChoiceDesired is outside safety: typing a search or picking a saved place does not end a pending location request, so its fix replaces that choice. lateFixReplacesUnsubmittedChoiceTest replays it."
     ],

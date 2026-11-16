@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { modelClosure, openQuintCache, quintCacheSchema, recallRun, runKey, snapshotInputs, storeRun } from '../scripts/quint-cache.ts';
 import { readJson, repositoryRoot } from '../scripts/quint-lib.ts';
@@ -80,7 +81,7 @@ exports.apalacheDistDir = version => path.join(process.env.QUINT_HOME, 'apalache
   };
   const check = (...args) => run(args);
   const launches = () => readFileSync(log, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
-  return {root, write, run, check, launches, append: (path, text) => appendFileSync(join(root, path), text)};
+  return {root, env, write, run, check, launches, append: (path, text) => appendFileSync(join(root, path), text)};
 }
 
 test('a run is reused until a file Quint reads, its arguments or its toolchain changes', {timeout: scaledTimeout(300000)}, () => {
@@ -227,7 +228,7 @@ test('a verify is keyed by its configuration and checker engine, and never remem
       const foreign = await new Promise(resolve => {
         const out = join(f.root, 'foreign.json');
         const child = spawn(process.execPath, ['scripts/check-quint.ts', 'verify', '--models=Fixture', `--server-endpoint=${busy}`, `--out=${out}`],
-          {cwd: f.root, env: {...process.env, FAKE_QUINT_LOG: join(f.root, 'launches.jsonl'), QUINT_HOME: join(f.root, 'quint-home')}, stdio: 'ignore'});
+          {cwd: f.root, env: f.env, stdio: 'ignore'});
         child.on('close', status => resolve({status, receipt: readJson(out)}));
       });
       assert.equal(foreign.status, 0);
@@ -252,5 +253,113 @@ test('a model whose imports cannot be read fails alone; other models still run',
     assert.equal(rows.Unrelated.passed, true);
     assert.equal(result.receipt.error, undefined);
     assert.deepEqual(f.launches().map(launch => launch.files), [['specs/quint/application/Unrelated.qnt']]);
+  } finally { rmSync(f.root, {recursive: true, force: true}); }
+});
+
+test('remembered output is judged again: one the current checker would reject reruns instead of passing as cached', {timeout: scaledTimeout(120000)}, () => {
+  const f = fixture();
+  try {
+    const first = f.check('test', '--models=Fixture');
+    assert.equal(first.status, 0, first.output);
+    assert.equal(f.launches().length, 1);
+    // The entry keeps its key and exit status but its output no longer names the declared scenario, as when a stricter
+    // checker or a changed expectation would reject what an older one accepted.
+    const runs = join(f.root, '.cache/quint/runs');
+    const [name] = readdirSync(runs);
+    const entry = JSON.parse(gunzipSync(readFileSync(join(runs, name))).toString('utf8'));
+    assert.equal(entry.status, 0);
+    assert.match(entry.stdout, /ok exampleTest passed/);
+    writeFileSync(join(runs, name), gzipSync(JSON.stringify({...entry, stdout: 'nothing to see\n'})));
+    const second = f.check('test', '--models=Fixture');
+    assert.equal(second.status, 0, second.output);
+    assert.equal(f.launches().length, 2, 'the rejected remembered output is not reused: Quint runs again');
+    assert.doesNotMatch(second.output, /\(cached\)/);
+    assert.deepEqual([second.receipt.cache.hits, second.receipt.cache.misses, second.receipt.cache.stored], [0, 1, 1]);
+    assert.equal(second.receipt.results[0].cache.hit, false);
+    assert.match(second.receipt.results[0].output, /ok exampleTest passed/);
+  } finally { rmSync(f.root, {recursive: true, force: true}); }
+});
+
+test('a cache directory with files tracked by git is refused, whatever they say', {timeout: scaledTimeout(120000)}, () => {
+  const f = fixture();
+  try {
+    const first = f.check('test', '--models=Fixture');
+    assert.equal(first.status, 0, first.output);
+    const git = (...args) => {
+      const result = spawnSync('git', args, {cwd: f.root, encoding: 'utf8'});
+      assert.equal(result.status, 0, result.stderr);
+    };
+    git('init', '-q');
+    git('add', 'specs');
+    git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture');
+    assert.equal(f.check('test', '--models=Fixture').receipt.cache.hits, 1, 'an untracked cache in a checkout is used');
+    // The run cache guards itself, apart from the registry's metadata check that a full check reaches first: open it
+    // alone, in a fresh process, as any caller of the run cache would.
+    f.write('scripts/open-run-cache.ts', `import { openQuintCache } from './quint-cache.ts';
+console.log('opened ' + openQuintCache(process.cwd(), true).enabled);
+`);
+    const openRunCache = () => spawnSync(process.execPath, ['scripts/open-run-cache.ts'], {cwd: f.root, encoding: 'utf8', env: f.env});
+    const untracked = openRunCache();
+    assert.equal(untracked.status, 0, untracked.stderr);
+    assert.match(untracked.stdout, /opened true/);
+    // A committed entry (here a genuine one, force-added past the ignore rule) carries no provenance.
+    git('add', '-f', '.cache/quint/runs');
+    const direct = openRunCache();
+    assert.notEqual(direct.status, 0, direct.stdout);
+    assert.match(direct.stderr, /Refusing the Quint cache .*git tracks 1 file\(s\) in it, such as \.cache\/quint\/runs\/run-/);
+    git('add', '-f', '.cache/quint');
+    const refused = spawnSync(process.execPath, ['scripts/check-quint.ts', 'test', '--models=Fixture', `--out=${join(f.root, 'refused.json')}`],
+      {cwd: f.root, encoding: 'utf8', env: f.env, timeout: scaledTimeout(60000)});
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stdout + refused.stderr, /Refusing the Quint cache .*git tracks/);
+    assert.doesNotMatch(refused.stdout + refused.stderr, /PASS/);
+    assert.equal(f.launches().length, 1);
+    // A directory moved elsewhere in the checkout is inspected the same way.
+    const moved = spawnSync(process.execPath, ['scripts/check-quint.ts', 'test', '--models=Fixture', `--out=${join(f.root, 'moved.json')}`],
+      {cwd: f.root, encoding: 'utf8', env: {...f.env, ALPHA_QUINT_CACHE_DIR: '.cache/quint/runs'}, timeout: scaledTimeout(60000)});
+    assert.notEqual(moved.status, 0);
+    assert.match(moved.stdout + moved.stderr, /Refusing the Quint cache/);
+    // Without the cache nothing is read from it, and the check runs.
+    const bypass = f.check('test', '--models=Fixture', '--cache=off');
+    assert.equal(bypass.status, 0, bypass.output);
+    assert.equal(f.launches().length, 2);
+  } finally { rmSync(f.root, {recursive: true, force: true}); }
+});
+
+test('a remembered metadata validation vouches only by its contents', {timeout: scaledTimeout(120000)}, () => {
+  const f = fixture();
+  try {
+    // Fixture declares an unknown proof backend, which validation rejects.
+    const manifest = 'specs/quint/application/manifest.json';
+    const models = JSON.parse(readFileSync(join(f.root, manifest), 'utf8'));
+    models[0].verifyBackend = 'bogus';
+    f.write(manifest, JSON.stringify(models));
+    f.write('scripts/load-models.ts', `import { readFileSync } from 'node:fs';
+import { loadModels, quintMetadataMarker } from './quint-lib.ts';
+if (process.argv[2] === 'marker') {
+  const [entry] = JSON.parse(readFileSync('${manifest}', 'utf8'));
+  // As the registry reads it: a family and its source list.
+  console.log(JSON.stringify(quintMetadataMarker({...entry, family: 'application', sources: []}, readFileSync(entry.path, 'utf8'))));
+} else console.log('loaded ' + loadModels().length);
+`);
+    const node = (...args) => spawnSync(process.execPath, ['scripts/load-models.ts', ...args], {cwd: f.root, encoding: 'utf8', env: f.env});
+    const marker = JSON.parse(node('marker').stdout);
+    assert.ok(marker.contents.includes(marker.file.split('metadata-').at(-1)), 'the marker names the key it vouches for');
+    const rejected = node();
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /Invalid verifyBackend in Fixture/);
+    assert.equal(existsSync(marker.file), false, 'a failed validation is never remembered');
+
+    // An empty marker at the right path, as a restored or committed file could be, does not skip validation.
+    mkdirSync(dirname(marker.file), {recursive: true});
+    writeFileSync(marker.file, '');
+    const empty = node();
+    assert.notEqual(empty.status, 0, empty.stdout);
+    assert.match(empty.stderr, /Invalid verifyBackend in Fixture/);
+    // Control: the genuine contents at that path are what a remembered success looks like, and they are honoured.
+    writeFileSync(marker.file, marker.contents);
+    const remembered = node();
+    assert.equal(remembered.status, 0, remembered.stderr);
+    assert.match(remembered.stdout, /loaded 3/);
   } finally { rmSync(f.root, {recursive: true, force: true}); }
 });

@@ -438,6 +438,8 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   let gmailAccounts: GmailAccount[] = [];
   let roles: Record<string, RoleRow> | null = null, launcher: boolean | null = null, roleBusy = false;
   let crashLog: CrashLog | null = null, crashBusy = false, diagnosticsBusy = false;
+  // Advanced by every crash-log publish outside refresh(), so a refresh that read the log earlier keeps it.
+  let crashLogVersion = 0;
   let updateBusy: '' | 'check' | 'install' = '', updateResult='';
   const reviews=new BrowserReviews();
   async function review(id:string,title:string,details:string,label:string,guard:()=>boolean=()=>true){
@@ -509,7 +511,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     try{
       const status=await connectionController.readResidentDiagnostics(abort.signal);
       if(abort.signal.aborted||owner!==instance||inferenceAbort!==abort)return;
-      if(recordCloudInferenceFailure(status?.cloudInferenceFailure)){const problems=await readCrashLog();if(!abort.signal.aborted&&owner===instance&&inferenceAbort===abort){crashLog=problems;changed();}}
+      if(recordCloudInferenceFailure(status?.cloudInferenceFailure)){const problems=await readCrashLog();if(!abort.signal.aborted&&owner===instance&&inferenceAbort===abort){crashLog=problems;++crashLogVersion;changed();}}
       if(!abort.signal.aborted&&owner===instance&&inferenceAbort===abort)return status;
     }catch{/* Support diagnostics never replace the original inference failure. */}
     finally{clearTimeout(timer);if(inferenceAbort===abort)inferenceAbort=null;}
@@ -625,7 +627,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if (crashBusy || !await review('clear-problems','Clear problem log?','','Clear')||crashBusy) return;
     inferenceAbort?.abort();inferenceAbort=null;
     const instance = owner; crashBusy = true; changed();
-    try { await clearCrashLog(); crashLog = await readCrashLog(); }
+    try { await clearCrashLog(); crashLog = await readCrashLog(); ++crashLogVersion; }
     catch { if (owner === instance) api.toast('Couldn’t clear'); }
     finally { crashBusy = false; if (owner === instance) changed(); }
   }
@@ -642,7 +644,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   // Show a text-size result on the instance that requested it.
   const showTextScale=(instance:any,result:Bag|null)=>{if(result&&owner===instance){facts={...facts,...result};instance?.vset('settings',{nativeReadAt:Date.now()});}};
   async function refresh() {
-    const instance = owner, token = ++generation, scaleAtRead = scaleVersion;
+    const instance = owner, token = ++generation, scaleAtRead = scaleVersion, logAtRead = crashLogVersion;
     if (!instance) return;
     resumedUnread = false;
     const native = Capacitor.isNativePlatform();
@@ -652,7 +654,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if (owner !== instance || generation !== token) return;
     roles = roleState.status === 'fulfilled' ? readRoles(roleState.value) : null;
     if (build.status === 'fulfilled' && build.value) launcher = build.value.launcher === true;
-    crashLog = problems.status === 'fulfilled' ? problems.value : null;
+    if (logAtRead === crashLogVersion) crashLog = problems.status === 'fulfilled' ? problems.value : null;
     photoAccess = photos.status === 'fulfilled' ? photos.value : null;
     fileAccess = storage.status === 'fulfilled' && (storage.value?.access === 'granted' || storage.value?.access === 'denied') ? storage.value.access : null;
     const previousFacts = facts;

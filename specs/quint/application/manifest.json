@@ -1867,7 +1867,10 @@
       "oldFailureCannotEraseNewRowsTest",
       "deniedReadbackCannotQueryTest",
       "clearedQueryCannotPublishTest",
-      "cancelledQueryCannotPublishTest"
+      "cancelledQueryCannotPublishTest",
+      "leaveRetiresShownFilterTest",
+      "leftQueryCannotPublishTest",
+      "refusedReopenCannotAdmitFilterTest"
     ],
     "sources": [
       "apps/app/src/prototype/selection-adapter.ts",
@@ -1879,6 +1882,7 @@
     ],
     "abstractions": [
       "Installed agent filters from a mounted Browse view, with separate reload and query generations, pending and displayed filter ownership, cancellation, filtered result ordering and no storage writes.",
+      "Leaving the view retires the pending and displayed filter and clears its rows (eliza#39740); after leaving, a filter whose request to reopen Files is refused fails before admission. Reopening and re-entering the view are covered by FilesAgentActions, not this model.",
       "Three operation identities, two text classes and four unique row identities. The model covers reloads during an explicit filter. Other reload sequences, category and Trash transactions, and provider queries remain separate obligations.",
       "Installed agent filter operations from a mounted Browse view, with separate access and query generations, current filter ownership, cancellation and filtered result ordering.",
       "Three operation identities, two text classes and four unique row identities. Reload after mount, category/Trash list transactions, file mutations and provider query implementation remain separate obligations."
@@ -2869,7 +2873,8 @@
     ],
     "invariants": [
       "ExactDismissal",
-      "RenderOrder"
+      "RenderOrder",
+      "AccountOwnsExpiry"
     ],
     "sources": [
       "apps/app/src/runtime/connection-ui.tsx",
@@ -2878,7 +2883,7 @@
     ],
     "abstractions": [
       "The mounted chooser projects a running resident with needs-plan admission and a near-expiry key. Only the plan owns a Home notice and dismissal; Account owns expiry and Renew. Settings, Account and foreground apps suppress publication while retaining dismissal state.",
-      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, overflow-driven scrolling, plan dismissal and Account expiry controls. Account replacement, renewal effects, billing and installed WebView behavior remain separate."
+      "Two viewport and text-scale classes. A closed Chromium replay checks actual geometry, action hit ownership, overflow-driven scrolling, plan dismissal across Settings, Inbox, conversation and Account, and the expiry and Renew shown only in Account. Account replacement, renewal effects, billing and installed WebView behavior remain separate."
     ]
   },
   {
@@ -4279,7 +4284,7 @@
       "insecureAddressHasNoCardTest",
       "reviewFirstKeepsCardTest",
       "presentationWaitsForReceiptTest",
-      "openedButNotShownTest",
+      "hiddenForegroundReportsTabCreationTest",
       "commandRefusedUnderReviewFirstTest",
       "commandBoundToTabTest",
       "commandSentOnceTest",
@@ -4302,14 +4307,14 @@
     "abstractions": [
       "One proposal at a time with a destination class (HTTPS, plain HTTP, credentials in the address) and whether the owner's message typed that address; one view command (back, forward or reload are not distinguished) bound to one tab's navigation revision, at most three claims.",
       "The direct open and its one-per-message rule are also replayed against the real coordinator by DeviceActionReview; this module adds the scheme rule, presentation after the journal and receipt attempt, and the unjournaled view-command path with its review-first refusal (an unreadable choice counts as on).",
-      "KNOWN DIVERGENCE (app review AGENT-10): the receipt text says the address was opened once the tab exists, whether or not Browser is then shown. OpenedClaimMeansShown is registered under expectedViolations with the required witness OpenedButNotShown, not weakened.",
       "The directed BrowserAgentOpen replay runs the whole view navigation client, installed Browser adapter and shared device action coordinator. It covers the exact tab bridge call, denied or stale commands, lost acknowledgment without a repeated effect, HTTPS admission and deferred presentation after the receipt attempt.",
-      "AGENT-10 is replayed with a hidden foreground. The actual receipt formatter says Opened after creating its background tab while Browser stays unselected. The property violation stays registered. Server, renderer journal persistence, agent adapter context wiring and Android navigation internals are separate evidence."
+      "ReceiptReportsTabCreation is observed from the summary the real coordinator journals at its terminal phase and the receipt it returns, compared with the literal tab-creation wording, so a changed formatter or a coordinator that rewrites the summary fails the trace. The replay's executor port calls the product formatter; that the production executor in agent-adapter.ts uses the same formatter is not replayed. The hidden foreground replay observes that receipt while Browser remains unselected. Server grants, renderer journal persistence, agent adapter context wiring and Android navigation internals are separate evidence."
     ],
     "invariants": [
       "HttpsNoUserinfo",
       "AutoOpenMatchesTypedAddress",
       "OneAutoOpenPerMessage",
+      "ReceiptReportsTabCreation",
       "PresentationAfterReceiptAttempt",
       "ViewCommandNeedsToggleOff",
       "ViewCommandBoundToExactTabRevision",
@@ -4317,15 +4322,7 @@
       "ViewCommandNeverRepeated"
     ],
     "witnesses": [
-      "OpenedButNotShown"
-    ],
-    "expectedViolations": [
-      {
-        "init": "init",
-        "step": "step",
-        "invariant": "OpenedClaimMeansShown",
-        "expected": "violation"
-      }
+      "CreatedTabRemainsUnselected"
     ],
     "bounds": {
       "maxSamples": 400,
@@ -7993,6 +7990,7 @@
       "recordingBeforeResumeRefusesTest",
       "busyCameraFailsAtOnceTest",
       "unconfirmedShutterIsUnknownTest",
+      "abortReleasesWaitingRequestTest",
       "changedRequestTakesNoPhotoTest"
     ],
     "invariants": [
@@ -8011,7 +8009,12 @@
       "UnknownWithoutRowWitness"
     ],
     "sources": [
-      "apps/app/src/prototype/camera-adapter.ts"
+      "apps/app/src/prototype/camera-adapter.ts",
+      "apps/app/src/prototype/browser-camera.ts",
+      "apps/app/src/prototype/model.js"
+    ],
+    "sharedSources": [
+      "plugins/plugin-native-camera/src/session.ts"
     ],
     "symbols": [
       {
@@ -8037,14 +8040,15 @@
     ],
     "stateMapping": {
       "view/phase/busyBy": "Camera view visibility, the shared session phase and what holds the camera",
-      "request/refused/aborted": "The agentRequest slot, its refused flag and the request signal",
-      "result/dispatched/agentRows/rowsAtRequest": "The reported capture attempt, whether the shutter ran, and photos written for the assistant",
+      "request/refused/aborted": "The admitted slot, recording refusal, and stale current-context check. An active AbortSignal settles the wait through cancelWaiting.",
+      "result/dispatched/agentRows/rowsAtRequest": "The capture attempt, whether its shutter ran, and image rows attributable to assistant attempts, excluding the separately observed owner photo",
       "holds/startsByAgent": "requestedCaptureHolds and previews the request started itself"
     },
     "abstractions": [
       "The preview phase machine is the shared camera session; here it is off, starting, ready or error with a nondeterministic start outcome.",
-      "One request at a time and three photos. Owner captures and recordings are opaque holders of the camera.",
-      "Model safety checks do not establish implementation refinement or device acceptance."
+      "The mounted test drives the full Camera adapter, Browser capture and storage, shell and shared session. It observes one owned preview or retry, actual owner capture and recording exclusion, stale context and abort, exact successful row and receipt identities, and unknown both before and after a browser storage commit.",
+      "One admitted request at a time, three assistant rows, and opaque non-agent holders. CameraAgentCapture separately compares chat coverage and reveal. AgentPhotoRequest abstracts reveal time on a ready preview; its queued recording replay uses a real reveal wait after the owner preview has become ready.",
+      "The browser replay injects a synthetic sensor, a failed IndexedDB transaction, and loss of the capture reply after a real commit. Browser photos always return a row identity on success; the native saved-without-identity response remains a model-only branch. Proposal and conversation admission and device MediaStore and camera acceptance are separate."
     ]
   },
   {
@@ -10542,7 +10546,10 @@
       "licensesLoadOnceTest",
       "newerDiagnosticSupersedesStatusTest",
       "diagnosticLimitRetiresStatusTest",
-      "unmountRetiresDiagnosticLogTest"
+      "unmountRetiresDiagnosticLogTest",
+      "olderRefreshCannotHidePublishedFailureTest",
+      "freshRefreshShowsUnpublishedFailureTest",
+      "refreshAfterPublishShowsTheLogTest"
     ],
     "invariants": [
       "CheckingEnds",
@@ -10550,14 +10557,17 @@
       "OneNewestRead",
       "ReadsAreLimited",
       "LicensesLoadOnce",
-      "DiagnosticStateIsScoped"
+      "DiagnosticStateIsScoped",
+      "RetiredDiagnosticsAreSilent",
+      "PublishedFailureStaysShown"
     ],
     "witnesses": [
       "SupersededResultWitness",
       "LimitWitness",
       "HiddenRefreshWitness",
       "LicensesRetryWitness",
-      "LicensesOutliveMountWitness"
+      "LicensesOutliveMountWitness",
+      "StaleRefreshWitness"
     ],
     "sources": [
       "apps/app/src/prototype/settings-adapter.ts"
@@ -10594,6 +10604,10 @@
       {
         "path": "apps/app/src/prototype/settings-adapter.ts",
         "name": "inferenceAbort"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "crashLogVersion"
       }
     ],
     "stateMapping": {
@@ -10601,12 +10615,12 @@
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
       "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization…, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
-      "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures and results published by the diagnostic read",
+      "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures, the module-level crashLog the Problem log renders, the Problem log tap's ordinary refresh() (its generation and the crash-log snapshot it read) and crashLogVersion",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },
     "abstractions": [
       "The Gmail authorization read, licence loading and explicit Problem log diagnostic read are modeled. Listener status is SettingsListenerReads.",
-      "An accepted failure is unique in this diagnostic campaign. Independent ordinary log refreshes, explicit log clear, the export chooser, and the resident transport's internal session validation are outside these transitions.",
+      "An accepted failure is unique in this diagnostic campaign. The ordinary refresh started by the Problem log tap is modeled; other refresh() calls only advance its generation and are not separate transitions. Explicit log clear, the export chooser, and the resident transport's internal session validation are outside these transitions.",
       "A change of the account binding always reaches the page through the connection subscription, which starts a read in the same task. A Cloud client that never settles a request after its abort is ended by the limit.",
       "Settings busy labels (update check, notification work, photo access, crash log) are single-flight flags around one awaited call and are not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."

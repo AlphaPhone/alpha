@@ -373,15 +373,12 @@ operation `sign`, the exact reviewed `workflow_commit` and `signing-plan.json`
 as the `plan` input. Preflight checks the official Actions ZIP. The protected
 job checks the same run attempt and artifact again, then stages the pinned
 private generation before accessing the signing key. Current builds produce one
-native launcher APK on the public update channel. The private signing contract
-accepts the canonical package or an explicitly approved retained-installation
-update. The latter must bind its installed identity and purpose to the exact
-reviewed producer bytes. Release tooling also retains
-the reviewed private Cloud producer input contract: its complete original standalone
-and launcher pair must match the approved hashes, Cloud profile and historical
-package identity. Both members are authenticated archive inputs; only the launcher
-is staged for signing, exported, voice-qualified or published. The rotation approval
-also names only the launcher. Input enrollment is not independent attestation of the
+native launcher APK on the public update channel. Signing admission
+(`scripts/ci/app_update_producer.py`) accepts only a
+launcher-only native plan for `ai.alphacompute.alphaphone`, signed with the one
+enrolled key: it refuses another installation identity, a standalone APK pin
+and a plan or signer record that carries a signing-key rotation.
+Input enrollment is not independent attestation of the
 private bytes or release acceptance; protected admission must still read and verify them.
 
 For publication, set `delivery_artifact_id` to the numeric ID of the original
@@ -703,6 +700,13 @@ routes, keeps selected chat attachments through intake, binds the selected Cloud
 image model at launch and rechecks a live file selection after storage reads
 ([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
 The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
+The pin `49d8b466043ca6c3316127b616362c9d80836084` adds the fitted chat-sheet open height to the shared
+`chat-panel-layout.ts` ([eliza#39771](https://github.com/elizaOS/eliza/pull/39771), for AP-16 AC-07; Alpha
+still uses its own `fitSheetHeight` until it adopts `resolveChatSheetFitHeight`), awaits and fences local
+Inbox draft reviews ([eliza#39748](https://github.com/elizaOS/eliza/pull/39748)), clears the Files filter
+when its view is left ([eliza#39740](https://github.com/elizaOS/eliza/pull/39740)) and resumes fresh Cloud
+database migrations ([eliza#39754](https://github.com/elizaOS/eliza/pull/39754)). None of the recorded core,
+mobile-build or formal-sidecar targets changed; the eliza `bun.lock` is unchanged.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

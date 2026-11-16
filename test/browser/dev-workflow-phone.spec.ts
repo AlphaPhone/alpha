@@ -38,7 +38,9 @@ test('a lost read receipt resumes after reload using the original result despite
 test('run-day Calendar confirmation checks its original anchor across midnight',async({page})=>{
  test.setTimeout(120000);
  const anchor='2027-03-15T03:59:00.000Z';
- const nextDay='2027-03-15T04:01:00.000Z';
+ // Past the 15-minute grace a legacy (unanchored) review allows after midnight, so only the persisted anchor
+ // can still admit the previous day's read.
+ const nextDay='2027-03-15T04:20:00.000Z';
  await page.clock.setFixedTime(new Date(anchor));
  await setup(page,'run-day');
  const calendarState=()=>page.evaluate(async()=>{
