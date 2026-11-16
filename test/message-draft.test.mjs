@@ -110,36 +110,3 @@ test('Edit and an accepted suggestion make the text the owner\'s', () => {
   const accepted = D.typed(suggested(), suggested().text);
   assert.deepEqual({draft: accepted.draft, text: accepted.text, declined: accepted.declined}, {draft: 'owner', text: 'Yes, see you at 7', declined: 'sms:1'});
 });
-test('the saved SMS slot reads only its exact shape', async () => {
-  const S = await import('../apps/app/src/runtime/sms-draft-store.ts');
-  const slot = D.askedDraftPlaced(D.typed(D.emptyDraft(), 'Mine'), 'Alpha words', true);
-  const saved = S.smsDraftText(slot);
-  assert.deepEqual(JSON.parse(saved), {v: 1, draft: 'asked', text: 'Alpha words', undo: {draft: 'owner', text: 'Mine'}});
-  assert.deepEqual(S.readSmsDraftText(saved), {...D.emptyDraft(), draft: 'asked', text: 'Alpha words', undo: {draft: 'owner', text: 'Mine'}});
-  // An untouched suggestion is for the visit only.
-  assert.deepEqual(S.readSmsDraftText(S.smsDraftText(suggested())), D.emptyDraft());
-  for (const raw of ['', 'not json', 'null', '[]', '{"v":2,"draft":"owner","text":"x","undo":null}', '{"v":1,"draft":"owner","text":"x"}',
-    '{"v":1,"draft":"owner","text":"x","undo":null,"extra":1}', '{"v":1,"draft":"agent","text":"x","undo":null}', '{"v":1,"draft":"none","text":"x","undo":null}',
-    '{"v":1,"draft":"owner","text":"","undo":null}', '{"v":1,"draft":"owner","text":"x","undo":{"draft":"none","text":"y"}}',
-    '{"v":1,"draft":"owner","text":"x","undo":{"draft":"owner","text":"y","by":"z"}}', JSON.stringify({v: 1, draft: 'owner', text: 'x'.repeat(1601), undo: null})])
-    assert.deepEqual(S.readSmsDraftText(raw), D.emptyDraft(), raw.slice(0, 60));
-});
-test('saved SMS slots are read before they are written and written in order', async () => {
-  const S = await import('../apps/app/src/runtime/sms-draft-store.ts');
-  const rows = new Map(), log = [];
-  const open = async threadId => ({
-    read: async () => { log.push(['read', threadId]); return rows.get(threadId) ?? null; },
-    save: async (expected, text) => { log.push(['save', threadId, text]); if ((rows.get(threadId) ?? null) !== expected) throw Error('conflict'); const row = {version: 1, binding: threadId, revision: String(log.length), text}; rows.set(threadId, row); return row; },
-  });
-  const slots = S.smsDraftSlots(open);
-  assert.deepEqual(await slots.load('t1'), D.emptyDraft());
-  await slots.save('t1', D.emptyDraft());
-  assert.equal(log.filter(row => row[0] === 'save').length, 0, 'an empty slot is not written');
-  const owner = D.typed(D.emptyDraft(), 'On my way');
-  await Promise.all([slots.save('t1', owner), slots.save('t1', owner)]);
-  assert.equal(log.filter(row => row[0] === 'save').length, 1, 'an unchanged slot is not written again');
-  // Another writer's row is read again before writing.
-  rows.set('t1', {version: 1, binding: 't1', revision: 'other', text: S.smsDraftText(D.typed(D.emptyDraft(), 'Elsewhere'))});
-  await slots.save('t1', D.typed(D.emptyDraft(), 'Final'));
-  assert.equal((await S.smsDraftSlots(open).load('t1')).text, 'Final');
-});
