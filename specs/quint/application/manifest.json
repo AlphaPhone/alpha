@@ -11049,7 +11049,17 @@
       "tooLargeCannotSaveTest",
       "conflictNeedsChoiceTest",
       "conflictBlocksSaveTest",
-      "retryOffersTypedTextTest"
+      "retryOffersTypedTextTest",
+      "closingEditorRetiresReviewTest",
+      "heldReviewDiscardsOnlyAfterApprovalTest",
+      "heldReplaceKeepsCopyWithoutApprovalTest",
+      "productionRecoveryOnlyKeepsDataTest",
+      "staleRecoverySnapshotRefusesResetTest",
+      "confirmedRecoveryUsesCapturedDraftTest",
+      "closingEditorCancelsRecoveryTest",
+      "staleDiscardReviewPreservesNewerCopyTest",
+      "approvedReplaceClearsConflictTest",
+      "closingEditorRetiresPendingResetTest"
     ],
     "invariants": [
       "TypeOK",
@@ -11061,7 +11071,9 @@
       "OfferedHasText",
       "NoTextNoShape",
       "StaleEditsAreRetained",
-      "SavedThenClearedOrKept"
+      "SavedThenClearedOrKept",
+      "ModalsOwned",
+      "ResetNeedsRecovery"
     ],
     "witnesses": [
       "OfferedWitness",
@@ -11075,7 +11087,15 @@
     "sources": [
       "apps/app/src/browser/calendar-editor-draft.ts",
       "apps/app/src/browser/calendar-editor.ts",
-      "apps/app/src/browser/review.ts"
+      "apps/app/src/browser/review.ts",
+      "apps/app/src/browser/domain-recovery.ts",
+      "apps/app/src/browser/retained-data-notice.ts",
+      "apps/app/src/browser/domain-document.ts",
+      "apps/app/src/runtime/assistant-draft-store.ts"
+    ],
+    "sharedSources": [
+      "packages/ui/src/state/durable-draft-controller.ts",
+      "packages/ui/src/state/durable-draft.ts"
     ],
     "symbols": [
       {
@@ -11158,6 +11178,8 @@
       "form": "The fields the editor shows: the event's own, a stored copy's or ones typed here",
       "stored/synced/savedCopy": "The stored draft copy, whether it equals the editor's text, and the copy a conflict offers",
       "stage": "The awaited controller.open, retry, consume or event commit",
+      "review/reviewStoreCurrent": "Outstanding BrowserReviews approval of discard or replace and the shared controller’s exact expected durable draft row",
+      "recovery/recoveryCurrent/recoveryReset": "The installed recovery dialog, captured browser document revision and observed reset receipt",
       "inert/disabled/canRestore/canReplace/canDiscard/canRetry": "form.inert, save.disabled and the hidden state of the four draft buttons as publish() last set them",
       "saves/saveResult": "Event commits that resolved, and how the last Save event press ended",
       "staleSave/unreviewedSave": "History of an event commit started from older-revision edits or while the retained edits were unreviewed"
@@ -11165,8 +11187,9 @@
     "abstractions": [
       "One event with two revisions: the one being edited and an older one. Retained copies are classed by the revision they carry; field contents are not modeled.",
       "The draft controller is an input: it answers the open, the retry and the clear, and reports a conflict or a storage error. Its own storage protocol is the shared durable draft controller's.",
-      "The Replace and Discard reviews are answered in the same step they open; a review left open while the controller reports is not modeled.",
-      "Editor storage recovery, the size and shape limits of readCalendarEditorDraft beyond too-large fields, and date validation of the event save are not modeled.",
+      "The broad draft-only replay uses draftStep and folds immediate review answers into the operation. The directed installed replay holds actual BrowserReviews and checks owner retirement before a stale approval.",
+      "Production recovery only opens the retained-data notice. The development workflow uses a captured browser document revision and separate confirmation. The host ports control storage, downloads and reload. The held review assumes the visible editor text is current. A differing persisted copy is resolved by the controller's storage checks.",
+      "Extended field limits and event date validation remain separate.",
       "This is the browser Calendar's modal editor; the prototype Calendar's retained forms are modeled separately."
     ]
   },
