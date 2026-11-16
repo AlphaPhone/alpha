@@ -17,7 +17,7 @@ function compile(source){
  const marker='    var newTurn = voiceTurn ||';
  const methods=source.slice(start,end);
  assert.equal(methods.split(marker).length,2,'one read-only voice snapshot observation');
- return `class Shell { constructor(){this.state={chat:'hidden',typing:false,msgs:[{id:'old',from:'user',text:'Earlier',messageBinding:{conversationId:'owned'}}]};this.props={};} S(){return this.state;} preset(){} setState(patch){Object.assign(this.state,patch);}
+ return `class Shell { constructor(){this.state={chat:'hidden',typing:false,msgs:[{id:'old',from:'user',text:'Earlier',messageBinding:{conversationId:'owned'}}]};this.props={};} S(){return this.state;} preset(){} restoreStageSession(){this.emptyStageRestored=true;} setState(patch){Object.assign(this.state,patch);}
  ${methods.replace(marker,'    this.observedVoiceTurn=!!voiceTurn; if(voiceTurn)this.observedVoiceFollows=(this.observedVoiceFollows||0)+1;\n'+marker)}
  };globalThis.Shell=Shell;`;
 }
@@ -31,6 +31,7 @@ function fixture(code){
   setInterval:()=>1,CHAT_PAGE_ROWS:100,CHAT_CLOSED_ROWS:20});
  vm.runInContext(code,context);
  const shell=new context.Shell();shell.componentDidMount();
+ assert.equal(shell.emptyStageRestored,true,'the unrelated empty stage-restore port was invoked');
  const focused=document.getElementById('focus');focused.focus();
  let snapshot=false;
  const observe=()=>{
@@ -97,7 +98,7 @@ export async function checkVoiceTranscriptFollow(extraSources=[]){
   }
   return await checkTraces({model:'VoiceTranscriptFollow',sources:[...sources,generated],driverHashes,generatedSources:[generated],traces,
    scope:'bounded-component',assumptions:[
-    'Unchanged shell lifecycle, voice-follow and snapshot methods execute in JSDOM. A read-only observer records the actual local voiceTurn result and count; it does not reproduce the predicate.',
+    'Unchanged shell lifecycle, voice-follow and snapshot methods execute in JSDOM, with an empty saved-stage restore port. Stage persistence is outside this partial-source contract. A read-only observer records the actual local voiceTurn result and count; it does not reproduce the predicate.',
     'Transcript delivery, accepted-final invocation and owner retirement are explicit caller ports. The real mounted reading-input listeners, DOM selection and active element execute. Geometry is controlled; actual React commit scrolling, native input, ASR acceptance/deduplication and whole-session retirement remain separate obligations.',
     'The model projects only observable scroll intent, message identity, selection and focus. Its current/accepted/cancelled lifecycle fields are not independently established by this bounded shell fixture. No model state or expected result drives source execution.',
    ]});

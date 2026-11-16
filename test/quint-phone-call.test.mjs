@@ -15,6 +15,9 @@ import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {modelTraces, replay} from '../specs/quint/refinement/application/shell-model-traces.mjs';
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
+import {tsImport} from './support/ts-import.mjs';
+const commsBar = await tsImport(new URL('../apps/app/src/runtime/comms-bar.ts', import.meta.url).pathname, import.meta.url);
+const telephonyPresenters = await tsImport(new URL('../apps/app/src/prototype/telephony-presenters.ts', import.meta.url).pathname, import.meta.url);
 
 // PhoneCall traces from the simulator, replayed on the development Phone fixture itself: the
 // module-level call latch, pnStart/pnEnd/pnDecline and the registered view's render, back,
@@ -36,6 +39,9 @@ const SEEDS = [{id: 's1', pid: 'ada', num: '', dir: 'out', ago: 5}, {id: 's2', p
 function fixture() {
   const views = {contacts: {state: {list: null}}};
   const core = shellCore({views, globals: {
+    ...commsBar,
+    ...telephonyPresenters,
+    testMocksEnabled: true,
     registerView: (key, definition) => { views[key] = definition; },
     PN_SCRIPT: {_: {lines: [], sum: ''}}, PN_REC: SEEDS, PN_VM: [], PN_SCREEN: [['alpha', 'One moment.']], PN_REPLIES: [],
     copy: () => ({presetPerson: 'ada'}), PEOPLE, person: id => PEOPLE.find(person => person.id === id) || null,
@@ -54,11 +60,13 @@ function fixture() {
   let shown = null;
   const settle = run => {
     queue = [];
+    let settledPatches = 0;
     try { run(); } finally {
       const pending = queue; queue = null;
+      settledPatches = pending.length;
       for (const [patch, done] of pending) settleNow.call(shell, patch, done);
-      return pending.length > 0;
     }
+    return settledPatches > 0;
   };
   // A state change redraws the view while it is in front; its render arms the start of a handed-over call.
   const act = run => {

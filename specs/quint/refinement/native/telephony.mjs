@@ -50,7 +50,6 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
       type: () => on(act('typeText'), s => D.typed(s, 'On my way')),
       dismiss: () => on(act('dismissSuggestion'), s => D.suggestionDismissed(s)),
       asked: () => on(act('placeAskedDraft'), s => D.askedDraftPlaced(s, 'Ten minutes away', true)),
-      noAsked: () => { must(D.askedDraftPlaced(state, 'Ten minutes away', true) === state, 'a refused asked draft changes nothing'); return on(refused('placeAskedDraft')); },
       tap: () => on(act('tapSend')),
       confirm: result => { if (result === 'sent') answered = inbound; return on(act('confirmReview', result), s => D.reviewFinished(s, result)); },
       lose: () => on(act('loseReady'), s => D.readinessLost(s)),
@@ -70,7 +69,7 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
     thread('losing readiness stops a running suggestion').ready().receive().request().lose().done(),
     thread('an edited suggestion becomes the owner draft and is not suggested again').ready().receive().request().reply(1, true).open().type().done(),
     thread('an asked draft is sent only after the owner tap and survives a newer message').ready().open().asked().receive().tap().confirm('sent').done(),
-    thread('an asked draft never replaces the owner text').ready().open().type().noAsked().done(),
+    thread('an explicitly asked rewrite replaces the owner text without sending').ready().open().type().asked().done(),
     thread('an asked draft replaces a suggestion, which is then not offered again').ready().receive().request().reply(1, true).open().asked().dismiss().noRequest().done(),
     thread('typing over an asked draft makes it the owner draft').ready().open().asked().type().done(),
     thread('a dismissal is remembered past a send').ready().receive().request().reply(1, true).dismiss().open().type().tap().confirm('sent').done(),
@@ -79,6 +78,7 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
     'The actual message-draft.ts transitions run with controlled thread events. Draft owner, suggestion state, the answered message and the dismissed message are observed.',
     'Inbound and answered counts, the open thread, read state, the native review and the send counters are driver inputs here; the SMS adapter and the native reviewed send own them.',
     'The reply text is one fixed string; the model abstracts text to two identities.',
+    'AC-14 Undo content and provenance are covered by test/message-draft.test.mjs; this model observes the resulting slot and send authority, not the Undo history.',
   ]});
 }
 
