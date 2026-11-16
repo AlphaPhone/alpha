@@ -39,7 +39,9 @@ const dateLabel=(at:number)=>new Date(at).toLocaleDateString(undefined,{year:'nu
  * Stripe's page, opened from here and returning here; plan changes and cancellation first confirm
  * the account with a one-time email code (native billing authority).
  */
-export function CloudPlanManager({account,authority,serviceName,onChanged}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void}){
+export function CloudPlanManager({account,authority,serviceName,onChanged,onPaymentOpened}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void;
+ /** A Stripe page opened: the app's next return checks the plan even before Cloud confirms it. */
+ onPaymentOpened?:()=>void}){
  const [plans,setPlans]=useState<PlanOffer[]|null>(null);
  const [subscription,setSubscription]=useState<SubscriptionState|null|undefined>(undefined);
  const [referral,setReferral]=useState<ReferralState|null>(null);
@@ -53,6 +55,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
  // The caller passes a fresh callback each render; reading it through a ref keeps the effects below stable.
  const changed=useRef(onChanged);changed.current=onChanged;
  const notifyChanged=useCallback(()=>changed.current(),[]);
+ const opened=useRef(onPaymentOpened);opened.current=onPaymentOpened;
  const credential=account.identity.credentialId;
  // service.client is one object per signed-in key (the component is keyed by credential); the wrapper is not.
  const client=account.client;
@@ -114,7 +117,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
     // A payment that needs action (3-D Secure, a new card) continues on Stripe's invoice page.
     const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId});
     const continuation=payment.status>=200&&payment.status<300?parseUpgradePayment(payment.body):null;
-    if(continuation?.invoiceUrl){await client.openPaymentPage(continuation.invoiceUrl,signal);setNotice('Finish payment, then come back');}
+    if(continuation?.invoiceUrl){opened.current?.();await client.openPaymentPage(continuation.invoiceUrl,signal);setNotice('Finish payment, then come back');}
     else setNotice('Plan upgraded');
     break;
    }
@@ -129,7 +132,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
   const previous=pendingCheckouts.get(credential);
   const idempotencyKey=previous&&previous.planKey===plan.key&&Date.now()<previous.expiresAt?previous.idempotencyKey:crypto.randomUUID();
   const started=await client.startSubscriptionCheckout(plan.key,idempotencyKey,signal);
-  if(started.status==='open'){pendingCheckouts.set(credential,{sessionId:started.sessionId,planKey:plan.key,idempotencyKey,expiresAt:started.expiresAt});setNotice('Finish payment, then come back');}
+  if(started.status==='open'){opened.current?.();pendingCheckouts.set(credential,{sessionId:started.sessionId,planKey:plan.key,idempotencyKey,expiresAt:started.expiresAt});setNotice('Finish payment, then come back');}
   else if(started.status==='completed'){pendingCheckouts.delete(credential);setNotice('Plan active');notifyChanged();await load(signal);}
   else {pendingCheckouts.delete(credential);throw Error('Checkout expired. Try again.');}
  });
