@@ -670,7 +670,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if (view === 'maps') providerSelection = getMapsSelectedObject();
     if (view === 'photos') {
       const state = shell.vget('photos');
-      if (state.open === state.nativePhotoSelection?.id) providerSelection = state.nativePhotoSelection;
+      // Publish the library id the Photos operations accept (lib:… / m:…), not the grid's native-camera- key.
+      if (state.open === state.nativePhotoSelection?.id) providerSelection = {...state.nativePhotoSelection,id:String(state.open).replace(/^native-camera-/,'')};
     }
     if (view === 'inbox') {
       const state = shell.vget('inbox');

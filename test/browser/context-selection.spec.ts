@@ -228,6 +228,8 @@ test.describe('capture',()=>{
   await photo(page,'FIRST');await photo(page,'SECOND');
   await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).first().click();
   await expect.poll(async()=>(await selectedObject(page))?.kind).toBe('photo');const selected=await selectedObject(page);
+  // The published id is the library id Photos operations accept (photos_open/photos_share), never the grid key.
+  expect(selected!.id).not.toMatch(/^native-camera-/);expect(await page.evaluate(async id=>(await (await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary.read({id})).id,selected!.id)).toBe(selected!.id);
   await choosePhotoAction(page,'Ask Alpha');
   await expect(review(page)).toHaveCount(0);
   await expect(page.getByAltText('Captured photo')).toBeVisible();
