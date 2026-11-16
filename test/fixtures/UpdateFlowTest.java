@@ -1944,6 +1944,25 @@ public final class UpdateFlowTest {
    .put("apkUrl",offer.getString("apkUrl")).put("sha256",offer.getString("sha256"))
    .put("sizeBytes",offer.getData().optLong("sizeBytes")).put("versionCode",offer.getData().optLong("versionCode"));
  }
+ /** Alpha ships only the launcher: an index feed carrying any other variant is malformed as a
+  * whole, so it offers nothing, not even its launcher row. Another signer's row is only skipped.
+  * Returns the versionCode selectUpdateOffer offers a launcher install for each mixed index (0: none). */
+ static org.json.JSONObject mixedIndexSelections()throws Exception{
+  java.lang.reflect.Method select=AlphaDevicePlugin.class.getDeclaredMethod("selectUpdateOffer",org.json.JSONObject.class,String.class,String.class);
+  select.setAccessible(true);
+  String signer=sha256(new byte[]{7});
+  org.json.JSONObject launcher=new org.json.JSONObject().put("schema","alpha-update/v1").put("variant","launcher")
+   .put("signerSha256",signer).put("apkUrl","https://updates.test/alpha-9.apk").put("sha256","ab".repeat(32)).put("sizeBytes",4).put("versionCode",9);
+  org.json.JSONObject result=new org.json.JSONObject();
+  for(String[] change:new String[][]{{"otherSigner","signerSha256","6d".repeat(32)},{"standalone","variant","standalone"}}){
+   org.json.JSONObject other=new org.json.JSONObject(launcher.toString()).put(change[1],change[2]);
+   org.json.JSONObject index=new org.json.JSONObject().put("schema","alpha-update/index-v1")
+    .put("releases",new org.json.JSONArray().put(other).put(new org.json.JSONObject(launcher.toString())));
+   org.json.JSONObject offered=(org.json.JSONObject)select.invoke(null,index,"launcher",signer);
+   result.put(change[0],offered==null?0:offered.getLong("versionCode"));
+  }
+  return result;
+ }
  private static byte[] manifestBytes(org.json.JSONObject offer){
   return (offer.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
  }
