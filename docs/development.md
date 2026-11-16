@@ -666,7 +666,7 @@ probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
 The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
 Shell from browser-based Google sign-in and checks for an eligible browser
 when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
-The candidate pin `aee57131613d6758dbe007e53cdb791f109bdb1c` adds the reviewed MIME preflight, private-action restoration and native-media repairs. Files adds its Core workspace binding; the engine, voice assets and UUID inputs are unchanged. Full corrected-source model qualification is in progress. New native receipts and signed retained-data qualification remain required.
+The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

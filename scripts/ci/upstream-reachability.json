@@ -2,40 +2,15 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "c25d0fca2561f9f604bee8e891be772fa678589f",
-  "head": "aee57131613d6758dbe007e53cdb791f109bdb1c",
-  "recordedAt": "2026-11-15",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...aee57131613d6758dbe007e53cdb791f109bdb1c",
-  "status": "ahead",
-  "aheadBy": 6,
+  "baseCommit": "e682daad5a5c70d4334abe7ef287211d3675b8e2",
+  "head": "e682daad5a5c70d4334abe7ef287211d3675b8e2",
+  "recordedAt": "2026-11-16",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...e682daad5a5c70d4334abe7ef287211d3675b8e2",
+  "status": "identical",
+  "aheadBy": 0,
   "behindBy": 0,
-  "mergeBase": "c25d0fca2561f9f604bee8e891be772fa678589f",
-  "pinOnlyCommits": [
-    {
-      "sha": "3dcd609402253ed780883190e62f3414b0e271ff",
-      "subject": "fix(native): restore media routes and preserve image funding retries"
-    },
-    {
-      "sha": "ef355f431fd79f5cde9651fdabe0112cd6e29e90",
-      "subject": "fix(native): bind selected Cloud image model at launch"
-    },
-    {
-      "sha": "8243893aad03c1c16e023d7764685ac59fd8da98",
-      "subject": "fix(media): preserve selected chat attachment intake"
-    },
-    {
-      "sha": "63b9cb9258256b39b3c538a3d7755a520155c3cf",
-      "subject": "fix(files): recheck live selection after storage reads"
-    },
-    {
-      "sha": "e64c2f244732e723455c11bef6394a6119667d0e",
-      "subject": "refactor(ui): share mobile chat media and search types"
-    },
-    {
-      "sha": "aee57131613d6758dbe007e53cdb791f109bdb1c",
-      "subject": "test(files): bind selected chat bytes in conformance inventory"
-    }
-  ],
+  "mergeBase": "e682daad5a5c70d4334abe7ef287211d3675b8e2",
+  "pinOnlyCommits": [],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
