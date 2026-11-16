@@ -59,7 +59,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   let mapCopyright='';
   let pendingHandoff: {query:string}|undefined, mapsController:MapsController|undefined;
   let queryTimer:ReturnType<typeof setTimeout>|undefined,originTimer:ReturnType<typeof setTimeout>|undefined;
-  let queryDraft:string|undefined,originDraft:string|undefined,searchEpoch=0;
+  let queryDraft:string|undefined,originDraft:string|undefined,searchEpoch=0,submittedQueryEpoch=-1;
   const cancelSearchTimers=()=>{if(queryTimer!==undefined)clearTimeout(queryTimer);if(originTimer!==undefined)clearTimeout(originTimer);queryTimer=originTimer=undefined;};
   const retireSearch=()=>{++searchEpoch;cancelSearchTimers();queryDraft=originDraft=undefined;};
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
@@ -222,8 +222,9 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       const draft=queryDraft,text=draft??screen.view().query,state=mapsController?.snapshot();queryDraft=undefined;
       // Enter after the debounce reuses this input's in-flight or ready search.
       // A new edit, refused request or changed provider still admits a new search.
-      if(draft===undefined&&state?.query===text.trim()&&(state.search.phase==='loading'||state.search.phase==='ready'))return;
-      screen.setQuery(text);if(text.trim())screen.submit();
+      if(draft===undefined&&submittedQueryEpoch===searchEpoch&&!pendingHandoff&&currentApi.get('maps').query==null&&state?.query===text.trim()&&(state.search.phase==='loading'||state.search.phase==='ready'))return;
+      ++searchEpoch;
+      screen.setQuery(text);if(text.trim()){screen.submit();submittedQueryEpoch=searchEpoch;}
     };
     const submitOrigin=()=>{
       if(originTimer!==undefined)clearTimeout(originTimer);originTimer=undefined;
@@ -328,7 +329,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       searchLead: () => {retireSearch();screen.searchLead();},
       onQ: (event: Event) => schedule(view.mode==='origin',(event.target as HTMLInputElement).value),
       focusQ: () => {},
-      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();++searchEpoch;if(view.mode==='origin')submitOrigin();else submitQuery();(event.target as HTMLInputElement).blur(); } },
+      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin'){++searchEpoch;submitOrigin();}else submitQuery();(event.target as HTMLInputElement).blur(); } },
       clearQ: () => {retireSearch();screen.clearQuery();},
       chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => screen.chooseSaved(item.id) })),
       cats: (view.map.selected||view.map.overlay.position?data.cats:[]).map((category: Bag) => ({ ...category, go: () => screen.searchFor(category.label) })),
