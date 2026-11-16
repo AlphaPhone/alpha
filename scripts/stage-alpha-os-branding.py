@@ -131,7 +131,12 @@ def project_policy_bytes(data, canonical, selected):
     return re.sub(rb'(?<![A-Za-z0-9_$])' + re.escape(canonical.encode()) + rb'(?![A-Za-z0-9_$])',
                   lambda _: selected.encode(), data)
 
-def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None, image_admission=None, entry_baseline=None):
+def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None, image_admission=None, entry_baseline=None, image_stage=None):
+    # A source packet publishes beside its admitted image stage, which becomes vendor/alphaphone.
+    # Its vendor/alphaphone preimages are that stage, never an older install in the source tree.
+    def existing(name):
+        prefix = 'vendor/alphaphone/'
+        return safe(image_stage, name[len(prefix):]) if image_stage and name.startswith(prefix) else safe(root, name)
     check_revision(root, 'packages/apps/Provision')
     check_revision(root, 'frameworks/base')
     report_path = assets / 'branding-assets.json'
@@ -210,16 +215,20 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     # The production product copies this feature only after the matching Provision sources are staged.
     put('vendor/alphaphone/branding/provision/fresh-telephony.xml',
         project_policy_bytes((BRAND/'provision/fresh-telephony.xml').read_bytes(), canonical_app, selected))
-    product = safe(root,'vendor/alphaphone/product.mk'); current = product.read_bytes()
+    product = existing('vendor/alphaphone/product.mk'); current = product.read_bytes()
     include = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
+    suffix = b'\n# Alpha OS visual identity.\n'+include.encode()+b'\n'
     assert current.decode().count(include) <= 1, 'Duplicate branding inclusion'
-    if include not in current.decode():
+    if image_stage:
+        # stage-aosp added exactly this include to the generated stage; bind it to that preimage.
+        assert current.endswith(suffix) and product_mk_hash == digest(current[:-len(suffix)]), 'Image stage product.mk differs from its pinned preimage'
+    elif include not in current.decode():
         assert product_mk_hash == digest(current), 'Explicit generated product.mk preimage pin required'
-        put('vendor/alphaphone/product.mk',current+b'\n# Alpha OS visual identity.\n'+include.encode()+b'\n',[digest(current)])
+        put('vendor/alphaphone/product.mk',current+suffix,[digest(current)])
     rows=[]
     prior_rows = {row['path']:row['sha256'] for row in (prior or {}).get('files',[])}
     for name,value in plan.items():
-        target=safe(root,name); actual=digest(target.read_bytes())if target.exists()else None
+        target=existing(name); actual=digest(target.read_bytes())if target.exists()else None
         after=digest(value)
         assert actual is None or actual==after or actual in allowed[name] or actual==prior_rows.get(name), 'Unreviewed existing stage file: '+name
         rows.append({'path':name,'beforeSha256':actual,'sha256':after,'changed':actual!=after})
@@ -275,7 +284,8 @@ def main():
                 data=subprocess.check_output(['git','-C',str(root/'packages/apps/Provision'),'show',row['revision']+':'+filename])
                 assert digest(data)==row['sha256'], 'Pinned Provision source drift'
                 output=safe(inputs, 'packages/apps/Provision/'+filename);output.parent.mkdir(parents=True,exist_ok=True);output.write_bytes(data)
-        plan,rows=build_plan(root,args.assets_dir.resolve(strict=True),args.assets_report_sha256,inputs,prior,args.product_mk_sha256,image_admission=admission)
+        plan,rows=build_plan(root,args.assets_dir.resolve(strict=True),args.assets_report_sha256,inputs,prior,args.product_mk_sha256,image_admission=admission,
+                          image_stage=args.image_stage.resolve(strict=True) if args.packet_output else None)
     args.receipt.parent.mkdir(parents=True,exist_ok=True)
     assert not args.receipt.exists(),'Preserve existing receipt; use a new path'
     backup=args.receipt.parent/(args.receipt.stem+'-source-preimages')

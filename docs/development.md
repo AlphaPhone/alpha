@@ -182,7 +182,10 @@ with the launcher only after all checks pass; it does not apply source, build
 or flash an image. The packet binds the catalogue identity, APK, descriptor, qualified
 Phone/SMS handlers and Provision resource. The source planner verifies the canonical
 core and system-entry preimages and outputs before it checks the exact declared retained
-projection hashes in `android/aosp/branding/installed-image-policies.json`. Canonical
+projection hashes in `android/aosp/branding/installed-image-policies.json`. It reads the
+`vendor/alphaphone` preimages from the image stage being published, whose generated
+`product.mk` is pinned before staging adds the branding include, never from an earlier
+install in the source tree. Canonical
 policy packets stay unchanged. Apply the source packet through the existing guarded
 branding stage, with `--image-stage` pointing at the admitted image stage and a new
 receipt; preserve any required prior source receipt. A retained update must preserve
