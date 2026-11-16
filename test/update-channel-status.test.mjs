@@ -3,10 +3,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 const {channelStatus}=await import('../scripts/update-channel-status.ts');
-const {appUpdateManifestUrl}=await import('../scripts/update-channel.ts');
+const {appUpdateManifestUrl,APP_UPDATE_REPOSITORY}=await import('../scripts/update-channel.ts');
 const signer=JSON.parse(fs.readFileSync('android/release-signer.json','utf8')).signerSha256;
 const offer=(versionCode,overrides={})=>({schema:'alpha-update/v1',versionCode,variant:'launcher',signerSha256:signer,
- apkUrl:`https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-phone-${versionCode}.apk`,sha256:'a'.repeat(64),sizeBytes:1000,...overrides});
+ apkUrl:`https://github.com/${APP_UPDATE_REPOSITORY}/releases/download/app-stable-alphacompute/alpha-phone-${versionCode}.apk`,sha256:'a'.repeat(64),sizeBytes:1000,...overrides});
 const reader=objects=>async url=>{const value=objects[url];if(value===undefined)return null;const bytes=Buffer.from(JSON.stringify(value));return {size:bytes.length,sha256:'x',bytes};};
 const current=appUpdateManifestUrl('app-stable-alphacompute'),legacy=appUpdateManifestUrl('app-stable');
 const legacyOffer={...offer(75),signerSha256:'0'.repeat(64),apkUrl:'https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-phone-75.apk'};
