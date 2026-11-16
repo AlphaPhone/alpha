@@ -197,7 +197,7 @@ async function approvalTrace({name, page, errors}) {
       f.finishDecision();
     });
     await waitSettlement();
-    await page.getByText('Action did not reach a confirmed result. Check action history before requesting it again.', {exact:true}).first().waitFor();
+    await page.getByText('I couldn’t confirm the result. Check the app before trying again.', {exact:true}).first().waitFor();
     await checkpoint('unconfirmedReceiptArrives');
     const session = await page.evaluate(() => window.quintActors.connectionController.getSnapshot().session);
     await page.evaluate(() => {
