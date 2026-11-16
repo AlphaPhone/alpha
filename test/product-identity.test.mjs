@@ -95,11 +95,11 @@ test('the key scan would catch an unprefixed or foreign key', t => {
   assert.deepEqual(literalStorageKeys(dir).map(row => row.key).sort(), ['alpha.dev.', 'eliza:x', 'milady.theme']);
 });
 
-// Alpha is one registered product of the shared mobile shell (apps/app/src/product/alpha-product-registration.ts). The
+// Alpha is the registered product of its own mobile shell (apps/app/src/product/alpha-product-registration.ts). The
 // record is the product's identity, theme and installed-data compatibility input; the checks below
 // keep it equal to what the build and the renderer actually use.
 test('the product record validates and carries the same identity as app.config.json', async () => {
-  const {validateMobileProductRegistration} = await tsImport('../.eliza/client-features/packages/ui/src/mobile-shell/product-registration.ts', import.meta.url);
+  const {validateMobileProductRegistration} = await tsImport('../apps/app/src/ui/mobile-shell/product-registration.ts', import.meta.url);
   assert.deepEqual(validateMobileProductRegistration(record), []);
   assert.equal(record.identity.appId, identity.appId);
   assert.equal(record.identity.appName, identity.appName);

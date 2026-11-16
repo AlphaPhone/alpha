@@ -8,7 +8,7 @@ import {boundInputs, call, captureSources, checkpoint, root, trace} from './supp
 
 const fixture = 'specs/quint/refinement/application/drawer-interaction-fixture.tsx';
 const driver = fileURLToPath(import.meta.url);
-const drawer = '.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx';
+const drawer = 'apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx';
 const replaceOnce = (input, old, next) => {
   assert.equal(input.split(old).length, 2, 'Exact Drawer observer or timer port seam');
   return input.replace(old, next);

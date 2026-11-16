@@ -1,6 +1,6 @@
 // Alpha consumes the reviewed deletion Undo window from the pin: the native engine is
 // @elizaos/capacitor-action-journal (ai.eliza.plugins.actionjournal.deletion), the renderer
-// contract is @elizaos/contracts/deletion-window and the notice is @elizaos/ui's
+// contract is @elizaos/contracts/deletion-window and the notice is Alpha's (apps/app/src/ui/components/composites)
 // DeferredDeletionNotice. This runs the shared JVM suite against the staged pinned sources and
 // checks that Alpha keeps its installed slot, bridge and work names and no duplicate engine.
 import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';

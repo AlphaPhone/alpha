@@ -8,7 +8,7 @@ export const FUNDING_NEEDED='Plan needed';
 /** Cloud declined a turn for this account's billing: the chat's one answer, beside this sheet. */
 export function fundingRefusedReply(serviceName:string):string {void serviceName;return 'Billing declined';}
 import {alphaSubscriptionCopy,type ServiceLimit,type SubscriptionView} from './subscription-entitlement';
-import {useCloudSubscriptionSummary} from '../../../../.eliza/client-features/packages/ui/src/components/settings/cloud-subscription-summary.tsx';
+import {useCloudSubscriptionSummary} from '../ui/components/settings/cloud-subscription-summary.tsx';
 function endLabel(endsAt:number):string {
  const date=new Date(endsAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
  const days=Math.ceil((endsAt-Date.now())/86400000);

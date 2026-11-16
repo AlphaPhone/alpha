@@ -253,3 +253,10 @@ function scratchRoot(t, {ownNodeModules = false} = {}) {
   fs.cpSync(path.join(ROOT, 'licenses'), path.join(dir, 'licenses'), {recursive: true});
   return dir;
 }
+
+test('the Lucide icon notice comes from the copied icons, not an npm package', () => {
+  const record = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/app/public/icons/lucide/source.json'), 'utf8'));
+  const lucide = fresh.entries.filter(entry => /lucide/i.test(entry.name));
+  assert.deepEqual(lucide.map(entry => [entry.name, entry.version, entry.license, entry.source]), [[record.package, record.version, 'ISC AND MIT', record.repository]]);
+  assert.match(lucide[0].text, /^ISC License[\s\S]*derived from the Feather project[\s\S]*The MIT License/);
+});

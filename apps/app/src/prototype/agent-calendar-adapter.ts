@@ -18,7 +18,7 @@ import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {canonicalCalendarRow,canonicalCalendarEditorTiming,calendarFormCreate,calendarFormMinutes,calendarFormPatch,type CanonicalCalendarForm} from '../runtime/agent-calendar-view';
 import {agentReminderLead,homeCalendarValues,homeReadIsStale,overdueAgendaNext,presentHomeAgendaCard,presentHomeAgendaFeed,type HomeAgendaCardInput} from './home-cards';
 import {getZonedDateParts,addDaysToLocalDate} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/internal/time';
-import {eventEditorMutability,cancellationModeForEditorEvent} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy';
+import {eventEditorMutability,cancellationModeForEditorEvent} from '../ui/calendar/event-editor-policy';
 import {calendarDayObservation} from '../runtime/calendar-day-observation';
 import {rememberNoteOrigin} from './note-origin-adapter';
 type Bag=Record<string,any>;

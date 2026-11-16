@@ -39,8 +39,8 @@ export function installCalendarFormDraftAdapter(Component:any,views:Bag,options:
   if(form.id||form.alphaCalendarId||form.alphaReminderId||!form.creationId)return;
   if(this.calendarDraftIdentity!==form.creationId){this.calendarDraftIdentity=form.creationId;this.calendarDraftAnchor=new Date();}
   const today=new Date(),anchor=this.calendarDraftAnchor as Date;
-  const civil=(date:Date)=>Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());
-  if(civil(today)!==civil(anchor)){this.calendarDraftAnchor=today;this.vset('calendar',{form:{...form,off:form.off+(civil(anchor)-civil(today))/86400000}});return;}
+  const shift=calendarFormDayShift(anchor,today);
+  if(shift){this.calendarDraftAnchor=today;this.vset('calendar',{form:{...form,off:form.off+shift}});return;}
   try{const text=encodeCalendarForm(form,this.calendarDraftAnchor);const wasInvalid=this.calendarFormValidationError;this.calendarFormValidationError=false;if(wasInvalid)this.vset('calendar',{});if(text===this.calendarDraftSuppressed)return;this.calendarDraftText=text;this.calendarDraft?.edit(text);}catch{if(!this.calendarFormValidationError){this.calendarFormValidationError=true;this.vset('calendar',{});}}
  };
  p.calendarFormCommitted=function(form:Bag){

@@ -5,6 +5,7 @@ import {assistantDraftStore} from '../runtime/assistant-draft-store';
 import {encodeCalendarEdit,decodeCalendarEdit,snapshotCalendarEdit,calendarEditIdentity} from '../runtime/calendar-edit-draft';
 import {openDomainRecovery} from '../browser/domain-recovery';
 import {browserDevProfile} from '../browser/dev-profile';
+import {calendarFormDayShift} from './calendar-form-draft-adapter';
 type Bag=Record<string,any>;
 /** Retained existing-item forms use the existing transactional text-draft primitive. */
 export function installCalendarEditDraftAdapter(Component:any,views:Bag,options:{active?:(shell:any)=>boolean}={}){
@@ -26,8 +27,8 @@ export function installCalendarEditDraftAdapter(Component:any,views:Bag,options:
   if(!form?.id||!form.alphaCalendarId&&!form.alphaReminderId){this.calendarEditDraftIdentity=undefined;return;}
   if(this.calendarEditDraftIdentity!==calendarEditIdentity(form)){this.calendarEditDraftIdentity=calendarEditIdentity(form);this.calendarEditDraftAnchor=new Date();}
   const today=new Date(),anchor=this.calendarEditDraftAnchor as Date;
-  const civil=(date:Date)=>Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());
-  if(civil(today)!==civil(anchor)){this.calendarEditDraftAnchor=today;this.vset('calendar',{form:{...form,off:form.off+(civil(anchor)-civil(today))/86400000,...(form.reminderEditSchedule?{reminderEditSchedule:[form.reminderEditSchedule[0]+(civil(anchor)-civil(today))/86400000,...form.reminderEditSchedule.slice(1)]}:{})}});return;}
+  const shift=calendarFormDayShift(anchor,today);
+  if(shift){this.calendarEditDraftAnchor=today;this.vset('calendar',{form:{...form,off:form.off+shift,...(form.reminderEditSchedule?{reminderEditSchedule:[form.reminderEditSchedule[0]+shift,...form.reminderEditSchedule.slice(1)]}:{})}});return;}
   try{const text=encodeCalendarEdit(form,this.calendarEditDraftAnchor);const wasInvalid=this.calendarEditFormValidationError;this.calendarEditFormValidationError=false;if(wasInvalid)this.vset('calendar',{});if(text===this.calendarEditDraftSuppressed)return;this.calendarEditDraftText=text;this.calendarEditDraft?.edit(text);}catch{if(!this.calendarEditFormValidationError){this.calendarEditFormValidationError=true;this.vset('calendar',{});}}
  };
  p.calendarEditFormCommitted=function(form:Bag){

@@ -12,7 +12,7 @@ const model = 'CalendarPreservationConfirmation';
 const browserInputs = ['apps/app/src/prototype/template.html', 'apps/app/src/prototype/settings-adapter.ts',
   'apps/app/src/prototype/model.js', 'apps/app/src/runtime/agent-calendar.ts', 'apps/app/src/runtime/legacy-calendar-preservation.ts',
   'apps/app/src/browser/calendar-store.ts', 'apps/app/src/browser/documents.ts',
-  '.eliza/client-features/packages/ui/src/platform/browser-document-store.ts'];
+  'apps/app/src/ui/platform/browser-document-store.ts'];
 
 const owner = name => {
   assert.ok(['owner-a', 'owner-b'].includes(name));

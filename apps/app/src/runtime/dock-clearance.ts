@@ -1,4 +1,4 @@
-import { installDockClearance as installSharedDockClearance, visibleDocks as sharedVisibleDocks } from '../../../../.eliza/client-features/packages/ui/src/components/shell/dock-clearance.ts';
+import { installDockClearance as installSharedDockClearance, visibleDocks as sharedVisibleDocks } from '../ui/components/shell/dock-clearance.ts';
 /**
  * How much of the bottom of the phone the composer or pill takes, including an expanded chat's
  * text/voice composer, measured in the phone canvas's own pixels.
@@ -50,8 +50,8 @@ export function visibleDocks(root: ParentNode = document): HTMLElement[] {
 let installed: (() => void) | null = null;
 /**
  * Installed once per document; a second call returns the same uninstaller. The measuring and
- * publishing are shared with Eliza (packages/ui/src/components/shell/dock-clearance.ts); Alpha
- * supplies its screen, dock and bar selectors and its installed property names.
+ * publishing are in ui/components/shell/dock-clearance.ts; this binding supplies Alpha's
+ * screen, dock and bar selectors and its installed property names.
  */
 export function installDockClearance(): () => void {
   if (installed) return installed;

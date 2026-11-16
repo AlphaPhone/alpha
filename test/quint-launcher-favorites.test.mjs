@@ -6,10 +6,11 @@ import {readFileSync} from 'node:fs';
 import {build} from 'esbuild';
 import {checkTraces} from '../specs/quint/refinement/check-traces.mjs';
 import {boundInputs, call, captureSources, checkpoint, deferred, root, tick, trace} from '../specs/quint/refinement/application/support.mjs';
+import {assertBundlesLocalUi, uiStagingHelper} from './support/quint-conformance-ui-staging.mjs';
 
 const driver = fileURLToPath(import.meta.url);
 const launcherSource = '.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts';
-const shellSource = '.eliza/client-features/packages/ui/src/mobile-shell/mobile-launcher.ts';
+const shellSource = 'apps/app/src/ui/mobile-shell/mobile-launcher.ts';
 const productSource = 'apps/app/src/product/alpha-product.ts';
 const notes = 'alpha:notes', automations = 'alpha:automations', legacy = 'alpha:workflows';
 const clock = 'org.fixture.clock', work = 'org.fixture.clock/org.fixture.clock.Main#10';
@@ -44,8 +45,9 @@ async function compile(extraSources) {
           '  __port.inspect = () => ({rawSaved,builtins,defaultsPending,migrationPending,legacyHomeDefaultsPending});\n' + marker)};
       });
     }}]});
+  assertBundlesLocalUi(built.metafile, shellSource);
   const sources = [...Object.keys(built.metafile.inputs).filter(path => !path.startsWith('<') && path !== 'launcher-favorites-entry.ts'),
-    launcherSource, shellSource, productSource, driver, ...extraSources];
+    launcherSource, shellSource, productSource, driver, uiStagingHelper, ...extraSources];
   captureSources(sources);
   return {code: built.outputFiles[0].text, sources};
 }

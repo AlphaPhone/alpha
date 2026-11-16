@@ -217,7 +217,7 @@ test('200% text survives the browser build re-applying its stored text size', as
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale').trim())).toBe('2');
 });
 
-// Shared Home tiles (@elizaos/ui/mobile-shell MobileHomeScreen): every tile in the grid is one named
+// Home tiles (apps/app/src/ui/mobile-shell/MobileHomeScreen.tsx): every tile in the grid is one named
 // button whose accessible name is its visible label; the glyph id it carries for audits
 // (data-mobile-shell-tile-icon) never changes that name.
 for (const theme of ['light', 'dark'] as const) {

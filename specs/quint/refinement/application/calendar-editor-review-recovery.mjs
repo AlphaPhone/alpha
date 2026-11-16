@@ -46,7 +46,7 @@ async function compile() {
   for (const owner of [entry, 'apps/app/src/browser/calendar-editor-draft.ts', 'apps/app/src/browser/review.ts',
     'apps/app/src/runtime/assistant-draft-store.ts', 'apps/app/src/browser/domain-document.ts',
     'apps/app/src/browser/domain-recovery.ts', 'apps/app/src/browser/retained-data-notice.ts',
-    '.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts']) assert.ok(sources.includes(owner), owner);
+    'apps/app/src/ui/state/durable-draft-controller.ts']) assert.ok(sources.includes(owner), owner);
   return {code: result.outputFiles[0].text, sources};
 }
 

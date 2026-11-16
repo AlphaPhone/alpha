@@ -38,7 +38,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | AC-04 | Sheet heights: closed (bar only), open, full. With no draft waiting, the open height fits the chat between 38% and 60% of the viewport. With a draft waiting, AC-13 applies. Full shows the live strip: avatar, name and app; Mute and End during a call; Send when a draft is waiting. Tapping the strip or dragging down returns to open. | Full height always shows the strip; during a call, End is reachable at every height. |
 | AC-05 | The sheet holds its height when the stage changes view. View changes slide the stage sideways and carry the avatar across. All motion uses `OVERLAY_EASE` at 420 ms. With reduced motion, changes are immediate. | Changing views from the chat leaves the sheet's height and transcript unchanged. |
 | AC-06 | Back order: return the stage to the view it came from (the "‹ Messages" chip), then close the chat, then normal app back. Closing the chat keeps the current stage view: a call Alpha started stays on the call. | Back from a call that Alpha opened from a thread returns to the thread with the chat still open; a second back closes the chat. |
-| AC-07 | The sheet height rules live in the shared shell (`vendor/eliza/packages/ui/src/components/shell/chat-panel-layout.ts`). Make the content-fit and draft-fit changes upstream and advance `upstream.lock.json` and the submodule to the reviewed commit, per AGENTS.md. Never edit the vendor checkout. | The pin moves to a reviewed upstream commit that contains the fitted heights. |
+| AC-07 | The sheet height rules are Alpha's own: the panel layout in `apps/app/src/ui/components/shell/chat-panel-layout.ts` and the content and draft fit in `apps/app/src/prototype/chat-overlay-motion-adapter.ts`. Change them there; they need no upstream change or pin move. | The fitted heights come from Alpha's modules, and no upstream UI module is imported (`test/ui-self-contained.test.mjs`). |
 
 ### Bar and targets
 
@@ -123,7 +123,7 @@ Change existing code; no flags or parallel versions (CONTRIBUTING.md).
 - `apps/app/src/prototype/phone-adapter.ts`, `telephony-*`: approval before dial, End placement, incoming card in the stage.
 - `apps/app/src/prototype/contacts-adapter.ts`: local filtering and Alpha filters.
 - `apps/app/src/prototype/phone.css`: shared styles; reuse `.alpha-mark-fill`.
-- Upstream `chat-panel-layout.ts`: fitted open height (AC-07).
+- `apps/app/src/ui/components/shell/chat-panel-layout.ts`: Alpha-owned panel layout the fitted open height builds on (AC-07).
 
 ## Formal models
 

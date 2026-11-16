@@ -1,8 +1,8 @@
-import {walkthroughProgress, type WalkthroughChoice, type WalkthroughProgress} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+import {walkthroughProgress, type WalkthroughChoice, type WalkthroughProgress} from './ui/components/permissions/permission-walkthrough.ts';
 import {startupPermissionKeys, nativeStartupPermissionKeys} from './startup-permission-flow.ts';
 
 /**
- * Alpha's installed walkthrough progress (shared resumable progress, packages/ui permissions).
+ * Alpha's installed walkthrough progress (resumable progress, ui/components/permissions).
  * Versions: 1 the four-step list (browser and early native), 2 the historical five-step native
  * list, 3 the six-step native list with Calendar and Photos, 4 the current native list with Files
  * (all-files access, decision F1). Unfinished native setup resumes on version 4; completed

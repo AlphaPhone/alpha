@@ -1,20 +1,18 @@
 import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {JSDOM} from 'jsdom';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {checkTraces} from '../specs/quint/refinement/check-traces.mjs';
 import {boundInputs, captureSources, checkpoint, read, tick, trace, call} from '../specs/quint/refinement/application/support.mjs';
+import {assertUpstreamUiNotStaged, preparedStamp, uiStagingHelper} from './support/quint-conformance-ui-staging.mjs';
 
 const model = 'ScreenFocusOwnership';
 const modelPath = 'specs/quint/application/ScreenFocusOwnership.qnt';
 const host = 'apps/app/src/runtime/view-focus.ts';
-const shared = 'packages/ui/src/accessibility/screen-focus.ts';
-const effective = '.eliza/client-features/' + shared;
-const projection = '.eliza/client-features/.source.json';
+const coordinator = 'apps/app/src/ui/accessibility/screen-focus.ts';
 const strip = text => stripTypeScriptTypes(text, {mode: 'strip'})
   .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
 
@@ -151,23 +149,20 @@ function fixture(name, code) {
 }
 
 async function checkScreenFocusOwnership() {
-  const sources = [fileURLToPath(import.meta.url), host, 'vendor/eliza/' + shared, effective, projection,
+  const sources = [fileURLToPath(import.meta.url), host, coordinator, preparedStamp, uiStagingHelper,
     'apps/app/src/main.tsx', 'upstream.lock.json', 'scripts/prepare-client-features.ts'];
   captureSources([...sources, modelPath]);
-  const stamp = JSON.parse(read(projection));
-  const prepared = read(effective);
-  const pinned = read('vendor/eliza/' + shared);
-  const digest = createHash('sha256').update(pinned).digest('hex');
-  assert.equal(stamp.baseCommit, JSON.parse(read('upstream.lock.json')).commit);
-  assert.equal(stamp.sourceFiles[shared], digest);
-  assert.equal(stamp.files[shared], digest);
-  assert.equal(prepared, pinned);
+  assertUpstreamUiNotStaged();
+  const hostText = read(host);
+  assert.match(hostText, /^import \{ createScreenFocus, isExposed \} from '\.\.\/ui\/accessibility\/screen-focus\.ts';$/m,
+    'the product binding uses the exact focus coordinator executed here');
+  const focusText = read(coordinator);
   const marker = '  return {\n    screenChanged: () => schedule(),';
-  assert.equal(prepared.split(marker).length, 2);
+  assert.equal(focusText.split(marker).length, 2);
   const inspect = `  globalThis.inspectFocus = () => ({frame, remaining, held,
     cause: !frame ? "idle" : allowed === screenChangeAllowed ? "screen" : "resize"});\n`;
-  const code = new vm.Script(strip(prepared.replace(marker, inspect + marker)) +
-    `\n${strip(read(host))}\nglobalThis.install = installViewFocus; globalThis.current = () => installed;`);
+  const code = new vm.Script(strip(focusText.replace(marker, inspect + marker)) +
+    `\n${strip(hostText)}\nglobalThis.install = installViewFocus; globalThis.current = () => installed;`);
   const traces = [];
   async function run(name, sequence) {
     const owner = fixture(name, code);
@@ -205,7 +200,7 @@ async function checkScreenFocusOwnership() {
   });
 
   return checkTraces(boundInputs({model, modelPath, sources, traces, scope: 'bounded-component',
-    assumptions: ['Actual prepared coordinator and Alpha focus owner execute. A read-only test hook captures private scheduling state.',
+    assumptions: ['Alpha\'s own coordinator and focus owner execute. A read-only test hook captures private scheduling state.',
       'The DOM fixture controls geometry, animation frames and overlay existence. Captured resize callback identity is covered through observed behavior.',
       'Installed TalkBack, physical rotation timing and mounted modal shapes beyond the focused browser tests remain separate.']}));
 }
