@@ -7869,6 +7869,10 @@
     "tests": [
       "doubleConfirmDispatchesOnceTest",
       "leftDuringValidationOpensNothingTest",
+      "hideRetiresPendingConfirmTest",
+      "confirmedChangeSettlesWhileHiddenTest",
+      "validationRefusesWhileHiddenTest",
+      "validationMayFinishAfterShowingTest",
       "concurrentRequestsOpenOneReviewTest",
       "changedItemClosesReviewTest",
       "changedAfterConfirmRefusedByAndroidTest",
@@ -7924,16 +7928,17 @@
       }
     ],
     "stateMapping": {
-      "visible/hostReview/epoch/disposed": "The mounted Photos host, its own album or share review, and the adapter epoch bumped on leave and dispose",
+      "inPhotos/hidden/hostReview/epoch/disposed": "The active Photos host, document visibility, the host album or share review, and the adapter epoch bumped on leave and dispose",
       "requests": "Agent change requests waiting for provider validation, with the epoch and revision they captured",
       "review/reviewRevision/reviewEpoch": "The single pending review and the revisions it binds",
       "confirms/acting/actingRevision/latePresses": "Owner confirmations being re-validated, the change handed to Android, and confirmations whose review was gone when their re-validation returned",
       "dispatched/applied": "Reviews handed to Android and changes Android applied"
     },
     "abstractions": [
-      "One item with three revisions, two concurrent requests, two confirm presses and three visits. Search, inspect, select and view requests are outside this model, as is the review ended by hiding the app.",
+      "One item with three revisions, two concurrent requests, two confirm presses and three visits. Search, inspect, select and view requests are outside this model.",
       "Android re-checks the reviewed revision before applying; its dialog is one settle step.",
-      "Trace replay: test/quint-photo-library-agent-review.test.mjs replays simulator traces step by step against createDeviceLibrary with the native library plugin and the main Photos host as ports, every validate and requestChange call answered by a model step. The revision and visit a review binds are compared through what the provider and Android are asked and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
+      "The whole adapter is mounted over a document with visibilitychange events. Hiding closes the in-app review and prevents its pending confirmation from dispatching, while an already dispatched Android request may finish. The pre-open validation checks current visibility on return without retiring the Photos visit.",
+      "The owning test replays the sampled visit interleavings and the named visibility schedules against createDeviceLibrary, with native library responses and the main Photos host as ports. It observes hosted redraw, the pending card, validation and native dispatch; the host reset and Android device behavior are outside the source correspondence."
     ]
   },
   {
