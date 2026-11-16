@@ -15,7 +15,7 @@ import { connectionController, agentPendingText } from '../runtime/connection-ui
 import { BrowserReviews } from '../browser/review';
 import { createExternalBrowserHandoff } from './browser-external-handoff';
 import { browserErrorMessage } from '../browser/browser-errors';
-import { surfacePollIdle } from '../browser/browser-poll';
+import { approvedOpenTab, surfacePollIdle } from '../browser/browser-poll';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
 // The shared native tab host (BrowserTabHostPlugin) under Alpha's Capacitor name; the web build
@@ -40,6 +40,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   const restoreAttempts = new Map<string, number>();
   const reviews = new BrowserReviews();
   let profileUnsupportedTab:string|undefined;
+  // The tab the last approved open loaded into, until the user navigates it from the address bar.
+  let agentTab:string|undefined;
   let shell: any, lastGeometry = '', disposed = false, sharing = false, confirming = false, clearingData = false;
   let lastPresented:Bag|undefined,presentationFrame:number|undefined,presentationFailed=false;
   // Saving waits for a successful read so a damaged saved record is never overwritten implicitly.
@@ -189,7 +191,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   function ensure(id: string, priv = isPrivate(id)) {
     return tabs.ensure(id, priv, () => Browser.create({ session, id, private: priv }).catch((error: unknown) => { if(!disposed&&Capacitor.isNativePlatform()&&state()?.cur===id&&error instanceof Error&&error.message===PROFILE_UNSUPPORTED_NATIVE_MESSAGE){profileUnsupportedTab=id;refresh();} throw error; }));
   }
-  async function navigate(raw: string, newTab = false, approvedSignal?: AbortSignal, privateTab = false, background = false) {
+  async function navigate(raw: string, newTab = false, approvedSignal?: AbortSignal, privateTab = false, background = false, target?: string) {
     let url: URL;
     try {
       // The shared address-bar classification; Alpha keeps its length bound, HTTPS default and search provider.
@@ -220,7 +222,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     if (newTab && s.tabs.length >= MAX_TABS) { const full = new Error('Tab limit'); if (approvedSignal) throw full; report(full); return; }
     profileUnsupportedTab=undefined;
     const selectedTab=s.cur;
-    const id = newTab ? newTabId() : s.cur, priv = newTab ? privateTab : isPrivate(id);
+    const id = newTab ? newTabId() : target ?? s.cur, priv = newTab ? privateTab : isPrivate(id);
+    if (!approvedSignal && id === agentTab) agentTab = undefined;
     // Keep the last committed address durable while a restored page is loading or fails.
     const saved = restored.get(id);
     if (saved) tabs.annotate(id, { savedUrl: saved.url, title: saved.title });
@@ -237,6 +240,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // A tab that opened while this one was being created can have filled the last place.
       if (newTab && current.tabs.length >= MAX_TABS) { tabs.forget([id]); void Browser.close({session,id}).catch(report); const full = new Error('Tab limit'); if (approvedSignal) throw full; report(full); return; }
       if (newTab) shell.vset('browser', { tabs: [...state().tabs, { id, hist: ['newtab'], pos: 0, ...(priv ? {priv: true} : {}) }], ...(!background ? {cur: id} : {}) });
+      else if (!background && current.cur !== id) shell.vset('browser', { cur: id });
       tabs.beginNavigation(id, url.href);
       // A background (restored-tab) load must not close a menu or switcher the
       // user opened while its native tab was being created.
@@ -542,7 +546,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // A request made from a private page stays in that profile. Opening a
       // destination must not silently switch to saved sign-ins and history.
       const privateTab=!!(shell.S?.().view==='browser'&&isPrivate(selected));
-      const id = await navigate(url.href, true, signal, privateTab, deferPresentation);
+      // Reuse an untouched New tab or the agent's own earlier tab, so opens do not fill the tab limit.
+      const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab));
+      const id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
+      if (id) agentTab = id;
       const present = () => {
         signal.throwIfAborted();
         if (!id || disposed || document.hidden || state()?.cur !== (deferPresentation ? selected : id) || !tabs.has(id)) return;
