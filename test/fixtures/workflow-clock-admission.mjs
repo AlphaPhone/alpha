@@ -44,7 +44,11 @@ export async function loadWorkflowClockFixture() {
   const contextStart = agentText.indexOf('  function context(shell: Shell) {');
   const contextEnd = agentText.indexOf('  p.componentDidMount', contextStart);
   assert.ok(contextStart >= 0 && contextEnd > contextStart);
-  const context = strip(agentText.slice(contextStart, contextEnd));
+  // AC-26: context() retires open proposal cards when the published subject changes.
+  const retireStart = agentText.indexOf('  function retireProposalCards(shell:Shell){');
+  const retireEnd = agentText.indexOf('  p.cancelReadReplyCompletions', retireStart);
+  assert.ok(retireStart >= 0 && retireEnd > retireStart);
+  const context = strip(agentText.slice(retireStart, retireEnd) + agentText.slice(contextStart, contextEnd));
   const shellText = read(shellSource);
   const leaveStart = shellText.indexOf('  leave() {');
   const leaveEnd = shellText.indexOf('\n\n  preset(', leaveStart);

@@ -15,6 +15,7 @@ import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {modelTraces, replay} from '../specs/quint/refinement/application/shell-model-traces.mjs';
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
+import {tsImport} from './support/ts-import.mjs';
 
 // PhoneCall traces from the simulator, replayed on the development Phone fixture itself: the
 // module-level call latch, pnStart/pnEnd/pnDecline and the registered view's render, back,
@@ -30,6 +31,10 @@ const phoneSource = model.slice(from, to);
 // The shell's own test for a tap that ends a gesture.
 const swallowed = model.match(/\n  swallowed\(\) \{ (return [^\n]+;) \}\n/);
 assert.ok(swallowed, 'the shell swallowed() source');
+// The render registers the Recents list filter and filters rows by the bar's query (AC-22): the
+// real comms-bar registry and call-query matcher the view imports.
+const {setListFilterHandler, clearListFilter} = await tsImport('../apps/app/src/runtime/comms-bar.ts', import.meta.url);
+const {matchesCallQuery} = await tsImport('../apps/app/src/prototype/telephony-presenters.ts', import.meta.url);
 const PEOPLE = [{id: 'ada', name: 'Ada Lovelace', first: 'Ada', ini: 'AL', phone: '(415) 555-0101'}];
 const SEEDS = [{id: 's1', pid: 'ada', num: '', dir: 'out', ago: 5}, {id: 's2', pid: null, num: '555', dir: 'out', ago: 9}];
 
@@ -41,6 +46,7 @@ function fixture() {
     copy: () => ({presetPerson: 'ada'}), PEOPLE, person: id => PEOPLE.find(person => person.id === id) || null,
     formatTime: () => 'now', formatMonthDay: () => 'day', DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     pad2: value => String(value).padStart(2, '0'), crypto: {randomUUID},
+    setListFilterHandler, clearListFilter, matchesCallQuery,
   }});
   core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };`);
   const {PN} = core.context, phone = views.phone;
