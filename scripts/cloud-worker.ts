@@ -19,6 +19,7 @@
  *   bun scripts/cloud-worker.ts secrets  --environment ENV --env-file F [--apply] [--frozen]   complete, verify, push
  *   bun scripts/cloud-worker.ts provision --environment ENV --env-file F [--write]  KV, R2, Hyperdrive, DNS
  *   bun scripts/cloud-worker.ts preflight --environment ENV             check required deploy inputs before writes
+ *   bun scripts/cloud-worker.ts database-identity --environment ENV --env-file F   read redacted database receipts
  *   bun scripts/cloud-worker.ts migrate  --environment ENV --env-file F   apply the Cloud database migrations
  *   bun scripts/cloud-worker.ts seed     --environment ENV --env-file F   register the app (apps + client rows)
  *   bun scripts/cloud-worker.ts deploy   --environment ENV --env-file F [--component api|login|edge|all]
@@ -41,7 +42,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {nativeAuthCallbackRegistration, validateCloudDeployment, type CloudDeploymentConfig} from './cloud-deployment.ts';
-import {registrationRows, seedRegistration, readIdentity, releaseSignerFingerprints} from './cloud-registration.ts';
+import {registrationRows, seedRegistration, readIdentity, releaseSignerFingerprints, type CloudDatabaseAuthority} from './cloud-registration.ts';
 import {cloudEnvironments, type CloudEnvironment} from './cloud-sdk-authority.ts';
 import {leakedElizaHost} from './local-cloud.ts';
 import {publishedAssetLinksCheck} from './render-assetlinks.ts';
@@ -57,12 +58,13 @@ export interface CloudResources {
 }
 
 const SERVICE_DOCUMENT_BINDINGS = ['CLOUD_PUBLIC_SERVICE_TERMS_JSON', 'CLOUD_PUBLIC_SERVICE_PRIVACY_JSON'] as const;
+const DATABASE_RECEIPTS = ['DATABASE_IDENTITY_EXPECTED_CLUSTER_SHA256', 'DATABASE_IDENTITY_EXPECTED_AUTHORITY_SHA256'] as const;
 
 /** Values the operator supplies, including the approved public documents. */
 export const OPERATOR_SECRETS = Object.freeze({
   required: ['DATABASE_URL', 'STEWARD_DATABASE_URL', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'CEREBRAS_API_KEY', 'RESEND_API_KEY',
     'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
-    'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID', ...SERVICE_DOCUMENT_BINDINGS],
+    'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID', ...SERVICE_DOCUMENT_BINDINGS, ...DATABASE_RECEIPTS],
   optional: ['CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STEWARD_GOOGLE_NATIVE_CLIENT_IDS'],
 });
 /** Secrets this tool generates once and keeps in the env file. */
@@ -368,6 +370,7 @@ export function secretProblems(values: Record<string, string>, environment: Clou
   if (stripe && environment === 'production' && !/^(sk|rk)_live_/.test(stripe)) problems.push('STRIPE_SECRET_KEY must be a live key in production');
   if (stripe && environment === 'staging' && !/^(sk|rk)_test_/.test(stripe)) problems.push('STRIPE_SECRET_KEY must be a test key in staging');
   for (const name of ['DATABASE_URL', 'STEWARD_DATABASE_URL']) if (values[name] && !/^postgres(ql)?:\/\//.test(values[name])) problems.push(`${name} must be a postgres:// URL`);
+  for (const name of DATABASE_RECEIPTS) if (values[name] && !validDatabaseReceipt(values[name])) problems.push(`${name} must be a lowercase SHA-256 digest`);
   if (values.DATABASE_URL && values.DATABASE_URL === values.STEWARD_DATABASE_URL) problems.push('STEWARD_DATABASE_URL must be a separate database from DATABASE_URL');
   if (values.KV_REST_API_URL && !/^https:\/\//.test(values.KV_REST_API_URL)) problems.push('KV_REST_API_URL must be https');
   if (values.STEWARD_GOOGLE_NATIVE_CLIENT_IDS) { try { JSON.parse(values.STEWARD_GOOGLE_NATIVE_CLIENT_IDS); } catch { problems.push('STEWARD_GOOGLE_NATIVE_CLIENT_IDS must be JSON'); } }
@@ -436,15 +439,46 @@ export function migrationOutcome(output: string, status: number | null): 'comple
   return /\[db:migrate\] migrations complete/.test(output) ? 'complete' : 'paused';
 }
 
+const validDatabaseReceipt = (value: string | undefined) => !!value && /^[a-f0-9]{64}$/.test(value);
+
+function cloudDatabaseUrl(values: Record<string, string>): string {
+  const url = values.DATABASE_URL;
+  if (!url || !/^postgres(ql)?:\/\//.test(url) || !URL.canParse(url)) throw new Error('DATABASE_URL must be a PostgreSQL connection URL');
+  return url;
+}
+
+export function databaseAuthority(values: Record<string, string>, environment: CloudEnvironment): CloudDatabaseAuthority {
+  const [clusterName, authorityName] = DATABASE_RECEIPTS;
+  for (const name of DATABASE_RECEIPTS) {
+    if (!validDatabaseReceipt(values[name])) throw new Error(`${name} must be a reviewed lowercase SHA-256 digest`);
+  }
+  return {
+    DATABASE_IDENTITY_GATE_MODE: 'enforce', DATABASE_IDENTITY_ENVIRONMENT: environment,
+    [clusterName]: values[clusterName], [authorityName]: values[authorityName],
+  };
+}
+
+export function reportDatabaseIdentity(tree: string, values: Record<string, string>, environment: CloudEnvironment) {
+  const databaseUrl = cloudDatabaseUrl(values);
+  const script = path.join(tree, 'packages/cloud/scripts/admin/preflight-database-identity.ts');
+  const result = spawnSync(pinnedBun(tree), ['--conditions=eliza-source', script], {cwd: path.join(tree, 'packages/cloud/shared'), stdio: 'inherit', env: {
+    ...process.env, DATABASE_URL: databaseUrl, DATABASE_IDENTITY_ENVIRONMENT: environment, DATABASE_IDENTITY_GATE_MODE: 'report',
+    DATABASE_IDENTITY_EXPECTED_CLUSTER_SHA256: undefined, DATABASE_IDENTITY_EXPECTED_AUTHORITY_SHA256: undefined}});
+  if (result.status !== 0) throw new Error('Could not read the database identity receipt');
+}
+
 export function migrate(tree: string, values: Record<string, string>, environment: CloudEnvironment) {
-  const result = spawnSync(pinnedBun(tree), ['run', '--cwd', 'packages/cloud/shared', 'db:migrate'], {cwd: tree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], env: {
-    ...process.env, DATABASE_URL: values.DATABASE_URL, DATABASE_IDENTITY_ENVIRONMENT: environment, DATABASE_IDENTITY_GATE_MODE: 'off'}});
+  const databaseUrl = cloudDatabaseUrl(values);
+  const authority = databaseAuthority(values, environment);
+  const result = spawnSync(pinnedBun(tree), ['run', '--cwd', 'packages/cloud/shared', 'db:migrate'], {cwd: tree,
+    stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', env: {
+    ...process.env, DATABASE_URL: databaseUrl, ...authority}});
   process.stdout.write(result.stdout ?? '');
   const outcome = migrationOutcome(result.stdout ?? '', result.status);
   if (outcome === 'failed') throw new Error('Cloud database migration failed');
   // A new database completes in one run. An interrupted first run resumes only from a pin that includes
   // eliza#39754; a database with an older ledger pauses for upstream's release review.
-  if (outcome === 'paused') throw new Error('Cloud database migration paused at the release barrier before completing; see packages/cloud/scripts/README.md (an interrupted first run resumes with eliza#39754)');
+  if (outcome === 'paused') throw new Error('The pinned migrator did not confirm completion (it paused at a release barrier); resolve it before seeding or deploying (see packages/cloud/scripts/README.md; an interrupted first run resumes with eliza#39754)');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -525,7 +559,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     tree: {type: 'string'}, out: {type: 'string'}, environment: {type: 'string'}, 'env-file': {type: 'string'}, component: {type: 'string', default: 'all'},
     apply: {type: 'boolean', default: false}, frozen: {type: 'boolean', default: false}, write: {type: 'boolean', default: false}, json: {type: 'boolean', default: false}}});
   const command = positionals[0];
-  const usage = () => { console.error('Usage: bun scripts/cloud-worker.ts prepare|deployment|render|check|registration|secrets|provision|preflight|migrate|seed|deploy|tenant|pricing|smoke [options] (see the header of this file)'); process.exit(2); };
+  const usage = () => { console.error('Usage: bun scripts/cloud-worker.ts prepare|deployment|render|check|registration|secrets|provision|preflight|database-identity|migrate|seed|deploy|tenant|pricing|smoke [options] (see the header of this file)'); process.exit(2); };
   const environment = () => { const value = o.environment as CloudEnvironment; if (!cloudEnvironments.includes(value)) usage(); return value; };
   const envFile = () => { if (!o['env-file']) usage(); return path.resolve(o['env-file']!); };
   const policy = () => loadJson<CloudDeploymentConfig>(o.policy!);
@@ -593,11 +627,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         say(`deploy inputs configured for ${env}`);
         break;
       }
-      case 'migrate': { const env = environment(); migrate(preparedTree(o.tree ? path.resolve(o.tree) : undefined), readEnvFile(envFile()), env); break; }
+      case 'database-identity': case 'migrate': {
+        const env = environment(), tree = preparedTree(o.tree ? path.resolve(o.tree) : undefined), values = readEnvFile(envFile());
+        const operation = command === 'migrate' ? migrate : reportDatabaseIdentity;
+        operation(tree, values, env);
+        break;
+      }
       case 'seed': {
         const env = environment(), values = readEnvFile(envFile()), tree = preparedTree(o.tree ? path.resolve(o.tree) : undefined);
-        if (!values.DATABASE_URL) throw new Error('DATABASE_URL is missing from the env file');
-        console.log(JSON.stringify(seedRegistration({tree, databaseUrl: values.DATABASE_URL, rows: [registrationRows(policy(), env)], bun: pinnedBun(tree)})));
+        const databaseUrl = cloudDatabaseUrl(values), authority = databaseAuthority(values, env);
+        console.log(JSON.stringify(seedRegistration({tree, databaseUrl, authority, rows: [registrationRows(policy(), env)], bun: pinnedBun(tree)})));
         break;
       }
       case 'deploy': {
