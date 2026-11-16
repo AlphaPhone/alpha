@@ -8318,6 +8318,7 @@
       "dragOverToolbarIsSuppressedTest",
       "navigationRetiresDragTest",
       "expiredClickIsDroppedTest",
+      "closedChatForgetsDraggedHeightTest",
       "freshPressLiftsSuppressionTest"
     ],
     "invariants": [
@@ -8327,7 +8328,8 @@
       "HomeKeepsBar",
       "KeptBarIsHomeBar",
       "GhostInsideWindow",
-      "ValidDetent"
+      "ValidDetent",
+      "RememberedOnlyWhileOpen"
     ],
     "witnesses": [
       "HomeBarKeptWitness",
