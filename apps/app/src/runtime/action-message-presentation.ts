@@ -16,6 +16,12 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
 }
 const REVIEW_TEXT = 'Review on phone';
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
+// Presentation only: preserve the journal while explaining uncertainty safely.
+export function actionResultText(text: string): string {
+  return text === 'The action could not reach a confirmed result.'
+    || text === 'Action did not reach a confirmed result. Check action history before requesting it again.'
+    ? 'I couldn’t confirm the result. Check the app before trying again.' : text;
+}
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
@@ -80,8 +86,9 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (!stored || stored.from !== 'agent') return message;
     const destination = cardDestination(stored);
     if (stored.card?.proposalId && stored.card.done) {
-      const summary = stored.card.sub;
-      if (typeof summary !== 'string' || !summary.trim()) return message;
+      const rawSummary = stored.card.sub;
+      if (typeof rawSummary !== 'string' || !rawSummary.trim()) return message;
+      const summary = actionResultText(rawSummary);
       const displayText = destination && stored.card.title === 'Completed' ? browserReceiptDisplayText(destination, summary) : summary;
       return {...message, cGeneric:false, cDigest:false, displayText, hasCalendarText:true, deviceReceipt:true};
     }
@@ -90,7 +97,7 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (stored.deviceReceipt && stored.browserDestination && typeof stored.text === 'string') {
       try { return {...message, displayText:browserReceiptDisplayText(stored.browserDestination, stored.text), hasCalendarText:true, deviceReceipt:true}; } catch { return {...message, deviceReceipt:true}; }
     }
-    if (stored.deviceReceipt === true && !stored.card) return {...message, deviceReceipt:true};
+    if (stored.deviceReceipt === true && !stored.card) return {...message, displayText:actionResultText(stored.text), deviceReceipt:true};
     if (destination && message.cDigest && message.rows?.length) {
       return {...message,hasCalendarText:false,rows:message.rows.map((row:Message,index:number)=>index===0?{...row,who:new URL(destination).host,text:'Open'}:row)};
     }

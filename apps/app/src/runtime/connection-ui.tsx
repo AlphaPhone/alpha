@@ -51,7 +51,7 @@ import { pauseHostedBackground } from './hosted-background';
 import {developmentDeviceStore,developmentActionJournal} from './local-agent-storage';
 import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentRefusal, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,removeLocalProviderKey,revealLocalProviderKey,type LocalProviderKey,type LocalProviderReveal,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
 import { presentDeviceRecordOperation } from './device-record-presentation';
-import {checkinDisplayText, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
+import {actionResultText,checkinDisplayText, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
 import type { MessagePage } from './remote-protocol';
 import type {DeviceRecovery,CurrentDeviceActionRequest} from "./device-actions";
 import type { WorkflowPhoneReview } from './workflow-device-contract';
@@ -4137,7 +4137,7 @@ export function ConnectionChooser() {
     {snapshot.session && snapshot.phoneCapabilityReason && <p role="status">{snapshot.phoneCapabilityReason}</p>}
     {actionReview}
     {snapshot.replyNotice && <p role="status">{snapshot.replyNotice}</p>}
-    <div role="status" aria-live="polite">{snapshot.busy&&snapshot.message?<Busy label={snapshot.message}/>:snapshot.message}</div>
+    <div role="status" aria-live="polite">{snapshot.busy&&snapshot.message?<Busy label={actionResultText(snapshot.message)}/>:actionResultText(snapshot.message)}</div>
     {snapshot.error && <p role="alert" className="alpha-connection-error">{snapshot.error}</p>}
     {snapshot.busy && <button className="alpha-connection-cancel" onClick={() => connectionController.cancel()}>{'Cancel'}</button>}
     {testMocksEnabled&&<details><summary>Development Cloud agent infrastructure</summary><p>Connect your personal agent. Dedicated hosting requires a reviewed setup before it starts.</p>
