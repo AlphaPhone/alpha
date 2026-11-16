@@ -1,7 +1,6 @@
 """Read-only admission and signing handoff for Alpha application producer archives."""
 
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -18,7 +17,7 @@ from app_update_producer import (
     CANDIDATE, CANDIDATE_PACKAGE, MAX_ARCHIVE_BYTES, PRIVATE_APK_BUCKET, PRIVATE_RUNNER, REPOSITORY,
     WORKFLOW, WORKFLOW_ID, apk_member_limit, archive_pins, copy_verified, decode, download_github_archive,
     gh_json, github_candidate, github_candidate_download_pins, matches, positive_id, producer_kind,
-    validate_private_storage, input_contract, release_contract,
+    validate_private_storage, input_contract, release_contract, require_current_signer_record,
 )
 
 VARIANTS = ("launcher",)
@@ -43,26 +42,9 @@ def reviewed_private_producer(plan, descriptor):
     fields = ("alphaCommit", "sdkCommit", "versionCode", "updateChannel", "archiveBytes",
               "archiveSHA256", "producerManifestSHA256", "privateProducerReceiptSHA256", "unsignedApkSHA256")
     approval = {"approval": "approved", **{key: plan.get(key) for key in fields}}
+    require_current_signer_record(descriptor)
     return plan.get("producerKind") == PRIVATE_RUNNER and isinstance(plan.get("privateStorage"), dict) and \
         descriptor.get("privateProducerApproval") == approval
-
-
-def approved_cloud_rotation(plan, descriptor):
-    """Refuse missing/changed launcher migration before any signing key access."""
-    require(input_contract(plan)["runtimeProfile"] == "cloud" and reviewed_private_producer(plan, descriptor),
-            "Unreviewed private Cloud producer")
-    rotation, supplied = descriptor.get("apkSigningRotation"), plan.get("rotation")
-    require(isinstance(rotation, dict) and rotation.get("schema") == 1 and rotation.get("approval") == "approved" and
-            rotation.get("versionCode") == plan["versionCode"] and
-            rotation.get("unsignedApkSHA256") == {"launcher": plan["unsignedApkSHA256"]["launcher"]} and
-            isinstance(supplied, dict) and set(supplied) == {"lineageBase64", "lineageSHA256"},
-            "Reviewed launcher-only Cloud rotation is required")
-    require(isinstance(supplied["lineageBase64"], str) and len(supplied["lineageBase64"]) <= 90000,
-            "Bounded public lineage required")
-    lineage = base64.b64decode(supplied["lineageBase64"], validate=True)
-    require(0 < len(lineage) <= 65536 and digest(lineage) == supplied["lineageSHA256"] == rotation.get("lineageSha256"),
-            "Reviewed Cloud lineage differs")
-    return lineage
 
 
 def checked_source_bytes(root, commit, name, *, object_id=False):

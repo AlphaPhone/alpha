@@ -1,7 +1,6 @@
 """Synthetic archive fixtures. No real APK, signing key or provider is accessed."""
 
 import copy
-import base64
 import importlib.util
 import json
 import os
@@ -569,7 +568,7 @@ class CloudSigningInputTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid debug archive member"):
                 ADMISSION.admit(self.archive, self.pin)
 
-    def test_admits_both_exact_unsigned_cloud_variants(self):
+    def test_admits_the_exact_unsigned_launcher(self):
         self.write_archive()
         self.assertEqual(ADMISSION.admit(self.archive, self.pin), {
             "source": "a" * 40,
@@ -581,65 +580,36 @@ class CloudSigningInputTest(unittest.TestCase):
             "signed": False,
         })
 
-    def test_private_cloud_pair_preserves_profile_identity_and_complete_variants(self):
-        payload = b"synthetic standalone APK bytes"
-        self.apk_bytes["standalone-release-unsigned.apk"] = payload
-        self.pin["unsignedApkSHA256"]["standalone"] = ADMISSION.digest(payload)
-        standalone = copy.deepcopy(self.verification["results"][0])
-        standalone.update(variant="standalone", file="artifacts/standalone-release-unsigned.apk",
-                          home=False, sha256=ADMISSION.digest(payload))
-        self.verification["results"].append(standalone)
-        for record in (self.verification, self.build, self.producer):
-            record["runtimeProfile"] = "cloud"
-        for row in self.verification["results"]:
-            row["packageName"] = "ai.elizaresearch.alphaphone"
-        self.pin.update(producerKind=PRODUCER.PRIVATE_RUNNER, privateStorage={})
-        private = {
-            "schema": 1, "producerKind": PRODUCER.PRIVATE_RUNNER,
-            "project": "alpha-aosp-lab-20261024", "instanceId": "8999310923263914877",
-            "alphaCommit": self.pin["alphaCommit"], "sdkCommit": self.pin["sdkCommit"],
-            "versionCode": self.pin["versionCode"], "runtimeProfile": "cloud",
-            "updateChannel": self.pin["updateChannel"],
-            "unsignedApkSHA256": self.pin["unsignedApkSHA256"],
-            "checks": {name: "passed" for name in (
-                "productSourceGuard", "sdkSourceGuard", "normalPreparation",
-                "combinedVerification", "apkArchive")},
-        }
-        raw = json.dumps(private).encode()
-        self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(raw)
-        entries = {"private-producer.json": raw}
-        self.write_archive(entries)
-        self.assertEqual(ADMISSION.admit(self.archive, self.pin)["unsignedApkSHA256"],
-                         self.pin["unsignedApkSHA256"])
-        # The full pair remains authenticated input custody. Only its launcher
-        # may cross the signing boundary, even with both hashes in the plan.
-        self.assertEqual(PRODUCER.input_contract(self.pin)["variants"], ("standalone", "launcher"))
-        self.assertEqual(PRODUCER.release_contract(self.pin)["variants"], ("launcher",))
-        stage = Path(self.temporary.name) / "launcher-signing-input"
-        ADMISSION.admit(self.archive, self.pin, stage)
-        self.assertEqual({item.name for item in stage.iterdir()}, {"launcher-release-unsigned.apk"})
-        self.assertEqual((stage / "launcher-release-unsigned.apk").read_bytes(), self.apk_bytes["launcher-release-unsigned.apk"])
-        changed = dict(entries)
-        changed["standalone-release-unsigned.apk"] = b"changed retired input"
-        self.write_archive(changed)
-        with self.assertRaisesRegex(ValueError, "standalone APK bytes differ"):
-            ADMISSION.admit(self.archive, self.pin)
-        self.write_archive(entries)
-        for record, field, replacement in (
-                (self.producer, "runtimeProfile", "native"),
-                (self.build, "runtimeProfile", "native"),
-                (standalone, "packageName", PRODUCER.CANDIDATE_PACKAGE)):
-            with self.subTest(field=field, replacement=replacement):
-                previous = record[field]
-                record[field] = replacement
-                self.write_archive(entries)
-                with self.assertRaises(ValueError):
-                    ADMISSION.admit(self.archive, self.pin)
-                record[field] = previous
-        self.verification["results"].remove(standalone)
-        self.write_archive(entries)
-        with self.assertRaises(ValueError):
-            ADMISSION.admit(self.archive, self.pin)
+    def test_a_standalone_pin_or_a_rotation_never_reaches_signing(self):
+        # Version 49 phones are wiped, not upgraded in place: no producer route admits the retired
+        # standalone APK or a signing-key rotation.
+        for kind in (PRODUCER.PRIVATE_RUNNER, None):
+            with self.subTest(kind=kind):
+                pin = copy.deepcopy(self.pin)
+                pin["unsignedApkSHA256"]["standalone"] = "1" * 64
+                if kind:
+                    pin.update(producerKind=kind, privateStorage={}, privateProducerReceiptSHA256="2" * 64)
+                    for field in ("producerRunId", "producerRunAttempt", "artifactId", "candidateReceiptSHA256"):
+                        pin.pop(field, None)
+                with self.assertRaisesRegex(ValueError, "only the launcher APK is signed"):
+                    PRODUCER.input_contract(pin)
+        with self.assertRaisesRegex(ValueError, "no signing-key rotation"):
+            PRODUCER.producer_kind({**self.pin, "rotation": {"lineageBase64": "", "lineageSHA256": "0" * 64}})
+
+    def test_a_signer_record_with_a_rotation_names_the_edit_and_a_standalone_pin_is_inert(self):
+        current = {"schema": 1, "signerSha256": "e" * 64, "privateProducerApproval": {"unsignedApkSHA256": {"launcher": "1" * 64}}}
+        self.assertEqual(PRODUCER.require_current_signer_record(current), current)
+        rotation = {**current, "apkSigningRotation": {"approval": "approved"}}
+        message = "Delete the apkSigningRotation object from android/release-signer.json"
+        with self.assertRaisesRegex(PRODUCER.RetiredSignerRecord, message):
+            PRODUCER.require_current_signer_record(rotation)
+        with self.assertRaisesRegex(PRODUCER.RetiredSignerRecord, message):
+            ADMISSION.reviewed_private_producer(self.pin, rotation)
+        # A leftover standalone pin in an earlier approval is accepted as a record but matches no
+        # launcher-only plan, so it authorizes nothing.
+        leftover = {**current, "privateProducerApproval": {"unsignedApkSHA256": {"standalone": "1" * 64, "launcher": "2" * 64}}}
+        self.assertEqual(PRODUCER.require_current_signer_record(leftover), leftover)
+        self.assertFalse(ADMISSION.reviewed_private_producer(self.pin, leftover))
 
     def test_channel_substitution_is_refused_at_each_evidence_boundary(self):
         for boundary in [self.verification, self.build, self.producer, *self.verification["results"]]:
@@ -668,6 +638,7 @@ class CloudSigningInputTest(unittest.TestCase):
             ("versionCode", 45),
             ("versionCode", True),
             ("unsignedApkSHA256", {"standalone": "0" * 64}),
+            ("unsignedApkSHA256", {"launcher": "0" * 64}),
         ):
             with self.subTest(field=field, value=value):
                 pin = {**self.pin, field: value}
@@ -770,7 +741,7 @@ class PrivateProducerSourceReviewTest(unittest.TestCase):
                 "archiveBytes": 100, "archiveSHA256": "d" * 64,
                 "producerManifestSHA256": "e" * 64,
                 "privateProducerReceiptSHA256": "f" * 64,
-                "unsignedApkSHA256": {"standalone": "1" * 64, "launcher": "2" * 64},
+                "unsignedApkSHA256": {"launcher": "2" * 64},
                 "producerKind": "root-reviewed-private-runner",
                 "privateStorage": {
                     "bucket": "alpha-aosp-lab-20261024-private-apks",
@@ -781,11 +752,6 @@ class PrivateProducerSourceReviewTest(unittest.TestCase):
             fields = ("alphaCommit", "sdkCommit", "versionCode", "updateChannel", "archiveBytes",
                       "archiveSHA256", "producerManifestSHA256", "privateProducerReceiptSHA256", "unsignedApkSHA256")
             approval = {"approval": "approved", **{key: plan[key] for key in fields}}
-            lineage = b"synthetic public lineage fixture"
-            plan["rotation"] = {"lineageBase64": base64.b64encode(lineage).decode(), "lineageSHA256": ADMISSION.digest(lineage)}
-            rotation = {"schema": 1, "approval": "approved", "versionCode": plan["versionCode"],
-                        "unsignedApkSHA256": {"launcher": plan["unsignedApkSHA256"]["launcher"]},
-                        "lineageSha256": ADMISSION.digest(lineage)}
             comparison = {"status": "diverged", "merge_base_commit": {"sha": "4" * 40}}
             for name, body in {
                 "git": '#!/bin/sh\nprintf "%s\\n" "$GITHUB_SHA"\n',
@@ -805,27 +771,25 @@ class PrivateProducerSourceReviewTest(unittest.TestCase):
                     candidate = copy.deepcopy(approval)
                     if field is not None:
                         candidate[field] = "unreviewed"
-                    (root / "android/release-signer.json").write_text(json.dumps({"privateProducerApproval": candidate, "apkSigningRotation": rotation}))
+                    (root / "android/release-signer.json").write_text(json.dumps({"privateProducerApproval": candidate}))
                     result = subprocess.run(["bash", "scripts/ci/verify-cloud-signing-input.sh"],
                                             cwd=root, env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode == 0, field is None, result.stderr)
-            (root / "android/release-signer.json").write_text(json.dumps({"privateProducerApproval": approval, "apkSigningRotation": rotation}))
-            # Even an ancestor of main cannot omit or substitute the approved
-            # migration. The refusal happens before remote reads or key access.
+            # A signer record that carries a rotation, or a plan that asks for one, is refused before any remote read or key access, even from main history.
             env["TEST_COMPARISON"] = json.dumps({"status": "ahead", "merge_base_commit": {"sha": plan["alphaCommit"]}})
-            for supplied in (None, {**plan["rotation"], "lineageBase64": "not base64"},
-                             {**plan["rotation"], "lineageSHA256": "0" * 64}):
-                with self.subTest(rotation=supplied):
-                    candidate = copy.deepcopy(plan)
-                    if supplied is None:
-                        candidate.pop("rotation")
-                    else:
-                        candidate["rotation"] = supplied
-                    env["SIGNING_PLAN"] = json.dumps(candidate)
+            for name, descriptor, signing_plan, message in (
+                    ("rotation record", {"privateProducerApproval": approval, "apkSigningRotation": {"approval": "approved"}}, plan,
+                     "Delete the apkSigningRotation object from android/release-signer.json"),
+                    ("rotation plan", {"privateProducerApproval": approval},
+                     {**plan, "rotation": {"lineageBase64": "", "lineageSHA256": "0" * 64}}, "no signing-key rotation")):
+                with self.subTest(retired=name):
+                    (root / "android/release-signer.json").write_text(json.dumps(descriptor))
+                    env["SIGNING_PLAN"] = json.dumps(signing_plan)
                     (root / "gh-calls").unlink(missing_ok=True)
                     result = subprocess.run(["bash", "scripts/ci/verify-cloud-signing-input.sh"], cwd=root, env=env,
                                             capture_output=True, text=True)
                     self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(message, result.stderr)
                     self.assertFalse((root / "gh-calls").exists())
 
 

@@ -365,7 +365,7 @@ gcloud storage cp "$signed_uri" signed.tar
 
 Complete Cartesia qualification on each exact signed APK. Record a content-free
 `alpha-cloud-voice-qualification-v1` JSON receipt with one `results` row per
-approved signed APK: exactly one launcher, including a retained Cloud input. Each
+approved signed APK: exactly one launcher. Each
 row names the observed `apkSha256`, `provider` and `outcome`, and records the
 observed booleans in `checks` for `consent`, `session`, `acousticInput`,
 `blueBar`, `transcript`, `audibleSpeakerReply`, `mute`, `unmute` and
@@ -373,16 +373,15 @@ observed booleans in `checks` for `consent`, `session`, `acousticInput`,
 and credentials. The workflow admits passing Cartesia checks for every exact APK
 named in the launcher-only signed output.
 
-For a retained Cloud archive, publication runs its unchanged historical verifier on
-the original unsigned pair and debug inputs. Alpha then independently verifies that
-the signed launcher preserves every ZIP member, compression fact, local header and
-payload byte, passes 16 KiB alignment and the pinned signature/lineage verifier on
-Android APIs 29–37, and has the exact reviewed voice receipt. The original unsigned
-manifest is retained separately. The derived one-row signed manifest names Alpha's
-admission commit, the original producer/SDK commits and the byte-equivalence proof;
-it is not attributed as a new output of the historical producer. Current native
-builds continue through the normal native verifier. Historical v62 receipts keep
-their original source, hashes and qualification scope.
+Publication reverifies every signed launcher with the normal native verifier
+(`bun run android:verify`). Alpha signs with one key and no signing-key rotation:
+phones still on version 49 (the retired signer) are wiped and installed again,
+never upgraded in place, so no release carries a rotation lineage or a standalone
+APK. `android/release-signer.json` must not carry `apkSigningRotation`; the
+signing and admission scripts refuse a record that does and name the edit that
+removes it. A `standalone` pin left in an existing producer approval is inert:
+admission is launcher-only, so the next approval is written launcher-only. Historical v62 receipts keep their original
+source, hashes and qualification scope.
 
 Set `publication_commit` to the exact reviewed commit currently on `main`.
 Prepare the qualification using the original plan bytes and the reviewed voice

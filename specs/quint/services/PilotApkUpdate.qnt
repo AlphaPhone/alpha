@@ -1,17 +1,17 @@
-/// One admitted pilot update with explicit device lock, readback and rotation evidence.
+/// One admitted pilot update with an explicit device lock and readback evidence.
 module PilotApkUpdate {
-  type State = {phase: str, rotation: bool, originalHome: str, home: str, moved: bool,
-    restoration: str, locked: bool, journal: str, before: str, installer: str,
+  type State = {phase: str, originalHome: str, home: str, moved: bool,
+    restoration: str, locked: bool, before: str, installer: str,
     installVerified: bool, finalStopped: bool, agent: str, passed: bool}
   var s: State
 
-  action initFor(alphaHome: bool, rotation: bool): bool = {
+  action initFor(alphaHome: bool): bool = {
     val home = if (alphaHome) "alpha" else "stock"
-    s' = {phase: "ready", rotation: rotation, originalHome: home, home: home, moved: false,
-      restoration: "unneeded", locked: false, journal: "none", before: "none", installer: "not-dispatched",
+    s' = {phase: "ready", originalHome: home, home: home, moved: false,
+      restoration: "unneeded", locked: false, before: "none", installer: "not-dispatched",
       installVerified: false, finalStopped: false, agent: "unstarted", passed: false}
   }
-  action init = any {initFor(true, true), initFor(true, false), initFor(false, true), initFor(false, false)}
+  action init = any {initFor(true), initFor(false)}
   action claimDevice = all {
     s.phase == "ready", not(s.locked),
     s' = {...s, phase: "pre-read", locked: true}
@@ -30,15 +30,11 @@ module PilotApkUpdate {
     s' = {...s, phase: "pre-dispatch", before: evidence}
   }
   action stopBeforeDispatch = all {
-    s.phase.in(Set("pre-read", "pre-dispatch")), s.journal == "none",
+    s.phase.in(Set("pre-read", "pre-dispatch")),
     s' = {...s, phase: "cleanup"}
   }
-  action recordRotationIntent = all {
-    s.phase == "pre-dispatch", s.rotation, s.before == "inventory", s.journal == "none", s.home == "stock",
-    s' = {...s, phase: "intent-written", journal: "unknown"}
-  }
   action dispatch = all {
-    if (s.rotation) s.phase == "intent-written" else s.phase == "pre-dispatch" and s.home == "stock",
+    s.phase == "pre-dispatch", s.home == "stock",
     s' = {...s, phase: "installer", installer: "unknown"}
   }
   action installerReturned(returned: bool): bool = all {
@@ -71,10 +67,6 @@ module PilotApkUpdate {
   action finishRecord = all {
     s.phase == "record", s' = {...s, phase: "recorded"}
   }
-  action verifyRotationJournal = all {
-    s.phase == "recorded", s.journal == "unknown", s.installVerified,
-    s' = {...s, journal: "verified-applied"}
-  }
   action releaseDevice = all {
     s.phase == "recorded", s.locked,
     s' = {...s, phase: "done", locked: false}
@@ -82,50 +74,47 @@ module PilotApkUpdate {
 
   val LockOwnsUpdate = s.locked == not(s.phase.in(Set("ready", "done")))
   val DispatchHasReadback = s.installer != "not-dispatched" implies s.before != "none"
-  val RotationHasDurableInventory = (s.rotation and s.installer != "not-dispatched" implies s.journal != "none") and
-    (s.journal != "none" implies s.rotation and s.before == "inventory")
   val VerificationHasReturnedInstall = s.installVerified implies s.installer == "returned"
-  val CompletedJournalHasEvidence = s.journal == "verified-applied" implies s.installVerified and s.phase.in(Set("recorded", "done"))
   val RestoreOnlyOwnedHome = (s.moved implies s.originalHome == "alpha") and
     (s.restoration == "unneeded" iff not(s.moved)) and (s.restoration == "restored" implies s.home == "alpha")
   val RestartHasCleanBoundary = s.agent != "unstarted" implies CanStart
   val PassedHasStartupEvidence = s.passed == s.agent.in(Set("running", "not-verified"))
-  val safety = LockOwnsUpdate and DispatchHasReadback and RotationHasDurableInventory and VerificationHasReturnedInstall and
-    CompletedJournalHasEvidence and RestoreOnlyOwnedHome and RestartHasCleanBoundary and PassedHasStartupEvidence
+  val safety = LockOwnsUpdate and DispatchHasReadback and VerificationHasReturnedInstall and
+    RestoreOnlyOwnedHome and RestartHasCleanBoundary and PassedHasStartupEvidence
 
   action step = any {
     claimDevice, handoff(true), handoff(false), observeHome("alpha"), observeHome("split"),
-    readBefore("inventory"), readBefore("package-only"), stopBeforeDispatch, recordRotationIntent,
+    readBefore("inventory"), readBefore("package-only"), stopBeforeDispatch,
     dispatch, installerReturned(true), installerReturned(false), verifyReadback(true), verifyReadback(false),
     finishStop(true), finishStop(false), finishHome("restored", "alpha"),
     {nondet home = Set("alpha", "stock", "split").oneOf(); any {finishHome("unproven", home), finishHome("unneeded", home)}},
     startAgent("running"), startAgent("not-verified"), startAgent("refused"), startAgent("not-running"), skipStart,
-    finishRecord, verifyRotationJournal, releaseDevice, s' = s
+    finishRecord, releaseDevice, s' = s
   }
-  run normalUpdateRestoresHomeBeforeStartTest = initFor(true, false).then(claimDevice).then(handoff(true))
+  run normalUpdateRestoresHomeBeforeStartTest = initFor(true).then(claimDevice).then(handoff(true))
     .then(readBefore("inventory")).then(dispatch).then(installerReturned(true)).then(verifyReadback(true))
     .then(finishStop(true)).then(finishHome("restored", "alpha")).then(startAgent("running"))
     .then(finishRecord).then(releaseDevice).expect(s.passed and s.home == "alpha" and not(s.locked) and safety)
-  run partialHandoffNeverDispatchesTest = initFor(true, true).then(claimDevice).then(handoff(false))
+  run partialHandoffNeverDispatchesTest = initFor(true).then(claimDevice).then(handoff(false))
     .then(stopBeforeDispatch).then(finishStop(true)).then(finishHome("restored", "alpha")).then(skipStart)
-    .then(finishRecord).then(releaseDevice).expect(s.installer == "not-dispatched" and s.journal == "none" and safety)
-  run homeTakeoverBlocksDispatchTest = initFor(false, false).then(claimDevice).then(readBefore("inventory"))
+    .then(finishRecord).then(releaseDevice).expect(s.installer == "not-dispatched" and safety)
+  run homeTakeoverBlocksDispatchTest = initFor(false).then(claimDevice).then(readBefore("inventory"))
     .then(observeHome("alpha")).then(stopBeforeDispatch).then(finishStop(true)).then(finishHome("unneeded", "alpha"))
     .then(skipStart).then(finishRecord).then(releaseDevice).expect(not(s.moved) and s.home == "alpha" and safety)
-  run ambiguousRotationRetainsIntentTest = initFor(true, true).then(claimDevice).then(handoff(true))
-    .then(readBefore("inventory")).then(recordRotationIntent).then(dispatch).then(installerReturned(false))
+  run unknownInstallerResponseNeverStartsTest = initFor(true).then(claimDevice).then(handoff(true))
+    .then(readBefore("inventory")).then(dispatch).then(installerReturned(false))
     .then(finishStop(true)).then(finishHome("restored", "alpha")).then(skipStart).then(finishRecord).then(releaseDevice)
-    .expect(s.journal == "unknown" and s.installer == "unknown" and s.agent == "unstarted" and safety)
-  run verifiedRotationSurvivesRestartRefusalTest = initFor(false, true).then(claimDevice).then(readBefore("inventory"))
-    .then(recordRotationIntent).then(dispatch).then(installerReturned(true)).then(verifyReadback(true))
+    .expect(s.installer == "unknown" and not(s.installVerified) and s.agent == "unstarted" and safety)
+  run verifiedUpdateFailsOnRestartRefusalTest = initFor(false).then(claimDevice).then(readBefore("inventory"))
+    .then(dispatch).then(installerReturned(true)).then(verifyReadback(true))
     .then(finishStop(true)).then(finishHome("unneeded", "stock")).then(startAgent("refused")).then(finishRecord)
-    .then(verifyRotationJournal).then(releaseDevice).expect(s.journal == "verified-applied" and not(s.passed) and safety)
-  run runningIntegrityOrUnprovenHomePreventsStartTest = initFor(true, false).then(claimDevice).then(handoff(true))
+    .then(releaseDevice).expect(s.installVerified and not(s.passed) and safety)
+  run runningIntegrityOrUnprovenHomePreventsStartTest = initFor(true).then(claimDevice).then(handoff(true))
     .then(readBefore("inventory")).then(dispatch).then(installerReturned(true)).then(verifyReadback(true))
     .then(finishStop(false)).then(finishHome("unproven", "split")).then(skipStart).then(finishRecord).then(releaseDevice)
     .expect(s.installVerified and s.agent == "unstarted" and not(s.passed) and safety)
-  run packageOnlyReadbackCanVerifyOrdinaryUpdateTest = initFor(false, false).then(claimDevice).then(readBefore("package-only"))
+  run packageOnlyReadbackCanVerifyOrdinaryUpdateTest = initFor(false).then(claimDevice).then(readBefore("package-only"))
     .then(dispatch).then(installerReturned(true)).then(verifyReadback(true)).then(finishStop(true))
     .then(finishHome("unneeded", "stock")).then(startAgent("not-verified")).then(finishRecord).then(releaseDevice)
-    .expect(s.passed and s.before == "package-only" and s.journal == "none" and safety)
+    .expect(s.passed and s.before == "package-only" and safety)
 }

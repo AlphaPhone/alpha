@@ -36,7 +36,7 @@ const installed = {versionCode: 7, launcher: true, signerSha256: signer};
 const offered = {schema: 'alpha-update/v1', variant: 'launcher', signerSha256: signer, versionCode: 8,
   versionName: 'Synthetic update', apkUrl: 'https://updates.test/alpha-8.apk', sha256: sha(Buffer.of(1, 2, 3, 4)), sizeBytes: 4};
 const replacement = {...offered, versionCode: 9, apkUrl: 'https://updates.test/alpha-9.apk'};
-const secondFeed = {schema: 'alpha-update/index-v1', releases: [{...offered, variant: 'standalone'}, replacement]};
+const secondFeed = {schema: 'alpha-update/index-v1', releases: [{...offered, signerSha256: sha(Buffer.of(8))}, replacement]};
 const offerJson = JSON.stringify(offered);
 const nativeInputs = {
   offer1: [200, offerJson],

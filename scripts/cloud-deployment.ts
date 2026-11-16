@@ -96,7 +96,7 @@ export function checkCloudDeployment(directory=root,{config=CLOUD_DEPLOYMENT,sdk
  // A candidate Cloud (ALPHA_CLOUD_DEPLOYMENT_FILE) is a development build with its own namespace by design;
  // it must never reuse a shipped one, or its sign-ins would be read by a build for another Cloud.
  if(candidate){if(namespaces.includes(storageFingerprint(config)))throw Error('A candidate Cloud deployment must differ from every shipped deployment');}
- else if(storageFingerprint(config)!==namespaces.at(-1))throw Error('Cloud storage namespace would change: every installed phone loses its production credential; add a tested migration (LegacyCloudRecovery) and append the new namespace to STORAGE_NAMESPACES in scripts/cloud-deployment.ts');
+ else if(storageFingerprint(config)!==namespaces.at(-1))throw Error('Cloud storage namespace would change: every installed phone loses its production credential; add a tested migration and append the new namespace to STORAGE_NAMESPACES in scripts/cloud-deployment.ts');
  // The resident agent's inference base (ELIZAOS_CLOUD_BASE_URL) must be the configured API, never a second authority.
  if(JSON.stringify(sdkBases)!==JSON.stringify(cloudSdkBases(config)))throw Error('Cloud SDK bases (scripts/cloud-sdk-authority.ts) disagree with the Cloud deployment policy');
 }

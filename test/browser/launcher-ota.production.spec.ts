@@ -11,9 +11,10 @@ const apk = {
   sizeBytes: 42_000_000,
 };
 const launcher = { ...apk, schema: 'alpha-update/v1', variant: 'launcher', signerSha256: signer };
-const standalone = { ...launcher, variant: 'standalone', versionCode: 9,
-  apkUrl: 'https://updates.example.invalid/standalone.apk', sha256: 'b7'.repeat(32) };
-const manifest = JSON.stringify({ schema: 'alpha-update/index-v1', releases: [standalone, launcher] }, null, 2) + '\n';
+// Another signing family's newer launcher is never this install's offer.
+const otherSigner = { ...launcher, signerSha256: '6d'.repeat(32), versionCode: 9,
+  apkUrl: 'https://updates.example.invalid/other-signer.apk', sha256: 'b7'.repeat(32) };
+const manifest = JSON.stringify({ schema: 'alpha-update/index-v1', releases: [otherSigner, launcher] }, null, 2) + '\n';
 const manifestSha256 = createHash('sha256').update(manifest).digest('hex');
 const appUpdate = { manifest, manifestSha256, installedVersionCode: 7, installedSigner: signer };
 const expectedInstall = { ...apk, automatic: true, manifestSha256 };

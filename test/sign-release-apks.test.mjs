@@ -5,11 +5,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash, X509Certificate } from "node:crypto";
+import { X509Certificate } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { approvedSigningRotation, KEYSTORE_PASSWORD_ENV, PIN_ENV, PKCS11_JVM_OPTION, keyFileProblems, main, signArguments, toolMessage } from "../scripts/sign-release-apks.ts";
+import { KEYSTORE_PASSWORD_ENV, PIN_ENV, PKCS11_JVM_OPTION, keyFileProblems, main, signArguments, toolMessage } from "../scripts/sign-release-apks.ts";
 
 const RELEASE = "e5".repeat(32);
 
@@ -241,22 +241,6 @@ test("a real apksigner signs an APK with ceremony-layout key files, and the resu
   const { signerDigest } = await import("../scripts/apk.ts");
   assert.equal(signerDigest(path.join(work, "app-release.apk")), certificate);
   assert.equal(fs.existsSync(path.join(work, "app-release.apk.idsig")), false, "no v4 side file is written");
-  // The retained launcher handoff admits only v3's out-of-ZIP signing block.
-  // This uses the same freshly generated disposable key, never a release key.
-  const v3 = path.join(work, "v3-only.apk");
-  execFileSync(apksigner, ["sign", "--key", path.join(dir, "alphaphone_app.pk8"), "--cert", path.join(dir, "alphaphone_app.x509.pem"),
-    "--alignment-preserved", "true",
-    "--v1-signing-enabled", "false", "--v2-signing-enabled", "false", "--v3-signing-enabled", "true", "--v4-signing-enabled", "false",
-    "--out", v3, unsigned], {env: toolchain.androidEnv(), stdio: "pipe"});
-  const payload = execFileSync("python3", ["-B", "-c", `
-import importlib.util, pathlib, sys
-sys.path.insert(0, 'scripts/ci')
-spec=importlib.util.spec_from_file_location('handoff','scripts/ci/verify-qualified-cloud-launcher.py')
-module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-a,b=map(pathlib.Path,sys.argv[1:])
-print(module.identical_zip_payload(a,b,module.QUALIFIED.file_sha(a),module.QUALIFIED.file_sha(b)))
-`, unsigned, v3], {cwd: new URL("..", import.meta.url), encoding: "utf8"});
-  assert.match(payload, /alpha-signed-zip-payload\/v1/);
   // The same key against a different recorded signer is refused and leaves nothing behind.
   const other = product(t, "0".repeat(64));
   assert.equal(await main(["--keys-dir", dir, "--apksigner", apksigner, "--apk", unsigned, "--out", path.join(work, "other.apk")], { root: other, env: process.env, log() {}, error() {} }), 1);
@@ -297,37 +281,23 @@ test("the real apksigner launcher accepts the PKCS#11 JVM option, and with a PKC
 });
 
 
-test("rotation admission requires explicit approval and preserves the exact reviewed scope", async t => {
-  const root = scratch(t, "alpha-rotation-admission-");
-  const lineage = path.join(root, "rotation.lineage");
-  const unsigned = path.join(root, "unsigned.apk");
-  fs.writeFileSync(lineage, "synthetic public lineage");
-  fs.writeFileSync(unsigned, "synthetic unsigned fixture");
-  const sha = bytes => createHash("sha256").update(bytes).digest("hex");
-  const rotation = {
-    schema: 1, approval: "approved", fromVersionCode: 44, versionCode: 45,
-    previousSignerSha256: "a1".repeat(32), lineageSha256: sha(fs.readFileSync(lineage)),
-    apksignerSha256: "b2".repeat(32), verifierJarSha256: "c3".repeat(32),
-    unsignedApkSHA256: {launcher: sha(fs.readFileSync(unsigned))},
-  };
-  const descriptor = {signerSha256: RELEASE, lastRelease: {versionCode: 44}, apkSigningRotation: rotation};
-  const targets = [{input: unsigned}];
-  const argumentsWithRotation = signArguments({mode: "key-files", keysDir: "/unused", input: unsigned,
-    output: path.join(root, "launcher-release.apk"), rotationLineage: lineage});
-  assert.deepEqual(argumentsWithRotation.slice(5, -5), ["--lineage", lineage, "--rotation-min-sdk-version", "28", "--min-sdk-version", "29",
-    "--alignment-preserved", "true", "--v1-signing-enabled", "false", "--v2-signing-enabled", "false", "--v3-signing-enabled", "true"]);
-  assert.equal(await approvedSigningRotation(descriptor, lineage, targets), rotation);
-  await assert.rejects(approvedSigningRotation(descriptor, lineage, []), /outside the reviewed rotation scope/);
-  await assert.rejects(approvedSigningRotation(descriptor, lineage, [...targets, ...targets]), /outside the reviewed rotation scope/);
-  const permissionRotation = {...rotation, preserveSignaturePermissions: true};
-  assert.equal(await approvedSigningRotation({...descriptor, apkSigningRotation: permissionRotation}, lineage, targets), permissionRotation);
-  await assert.rejects(approvedSigningRotation({...descriptor, apkSigningRotation: {...rotation, preserveSignaturePermissions: "true"}}, lineage, targets), /No reviewed APK signing rotation record/);
-  for (const approval of ["pending", undefined, "", true]) {
-    const unapproved = {...descriptor, apkSigningRotation: {...rotation, approval}};
-    await assert.rejects(approvedSigningRotation(unapproved, lineage, targets), /No reviewed APK signing rotation record/);
-  }
-  fs.appendFileSync(unsigned, " changed");
-  await assert.rejects(approvedSigningRotation(descriptor, lineage, targets), /outside the reviewed rotation scope/);
-  fs.appendFileSync(lineage, " changed");
-  await assert.rejects(approvedSigningRotation(descriptor, lineage, targets), /lineage differs from the reviewed digest/);
+test("a signer record that carries a signing-key rotation is refused with the edit it needs; a leftover standalone pin is inert", async t => {
+  const { tool, calls } = stubSigner(t);
+  const record = { schema: 1, signerSha256: RELEASE, lastRelease: { versionCode: null, versionName: null, recordedAt: null } };
+  const root = product(t);
+  fs.writeFileSync(path.join(root, "android/release-signer.json"), JSON.stringify({ ...record, apkSigningRotation: { schema: 1, approval: "approved" } }));
+  const refused = await sign(root, ["--keys-dir", keys(t), "--apksigner", tool]);
+  assert.equal(refused.code, 1);
+  assert.match(refused.err, /Delete the apkSigningRotation object from android\/release-signer\.json/);
+  assert.equal(fs.existsSync(path.join(root, "artifacts/launcher-release-unsigned.apk")), true);
+  assert.deepEqual(calls(), []);
+  // A standalone pin left in an earlier producer approval is inert: only the launcher is signed.
+  const leftover = product(t);
+  fs.writeFileSync(path.join(leftover, "android/release-signer.json"), JSON.stringify({ ...record, privateProducerApproval: { unsignedApkSHA256: { standalone: "a".repeat(64), launcher: "b".repeat(64) } } }));
+  const signed = await sign(leftover, ["--keys-dir", keys(t), "--apksigner", tool]);
+  assert.equal(signed.code, 0, signed.err);
+  assert.equal(fs.existsSync(path.join(leftover, "artifacts/launcher-release.apk")), true);
+  // The retired rotation option is no longer an option at all.
+  assert.equal((await sign(product(t), ["--keys-dir", keys(t), "--apksigner", tool, "--rotation-lineage", "/l"])).code, 2);
+  assert.equal(signArguments({ mode: "key-files", keysDir: "/k", input: "/in.apk", output: "/out.apk" }).includes("--lineage"), false);
 });
