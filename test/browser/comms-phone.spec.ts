@@ -239,3 +239,25 @@ test.describe('Alpha image shape (telephony-fixture.ts): Recents filter', () => 
     expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).filter(row => row[0] === 'listRecentCalls').length)).toBeLessThanOrEqual(reads);
   });
 });
+
+test.describe('Alpha image shape (telephony-fixture.ts): AC-20 call card lookup', () => {
+  test('the image resolver names the person by the number, counts the review\'s options, and claims nothing it did not read', async ({page}) => {
+    await setupTelephony(page);
+    await page.getByRole('button', {name: 'Phone', exact: true}).first().click();
+    const resolve = (target: unknown) => page.evaluate(async target => {
+      const {resolveCallParty, callCardText} = await import('/src/runtime/comms-bar.ts' as string);
+      const party = await resolveCallParty(target);
+      return {party, card: callCardText(target, party, (n: string) => n)};
+    }, target);
+    // By Android's own number matching, not the first page of the address book.
+    expect(await resolve({number: '(555) 010-0103'})).toEqual({party: {name: 'Carmen Ruiz', numbers: ['(555) 010-0103']}, card: {title: 'Call Carmen Ruiz', detail: '(555) 010-0103'}});
+    expect((await resolve({number: '+15559990000'})).card.detail).toBe('+15559990000 · not in Contacts');
+    // An unparseable number names nobody and says nothing about Contacts.
+    expect(await resolve({number: '1-800-FLOWERS'})).toEqual({party: null, card: {title: 'Call 1-800-FLOWERS', detail: '1-800-FLOWERS'}});
+    // A contact: the same normalised options the in-card review offers before the dial.
+    expect((await resolve({contact: 'Bao'})).card).toEqual({title: 'Call Bao Tran', detail: '2 numbers · you choose one before it dials'});
+    // Without Contacts access nothing is claimed.
+    await page.evaluate(() => { (window as any).access.contacts = false; });
+    expect((await resolve({number: '+15559990000'})).card.detail).toBe('+15559990000');
+  });
+});

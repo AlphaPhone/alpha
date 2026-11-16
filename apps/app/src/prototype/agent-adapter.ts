@@ -285,8 +285,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
     if((await client.status()).permissions.contacts!=='granted')return null;
     if('number' in target){
-      const key=numberKey(target.number),rows=await client.searchContacts('',100);
-      return {name:rows.find(row=>row.phoneNumbers.some(value=>numberKey(value)===key))?.displayName||null,numbers:[target.number]};
+      // Android's own number matching over the whole address book (AlphaTelephonyPlugin.contactForNumber).
+      // An unparseable number names nobody, and says nothing about Contacts.
+      if(!numberKey(target.number))return null;
+      const found=await registerPlugin<{contactForNumber(input:{number:string}):Promise<unknown>}>('AlphaTelephony').contactForNumber({number:target.number});
+      const name=(found as {name?:unknown}|null)?.name;
+      if(name!==null&&(typeof name!=='string'||!name.trim()))return null;
+      return {name:name||null,numbers:[target.number]};
     }
     // The same options the in-card review offers before the dial (telephony-executor).
     const options=contactCallOptions(await client.searchContacts(target.contact,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber),names=new Set(options.map(option=>option.id));

@@ -14,8 +14,7 @@ process.on('exit', () => rmSync(dir, {recursive: true, force: true}));
 const output = await build({entryPoints: [resolve('apps/app/src/runtime/telephony-executor.ts')], bundle: true, format: 'esm', platform: 'node', write: false,
   alias: {'@elizaos/contracts/telephony-actions': resolve('.eliza/client-features/packages/contracts/src/telephony-actions.ts')}});
 writeFileSync(join(dir, 'executor.mjs'), output.outputFiles[0].text);
-const {executeTelephonyAction, appliedContactChange, contactCallOptions} = await import(pathToFileURL(join(dir, 'executor.mjs')));
-const {callCardText} = await import('../apps/app/src/runtime/comms-bar.ts');
+const {executeTelephonyAction, appliedContactChange} = await import(pathToFileURL(join(dir, 'executor.mjs')));
 
 const priya = {id: '1', displayName: 'Priya Nair', phoneNumbers: ['+14155550132']};
 const reyes = {id: '2', displayName: 'Daniel Reyes', phoneNumbers: ['+15105550119', '(510) 555-0164']};
@@ -181,15 +180,3 @@ test('uncertain create, update and delete receipts stay unknown without repeatin
  }
 });
 
-test('AC-20: the approval card counts exactly the numbers the review will offer', async () => {
-  // Duplicate formats of one number and an undialable entry: the review offers the dialable ones once.
-  const rows = [{id: '4', displayName: 'Ana Torres', phoneNumbers: ['+1 (415) 555-0101', '+14155550101', '*#06#']}];
-  const p = ports({searchContacts: async () => rows});
-  await run({type: 'phone_call', target: {kind: 'contact', query: 'Ana'}}, p);
-  const offered = did(p, 'ask')[0][1].options.map(option => option.number);
-  const options = contactCallOptions(rows, p.ports.normalize);
-  assert.deepEqual(options.map(option => option.number), offered);
-  const card = callCardText({contact: 'Ana'}, {name: options[0].name, numbers: options.map(option => option.number)}, number => number);
-  assert.equal(card.title, 'Call Ana Torres');
-  assert.equal(card.detail, offered.length === 1 ? offered[0] : `${offered.length} numbers · you choose one before it dials`);
-});
