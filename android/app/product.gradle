@@ -16,10 +16,17 @@ if (identityAsset != null) {
  if (projectedIdentity.schema != 1 || projectedIdentity.applicationId != android.defaultConfig.applicationId ||
      projectedIdentity.sourceApplicationId == projectedIdentity.applicationId)
   throw new GradleException('Generated Android identity differs from the application')
- def sourcePackagePath = projectedIdentity.sourceApplicationId.replace('.', '/')
  def projectedRoot = file(identityAsset.source).parentFile
  android.sourceSets.all { sources ->
-  sources.java.exclude(sourcePackagePath + '/**')
+  // Replace the whole authored Java root: instrumentation helpers can keep a shared
+  // package while importing the selected product identity. Pinned module roots stay intact.
+  def authoredJava = file('src/' + sources.name + '/java')
+  def projectedJava = new File(projectedRoot, 'android/app/src/' + sources.name + '/java')
+  if (projectedJava.isDirectory()) {
+   sources.java.setSrcDirs(sources.java.srcDirs.collect { directory ->
+    directory.canonicalFile == authoredJava.canonicalFile ? projectedJava : directory
+   }.unique())
+  }
   def manifest = new File(projectedRoot, 'android/app/src/' + sources.name + '/AndroidManifest.xml')
   if (manifest.isFile()) sources.manifest.srcFile manifest
  }
