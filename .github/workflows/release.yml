@@ -272,7 +272,7 @@ jobs:
             const badging = execFileSync(aapt, ['dump', 'badging', apk], { encoding: 'utf8' });
             const xml = execFileSync(aapt, ['dump', 'xmltree', apk, 'AndroidManifest.xml'], { encoding: 'utf8' });
             const facts = manifestFacts(xml, badging);
-            const compiledChannel = apkUpdateChannel(parseXmlTree(xml));
+            const compiledChannel = apkUpdateChannel(parseXmlTree(xml), {appId: expectedPackage});
             if (compiledChannel.kind !== channel.kind || compiledChannel.manifestUrlSha256 !== channel.manifestUrlSha256)
               throw new Error('The ' + variant + ' APK compiled update channel differs from the reviewed signing plan');
             if (facts.packageName !== expectedPackage || facts.versionCode !== plan.versionCode ||
