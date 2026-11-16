@@ -70,6 +70,7 @@ keys for staging and live keys for production.
 | `CEREBRAS_API_KEY` | cloud.cerebras.ai → API keys | Serves `qwen-3.8-27b`. `OPENROUTER_API_KEY` (optional) adds other models. |
 | `CARTESIA_API_KEY`, `CARTESIA_STT_USD_PER_CREDIT` (optional) | play.cartesia.ai → API keys; price per credit from your plan | Without them STT and TTS use Workers AI. |
 | `RESEND_API_KEY` | resend.com, with `alphacompute.ai` verified as a sending domain | Sends sign-in codes from `noreply@alphacompute.ai`. |
+| `CLOUD_PUBLIC_SERVICE_TERMS_JSON`, `CLOUD_PUBLIC_SERVICE_PRIVACY_JSON` | Alpha Compute's approved Terms and Privacy text | Each value is one line of JSON with `title`, `revision`, and a nonempty `sections` array. Each section has a `title` and a nonempty `paragraphs` array of plain-text strings. Limit each value to 5120 UTF-8 bytes. The API publishes the documents for the in-app sign-in screen. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web application) in an AlphaCompute project | Authorized redirect URIs: `https://login.alphacompute.ai/auth/oauth/google/callback` and `https://api.alphacompute.ai/api/v1/oauth/google/callback` (staging: the `-staging` hosts). Used for sign-in (Steward) and the Gmail/Calendar connector (API). |
 | `STEWARD_GOOGLE_NATIVE_CLIENT_IDS` (optional) | An Android OAuth client: package `ai.alphacompute.alphaphone`, SHA-1 of the release certificate | JSON `{"alpha-phone": ["<id>.apps.googleusercontent.com"]}`. Only needed for native Google sign-in; the app uses browser sign-in today. |
 | `GOOGLE_MAPS_API_KEY` (optional) | Google Cloud → Maps Platform key restricted to Geocoding, Places and Routes | Without it Maps is unavailable. |
@@ -91,6 +92,7 @@ bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha
 # add the provider values to that file, then run `secrets` again until nothing is MISSING
 CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provision --environment staging --env-file ~/.config/alpha-cloud/staging.env --write
 bun run cloud:worker -- check --environment staging   # render and bundle, no network
+CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging
 bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
@@ -103,7 +105,13 @@ bun run cloud:worker -- smoke --environment staging
 records for the API and blob hosts, and writes their ids to `cloud/resources.json` (commit that
 file). The login and web hosts are Worker custom domains, which Cloudflare creates on deploy.
 After the first deployment, the **Cloud deploy** workflow does the same from `main` with
-`--frozen` secrets. Then:
+`--frozen` secrets. Before migrating or seeding, `preflight` checks for provisioned account,
+Hyperdrive and KV IDs in the selected environment and an explicit Cloudflare API token.
+The `smoke` step checks which API environment answered, the Terms and Privacy text,
+public entitlement keys, the exact native client and S256 callback binding, the plan catalogue, sign-in
+providers, the enrolled release certificate's App Links grant, and the hosted callback page.
+
+Exercise the live integrations after these checks pass.
 
 - In Stripe, send a test webhook and check that it returns 200.
 - Run `POST https://api.alphacompute.ai/api/v1/cron/refresh-pricing` with

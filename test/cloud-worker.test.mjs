@@ -8,11 +8,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {workerDeployment,edgeConfig,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
+import {workerDeployment,deployResources,edgeConfig,prepare,preparedTree,completeSecrets,secretProblems,componentSecrets,readEnvFile,smoke,
  WORKER_SECRETS,LOGIN_SECRETS,OPERATOR_SECRETS,GENERATED_SECRETS} from '../scripts/cloud-worker.ts';
 import {registrationRows,registrationFor,registrationAppId,colonFingerprint,releaseSignerFingerprints} from '../scripts/cloud-registration.ts';
 import {edgeRoute} from '../cloud/edge/worker.ts';
-import {SHIPPED_CLOUD_DEPLOYMENT} from '../scripts/cloud-deployment-policy.ts';
 import {validateCloudDeployment,storageFingerprint,STORAGE_NAMESPACES} from '../scripts/cloud-deployment.ts';
 import {leakedElizaHost} from '../scripts/local-cloud.ts';
 
@@ -20,8 +19,9 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const example={policy:read('cloud/policy.example.json'),resources:read('cloud/resources.example.json')};
 const alpha={policy:read('cloud/policy.json'),resources:read('cloud/resources.json')};
 const identity=read('app.config.json');
+const legalDocument=title=>({title,revision:'synthetic-1',sections:[{title:'Fixture',paragraphs:['Only synthetic text.']}]});
 
-test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.ai and is not a shipped namespace',()=>{
+test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.ai',()=>{
  validateCloudDeployment(alpha.policy);
  assert.equal(identity.appId,'ai.alphacompute.alphaphone');
  for(const environment of ['production','staging']){
@@ -33,7 +33,6 @@ test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacom
   assert.equal(ids.zone,'alphacompute.ai');
   for(const host of [ids.blobHost,new URL(ids.loginApiUrl).hostname])assert.match(host,/\.alphacompute\.ai$/);
  }
- assert.ok(!STORAGE_NAMESPACES.includes(storageFingerprint(alpha.policy)));
  assert.equal(leakedElizaHost(alpha),null);
 });
 
@@ -74,18 +73,68 @@ for(const [name,{policy,resources}] of Object.entries({example,alpha}))test(`the
  assert.equal(leakedElizaHost(deployment),null);
 });
 
-test('shipped, Eliza-naming or incomplete input is refused',()=>{
+test('the same Alpha Cloud configuration remains deployable after application cutover',()=>{
+ const before=workerDeployment(alpha.policy,alpha.resources);
+ STORAGE_NAMESPACES.push(storageFingerprint(alpha.policy));
+ try { assert.deepEqual(workerDeployment(alpha.policy,alpha.resources),before); }
+ finally { STORAGE_NAMESPACES.pop(); }
+});
+
+test('only the selected environment needs provisioned resources before deployment writes',()=>{
+ const resources=structuredClone(alpha.resources);
+ const auth={CLOUDFLARE_API_TOKEN:'synthetic-token'};
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',auth),/resources\.staging\.accountId is not provisioned/);
+ resources.staging.accountId='a'.repeat(32);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',auth),/resources\.staging\.hyperdriveId is not provisioned/);
+ resources.staging.hyperdriveId='b'.repeat(32);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',auth),/resources\.staging\.kvNamespaceId is not provisioned/);
+ resources.staging.kvNamespaceId='c'.repeat(32);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',{}),/CLOUDFLARE_API_TOKEN is required/);
+ assert.throws(()=>deployResources(alpha.policy,resources,'staging',{...auth,CLOUDFLARE_ACCOUNT_ID:'d'.repeat(32)}),/does not match the selected resources/);
+ assert.equal(deployResources(alpha.policy,resources,'staging',auth),resources.staging);
+ assert.throws(()=>deployResources(alpha.policy,resources,'production',auth),/resources\.production\.accountId is not provisioned/);
+});
+
+test('shared Eliza, foreign services or incomplete input is refused',()=>{
  const {policy,resources}=example;
  for(const name of [...WORKER_SECRETS,...LOGIN_SECRETS])assert.match(name,/^[A-Z][A-Z0-9_]+$/);
- assert.throws(()=>workerDeployment(SHIPPED_CLOUD_DEPLOYMENT,resources),/shipped Cloud deployment/);
+ const shared=structuredClone(policy);shared.production.api='https://api.eliza.app';
+ assert.throws(()=>workerDeployment(shared,resources),/must not name api\.eliza\.app/);
  const naming=structuredClone(resources);naming.production.loginApiUrl='https://login.eliza.app';
  assert.throws(()=>workerDeployment(policy,naming),/must not name login\.eliza\.app/);
  const missing=structuredClone(resources);delete missing.staging.hyperdriveId;
  assert.throws(()=>workerDeployment(policy,missing),/resources\.staging\.hyperdriveId is required/);
  const otherZone=structuredClone(resources);otherZone.production.zone='example.net';
  assert.throws(()=>workerDeployment(policy,otherZone),/is not in zone example\.net/);
+ const otherServices=structuredClone(policy);otherServices.production.services='https://services.example.net';
+ assert.throws(()=>workerDeployment(otherServices,resources),/services\.example\.net is not in zone/);
  const insecure=structuredClone(policy);insecure.production.api='http://api.cloud.example.org';
  assert.throws(()=>workerDeployment(insecure,resources),/canonical HTTPS origins/);
+});
+
+test('prepare preserves unrelated directories and admits only its marked pinned export',async()=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-cloud-prepare-test-'));
+ try {
+  const tree=path.join(directory,'tree');
+  fs.mkdirSync(tree);
+  const foreign=path.join(tree,'keep.txt');
+  fs.writeFileSync(foreign,'keep');
+  await assert.rejects(prepare(tree),/not an Alpha Cloud export/);
+  assert.equal(fs.readFileSync(foreign,'utf8'),'keep');
+
+  const record=path.join(tree,'.alpha-cloud-tree.json');
+  fs.writeFileSync(record,'{}');
+  await assert.rejects(prepare(tree),/not an Alpha Cloud export/);
+  assert.equal(fs.readFileSync(foreign,'utf8'),'keep');
+
+  fs.writeFileSync(record,JSON.stringify({commit:read('upstream.lock.json').commit,built:true}));
+  assert.equal(await prepare(tree),fs.realpathSync(tree));
+  assert.equal(preparedTree(tree),fs.realpathSync(tree));
+  fs.writeFileSync(path.join(tree,'.git'),'gitdir: elsewhere');
+  await assert.rejects(prepare(tree),/not an Alpha Cloud export/);
+  assert.equal(fs.readFileSync(foreign,'utf8'),'keep');
+  assert.throws(()=>preparedTree(path.resolve('vendor/eliza')), /outside the pinned vendor checkout/);
+ } finally { fs.rmSync(directory,{recursive:true,force:true}); }
 });
 
 test('the app registration is the rows upstream admits: approved app, exact https callback, release signers',()=>{
@@ -129,16 +178,28 @@ test('secrets: operator names are named, internal ones are generated once and ne
  for(const name of OPERATOR_SECRETS.required)assert.ok(missing.includes(`${name} is missing`),name);
  const operator={DATABASE_URL:'postgresql://cloud@db.internal/alpha',STEWARD_DATABASE_URL:'postgresql://steward@db.internal/steward',KV_REST_API_URL:'https://kv.internal',
   KV_REST_API_TOKEN:'t',CEREBRAS_API_KEY:'c',RESEND_API_KEY:'r',GOOGLE_CLIENT_ID:'g.apps.googleusercontent.com',GOOGLE_CLIENT_SECRET:'s',STRIPE_SECRET_KEY:'sk_test_x',
-  STRIPE_WEBHOOK_SECRET:'w',STRIPE_PLUS_MONTHLY_PRICE_ID:'price_p',STRIPE_PLUS_PRODUCT_ID:'prod_p',STRIPE_PRO_MONTHLY_PRICE_ID:'price_q',STRIPE_PRO_PRODUCT_ID:'prod_q'};
+  STRIPE_WEBHOOK_SECRET:'w',STRIPE_PLUS_MONTHLY_PRICE_ID:'price_p',STRIPE_PLUS_PRODUCT_ID:'prod_p',STRIPE_PRO_MONTHLY_PRICE_ID:'price_q',STRIPE_PRO_PRODUCT_ID:'prod_q',
+  CLOUD_PUBLIC_SERVICE_TERMS_JSON:JSON.stringify(legalDocument('Terms')),CLOUD_PUBLIC_SERVICE_PRIVACY_JSON:JSON.stringify(legalDocument('Privacy'))};
  const complete={...first,...operator};
  assert.deepEqual(secretProblems(complete,environment),[]);
  assert.deepEqual(secretProblems(complete,'production'),['STRIPE_SECRET_KEY must be a live key in production']);
  assert.ok(secretProblems({...complete,STEWARD_DATABASE_URL:complete.DATABASE_URL},environment).some(problem=>/separate database/.test(problem)));
  assert.ok(secretProblems({...complete,KV_REST_API_URL:'https://kv.eliza.app'},environment).some(problem=>/names kv\.eliza\.app/.test(problem)));
+ assert.deepEqual(secretProblems({...complete,CLOUD_PUBLIC_SERVICE_TERMS_JSON:''},environment),['CLOUD_PUBLIC_SERVICE_TERMS_JSON is missing']);
+ assert.deepEqual(secretProblems({...complete,CLOUD_PUBLIC_SERVICE_TERMS_JSON:'{"title":"Fixture"}'},environment),
+  ['CLOUD_PUBLIC_SERVICE_TERMS_JSON must be a JSON document with a title, revision and plain-text sections']);
+ const oversized=JSON.stringify({...legalDocument('Privacy'),sections:[{title:'Fixture',paragraphs:['é'.repeat(2600)]}]});
+ assert.ok(oversized.length<5120&&Buffer.byteLength(oversized)>5120);
+ assert.deepEqual(secretProblems({...complete,CLOUD_PUBLIC_SERVICE_PRIVACY_JSON:oversized},environment),
+  ['CLOUD_PUBLIC_SERVICE_PRIVACY_JSON must be at most 5120 UTF-8 bytes']);
  // Steward gets its own database as DATABASE_URL; the API never sees Steward's vault secrets.
  const login=componentSecrets(complete,'login'),api=componentSecrets(complete,'api');
  assert.equal(login.DATABASE_URL,operator.STEWARD_DATABASE_URL);
  assert.equal(api.DATABASE_URL,operator.DATABASE_URL);
+ for(const name of ['CLOUD_PUBLIC_SERVICE_TERMS_JSON','CLOUD_PUBLIC_SERVICE_PRIVACY_JSON']){
+  assert.equal(api[name],operator[name]);
+  assert.equal(login[name],undefined);
+ }
  for(const name of ['STEWARD_MASTER_PASSWORD','STEWARD_KDF_SALT','STEWARD_AUDIT_HMAC_KEY'])assert.equal(api[name],undefined);
  assert.equal(api.STEWARD_JWT_SECRET,login.STEWARD_JWT_SECRET);
 });
@@ -164,23 +225,72 @@ test('the edge Worker forwards only asset links and the registered native return
   'https://cloud.alphacompute.ai/a/b/auth/callback','http://cloud.alphacompute.ai/alphaphone/auth/callback','https://cloud.alphacompute.ai/ALPHA/auth/callback'])assert.equal(at(url),null,url);
 });
 
-test('smoke readiness requires every public answer the phone needs and refuses Eliza hosts',async()=>{
- const row=alpha.policy.staging,ids=alpha.resources.staging;
+function smokeFixture(environment){
+ const row=alpha.policy[environment],ids=alpha.resources[environment];
+ const redirectUri=row.web+'/alphaphone/auth/callback';
+ const config={success:true,clientId:identity.appId,environment,redirectUri,codeChallengeMethod:'S256'};
+ const registration=`${row.api}/api/v1/app-auth/mobile/config?${new URLSearchParams({clientId:identity.appId,environment,redirectUri})}`;
+ const service={success:true,version:1,service:{name:row.name,terms:legalDocument('Terms'),privacy:legalDocument('Privacy')}};
+ const links=[{relation:['delegate_permission/common.handle_all_urls'],target:{namespace:'android_app',package_name:identity.appId,
+  sha256_cert_fingerprints:releaseSignerFingerprints()}}];
+ const {publicKey}=crypto.generateKeyPairSync('ec',{namedCurve:'P-256'});
+ const keys=[{...publicKey.export({format:'jwk'}),kid:'synthetic-entitlement'}];
+ const callback=`<a href="intent://${new URL(redirectUri).host}/alphaphone/auth/callback#Intent;scheme=https;package=${identity.appId};end">Return to Alpha</a>`;
  const answers={
-  [`${row.api}/api/health`]:[200,{ok:true}],
-  [`${row.api}/api/public/service`]:[200,{name:row.name}],
-  [`${row.api}/api/v1/subscription/entitlement-keys`]:[200,{keys:[]}],
-  [`${row.api}/api/v1/app-auth/mobile/config?clientId=ai.alphacompute.alphaphone`]:[200,{clientId:'ai.alphacompute.alphaphone'}],
-  [`${row.api}/api/v1/subscriptions/plans`]:[200,{plans:[]}],
-  [`${ids.loginApiUrl}/auth/providers?tenantId=${row.tenant}`]:[200,{google:true}],
-  [`${row.web}/.well-known/assetlinks.json`]:[200,[{target:{package_name:'ai.alphacompute.alphaphone'}}]],
+  [`${row.api}/api/health`]:[200,{status:'ok',environment}],
+  [`${row.api}/api/public/service`]:[200,service],
+  [`${row.api}/api/v1/subscription/entitlement-keys`]:[200,{keys}],
+  [registration]:[200,config],
+  [`${row.api}/api/v1/subscriptions/plans`]:[200,{success:true,data:{plans:[
+   {key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25.000000'}},
+   {key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90.000000'}},
+  ]}}],
+  [`${ids.loginApiUrl}/auth/providers?tenantId=${row.tenant}`]:[200,{email:true,google:true}],
+  [`${row.web}/.well-known/assetlinks.json`]:[200,links],
+  [redirectUri]:[200,callback,'text/html'],
  };
- const fake=overrides=>async url=>{const [status,body]=overrides[url]??answers[url]??[404,{}];return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});};
- assert.ok((await smoke(alpha.policy,alpha.resources,'staging',fake({}))).every(row=>row.passed));
- const leaked=await smoke(alpha.policy,alpha.resources,'staging',fake({[`${row.api}/api/public/service`]:[200,{billing:'https://cloud.eliza.app/cloud/billing'}]}));
- assert.match(leaked.find(row=>row.gate==='service document').detail,/names cloud\.eliza\.app/);
- const noLinks=await smoke(alpha.policy,alpha.resources,'staging',fake({[`${row.web}/.well-known/assetlinks.json`]:[200,[]]}));
- assert.equal(noLinks.find(row=>row.gate==='asset links').passed,false);
+ const fetcher=overrides=>async (url,options)=>{
+  assert.equal(options.redirect,'manual');
+  assert.ok(options.signal instanceof AbortSignal);
+  const [status,body,type='application/json']=overrides[url]??answers[url]??[404,{}];
+  return new Response(type==='application/json'?JSON.stringify(body):body,{status,headers:{'content-type':type}});
+ };
+ return {row,ids,redirectUri,config,registration,service,links,keys,callback,fetcher};
+}
+
+test('smoke uses the pinned native registration contract and checks the public callback for both environments',async()=>{
+ for(const environment of ['staging','production']){
+  const {fetcher}=smokeFixture(environment);
+  const rows=await smoke(alpha.policy,alpha.resources,environment,fetcher({}));
+  assert.equal(rows.length,8);
+  assert.ok(rows.every(row=>row.passed),JSON.stringify(rows));
+ }
+});
+
+test('smoke refuses incomplete, wrong-environment and wrong-authority HTTP 200 answers',async()=>{
+ const {row,ids,redirectUri,config,registration,service,links,keys,callback,fetcher}=smokeFixture('staging');
+ const regressions=[
+  ['api health',`${row.api}/api/health`,[200,{status:'ok',environment:'production'}]],
+  ['service document',`${row.api}/api/public/service`,[200,{name:row.name}]],
+  ['service document',`${row.api}/api/public/service`,[200,{...service,service:{...service.service,name:'Unexpected service'}}]],
+  ['entitlement keys',`${row.api}/api/v1/subscription/entitlement-keys`,[200,{keys:[]}]],
+  ['entitlement keys',`${row.api}/api/v1/subscription/entitlement-keys`,[200,{keys:[...keys,{...keys[0],d:'synthetic-private-value'}]}]],
+  ['entitlement keys',`${row.api}/api/v1/subscription/entitlement-keys`,[200,{keys:[{...keys[0],x:'A'.repeat(43),y:'A'.repeat(43)}]}]],
+  ['app registration',registration,[200,{...config,redirectUri:redirectUri+'-other'}]],
+  ['app registration',registration,[200,{...config,codeChallengeMethod:'plain'}]],
+  ['plans',`${row.api}/api/v1/subscriptions/plans`,[200,{success:true,data:{plans:[]}}]],
+  ['sign-in providers',`${ids.loginApiUrl}/auth/providers?tenantId=${row.tenant}`,[200,{google:true}]],
+  ['asset links',`${row.web}/.well-known/assetlinks.json`,[200,[{target:{package_name:identity.appId}}]]],
+  ['asset links',`${row.web}/.well-known/assetlinks.json`,[200,[{...links[0],target:{...links[0].target,sha256_cert_fingerprints:[colonFingerprint('a'.repeat(64))]}}]]],
+  ['callback page',redirectUri,[302,'','text/html']],
+  ['callback page',redirectUri,[200,callback.replace(identity.appId,'ai.example.other'),'text/html']],
+ ];
+ for(const [gate,url,answer] of regressions){
+  const rows=await smoke(alpha.policy,alpha.resources,'staging',fetcher({[url]:answer}));
+  assert.deepEqual(rows.filter(row=>!row.passed).map(row=>row.gate),[gate]);
+ }
+ const leaked=await smoke(alpha.policy,alpha.resources,'staging',fetcher({[redirectUri]:[200,callback+'https://cloud.eliza.app','text/html']}));
+ assert.match(leaked.find(row=>row.gate==='callback page').detail,/names cloud\.eliza\.app/);
 });
 
 test('Cloud tool outputs under the pinned source are refused before invoking upstream',()=>{

@@ -18,6 +18,7 @@
  *   bun scripts/cloud-worker.ts registration --environment ENV            print the app's registration rows
  *   bun scripts/cloud-worker.ts secrets  --environment ENV --env-file F [--apply] [--frozen]   complete, verify, push
  *   bun scripts/cloud-worker.ts provision --environment ENV --env-file F [--write]  KV, R2, Hyperdrive, DNS
+ *   bun scripts/cloud-worker.ts preflight --environment ENV             check required deploy inputs before writes
  *   bun scripts/cloud-worker.ts migrate  --environment ENV --env-file F   apply the Cloud database migrations
  *   bun scripts/cloud-worker.ts seed     --environment ENV --env-file F   register the app (apps + client rows)
  *   bun scripts/cloud-worker.ts deploy   --environment ENV --env-file F [--component api|login|edge|all]
@@ -38,10 +39,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
-import {storageFingerprint, STORAGE_NAMESPACES, validateCloudDeployment, type CloudDeploymentConfig} from './cloud-deployment.ts';
-import {registrationRows, seedRegistration, readIdentity} from './cloud-registration.ts';
+import {nativeAuthCallbackRegistration, validateCloudDeployment, type CloudDeploymentConfig} from './cloud-deployment.ts';
+import {registrationRows, seedRegistration, readIdentity, releaseSignerFingerprints} from './cloud-registration.ts';
 import {cloudEnvironments, type CloudEnvironment} from './cloud-sdk-authority.ts';
 import {leakedElizaHost} from './local-cloud.ts';
+import {publishedAssetLinksCheck} from './render-assetlinks.ts';
+import {PLAN_KEYS, parsePlans} from '../apps/app/src/runtime/cloud-plans.ts';
+import {parseCloudServiceInfo} from '../apps/app/src/runtime/cloud-service-info.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const identity = readIdentity(root);
@@ -51,11 +55,13 @@ export interface CloudResources {
   hyperdriveId: string; kvNamespaceId: string; r2Bucket: string; rateLimitNamespaceIds: Record<string, string>;
 }
 
-/** Secrets the operator obtains from a provider (docs/alpha-cloud.md walks through each). */
+const SERVICE_DOCUMENT_BINDINGS = ['CLOUD_PUBLIC_SERVICE_TERMS_JSON', 'CLOUD_PUBLIC_SERVICE_PRIVACY_JSON'] as const;
+
+/** Values the operator supplies, including the approved public documents. */
 export const OPERATOR_SECRETS = Object.freeze({
   required: ['DATABASE_URL', 'STEWARD_DATABASE_URL', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'CEREBRAS_API_KEY', 'RESEND_API_KEY',
     'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
-    'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID'],
+    'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID', ...SERVICE_DOCUMENT_BINDINGS],
   optional: ['CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STEWARD_GOOGLE_NATIVE_CLIENT_IDS'],
 });
 /** Secrets this tool generates once and keeps in the env file. */
@@ -69,7 +75,7 @@ export const WORKER_SECRETS = Object.freeze(['DATABASE_URL', 'KV_REST_API_URL', 
   'SECRETS_MASTER_KEY', 'CRON_SECRET', 'ELIZA_ENTITLEMENT_SIGNING_KEY', 'ELIZA_ENTITLEMENT_SIGNING_KEY_ID', 'ELIZA_SUBSCRIPTION_GRANT_CODE_PEPPER',
   'CEREBRAS_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET',
   'STRIPE_PLUS_MONTHLY_PRICE_ID', 'STRIPE_PLUS_PRODUCT_ID', 'STRIPE_PRO_MONTHLY_PRICE_ID', 'STRIPE_PRO_PRODUCT_ID',
-  'CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY']);
+  'CARTESIA_API_KEY', 'CARTESIA_STT_USD_PER_CREDIT', 'OPENROUTER_API_KEY', 'GOOGLE_MAPS_API_KEY', 'STRIPE_PUBLISHABLE_KEY', ...SERVICE_DOCUMENT_BINDINGS]);
 export const LOGIN_SECRETS = Object.freeze(['DATABASE_URL', 'STEWARD_MASTER_PASSWORD', 'STEWARD_JWT_SECRET', 'STEWARD_KDF_SALT', 'STEWARD_AUDIT_HMAC_KEY',
   'STEWARD_RATE_LIMIT_TOKEN', 'STEWARD_AGGREGATION_TOKEN', 'STEWARD_SPEND_METRICS_TOKEN', 'STEWARD_REQUEST_SIGNING_SECRET',
   'STEWARD_PLATFORM_KEYS', 'STEWARD_PLATFORM_KEY_SCOPES', 'RESEND_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'STEWARD_GOOGLE_NATIVE_CLIENT_IDS']);
@@ -80,11 +86,23 @@ const PLATFORM_SCOPES = ['platform:read', 'platform:write', 'platform:tenant:cre
 
 const loadJson = <T>(file: string): T => JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 const say = (message: string) => console.log(`[cloud] ${message}`);
+const provisionedId = (value: string) => /^[0-9a-f]{32}$/.test(value) && !/^0{30}[0-9]{2}$/.test(value);
+
+export function deployResources(policy: CloudDeploymentConfig, resources: Record<CloudEnvironment, CloudResources>, environment: CloudEnvironment, env = process.env) {
+  workerDeployment(policy, resources);
+  const ids = resources[environment];
+  for (const field of ['accountId', 'hyperdriveId', 'kvNamespaceId'] as const) {
+    if (!provisionedId(ids[field])) throw new Error(`resources.${environment}.${field} is not provisioned; run provision before deploy`);
+  }
+  if (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_ACCOUNT_ID !== ids.accountId) throw new Error('CLOUDFLARE_ACCOUNT_ID does not match the selected resources');
+  if (!env.CLOUDFLARE_API_TOKEN?.trim()) throw new Error('CLOUDFLARE_API_TOKEN is required to deploy Alpha Cloud');
+  return ids;
+}
 
 /** The upstream deployment file: identity from the app's policy, ids from the operator. */
 export function workerDeployment(policy: CloudDeploymentConfig, resources: Record<CloudEnvironment, CloudResources>) {
   validateCloudDeployment(policy);
-  if (STORAGE_NAMESPACES.includes(storageFingerprint(policy))) throw new Error('This policy is a shipped Cloud deployment; the product Worker is built only for the product\'s own Cloud');
+  // The operator continues to deploy Alpha Cloud after phones adopt its storage namespace.
   const leak = leakedElizaHost(policy) ?? leakedElizaHost(resources);
   if (leak) throw new Error(`The product Cloud must not name ${leak}`);
   const environments = Object.fromEntries(cloudEnvironments.map(environment => {
@@ -93,7 +111,7 @@ export function workerDeployment(policy: CloudDeploymentConfig, resources: Recor
     for (const key of ['workerName', 'accountId', 'zone', 'blobHost', 'loginApiUrl', 'mailFrom', 'hyperdriveId', 'kvNamespaceId', 'r2Bucket'] as const)
       if (typeof ids[key] !== 'string' || !ids[key].trim()) throw new Error(`resources.${environment}.${key} is required`);
     const zoned = (host: string) => { if (host !== ids.zone && !host.endsWith('.' + ids.zone)) throw new Error(`${host} is not in zone ${ids.zone}`); return {pattern: `${host}/*`, zone: ids.zone}; };
-    zoned(new URL(row.web).host); zoned(new URL(ids.loginApiUrl).host);
+    zoned(new URL(row.web).host); zoned(new URL(row.services).host); zoned(new URL(ids.loginApiUrl).host);
     const callback = row.web + '/alphaphone/auth/callback';
     return [environment, {
       workerName: ids.workerName, accountId: ids.accountId,
@@ -145,8 +163,12 @@ export function outsideVendor(directory: string): string {
   let parent = absolute;
   while (!fs.existsSync(parent)) parent = path.dirname(parent);
   const resolved = path.join(fs.realpathSync(parent), path.relative(parent, absolute));
-  const vendor = path.join(root, 'vendor');
-  if (resolved === vendor || resolved.startsWith(vendor + path.sep)) throw new Error('Cloud tool inputs and outputs must be outside the pinned vendor checkout');
+  const vendor = path.join(fs.realpathSync(root), 'vendor');
+  const physicalVendor = fs.existsSync(vendor) ? fs.realpathSync(vendor) : vendor;
+  const inside = (file: string, parent: string) => file === parent || file.startsWith(parent + path.sep);
+  if (inside(absolute, path.join(root, 'vendor')) || inside(resolved, vendor) || inside(resolved, physicalVendor)) {
+    throw new Error('Cloud tool inputs and outputs must be outside the pinned vendor checkout');
+  }
   return resolved;
 }
 
@@ -171,29 +193,76 @@ export function pinnedBun(tree: string): string {
 }
 
 const marker = (tree: string) => path.join(tree, '.alpha-cloud-tree.json');
+interface PreparedTreeRecord { commit: string; built: boolean }
+
+function treeRecord(tree: string): PreparedTreeRecord | null {
+  const entry = fs.lstatSync(tree, {throwIfNoEntry: false});
+  if (!entry) return null;
+  if (entry.isDirectory()) {
+    const record = marker(tree);
+    if (fs.lstatSync(record, {throwIfNoEntry: false})?.isFile() && !fs.lstatSync(path.join(tree, '.git'), {throwIfNoEntry: false})) {
+      try {
+        const value = loadJson<PreparedTreeRecord>(record);
+        if (typeof value?.commit === 'string' && /^[0-9a-f]{40}$/.test(value.commit) && typeof value.built === 'boolean') return value;
+      } catch { /* An unreadable marker does not establish ownership. */ }
+    }
+    if (fs.readdirSync(tree).length === 0) return null;
+  }
+  throw new Error(`Existing directory ${tree} is not an Alpha Cloud export; choose an empty --tree`);
+}
+
 export function preparedTree(tree = defaultTree()) {
-  const record = fs.existsSync(marker(tree)) ? loadJson<{commit: string; built: boolean}>(marker(tree)) : null;
+  tree = outsideVendor(tree);
+  const record = treeRecord(tree);
   if (!record?.built || record.commit !== lock().commit) throw new Error(`No prepared upstream tree at ${tree} for ${lock().commit.slice(0, 10)}: run \`bun scripts/cloud-worker.ts prepare\``);
   return tree;
 }
 
 export async function prepare(tree = defaultTree()) {
+  tree = outsideVendor(tree);
   const {commit} = lock(), vendor = path.join(root, 'vendor/eliza');
-  if (fs.existsSync(marker(tree)) && loadJson<{commit: string; built: boolean}>(marker(tree)).commit === commit && loadJson<{built: boolean}>(marker(tree)).built) { say(`tree ready: ${tree}`); return tree; }
-  if (fs.existsSync(tree)) fs.rmSync(tree, {recursive: true, force: true});
-  fs.mkdirSync(tree, {recursive: true});
-  say(`exporting the pinned upstream ${commit.slice(0, 10)} (git archive; vendor/eliza is not written)`);
-  const exported = spawnSync('bash', ['-o', 'pipefail', '-c', 'git -C "$1" archive --format=tar "$2" | tar -x -C "$3"', 'export', vendor, commit, tree], {stdio: 'inherit'});
-  if (exported.status !== 0) throw new Error('git archive of the pin failed');
-  const bun = pinnedBun(tree);
-  const run = (args: string[], label: string) => {
-    say(label);
-    const result = spawnSync(bun, args, {cwd: tree, stdio: 'inherit', env: {...process.env, CI: '1', NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim()}});
-    if (result.status !== 0) throw new Error(`${label} failed (exit ${result.status})`);
-  };
-  run(['install', '--ignore-scripts'], 'installing the workspace (lifecycle scripts skipped)');
-  run(['run', 'build:core'], 'building the workspace packages the Workers import (build:core)');
-  fs.writeFileSync(marker(tree), JSON.stringify({commit, built: true}) + '\n');
+  const current = treeRecord(tree);
+  if (current?.built && current.commit === commit) { say(`tree ready: ${tree}`); return tree; }
+
+  const parent = path.dirname(tree);
+  fs.mkdirSync(parent, {recursive: true});
+  const scratch = fs.mkdtempSync(path.join(parent, '.alpha-cloud-prepare-'));
+  const next = path.join(scratch, 'next'), previous = path.join(scratch, 'previous');
+  let preservePrevious = false;
+  try {
+    fs.mkdirSync(next);
+    say(`exporting the pinned upstream ${commit.slice(0, 10)} (git archive; vendor/eliza is not written)`);
+    const exported = spawnSync('bash', ['-o', 'pipefail', '-c', 'git -C "$1" archive --format=tar "$2" | tar -x -C "$3"', 'export', vendor, commit, next], {stdio: 'inherit'});
+    if (exported.status !== 0) throw new Error('git archive of the pin failed');
+    const bun = pinnedBun(next);
+    const run = (args: string[], label: string) => {
+      say(label);
+      const result = spawnSync(bun, args, {cwd: next, stdio: 'inherit', env: {...process.env, CI: '1', NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim()}});
+      if (result.status !== 0) throw new Error(`${label} failed (exit ${result.status})`);
+    };
+    run(['install', '--ignore-scripts'], 'installing the workspace (lifecycle scripts skipped)');
+    run(['run', 'build:core'], 'building the workspace packages the Workers import (build:core)');
+    fs.writeFileSync(marker(next), JSON.stringify({commit, built: true}) + '\n', {flag: 'wx'});
+
+    const latest = treeRecord(tree);
+    if (!latest?.built || latest.commit !== commit) {
+      if (latest) fs.renameSync(tree, previous);
+      try {
+        fs.renameSync(next, tree);
+      } catch (error) {
+        if (latest) {
+          try { fs.renameSync(previous, tree); }
+          catch {
+            preservePrevious = true;
+            throw new Error(`Could not publish ${tree}; the previous export remains at ${previous}`, {cause: error});
+          }
+        }
+        throw error;
+      }
+    }
+  } finally {
+    if (!preservePrevious) fs.rmSync(scratch, {recursive: true, force: true});
+  }
   say(`tree ready: ${tree}`);
   return tree;
 }
@@ -301,6 +370,18 @@ export function secretProblems(values: Record<string, string>, environment: Clou
   if (values.DATABASE_URL && values.DATABASE_URL === values.STEWARD_DATABASE_URL) problems.push('STEWARD_DATABASE_URL must be a separate database from DATABASE_URL');
   if (values.KV_REST_API_URL && !/^https:\/\//.test(values.KV_REST_API_URL)) problems.push('KV_REST_API_URL must be https');
   if (values.STEWARD_GOOGLE_NATIVE_CLIENT_IDS) { try { JSON.parse(values.STEWARD_GOOGLE_NATIVE_CLIENT_IDS); } catch { problems.push('STEWARD_GOOGLE_NATIVE_CLIENT_IDS must be JSON'); } }
+  for (const name of SERVICE_DOCUMENT_BINDINGS) {
+    const value = values[name];
+    if (!value) continue;
+    if (Buffer.byteLength(value, 'utf8') > 5120) {
+      problems.push(`${name} must be at most 5120 UTF-8 bytes`);
+      continue;
+    }
+    try {
+      const document = JSON.parse(value);
+      parseCloudServiceInfo({success: true, version: 1, service: {name: identity.appName, terms: document, privacy: document}});
+    } catch { problems.push(`${name} must be a JSON document with a title, revision and plain-text sections`); }
+  }
   return problems;
 }
 
@@ -355,28 +436,68 @@ export function migrate(tree: string, values: Record<string, string>, environmen
 
 export async function smoke(policy: CloudDeploymentConfig, resources: Record<CloudEnvironment, CloudResources>, environment: CloudEnvironment, fetchImpl: typeof fetch = fetch) {
   const row = validateCloudDeployment(policy)[environment], ids = resources[environment];
+  const {redirectUri} = nativeAuthCallbackRegistration(policy, identity, environment);
+  const registration = new URLSearchParams({clientId: identity.appId, environment, redirectUri});
   const rows: {gate: string; passed: boolean; detail: string}[] = [];
   const probe = async (gate: string, url: string, test: (response: Response, text: string) => string | null) => {
     try {
-      const response = await fetchImpl(url, {redirect: 'manual', headers: {'cache-control': 'no-cache'}});
+      const response = await fetchImpl(url, {redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: {'cache-control': 'no-cache'}});
       const text = await response.text();
-      const problem = test(response, text) ?? (leakedElizaHost(text) ? `names ${leakedElizaHost(text)}` : null);
+      const leak = leakedElizaHost(text) ?? leakedElizaHost(response.headers.get('location'));
+      const problem = response.status === 200 ? test(response, text) ?? (leak ? `names ${leak}` : null) : `HTTP ${response.status}`;
       rows.push({gate, passed: !problem, detail: problem ?? `HTTP ${response.status}`});
     } catch (error) { rows.push({gate, passed: false, detail: (error as Error).message}); }
   };
   const json = (text: string) => { try { return JSON.parse(text); } catch { return null; } };
-  await probe('api health', `${row.api}/api/health`, response => response.ok ? null : `HTTP ${response.status}`);
-  await probe('service document', `${row.api}/api/public/service`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status}`);
-  await probe('entitlement keys', `${row.api}/api/v1/subscription/entitlement-keys`, (response, text) => response.ok && Array.isArray(json(text)?.keys) ? null : `HTTP ${response.status}`);
-  await probe('app registration', `${row.api}/api/v1/app-auth/mobile/config?clientId=${encodeURIComponent(identity.appId)}`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status} ${text.slice(0, 120)}`);
-  await probe('plans', `${row.api}/api/v1/subscriptions/plans`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status}`);
-  await probe('sign-in providers', `${ids.loginApiUrl}/auth/providers?tenantId=${encodeURIComponent(row.tenant)}`, (response, text) => response.ok && json(text) ? null : `HTTP ${response.status}`);
-  await probe('asset links', `${row.web}/.well-known/assetlinks.json`, (response, text) => {
-    if (response.status !== 200) return `HTTP ${response.status} (Android needs 200 without redirect)`;
-    if (!/application\/json/.test(response.headers.get('content-type') ?? '')) return 'not application/json';
-    const statements = json(text);
-    return Array.isArray(statements) && statements.some((s: any) => s?.target?.package_name === identity.appId) ? null : `no statement for ${identity.appId}`;
+  await probe('api health', `${row.api}/api/health`, (_response, text) => {
+    const health = json(text);
+    return health?.status === 'ok' && health.environment === environment ? null : `expected API health for ${environment}`;
   });
+  await probe('service document', `${row.api}/api/public/service`, (_response, text) => {
+    try {
+      const service = parseCloudServiceInfo(json(text));
+      return service.name === (row.name ?? new URL(row.api).hostname) ? null : 'unexpected Cloud service name';
+    } catch { return 'expected Terms and Privacy documents accepted by Alpha sign-in'; }
+  });
+  await probe('entitlement keys', `${row.api}/api/v1/subscription/entitlement-keys`, (_response, text) => {
+    const keys: unknown = json(text)?.keys;
+    const usable = Array.isArray(keys) && keys.length > 0 && keys.every(key => {
+      if (key?.kty !== 'EC' || key.crv !== 'P-256' || typeof key.kid !== 'string' || !key.kid.trim() || key.d !== undefined
+        || typeof key.x !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(key.x)
+        || typeof key.y !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(key.y)) return false;
+      try { crypto.createPublicKey({key, format: 'jwk'}); return true; } catch { return false; }
+    });
+    return usable ? null : 'expected a nonempty set of public P-256 entitlement keys';
+  });
+  await probe('app registration', `${row.api}/api/v1/app-auth/mobile/config?${registration}`, (_response, text) => {
+    const config = json(text);
+    return config?.success === true && config.clientId === identity.appId && config.environment === environment
+      && config.redirectUri === redirectUri && config.codeChallengeMethod === 'S256' ? null : 'expected the exact native client, callback and S256';
+  });
+  await probe('plans', `${row.api}/api/v1/subscriptions/plans`, (_response, text) => {
+    try {
+      const body = json(text);
+      if (body?.success === true) {
+        const plans = parsePlans(body);
+        if (plans.length === PLAN_KEYS.length && PLAN_KEYS.every(key => plans.some(plan => plan.key === key))) return null;
+      }
+    } catch { /* The server catalogue must be usable by Alpha. */ }
+    return 'expected the Plus and Pro subscription plans';
+  });
+  await probe('sign-in providers', `${ids.loginApiUrl}/auth/providers?tenantId=${encodeURIComponent(row.tenant)}`, (_response, text) => {
+    const providers = json(text);
+    return providers?.email === true && providers.google === true ? null : 'expected email and Google sign-in';
+  });
+  await probe('asset links', `${row.web}/.well-known/assetlinks.json`, (response, text) => {
+    if (!/^application\/json\b/i.test(response.headers.get('content-type') ?? '')) return 'not application/json';
+    const signerSha256 = releaseSignerFingerprints()[0].replaceAll(':', '').toLowerCase();
+    const links = publishedAssetLinksCheck(text, {packageName: identity.appId, signerSha256});
+    return links.granted ? null : links.problems.join('; ');
+  });
+  const callback = new URL(redirectUri);
+  const callbackIntent = `intent://${callback.host}${callback.pathname}#Intent;scheme=https;package=${identity.appId};end`;
+  await probe('callback page', redirectUri, (response, text) => /^text\/html\b/i.test(response.headers.get('content-type') ?? '')
+    && text.includes(`href="${callbackIntent}"`) ? null : 'expected the hosted HTML callback for this Android package');
   return rows;
 }
 
@@ -388,7 +509,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     tree: {type: 'string'}, out: {type: 'string'}, environment: {type: 'string'}, 'env-file': {type: 'string'}, component: {type: 'string', default: 'all'},
     apply: {type: 'boolean', default: false}, frozen: {type: 'boolean', default: false}, write: {type: 'boolean', default: false}, json: {type: 'boolean', default: false}}});
   const command = positionals[0];
-  const usage = () => { console.error('Usage: bun scripts/cloud-worker.ts prepare|deployment|render|check|registration|secrets|provision|migrate|seed|deploy|tenant|smoke [options] (see the header of this file)'); process.exit(2); };
+  const usage = () => { console.error('Usage: bun scripts/cloud-worker.ts prepare|deployment|render|check|registration|secrets|provision|preflight|migrate|seed|deploy|tenant|smoke [options] (see the header of this file)'); process.exit(2); };
   const environment = () => { const value = o.environment as CloudEnvironment; if (!cloudEnvironments.includes(value)) usage(); return value; };
   const envFile = () => { if (!o['env-file']) usage(); return path.resolve(o['env-file']!); };
   const policy = () => loadJson<CloudDeploymentConfig>(o.policy!);
@@ -434,12 +555,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         const target = next[env];
         target.accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? ids.accountId;
         const listed = (args: string[]) => wrangler(tree, args, {capture: true, accountId: target.accountId});
-        if (!/^[0-9a-f]{32}$/.test(ids.kvNamespaceId) || /^0+[0-9]*$/.test(ids.kvNamespaceId)) {
+        if (!provisionedId(ids.kvNamespaceId)) {
           const created = listed(['kv', 'namespace', 'create', `${ids.workerName}-cache`]);
           target.kvNamespaceId = /"?id"?\s*[:=]\s*"([0-9a-f]{32})"/.exec(created)?.[1] ?? (() => { throw new Error('Could not read the new KV namespace id'); })();
         }
         try { listed(['r2', 'bucket', 'create', ids.r2Bucket]); } catch { say(`R2 bucket ${ids.r2Bucket}: exists or could not be created (check the dashboard)`); }
-        if (/^0+[0-9]*$/.test(ids.hyperdriveId)) {
+        if (!provisionedId(ids.hyperdriveId)) {
           if (!values.DATABASE_URL) throw new Error('DATABASE_URL is needed to create the Hyperdrive configuration');
           const created = listed(['hyperdrive', 'create', `${ids.workerName}-db`, '--connection-string', values.DATABASE_URL]);
           target.hyperdriveId = /"?id"?\s*[:=]\s*"([0-9a-f]{32})"/.exec(created)?.[1] ?? (() => { throw new Error('Could not read the new Hyperdrive id'); })();
@@ -450,6 +571,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         else console.log(JSON.stringify(next[env], null, 1));
         break;
       }
+      case 'preflight': {
+        const env = environment();
+        deployResources(policy(), resources(), env);
+        say(`deploy inputs configured for ${env}`);
+        break;
+      }
       case 'migrate': { const env = environment(); migrate(preparedTree(o.tree ? path.resolve(o.tree) : undefined), readEnvFile(envFile()), env); break; }
       case 'seed': {
         const env = environment(), values = readEnvFile(envFile()), tree = preparedTree(o.tree ? path.resolve(o.tree) : undefined);
@@ -458,11 +585,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         break;
       }
       case 'deploy': {
-        const env = environment(), tree = preparedTree(o.tree ? path.resolve(o.tree) : undefined);
+        const env = environment(), targetPolicy = policy(), targetResources = resources();
+        const ids = deployResources(targetPolicy, targetResources, env);
+        const tree = preparedTree(o.tree ? path.resolve(o.tree) : undefined);
         const values = readEnvFile(envFile());
         const problems = [...secretProblems(values, env), ...GENERATED_SECRETS.filter(name => !values[name]).map(name => `${name} is missing`)];
         if (problems.length) throw new Error(`Secrets incomplete; run \`secrets\` first:\n  ${problems.join('\n  ')}`);
-        const directory = render({policy: policy(), resources: resources(), tree, out: out(), environments: [env]});
+        const directory = render({policy: targetPolicy, resources: targetResources, tree, out: out(), environments: [env]});
         const components = o.component === 'all' ? CLOUD_COMPONENTS : [o.component as CloudComponent];
         if (!components.every(component => CLOUD_COMPONENTS.includes(component))) usage();
         // API first: the edge Worker's service binding needs it to exist.
@@ -478,7 +607,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
               fs.writeFileSync(file, JSON.stringify(componentSecrets(values, component)), {mode: 0o600});
               args.push('--secrets-file', file);
             }
-            wrangler(tree, args, {cwd: directory, accountId: resources()[env].accountId});
+            wrangler(tree, args, {cwd: directory, accountId: ids.accountId});
           }
         } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
         break;
