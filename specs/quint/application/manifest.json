@@ -436,7 +436,9 @@
     "sources": [
       "apps/app/src/browser/browser-surface.ts",
       "apps/app/src/prototype/browser-adapter.ts",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaBrowserPlugin.java"
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaBrowserPlugin.java",
+      "android/app/src/main/res/values/eliza_passwords.xml",
+      "apps/app/src/passwords/password-manager.ts"
     ],
     "abstractions": [
       "Complementary current-source audit scope. The canonical model and its existing source-observation driver remain separate; this state model does not claim complete implementation refinement.",
@@ -446,12 +448,21 @@
       "damaged is the native key state together with the page's knowledge of it. Native encryption and device authentication are external inputs. A refused reset authentication is reported only while the password pages are open.",
       "The development provider dialog (browser/password-provider.ts) is modeled in PasswordProviderDialog.",
       "The password pages open only while the app is shown: a render while hidden (the change notice sent on hiding causes one) leaves them closed, and a hidden page starts no listing read. test/password-manager-hidden.test.mjs checks this on the real module.",
-      "Model safety checks do not establish implementation refinement or device acceptance."
+      "The native case in test/quint-vault-coordinator-refinement.test.mjs checks the native grant and retained-vault reset against whole pinned Java under synthetic platform ports. The renderer review and the OS authentication inputs are controlled.",
+      "Model safety checks do not establish complete implementation refinement or device acceptance."
     ],
     "sharedSources": [
       "plugins/plugin-native-passwords/src/client.ts",
       "plugins/plugin-native-passwords/src/bindings.ts",
-      "plugins/plugin-native-passwords/src/definitions.ts"
+      "plugins/plugin-native-passwords/src/definitions.ts",
+      "plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordsPlugin.java",
+      "plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordsConfig.java",
+      "plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordUnlock.java",
+      "plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordVaultAccess.java",
+      "plugins/plugin-native-passwords/android/src/main/res/values/eliza_passwords.xml",
+      "plugins/plugin-native-secure-store/android-nativeonly/src/main/java/ai/eliza/plugins/securestore/nativeonly/PasswordVaultStore.java",
+      "plugins/plugin-native-secure-store/android-nativeonly/src/main/java/ai/eliza/plugins/securestore/nativeonly/PasswordVaultFrame.java",
+      "plugins/plugin-native-secure-store/android-nativeonly/src/main/java/ai/eliza/plugins/securestore/nativeonly/CredentialAccessSession.java"
     ],
     "invariants": [
       "TypeOK",
