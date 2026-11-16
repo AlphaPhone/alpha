@@ -142,8 +142,13 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await expect(page.locator('[data-alpha-layer="app"][data-alpha-stage="true"]')).toHaveCount(0);
     expect(await hits(page, '[data-alpha-call-end]')).toBe(true);
     await askAlpha(page, 'can you call maya');
-    await page.waitForTimeout(600);
+    // Wait for the reply itself: the dropped proposal is answered with a plain line.
+    await expect(page.locator('[data-alpha-layer="conversation"]').getByText('Not during an emergency call.', {exact: true})).toBeVisible();
     await expect(page.locator('[data-alpha-chat-proposal]')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).alphaShell().S().msgs.filter((m: any) => m.card?.type === 'proposal').length)).toBe(0);
+    // The call is still live and End still reachable.
+    await expect(card).toHaveAttribute('data-emergency', 'true');
+    expect(await hits(page, '[data-alpha-call-end]')).toBe(true);
   });
 });
 
