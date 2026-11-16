@@ -5422,7 +5422,13 @@
       "changedDraftDroppedWhenStopFailsTest",
       "dismissedErrorKeepsVoiceClosedTest",
       "userPanelChoiceIsKeptTest",
-      "idleSurfaceLeavesNoHoldTest"
+      "idleSurfaceLeavesNoHoldTest",
+      "confirmedCloseReturnsToInputTest",
+      "preservingStopKeepsSheetTest",
+      "keyboardFromSheetReturnsToInputTest",
+      "keyboardFromFullKeepsFullTest",
+      "changedBindingSkipsPanelReturnTest",
+      "restoredBindingAllowsPanelReturnTest"
     ],
     "invariants": [
       "HoldTracksChain",
@@ -5449,6 +5455,10 @@
       {
         "path": "apps/app/src/prototype/voice-adapter.ts",
         "name": "retirement"
+      },
+      {
+        "path": "apps/app/src/prototype/voice-adapter.ts",
+        "name": "cancelChat"
       },
       {
         "path": "apps/app/src/prototype/voice-adapter.ts",
@@ -5492,13 +5502,15 @@
       "stoppingPending": "The stopping promise chain",
       "retirement": "The retirement record and its phase",
       "mediaUnconfirmed/everUnconfirmed": "mediaUnconfirmed, which nothing resets",
-      "panel/restores": "The chat panel state the retirement returns to",
+      "panel/panelBeforeVoice/heldPanel/returnPanel": "The shown chat detent, the original chat in chatDestination, and the exact held and return chat detents in retirement",
+      "panelBindingCurrent/restores": "The view and composer binding check for a confirmed panel return, and the number of panel return patches following a hold",
       "sendWaiting/asked/sends/staleSends/sentUnconfirmed": "A p.send call waiting on stopVoiceConversation(): whether it went on, was dropped because the screen, conversation or draft changed while it waited, or went on although the stop was never confirmed",
       "refusedStarts/holds": "Refused voice starts and retirements created"
     },
     "abstractions": [
       "One chat shell. The surface is closed, a voice conversation or Transcribe; what it holds is one media flag.",
-      "Leaving always closes the surface. The foreground-loss path that keeps the recorder open in its ready stage, the Notes recorder and reading aloud that is stopped at entry are outside this model.",
+      "The modeled cancelChat paths use the shown input, sheet and full detents, including a ready surface with no media, explicit keyboard and preserve-current stop. Hidden/Home-pill presentation and the unrelated Notes recorder are outside this model.",
+      "The whole voice adapter replay observes synthetic capture, held stop, the panel detent, and explicit Back after stop failure. The agent adapter typed dispatch remains a separate source obligation.",
       "A typed message that waited on a chain that failed is sent like any other; only the later checks of p.send (empty text, a reply in progress, a held draft) are outside this model.",
       "Whether the waiting message is still current (screen, conversation, draft, reply target) is one nondeterministic input."
     ]
