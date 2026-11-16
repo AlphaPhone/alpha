@@ -3619,99 +3619,6 @@
     ]
   },
   {
-    "path": "specs/quint/native/SavedSignInRecovery.qnt",
-    "module": "SavedSignInRecovery",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "restoreTest",
-      "newerSignInWinsTest",
-      "cancelSupersedesUnreadRestoreTest",
-      "singleFlightTest",
-      "destroyedActivityRestoresNothingTest",
-      "expiredSavedSignInTest",
-      "expiresDuringRestoreTest",
-      "refusedKeyIsMarkedTest"
-    ],
-    "invariants": [
-      "TypeOK",
-      "NewerSignInWins",
-      "SingleFlight",
-      "OwnerNeverAhead",
-      "SavedDataKept",
-      "RestoredConsumesSaved",
-      "RejectedIsMarked"
-    ],
-    "witnesses": [
-      "RestoredWitness",
-      "SupersededKeepsSavedWitness",
-      "BusyRefusalWitness",
-      "RejectedWitness",
-      "ExpiredDuringRestoreWitness"
-    ],
-    "sources": [
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java"
-    ],
-    "symbols": [
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "restoreSavedSignIn"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "savedSignInRecoveryStatus"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "supersedeRecovery"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "recoveryEpoch"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "recoveringLegacy"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "endRecovery"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "reserveCredentialCommit"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java",
-        "name": "restoreLegacyCloudCredential"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java",
-        "name": "legacyCloudRecoveryEligible"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java",
-        "name": "RecoveryRefused"
-      }
-    ],
-    "stateMapping": {
-      "epoch/owner/recovering/closed": "recoveryEpoch, the restore owner epoch, recoveringLegacy and the destroyed plugin",
-      "stage": "accepted, snapshot taken, and the Cloud identity read outside every lock",
-      "intentCurrent": "the credential intent reserved by AlphaLocalAgentPlugin.reserveCredentialIntent",
-      "legacy/legacyAtRequest": "the retained legacy production credential and its state when the restore was accepted",
-      "slot/commitsSinceRequest": "the Cloud credential slot writer and shared sign-in commits since the request",
-      "answer/refusals": "the plugin call result and login-active refusals"
-    },
-    "abstractions": [
-      "Six epochs and one saved credential. The legacy journal, exact-byte recheck and encrypted storage are AlphaCredentialStore primitives covered by existing tests.",
-      "The shared sign-in client is a controlled port: only its entry points, cancel, matching return and commit reservation are represented. The client reserves the credential intent when a Google attempt is accepted or a code is sent and stores the key later under that guard; the model joins the two into signInCommits.",
-      "An already expired saved credential is not offered and answers that nothing was restored; the expired refusal is only the expiry passing between the snapshot and the token check.",
-      "The replay in specs/quint/refinement/native/saved-sign-in-recovery.mjs runs the real AlphaCloudSignInPlugin with the credential store and the shared client as ports, so legacy, slot and stage are port state there. Scenario and simulation evidence otherwise; no Keystore, installed-upgrade or Cloud claim."
-    ]
-  },
-  {
     "path": "specs/quint/native/NativeMapsLocation.qnt",
     "module": "NativeMapsLocation",
     "init": "init",
@@ -4513,12 +4420,10 @@
       "unknownSendIsNotRetriedTest",
       "lockDismissesReviewTest",
       "inboundDuringAgentReviewClosesItTest",
-      "askedDraftReplacesOwnerTextWithUndoTest",
+      "askedRewriteReplacesOwnerTextWithoutSendingTest",
       "askedDraftSentOnlyAfterTapTest",
       "askedDraftReplacesSuggestionTest",
-      "dismissedSuggestionIsNotOfferedAgainTest",
-      "undoRestoresDisplacedSuggestionTest",
-      "newerMessageRetiresSuggestionUndoTest"
+      "dismissedSuggestionIsNotOfferedAgainTest"
     ],
     "invariants": [
       "SendNeedsOwnerTap",

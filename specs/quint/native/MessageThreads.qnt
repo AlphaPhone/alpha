@@ -7,9 +7,7 @@ module MessageThreads {
     draft: str, draftText: int, draftBase: int,
     suggest: str, suggestTicket: int, declined: int,
     review: str, reviewText: int,
-    taps: int, sends: int, outcome: str, uncertain: bool,
-    // AC-14: the draft an asked draft displaced, kept for one Undo ("none" when there is none).
-    undo: str, undoBase: int, undoDeclined: int
+    taps: int, sends: int, outcome: str, uncertain: bool
   }
   var s: State
   action check(condition: bool): bool = all { assert(condition), s' = s }
@@ -19,7 +17,7 @@ module MessageThreads {
     draft: "none", draftText: 0, draftBase: -1,
     suggest: "idle", suggestTicket: -1, declined: -1,
     review: "none", reviewText: -1,
-    taps: 0, sends: 0, outcome: "none", uncertain: false, undo: "none", undoBase: -1, undoDeclined: -1
+    taps: 0, sends: 0, outcome: "none", uncertain: false
   }
   // ready = verified image, SMS role and permission, unlocked and in front.
   action becomeReady = s' = {ready: true, ...s}
@@ -37,7 +35,6 @@ module MessageThreads {
       draftBase: if (s.draft == "agent") -1 else s.draftBase,
       uncertain: if (s.draft == "agent") false else s.uncertain,
       suggest: "idle",
-      undo: if (s.undo == "agent") "none" else s.undo,
       review: if (s.review == "showing" and s.draft == "agent") "none" else s.review, ...s}
   }
   // The agent drafts only for an unanswered inbound message and only into an empty composer, and
@@ -54,33 +51,23 @@ module MessageThreads {
     else s' = s
   action dismissSuggestion = all {
     s.draft.in(Set("agent", "asked")), s.review != "showing",
-    s' = {draft: "none", draftBase: -1, declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, undo: "none", ...s}
+    s' = {draft: "none", draftBase: -1, declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, ...s}
   }
-  // The owner asked the agent to draft for the open thread (AP-16 AC-14). The draft takes the one
-  // draft slot whatever it holds, the owner's own text included; the displaced draft is kept for one
-  // Undo. A newer message does not retire it, and it is still only a draft: nothing is sent.
+  // AC-14: an explicitly asked rewrite replaces the slot, including owner text.
+  // The implementation keeps one Undo; a newer message does not retire the asked draft.
   action placeAskedDraft = all {
     s.ready, s.open, s.review != "showing",
     s' = {draft: "asked", draftText: 1 - s.draftText, draftBase: -1, suggest: "idle",
-      declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, undo: s.draft,
-      undoBase: if (s.draft == "agent") s.draftBase else -1, undoDeclined: if (s.draft == "agent") s.declined else -1, ...s}
-  }
-  // Undo brings back the displaced draft with its provenance; a restored suggestion answers its own
-  // message again, and the dismissal its replacement recorded is withdrawn.
-  action undoAskedDraft = all {
-    s.undo != "none", s.review != "showing",
-    s' = {draft: s.undo, draftText: 1 - s.draftText, undo: "none", suggest: "idle",
-      draftBase: if (s.undo == "agent") s.undoBase else -1,
-      declined: if (s.undo == "agent") s.undoDeclined else s.declined, uncertain: false, ...s}
+      declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, ...s}
   }
   // Typing takes ownership; a running suggestion can no longer land.
   action typeText = all {
     s.ready, s.open, s.review != "showing",
     s' = {draft: "owner", draftText: 1 - s.draftText, draftBase: -1, suggest: "idle",
-      declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, undo: "none", ...s}
+      declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, ...s}
   }
   action clearDraft = all {
-    s.draft == "owner", s.review != "showing", s' = {draft: "none", draftBase: -1, uncertain: false, undo: "none", ...s}
+    s.draft == "owner", s.review != "showing", s' = {draft: "none", draftBase: -1, uncertain: false, ...s}
   }
   // The owner's send tap opens the native review of the exact text.
   action tapSend = all {
@@ -97,11 +84,11 @@ module MessageThreads {
     s' = if (s.uncertain)
         (if (result == "unknown") {review: "none", ...s}
          else if (result == "failed") {review: "none", outcome: "failed", uncertain: false, ...s}
-         else {review: "none", outcome: "sent", uncertain: false, draft: "none", draftBase: -1, answered: s.inbound, undo: "none", ...s})
+         else {review: "none", outcome: "sent", uncertain: false, draft: "none", draftBase: -1, answered: s.inbound, ...s})
       else if (result == "failed") {review: "none", outcome: "failed", sends: s.sends + 1, ...s}
       else if (result == "unknown") {review: "none", outcome: "unknown", sends: s.sends + 1, uncertain: true, ...s}
       else {review: "none", outcome: "sent", sends: s.sends + 1, draft: "none", draftBase: -1,
-        answered: s.inbound, undo: "none", ...s}
+        answered: s.inbound, ...s}
   }
   action step = {
     nondet flag = Set(false, true).oneOf()
@@ -109,7 +96,7 @@ module MessageThreads {
     nondet result = Set("sent", "failed", "unknown").oneOf()
     any { becomeReady, loseReady, openThread, closeThread, receive, requestSuggestion,
       suggestionReply(ticket, flag), dismissSuggestion, placeAskedDraft, typeText, clearDraft, tapSend, cancelReview,
-      confirmReview(result), undoAskedDraft, s' = s }
+      confirmReview(result), s' = s }
   }
   val unread = s.inbound - s.readThrough
   val SendNeedsOwnerTap = s.sends <= s.taps
@@ -150,11 +137,9 @@ module MessageThreads {
   run inboundDuringAgentReviewClosesItTest = init.then(becomeReady).then(receive).then(requestSuggestion)
     .then(suggestionReply(1, true)).then(tapSend).then(receive)
     .then(check(safety and s.review == "none" and s.draft == "none" and s.sends == 0))
-  run askedDraftReplacesOwnerTextWithUndoTest = init.then(becomeReady).then(openThread).then(typeText)
+  run askedRewriteReplacesOwnerTextWithoutSendingTest = init.then(becomeReady).then(openThread).then(typeText)
     .then(check(safety and s.draft == "owner")).then(placeAskedDraft)
-    .then(check(safety and s.draft == "asked" and s.undo == "owner" and s.sends == 0))
-    .then(undoAskedDraft).then(check(safety and s.draft == "owner" and s.undo == "none"))
-    .then(undoAskedDraft.fail())
+    .then(check(safety and s.draft == "asked" and s.sends == 0 and s.taps == 0))
   run askedDraftSentOnlyAfterTapTest = init.then(becomeReady).then(openThread).then(placeAskedDraft)
     .then(check(safety and s.draft == "asked" and s.sends == 0 and s.taps == 0)).then(receive)
     .then(check(safety and s.draft == "asked")).then(tapSend).then(confirmReview("sent"))
@@ -168,11 +153,4 @@ module MessageThreads {
     .then(check(safety and s.draft == "none" and s.declined == 1 and not(s.inbound != s.declined)))
     .then(receive).then(requestSuggestion).then(suggestionReply(2, true))
     .then(check(safety and s.draft == "agent" and s.draftBase == 2))
-  run undoRestoresDisplacedSuggestionTest = init.then(becomeReady).then(receive).then(requestSuggestion)
-    .then(suggestionReply(1, true)).then(openThread).then(placeAskedDraft)
-    .then(check(safety and s.undo == "agent" and s.declined == 1))
-    .then(undoAskedDraft).then(check(safety and s.draft == "agent" and s.draftBase == 1 and s.declined == -1))
-  run newerMessageRetiresSuggestionUndoTest = init.then(becomeReady).then(receive).then(requestSuggestion)
-    .then(suggestionReply(1, true)).then(openThread).then(placeAskedDraft).then(receive)
-    .then(check(safety and s.draft == "asked" and s.undo == "none")).then(undoAskedDraft.fail())
 }

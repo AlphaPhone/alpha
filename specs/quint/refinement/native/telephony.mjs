@@ -34,8 +34,7 @@ const must = (condition, message) => { if (!condition) throw Error('Source disag
 export async function checkTelephonyMessageThreads(extraSources = []) {
   const {implementation: {D}, sources, driverHashes} = await capture([['D', 'apps/app/src/runtime/message-draft.ts']], 'MessageThreads', extraSources);
   const number = id => id === null ? -1 : Number(id.slice(1));
-  const seen = state => ({'s.draft': state.draft, 's.suggest': state.suggest, 's.draftBase': state.draft === 'agent' ? number(state.base) : -1, 's.declined': number(state.declined),
-    's.undo': state.undo ? state.undo.draft : 'none'});
+  const seen = state => ({'s.draft': state.draft, 's.suggest': state.suggest, 's.draftBase': state.draft === 'agent' ? number(state.base) : -1, 's.declined': number(state.declined)});
   /** One thread driven through the draft module; `latest` is the newest inbound message while unanswered. */
   function thread(name) {
     let state = D.emptyDraft(), inbound = 0, answered = 0;
@@ -51,8 +50,6 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
       type: () => on(act('typeText'), s => D.typed(s, 'On my way')),
       dismiss: () => on(act('dismissSuggestion'), s => D.suggestionDismissed(s)),
       asked: () => on(act('placeAskedDraft'), s => D.askedDraftPlaced(s, 'Ten minutes away', true)),
-      undo: () => on(act('undoAskedDraft'), s => D.draftUndone(s)),
-      noUndo: () => { must(D.draftUndone(state) === state, 'nothing to undo changes nothing'); return on(refused('undoAskedDraft')); },
       tap: () => on(act('tapSend')),
       confirm: result => { if (result === 'sent') answered = inbound; return on(act('confirmReview', result), s => D.reviewFinished(s, result)); },
       lose: () => on(act('loseReady'), s => D.readinessLost(s)),
@@ -72,9 +69,7 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
     thread('losing readiness stops a running suggestion').ready().receive().request().lose().done(),
     thread('an edited suggestion becomes the owner draft and is not suggested again').ready().receive().request().reply(1, true).open().type().done(),
     thread('an asked draft is sent only after the owner tap and survives a newer message').ready().open().asked().receive().tap().confirm('sent').done(),
-    thread('an asked draft replaces the owner text, which one Undo brings back').ready().open().type().asked().undo().noUndo().done(),
-    thread('Undo restores a displaced suggestion for its message').ready().receive().request().reply(1, true).open().asked().undo().done(),
-    thread('a newer message retires a displaced suggestion\'s Undo').ready().receive().request().reply(1, true).open().asked().receive().noUndo().done(),
+    thread('an explicitly asked rewrite replaces the owner text without sending').ready().open().type().asked().done(),
     thread('an asked draft replaces a suggestion, which is then not offered again').ready().receive().request().reply(1, true).open().asked().dismiss().noRequest().done(),
     thread('typing over an asked draft makes it the owner draft').ready().open().asked().type().done(),
     thread('a dismissal is remembered past a send').ready().receive().request().reply(1, true).dismiss().open().type().tap().confirm('sent').done(),
@@ -83,6 +78,7 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
     'The actual message-draft.ts transitions run with controlled thread events. Draft owner, suggestion state, the answered message and the dismissed message are observed.',
     'Inbound and answered counts, the open thread, read state, the native review and the send counters are driver inputs here; the SMS adapter and the native reviewed send own them.',
     'The reply text is one fixed string; the model abstracts text to two identities.',
+    'AC-14 Undo content and provenance are covered by test/message-draft.test.mjs; this model observes the resulting slot and send authority, not the Undo history.',
   ]});
 }
 
