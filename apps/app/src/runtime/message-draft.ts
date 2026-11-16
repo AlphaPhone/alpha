@@ -17,14 +17,17 @@ export type DraftState = {
   ticket: string | null;
   /** The inbound message whose suggestion the owner dismissed; it is not suggested again. */
   declined: string | null;
-  /** The slot content a replacement by Alpha displaced, for one Undo. */
-  undo: {draft: 'owner' | 'agent' | 'asked'; text: string} | null;
+  /** The slot content a replacement by Alpha displaced, for one Undo. A displaced suggestion keeps
+   * the message it answered and the dismissal it replaced, so Undo restores it exactly. */
+  undo: {draft: 'owner' | 'agent' | 'asked'; text: string; base?: string | null; declined?: string | null} | null;
 };
 export const emptyDraft = (): DraftState => ({draft: 'none', text: '', base: null, suggest: 'idle', ticket: null, declined: null, undo: null});
 
 /** `latest` is the newest message's id when it is inbound and unanswered, otherwise null. */
 export function threadChanged(state: DraftState, latest: string | null): DraftState {
   if (state.draft === 'agent' && state.base !== latest) return {...emptyDraft(), declined: state.declined};
+  // A displaced suggestion answers one message: once a newer one arrives, Undo cannot bring it back.
+  if (state.undo?.draft === 'agent' && state.undo.base !== latest) state = {...state, undo: null};
   if (state.suggest !== 'idle' && state.ticket !== latest) return {...state, suggest: 'idle', ticket: null};
   return state;
 }
@@ -60,7 +63,8 @@ export function suggestionDismissed(state: DraftState): DraftState {
  */
 export function askedDraftPlaced(state: DraftState, text: string, ready: boolean): DraftState {
   if (!ready || !text) return state;
-  const undo = state.draft !== 'none' && state.text ? {draft: state.draft, text: state.text} : null;
+  const undo = state.draft === 'none' || !state.text ? null
+    : state.draft === 'agent' ? {draft: state.draft, text: state.text, base: state.base, declined: state.declined} : {draft: state.draft, text: state.text};
   return {draft: 'asked', text, base: null, suggest: 'idle', ticket: null, declined: state.draft === 'agent' ? state.base : state.declined, undo};
 }
 /**
@@ -70,7 +74,8 @@ export function askedDraftPlaced(state: DraftState, text: string, ready: boolean
 export function draftUndone(state: DraftState): DraftState {
   const undo = state.undo;
   if (!undo) return state;
-  return {...state, draft: undo.draft, text: undo.text, base: undo.draft === 'agent' ? state.declined : null, suggest: 'idle', ticket: null, undo: null};
+  if (undo.draft === 'agent') return {...state, draft: 'agent', text: undo.text, base: undo.base ?? null, declined: undo.declined ?? null, suggest: 'idle', ticket: null, undo: null};
+  return {...state, draft: undo.draft, text: undo.text, base: null, suggest: 'idle', ticket: null, undo: null};
 }
 /**
  * After a confirmed review. Accepted by the phone: the composer clears. `failed`: the draft stays for

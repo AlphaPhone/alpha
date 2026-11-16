@@ -4513,10 +4513,12 @@
       "unknownSendIsNotRetriedTest",
       "lockDismissesReviewTest",
       "inboundDuringAgentReviewClosesItTest",
-      "askedDraftNeverReplacesOwnerTextTest",
+      "askedDraftReplacesOwnerTextWithUndoTest",
       "askedDraftSentOnlyAfterTapTest",
       "askedDraftReplacesSuggestionTest",
-      "dismissedSuggestionIsNotOfferedAgainTest"
+      "dismissedSuggestionIsNotOfferedAgainTest",
+      "undoRestoresDisplacedSuggestionTest",
+      "newerMessageRetiresSuggestionUndoTest"
     ],
     "invariants": [
       "SendNeedsOwnerTap",

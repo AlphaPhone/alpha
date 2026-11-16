@@ -93,7 +93,13 @@ test('a draft the owner asked Alpha for replaces the slot, keeps one Undo, and i
   assert.deepEqual({draft: overSuggestion.draft, declined: overSuggestion.declined}, {draft: 'asked', declined: 'm1'});
   assert.equal(D.canSuggest(D.suggestionDismissed(overSuggestion), 'm1', true), false);
   const back = D.draftUndone(overSuggestion);
-  assert.deepEqual({draft: back.draft, text: back.text, base: back.base}, {draft: 'agent', text: 'Sure', base: 'm1'});
+  assert.deepEqual({draft: back.draft, text: back.text, base: back.base, declined: back.declined}, {draft: 'agent', text: 'Sure', base: 'm1', declined: null},
+    'the suggestion comes back for its message, and its replacement is no longer a dismissal');
+  assert.equal(D.canSuggest(back, 'm1', true), false, 'the slot is not empty');
+  // A newer message retires a displaced suggestion's Undo, as it would retire the suggestion itself.
+  assert.equal(D.threadChanged(overSuggestion, 'm2').undo, null);
+  assert.deepEqual(D.threadChanged(overSuggestion, 'm1').undo, overSuggestion.undo);
+  assert.deepEqual(D.threadChanged(replaced, 'm2').undo, replaced.undo, 'the owner\'s displaced text is kept');
   assert.deepEqual(D.reviewFinished(asked, 'sent'), empty);
   assert.equal(D.reviewFinished(asked, 'unknown'), asked);
 });
