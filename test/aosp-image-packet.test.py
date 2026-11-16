@@ -155,7 +155,7 @@ class ImagePacket(unittest.TestCase):
                 row = real_pinned(project, path)
                 return {**row, 'sha256': stage.digest(provision[path])} if project == 'packages/apps/Provision' and path in provision else row
             def git_show(args, **kwargs):
-                self.assertEqual(args[:4], ['git', '-C', str(aosp/'packages/apps/Provision'), 'show'])
+                self.assertEqual(args[:4], ['git', '-C', str((aosp/'packages/apps/Provision').resolve()), 'show'])
                 return provision[args[4].split(':', 1)[1]]
             identity = {'schema': 1, 'packageName': CANONICAL}
             def admitted(path, aapt, apksigner):
