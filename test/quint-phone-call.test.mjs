@@ -47,6 +47,8 @@ function fixture() {
     formatTime: () => 'now', formatMonthDay: () => 'day', DAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     pad2: value => String(value).padStart(2, '0'), crypto: {randomUUID},
     setListFilterHandler, clearListFilter, matchesCallQuery,
+    // The development Phone fixture runs only behind test mocks; this replay is that fixture.
+    testMocksEnabled: true,
   }});
   core.run(`${phoneSource}\nShell.prototype.swallowed = function () { ${swallowed[1]} };`);
   const {PN} = core.context, phone = views.phone;
