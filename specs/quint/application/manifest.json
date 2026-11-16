@@ -10504,7 +10504,9 @@
       "licensesLoadOnceTest",
       "newerDiagnosticSupersedesStatusTest",
       "diagnosticLimitRetiresStatusTest",
-      "unmountRetiresDiagnosticLogTest"
+      "unmountRetiresDiagnosticLogTest",
+      "olderRefreshCannotHidePublishedFailureTest",
+      "refreshAfterPublishShowsTheLogTest"
     ],
     "invariants": [
       "CheckingEnds",
@@ -10512,14 +10514,17 @@
       "OneNewestRead",
       "ReadsAreLimited",
       "LicensesLoadOnce",
-      "DiagnosticStateIsScoped"
+      "DiagnosticStateIsScoped",
+      "RetiredDiagnosticsAreSilent",
+      "PublishedFailureStaysShown"
     ],
     "witnesses": [
       "SupersededResultWitness",
       "LimitWitness",
       "HiddenRefreshWitness",
       "LicensesRetryWitness",
-      "LicensesOutliveMountWitness"
+      "LicensesOutliveMountWitness",
+      "StaleRefreshWitness"
     ],
     "sources": [
       "apps/app/src/prototype/settings-adapter.ts"
@@ -10556,6 +10561,10 @@
       {
         "path": "apps/app/src/prototype/settings-adapter.ts",
         "name": "inferenceAbort"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "crashLogVersion"
       }
     ],
     "stateMapping": {
@@ -10563,12 +10572,12 @@
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
       "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization\u2026, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
-      "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures and results published by the diagnostic read",
+      "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures, the module-level crashLog the Problem log renders, the Problem log tap's ordinary refresh() (its generation and the crash-log snapshot it read) and crashLogVersion",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },
     "abstractions": [
       "The Gmail authorization read, licence loading and explicit Problem log diagnostic read are modeled. Listener status is SettingsListenerReads.",
-      "An accepted failure is unique in this diagnostic campaign. Independent ordinary log refreshes, explicit log clear, the export chooser, and the resident transport's internal session validation are outside these transitions.",
+      "An accepted failure is unique in this diagnostic campaign. The ordinary refresh started by the Problem log tap is modeled; other refresh() calls only advance its generation and are not separate transitions. Explicit log clear, the export chooser, and the resident transport's internal session validation are outside these transitions.",
       "A change of the account binding always reaches the page through the connection subscription, which starts a read in the same task. A Cloud client that never settles a request after its abort is ended by the limit.",
       "Settings busy labels (update check, notification work, photo access, crash log) are single-flight flags around one awaited call and are not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."

@@ -108,8 +108,8 @@ test("partial source contract: simulated SettingsCapabilityReads traces agree wi
 test('mounted Problem log keeps only the current resident diagnostics result', {timeout: scaledTimeout(240000)}, async () => {
   const {checkSettingsResidentDiagnostics} = await import('../specs/quint/refinement/application/settings-resident-diagnostics.mjs');
   const receipt = await checkSettingsResidentDiagnostics([partialContractFile(import.meta.url)]);
-  assert.equal(receipt.traces, 3);
-  assert.equal(receipt.checkpoints, 21);
+  assert.equal(receipt.traces, 4);
+  assert.equal(receipt.checkpoints, 32);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
 });
