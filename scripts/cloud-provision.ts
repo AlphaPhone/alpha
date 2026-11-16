@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
+import type {CloudEnvironment} from './cloud-sdk-authority.ts';
 import type {CloudResources} from './cloud-worker.ts';
 
 type RecordValue = Record<string, unknown>;
@@ -42,22 +46,24 @@ type CloudflareApi = ReturnType<typeof cloudflareApi>;
 
 async function list(api: CloudflareApi, resource: string, operation: string) {
   const results: RecordValue[] = [];
-  const pageSize = 100;
+  // The zones endpoint accepts at most 50 results per page.
+  const pageSize = 50;
+  let previousPageSize: number | undefined;
   for (let page = 1; page <= 100; page++) {
     const separator = resource.includes('?') ? '&' : '?';
     const response = await api(`${resource}${separator}per_page=${pageSize}&page=${page}`, operation);
     if (!Array.isArray(response.result)) throw new Error(`Cloudflare ${operation} did not return a list`);
     results.push(...response.result.map(record));
-    const info = record(response.result_info);
-    if (info.page !== undefined || info.per_page !== undefined || info.total_count !== undefined) {
-      const {page: returnedPage, per_page: perPage, total_count: totalCount} = info;
-      if (returnedPage !== page || typeof perPage !== 'number' || !Number.isSafeInteger(perPage) || perPage < 1 ||
-        typeof totalCount !== 'number' || !Number.isSafeInteger(totalCount) || totalCount < 0 ||
-        response.result.length !== Math.min(perPage, Math.max(0, totalCount - (page - 1) * perPage))) {
-        throw new Error(`Cloudflare ${operation} returned inconsistent pagination`);
-      }
-      if (page * perPage >= totalCount) return results;
-    } else if (response.result.length < pageSize) return results;
+    const {page: returnedPage, per_page: perPage = pageSize, total_count: totalCount} = record(response.result_info);
+    if ((returnedPage !== undefined && returnedPage !== page) || typeof perPage !== 'number' || !Number.isSafeInteger(perPage) ||
+      perPage < 1 || perPage > pageSize || (previousPageSize !== undefined && perPage !== previousPageSize) ||
+      response.result.length > perPage || (totalCount !== undefined &&
+        (typeof totalCount !== 'number' || !Number.isSafeInteger(totalCount) || totalCount < results.length))) {
+      throw new Error(`Cloudflare ${operation} returned inconsistent pagination`);
+    }
+    previousPageSize = perPage;
+    // An endpoint can report an unfiltered total even when its exact-name result is exhausted.
+    if (response.result.length < perPage || results.length === totalCount) return results;
   }
   throw new Error(`Cloudflare ${operation} exceeded the page limit`);
 }
@@ -99,6 +105,7 @@ async function createAndRead<T>(create: () => Promise<RecordValue>, read: () => 
   try { created = record((await create()).result); }
   catch (error) {
     if (!(error instanceof CloudflareRequestError) || (error.status !== 0 && error.status !== 409 && error.status < 500 &&
+      !(error.status >= 200 && error.status < 300 && error.codes.length === 0) &&
       (duplicateCode === undefined || !error.codes.includes(duplicateCode)))) throw error;
     failure = error;
   }
@@ -127,7 +134,7 @@ export async function reconcileCloudResources({ids, sibling, apiHost, databaseUr
   if (!create && (!recordedAccount || !kvId || !hyperdriveId)) throw new Error('Record the selected account, KV and Hyperdrive IDs before deploy');
   const origin = databaseUrl === undefined && !create ? undefined : postgresOrigin(databaseUrl ?? '');
   const api = cloudflareApi(token, fetcher), accountPath = `/accounts/${account}`;
-  const zones = await list(api, `/zones?${new URLSearchParams({name: ids.zone, 'account.id': account})}`, 'zone lookup');
+  const zones = await list(api, `/zones?${new URLSearchParams({name: ids.zone, 'account.id': account, match: 'all'})}`, 'zone lookup');
   const [zone] = zones;
   if (zones.length !== 1 || zone.name !== ids.zone || record(zone.account).id !== account || !provisionedId(zone.id)) {
     throw new Error(`Zone ${ids.zone} is not uniquely owned by the selected Cloudflare account`);
@@ -160,7 +167,7 @@ export async function reconcileCloudResources({ids, sibling, apiHost, databaseUr
     return bucket;
   };
   const readDns = async (host: string) => {
-    const rows = await list(api, `${dnsPath}?${new URLSearchParams({name: host})}`, 'DNS lookup');
+    const rows = await list(api, `${dnsPath}?${new URLSearchParams({'name.exact': host})}`, 'DNS lookup');
     if (rows.some(row => row.name !== host || typeof row.type !== 'string')) throw new Error(`Unexpected DNS lookup result for ${host}`);
     const routes = rows.filter(row => row.type === 'A' || row.type === 'AAAA' || row.type === 'CNAME');
     if (!routes.length) return undefined;
@@ -188,4 +195,28 @@ export async function reconcileCloudResources({ids, sibling, apiHost, databaseUr
       comment: 'Alpha Cloud Worker route'}), () => readDns(host), 'DNS record', 'id');
   }
   return {...ids, accountId: account, kvNamespaceId: finalKv.id, hyperdriveId: finalHyper.id};
+}
+
+/** Persist one environment without overwriting edits made while Cloudflare requests were in flight. */
+export function writeProvisionedResources(file: string, environment: CloudEnvironment, expected: CloudResources, verified: CloudResources) {
+  const lease = `${file}.alpha-cloud-write-lock`;
+  const lock = fs.openSync(lease, 'wx', 0o600);
+  try {
+    const original = fs.lstatSync(file);
+    if (!original.isFile()) throw new Error('Cloud resources must be a regular file');
+    const resources = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<CloudEnvironment, CloudResources>;
+    const current = resources[environment];
+    if (isDeepStrictEqual(current, verified)) return;
+    if (!isDeepStrictEqual(current, expected)) throw new Error(`Cloud resources changed for ${environment}; rerun provision`);
+    resources[environment] = verified;
+    const scratch = fs.mkdtempSync(path.join(path.dirname(file), '.alpha-cloud-resources-'));
+    const staged = path.join(scratch, 'resources.json');
+    try {
+      fs.writeFileSync(staged, JSON.stringify(resources, null, 2) + '\n', {mode: original.mode & 0o777});
+      fs.renameSync(staged, file);
+    } finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+  } finally {
+    fs.closeSync(lock);
+    fs.unlinkSync(lease);
+  }
 }
