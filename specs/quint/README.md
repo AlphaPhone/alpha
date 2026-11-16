@@ -61,7 +61,7 @@ retained; this historical comparison does not establish current runtime behavior
 NativeCrashJournal keeps its seven original initial states, raw timestamp values,
 actions and safety obligations. Its completion helper factors the installed disk
 and reply independently, and the row predicate checks the same ordered rows.
-The [six-step qualification](https://github.com/eliza-research/alpha/actions/runs/43537851333)
+The [six-step qualification](https://github.com/alphacompute/alpha/actions/runs/43537851333)
 completed all seven verification conditions at states zero through six with
 `NoError`. It used the pinned Z3 backend, a 4 GiB heap, `after` invariant scheduling
 and a three-hour phase deadline. The default model depth remains four. Its
@@ -75,7 +75,7 @@ proves both original progress properties, alongside unchanged review retirement.
 The individual historical properties remain available. Branch-local choices and
 history-relation evaluation preserve the original state transitions and domains.
 
-The [full qualification](https://github.com/eliza-research/alpha/actions/runs/43508291814)
+The [full qualification](https://github.com/alphacompute/alpha/actions/runs/43508291814)
 completed 8,398,068 states at depth 23 with an empty queue, two liveness branches,
 and the history assertions as an implied invariant. It retained the 1800-second,
 two-worker, 2 GiB limits and all original scenarios and sampling bounds. Separate
