@@ -136,7 +136,7 @@ if (!fixture) {
   installCalendarAdapter(Component, VIEWS, {active:deviceCalendarScope});
   if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS,secureConnectionStore);installPhoneAdapter(Component,VIEWS);}
   // AC-19 on the image: Telecom tells the shell when a call that may be an emergency call is live.
-  if(isAndroid&&aospImage)installCallStateWatch(Component,registerPlugin<CallStatePlugin>('AlphaDevice'));
+  if(isAndroid&&aospImage)installCallStateWatch(Component,registerPlugin<CallStatePlugin>('AlphaCallState'));
   installCalendarFormDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installCalendarEditDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installNoteOriginAdapter(Component, VIEWS);

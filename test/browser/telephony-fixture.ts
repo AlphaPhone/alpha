@@ -16,6 +16,8 @@ export type TelephonyFixture = {
   controlledMms?: boolean;
   smsRoleHeld?: boolean;
   mms?: boolean;
+  /** Pad the address book with this many contacts sorted ahead of the fixture people (AC-20 lookup). */
+  padContacts?: number;
 };
 
 export async function setupTelephony(page: Page, options: TelephonyFixture = {}) {
@@ -30,7 +32,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     const smsDrafts = new Map<string, string>();
     let listenerSequence = 0;
     const callStateListeners: ((data: unknown) => void)[] = [];
-    w.deviceCallState = {inCall: false, emergency: false, emergencyLive: false};
+    w.deviceCallState = {inCall: false, emergency: false, emergencyLive: false, watching: true};
     /** A call-state change, as Telephony reports it to AlphaDevice. */
     w.setDeviceCallState = (state: unknown) => { w.deviceCallState = state; for (const listener of callStateListeners) listener(state); };
     w.smsProviderChanged = () => {
@@ -43,7 +45,8 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.access = {callLog: granted, sms: granted, contacts: granted, phoneState: granted, sendSms: granted && direct};
     if (options.singleUnread) w.readThreads = ['thread:103'];
     const now = Date.now(), minute = 60_000, hour = 60 * minute, day = 24 * hour;
-    const people = options.empty ? [] : [
+    const padding = Array.from({length: options.padContacts || 0}, (_, i) => ({id: String(1000 + i), name: `Aaron ${String(i).padStart(3, '0')}`, phones: [`+1555020${String(i).padStart(4, '0')}`], emails: []}));
+    const people = options.empty ? [] : [...padding,
       {id: '11', name: 'Ada Okafor', phones: ['+15550100101'], emails: ['ada@example.invalid']},
       {id: '12', name: 'Bao Tran', phones: ['+15550100102', '+15550100112'], emails: []},
       {id: '13', name: 'Carmen Ruiz', phones: ['+15550100103'], emails: ['carmen@example.invalid']},
@@ -110,7 +113,7 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
       let binary = ''; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
       return {mimeType: 'audio/wav', sampleRateHz: 16000, durationSeconds: seconds, data: btoa(binary)};
     };
-    const names = ['AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
+    const names = ['AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaCallState', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
     const methods = ['addListener', 'removeListener', 'surfaceInfo', 'readPending', 'readPendingResult', 'readDelegationCallback', 'readSecret', 'secureRead', 'secureWrite', 'secureRemove', 'secureCompareExchange', 'get', 'save', 'remove', 'status', 'getStatus', 'getState', 'state', 'permissionState', 'permissions', 'list', 'listCalendars', 'listEvents', 'listReminders', 'listBookmarks', 'getBookmarks', 'bookmarks', 'settings', 'getSettings', 'buildInfo', 'platformCapabilities', 'capabilities', 'query', 'read', 'readJournal', 'getPending', 'readSelection', 'requestPermissions', 'create', 'edit',
       'imageCapability', 'requestAccess', 'requestRole', 'searchContacts', 'listRecentCalls', 'dial', 'placeCall', 'composeSms', 'listThreads', 'listMessages', 'observeMessages', 'markThreadRead', 'sendSms', 'cancelSmsReview', 'smsSendHistory', 'smsSendResult',
       'smsNoticePending', 'acknowledgeSmsNotice', 'mmsSendResult',
@@ -118,11 +121,11 @@ export async function setupTelephony(page: Page, options: TelephonyFixture = {})
     w.Capacitor = {Plugins: {}, PluginHeaders: names.map(name => ({name, methods: methods.map(name => ({name, rtype: name === 'addListener' ? 'callback' : 'promise'}))})), nativeCallback: (plugin: string, method: string, input: any, callback: (data: unknown) => void) => {
       const id = String(++listenerSequence);
       if (plugin === 'AlphaTelephony' && method === 'addListener') messageListeners.set(id, {eventName: input.eventName, callback});
-      if (plugin === 'AlphaDevice' && method === 'addListener' && input.eventName === 'callState') callStateListeners.push(callback);
+      if (plugin === 'AlphaCallState' && method === 'addListener' && input.eventName === 'callState') callStateListeners.push(callback);
       return id;
     }, nativePromise: async (plugin: string, method: string, input: any) => {
-      // AC-19: Telecom's call state as AlphaDevice reports it (AlphaCallState.java); none by default.
-      if (plugin === 'AlphaDevice' && method === 'callState') return w.deviceCallState;
+      // AC-19: Telecom's call state as the AlphaCallState plugin reports it; none by default.
+      if (plugin === 'AlphaCallState' && method === 'callState') return w.deviceCallState;
       if (plugin === 'AlphaTelephony') {
         w.telephonyCalls.push(method); w.telephonyInputs.push([method, input]);
         if (w.telephonyAnswers?.[method]) return w.telephonyAnswers[method](input);

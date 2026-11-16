@@ -17,7 +17,7 @@ import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,camer
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
-import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
+import {guardTelephonyPorts,telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
@@ -275,7 +275,7 @@ export async function declineProposal(id:string):Promise<{ok:boolean;message:str
 const EMERGENCY_REFUSAL='Nothing was done during a call that may be an emergency call.';
 async function emergencyCallBlocks():Promise<boolean>{
   if(!aospImage)return false;
-  return !(await telephonyEffectAllowed(registerPlugin<CallStatePlugin>('AlphaDevice')));
+  return !(await telephonyEffectAllowed(registerPlugin<CallStatePlugin>('AlphaCallState')));
 }
 export function installAgentAdapter(Component: Shell, views: Shell) {
   const p = Component.prototype;
@@ -1053,13 +1053,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
-          placeCall:async number=>await emergencyCallBlocks()?{status:'busy' as const}:client.placeCall(number),
+          placeCall:number=>client.placeCall(number),
           getContact:async id=>parseContactDetail(await book.get({id}),id),
-          saveContact:async(draft,target)=>{if(await emergencyCallBlocks())return {status:'failed' as const};const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};},
-          removeContact:async(id,version)=>await emergencyCallBlocks()?{status:'failed' as const}:parseContactRemove(await book.remove({id,version})),
+          saveContact:async(draft,target)=>{const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};},
+          removeContact:async(id,version)=>parseContactRemove(await book.remove({id,version})),
           // The same native review and journalled send as a text to a number; the review shows the resolved number and the text.
           sendSms:async(number,body,id,sendSignal)=>{
-            if(await emergencyCallBlocks())return 'cancelled';
             const status=await client.status();current();
             const sim=expectedContext.view==='messages'&&expectedContext.selectedObject?.kind==='sms-subscription'?expectedContext.selectedObject:null;
             const selected=sim&&status.subscriptions?.find(row=>String(row.id)===sim.id&&smsSubscriptionRevision(row)===sim.revision);
@@ -1074,7 +1073,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
         };
-        return executeTelephonyAction(operation,operationId,ports,signal);
+        // AC-19: every side effect re-reads Telecom first and refuses unless it can rule out an emergency call.
+        return executeTelephonyAction(operation,operationId,guardTelephonyPorts(ports,async()=>!(await emergencyCallBlocks())),signal);
       }
       if(isSmsSend(operation)){
         if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent. Open Messages, choose the SIM, then ask again.'};

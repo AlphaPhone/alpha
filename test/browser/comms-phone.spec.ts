@@ -261,7 +261,8 @@ test.describe('Alpha image shape (telephony-fixture.ts): Recents filter', () => 
 
 test.describe('Alpha image shape (telephony-fixture.ts): AC-20 call card lookup', () => {
   test('the image resolver names the person by the number, counts the review\'s options, and claims nothing it did not read', async ({page}) => {
-    await setupTelephony(page);
+    // 150 contacts sort ahead of Carmen: a first-page scan of 100 could not find her.
+    await setupTelephony(page, {padContacts: 150});
     await page.getByRole('button', {name: 'Phone', exact: true}).first().click();
     const resolve = (target: unknown) => page.evaluate(async target => {
       const {resolveCallParty, callCardText} = await import('/src/runtime/comms-bar.ts' as string);
@@ -269,7 +270,11 @@ test.describe('Alpha image shape (telephony-fixture.ts): AC-20 call card lookup'
       return {party, card: callCardText(target, party, (n: string) => n)};
     }, target);
     // By Android's own number matching, not the first page of the address book.
+    const lookups = () => page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).filter(([method]) => method === 'contactForNumber' || method === 'searchContacts').map(([method, input]) => [method, input.number ?? input.query]));
+    const before = (await lookups()).length;
     expect(await resolve({number: '(555) 010-0103'})).toEqual({party: {name: 'Carmen Ruiz', numbers: ['(555) 010-0103']}, card: {title: 'Call Carmen Ruiz', detail: '(555) 010-0103'}});
+    // The number goes to Android's lookup; no address-book page is scanned for it.
+    expect((await lookups()).slice(before)).toEqual([['contactForNumber', '(555) 010-0103']]);
     expect((await resolve({number: '+15559990000'})).card.detail).toBe('+15559990000 · not in Contacts');
     // An unparseable number names nobody and says nothing about Contacts.
     expect(await resolve({number: '1-800-FLOWERS'})).toEqual({party: null, card: {title: 'Call 1-800-FLOWERS', detail: '1-800-FLOWERS'}});

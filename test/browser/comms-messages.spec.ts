@@ -59,14 +59,14 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await page.evaluate(`${shell}.propose(${proposal('before')}).shown`)).toBe(true);
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
     // Telecom reports a live call whose kind it cannot tell: AC-19 holds, through the image's own path.
-    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: null, emergencyLive: true}));
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: null, emergencyLive: true, watching: true}));
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(0);
     expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(true);
     expect(await page.evaluate(`JSON.stringify(${shell}.propose(${proposal('during')}))`)).toBe(JSON.stringify({shown: false, replaced: []}));
     // An ordinary call does not hold it; neither does the call ending.
-    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: false, emergencyLive: false}));
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: false, emergencyLive: false, watching: true}));
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
-    await page.evaluate(() => (window as any).setDeviceCallState({inCall: false, emergency: false, emergencyLive: false}));
+    await page.evaluate(() => (window as any).setDeviceCallState({inCall: false, emergency: false, emergencyLive: false, watching: true}));
     expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(false);
   });
 

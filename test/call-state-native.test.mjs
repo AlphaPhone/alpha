@@ -20,6 +20,10 @@ test('the renderer re-derives exactly the native rule for every reading', async 
   const value = text => text === 'null' ? null : text === 'true';
   for (const row of table) {
     const [inCall, emergency, live] = row.split(',').map(value);
-    assert.equal(parseCallState({inCall, emergency, emergencyLive: false}).emergencyLive, live, row);
+    assert.equal(parseCallState({inCall, emergency, emergencyLive: false, watching: true}).emergencyLive, live, row);
   }
+});
+
+test('the call-state listener registers once phone-state access exists, follows changes and stops cleanly', () => {
+  assert.match(runJvm([nativeSource('AlphaCallStateWatch.java'), fixture('CallStateWatchTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.CallStateWatchTest'), /PASS call-state watch/);
 });

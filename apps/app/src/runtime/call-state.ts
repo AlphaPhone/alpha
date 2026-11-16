@@ -1,29 +1,34 @@
 /**
  * AP-16 AC-19 on the Alpha image: whether a call is live and whether it may be an emergency call,
- * from Telecom through the AlphaDevice plugin (android AlphaCallState.java). The system call screen
- * owns every call, so this is the only way the WebView learns that one is live. Read-only.
+ * from Telecom through the AlphaCallState plugin (android AlphaCallState.java). The system call
+ * screen owns every call, so this is the only way the WebView learns that one is live. Read-only.
  *
- * The rule is native: a live call that cannot be ruled out as an emergency call holds AC-19. While
- * it holds, Alpha offers and runs no action (comms-bar emergency source, executor guards).
+ * Two uses, two failure rules:
+ * - Display (the comms-bar emergency source): a live call that cannot be ruled out as an emergency
+ *   call holds AC-19; with no call or no readable state the shell keeps working, so a lost bridge
+ *   never freezes proposals for good. The last good reading stays until a newer one arrives.
+ * - Side effects (telephonyEffectAllowed, guardTelephonyPorts): fail closed. A dial, dial handoff,
+ *   SMS send or contact write runs only on a fresh reading that parses, knows whether a call is
+ *   live, and rules out an emergency call.
  */
 import {setEmergencySource} from './comms-bar';
 
-export type CallState = {inCall: boolean | null; emergency: boolean | null; emergencyLive: boolean};
+export type CallState = {inCall: boolean | null; emergency: boolean | null; emergencyLive: boolean; watching: boolean};
 export type CallStatePlugin = {
 	callState(): Promise<unknown>;
 	addListener(event: 'callState', listener: (value: unknown) => void): Promise<{remove(): Promise<void> | void}>;
 };
 
-const UNKNOWN: CallState = {inCall: null, emergency: null, emergencyLive: false};
+const UNKNOWN: CallState = {inCall: null, emergency: null, emergencyLive: false, watching: false};
 const tri = (value: unknown) => value === null || typeof value === 'boolean';
 
 /** The exact native shape, or null. */
 export function parseCallState(value: unknown): CallState | null {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 	const row = value as Record<string, unknown>;
-	if (Object.keys(row).sort().join(',') !== 'emergency,emergencyLive,inCall') return null;
-	if (!tri(row.inCall) || !tri(row.emergency) || typeof row.emergencyLive !== 'boolean') return null;
-	const state = {inCall: row.inCall as boolean | null, emergency: row.emergency as boolean | null, emergencyLive: row.emergencyLive};
+	if (Object.keys(row).sort().join(',') !== 'emergency,emergencyLive,inCall,watching') return null;
+	if (!tri(row.inCall) || !tri(row.emergency) || typeof row.emergencyLive !== 'boolean' || typeof row.watching !== 'boolean') return null;
+	const state = {inCall: row.inCall as boolean | null, emergency: row.emergency as boolean | null, emergencyLive: row.emergencyLive, watching: row.watching};
 	// The rule is re-derived here: a payload that contradicts it is not trusted to lift AC-19.
 	return {...state, emergencyLive: state.emergencyLive || state.inCall === true && state.emergency !== false};
 }
@@ -31,7 +36,7 @@ export function parseCallState(value: unknown): CallState | null {
 let current: CallState = UNKNOWN;
 export const currentCallState = (): CallState => current;
 
-/** A fresh native reading, for a guard right before a side effect. A failed read keeps the last one. */
+/** A fresh native reading for the display. A failed read keeps the last one. */
 export async function readCallState(plugin: CallStatePlugin): Promise<CallState> {
 	try {
 		const parsed = parseCallState(await plugin.callState());
@@ -63,9 +68,12 @@ export function watchCallState(plugin: CallStatePlugin, changed: () => void): ()
 	}).then(registered => { if (live) handle = registered; else void registered.remove(); }, () => {});
 	const visible = () => { if (!document.hidden) void refresh(); };
 	document.addEventListener('visibilitychange', visible);
+	// Until Telephony's listener is registered (phone-state access can arrive later), poll while in front.
+	const poll = setInterval(() => { if (!document.hidden && !current.watching) void refresh(); }, 4000);
 	void refresh();
 	return () => {
 		live = false;
+		clearInterval(poll);
 		document.removeEventListener('visibilitychange', visible);
 		void handle?.remove();
 		setEmergencySource(null);
@@ -87,7 +95,32 @@ export function installCallStateWatch(Component: any, plugin: CallStatePlugin): 
 	};
 }
 
-/** The executor's AC-19 guard: a fresh reading right before a telephony side effect. */
+/** The executor's AC-19 guard: true only on a fresh reading that parses, says whether a call is live,
+ * and rules out an emergency call. A failed or malformed read, or unknown state, refuses (fail closed). */
 export async function telephonyEffectAllowed(plugin: CallStatePlugin): Promise<boolean> {
-	return !(await readCallState(plugin)).emergencyLive;
+	let state: CallState | null;
+	try {
+		state = parseCallState(await plugin.callState());
+	} catch {
+		return false;
+	}
+	if (!state) return false;
+	current = state;
+	return state.inCall !== null && !state.emergencyLive;
+}
+
+type SideEffectPorts = {
+	placeCall(number: string): Promise<{status: string}>;
+	sendSms(number: string, body: string, operationId: string, signal: AbortSignal): Promise<string>;
+	saveContact(draft: never, target?: never): Promise<{status: string}>;
+	removeContact(id: string, version: string): Promise<{status: string}>;
+};
+/** The image executor's side-effect ports, each behind the fail-closed guard read right before it. */
+export function guardTelephonyPorts<T extends SideEffectPorts>(ports: T, allowed: () => Promise<boolean>): T {
+	return {...ports,
+		placeCall: async (number: string) => await allowed() ? ports.placeCall(number) : {status: 'busy'},
+		sendSms: async (number: string, body: string, operationId: string, signal: AbortSignal) => await allowed() ? ports.sendSms(number, body, operationId, signal) : 'cancelled',
+		saveContact: async (draft: never, target?: never) => await allowed() ? ports.saveContact(draft, target) : {status: 'failed'},
+		removeContact: async (id: string, version: string) => await allowed() ? ports.removeContact(id, version) : {status: 'failed'},
+	} as T;
 }
