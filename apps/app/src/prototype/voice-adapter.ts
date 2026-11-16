@@ -1230,6 +1230,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   };
   // Agent and direct controls use the same Stop-and-save operation.
   setNotesRecorderControl({
+    isOpen: () => noteRecorder.open,
     start: startNoteRecorder,
     stop: async () => {
       if (!noteRecorder.recordingId || !['recording', 'paused', 'stopped'].includes(noteRecorder.phase)) return 'none';

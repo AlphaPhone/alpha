@@ -33,7 +33,7 @@ export function CloudSignInPanel({ view, busy, google, phone, showGoogle = googl
   errorIsNotice?: boolean;
   offline?: boolean;
   networkNotice?: ReactNode;
-  /** Low-emphasis entries under the methods (saved sign-in recovery, test-mocks diagnostics). */
+  /** Low-emphasis entries under the methods (test-mocks diagnostics). */
   extra?: ReactNode;
   /** The native readiness probe has admitted this attempt. */
   ready?: boolean;

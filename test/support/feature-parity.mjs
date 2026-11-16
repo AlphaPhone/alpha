@@ -137,7 +137,6 @@ export const featureParityAllowlist = {
     "android/app/src/main/java/ai/alphacompute/alphaphone/KeyboardDictationCloud.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/KeyboardDictationPolicy.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java",
-    "android/app/src/main/java/ai/alphacompute/alphaphone/LegacyCloudRecovery.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/LocalAgentProviderAdmission.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/NativeDeletionCoordinator.java",

@@ -4346,26 +4346,33 @@
       "recordingRefusesTest",
       "leaveWhileQueuedTest",
       "unconfirmedSaveTest",
-      "reopenedChatCoversShutterTest"
+      "reopenedChatRefusesCaptureTest",
+      "expandedChatRefusesCaptureTest",
+      "closingPanelDelaysCaptureTest",
+      "abortDuringRevealTest",
+      "paintedPanelRefusesCaptureTest"
     ],
     "sources": [
       "apps/app/src/prototype/camera-adapter.ts",
-      "apps/app/src/prototype/agent-adapter.ts"
+      "apps/app/src/prototype/agent-adapter.ts",
+      "apps/app/src/prototype/model.js",
+      "apps/app/src/prototype/template.html",
+      "apps/app/src/prototype/chat-overlay-motion-adapter.ts"
     ],
     "sharedSources": [
       "plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"
     ],
     "abstractions": [
-      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; one shutter. `takeRequestedPhoto` is the modeled function: admission closes the chat and holds the preview, a starting preview is awaited, and the context is checked again right before the shutter.",
+      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; a closing panel that may still be painted over the viewfinder after the committed chat is hidden; one shutter. Admission represents the committed chat close in `takeRequestedPhoto`; `revealed` is the wait for the closing panel's transition, and the hold keeps the preview available during it and while preview startup settles. Compositor frames are abstracted to the painted flag, which the mounted replay observes at the shutter. Without a request hold, an open chat releases the preview after its grace (`chatGraceReleases`).",
       "Current-source successor of the agent actions in the historical legacy CameraSession design model. Settlement after the preview settles is checked by scenarios (queued capture, start failure, leave while queued), not as a temporal property; no fairness assumption is made.",
-      "RESIDUAL GAP: the request closes the chat once. If the owner opens it again while the preview is still starting, the preview hold keeps the camera active and the shutter fires behind the chat. ShutterNeverCovered is registered under expectedViolations with the required witness CoveredShutter. Found by reading the source; not reproduced on a device.",
+      "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter separately refuses a committed sheet or full chat (`chatCovers`) and a painted panel that still overlaps the viewfinder (`conversationOverViewfinder`). ShutterNeverCovered follows directly from those two guard checks and adds no evidence of its own; RequestUncoversViewfinder carries the reveal wait, and the mounted replay shows that removing either painted-panel check in the source fails a trace.",
       "A recording that starts while a request is queued, lens, flash, zoom, video and scan are outside this model. A context change that the phone executor detects before it reaches the camera adapter is journaled as unknown by the coordinator (see DeviceActionReview).",
-      "Model-only: no refinement adapter drives the source. The rules were read from the listed source at the pinned revision; model safety checks do not establish implementation refinement or device acceptance. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
+      "The owning mounted Camera replay (test/quint-camera-agent-capture.test.mjs) drives the real capture adapter with synthetic preview and shutter ports. It checks the sheet and full chat refusals, a request admitted while the owner's closing panel is still painted, a reopened-then-closed panel refused at the shutter gate, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
     ],
     "invariants": [
       "CaptureNeedsVisibleCamera",
       "RequestUncoversViewfinder",
-      "ShutterUncoveredUnlessOwnerReopened",
+      "ShutterNeverCovered",
       "AtMostOneShutter",
       "UncertainCaptureNeverRepeats",
       "UnknownOnlyAfterShutter",
@@ -4375,15 +4382,8 @@
       "NoCaptureWhileRecording"
     ],
     "witnesses": [
-      "CoveredShutter"
-    ],
-    "expectedViolations": [
-      {
-        "init": "init",
-        "step": "step",
-        "invariant": "ShutterNeverCovered",
-        "expected": "violation"
-      }
+      "ReopenedChatRefusedWitness",
+      "PaintedPanelRefusedWitness"
     ],
     "bounds": {
       "maxSamples": 400,
@@ -5096,6 +5096,9 @@
       "bindingChangeLeavesUnconfirmedTest",
       "failedActionCancelsLeaseTest",
       "staleReceiptRetiresLeaseTest",
+      "recoveryNeedsExactOriginalTest",
+      "settledRecoveryNeverRearmsTest",
+      "retiredRecoveryCannotRetainTest",
       "mismatchedHintNeverStartsCompletionTest",
       "failedCompletionRemainsUnconfirmedTest"
     ],
@@ -5120,6 +5123,14 @@
       "apps/app/src/runtime/connection-ui.tsx"
     ],
     "symbols": [
+      {
+        "path": "apps/app/src/prototype/agent-adapter.ts",
+        "name": "recoverPendingActions"
+      },
+      {
+        "path": "apps/app/src/runtime/connection-ui.tsx",
+        "name": "pendingActions"
+      },
       {
         "path": "apps/app/src/prototype/agent-adapter.ts",
         "name": "retainReadReply"
@@ -5168,7 +5179,8 @@
       "One rendered lease, an exact synthetic proposal and its original user message. The source replay supplies the local connection epoch and conversation, while expiry, account credential checks and the voice-media implementation have separate scopes.",
       "A successful approved read carries a hint. A mismatched digest or origin is refused before completion, and a failed approval without a hint cancels the lease.",
       "After the approval settles, the shell context refresh retires a stale lease and requests exact cancellation.",
-      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls."
+      "The directed replay checks exact message identity and binding, cancellation while the reply is held, transport failure and retirement before the answer's renderer commit. The counter tracks answer insertions and voice callback calls.",
+      "The pending recovery replay uses the actual context refresh, pending action list and saved choice parser. Controlled inputs cover missing or mismatched original history, the exact original, repeated recovery, and a retired pending read."
     ]
   },
   {
@@ -10517,14 +10529,18 @@
       "hiddenSettingsReadsNothingTest",
       "signedOutAsksForSignInTest",
       "unmountRetiresReadTest",
-      "licensesLoadOnceTest"
+      "licensesLoadOnceTest",
+      "newerDiagnosticSupersedesStatusTest",
+      "diagnosticLimitRetiresStatusTest",
+      "unmountRetiresDiagnosticLogTest"
     ],
     "invariants": [
       "CheckingEnds",
       "VerifiedIsCurrentSession",
       "OneNewestRead",
       "ReadsAreLimited",
-      "LicensesLoadOnce"
+      "LicensesLoadOnce",
+      "DiagnosticStateIsScoped"
     ],
     "witnesses": [
       "SupersededResultWitness",
@@ -10560,6 +10576,14 @@
       {
         "path": "apps/app/src/prototype/settings-adapter.ts",
         "name": "gmailGrantLabel"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "async function refreshResidentDiagnostics"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "inferenceAbort"
       }
     ],
     "stateMapping": {
@@ -10567,10 +10591,12 @@
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
       "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization…, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
+      "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures and results published by the diagnostic read",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },
     "abstractions": [
-      "Only the Gmail authorization read of refreshCapabilities is modeled; the listener status read is SettingsListenerReads and the browser agent status read follows the same fence. refreshResidentDiagnostics (inferenceAbort) uses the same supersede-and-limit shape and is not separately modeled.",
+      "The Gmail authorization read, licence loading and explicit Problem log diagnostic read are modeled. Listener status is SettingsListenerReads.",
+      "An accepted failure is unique in this diagnostic campaign. Independent ordinary log refreshes, explicit log clear, the export chooser, and the resident transport's internal session validation are outside these transitions.",
       "A change of the account binding always reaches the page through the connection subscription, which starts a read in the same task. A Cloud client that never settles a request after its abort is ended by the limit.",
       "Settings busy labels (update check, notification work, photo access, crash log) are single-flight flags around one awaited call and are not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."

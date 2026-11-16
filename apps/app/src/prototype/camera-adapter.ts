@@ -747,10 +747,22 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     if (maskCache.top !== top) { screen.style.setProperty('--alpha-camera-top', top); maskCache.top = top; }
     if (maskCache.bottom !== bottom) { screen.style.setProperty('--alpha-camera-bottom', bottom); maskCache.bottom = bottom; }
   }
+  type AgentCaptureRequest = { queued: boolean; refused: boolean; cancelReveal?: () => void };
+  let agentRequest: AgentCaptureRequest | undefined;
   let requestedCaptureHolds=0;
   let pendingShot:number|undefined;
   const cameraViewVisible = () => !disposed && !document.hidden && !!api?.isActive() && !!document.querySelector(finder);
   const chatCovers = () => ['sheet', 'full'].includes(api?.S.chat);
+  const conversationPanel = () => document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]');
+  function conversationOverViewfinder(panel: HTMLElement | null): boolean {
+    const viewfinder = document.querySelector(finder);
+    if (!panel || !viewfinder || Number(getComputedStyle(panel).opacity) === 0) return false;
+    const chat = panel.getBoundingClientRect();
+    const preview = viewfinder.getBoundingClientRect();
+    return chat.height > 0 && chat.width > 0 &&
+      chat.top < preview.bottom && chat.bottom > preview.top &&
+      chat.left < preview.right && chat.right > preview.left;
+  }
   /** When the chat sheet started covering Camera; the session stays bound for CHAT_GRACE_MS after that. */
   let chatCoveredAt: number | undefined, chatTimer: number | undefined;
   /** Set by the grace timer itself, so a wall clock set back while the chat covers Camera cannot extend the grace. */
@@ -878,6 +890,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     });
   }
   async function stop() {
+    agentRequest?.cancelReveal?.();
     pendingShot=undefined;
     clearCameraInteraction();
     // A scan review that opened a system picker stays open while Android covers the WebView.
@@ -1048,30 +1061,60 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       catch { if (session.current(token)) message('Not saved'); }
     });
   }
-  /** An agent capture asked for while Camera starts waits for the preview, unless a recording starts first. */
-  let agentRequest:{queued:boolean;refused:boolean}|undefined;
+  /** An agent capture waits for the revealed viewfinder, unless a recording starts first. */
   const takeRequestedPhoto=async(operationId:string,signal:AbortSignal,current:()=>void):Promise<CameraCaptureAttempt>=>{
     const busy:CameraCaptureAttempt={status:'failed',summary:'Camera busy'};
-    let dispatched=false,request:{queued:boolean;refused:boolean}|undefined;
+    let dispatched=false;
+    let request: AgentCaptureRequest | undefined;
     try{
       signal.throwIfAborted();current();
       const owner=api;
       if(!cameraViewVisible()||!owner)return {status:'failed',summary:'Open Camera first'};
       if(agentRequest||session.busy)return busy;
-      // Close the chat so the owner sees the viewfinder and the capture.
-      if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
-      request=agentRequest={queued:false,refused:false};requestedCaptureHolds++;
+      const capture: AgentCaptureRequest = { queued: true, refused: false };
+      request=agentRequest=capture;requestedCaptureHolds++;
+      const closeChat=owner.S.chat!=='hidden';
+      // The committed chat state can be hidden while its closing panel still covers Camera.
+      if(closeChat||conversationOverViewfinder(conversationPanel())){
+        const revealed=await new Promise<boolean>(resolve=>{
+          const finish=(committed:boolean)=>{
+            if(capture.cancelReveal!==cancel)return;
+            signal.removeEventListener('abort',cancel);
+            capture.cancelReveal=undefined;
+            resolve(committed);
+          };
+          const cancel=()=>finish(false);
+          const afterCommit=()=>{
+            if(capture.cancelReveal!==cancel)return;
+            const panel=conversationPanel();
+            // An interactive panel belongs to the owner. The shutter gate refuses its coverage.
+            const closing=panel?.hasAttribute('inert')&&conversationOverViewfinder(panel)
+              ? panel.getAnimations?.() : undefined;
+            if(closing?.length){
+              void Promise.allSettled(closing.map(animation=>animation.finished)).then(()=>finish(true));
+            }else finish(true);
+          };
+          capture.cancelReveal=cancel;
+          signal.addEventListener('abort',cancel,{once:true});
+          if(closeChat)owner.shell({chat:'hidden'},{afterCommit});
+          else afterCommit();
+        });
+        signal.throwIfAborted();current();
+        if(!revealed||!cameraViewVisible())return {status:'failed',summary:'Camera closed'};
+      }
       if(session.phase!=='ready'){
-        request.queued=true;
         if(session.phase!=='starting')void start(true);
         await untilSettled(signal);
-        request.queued=false;
       }
+      capture.queued=false;
       // The request is checked again right before the shutter: the conversation or screen may have changed.
       signal.throwIfAborted();current();
       if(request.refused)return {status:'failed',summary:'Recording — no photo'};
       if(!active()||session.phase!=='ready')return {status:'failed',summary:session.phase==='off'?'Camera closed':'Camera unavailable'};
       const attempt=await session.exclusive(async():Promise<CameraCaptureAttempt>=>{
+        if(chatCovers()||conversationOverViewfinder(conversationPanel())){
+          return {status:'failed',summary:'Camera viewfinder is covered'};
+        }
         dispatched=true;shutterFlash(owner);
         const item=await writePhoto(owner,false);
         if(!item.id)return {status:'unknown',summary:'Saved'};
@@ -1080,7 +1123,13 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       });
       return attempt.status==='busy'?busy:attempt.value;
     }catch{return {status:dispatched?'unknown':'failed',summary:dispatched?'Save unconfirmed':'Request changed'};}
-    finally{if(request&&agentRequest===request)agentRequest=undefined;if(request){requestedCaptureHolds--;schedule();}}
+    finally{
+      if(request){
+        request.cancelReveal?.();
+        if(agentRequest===request)agentRequest=undefined;
+        requestedCaptureHolds--;schedule();
+      }
+    }
   };
   requestedPhoto=takeRequestedPhoto;
   /** The host Keep port of a scanned page: the browser's photo store, or the owned captures store with the capture's operation identity. */
