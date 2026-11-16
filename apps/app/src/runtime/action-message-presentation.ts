@@ -17,7 +17,7 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
 const REVIEW_TEXT = 'Review on phone';
 // This SDK fallback states uncertainty, not a failed effect. Keep stored receipts
 // intact and give the person a safe next step without encouraging a replay.
-function actionResultText(text: unknown) {
+export function actionResultText(text: string): string {
   return text === 'The action could not reach a confirmed result.'
     ? 'I couldn’t confirm the result. Check the app before trying again.' : text;
 }
