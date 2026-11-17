@@ -221,12 +221,14 @@ async function restoreAttachments(messages:Shell[],session:VerifiedSession,conve
     const transcript=attachment?.transcriptAttachment;
     const photo=attachment?.cameraAttachment;
     const mail=attachment?.mailAttachment;
+    const replyQuote=attachment?.replyQuote;
     const files=storedChatFiles(attachment?.fileAttachments);
     return {...message,
       ...(typeof attachment.displayText==='string'&&attachment.requestText===message.text?{text:attachment.displayText}:{}),
       ...(typeof transcript?.title==='string'?{transcriptAttachment:transcript}:{}),
       ...(typeof mail?.title==='string'?{mailAttachment:mail}:{}),
       ...(files.length?{fileAttachments:files}:{}),
+      ...(replyQuote&&typeof replyQuote.text==='string'&&['user','agent'].includes(replyQuote.from)?{replyQuote}:{}),
       ...(typeof photo?.image==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo.image)?{cameraAttachment:photo}:{}),
     };
   }));
@@ -1711,7 +1713,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(shownNotices!==live){const kept=new Set(shownNotices.map(item=>item.id)),hidden=new Set(live.filter(item=>item.systemNotice&&!kept.has(item.id)).map(item=>item.id));out.msgs=(out.msgs||[]).filter((m:Shell)=>!hidden.has(m.id));}
     out.msgs=(out.msgs||[]).map((m:Shell)=>{
       const sent=live.find(item=>item.id===m.id);
-      m={...m,sentMail:sent?.mailAttachment?.title||'',sentTranscript:sent?.transcriptAttachment?.title||'',sentPhoto:sent?.cameraAttachment?.image||'',sentFiles:storedChatFiles(sent?.fileAttachments).map(file=>({id:file.id,name:file.name,document:!CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType),previewLabel:'Preview sent '+file.name,image:CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:'',open:()=>{if(CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)){this.chatImagePreview=`data:${file.mimeType};base64,${file.data}`;this.setState({});}}})),openPhotoPreview:()=>{if(sent?.cameraAttachment?.image){this.chatImagePreview=sent.cameraAttachment.image;this.setState({});}}};
+      m={...m,replyQuote:sent?.replyQuote?.text||'',replyAuthor:sent?.replyQuote?.from==='user'?'You':'Alpha',sentMail:sent?.mailAttachment?.title||'',sentTranscript:sent?.transcriptAttachment?.title||'',sentPhoto:sent?.cameraAttachment?.image||'',sentFiles:storedChatFiles(sent?.fileAttachments).map(file=>({id:file.id,name:file.name,document:!CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType),previewLabel:'Preview sent '+file.name,image:CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:'',open:()=>{if(CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)){this.chatImagePreview=`data:${file.mimeType};base64,${file.data}`;this.setState({});}}})),openPhotoPreview:()=>{if(sent?.cameraAttachment?.image){this.chatImagePreview=sent.cameraAttachment.image;this.setState({});}}};
       const c=m.c||{};
       // A system notice is a status block, never a button: it carries its text once, with no
       // title repeated as the detail and no second copy printed above it.
@@ -1988,10 +1990,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // Everything this send later shows belongs to the agent connection it was sent on.
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
-    const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:filesAtStart as ChatFile[]|undefined,displayText:text,requestText}:null;
+    const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:filesAtStart as ChatFile[]|undefined,displayText:text,requestText,...(replyTarget?{replyQuote:{messageId:replyTarget.messageId,text:replyTarget.text,from:replyTarget.from}}:{})}:null;
     let stagedAttachmentKey:string|undefined;
     const rememberSentAttachment=async (identity:NonNullable<AgentReply['messageBinding']>,recordedId:string)=>{
-      if(!sentAttachment||!(mail||transcript||sentAttachment.cameraAttachment||sentAttachment.fileAttachments?.length))return;
+      if(!sentAttachment||!(mail||transcript||sentAttachment.replyQuote||sentAttachment.cameraAttachment||sentAttachment.fileAttachments?.length))return;
       // First send can create the conversation after pre-dispatch storage was skipped.
       // History prefers the request ID and falls back to the recorded ID only if absent.
       if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
@@ -2023,7 +2025,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     try {
       // A refused send can settle immediately. Commit the cleared composer before
       // dispatch so its late paint cannot overwrite the restored, unsent draft.
-      await new Promise<void>(resolve=>this.setState((previous:Shell)=>({ msgs: [...previous.msgs, { id: userId, from: 'user', text, ...(fromComposer?{mailAttachment:sentAttachment?.mailAttachment,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:sentAttachment?.fileAttachments}:{} ) }], ...(fromComposer?{draft:''}:{}), typing: true, chat: previous.chat === 'full' ? 'full' : 'sheet', shade: false }),()=>{focusAfterCommit?.();resolve();}));
+      await new Promise<void>(resolve=>this.setState((previous:Shell)=>({ msgs: [...previous.msgs, { id: userId, from: 'user', text, ...(sentAttachment?.replyQuote?{replyQuote:sentAttachment.replyQuote}:{}), ...(fromComposer?{mailAttachment:sentAttachment?.mailAttachment,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:sentAttachment?.fileAttachments}:{} ) }], ...(fromComposer?{draft:''}:{}), typing: true, chat: previous.chat === 'full' ? 'full' : 'sheet', shade: false }),()=>{focusAfterCommit?.();resolve();}));
       try{
         await this.connectAgent(); context(this);
         if (alphaClient.getState().context.revision !== revision) throw new NotDispatched(fromComposer?'The active screen changed. Your message is back in the composer.':'The active screen changed. Nothing was sent.');
