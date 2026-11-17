@@ -129,7 +129,7 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
       await page.getByText('Create note', { exact: true }).click();
       await expect.poll(counts).toEqual({ posts: 1, decisions: 1, claims: 1, receipts: 1, effects: 1, journal: ['get', 'reserve', 'markApplying', 'finish'] });
       if(mode==='unknown-receipt'){
-        await expect(page.locator('[data-alpha-layer="conversation"]').getByText('I couldn’t confirm the result. Check the app before trying again.',{exact:true})).toHaveCount(1);
+        await expect(page.locator('[data-alpha-layer="conversation"]').getByText('I couldn’t confirm the result.',{exact:true})).toHaveCount(1);
         await expect(page.getByText('The action could not reach a confirmed result.',{exact:true})).toHaveCount(0);
         await expect(page.getByText('Action did not reach a confirmed result. Check action history before requesting it again.',{exact:true})).toHaveCount(0);
         await expect(page.getByText('Create note',{exact:true})).toHaveCount(0);

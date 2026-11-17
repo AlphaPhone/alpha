@@ -20,7 +20,7 @@ const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new br
 export function actionResultText(text: string): string {
   return text === 'The action could not reach a confirmed result.'
     || text === 'Action did not reach a confirmed result. Check action history before requesting it again.'
-    ? 'I couldn’t confirm the result. Check the app before trying again.' : text;
+    ? 'I couldn’t confirm the result.' : text;
 }
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);

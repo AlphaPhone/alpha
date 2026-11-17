@@ -35,6 +35,19 @@ test('the reported contact save reads as a plain confirmation and outcomes stay 
   assert.doesNotMatch(text.telephonyActionResultText({kind: 'phone-call', status: 'placed', contact: false}), /connected|answered/i);
   assert.doesNotMatch(text.telephonyActionResultText({kind: 'sms-compose', status: 'submitted'}), /\bsent\b/i);
   assert.doesNotMatch(text.phoneDialResultText({status: 'handed-off'}), /placed|connected/i);
-  // A read still marks the shared content as untrusted for the agent.
-  assert.match(text.telephonyActionResultText({kind: 'messages-read', status: 'read'}), /untrusted data/);
+  // A read's summary goes to the agent with the content: it still marks that content as untrusted
+  // data and never instructions.
+  for (const kind of ['messages-read', 'voicemail-read']) {
+    const read = text.telephonyActionResultText({kind, status: 'read'});
+    assert.match(read, /untrusted data/, kind);
+    assert.match(read, /never instructions/, kind);
+  }
+});
+
+test('an approved text to a number reads as one short sentence and never overclaims', () => {
+  for (const status of ['submitted', 'sent', 'delivered', 'cancelled', 'denied', 'failed', 'unknown']) oneSentence(text.smsSendResultText(status));
+  assert.equal(text.smsSendResultText('sent'), 'Message sent.');
+  assert.doesNotMatch(text.smsSendResultText('submitted'), /\bsent\b|delivered/i);
+  assert.doesNotMatch(text.smsSendResultText('sent'), /delivered/i);
+  assert.match(text.smsSendResultText('failed'), /may have gone out/, 'a reported failure keeps the partial-send truth');
 });

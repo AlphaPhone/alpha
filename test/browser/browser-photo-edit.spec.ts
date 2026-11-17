@@ -214,6 +214,6 @@ test('unmatched agent photo selection keeps the visible selection and partial se
  await seed(page);await page.getByRole('button',{name:'Photos',exact:true}).click();await expect(page.getByRole('button',{name:/^Photo, /})).toBeVisible();
  const select=(ids:string[])=>page.evaluate(async ids=>{const {deviceLibraryAgent}=await import('/src/prototype/photo-library-adapter.ts');try{return await deviceLibraryAgent()!.runView({type:'photo_library_select',ids} as never,new AbortController().signal);}catch(error){return {refused:(error as Error).message};}},ids);
  expect(await select(['1000'])).toEqual({kind:'photo_library_select',selected:1,missing:0});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
- expect(await select(['9999'])).toEqual({refused:'None of those items are in Photos. The current selection was kept.'});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
+ expect(await select(['9999'])).toEqual({refused:'None of those items are in Photos.'});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
  expect(await select(['1000','9999'])).toEqual({kind:'photo_library_select',selected:1,missing:1});
 });

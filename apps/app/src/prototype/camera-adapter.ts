@@ -1459,7 +1459,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     trashed:(ids:string[])=>{const owner=photosApi;if(!owner||!ids.length)return;void (async()=>{await loadTrash(owner);await refresh();const rows=trash.filter(row=>ids.includes(nativeId(row.id)));if(owner.isActive())owner.toast('Deleted',rows.length?{undo:()=>{void changeSelection(owner,'restore',rows);}}:undefined);})();},
     async run(operation:HostOperation,signal:AbortSignal):Promise<LibraryAgentResult|PhotosViewResult>{
       const owner=photosApi;if(!owner?.isActive()||disposed)throw new LibraryAgentRefusal('Open Photos, then ask again.');
-      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy. Try again.');
+      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy right now.');
       if(!loaded)await refresh();signal.throwIfAborted();
       if(operation.type==='photos_filter'){
         const {type:_type,...wanted}=operation;void _type;
@@ -1482,12 +1482,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       }
       const wanted=new Set(operation.ids),rows=captures.filter(row=>wanted.has(nativeId(row.id)));
       if(operation.type==='photo_library_select'){
-        if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos. The current selection was kept.');
+        if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos.');
         selection=rows;selectionTab='lib';photosFilter=undefined;
         owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
         return {kind:'photo_library_select',selected:rows.length,missing:operation.ids.length-rows.length};
       }
-      if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos. Nothing changed.');
+      if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos.');
       if(albumReview||shareReview)throw new LibraryAgentRefusal('Finish the open review first.');
       if(operation.type==='photos_share'){
         // Reviewed: the owner confirms over the grid, then picks a target in Android's share sheet.

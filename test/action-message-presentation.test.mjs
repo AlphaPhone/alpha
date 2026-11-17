@@ -24,19 +24,19 @@ test('an unconfirmed action remains uncertain, appears once and never rewrites i
  const rows=[{...user,text:summary},uncertain,{id:'device-receipt:p',from:'agent',text:summary,deviceReceipt:true}];
  const frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
  assert.deepEqual(shown.map(m=>m.id),['user','action']);assert.equal(shown[0].text,summary);
- assert.equal(shown[1].displayText,'I couldn’t confirm the result. Check the app before trying again.');
+ assert.equal(shown[1].displayText,'I couldn’t confirm the result.');
  assert.equal(shown[1].cGeneric,false);assert.deepEqual(rows,frozen);
 });
 test('the current SDK uncertainty fallback gets the same safe presentation',()=>{
  const summary='Action did not reach a confirmed result. Check action history before requesting it again.';
  const rows=[{id:'current',from:'agent',text:summary,deviceReceipt:true}],frozen=structuredClone(rows);
- assert.equal(projectActionMessages(render(rows),rows)[0].displayText,'I couldn’t confirm the result. Check the app before trying again.');assert.deepEqual(rows,frozen);
+ assert.equal(projectActionMessages(render(rows),rows)[0].displayText,'I couldn’t confirm the result.');assert.deepEqual(rows,frozen);
 });
 test('standalone unconfirmed receipts get safe copy while specific results and ordinary prose remain intact',()=>{
  const generic='The action could not reach a confirmed result.',specific='Clock result is unknown. Check Clock before repeating the request.';
  const rows=[{id:'generic',from:'agent',text:generic,deviceReceipt:true},{id:'specific',from:'agent',text:specific,deviceReceipt:true},{id:'prose',from:'agent',text:generic}];
  const frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
- assert.equal(shown[0].displayText,'I couldn’t confirm the result. Check the app before trying again.');
+ assert.equal(shown[0].displayText,'I couldn’t confirm the result.');
  assert.equal(shown[1].displayText,specific);assert.equal(shown[2].displayText,generic);assert.deepEqual(rows,frozen);
 });
 test('restored verified browser receipt hides only exact protocol instruction in its turn',()=>{
@@ -130,7 +130,7 @@ test('a requested Browser open answered by the agent reply shows that reply once
 });
 test('failed, other, unanswered and offscreen-reply receipts stay visible',()=>{
  for(const rows of [
-  [user,browserReply,{id:'device-receipt:p',from:'agent',text:'Approved browser navigation is unavailable. No page opened.',deviceReceipt:true}],
+  [user,browserReply,{id:'device-receipt:p',from:'agent',text:'Browser navigation is unavailable, so no page opened.',deviceReceipt:true}],
   [user,browserReply,{id:'device-receipt:n',from:'agent',text:'Note saved.',deviceReceipt:true}],
   [user,{...browserReply,interrupted:true},browserReceipt],
   [user,{...browserReply,text:''},browserReceipt],
@@ -146,7 +146,7 @@ test('only a browser proposal receipt that succeeded with its exact summary name
  for(const [proposal,receipt] of [
   [card,{status:'succeeded',summary:tabCreated+' Server receipt is pending; check action history.'}],
   [card,{status:'succeeded',summary:legacySummary+' Not synced yet; open action history to retry.'}],
-  [card,{status:'failed',summary:'Approved browser navigation is unavailable. No page opened.'}],
+  [card,{status:'failed',summary:'Browser navigation is unavailable, so no page opened.'}],
   [card,{...opened,status:'unknown'}],
   [{id:'p',description:'Open browser destination https://other.example'},opened],
   [{id:'p',description:'Open browser destination http://example.com'},opened],

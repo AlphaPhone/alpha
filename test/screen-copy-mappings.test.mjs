@@ -28,8 +28,8 @@ test('every Calendar approval outcome is keyed on its kind and code, never shown
   CALENDAR_MANAGED_TARGET_CHANGED:'Nothing changed in Calendar: the event changed after you reviewed it.',
   CALENDAR_SYNC_PRECONDITION:'Nothing changed in Calendar: the event changed after you reviewed it.',
   CALENDAR_MANAGED_ACCOUNT_CHANGED:'Nothing changed in Calendar: the Calendar account changed.',
-  CALENDAR_MANAGED_EDITOR_REQUIRED:'Nothing changed in Calendar. Review this event in Calendar instead.',
-  CALENDAR_SYNC_REVIEW_REQUIRED:'Nothing changed in Calendar. Review this event in Calendar instead.',
+  CALENDAR_MANAGED_EDITOR_REQUIRED:'Nothing changed in Calendar: this event needs review in Calendar.',
+  CALENDAR_SYNC_REVIEW_REQUIRED:'Nothing changed in Calendar: this event needs review in Calendar.',
   CALENDAR_MANAGED_WRITE_UNAVAILABLE:'Nothing changed in Calendar: Alpha couldn’t confirm it may edit this calendar.',
  };
  for(const [code,reason] of Object.entries(reasons)){
@@ -43,10 +43,10 @@ test('every Calendar approval outcome is keyed on its kind and code, never shown
  const fixed=[...RESOLVE.slice(RESOLVE.indexOf('export function calendarApprovalOutcome'),RESOLVE.indexOf('export async function resolveCalendarApproval')).matchAll(/text: "([^"]+)"/g)].map(m=>m[1]);
  assert.equal(fixed.length,4,fixed.join(' | '));
  const replies=[
-  [{kind:'rejected',decision:'reject'},'Declined. Nothing changed in Calendar.'],
-  [{kind:'retryable',failure:{code:'ANY',retryable:true,acceptance:'not_accepted'}},'Nothing changed in Calendar. You can try again.'],
-  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_IN_PROGRESS',retryable:false,acceptance:'unknown'}},'This Calendar change is still being made. Check Calendar again shortly.'],
-  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_UNCONFIRMED',retryable:false,acceptance:'unknown'}},'Calendar change is not confirmed. Check its saved status before trying again.'],
+  [{kind:'rejected',decision:'reject'},'Declined, so nothing changed in Calendar.'],
+  [{kind:'retryable',failure:{code:'ANY',retryable:true,acceptance:'not_accepted'}},'Nothing changed in Calendar.'],
+  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_IN_PROGRESS',retryable:false,acceptance:'unknown'}},'This Calendar change is still being made.'],
+  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_UNCONFIRMED',retryable:false,acceptance:'unknown'}},'The Calendar change is not confirmed.'],
  ];
  for(const text of fixed)for(const [reply,alpha] of replies){
   const shown=parseCalendarApprovalResolution({requestId:id,decision:'approve',text,...reply},id,reply.decision??'approve').text;

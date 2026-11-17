@@ -70,7 +70,7 @@ export async function executeNamedNotes(store:Store,operation:Extract<NamedTarge
  current();await store.assertCurrent();current();const raw=store.raw;
  const stable=()=>{signal.throwIfAborted();current();if(store.raw!==raw)throw Error('Notes changed. Review the request again.');};
  const candidates=matchNotesName(store.list,operation.name);
- if(!candidates.length){await store.assertCurrent();stable();return {status:'succeeded',summary:`No saved note matches “${operation.name}”. Nothing was changed.`,foregroundResult:validateForegroundReviewResult(operation,{version:1,kind:operation.type,action:operation.action,name:operation.name,basis:'no-match'})};}
+ if(!candidates.length){await store.assertCurrent();stable();return {status:'succeeded',summary:`No saved note matches “${operation.name}”.`,foregroundResult:validateForegroundReviewResult(operation,{version:1,kind:operation.type,action:operation.action,name:operation.name,basis:'no-match'})};}
  const selected=await choose(candidates,operation,signal,stable);
  if(!selected)return {status:'failed',summary:'Cancelled'};
  if(!candidates.some(note=>note.id===selected))throw Error('The chosen note did not match this name');

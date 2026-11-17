@@ -1039,7 +1039,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
   }
   const accessRequired = {
     status: "failed" as const,
-    summary: "Files needs storage access. Nothing was changed.",
+    summary: "Nothing was changed because Files needs storage access.",
   };
   const foreground = () => typeof document === "undefined" || !document.hidden;
   const visible = () => !!api?.isActive() && foreground();
@@ -1080,7 +1080,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       if (filterTruncated)
         return {
           status: "failed",
-          summary: `Files could not complete this search. Showing ${countLabel(count)} from the scanned folders.`,
+          summary: `Files could not finish this search and shows ${countLabel(count)} from the scanned folders.`,
         };
       return {
         status: "succeeded",
@@ -1115,7 +1115,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       signal.throwIfAborted();
       const reviewRequired = {
         status: "failed" as const,
-        summary: "Review these files again. Nothing changed.",
+        summary: "Nothing changed because these files changed after review.",
       };
       if (
         (op.type === "files_move" || op.type === "files_trash") &&
@@ -1124,7 +1124,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         return reviewRequired;
       const unavailable = {
         status: "failed" as const,
-        summary: "Files is unavailable. Nothing was changed.",
+        summary: "Files is unavailable.",
       };
       if (!foreground()) return unavailable;
       if (!visible()) {
@@ -1143,7 +1143,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       if (op.type === "files_open") {
         const stale = {
           status: "failed" as const,
-          summary: "Files changed. Nothing was opened.",
+          summary: "Nothing was opened because Files changed.",
         };
         // A position names the displayed snapshot, not whichever rows a later
         // permission response or refresh happens to leave at that position.
@@ -1171,7 +1171,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           if (!row)
             return {
               status: "failed",
-              summary: "Files does not show that item. Nothing was opened.",
+              summary: "Files does not show that item.",
             };
           if (row.directory) {
             go({ kind: "folder", path: row.path });
@@ -1191,7 +1191,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         if (value.status !== "selected" || !value.selectionId)
           return {
             status: "failed",
-            summary: "That file is not there. Nothing was opened.",
+            summary: "That file is not there.",
           };
         opened = { path, selectionId: value.selectionId };
         await accept("files", value, currentApi, false);
@@ -1207,7 +1207,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       if (!refreshed)
         return {
           status: "failed",
-          summary: "Files changed. Nothing was changed.",
+          summary: "Nothing was changed because Files changed.",
         };
       if (access !== "granted") return accessRequired;
       if (op.type === "files_share") {
