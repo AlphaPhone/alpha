@@ -8,7 +8,7 @@ async function connect(page:Page){
  await page.addInitScript(()=>{
   const w=window as any,store=new Map();
   const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
-  const flows=[{id:'workflow-fixture',name:'Morning digest',active:true,versionId:'version-1',steps:[]}];
+  const flows:{id:string;name:string;active:boolean;versionId:string;steps:never[];removed?:boolean;triggerCleanup?:'complete'}[]=[{id:'workflow-fixture',name:'Morning digest',active:true,versionId:'version-1',steps:[]}];
   const fixture=w.workflowChatFixture={detailReads:0,automationLists:0};
   const receipt=(operation:string,flow:{id:string;versionId:string})=>({receiptId:crypto.randomUUID(),operation,resource:{kind:'workflow.definition',id:flow.id,version:flow.versionId},artifacts:[],idempotency:{key:null,replayed:false},observedAt:'2026-11-17T12:00:00.000Z',outcome:'applied',commit:{kind:'durable',id:flow.versionId,committedAt:'2026-11-17T12:00:00.000Z'}});
   w.Capacitor={PluginHeaders:[{name:'AlphaConnection',methods:methods(['request','cancel','secureRead','secureWrite','secureCompareExchange','secureRemove'])}],nativePromise:async(plugin:string,method:string,input:any)=>{
@@ -21,11 +21,11 @@ async function connect(page:Page){
    if(path==='/api/auth/me')return ok({identity:{id:'owner',displayName:'Fixture owner',kind:'owner'},session:{id:'synthetic-session',kind:'machine',expiresAt:Date.now()+600000},access:{role:'OWNER',mode:'session'}});
    if(path==='/api/agents')return ok({agents:[{id:'12345678-1234-4234-8234-123456789abc',name:'Chat change fixture',status:'running'}]});
    if(path==='/api/client-devices/register')return {status:404,data:{}};
-   if(path==='/api/automations'){fixture.automationLists++;return ok({automations:flows.map(flow=>({id:'workflow:'+flow.id,type:'workflow',workflowId:flow.id,title:flow.name,enabled:flow.active,status:flow.active?'active':'paused',schedules:[]}))});}
+   if(path==='/api/automations'){fixture.automationLists++;return ok({automations:flows.filter(flow=>!flow.removed).map(flow=>({id:'workflow:'+flow.id,type:'workflow',workflowId:flow.id,title:flow.name,enabled:flow.active,status:flow.active?'active':'paused',schedules:[]}))});}
    if(path==='/api/lifeops/reminders')return ok({reminders:[]});
    if(path==='/api/lifeops/scheduled-tasks')return ok({tasks:[]});
    if(path==='/api/workflow/status')return ok({engine:'smthrs',status:'ready'});
-   if(path==='/api/workflow/workflows')return ok({workflows:flows});
+   if(path==='/api/workflow/workflows')return ok({workflows:flows.filter(flow=>!flow.removed)});
    const flow=flows.find(item=>path==='/api/workflow/workflows/'+item.id||path==='/api/workflow/workflows/'+item.id+'/executions');
    if(flow&&path.endsWith('/executions'))return ok({executions:[]});
    if(flow){fixture.detailReads++;return ok(flow);}
@@ -34,10 +34,17 @@ async function connect(page:Page){
    if(path==='/api/conversations')return ok({conversations:[]});
    if(path==='/api/conversations/fixture-conversation/messages'&&input.method==='POST'){
     const ids={messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),agentName:'Chat change fixture'};
-    if(/create/i.test(JSON.parse(input.body).text)){
-     const created={id:'workflow-created',name:'Daily notes',active:false,versionId:'created-1',steps:[]};flows.push(created);
-     return ok({...ids,text:`Created “${created.name}” as an inactive Smithers workflow (${created.id}, version ${created.versionId}).`,actionResults:[{success:true,effectReceipts:[receipt('workflow.create',created)]}]});
+    // The owner's words follow the client's screen observation.
+    const said=String(JSON.parse(input.body).text).split('\n').pop()!,changed=(text:string,operation:string,flow=flows[0])=>ok({...ids,text,actionResults:[{success:true,text,effectReceipts:[receipt(operation,flow)]}]});
+    if(/create/i.test(said)){
+     const created={id:'workflow-created',name:'Daily notes',active:false,versionId:'created-1',steps:[] as never[]};flows.push(created);
+     return changed(`Created “${created.name}”. It is off until you turn it on.`,'workflow.create',created);
     }
+    if(/rename/i.test(said)){Object.assign(flows[0],{name:'Daily brief',versionId:'version-renamed'});return changed('Renamed “Morning digest” to “Daily brief”.','workflow.rename');}
+    if(/remove/i.test(said)){Object.assign(flows[0],{removed:true,triggerCleanup:'complete',active:false,versionId:'version-removed'});return changed(`Removed “${flows[0].name}”. It no longer runs. You can restore it later.`,'workflow.remove');}
+    if(/restore/i.test(said)){Object.assign(flows[0],{removed:false,active:false,versionId:'version-restored'});return changed(`Restored “${flows[0].name}”. It is off until you turn it on.`,'workflow.restore_removed');}
+    // plugin-workflow refuses a chat edit of a workflow built in the view; the failed result carries its code.
+    if(/schedule/i.test(said))return ok({...ids,text:'“Morning digest” was built in the Workflows view. Open it there to change its steps or schedule.',actionResults:[{success:false,error:'WORKFLOW_EDIT_IN_VIEW',text:'“Morning digest” was built in the Workflows view. Nothing was changed.'}]});
     // The pause committed, then the reply was cut off.
     Object.assign(flows[0],{active:false,versionId:'version-2'});
     return ok({...ids,text:'The request remains incomplete because processing stopped unexpectedly.',terminalFailure:{kind:'handler_error',code:'TURN_INTERRUPTED_AFTER_EFFECT',transient:false},actionResults:[{success:true,effectReceipts:[receipt('workflow.deactivate',flows[0])]}]});
@@ -56,10 +63,9 @@ async function say(page:Page,text:string){
 }
 const fixture=(page:Page)=>page.evaluate(()=>(window as any).workflowChatFixture as {detailReads:number;automationLists:number});
 
-test('a workflow created from chat reads in Alpha’s words and its card opens it in Workflows',async({page})=>{
+test('a workflow created from chat gets a card that opens it in Workflows',async({page})=>{
  await connect(page);await say(page,'Create a workflow that summarizes my notes');
- await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Created “Daily notes”. It is paused until you turn it on.'})).toBeVisible();
- await expect(page.getByText(/Smithers|workflow-created|created-1/)).toHaveCount(0);
+ await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Created “Daily notes”. It is off until you turn it on.'})).toBeVisible();
  const card=page.locator('.workflow-run-card[data-workflow-id="workflow-created"]');await expect(card).toContainText('Created');
  expect((await fixture(page)).detailReads).toBe(0);
  await card.getByRole('button',{name:'Open workflow',exact:true}).click();
@@ -81,4 +87,46 @@ test('a change committed before the reply was cut off still refreshes the open w
  await expect(list.getByText('Paused',{exact:true})).toBeVisible();
  expect((await fixture(page)).automationLists).toBeGreaterThan(before.automationLists);
  expect((await fixture(page)).detailReads).toBe(2);
+});
+
+test('a workflow renamed, removed and restored from chat follows in its open detail, the list and the cards',async({page})=>{
+ await connect(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();
+ const list=page.getByRole('region',{name:'Workflows',exact:true});await list.getByText('Morning digest',{exact:true}).first().click();
+ await expect(page.getByRole('heading',{name:'Morning digest',exact:true})).toBeVisible();
+ const card=(change:string)=>page.locator('.workflow-run-card[data-workflow-id="workflow-fixture"]').filter({hasText:change});
+ const minimize=async()=>{const button=page.getByRole('button',{name:'Minimize chat',exact:true});await button.press('Enter');await expect(button).toBeHidden();};
+ test.slow();
+
+ await say(page,'Rename this to Daily brief');
+ await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Renamed “Morning digest” to “Daily brief”.'})).toBeVisible();
+ await expect(card('Renamed')).toBeVisible();
+ await expect.poll(async()=>(await fixture(page)).detailReads).toBe(2);
+ await minimize();await expect(page.getByRole('heading',{name:'Daily brief',exact:true})).toBeVisible();
+
+ // The open workflow is shown as removed: it offers only to be restored.
+ await say(page,'Remove this');
+ await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Removed “Daily brief”. It no longer runs. You can restore it later.'})).toBeVisible();
+ await expect(card('Removed')).toBeVisible();
+ await expect.poll(async()=>(await fixture(page)).detailReads).toBe(3);
+ await minimize();await expect(page.getByRole('button',{name:'Restore workflow',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Back to workflows',exact:true}).click();
+ await expect(list.getByText('Daily brief',{exact:true})).toHaveCount(0);
+ // The removed workflow can still be read, so its card opens it, as removed.
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await card('Removed').getByRole('button',{name:'Open workflow',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Daily brief',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Restore workflow',exact:true})).toBeVisible();
+
+ await say(page,'Restore this');
+ await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Restored “Daily brief”. It is off until you turn it on.'})).toBeVisible();
+ await expect(card('Restored')).toBeVisible();
+ await minimize();await expect(page.getByRole('button',{name:'Remove workflow',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Back to workflows',exact:true}).click();
+ await expect(list.getByText('Daily brief',{exact:true}).first()).toBeVisible();
+});
+
+test('a change the agent refuses because it is made in the Workflows view offers to open that view',async({page})=>{
+ await connect(page);await say(page,'Change the schedule of Morning digest to 7');
+ const card=page.locator('.workflow-run-card').filter({hasText:'Make this change in Workflows'});
+ await card.getByRole('button',{name:'Open Workflows',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Workflows',exact:true})).toBeVisible();
 });
