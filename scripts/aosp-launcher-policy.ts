@@ -4,10 +4,13 @@ import { fileURLToPath } from 'node:url';
 
 /** Reviewed source of the privileged launcher's agent IPC policy. */
 export const LAUNCHER_POLICY_SOURCE = 'android/aosp/launcher-policy/alpha_launcher_agent_ipc.te';
-/** The include added to the staged product.mk; the policy directory sits beside it in the stage. */
+/**
+ * The include added to the staged product.mk. A literal path, as the staged telephony defaults use:
+ * a lazily expanded $(MAKEFILE_LIST) here would resolve after inherit-product, to another makefile.
+ */
 export const LAUNCHER_POLICY_PRODUCT_INCLUDE =
   '\n# The privileged launcher\'s local agent socket in its own private data (alpha_launcher_agent_ipc.te).\n' +
-  'SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/sepolicy\n';
+  'SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += vendor/alphaphone/sepolicy\n';
 
 /**
  * Stage the priv_app socket-file policy beside a privileged launcher. Only ever the reviewed bytes,
