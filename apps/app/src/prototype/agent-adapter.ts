@@ -13,6 +13,7 @@ import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,Legac
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
 import {CAMERA_CONTEXT_NOTICE,publishCommittedDeviceChanges,setFilesReviewIdentity} from '../runtime/device-actions';
+import {presentOpenView} from '../runtime/device-actions';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../ui/mailbox/MailFolderPicker.tsx';
@@ -1391,7 +1392,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (operation.type === 'open_view') {
         // Navigation changes the view epoch; journal completion still runs after it.
         if(!openInternalView(this,operation.view))return {status:'failed',summary:'This view is unavailable.'};
-        return { status: 'succeeded', summary: `Opened ${operation.view} on this phone.` };
+        return { status: 'succeeded', summary: presentOpenView(operation.view).appliedSummary };
       }
       if (operation.type !== 'browser_navigate') return {status:'failed',summary:'This device operation is unavailable.'};
       if (!this.browserNavigateApproved) return { status: 'failed', summary: 'Approved browser navigation is unavailable. No page opened.' };

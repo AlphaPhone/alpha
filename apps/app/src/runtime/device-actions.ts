@@ -46,6 +46,7 @@ import {browserNavigationSummary} from './action-message-presentation';
 import {presentDeviceRecordOperation} from './device-record-presentation';
 import {validateMapsSelectedObject} from '../maps/agent-context';
 import {isMvpView} from '../prototype/mvp-features';
+import {alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
@@ -60,13 +61,15 @@ export type DeviceExecutor = SharedDeviceExecutor<ContextEnvelope>;
 export type ForegroundReviewExecutor = SharedForegroundReviewExecutor<ContextEnvelope>;
 export type PendingReviewItem = SharedPendingReviewItem;
 
+/** Review and receipt copy for opening a view, by the name the owner sees rather than its id. */
+export function presentOpenView(view:string){const label=alphaViewLabel(view);return {title:`Open ${label}`,description:`Open ${label} on this phone`,appliedSummary:`Opened ${label} on this phone.`};}
 /** Alpha ships Home and Reminders plus the enabled MVP views. */
 const operations = {admitView:(view:string)=>view==='home'||view==='reminders'||isMvpView(view),parseWorkflowRead};
 export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope,WorkflowPhoneReview> = {
   appName:'Alpha',
   operations,
   workflow:{parseBinding:parseWorkflowBinding,parseRead:parseWorkflowRead,validateResult:validateWorkflowResult,assertOperation:assertWorkflowOperation},
-  presentRecord:(operation,timeZone)=>isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
+  presentRecord:(operation,timeZone)=>operation.type==='open_view'?presentOpenView(operation.view):isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
   browserNavigationSummary,
   mapsSelectionCurrent:validateMapsSelectedObject,
   namedCalendarReadTarget,
