@@ -111,10 +111,18 @@ export async function checkAutomationRequestSettlement(extraSources = [], {rewri
       const change = async (kind, target = false) => {
         const nextRequest = requests.length + 1;
         holdReads = true;readGate = deferred();
-        const label = kind === 'delete' ? 'Delete prompt' : kind === 'fire' ? 'Run now' : target ? 'Enable' : 'Pause';
-        const control = app.render().automation.actions.find(control => control.label === label);
-        assert.ok(control && !control.disabled, 'Actual row admits reviewed ' + label);
-        control.run();assert.equal(app.render().automation.review, true);
+        const detail = app.render().automation;
+        if (kind === 'enable') {
+          assert.ok(detail.power && !detail.powerDisabled, 'Actual power switch admits a reviewed change');
+          assert.equal(detail.powerOn, !target);
+          detail.togglePower();
+        } else {
+          const label = kind === 'delete' ? 'Delete prompt' : 'Run now';
+          const control = detail.actions.find(control => control.label === label);
+          assert.ok(control && !control.disabled, 'Actual row admits reviewed ' + label);
+          control.run();
+        }
+        assert.equal(app.render().automation.review, true);
         app.render().automation.confirm();
         await until(() => requests.length === nextRequest && admitted.size === nextRequest && inspect().busy && requests.at(-1)?.raw === rawEntries()[0]?.[1], 'actual retained mutation dispatch');
         mark('Actual reviewed request is journaled before dispatch', action('change', kind, target));
