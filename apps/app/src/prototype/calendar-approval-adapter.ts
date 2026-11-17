@@ -2,6 +2,7 @@ import {connectionController} from '../runtime/connection-ui';
 import {alphaClient} from '../runtime/alpha-client';
 import {calendarReviewText,inboxChoiceText,calendarApprovalStatus,type CalendarApproval,type CalendarApprovalResolution} from '../runtime/calendar-approval';
 import {reviewCalendarApproval} from './calendar-approval-review';
+import {CALENDAR_INVALIDATED_EVENT} from '../runtime/app-record-completion';
 type Shell=Record<string,any>;
 type CalendarReview=ReturnType<typeof calendarReviewText>;
 /** Parses of the agent messages on screen, by message id. A message whose text has not changed keeps
@@ -51,6 +52,8 @@ export function installCalendarApprovalAdapter(Component:Shell){
    if(!result)return;current();value.results.delete(key+id);value.statuses.set(key+id,'Checking…');shell.setState({});
    dispatched=true;const outcome=await connectionController.resolveCalendarApproval(result.request,result.decision,controller.signal);current();
    value.results.set(key+id,outcome);value.statuses.set(key+id,outcome.text);shell.setState({});shell.toast(outcome.text);
+   // The decision travels outside chat, so no reply carries its receipt: Calendar and Home read the change here.
+   const session=connectionController.getSnapshot().session;if(outcome.kind==='succeeded'&&session)window.dispatchEvent(new CustomEvent(CALENDAR_INVALIDATED_EVENT,{detail:{sessionId:session.sessionId}}));
   }catch(error){let admitted=false;try{current();admitted=true;}catch{/* Retired observations publish nothing to the replacement context. */}if(admitted){const message=dispatched?'Change not confirmed':error instanceof Error?error.message:'Unavailable';value.statuses.set(key+id,message);shell.setState({});shell.toast(message);}}
   finally{unsubscribe?.();unobserve?.();document.removeEventListener('visibilitychange',hidden);window.removeEventListener('pagehide',suspend);window.removeEventListener('alpha:device-state',suspend);if(value.abort===controller)value.abort=undefined;controller.abort();}
  }
@@ -67,7 +70,7 @@ export function installCalendarApprovalAdapter(Component:Shell){
    if(typeof message.displayText==='string'&&message.displayText!==source)return {...message,messageActionsLabel:message.messageActionsLabel?'Message actions: '+message.displayText:message.messageActionsLabel};
    // Order: the Calendar projection, then inbox choices (prose only); maps-adapter.ts (installMapsChatAdapter) runs after this.
    const parsed=cache.parse(String(message.id),source),displayText=inboxChoiceText(parsed.displayText);
-   return {...message,displayText,hasCalendarText:message.hasCalendarText!==false&&!!displayText,messageActionsLabel:message.messageActionsLabel?'Message actions: '+(displayText||'Calendar request'):message.messageActionsLabel,calendarReviews:parsed.ids.map(id=>({id,status:value.statuses.get(key+id)||'',canOpen:value.results.get(key+id)?.kind==='succeeded',open:()=>void review(this,id),openCalendar:()=>{if(this.live&&!document.hidden&&binding()===key){this.openView('calendar');void this.refreshAgentCalendar?.();}}}))};
+   return {...message,displayText,hasCalendarText:message.hasCalendarText!==false&&!!displayText,messageActionsLabel:message.messageActionsLabel?'Message actions: '+(displayText||'Calendar request'):message.messageActionsLabel,calendarReviews:parsed.ids.map(id=>({id,status:value.statuses.get(key+id)||'',canOpen:value.results.get(key+id)?.kind==='succeeded',open:()=>void review(this,id),openCalendar:()=>{if(this.live&&!document.hidden&&binding()===key)this.openView('calendar');}}))};
   });return out;
  };
  p.componentWillUnmount=function(){states.get(this)?.abort?.abort();states.delete(this);parses.delete(this);return unmount?.call(this);};

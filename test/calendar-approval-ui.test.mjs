@@ -72,7 +72,7 @@ const {reviewCalendarApproval:mountedReview}=await import('data:text/javascript;
 const targetFacts={calendar:'Personal',event:'Disposable event',eventStartsAt:Date.parse('2026-10-14T18:00:00Z'),eventEndsAt:Date.parse('2026-10-14T19:00:00Z'),targetVerified:true};
 const reviewCalendarApproval=(...args)=>mountedReview(...args,()=>targetFacts);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function dom(){const env=new JSDOM('<div class="os"></div>',{pretendToBeVisual:true});globalThis.window=env.window;globalThis.document=env.window.document;globalThis.getComputedStyle=env.window.getComputedStyle.bind(env.window);env.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};return ()=>{env.window.close();delete globalThis.window;delete globalThis.document;delete globalThis.getComputedStyle;};}
+function dom(){const env=new JSDOM('<div class="os"></div>',{pretendToBeVisual:true});globalThis.window=env.window;globalThis.document=env.window.document;globalThis.getComputedStyle=env.window.getComputedStyle.bind(env.window);const customEvent=globalThis.CustomEvent;globalThis.CustomEvent=env.window.CustomEvent;env.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};return ()=>{env.window.close();delete globalThis.window;delete globalThis.document;delete globalThis.getComputedStyle;globalThis.CustomEvent=customEvent;};}
 const button=name=>[...document.querySelectorAll('button')].find(b=>b.textContent===name);
 test('a changed request needs a fresh human choice; only the exact pending row is returned',async()=>{
  const cleanup=dom();try{let reads=0,result='waiting';const original=row(),changed=row({reason:'Changed request',updatedAt:'2026-10-15T00:01:00Z'});const promise=reviewCalendarApproval(async()=>++reads===1?original:changed,new AbortController().signal,()=>{},()=>{}).then(v=>result=v);await tick();button('Approve').click();await tick();assert.equal(result,'waiting');assert.match(document.querySelector('[role=status]').textContent,/Updated/);button('Approve').click();await promise;assert.equal(result.decision,'approve');assert.equal(result.request.revision,changed.revision);assert.equal(reads,3);}finally{cleanup();}
@@ -151,3 +151,27 @@ test('Calendar markup projection preserves completed device receipts and their a
  }finally{shell.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;}
 });
 
+const invalidations=()=>{const seen=[];window.addEventListener('alpha:canonical-calendar-invalidated',event=>seen.push(event.detail));return seen;};
+test('a completed approval tells Calendar and Home to read again; a decline, refusal or unconfirmed result does not',async()=>{
+ for(const [decision,reply,expected] of [['Approve',undefined,[{sessionId:'session'}]],['Decline',undefined,[]],
+  ['Approve',{kind:'invalidated',failure:{code:'CALENDAR_MANAGED_TARGET_CHANGED',retryable:false,acceptance:'not_accepted'}},[]],
+  ['Approve',{kind:'retryable',failure:{code:'CALENDAR_PROVIDER_UNAVAILABLE',retryable:true,acceptance:'not_accepted'}},[]],
+  ['Approve',{kind:'blocked',failure:{code:'CALENDAR_REVIEW_UNCONFIRMED',retryable:false,acceptance:'unknown'}},[]],['Approve','lost',[]]]){
+  const cleanup=dom();let shell;try{const setup=adapterFixture();shell=setup.shell;const f=setup.fixture,seen=invalidations();
+   if(reply)f.resolve=async(row,chosen)=>{if(reply==='lost')throw Error('Network lost');return {requestId:row.id,decision:chosen,text:'',...reply};};
+   shell.renderVals().msgs[0].calendarReviews[0].open();await tick();button(decision).click();await tick();
+   assert.equal(f.resolutions.length,1);assert.deepEqual(seen,expected,decision+' '+JSON.stringify(reply));
+  }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+ }
+});
+test('after a retryable result the same card approves again with the newly read row, once',async()=>{
+ const cleanup=dom();let shell;try{const setup=adapterFixture();shell=setup.shell;const f=setup.fixture,seen=invalidations(),first=f.row;
+  f.resolve=async(row,decision)=>({requestId:row.id,decision,kind:'retryable',text:'Nothing changed in Calendar. You can try again.',failure:{code:'CALENDAR_PROVIDER_UNAVAILABLE',retryable:true,acceptance:'not_accepted'}});
+  shell.renderVals().msgs[0].calendarReviews[0].open();await tick();button('Approve').click();await tick();
+  assert.equal(shell.renderVals().msgs[0].calendarReviews[0].status,'Nothing changed in Calendar. You can try again.');assert.equal(shell.renderVals().msgs[0].calendarReviews[0].canOpen,false);assert.deepEqual(seen,[]);
+  const retryable=f.row=row({state:'retryable',updatedAt:'2026-10-15T00:05:00Z'});delete f.resolve;
+  shell.renderVals().msgs[0].calendarReviews[0].open();await tick();assert.equal(button('Approve').hidden,false);assert.equal(button('Decline').hidden,true);button('Approve').click();await tick();
+  assert.deepEqual(f.resolutions,[{row:first,decision:'approve'},{row:retryable,decision:'approve'}]);assert.notEqual(retryable.revision,first.revision);
+  assert.equal(shell.renderVals().msgs[0].calendarReviews[0].canOpen,true);assert.deepEqual(seen,[{sessionId:'session'}]);assert.equal(f.sent.length,0);
+ }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+});
