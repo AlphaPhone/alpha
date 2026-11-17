@@ -17,7 +17,7 @@ import { BrowserReviews } from '../browser/review';
 import { createExternalBrowserHandoff } from './browser-external-handoff';
 import { browserErrorMessage, PROFILE_UNSUPPORTED_NATIVE_MESSAGE, PROFILE_UNSUPPORTED_MESSAGE } from '../browser/browser-errors';
 import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-messages';
-import { approvedOpenTab, surfacePollIdle } from '../browser/browser-poll';
+import { approvedOpenTab, BrowserOpenRefused, surfacePollIdle } from '../browser/browser-poll';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
 // The shared native tab host (BrowserTabHostPlugin) under Alpha's Capacitor name; the web build
@@ -223,10 +223,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         url = new URL('https://www.google.com/search');
         url.searchParams.set('q', input.query);
       }
-    } catch { if (approvedSignal) throw new Error('Invalid approved browser destination'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
-    const s = state(); if (!s) { if (approvedSignal) throw new Error('Browser unavailable'); return; }
+    } catch { if (approvedSignal) throw new BrowserOpenRefused('Browser cannot open that address.'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
+    const s = state(); if (!s) { if (approvedSignal) throw new BrowserOpenRefused('Browser is unavailable.'); return; }
     // Restored rows count: an agent open past the cap fails visibly instead of being dropped.
-    if (newTab && s.tabs.length >= MAX_TABS) { const full = new Error('Tab limit'); if (approvedSignal) throw full; report(full); return; }
+    if (newTab && s.tabs.length >= MAX_TABS) { if (approvedSignal) throw new BrowserOpenRefused(`Browser already has ${MAX_TABS} tabs open. Close one, then ask again.`); report(new Error('Tab limit')); return; }
     profileUnsupportedTab=undefined;
     const selectedTab=s.cur;
     const id = newTab ? newTabId() : target ?? s.cur, priv = newTab ? privateTab : isPrivate(id);
@@ -558,7 +558,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     };
     this.browserNavigateApproved = async (raw: string, signal: AbortSignal, deferPresentation = false) => {
       const url = new URL(raw);
-      if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Only HTTPS destinations may be approved');
+      if (url.protocol !== 'https:' || url.username || url.password) throw new BrowserOpenRefused('Browser opens only HTTPS addresses without sign-in details.');
       signal.throwIfAborted();
       const selected = state()?.cur;
       // A request made from a private page stays in that profile. Opening a
