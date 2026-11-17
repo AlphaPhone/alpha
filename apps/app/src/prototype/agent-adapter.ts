@@ -185,26 +185,32 @@ function createdFromSlot(slot:string,key:string){
     return Array.isArray(from)&&Array.isArray(to)&&from.length===4&&to.length===4&&from[3]===null&&typeof to[3]==='string'&&!!to[3]&&JSON.stringify(from.slice(0,3))===JSON.stringify(to.slice(0,3));
   }catch{return false;}
 }
-function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string){
+/** What releasing a composer send did with a send's text that had no durable copy. */
+type ComposerRelease='kept'|'restored'|'lost';
+const UNSENT_NOT_RESTORED='Not sent. The conversation changed, so the message could not be put back.';
+function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string):ComposerRelease{
   const draft=shell.composerDraft;draft.release();
   // A send made without a durable copy has no saved text to restore, so the composer gets it back directly,
-  // ahead of anything typed since (as the durable release does). It goes back only to the conversation it was
-  // written for, or the one this send created for the same owner and agent; never to another binding.
+  // ahead of anything typed since (as the durable release does). It goes back only to the binding it was
+  // written for, or the conversation this send created for the same owner and agent; any other change of
+  // binding, including one from none, means it cannot be put back, and the caller says so.
   if(undurableText!==undefined){
-    if(!shell.live||!undurableText.trim())return;
+    if(!shell.live||!undurableText.trim())return 'kept';
     const key=draft.binding;
-    if(heldKey&&key&&key!==heldKey&&!createdFromSlot(heldKey,key)){shell.toast('Not sent. The conversation changed, so the message was not restored.',ERROR_TOAST);return;}
-    shell.setState((previous:Shell)=>{const now=String(previous.draft||'');return{draft:now.trim()?`${undurableText}\n${now}`:undurableText};});
-    shell.toast('Not sent. Your message is back in the composer.');
-    return;
+    if(key!==heldKey&&!(heldKey&&key&&createdFromSlot(heldKey,key)))return 'lost';
+    // Released before the composer was cleared (an attachment that could not be saved): the text never left it.
+    if(String(shell.S().draft||'')===undurableText)return 'kept';
+    shell.setState((previous:Shell)=>{const now=String(previous.draft||'');return now===undurableText?null:{draft:now.trim()?`${undurableText}\n${now}`:undurableText};});
+    return 'restored';
   }
   const key=draft.binding;
-  if(!heldKey||!key||key===heldKey||!heldText.trim()||String(shell.S().draft||'').trim()||!createdFromSlot(heldKey,key))return;
+  if(!heldKey||!key||key===heldKey||!heldText.trim()||String(shell.S().draft||'').trim()||!createdFromSlot(heldKey,key))return 'kept';
   shell.setState((previous:Shell)=>draft.binding!==key||String(previous.draft||'').trim()?null:{draft:heldText},()=>{
     if(!shell.live||draft.binding!==key||String(shell.S().draft||'')!==heldText)return;
     draft.edit(heldText);
     settleFirstSendSlot(shell,heldKey,key,heldText,()=>shell.live&&draft.binding===key);
   });
+  return 'kept';
 }
 function attachmentKey(session:VerifiedSession,conversationId:string,messageId:string){
   return JSON.stringify(['chat-attachment-v1',session.origin,session.ownerId,session.agentId,conversationId,messageId]);
@@ -1993,10 +1999,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         await saveAttachment(connection.session,conversationId,userId,sentAttachment);
         stagedAttachmentKey=attachmentKey(connection.session,conversationId,userId);
       }
-      catch{if(fromComposer)releaseComposerSend(this,heldKey,heldText,undurableText);this.toast('Attachment could not be saved. Try again.');return;}
+      catch{const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText):'kept';if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else this.toast('Attachment could not be saved. Try again.');return;}
       // The local write may settle after the composer, attachment or conversation has been replaced.
       if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment||this.fileAttachments!==sentAttachment.fileAttachments){
-        if(this.live)releaseComposerSend(this,heldKey,heldText,undurableText);else this.composerDraft?.release();
+        if(this.live){if(releaseComposerSend(this,heldKey,heldText,undurableText)==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);}else this.composerDraft?.release();
         return;
       }
     }
@@ -2101,7 +2107,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Nothing reached the agent: put the text back and drop the unsent bubble. Never resend.
         // The text back in the composer says it was not sent; only a refusal with its own reason is
         // shown, and the private local preview keeps a held composer send's refusal out of toasts as before.
-        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));if(fromComposer)releaseComposerSend(this,heldKey,heldText,undurableText);if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(!fromComposer)this.toast('Not sent.');}}
+        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText):'kept';if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
         else if(fromComposer)this.composerDraft?.release();
       }else{
         const sessionRetired=attempt.residentSessionRetired===true;
