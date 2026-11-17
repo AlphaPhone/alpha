@@ -132,7 +132,7 @@ export function telephonyActionResultText(
       return contactWriteResultText(result);
     case "contact-show":
       return result.status === "shown"
-        ? "Contacts is open on the phone and shows the matching contacts to the owner. No contact detail was shared with you."
+        ? "Contacts opens on the phone with the matching contacts listed for the owner. No contact detail was shared with you."
         : result.status === "not-found"
           ? "No matching contact was found on the phone."
           : "Contacts cannot be shown on this phone right now.";
@@ -173,6 +173,8 @@ const OWNER_RECEIPTS: ReadonlyMap<string, string> = new Map(
       [{ kind: "contact-write", status: "saved" }, "Contact saved."],
       [{ kind: "contact-write", status: "deleted" }, "Contact deleted."],
       [{ kind: "contact-write", status: "cancelled" }, "You dismissed the change. Nothing was changed."],
+      [{ kind: "contact-show", status: "shown" }, "Contacts shows the matching contacts. Alpha learned only that there is a match."],
+      [{ kind: "contact-read", status: "read" }, "You shared the open contact with Alpha."],
       [{ kind: "sms-compose", status: "drafted" }, "The message is in that conversation’s text field for you to edit and send. Nothing was sent."],
       [{ kind: "sms-compose", status: "submitted" }, "Your message was handed to the carrier. It isn’t confirmed sent yet."],
       [{ kind: "sms-compose", status: "sent" }, "Your carrier accepted the message."],

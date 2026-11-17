@@ -6,7 +6,7 @@ import {CAMERA_CAPTURE_CAPABILITY} from '../../../../.eliza/client-features/plug
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
-import {telephonyActionCapabilities} from './telephony-actions-contract.ts';
+import {CONTACT_UPDATE_VALUES_CAPABILITY,CONTACT_WRITE_CAPABILITY,SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY,telephonyActionCapabilities} from './telephony-actions-contract.ts';
 import {reminderTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
 import {notesTarget} from './notes-contract.ts';
 import { calendarSource, calendarTarget } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
@@ -139,7 +139,8 @@ export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
  * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
 export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; previousNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
 /** Every capability either list offers. The Cloud agent answers two lists, its capabilities route
- * and its device registration, and the registration is the complete one. */
+ * and its device registration. They are one list in the pinned agent; an older Cloud agent's route
+ * left telephony out, so the registration is the complete one. */
 export function offeredByEither(...offers: unknown[]): unknown[] {
   return [...new Set(offers.flatMap(offer => Array.isArray(offer) ? offer : []))];
 }
@@ -167,9 +168,13 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // The reviewed dial handoff only with the native telephony profile (the verified image). The
   // on-device contact lookup waits for an owner number picker in the review, so it is not offered.
   capabilities.push(...telephonyDeviceCapabilities({present:profile.aospImage,dial:agent.includes(PHONE_DIAL_CAPABILITY),contactLookup:false}));
-  // Owner-approved calls, texts by name, contact changes and reads of the open thread or voicemail:
-  // the verified image only, and only what the agent offers. Each is confirmed on the phone
+  // Owner-approved calls, texts and drafts to a contact or a number, contact changes (whole fields
+  // or single values), Contacts filtered to a search, and reads of the open thread, voicemail or
+  // contact: the verified image only, and only what the agent offers. Each is confirmed on the phone
   // (telephony-executor.ts); the agent never receives the address book or a message list.
-  capabilities.push(...telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability)));
+  const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability));
+  // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
+  for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
+  capabilities.push(...telephony);
   return capabilities;
 }

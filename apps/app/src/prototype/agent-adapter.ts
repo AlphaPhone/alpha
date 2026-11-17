@@ -34,7 +34,8 @@ import {askTelephonyReview} from './telephony-review';
 import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
-import {openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {receiptLabel} from '../runtime/image-sms';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
@@ -837,7 +838,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(s.shade&&shell.notificationSelection?.())providerSelection=shell.notificationSelection();
     // The owning Calendar hook checks readiness/privacy; a chat overlay does not replace its underlying view.
     const calendarDay=view==='calendar'?shell.calendarDayObservation?.():undefined;
-    const telephonySelection=view==='messages'?openSmsThreadSelection():view==='phone'?openVoicemailSelection():null;
+    const telephonySelection=view==='messages'?openSmsThreadSelection():view==='phone'?openVoicemailSelection():view==='contacts'?openContactSelection():null;
     alphaClient.setViewContext({
       timeZone:currentClockTimeZone(),
       ...(calendarDay?{calendarDay}:{}),
@@ -1126,6 +1127,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
+          // A draft for a conversation that is not open, and Contacts filtered to a search: each step
+          // changes the view, so it runs after the receipt and only while this review is still current.
+          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>{current();step();});},
+          showContacts:async query=>{
+            const step=showContactsStep(query),access=step?await book.status():null;
+            if(!step||access?.available!==true||access.readable!==true)return null;
+            const listed=await book.list({query,limit:1});current();
+            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
+          },
+          openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
         return imageTelephonyAction(operation,operationId,ports,{allowed:imageEffectAllowed},signal);

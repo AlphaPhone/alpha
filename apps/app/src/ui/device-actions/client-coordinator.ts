@@ -560,6 +560,12 @@ function describeForegroundReview(
 
 type ExecutionResult = DeviceExecutionResult & {
   foregroundResult?: ForegroundReviewResult;
+  /**
+   * The view change that shows a successful telephony outcome (the drafted
+   * conversation, the filtered Contacts list). Like `presentBrowser`, it ends
+   * the review it ran under, so it runs after the receipt attempt.
+   */
+  present?: () => void;
 };
 type CommittedReceiptResult = { result: unknown } | Record<string, never>;
 
@@ -1190,7 +1196,7 @@ export class DeviceActionCoordinator<
           items.push({
             proposalId: proposal.id,
             proposal: null,
-            notice: `${card.title}: Ask again from the open ${selectedView === "messages" ? "conversation" : "voicemail"}.`,
+            notice: `${card.title}: Ask again from the open ${selectedView === "messages" ? "conversation" : selectedView === "contacts" ? "contact" : "voicemail"}.`,
           });
           continue;
         }
@@ -1903,16 +1909,14 @@ export class DeviceActionCoordinator<
       // Presentation changes the foreground context and cancels its approval.
       // Run it only after this exact action's receipt attempt, never as a retry.
       const presentBrowser = () => {
-        if (
-          p.operation.type === "browser_navigate" &&
-          result.status === "succeeded"
-        ) {
-          try {
+        if (result.status !== "succeeded") return;
+        try {
+          if (p.operation.type === "browser_navigate") {
             if (reviewed.currentRequest) assertCurrent();
             result.presentBrowser?.();
-          } catch {
-            /* A retired foreground must not replace a journaled outcome. */
-          }
+          } else if (isTelephonyAction(p.operation)) result.present?.();
+        } catch {
+          /* A retired foreground must not replace a journaled outcome. */
         }
       };
       let confirmed: DeviceProposal;
@@ -3092,11 +3096,7 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
     isClockHandoffOperation(operation)
   );
 }
-/**
- * Review-card copy. The phone's own review shows the resolved name, number and before/after.
- * A contact `add`/`remove`, an SMS `target` or `draft`, `contact_show` and `contact_read_selected`
- * are refused as not negotiated before any card, until this phone advertises them.
- */
+/** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
 function describeTelephonyAction(operation: TelephonyActionOperation): {
   title: string;
   description: string;
@@ -3128,11 +3128,30 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
         title: "Add contact",
         description: `${fields(operation.contact)}\n\nSaves this contact on your phone after you confirm.`,
       };
-    case "contact_update":
+    case "contact_update": {
+      const values = (
+        label: string,
+        change: { phoneNumbers?: string[]; emailAddresses?: string[] } = {},
+      ) =>
+        [...(change.phoneNumbers ?? []), ...(change.emailAddresses ?? [])].map(
+          (value) => `${label}: ${value}`,
+        );
+      const lines = [
+        ...(operation.set ? [fields(operation.set)] : []),
+        ...values("Add", operation.add),
+        ...values("Remove", operation.remove),
+      ].join("\n");
       return {
         title: "Change contact",
-        description: `Contact: ${operation.query}\n${fields(operation.set ?? {})}\n\nReplaces these details after you confirm. Nothing else is shared with the agent.`,
+        description: `Contact: ${operation.query}\n${lines}\n\n${
+          operation.add || operation.remove
+            ? operation.set
+              ? "Replaces the details listed whole and adds or removes only the values marked, after you confirm."
+              : "Adds or removes only these values after you confirm. The contact's other details stay."
+            : "Replaces these details after you confirm."
+        } Nothing else is shared with the agent.`,
       };
+    }
     case "contact_delete":
       return {
         title: "Delete contact",
@@ -3151,10 +3170,19 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
       };
     case "sms_compose": {
       const target = smsComposeTarget(operation);
-      return {
-        title: "Review SMS",
-        description: `${target.kind === "number" ? `To: ${target.number}` : `To contact: ${target.query}`}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
-      };
+      const to =
+        target.kind === "number"
+          ? `To: ${target.number}`
+          : `To contact: ${target.query}`;
+      return "draft" in operation
+        ? {
+            title: "Draft SMS",
+            description: `${to}\n\n${operation.body}\n\nOpens that conversation in Messages with this in its text field. Nothing is sent until you tap Send there.`,
+          }
+        : {
+            title: "Review SMS",
+            description: `${to}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
+          };
     }
     case "sms_reply_selected":
       return {
