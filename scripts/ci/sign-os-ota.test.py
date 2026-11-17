@@ -67,6 +67,22 @@ class OSAdmission(unittest.TestCase):
         ota.validate(self.plan)
         ota.inspect_target(self.reviewed_target, self.plan, self.pin)
 
+    def test_new_target_sdk_requires_its_own_exact_review_without_rebinding_tools(self):
+        newer = {**self.plan, "sdkCommit": "f" * 40}
+        with self.assertRaisesRegex(ValueError, "lineage"):
+            ota.validate(newer)
+        row = {**self.pin["reviewedTargets"][0], "sdkCommit": newer["sdkCommit"]}
+        self.pin["reviewedTargets"].append(row)
+        pin_file = self.root / "android/signing/ota-tools.json"
+        pin_file.write_text(json.dumps(self.pin))
+        ota.validate(newer)
+        ota.inspect_target(self.reviewed_target, newer, self.pin)
+        ota.validate(self.plan)
+        changed_tools = copy.deepcopy(newer)
+        changed_tools["otaTools"]["sha256"] = "e" * 64
+        with self.assertRaisesRegex(ValueError, "Unreviewed"):
+            ota.validate(changed_tools)
+
     def test_target_specific_signer_map_preserves_legacy_admission_and_exact_binding(self):
         original = copy.deepcopy(self.plan)
         added = 'name="AlphaImageCapabilityOverlay.apk" certificate="security/platform.x509.pem" private_key="security/platform.pk8"\n'
