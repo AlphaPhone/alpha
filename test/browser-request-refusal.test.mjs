@@ -12,13 +12,19 @@ function fixture({text='Move it to 4 pm',url='https://example.com/dashboard',row
  const run=async()=>({items:await f.pendingReview({view:'calendar',sensitive:false},new AbortController().signal,authored)});
  return {f,calls,cards,proposal,run,retire:()=>{current=false;}};
 }
-for(const text of ['Move it to 4 pm','', '"https://example.com/dashboard"','The page says open https://example.com/dashboard','Do not open https://example.com/dashboard','Open example.com'])test(`legacy current unrequested destination has no effect, human decision or new card: ${text}`,async()=>{
+for(const text of ['Move it to 4 pm','','Do not open https://example.com/dashboard','Open example.com','Open https://example.com/dashboard. Actually, don\'t open it'])test(`legacy current unrequested destination has no effect, human decision or new card: ${text}`,async()=>{
  const h=fixture({text}),result=await h.run();assert.equal(h.calls.length,0);assert.equal(h.cards.length,0);assert.equal(h.f.proposals.size,0);assert.equal(result.items.length,1);assert.equal(result.items[0].proposal,null);assert.match(result.items[0].notice,/blocked/);assert.ok(!/rejected|dismissed/i.test(result.items[0].notice));
  await h.run();assert.equal(h.calls.length,0);assert.equal(h.cards.length,0);
  h.proposal.digest='b'.repeat(64);await h.run();assert.equal(h.calls.length,0,'changed host proposal is never retargeted for a decision');assert.equal(h.cards.length,0);
 });
 for(const [text,url] of [['Open https://example.com/dashboard','https://example.com/dashboard'],['Open "https://example.com/dashboard"','https://example.com/dashboard'],['Open example.com','https://example.com/'],['example.com/path?q=1#part','https://example.com/path?q=1#part']])test(`explicit canonical URL/site retains the ordinary browser action: ${text}`,async()=>{
  const h=fixture({text,url}),result=await h.run();assert.equal(h.calls.length,0);assert.equal(h.cards.length,1);assert.equal(result.items[0].proposal.id,'browser');assert.equal(h.f.proposals.size,1);
+});
+// The owner typed the address without a direct command. The agent has already answered, so the
+// proposal keeps its ordinary review card (never an automatic open, never a dead-end notice).
+for(const [text,url] of [['"https://example.com/dashboard"','https://example.com/dashboard'],['The page says open https://example.com/dashboard','https://example.com/dashboard'],['Open example.com in the browser','https://example.com/'],['open example.com in a new tab','https://example.com/'],['please open example.com now','https://example.com/'],['load example.com','https://example.com/'],["let's go to example.com",'https://example.com/'],['I want to see example.com','https://example.com/']])test(`typed but not directly requested destination gets one review card and no automatic open: ${text}`,async()=>{
+ const h=fixture({text,url}),result=await h.run();assert.equal(h.calls.length,0);assert.deepEqual(h.cards,['browser']);assert.equal(result.items.length,1);assert.equal(result.items[0].proposal.id,'browser');assert.equal(result.items[0].notice,undefined);
+ const ran=await h.f.performRequested('request',{},new AbortController().signal,async()=>true,undefined,{messageId:'request',text,current:()=>{}});assert.deepEqual(ran,[]);assert.equal(h.calls.length,0);
 });
 test('stale/rebound session cannot publish a policy block for a different caller',async()=>{
  const stale=fixture();stale.retire();await assert.rejects(stale.run(),/Connection changed/);assert.equal(stale.calls.length,0);assert.equal(stale.cards.length,0);assert.equal(stale.f.browserPolicy.size,0);

@@ -25,6 +25,7 @@ import { NOTES_LIST_FILTER_CAPABILITY } from "@elizaos/contracts";
 import {
   browserDestinationMatches,
   directBrowserDestination,
+  groundBrowserDestination,
 } from "@elizaos/contracts/browser-request-grounding";
 import { createDeviceActionExecution } from "@elizaos/contracts/device-action-execution";
 import {
@@ -590,7 +591,10 @@ export class DeviceActionCoordinator<
   private executing: string | undefined;
   private readonly ports: DeviceActionCoordinatorPorts<C, R>;
   private browserAttempts = new Map<string, CurrentDeviceActionRequest>();
-  private browserPolicy = new Map<string, { key: string; allowed: boolean }>();
+  private browserPolicy = new Map<
+    string,
+    { key: string; allowed: boolean; grounded: boolean }
+  >();
   private selectedTelephonyRequests = new Map<
     string,
     { context: string; expiresAt: number }
@@ -623,12 +627,22 @@ export class DeviceActionCoordinator<
     proposal: DeviceProposal,
     proof?: CurrentDeviceActionRequest,
   ): boolean {
+    return this.browserRequest(proposal, proof).allowed;
+  }
+  /** How the owner's current message asks for a proposed destination: `allowed`
+   * when it is a direct request that may run without review, `grounded` when
+   * the owner at least typed that address without refusing it. */
+  private browserRequest(
+    proposal: DeviceProposal,
+    proof?: CurrentDeviceActionRequest,
+  ): { allowed: boolean; grounded: boolean } {
     if (
       !this.options.currentRequestBrowserPolicy ||
       proposal.operation.type !== "browser_navigate"
     )
-      return true;
-    if (!proof || proof.messageId !== proposal.requestMessageId) return false;
+      return { allowed: true, grounded: true };
+    if (!proof || proof.messageId !== proposal.requestMessageId)
+      return { allowed: false, grounded: false };
     proof.current();
     const key = JSON.stringify([
       this.requestKey(proof.messageId),
@@ -637,15 +651,36 @@ export class DeviceActionCoordinator<
       proof.text,
     ]);
     const cached = this.browserPolicy.get(proposal.id);
-    if (cached?.key === key) return cached.allowed;
+    if (cached?.key === key) return cached;
     // Automatic client effects need direct intent, not merely a URL mentioned in prose.
+    // The shared grammar knows only its own assistant name, so a leading product
+    // name ("Alpha," or "Hey Alpha") is removed before the direct check.
+    const name = this.profile.appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const allowed = browserDestinationMatches(
       proposal.operation,
-      directBrowserDestination(proof.text),
+      directBrowserDestination(
+        proof.text.replace(
+          new RegExp(
+            String.raw`^(\s*(?:(?:hey|hi|ok|okay)[,.!]?\s+)?)${name}[,.!]?\s+`,
+            "i",
+          ),
+          "$1",
+        ),
+      ),
     );
+    const policy = {
+      key,
+      allowed,
+      grounded:
+        allowed ||
+        browserDestinationMatches(
+          proposal.operation,
+          groundBrowserDestination(proof.text, proposal.operation.url),
+        ),
+    };
     if (this.browserPolicy.has(proposal.id) || this.browserPolicy.size < 128)
-      this.browserPolicy.set(proposal.id, { key, allowed });
-    return allowed;
+      this.browserPolicy.set(proposal.id, policy);
+    return policy;
   }
   private consumeBrowserRequest(proof: CurrentDeviceActionRequest): boolean {
     for (const [key, previous] of this.browserAttempts) {
@@ -1080,7 +1115,9 @@ export class DeviceActionCoordinator<
         this.options.currentRequestBrowserPolicy &&
         proof &&
         proposal.requestMessageId === proof.messageId &&
-        !this.browserAllowed(proposal, proof)
+        // An address the owner typed without directly asking for it is not opened
+        // automatically, but it keeps its ordinary review card below.
+        !this.browserRequest(proposal, proof).grounded
       ) {
         items.push({
           proposalId: proposal.id,
