@@ -4,7 +4,7 @@ import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
 import { applyListFilter, clearListFilter, setListFilterHandler } from '../runtime/comms-bar';
 import {UNNAMED_CONTACT,contactEmailFieldLabel,contactEmailLabel,contactEmailRemoveLabel,contactPhoneFieldLabel,contactPhoneLabel,contactPhoneRemoveLabel} from '../ui/telephony/telephony-messages';
-import {CONTACT_MAX_NAME,CONTACT_MAX_NOTES,contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
+import {CONTACT_MAX_NAME,CONTACT_MAX_NOTES,contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft,type ContactDraftProblem} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
 const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z';
@@ -14,7 +14,7 @@ export function contactActs(phones:readonly string[],api:Bag){
   ...(isMvpView('phone')?[{d:PHONE,label:`Call ${number}`,go:()=>api.open('phone',{prefill:number})}]:[]),
   ...(isMvpView('messages')?[{d:BUBBLE,label:`Message ${number}`,go:()=>api.open('messages',{prefill:number})}]:[])]);
 }
-const PROBLEM:Record<string,string>={'empty-contact':'Add a name, number or email.','invalid-name':'Check the name.','invalid-notes':'Check the notes.','too-many-fields':'Too many numbers or emails.','invalid-number':'Check the phone numbers.','invalid-address':'Check the email addresses.','invalid-type':'Check the phone numbers.'};
+const PROBLEM:Record<ContactDraftProblem,string>={'empty-contact':'Add a name, number or email.','invalid-name':'Check the name.','invalid-notes':'Check the notes.','too-many-fields':'Too many numbers or emails.','invalid-number':'Check the phone numbers.','invalid-address':'Check the email addresses.','invalid-type':'Check the phone numbers.'};
 /** The contact editor of the image Contacts view (specs/quint/native/ContactsBook.qnt). */
 type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:ContactDraft;givenName:string;familyName:string;notes:string;notesEditable:boolean;initialText:{givenName:string;familyName:string;notes:string};nameEdited:boolean;notesEdited:boolean;dirty:boolean;stale:boolean;notice:string};
 /** Why Android would refuse this draft. A new contact's name is judged from its structured fields

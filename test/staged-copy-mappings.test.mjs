@@ -174,7 +174,7 @@ test('every problem-log exit reason and screen failure kind has its own Alpha ti
 const telephonyMessages=await import('../apps/app/src/ui/telephony/telephony-messages.ts');
 const {CONTACT_PHONE_TYPES,CONTACT_EMAIL_TYPES}=await import('../.eliza/client-features/packages/contracts/src/native-address-book.ts');
 test('every contact phone and email type has Alpha’s label, never the address book identifier',()=>{
- const {CONTACT_PHONE_TYPE_LABELS,CONTACT_EMAIL_TYPE_LABELS,contactPhoneLabel,contactPhoneRemoveLabel,contactEmailLabel,contactEmailFieldLabel,contactEmailRemoveLabel}=telephonyMessages;
+ const {CONTACT_PHONE_TYPE_LABELS,CONTACT_EMAIL_TYPE_LABELS,contactPhoneLabel,contactPhoneFieldLabel,contactPhoneRemoveLabel,contactEmailLabel,contactEmailFieldLabel,contactEmailRemoveLabel}=telephonyMessages;
  const PHONE={home:['Home','Remove home number'],mobile:['Mobile','Remove mobile number'],work:['Work','Remove work number'],
   fax_work:['Work fax','Remove work fax number'],fax_home:['Home fax','Remove home fax number'],pager:['Pager','Remove pager number'],
   other:['Other','Remove other number'],callback:['Callback','Remove callback number'],car:['Car','Remove car number'],
@@ -186,6 +186,7 @@ test('every contact phone and email type has Alpha’s label, never the address 
  for(const type of CONTACT_PHONE_TYPES){
   assert.deepEqual([contactPhoneLabel(type),contactPhoneRemoveLabel(type)],PHONE[type],type);
   assert.ok(!contactPhoneLabel(type).includes('_'),type);
+  assert.equal(contactPhoneFieldLabel(type),`${PHONE[type][0]} phone`,type);
  }
  const EMAIL={home:['Home','Home email','Remove home email'],work:['Work','Work email','Remove work email'],other:['Other','Other email','Remove other email'],mobile:['Mobile','Mobile email','Remove mobile email']};
  assert.deepEqual(Object.keys(CONTACT_EMAIL_TYPE_LABELS).sort(),[...CONTACT_EMAIL_TYPES].sort());
@@ -194,6 +195,7 @@ test('every contact phone and email type has Alpha’s label, never the address 
  assert.deepEqual([contactPhoneLabel('custom:Boat'),contactPhoneRemoveLabel('custom:Boat')],['Boat','Remove Boat number']);
  assert.deepEqual([contactEmailLabel('custom:School'),contactEmailFieldLabel('custom:School'),contactEmailRemoveLabel('custom:School')],['School','School email','Remove School email']);
  assert.deepEqual([contactPhoneLabel('satellite_phone'),contactPhoneRemoveLabel('satellite_phone')],['Phone','Remove phone number']);
+ assert.deepEqual([contactPhoneFieldLabel('custom:Boat'),contactPhoneFieldLabel('satellite_phone')],['Boat phone','Phone']);
  assert.deepEqual([contactEmailLabel('toString'),contactEmailFieldLabel('toString'),contactEmailRemoveLabel('toString')],['Email','Email','Remove email']);
  const adapter=readFileSync(new URL('../apps/app/src/prototype/contacts-adapter.ts',import.meta.url),'utf8');
  assert.doesNotMatch(adapter,/TYPE_LABEL|replace\(\/_\/g/,'Contacts never derives a label from the identifier');
