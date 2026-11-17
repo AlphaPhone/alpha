@@ -2419,7 +2419,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       else this.toast(errorNotice(result.message, 'Speech recognition is unavailable on this device.'), ERROR_TOAST);
     } catch { this.toast('Speech recognition is unavailable on this device.'); }
   };
-  p.stopVoice = function () { this.pendingActionApproval?.abort();this.cancelReadReplyCompletions?.();alphaClient.cancel(); this.setState({ voice: 'off', typing: false }); };
+  p.stopVoice = function () {
+    const stopping=this.stopVoiceConversation?.(true);
+    if(stopping)return stopping;
+    this.pendingActionApproval?.abort();this.cancelReadReplyCompletions?.();alphaClient.cancel();this.setState({voice:'off',typing:false});
+  };
   views.notes.render = function (state: Shell, api: Shell) {
     const out = notesRender({ ...state, record: false }, api);
     out.storageStatus=state.storageStatus;
