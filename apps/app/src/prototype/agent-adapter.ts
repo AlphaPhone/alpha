@@ -188,7 +188,7 @@ function createdFromSlot(slot:string,key:string){
 /** What releasing a composer send did with a send's text that had no durable copy. */
 type ComposerRelease='kept'|'restored'|'lost';
 const UNSENT_NOT_RESTORED='Not sent. The conversation changed, so the message could not be put back.';
-function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string,{cleared=true,sameChat}:{cleared?:boolean;sameChat?:()=>boolean}={}):ComposerRelease{
+function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string,{cleared=true,sameChat,stayed}:{cleared?:boolean;sameChat?:()=>boolean;stayed?:()=>boolean}={}):ComposerRelease{
   const draft=shell.composerDraft;draft.release();
   // A send made without a durable copy has no saved text to restore, so the composer gets it back directly,
   // ahead of anything typed since (as the durable release does). It goes back only to the conversation it was
@@ -198,7 +198,9 @@ function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:strin
   if(undurableText!==undefined){
     if(!shell.live||!undurableText.trim())return 'kept';
     const key=draft.binding;
-    const same=heldKey&&key?key===heldKey||createdFromSlot(heldKey,key):sameChat?sameChat():key===heldKey;
+    // A new chat's slot matches any conversation of its owner and agent, so it counts as this send's own
+    // conversation only if the owner chose no conversation while the send was pending.
+    const same=heldKey&&key?key===heldKey||(createdFromSlot(heldKey,key)&&(stayed?.()??true)):sameChat?sameChat():key===heldKey;
     if(!same)return 'lost';
     // Released before the composer was cleared (an attachment that could not be saved): the text is normally
     // still there, perhaps with more typed after it, so nothing is put back. Only if something emptied or
@@ -208,7 +210,7 @@ function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:strin
     return 'restored';
   }
   const key=draft.binding;
-  if(!heldKey||!key||key===heldKey||!heldText.trim()||String(shell.S().draft||'').trim()||!createdFromSlot(heldKey,key))return 'kept';
+  if(!heldKey||!key||key===heldKey||!heldText.trim()||String(shell.S().draft||'').trim()||!createdFromSlot(heldKey,key)||!(stayed?.()??true))return 'kept';
   shell.setState((previous:Shell)=>draft.binding!==key||String(previous.draft||'').trim()?null:{draft:heldText},()=>{
     if(!shell.live||draft.binding!==key||String(shell.S().draft||'')!==heldText)return;
     draft.edit(heldText);
@@ -859,7 +861,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const history = connectionController.getSnapshot().history;
       if (history && history.sessionId === session && this.restoredHistory !== history) {
-        if(!history.automatic){this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
+        if(!history.automatic){this.ownerConversationChoices=(this.ownerConversationChoices||0)+1;this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
         this.restoredHistory = history;
         const attachmentSession=connectionController.getSnapshot().session;
         if(attachmentSession)void restoreAttachments(history.messages,attachmentSession,history.conversationId).then(messages=>{
@@ -1970,7 +1972,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const revision=alphaClient.getState().context.revision,connection=connectionController.getSnapshot(),sessionId=connection.session?.sessionId,conversationId=connection.history?.conversationId;
     const current=()=>{const selected=connectionController.getSnapshot();return this.live&&!document.hidden&&(!selected.busy||selected.backgroundWork===true)&&!selected.open&&!document.querySelector('[data-alpha-chat-recorder],[data-alpha-pill-voice]')&&selected.session?.sessionId===sessionId&&selected.history?.conversationId===conversationId&&alphaClient.getState().context.revision===revision&&filesCurrent();};
     // The owner, agent and conversation this send was written in; a send that began a conversation stays in it.
-    const sendChat=()=>{const selected=connectionController.getSnapshot();return selected.session?.sessionId===sessionId&&(!conversationId||selected.history?.conversationId===conversationId);};
+    const choicesAtSend=this.ownerConversationChoices||0,ownerStayed=()=>(this.ownerConversationChoices||0)===choicesAtSend;
+    const sendChat=()=>{const selected=connectionController.getSnapshot();return selected.session?.sessionId===sessionId&&(conversationId?selected.history?.conversationId===conversationId:ownerStayed());};
     const heldText=String(s.draft||'');let heldKey:string|undefined,undurableText:string|undefined;
     if(fromComposer){
       this.draftSendPending=true;
@@ -2005,10 +2008,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         await saveAttachment(connection.session,conversationId,userId,sentAttachment);
         stagedAttachmentKey=attachmentKey(connection.session,conversationId,userId);
       }
-      catch{const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{cleared:false,sameChat:sendChat}):'kept';if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else this.toast('Attachment could not be saved. Try again.');return;}
+      catch{const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{cleared:false,sameChat:sendChat,stayed:ownerStayed}):'kept';if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else this.toast('Attachment could not be saved. Try again.');return;}
       // The local write may settle after the composer, attachment or conversation has been replaced.
       if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment||this.fileAttachments!==sentAttachment.fileAttachments){
-        if(this.live){if(releaseComposerSend(this,heldKey,heldText,undurableText,{cleared:false,sameChat:sendChat})==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);}else this.composerDraft?.release();
+        if(this.live){if(releaseComposerSend(this,heldKey,heldText,undurableText,{cleared:false,sameChat:sendChat,stayed:ownerStayed})==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);}else this.composerDraft?.release();
         return;
       }
     }
@@ -2113,7 +2116,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Nothing reached the agent: put the text back and drop the unsent bubble. Never resend.
         // The text back in the composer says it was not sent; only a refusal with its own reason is
         // shown, and the private local preview keeps a held composer send's refusal out of toasts as before.
-        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{sameChat:sendChat}):'kept';if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
+        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{sameChat:sendChat,stayed:ownerStayed}):'kept';if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
         else if(fromComposer)this.composerDraft?.release();
       }else{
         const sessionRetired=attempt.residentSessionRetired===true;
