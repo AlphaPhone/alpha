@@ -132,8 +132,8 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (!available() || disposed) throw new LibraryAgentRefusal('The device library is available only in the Android app.');
       const current = await readScope();
       signal.throwIfAborted();
-      if (!current || current.scope === 'denied') throw new LibraryAgentRefusal('Alpha is not allowed to read the photo library. Nothing was shared.');
-      if (current.locked) throw new LibraryAgentRefusal('Unlock the phone to use the device library. Nothing was shared.');
+      if (!current || current.scope === 'denied') throw new LibraryAgentRefusal('Alpha is not allowed to read the photo library.');
+      if (current.locked) throw new LibraryAgentRefusal('Nothing was shared because the phone is locked.');
       if (operation.type === 'photo_library_search') {
         const limit = operation.limit ?? 20;
         const page = parsePage(await port.page({ limit, thumbnails: false, kind: operation.kind ?? 'all', ...(operation.from !== undefined ? { from: operation.from } : {}), ...(operation.to !== undefined ? { to: operation.to } : {}), ...(operation.favorites ? { favorites: true } : {}) }));
@@ -152,10 +152,10 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (acting || review || host.reviewOpen()) throw new LibraryAgentRefusal('Finish the open review first.');
       if (operation.type === 'photo_library_select') return host.run(operation, signal) as Promise<LibraryAgentResult>;
       const items = operation.items.map(entry => ({ id: entry.id, revision: modelRevisions.native(entry.id, entry.revision) ?? '' }));
-      if (items.some(entry => !entry.revision)) throw new LibraryAgentRefusal('An item changed since the assistant read it. Nothing changed; ask again.');
+      if (items.some(entry => !entry.revision)) throw new LibraryAgentRefusal('Nothing changed because an item changed since the assistant read it.');
       const prepared = prepareReview(operation.action, items), token = epoch;
       // The review binds the exact revisions the assistant read; the provider confirms they are still current.
-      if (!await validCurrent(prepared.items)) throw new LibraryAgentRefusal('An item changed or left the library. Nothing changed; ask again.');
+      if (!await validCurrent(prepared.items)) throw new LibraryAgentRefusal('Nothing changed because an item changed or left the library.');
       signal.throwIfAborted();
       // Photos may have been left, or another review opened, while the provider checked.
       if (token !== epoch || disposed) throw new LibraryAgentRefusal('Open Photos, then ask again.');

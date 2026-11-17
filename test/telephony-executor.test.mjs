@@ -98,7 +98,7 @@ test('a reply for the open conversation is placed as a draft and never sent', as
     assert.deepEqual(result.telephonyResult, {kind: 'sms-reply', status});
     assert.equal(result.status, status === 'drafted' ? 'succeeded' : 'failed');
     // AP-16 D5: an Alpha draft replaces unsent owner text (kept for one Undo); occupied now means a send or pictures.
-    if (status === 'occupied') assert.equal(result.summary, 'A message is being sent or has pictures attached in that conversation. Nothing was changed.');
+    if (status === 'occupied') assert.equal(result.summary, 'That conversation has a message sending or pictures attached.');
     assert.deepEqual(did(p, 'draft'), [['draft', 'Ten minutes away']], 'no recipient is named: it is the conversation on screen');
     assert.equal(did(p, 'sms').length + did(p, 'search').length + did(p, 'ask').length, 0, 'nothing is looked up, asked or sent');
   }

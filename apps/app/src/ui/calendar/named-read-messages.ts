@@ -9,26 +9,26 @@
 export const NAMED_CALENDAR_READ_SUMMARIES: ReadonlyMap<string, string> = new Map([
   [
     "Choose the exact matching event in Calendar before sharing it. Nothing was shared or changed.",
-    "Open the matching event in Calendar first, then ask again. Nothing was shared or changed.",
+    "Nothing was shared because the matching event is not open in Calendar.",
   ],
   [
     "The event was not shared. Its selection, access or review changed; nothing was changed.",
-    "The event wasn’t shared because its selection, access or review changed. Nothing was changed.",
+    "The event wasn’t shared because its selection, access or review changed.",
   ],
   [
     "The selected event does not match the requested name. Nothing was shared or changed.",
-    "The open event doesn’t match the name you asked about. Nothing was shared or changed.",
+    "Nothing was shared because the open event doesn’t match the name you asked about.",
   ],
   [
     "Shared the matching event you chose. Its requested update still requires a separate review.",
-    "Shared the event you chose. Any change you asked for needs its own review.",
+    "Shared the event you chose.",
   ],
 ]);
 
 /** Alpha's sentence for a result whose summary is not in the table, by its status. */
 export const NAMED_CALENDAR_READ_FALLBACK = {
   succeeded: "Shared the event you chose.",
-  failed: "The event wasn’t shared. Nothing was changed.",
+  failed: "The event wasn’t shared.",
 } as const;
 
 /** Alpha's summary for a named Calendar read result; the shared summary is never returned. */

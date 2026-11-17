@@ -20,7 +20,7 @@ const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new br
 export function actionResultText(text: string): string {
   return text === 'The action could not reach a confirmed result.'
     || text === 'Action did not reach a confirmed result. Check action history before requesting it again.'
-    ? 'I couldn’t confirm the result. Check the app before trying again.' : text;
+    ? 'I couldn’t confirm the result.' : text;
 }
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
@@ -88,6 +88,9 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (stored.card?.proposalId && stored.card.done) {
       const rawSummary = stored.card.sub;
       if (typeof rawSummary !== 'string' || !rawSummary.trim()) return message;
+      // AC-26: a comms proposal card shows its own result ("Done · Completed · summary"); it is the
+      // one completion, so its row shows no receipt line beside it.
+      if (stored.card.type === 'proposal') return {...message, hasCalendarText:false};
       const summary = actionResultText(rawSummary);
       const displayText = destination && stored.card.title === 'Completed' ? browserReceiptDisplayText(destination, summary) : summary;
       return {...message, cGeneric:false, cDigest:false, displayText, hasCalendarText:true, deviceReceipt:true};

@@ -22,17 +22,15 @@ export const REMINDER_DELIVERY_PROBLEMS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * The receipt summary for a saved reminder whose notification could not be arranged, or
- * `undefined` when `status` is not such a delivery status. `approximate` adds that Android
- * delivers reminder alerts at an approximate time.
+ * The one-sentence receipt summary for a saved reminder whose notification could not be
+ * arranged, or `undefined` when `status` is not such a delivery status.
  */
 export function reminderDeliveryProblemText(
   operationType: string,
   status: string,
-  { approximate = false }: { approximate?: boolean } = {},
 ): string | undefined {
   const problem = REMINDER_DELIVERY_PROBLEMS.get(status);
   if (!problem) return undefined;
   const done = REMINDER_CHANGE_DONE.get(operationType) ?? "Reminder changed";
-  return `${done}; ${problem}.${approximate ? " Android delivery is approximate." : ""}`;
+  return `${done}, but ${problem}.`;
 }

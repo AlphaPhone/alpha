@@ -75,6 +75,31 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		expect((await fixture(page)).approved).toEqual([]);
 	});
 
+	test('an approved proposal completes once: the card shows the result and no quote repeats it', async ({page}) => {
+		// Pixel 10a, 2026-11-17 ("Create a new contact - shaw 4153024399"): the approved card read
+		// "Completed · The owner approved and the contact was saved on the phone." and the same
+		// sentence was also printed as a quoted line above the card.
+		await setup(page, {comms: true});
+		await page.evaluate(() => {
+			const f = (window as any).commsAlpha;
+			f.replies.push({text: 'Review this request on your phone before it can run.', proposals: [{id: 'contact-1', title: 'Create contact', description: 'Name: Shaw\nPhone: (415) 302-4399', expiresAt: Date.now() + 600_000, contextRevision: 0}]});
+		});
+		await ask(page, 'Create a new contact - shaw 4153024399');
+		const card = page.locator('[data-alpha-chat-proposal]');
+		await expect(card.getByRole('button', {name: 'Approve: Create contact'})).toBeVisible();
+		await page.evaluate(async () => {
+			const {alphaClient} = await import('/src/runtime/alpha-client.ts');
+			const f = (window as any).commsAlpha;
+			alphaClient.approve = async (id: string) => { f.approved.push(id); return {proposalId: id, status: 'succeeded', summary: 'Contact saved.'} as any; };
+		});
+		await card.getByRole('button', {name: 'Approve: Create contact'}).click();
+		await expect.poll(async () => (await fixture(page)).approved).toEqual(['contact-1']);
+		const chat = page.locator('[data-alpha-layer="conversation"]');
+		await expect(card.locator('[data-alpha-proposal-detail]')).toHaveText('Contact saved.');
+		await expect(chat.getByText('Contact saved.', {exact: true})).toHaveCount(1);
+		await expect(chat.locator('[data-alpha-device-receipt="true"]')).toHaveCount(0);
+	});
+
 	test('the call approval card names the person and the number (AC-20)', async ({page}) => {
 		await setup(page, {comms: true});
 		await page.evaluate(p => (window as any).commsAlpha.replies.push({text: 'I can call her.', proposals: [p]}), proposal('n', '+14155550132'));
