@@ -382,8 +382,9 @@ async function reroute(page) {
 
 export async function mountClosedMaps(extraSources, runs, holdRouteReplies = false) {
   checkClientFeatures();
-  const watched = new Set([adapter, ...['maps-screen.ts', 'cloud-provider.ts'].map(path => resolve(root, 'apps/app/src/ui/maps/'+path)),
-    ...['state.ts', 'cloud-provider.ts', 'cloud-session.ts']
+  // The Maps view-model is Alpha's own module; the mounted page no longer loads the pinned client's copy.
+  const watched = new Set([adapter, ...['maps-screen.ts', 'cloud-provider.ts', 'state.ts'].map(path => resolve(root, 'apps/app/src/ui/maps/'+path)),
+    ...['cloud-provider.ts', 'cloud-session.ts']
       .map(path => resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/'+path))]);
   if (holdRouteReplies) watched.add(resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/device-navigation.ts'));
   const sources = [...new Set([

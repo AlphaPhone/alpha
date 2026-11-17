@@ -27,7 +27,7 @@ function sharedModule(path) {
 async function fixture(extraSources) {
   const shared = sharedModule('vendor/eliza/plugins/plugin-native-passwords/src/client.ts');
   const bindings = sharedModule('vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts');
-  const sources = [...shared.sources,...bindings.sources,'apps/app/src/passwords/password-manager.ts',
+  const sources = [...shared.sources,...bindings.sources,'apps/app/src/ui/passwords/passwords-presentation.ts','apps/app/src/passwords/password-manager.ts',
     'specs/quint/refinement/application/support.mjs','test/support/strip-types.mjs',driver,...extraSources];
   const driverHashes = captureInputs(sources);
   const sharedExports=shared.instantiate(), bindingExports=bindings.instantiate();
@@ -52,7 +52,7 @@ async function fixture(extraSources) {
   };
   const document = new EventTarget(); document.hidden=false;
   const window = new EventTarget();
-  const api = sourceContext(['apps/app/src/passwords/password-manager.ts'], [
+  const api = sourceContext(['apps/app/src/ui/passwords/passwords-presentation.ts','apps/app/src/passwords/password-manager.ts'], [
     'passwordManagerGroups','passwordEntryPage','leavePasswordManager','refreshPasswordManager','passwordManagerLifecycle',
     'observe: () => ({active,generation,locked:status?.locked ?? true,entries:entries!==null,damaged,resetReviewed:confirmReset!==null,secret:!!draft?.password,draft:!!draft,busy,noticePresent:!!notice})',
   ], {

@@ -27,9 +27,16 @@ export async function loadWorkflowClockFixture() {
   const bundle = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `
     export {currentClockTimeZone,buildClockRequest,describeClockDays} from './${dependencyPaths[0]}';
     export {createClockHandoffHistory,clockHandoffLegacyKey,clockHandoffSlot} from './${dependencyPaths[1]}';
-    export {createInlineModal} from './${dependencyPaths[2]}';`}, bundle: true, write: false, metafile: true,
+    export {createInlineModal} from './${dependencyPaths[2]}';
+    export {clockResultText} from './${dependencyPaths[4]}';`}, bundle: true, write: false, metafile: true,
   format: 'esm', platform: 'node', plugins: [{name: 'authenticated-clock-source', setup(build) {
     const marker = '.eliza/client-features/';
+    // The same pinned source, whether it is named by its package alias or by its prepared path.
+    build.onResolve({filter: /^@elizaos\/plugin-assistant\/device-actions\//}, args => {
+      const path = shared + args.path.slice(args.path.lastIndexOf('/') + 1) + '.ts';
+      assert.ok(dependencyPaths.includes(path), path);
+      return {path: resolve(root, path)};
+    });
     build.onResolve({filter: /\.eliza\/client-features\//}, args => {
       const path = 'vendor/eliza/' + args.path.slice(args.path.indexOf(marker) + marker.length);
       assert.ok(dependencyPaths.includes(path), path);
