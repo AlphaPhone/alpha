@@ -88,6 +88,19 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page,'deleteMessage')).toHaveLength(1);
   });
 
+  test('a send that is pending or failed is refused as not settled: nothing is deleted and Delete stays offered',async({page})=>{
+    await setupTelephony(page);
+    await page.evaluate(()=>{const row=(window as any).messages['thread:101'].find((value:any)=>value.id==='sms:4');Object.assign(row,{direction:'outgoing',status:'failed',deliveryReport:'none'});});
+    await page.getByRole('button',{name:'Messages',exact:true}).first().click();await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    const target=page.locator('[data-alpha-message-id="sms:4"]');
+    await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+    await page.getByRole('dialog',{name:'Delete message?',exact:true}).getByRole('button',{name:'Delete',exact:true}).click();
+    await expect(page.locator('[data-alpha-toast]')).toContainText('This message is still sending or did not send, so it was not deleted.');
+    await expect(target).toBeVisible();expect(await inputs(page,'deleteMessage')).toHaveLength(1);
+    expect(await page.evaluate(()=>(window as any).messages['thread:101'].some((value:any)=>value.id==='sms:4'))).toBe(true);
+    await target.dispatchEvent('contextmenu');await expect(page.getByRole('menuitem',{name:'Delete',exact:true}).first()).toBeVisible();
+  });
+
   test('message links are credential-free HTTP(S), stay inert until tapped, and open Alpha Browser', async ({page}) => {
     await setupTelephony(page);
     await page.evaluate(() => {
