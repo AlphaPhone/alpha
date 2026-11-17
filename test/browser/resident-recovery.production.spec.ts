@@ -1,10 +1,10 @@
 import {seedCompletedAccessSetup} from './flag-off-android';
 import {test,expect,type Page} from '@playwright/test';
-import {flagOffAndroid,fenceNetwork,harness,button,completeAccessSetup,openYourAgent} from './flag-off-android';
+import {flagOffAndroid,fenceNetwork,harness,button,completeAccessSetup} from './flag-off-android';
 import {residentStub} from './resident-stub';
 // Actual flag-off UI/CSS with closed native boundary fixtures. These tests do not archive real files.
 const token='d32f7f34-962b-47b7-8f0d-f2fe7f12610a';
-type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost'|'attach-pending'|'startup-read';
+type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost'|'attach-pending'|'startup-read'|'changed-provider';
 async function boot(page:Page,mode:Mode='success',signedOut=false){
  await fenceNetwork(page);await flagOffAndroid(page);await residentStub(page,{nativeSignIn:true,emptyKeystore:signedOut,accounts:[{token:'synthetic-cloud-key',userId:'9f1dc45a-4011-4e44-947a-30d999d24fa5',email:'owner@example.invalid',balance:5}]});
  await page.addInitScript(({mode,token})=>{
@@ -19,6 +19,8 @@ async function boot(page:Page,mode:Mode='success',signedOut=false){
   c.PluginHeaders.find((p:any)=>p.name==='Agent').methods.push(...['reviewRecovery','archiveRecovery','residentAttachment'].map(name=>({name,rtype:'promise'})));
   c.nativePromise=async(p:string,m:string,input:any)=>{
    if(p==='Agent'&&m==='getStatus'&&control.dead)return {packaged:true,state:'restarting',reason:'agent exited: 137'};
+   if(p==='Agent'&&m==='providerStatus'&&mode==='changed-provider'&&archived)
+     return {configured:true,provider:'cerebras',mode:'own',revision:'changed-provider'};
    if(p==='Agent'&&m==='residentAttachment'&&(mode==='lost'||mode==='transient'||mode==='attach-pending'||mode==='startup-read')&&calls.starts>0)
      return {attachable:false,bindingRetained:true,bindingGuard:'a'.repeat(64)};
    if(p==='Agent'&&m==='request'&&mode==='startup-read'&&calls.starts===1&&input.path==='/api/auth/me')
@@ -51,7 +53,10 @@ async function boot(page:Page,mode:Mode='success',signedOut=false){
  await page.goto('/');await expect.poll(()=>page.evaluate(()=>(window as any).recoveryCalls.starts)).toBeGreaterThanOrEqual(1);
  if(signedOut){const gate=page.locator('[role="main"].alpha-cloud-sign-in');await expect(gate).toBeVisible();return gate;}
  await expect(button(page,'Settings')).toBeVisible();await completeAccessSetup(page);
- return openYourAgent(page);
+ await button(page,'Open conversation').click();
+ const conversation=page.locator('[data-alpha-layer="conversation"][aria-hidden="false"]');
+ await expect(conversation.getByRole('textbox',{name:'Message Alpha',exact:true})).toBeVisible();
+ return conversation;
 }
 const calls=(page:Page)=>page.evaluate(()=>(window as any).recoveryCalls as {starts:number;reviews:number;archives:unknown[]});
 test('recovery waits for explicit restart and a backgrounded review cannot archive or start',async({page},testInfo)=>{
@@ -64,8 +69,7 @@ test('recovery waits for explicit restart and a backgrounded review cannot archi
  await expect.poll(()=>page.evaluate(()=>(window as any).recoveryControl.pending)).toBe(false);
  expect(await calls(page)).toEqual({starts:1,reviews:1,archives:[]});
  // An explicit restart cannot continue or obtain another review in the background.
- await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.textContent==='Restart Alpha'));
- await page.evaluate(()=>Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Restart Alpha')!.click());
+ await panel.getByRole('button',{name:'Restart Alpha',exact:true}).evaluate(button=>(button as HTMLButtonElement).click());
  expect(await calls(page)).toEqual({starts:1,reviews:1,archives:[]});
  await page.evaluate(()=>{(window as any).recoveryControl.hidden=false;document.dispatchEvent(new Event('visibilitychange'));});
  await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toBeEnabled();
@@ -74,15 +78,29 @@ test('recovery waits for explicit restart and a backgrounded review cannot archi
 });
 test('explicit restart requires complete archival before one ordinary start and retains the Cloud credential',async({page})=>{
  const panel=await boot(page);const key=await harness(page,f=>f.slots['cloud:production']);
+ const draft=panel.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await draft.fill('Keep this draft during restart');
  await panel.getByRole('button',{name:'Restart Alpha',exact:true}).click();
- await expect.poll(()=>calls(page)).toEqual({starts:2,reviews:1,archives:[{reviewToken:token}]});await expect(panel.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
- expect(await harness(page,f=>f.slots['cloud:production'])).toBe(key);expect(await harness(page,f=>f.streams)).toBe(0);await expect(page.getByRole('region',{name:'Settings',exact:true})).toBeVisible();await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await expect(button(page,'Notes')).toBeVisible();
+ await expect.poll(()=>calls(page)).toEqual({starts:2,reviews:1,archives:[{reviewToken:token}]});
+ await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
+ await expect(draft).toHaveValue('Keep this draft during restart');
+ expect(await harness(page,f=>f.slots['cloud:production'])).toBe(key);
+ expect(await harness(page,f=>f.streams)).toBe(0);
+});
+test('a provider change during restart does not carry the unsent draft into that session',async({page})=>{
+ const panel=await boot(page,'changed-provider');
+ const draft=panel.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await draft.fill('Keep these words in the previous provider');
+ await panel.getByRole('button',{name:'Restart Alpha',exact:true}).click();
+ await expect.poll(()=>calls(page)).toEqual({starts:2,reviews:1,archives:[{reviewToken:token}]});
+ await expect(draft).toHaveValue('');
+ expect(await harness(page,f=>f.streams)).toBe(0);
 });
 test('unavailable native inventory keeps restart blocked without archival',async({page})=>{
  const panel=await boot(page,'review-unavailable');await panel.getByRole('button',{name:'Restart Alpha',exact:true}).click();
  await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toBeEnabled();
  expect(await calls(page)).toEqual({starts:1,reviews:1,archives:[]});
- await expect(panel.getByRole('button',{name:'Load conversations',exact:true})).toHaveCount(0);
+ await expect(panel.getByRole('status',{name:'Assistant draft status',exact:true})).toHaveText('Restart blocked');
 });
 for(const mode of ['changed','partial'] as const)test(`${mode} archival cannot start the agent and retry gets a fresh native review`,async({page})=>{
  const panel=await boot(page,mode);await panel.getByRole('button',{name:'Restart Alpha',exact:true}).click();
@@ -90,24 +108,28 @@ for(const mode of ['changed','partial'] as const)test(`${mode} archival cannot s
  expect(await calls(page)).toEqual({starts:1,reviews:1,archives:[{reviewToken:token}]});
  await panel.getByRole('button',{name:'Restart Alpha',exact:true}).click();
  await expect.poll(()=>calls(page)).toEqual({starts:1,reviews:2,archives:[{reviewToken:token},{reviewToken:token.replace(/.{12}$/,String(2).padStart(12,'0'))}]});
- await expect(panel.getByRole('button',{name:'Load conversations',exact:true})).toHaveCount(0);
+ await expect(panel.getByRole('status',{name:'Assistant draft status',exact:true})).toHaveText(mode==='partial'?'Restart incomplete':'Restart blocked');
 });
+async function assertReattached(page:Page, panel:Awaited<ReturnType<typeof boot>>, priorStreams:number) {
+ expect(await harness(page,f=>f.streams)).toBe(priorStreams);
+ const draft=panel.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await draft.fill('Connection check '+(priorStreams+1));
+ await panel.getByRole('button',{name:'Send',exact:true}).click();
+ await expect(panel.getByText('Resident reply '+(priorStreams+1),{exact:true})).toBeVisible();
+ expect(await harness(page,f=>f.streams)).toBe(priorStreams+1);
+}
 test('automatic recovery continues past the old retry limit without a Status page or manual retry',async({page})=>{
  await page.clock.install();
- const activity=await boot(page,'transient');
- await expect(activity.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
- await expect(activity.getByRole('button',{name:'Retry',exact:true})).toHaveCount(0);
- await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
- // These are delays between completed attempts, including a second use of the capped delay.
- for (const [index,delay] of [3000,10000,30000,60000,60000].entries()){
+ const panel=await boot(page,'transient');
+ await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
+ await expect(panel.getByRole('button',{name:'Retry',exact:true})).toHaveCount(0);
+ // These are the delays between attempts, including a second use of the capped delay.
+ for(const [index,delay] of [3000,10000,30000,60000,60000].entries()){
   await page.clock.fastForward(delay+50);
   await expect.poll(()=>calls(page)).toEqual({starts:index+2,reviews:0,archives:[]});
  }
- await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
- await activity.getByRole('button',{name:'Back to About',exact:true}).click();
- await expect(activity.getByRole('heading',{name:'About',exact:true})).toBeVisible();
- await expect(activity.getByRole('button',{name:'Status',exact:true})).toHaveCount(0);
- expect(await harness(page,f=>f.streams)).toBe(0);
+ await assertReattached(page,panel,0);
+ expect(await calls(page)).toEqual({starts:6,reviews:0,archives:[]});
 });
 
 for(const [mode,name] of [
@@ -115,27 +137,24 @@ for(const [mode,name] of [
  ['startup-read','a native owner read interrupted by restart'],
 ] as const)test(`${name} retries without changing the saved binding`,async({page})=>{
  await page.clock.install();
- const activity=await boot(page,mode);
- const load=activity.getByRole('button',{name:'Load conversations',exact:true});
- await expect(load).toHaveCount(0);
- await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
+ const panel=await boot(page,mode);
+ await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
  const credential=await harness(page,f=>f.slots['cloud:production']);
  const initialProviderCalls=await page.evaluate(()=>(window as any).recoveryControl.initialProviderCalls as string[]);
 
  await page.clock.fastForward(3050);
  await expect.poll(()=>calls(page)).toEqual({starts:2,reviews:0,archives:[]});
  await page.evaluate(()=>(window as any).recoveryControl.release());
- await expect(load).toBeVisible();
+ await assertReattached(page,panel,0);
  expect(await harness(page,f=>f.slots['cloud:production'])).toBe(credential);
  expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.stop'||call==='Agent.configureCloudProvider'))).toEqual(initialProviderCalls);
- expect(await harness(page,f=>f.streams)).toBe(0);
+ expect(await calls(page)).toEqual({starts:2,reviews:0,archives:[]});
 });
 
 test('returning to Alpha after a resident process exit reconnects without a user request',async({page})=>{
  await page.clock.install();
- const activity=await boot(page,'lost');
- const load=activity.getByRole('button',{name:'Load conversations',exact:true});
- await expect(load).toBeVisible();
+ const panel=await boot(page,'lost');
+ await assertReattached(page,panel,0);
  const credential=await harness(page,f=>f.slots['cloud:production']);
  const stops=await harness(page,f=>f.calls.filter(call=>call==='Agent.stop').length);
  const configs=await harness(page,f=>f.calls.filter(call=>call==='Agent.configureCloudProvider').length);
@@ -146,15 +165,15 @@ test('returning to Alpha after a resident process exit reconnects without a user
    window.dispatchEvent(new Event('pageshow'));
  });
  await expect.poll(()=>calls(page)).toEqual({starts:2,reviews:0,archives:[]});
- await expect(load).toHaveCount(0);
+ await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
  await expect(page.getByText(/Your agent stopped|Retry in Settings/)).toHaveCount(0);
  await page.clock.fastForward(3050);
- await expect(load).toBeVisible();
+ await expect.poll(()=>calls(page)).toEqual({starts:3,reviews:0,archives:[]});
+ await assertReattached(page,panel,1);
  expect(await calls(page)).toEqual({starts:3,reviews:0,archives:[]});
  expect(await harness(page,f=>f.slots['cloud:production'])).toBe(credential);
  expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.stop').length)).toBe(stops);
  expect(await harness(page,f=>f.calls.filter(call=>call==='Agent.configureCloudProvider').length)).toBe(configs);
- expect(await harness(page,f=>f.streams)).toBe(0);
 });
 
 test('a signed-out startup refusal keeps guarded restart reachable on the sign-in page',async({page})=>{

@@ -1,6 +1,6 @@
 import {seedCompletedAccessSetup} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, completeAccessSetup, openYourAgent } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, completeAccessSetup } from './flag-off-android';
 import { residentStub, stub, setStub, enterNativeEmailCode } from './resident-stub';
 const account={token:'signed-out-page-qa-key',userId:'9f1dc45a-4011-4e44-947a-30d999d24fa5',email:'signed-out-qa@example.invalid',balance:5};
 const waiting='Checking code';
@@ -22,7 +22,24 @@ test.describe('mandatory production sign-in page',()=>{
   await expect(gate.getByRole('button',{name:'Send code',exact:true})).toBeEnabled();
   expect(await harness(page,f=>f.slots['cloud:production']??null)).toBeNull();
  });
- test('successful sign-in removes the gate; agent controls open as a Settings page',async({page})=>{const{gate,foreign}=await start(page);await enterNativeEmailCode(page);await expect(gate).toHaveCount(0,{timeout:30000});await completeAccessSetup(page);await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));const settings=await openYourAgent(page);await expect(settings.getByRole('heading',{name:'Agent activity',exact:true})).toBeVisible();await expect(page.getByRole('dialog',{name:'Your agent',exact:true})).toHaveCount(0);await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();expect(await harness(page,f=>f.streams)).toBe(0);expect(foreign).toEqual([]);});
+ test('successful email sign-in leaves Home available and Alpha replies to one typed message',async({page})=>{
+  const {gate,foreign}=await start(page);
+  await enterNativeEmailCode(page);
+  await expect(gate).toHaveCount(0,{timeout:30000});
+  await completeAccessSetup(page);
+  await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(button(page,'Notes')).toBeVisible();
+  expect(await harness(page,f=>f.streams)).toBe(0);
+
+  await button(page,'Open conversation').click();
+  const chat=page.locator('[data-alpha-layer="conversation"][aria-hidden="false"]');
+  await chat.getByRole('textbox',{name:'Message Alpha',exact:true}).fill('First text after sign-in');
+  await chat.getByRole('button',{name:'Send',exact:true}).click();
+  await expect(chat.getByText('Resident reply 1',{exact:true})).toBeVisible();
+  expect(await harness(page,f=>f.posts)).toEqual(['First text after sign-in']);
+  expect(foreign).toEqual([]);
+ });
 });
 
 // UI progress only: this feature fixture does not manufacture OS/provider grants.

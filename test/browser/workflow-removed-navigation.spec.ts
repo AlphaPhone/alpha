@@ -38,7 +38,7 @@ test('a fresh Workflows visit reaches the sole removed workflow and restores it 
  await page.getByRole('button',{name:/^Removed workflows\b/}).click();
  await workflowCard(page,'Sole removed workflow').click();
  await expect(page.getByRole('status',{name:'Workflow run status',exact:true})).toHaveText('Removed');
- await expect(page.getByRole('button',{name:'succeeded execution',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Finished execution',exact:true})).toBeVisible();
  expect(await savedState(page)).toEqual(before);
 
  await page.getByRole('button',{name:'Restore workflow',exact:true}).click();

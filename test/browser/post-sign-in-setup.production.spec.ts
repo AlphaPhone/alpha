@@ -3,7 +3,7 @@
 // key behind them, and nothing says AI is off or shows billing while it starts. Synthetic native
 // outcomes only; no device, Steward, Eliza Cloud, runtime or account is real.
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
-import { flagOffAndroid, button, fenceNetwork, openYourAgent } from './flag-off-android';
+import { flagOffAndroid, button, fenceNetwork, harness } from './flag-off-android';
 import { residentStub, stub, setStub } from './resident-stub';
 import { recordStartupFrames, expectNoHomeBeforePrompt, startupLoading } from './helpers/startup-frames';
 
@@ -103,12 +103,15 @@ test('APK path: a verified email code goes straight to the seven access steps wh
   for (const text of STARTING_SLOP) expect(await setup.innerText()).not.toContain(text);
   await setup.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(setup).toHaveCount(0);
-  const settings = await openYourAgent(page);
-  await expect(settings.getByRole('button', { name: 'Load conversations', exact: true })).toHaveCount(0);
-  await expect(settings.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+  await expect(button(page,'Notes')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
+  expect(await harness(page,f=>f.streams)).toBe(0);
+  const requestsBefore=await harness(page,f=>f.calls.filter((call:string)=>call==='Agent.request').length);
   await page.evaluate(() => (window as any).postSignIn.release());
-  await expect(settings.getByRole('button', { name: 'Load conversations', exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect.poll(()=>harness(page,f=>f.calls.filter((call:string)=>call==='Agent.request').length)).toBeGreaterThan(requestsBefore);
   expect(await starts(page)).toBe(2);
+  expect(await harness(page,f=>f.streams)).toBe(0);
   expect(foreign).toEqual([]);
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await expect(button(page, 'Notes')).toBeVisible();

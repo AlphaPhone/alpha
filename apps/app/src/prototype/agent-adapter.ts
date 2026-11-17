@@ -95,6 +95,7 @@ import { isAndroid } from '../native';
 import { registerPlugin } from '../platform-plugins';
 import { SystemBars, SystemBarsStyle } from '@capacitor/core';
 import {mergeConversationDelivery, connectionController, STOPPED_REPLY_NOTICE, STOPPED_CANCELLED_NOTICE, STOPPED_CONFIRMED_NOTICE, STOPPED_UNCHECKED_NOTICE, RESIDENT_STARTING_NOTICE, RESIDENT_RECOVERING_NOTICE, NO_AGENT_SEND, NO_AGENT_VOICE, residentAlwaysPresent, agentPendingText, agentAvailabilityNotice } from '../runtime/connection-ui';
+import {residentRecoveryCopy} from '../runtime/resident-recovery';
 import { broaderPageNotice, honestTiles, handoffGate, watchReturnToApp, tileFactsFromSnapshot, tileSettingsPages, type TileFacts, type TileKey } from './native-adapter';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 const alphaDevice = registerPlugin<{ snapshot(): Promise<Record<string, unknown>>; openSettings(input: { page: string }): Promise<{ status: string; specific?: boolean }> }>('AlphaDevice');
@@ -103,6 +104,19 @@ const elizaSystem = registerPlugin<{ setFlashlight(input: { enabled: boolean }):
 // The reference renderer is a JavaScript state machine. Its presentation API is
 // intentionally kept intact; authenticated effects are installed at this seam.
 type Shell = any;
+function residentRestartDraftScope(snapshot: ReturnType<typeof connectionController.getSnapshot>): string {
+  const account = snapshot.cloudAccount;
+  const provider = snapshot.providerStatus;
+  return JSON.stringify([
+    account?.environment, account?.userId, account?.organizationId, account?.credentialId,
+    provider?.mode ?? provider?.provider, provider?.selected ? provider.revision : undefined,
+  ]);
+}
+function residentDraftOwner(snapshot: ReturnType<typeof connectionController.getSnapshot>): string | undefined {
+  const session = snapshot.session;
+  if (snapshot.kind === 'resident' && session)
+    return JSON.stringify([session.origin, session.ownerId, session.agentId]);
+}
 /** One composer send. A message is dispatched once the transport accepted it for delivery. */
 type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>};
 /** Refused before any request carrying the message could leave this phone. */
@@ -838,7 +852,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.composerDraft=new AssistantDraftController(assistantDraftStore,()=>String(this.S().draft||''),(text,expected,current)=>new Promise<void>(resolve=>{if(!this.live||current&&!current()){resolve();return;}this.setState((previous:Shell)=>{if(current&&!current()||expected!==undefined&&String(previous.draft||'')!==expected)return null;if(this.startupDraft!==null)this.startupDraft=undefined;this.reviewedSourceDraft=null;return {draft:text};},resolve);}),()=>{if(this.live)this.setState({});},{notSent:''});
     this.refreshDraftBinding=()=>{this.draftBindingAbort?.abort();if(residentAlwaysPresent&&!connectionController.getSnapshot().session){this.draftBindingTask=Promise.resolve();return;}const controller=this.draftBindingAbort=new AbortController();this.draftBindingTask=connectionController.assistantDraftBinding(controller.signal).then(async key=>{if(!this.live||controller.signal.aborted)return;const review=await firstSendReview(this,key,controller.signal);if(!this.live||controller.signal.aborted)return;await this.composerDraft.open(review.open??key);if(review.moved&&this.composerDraft.binding===key)settleFirstSendSlot(this,review.moved,key,String(this.S().draft||''),()=>this.live&&this.composerDraft.binding===key);}).catch(()=>{if(this.live&&!controller.signal.aborted)this.composerDraft.unavailable();});};
     this.refreshDraftBinding();
-    this.connectionSession = connectionController.getSnapshot().session?.sessionId;
+    const initialConnection = connectionController.getSnapshot();
+    this.connectionSession = initialConnection.session?.sessionId;
+    this.lastResidentDraftOwner = residentDraftOwner(initialConnection);
     // Only fresh typing before the first verified session can cross startup admission.
     this.startupDraft=this.connectionSession?null:undefined;
     this.connectionUnsubscribe = connectionController.subscribe(() => {
@@ -848,7 +864,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(this.live)this.setState({});
       }
       let draftBindingAfterPaint=false;
+      if (this.residentRestartDraft && this.residentRestartDraft.scope !== residentRestartDraftScope(connection))
+        this.residentRestartDraft = undefined;
       if (session !== this.connectionSession) {
+        const restartDraft = this.residentRestartDraft;
+        const owner = residentDraftOwner(connection);
+        const preserveRestartDraft = !!restartDraft && !!owner && (!restartDraft.owner || restartDraft.owner === owner);
+        this.residentRestartDraft = undefined;
+        if (session) this.lastResidentDraftOwner = owner;
         const preserveStartupDraft=!this.connectionSession&&!!session&&!connection.startupResolved&&typeof this.startupDraft==='string'&&this.startupDraft===String(this.S().draft||'');
         // Detach before the UI clears. Its update must not save an empty draft to the old owner.
         this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();
@@ -862,7 +885,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         alphaClient.disconnect();
         if (this.live) {
           draftBindingAfterPaint=true;
-          this.setState({ msgs: [], ...(preserveStartupDraft?{}:{draft:''}), typing: false },this.refreshDraftBinding);
+          this.setState({ msgs: [], ...(preserveStartupDraft||preserveRestartDraft?{}:{draft:''}), typing: false },this.refreshDraftBinding);
         }
       }
       const history = connectionController.getSnapshot().history;
@@ -1701,7 +1724,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.recoverDraft=()=>{const recovery=this.composerDraft?.recovery();if(!recovery)return;this.draftRecoveryAbort?.abort();const controller=this.draftRecoveryAbort=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,currentDraft:String(this.S().draft||'')})};},reset:recovery.reset},'assistant draft','Assistant draft recovery','Download the saved bytes and current text before resetting this conversation’s draft. Reset does not delete messages or send anything. Reloading discards the current unsaved text.',controller.signal,undefined,Capacitor.getPlatform()==='android'?'device':'browser');};
     const connection=connectionController.getSnapshot();
     // Attempted sends explain why they cannot dispatch before readiness.
-    const residentPending=residentAlwaysPresent&&!connection.session?agentAvailabilityNotice(connection):'';
+    const restartRequired=residentAlwaysPresent&&!connection.session&&connection.residentRecoveryReason==='ipc-recovery-retention-limit';
+    const residentPending=restartRequired
+      ? residentRecoveryCopy('ipc-recovery-retention-limit',connection.residentRecovery)
+      : residentAlwaysPresent&&!connection.session?agentAvailabilityNotice(connection):'';
+    out.residentRestart=restartRequired;
+    out.residentRestartBusy=connection.busy;
+    out.restartResident=async()=>{
+      const snapshot=connectionController.getSnapshot();
+      if(!this.live||document.hidden||snapshot.busy||snapshot.session||snapshot.residentRecoveryReason!=='ipc-recovery-retention-limit')return;
+      // Only this explicit restart can carry unsent text into the same owner's reattached composer.
+      const draft={scope:residentRestartDraftScope(snapshot),owner:this.lastResidentDraftOwner};
+      this.residentRestartDraft=draft;
+      try{await connectionController.restartRecovery();}
+      finally{if(this.residentRestartDraft===draft)this.residentRestartDraft=undefined;}
+    };
     out.draftRetry=!!draft?.error;out.draftStatus=[draft?.message,residentPending].filter(Boolean).join(' ');out.draftConflict=!!draft?.conflict;out.draftSavedText=draft?.savedText||'(Empty saved draft)';out.draftOpening=!!draft?.consuming;
     out.restoreSavedDraft=async()=>{await this.composerDraft?.restoreSaved();if(this.live&&this.firstSendReview)this.refreshDraftBinding();};out.keepCurrentDraft=()=>{this.composerDraft?.keepCurrent();if(this.firstSendReview)this.refreshDraftBinding();};out.retryDraft=()=>{this.composerDraft?.retire();this.refreshDraftBinding();};
     const onDraft=out.onDraft;

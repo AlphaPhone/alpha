@@ -198,9 +198,9 @@ for (const start of ['reject','starting'] as const) {
     await page.goto('/');
     await completeAccessSetup(page);
     await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-    const activity = await openYourAgent(page);
-    await expect(activity.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
-    await expect(activity.getByText('Loads when your agent is ready', { exact: true })).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Restart Alpha', exact: true })).toHaveCount(0);
     expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), SELECTION)).toEqual({ kind: 'resident' });
     const starts = async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length;
     await expect.poll(starts).toBeGreaterThanOrEqual(1);
