@@ -111,6 +111,37 @@ test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-view
     expect(result.record.phoneNumbers).toHaveLength(2);expect(result.record.emailAddresses).toHaveLength(2);
   });
 
+  test('a contact whose notes Android omits shows Notes as unavailable and saves without touching them', async ({page}) => {
+    await setupTelephony(page);
+    await page.evaluate(()=>{
+      const w=window as any,cap=w.Capacitor,native=cap.nativePromise;
+      // Android leaves notes out of get() when they are ambiguous (several rows, too long, control characters).
+      w.providerContact={id:'13',lookup:'lookup-13',displayName:'Carmen Ruiz',givenName:'Carmen',familyName:'Ruiz',storedNotes:['first note','second note'],starred:false,phoneNumbers:[{number:'+15550100103',type:'mobile'}],emailAddresses:[{address:'carmen@example.invalid',type:'home'}],version:'a'.repeat(64)};
+      cap.nativePromise=async(plugin:string,method:string,input:any)=>{
+        if(plugin==='AlphaContacts'&&method==='get'&&input.id==='13'){const {storedNotes,...detail}=w.providerContact;return structuredClone(detail);}
+        if(plugin==='AlphaContacts'&&method==='save'){
+          w.telephonyInputs.push(['contacts.save',input]);
+          w.providerContact={...w.providerContact,...input,version:'b'.repeat(64)};
+          return {status:'saved',id:'13',version:w.providerContact.version};
+        }
+        return native(plugin,method,input);
+      };
+    });
+    await page.getByRole('button',{name:'Contacts',exact:true}).first().click();
+    await page.getByRole('button',{name:/Carmen Ruiz/}).first().click();
+    await page.getByRole('button',{name:'Edit contact',exact:true}).click();
+    for(const name of ['First name','Last name','Phone','Email'])await expect(page.getByRole('textbox',{name,exact:true})).toBeVisible();
+    await expect(page.getByRole('textbox',{name:'Notes',exact:true})).toHaveCount(0);
+    await expect(page.locator('[data-alpha-contact-notes-unavailable]')).toBeVisible();
+    await expect(page.locator('[data-alpha-contact-notes-unavailable]')).toContainText('Notes can’t be edited here');
+    await page.getByRole('textbox',{name:'Phone',exact:true}).fill('+15550100777');
+    await page.locator('[data-alpha-contact-save]').click();
+    const result=await page.evaluate(()=>({saved:(window as any).telephonyInputs.filter(([method]:any)=>method==='contacts.save').map(([,input]:any)=>input),record:(window as any).providerContact}));
+    expect(result.saved).toHaveLength(1);
+    expect(Object.keys(result.saved[0])).not.toContain('notes');
+    expect(result.record.storedNotes).toEqual(['first note','second note']);
+  });
+
   test('new contact offers all five fields immediately and submits the entered names and Notes', async ({page})=>{
     await setupTelephony(page);
     await page.getByRole('button',{name:'Contacts',exact:true}).first().click();

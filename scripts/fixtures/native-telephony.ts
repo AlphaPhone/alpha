@@ -164,6 +164,8 @@ export function installTelephonyFixture(options: TelephonyFixture = {}) {
           const rows=w.messages[input.threadId]||[],row=rows.find((value:any)=>value.id===input.id);
           if(!row)return {status:'not-found',message:input};
           if(row.kind!==input.kind||row.date!==input.date)return {status:'stale',message:input};
+          // As Android: only received and sent rows are settled; a pending or failed send is refused.
+          if(row.status==='pending'||row.status==='failed')return {status:'not-settled',message:input};
           w.messages[input.threadId]=rows.filter((value:any)=>value!==row);
           return {status:'deleted',message:input};
         }

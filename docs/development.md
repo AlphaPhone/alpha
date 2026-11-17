@@ -762,6 +762,16 @@ existing installs re-extract once. The pin also returns Alpha billing links to t
 package in the Cloud native-callback registry ([eliza#39803](https://github.com/elizaOS/eliza/pull/39803))
 and observes the expected PostgreSQL lock rejection in the Stripe checkout test
 ([eliza#39804](https://github.com/elizaOS/eliza/pull/39804)). No recorded target or `bun.lock` changed.
+The pin `5c8f2b8564b3c23cb557349dcb574af9f534f9c5` takes the reviewed follow-up to single message deletion
+and contact editing ([eliza#39805](https://github.com/elizaOS/eliza/pull/39805), after
+[eliza#39796](https://github.com/elizaOS/eliza/pull/39796)). Native deletion now answers `not-settled`,
+with nothing deleted, for a draft, queued, outbox or failed row; Messages shows that refusal. A new contact is
+checked with `contactDraftProblem(draft, { create: true })`. `get` omits notes it cannot edit as one value
+(several note rows, longer than 8192 code units, other control characters) and answers a save that supplies
+them `failed`; the Contacts editor then shows notes as unavailable and never sends them. Voice interim
+annotations such as `*Dramatic Mus` no longer interrupt a reply before their final is classified. The three
+NativeMessageDeletion Quint sidecars changed and their inventory hashes moved; no recorded core or
+mobile-build target or `bun.lock` changed.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies

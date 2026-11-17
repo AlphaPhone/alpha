@@ -1,4 +1,4 @@
-import {isIncompleteSmsRow,normalizePhoneNumber,type MessageDeleteReference} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {isIncompleteSmsRow,normalizePhoneNumber,type MessageDeleteReference,type MessageDeleteStatus} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {createAddressBookClient,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
@@ -61,6 +61,12 @@ const SMS_NOT_SENT=new Set(['too-long','invalid','busy','unavailable']);
 function smsProblemLabel(problem:SmsReviewProblem,mode:'direct'|'handoff',chosen:boolean,length=0){
  return {'no-recipient':'Add a number','invalid-recipient':'Invalid number','too-many-recipients':mode==='direct'?'Max 5':'Max 10','empty-body':'Enter a message.','body-too-long':`${length.toLocaleString('en-US')}/${mode==='direct'?'1,600':'5,000'}`,'invalid-body':'Unsupported characters','sim-unknown':chosen?'SIM inactive':'No SIM','sim-required':'Pick a SIM','sim-not-selectable':'Pick SIM in Messages'}[problem];
 }
+/* Owner text for a delete the provider refused. Each is definite: nothing was deleted. */
+const MESSAGE_DELETE_REFUSAL:Record<Exclude<MessageDeleteStatus,'deleted'|'unknown'>,string>={
+ stale:'This message changed. Review it again.',
+ 'not-found':'This message was not found. Refresh Messages.',
+ 'not-settled':'This message is still sending or did not send, so it was not deleted.',
+};
 export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftStore){
  if(!aospImage)return;
  const shelf=draftStore?createNativeSmsDraftShelf(draftStore):null;
@@ -90,7 +96,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    messageMenu=null;
    if(result.status==='deleted')void session.refresh();
    else if(result.status==='unknown')owner?.toast('Deletion outcome unknown. The message is kept on screen.');
-   else{owner?.toast(result.status==='stale'?'This message changed. Review it again.':'This message was not found. Refresh Messages.');void session.refresh();}
+   else{owner?.toast(MESSAGE_DELETE_REFUSAL[result.status]);void session.refresh();}
   }catch{
    uncertainDeletes.add(selection.target.id);
    if(visit===lifecycle&&inFront()){messageMenu=null;owner?.toast('Deletion unavailable or unconfirmed. The message is kept on screen.');}

@@ -16,7 +16,10 @@ export function contactActs(phones:readonly string[],api:Bag){
 const PROBLEM:Record<string,string>={'empty-contact':'Add a name, number or email.','invalid-name':'Check the name.','invalid-notes':'Check the notes.','too-many-fields':'Too many numbers or emails.','invalid-number':'Check the phone numbers.','invalid-address':'Check the email addresses.','invalid-type':'Check the phone numbers.'};
 const TYPE_LABEL=(type:string)=>type.startsWith('custom:')?type.slice(7):type.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
 /** The contact editor of the image Contacts view (specs/quint/native/ContactsBook.qnt). */
-type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:ContactDraft;givenName:string;familyName:string;notes:string;initialText:{givenName:string;familyName:string;notes:string};nameEdited:boolean;notesEdited:boolean;dirty:boolean;stale:boolean;notice:string};
+type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:ContactDraft;givenName:string;familyName:string;notes:string;notesEditable:boolean;initialText:{givenName:string;familyName:string;notes:string};nameEdited:boolean;notesEdited:boolean;dirty:boolean;stale:boolean;notice:string};
+/** Why Android would refuse this draft. A new contact's name is judged from its structured fields
+    alone, as Android stores it; an edit's omitted fields keep their stored values. */
+export const contactSaveProblem=(mode:Editor['mode'],draft:ContactDraft)=>contactDraftProblem(draft,{create:mode==='creating'});
 /** Native address-book rows stay in memory, never in prototype persistence or agent context. */
 export function installContactsAdapter(Component:any,views:Bag){
  const render=views.contacts.render,p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
@@ -84,24 +87,25 @@ export function installContactsAdapter(Component:any,views:Bag){
    }
    const structured=!!(record?.givenName||record?.familyName),givenName=record?(structured?record.givenName||'':record.displayName):'',familyName=record?.familyName||'',notes=record?.notes||'';
    const draft=record?{displayName:record.displayName,phoneNumbers:record.phoneNumbers.length?record.phoneNumbers.map(row=>({...row})):[{number:'',type:'mobile'}],emailAddresses:record.emailAddresses.length?record.emailAddresses.map(row=>({...row})):[{address:'',type:'home'}]}:blank();
-   form={mode:record?'editing':'creating',id:record?.id||null,version:record?.version||null,draft,givenName,familyName,notes,initialText:{givenName,familyName,notes},nameEdited:false,notesEdited:false,dirty:false,stale:false,notice:''};
+   // get omits notes it cannot edit as one value (several rows, too long, control characters); a save must not send them.
+   form={mode:record?'editing':'creating',id:record?.id||null,version:record?.version||null,draft,givenName,familyName,notes,notesEditable:!record||record.notes!==undefined,initialText:{givenName,familyName,notes},nameEdited:false,notesEdited:false,dirty:false,stale:false,notice:''};
    changed();
   }finally{if(token===visit)opening=false;}
  }
  const touch=(change:(draft:ContactDraft)=>void)=>{if(!form||saving)return;change(form.draft);form.dirty=true;if(!form.stale)form.notice='';changed();};
- const setText=(field:'givenName'|'familyName'|'notes',event:Event)=>{if(!form||saving)return;form[field]=(event.target as HTMLInputElement).value;form.dirty=true;if(field==='notes')form.notesEdited=form.notes!==form.initialText.notes;else form.nameEdited=form.givenName!==form.initialText.givenName||form.familyName!==form.initialText.familyName;if(!form.stale)form.notice='';changed();};
+ const setText=(field:'givenName'|'familyName'|'notes',event:Event)=>{if(!form||saving||field==='notes'&&!form.notesEditable)return;form[field]=(event.target as HTMLInputElement).value;form.dirty=true;if(field==='notes')form.notesEdited=form.notes!==form.initialText.notes;else form.nameEdited=form.givenName!==form.initialText.givenName||form.familyName!==form.initialText.familyName;if(!form.stale)form.notice='';changed();};
  const tidy=(editor:Editor):ContactDraft=>{
   const draft:ContactDraft={displayName:editor.draft.displayName,phoneNumbers:editor.draft.phoneNumbers.filter(row=>row.number.trim()).map(row=>({...row})),emailAddresses:editor.draft.emailAddresses.filter(row=>row.address.trim()).map(row=>({...row}))};
   if(editor.nameEdited||editor.mode==='creating'){
    draft.givenName=editor.givenName;draft.familyName=editor.familyName;
    draft.displayName=[editor.givenName,editor.familyName].filter(value=>value.trim()).join(' ').trim()||draft.phoneNumbers[0]?.number||draft.emailAddresses[0]?.address||'';
   }
-  if(editor.notesEdited||editor.mode==='creating'&&editor.notes)draft.notes=editor.notes;
+  if(editor.notesEditable&&(editor.notesEdited||editor.mode==='creating'&&editor.notes))draft.notes=editor.notes;
   return draft;
  };
  /* A save names the version that was shown. A contact that changed since keeps the editor and says so; nothing is written. */
  async function save(){
-  if(pendingWrite||!form||saving||!form.dirty||form.stale||!available())return;const token=visit,ownerAtStart=owner,current=form,draft=tidy(current),problem=contactDraftProblem(draft);
+  if(pendingWrite||!form||saving||!form.dirty||form.stale||!available())return;const token=visit,ownerAtStart=owner,current=form,draft=tidy(current),problem=contactSaveProblem(current.mode,draft);
   if(problem){current.notice=PROBLEM[problem]||'Check the contact.';changed();return;}
   let unconfirmed=true;pendingWrite=true;writeEpoch++;saving=true;changed();
   try{
@@ -180,7 +184,7 @@ export function installContactsAdapter(Component:any,views:Bag){
   }
   const current=form;
   model.ed={open:!!current,busy:saving,cannotSave:saving||!current?.dirty||current.stale,notice:current?.notice||'',hasNotice:!!current?.notice,
-   givenName:current?.givenName||'',familyName:current?.familyName||'',notes:current?.notes||'',maxName:CONTACT_MAX_NAME,maxNotes:CONTACT_MAX_NOTES,
+   givenName:current?.givenName||'',familyName:current?.familyName||'',notes:current?.notes||'',notesEditable:!!current?.notesEditable,notesUnavailable:!!current&&!current.notesEditable,maxName:CONTACT_MAX_NAME,maxNotes:CONTACT_MAX_NOTES,
    onGivenName:(event:Event)=>setText('givenName',event),onFamilyName:(event:Event)=>setText('familyName',event),onNotes:(event:Event)=>setText('notes',event),
    phones:(current?.draft.phoneNumbers||[]).map((row,index)=>({value:row.number,label:index===0&&row.type==='mobile'?'Phone':`${TYPE_LABEL(row.type)} phone`,canRemove:!!row.number||(current?.draft.phoneNumbers.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.phoneNumbers[index].number=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.phoneNumbers.splice(index,1);if(!draft.phoneNumbers.length)draft.phoneNumbers.push({number:'',type:'mobile'});}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} number`})),
    emails:(current?.draft.emailAddresses||[]).map((row,index)=>({value:row.address,label:index===0&&row.type==='home'?'Email':`${TYPE_LABEL(row.type)} email`,canRemove:!!row.address||(current?.draft.emailAddresses.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.emailAddresses[index].address=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.emailAddresses.splice(index,1);if(!draft.emailAddresses.length)draft.emailAddresses.push({address:'',type:'home'});}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} email`})),
