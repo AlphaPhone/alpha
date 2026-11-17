@@ -1182,3 +1182,17 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 
 /* Message actions follow the author of their selected bubble. */
 [data-alpha-message-actions][data-alpha-user-actions="true"]{align-self:flex-end!important}
+/* Owner issue 4: the ongoing-call bar (runtime/ongoing-call.ts) at the top of the phone canvas, below
+   the status bar (the native top inset), on every view but the call screen. It takes layout space and
+   never covers a view: it is outside the screen (template.html, dc-lite.js), and while it shows the
+   whole screen starts below it and is that much shorter, so every header, sheet, dock and notice
+   keeps its place relative to the screen. The bar's band already clears the status bar, so the
+   screen's own layers do not clear it again. White text on the text-safe call green (AC-28, 4.5:1);
+   48px targets. */
+.alpha-phone{--alpha-call-bar-top:6px}
+.native-phone .alpha-phone{--alpha-call-bar-top:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1) + 6px)}
+.alpha-phone>[data-screen][data-alpha-call-bar-on="true"]{--alpha-call-bar-space:calc(var(--alpha-call-bar-top) + 58px);top:var(--alpha-call-bar-space)!important;height:calc(var(--phone-height,915px) - var(--alpha-call-bar-space))!important;--native-top-inset:0px}
+.alpha-call-bar{position:absolute;z-index:99;left:12px;right:12px;top:var(--alpha-call-bar-top,48px);display:flex;align-items:center;gap:4px;height:52px;padding:0 2px;box-sizing:border-box;border-radius:26px;background:var(--alpha-call-green-text);color:var(--alpha-white);box-shadow:0 2px 8px var(--shc,rgba(0,0,0,.2))}
+.alpha-call-bar-return{flex:1 1 auto;min-width:0;min-height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;color:inherit;text-align:left;font-size:15px;font-weight:600}
+.alpha-call-bar-status{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.alpha-call-bar .alpha-end-button{width:48px;height:48px;min-width:48px;border-radius:24px}
