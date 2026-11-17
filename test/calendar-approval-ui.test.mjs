@@ -54,6 +54,39 @@ test('approval fields show local time, exact effect fields and readable source l
   const allDay=calendarApprovalFields(row({action:'schedule_event',payload:{...request.payload,allDay:{startDate:'2026-11-10',endDateExclusive:'2026-11-12'}}}));assert.match(allDay.fields.find(f=>f.label==='Date').value,/10 November 2026.*11 November 2026/);assert.equal(allDay.fields.find(f=>f.label==='Time').value,'All day');
  }finally{if(prior===undefined)delete process.env.TZ;else process.env.TZ=prior;setLocalePreferences();}
 });
+test('a repeating event to add is reviewed in plain words; a rule those words would shorten is shown in full',()=>{
+ setLocalePreferences({locale:'en-GB',hourCycle:'h23'});
+ try{
+  const base={action:'schedule_event',side:'owner',calendarId:'primary',title:'Standup',startsAtMs:Date.parse('2026-11-18T09:00:00Z'),endsAtMs:Date.parse('2026-11-18T09:15:00Z'),attendees:[],location:null,description:null,notifyAttendees:false};
+  const repeat=recurrence=>{const shown=calendarApprovalFields(row({action:'schedule_event',payload:{...base,recurrence}}));assert.equal(shown.complete,true,String(recurrence));return shown.fields.find(f=>f.label==='Repeat').value;};
+  for(const [rule,words] of [
+   ['RRULE:FREQ=DAILY','Every day'],
+   ['RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR','Every weekday'],
+   ['RRULE:FREQ=WEEKLY;BYDAY=MO,WE','Every week on Monday and Wednesday'],
+   ['RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU','Every 2 weeks on Tuesday'],
+   ['RRULE:FREQ=DAILY;COUNT=10','Every day, 10 times'],
+   ['RRULE:FREQ=MONTHLY;UNTIL=20270131T235959Z','Every month, until 31 January 2027'],
+   ['FREQ=YEARLY','Every year'],
+   // The day of the month and an unknown part have no words here, so the whole rule stays visible.
+   ['RRULE:FREQ=MONTHLY;BYMONTHDAY=15','Frequency: Monthly · BYMONTHDAY: 15'],
+   ['RRULE:FREQ=WEEKLY;BYDAY=1MO','Frequency: Weekly · Days: 1MO'],
+  ])assert.equal(repeat([rule]),words,rule);
+  assert.equal(repeat(['RRULE:FREQ=WEEKLY;BYDAY=FR','EXDATE:20261127T090000Z']),'Every week on Friday\nEXDATE:20261127T090000Z');
+ }finally{setLocalePreferences();}
+});
+test('a Google change that makes an event all-day or replaces its guests shows the new dates and every guest',()=>{
+ setLocalePreferences({locale:'en-GB',hourCycle:'h23'});
+ try{
+  const current={event:'Offsite',eventStartsAt:Date.parse('2026-11-11T18:00:00Z'),eventEndsAt:Date.parse('2026-11-11T19:00:00Z'),targetVerified:true};
+  const patch={title:null,startsAtMs:null,endsAtMs:null,allDay:null,timeZone:null,attendees:null,location:null,description:null,recurrence:null};
+  const shown=change=>{const result=calendarApprovalFields(row({action:'modify_event',payload:{...dto().payload,action:'modify_event',patch:{...patch,...change}}}),current);assert.equal(result.complete,true);return Object.fromEntries(result.fields.map(f=>[f.label,f.value]));};
+  const allDay=shown({allDay:{startDate:'2026-11-12',endDateExclusive:'2026-11-14'}});
+  assert.equal(allDay.Date,'12 November 2026 – 13 November 2026');assert.equal(allDay.Time,'All day');assert.equal(allDay.Starts,undefined);
+  // The update sends the whole new list: guests who stay are named beside the one added.
+  assert.equal(shown({attendees:[{email:'ada@example.invalid',displayName:'Ada'},{email:'sam@example.invalid'},{email:'lin@example.invalid',optional:true}]}).Guests,'Ada · ada@example.invalid\nsam@example.invalid\nlin@example.invalid (optional)');
+  assert.equal(shown({attendees:[]}).Guests,'No guests');
+ }finally{setLocalePreferences();}
+});
 test('unknown effect fields and malformed event times cannot be approved as a readable review',()=>{
  for(const payload of [{...dto().payload,unrecognizedEffect:true},{action:'schedule_event',side:'owner',calendarId:'primary',title:'Event',startsAtMs:1,endsAtMs:0}])assert.equal(calendarApprovalFields(row({payload,action:payload.action})).complete,false);
 });
