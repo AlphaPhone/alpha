@@ -175,3 +175,39 @@ test('a refused reset authentication needs a fresh review',async()=>{
  assert.ok(t.manager().some(row=>row.label==='Reset vault'));
  assert.equal(t.calls.filter(([method])=>method==='reset').length,0);
 });
+
+test('each fixed vault refusal is shown in Alpha wording, and only unknown text falls back',async()=>{
+ const t=await mount();await t.openShop();
+ t.type('Password','new-secret-2');
+ // Every fixed `invalid` sentence the passwords bridge can deliver, with what the form shows. The
+ // generator's length refusals carry digits, which the shared client's pass-through drops, so they
+ // reach the form as the generic sentence (as before) and are not listed here.
+ const shown=[
+  ['Enter a name','Enter a name.'],
+  ['Enter a shorter username','Enter a shorter username.'],
+  ['Enter a password','Enter a password.'],
+  ['Add at least one website or app','Add at least one website or app.'],
+  ['Password no longer exists','This password no longer exists.'],
+  ['Password vault is full','The password vault is full.'],
+  ['Use an HTTPS website address without a path','Use an HTTPS website address without a path.'],
+  ['Invalid binding','That website or app link is not valid.'],
+  ['Invalid app package','That app package is not valid.'],
+  ['Invalid app signing certificate',"That app's signing certificate is not valid."],
+  ['Saved passwords are not damaged','Saved passwords are not damaged.'],
+  ['Editor does not accept draft fields','The password editor does not accept draft fields.'],
+  ['Enter a website address.','Enter a website address.'],
+  ['Use an HTTPS website address.','Use an HTTPS website address.'],
+  ['Remove the user name from the address.','Remove the user name from the website address.'],
+  ['Choose at least one character type','Choose at least one character type.'],
+  ['Choose a typed or generated password.','Type a password or generate one.'],
+  ['Choose a saved password.','Choose a saved password.'],
+  ['Passwords are entered only in the protected form','Enter passwords only in the protected form.'],
+  ['Something the vault never says','Check the entry and try again.'],
+ ];
+ for(const [native,sentence] of shown){
+  t.fail.save=Object.assign(new Error(native),{code:'invalid'});
+  await t.press(t.rows(t.entryPage().groups),'Save');
+  assert.equal(t.find(t.rows(t.entryPage().groups),'Not saved').val,sentence,native);
+  assert.equal(t.find(t.rows(t.entryPage().groups),'Password').value,'new-secret-2','the draft is kept');
+ }
+});

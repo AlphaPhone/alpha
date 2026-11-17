@@ -6,6 +6,7 @@ const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promi
 import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
+import { selectedPreviewText } from '../ui/files/storage-presentation.ts';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
 import { filesIndex } from './files-index';
@@ -235,7 +236,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     try {
       const response = await DailyApps.readSelected({ selectionId: result.selectionId });
       if (epoch !== requestEpoch || current?.result.selectionId !== result.selectionId) return;
-      current = { ...current, text: response.status === 'read' ? response.text : undefined, status: response.message || (response.text !== undefined ? 'Loaded' : 'No preview') };
+      current = { ...current, text: response.status === 'read' ? response.text : undefined, status: selectedPreviewText(response) };
       // Native currently returns status "read"; use only a successful text result.
       refresh();
     } catch {

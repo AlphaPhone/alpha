@@ -1,6 +1,7 @@
 // Alpha's Home and app grid render from Alpha's mobile shell (apps/app/src/ui/mobile-shell), its Apps
-// drawer from Alpha's installed-app grid (apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx), with the product record in apps/app/src/product/alpha-product-registration.ts. Controller and search cases live in
-// the Quint launcher and drawer refinement suites (test/quint-launcher-*.test.mjs, test/quint-drawer-interaction.test.mjs).
+// drawer from Alpha's installed-app grid (apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx), with the product record in apps/app/src/product/alpha-product-registration.ts. Search ranking and
+// same-label disambiguation are in test/installed-launcher-search.test.mjs; launcher controller cases live in the Quint
+// launcher and drawer refinement suites (test/quint-launcher-*.test.mjs, test/quint-drawer-interaction.test.mjs).
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {tsImport} from './support/ts-import.mjs';

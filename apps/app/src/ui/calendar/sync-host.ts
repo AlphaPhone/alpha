@@ -164,9 +164,74 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   // This host
   ["Review the Calendar sync destination again.", "Review the Calendar sync destination again."],
   ["Calendar account changed. Review sync again.", "Calendar account changed. Review sync again."],
+  // sync-host.ts calendarSyncSettingsSlot (the device opt-in record)
+  ["Calendar sync settings changed. Review them again.", "Calendar sync settings changed. Review them again."],
 ]);
 
-/** Plain status text for a failed or stopped operation. A refusal's own text is never shown. */
+const DEVICE_REPLY_INVALID =
+  "The device Calendar returned an event this phone could not use.";
+
+/**
+ * Alpha's own sync runtime raises some refusals as plain errors: the browser calendar source and
+ * its linked-sync port, the sync field mapping (guests, repeats, skipped dates), the deletion
+ * journal and series records, the checkpoint storage and the device Calendar bridge's checks of
+ * its replies. Each names a local reason the owner must still see (never the Google calendar), so
+ * Alpha words each one here, keyed by the text its module throws.
+ */
+const LOCAL_FAILURES: ReadonlyMap<string, string> = new Map([
+  // browser/calendar-store.ts
+  ["The local calendar needs recovery.", "The local calendar needs recovery before syncing."],
+  // browser/json-domain-document.ts
+  ["Browser history needs recovery", "Saved data in this browser needs recovery before syncing."],
+  // browser/calendar-linked-local.ts
+  ["This local event needs recovery before syncing.", "This local event needs recovery before syncing."],
+  ["The all-day event dates need review.", "An all-day event's dates need review before syncing."],
+  ["Deletion pending", "A deletion is pending for this event. Sync again after it finishes or is undone."],
+  ["Unsupported event", "Google sent an event this phone cannot save locally. Nothing was applied."],
+  ["Review whole all-day dates before syncing.", "Review whole all-day dates before syncing."],
+  ["Missing time zone", "Google sent a timed event without its time zone. Nothing was applied."],
+  ["The local event changed before sync could apply.", "The local event changed before sync could apply."],
+  ["The local event or owner changed before deletion.", "The local event or owner changed before deletion."],
+  // browser/calendar-sync-fields.ts
+  ["Email needed", "A guest needs an email address before syncing."],
+  ["Duplicate guest", "A guest is listed twice. Review the guest list before syncing."],
+  ["Review the Google guest list before syncing.", "Review the Google guest list before syncing."],
+  ["Google returned duplicate attendees.", "Google listed the same guest twice. Review the guest list before syncing."],
+  ["Sync series", "One changed occurrence of a repeating event cannot be synced on its own."],
+  ["Unsupported repeat", "This repeat rule cannot be synced."],
+  ["Review the excluded occurrence dates.", "Review the skipped occurrence dates before syncing."],
+  ["Multiple recurrence rules need review. Nothing changed.", "Multiple repeat rules need review. Nothing changed."],
+  ["This Google repeat rule cannot be represented locally.", "This Google repeat rule cannot be kept on this phone."],
+  ["This Google exclusion date needs review.", "A skipped date from Google needs review."],
+  ["This Google exclusion date is invalid.", "A skipped date from Google is not valid."],
+  ["Repeat rule missing", "Google sent skipped dates without a repeat rule."],
+  // browser/calendar-deletions.ts (staging a synced deletion)
+  ["This event already has a pending deletion.", "This event already has a pending deletion."],
+  ["Deletion identity already used.", "This deletion was already recorded. Check pending deletions."],
+  ["Pending deletion history requires review.", "Pending deletion history needs review."],
+  // browser/calendar-records.ts
+  ["Calendar series changed.", "The repeating event changed. Sync again to review it."],
+  // runtime/calendar-linked-storage.ts
+  ["Invalid Calendar sync checkpoint slot", "Calendar sync records could not be opened."],
+  ["Calendar sync checkpoint limit reached", "Calendar sync reached its storage limit. The latest sync record was not saved."],
+  // runtime/native-calendar-sync.ts (checks of the device Calendar bridge's replies)
+  ["Device Calendar sync requires Android", "Device Calendar sync is available only on Android."],
+  ["Invalid device Calendar response", "The device Calendar returned a reply this phone could not use."],
+  ["Device Calendar event list needs review", "The device Calendar event list needs review."],
+  ["Invalid device Calendar identity", "The device Calendar returned an event list this phone could not use."],
+  ["Device Calendar destination changed", "The device Calendar destination changed. Review sync again."],
+  ["Invalid device Calendar event", DEVICE_REPLY_INVALID],
+  ["Invalid device Calendar guest", DEVICE_REPLY_INVALID],
+  ["Invalid device Calendar recurrence", DEVICE_REPLY_INVALID],
+  ["Invalid native Calendar recovery receipt", "The device Calendar returned a recovery receipt this phone could not use."],
+  ["Calendar deletion readback changed", "The device Calendar still shows the deleted event. Check it before retrying."],
+]);
+
+/**
+ * Plain status text for a failed or stopped operation. Only a `CalendarSyncNotice` is shown as
+ * written; every other known refusal is shown in Alpha's words, and only an unknown error falls
+ * back to the generic sentence.
+ */
 function calendarSyncFailureMessage(error: unknown): string {
   const e = error as { status?: number; name?: string; message?: unknown };
   if (e?.status === 404)
@@ -175,10 +240,12 @@ function calendarSyncFailureMessage(error: unknown): string {
     return "Sync paused or the selected account changed. Check linked events before retrying.";
   const message = typeof e?.message === "string" ? e.message : "";
   if (error instanceof CalendarSyncNotice && message) return message;
-  return (
-    SHARED_FAILURES.get(message) ??
-    "Sync stopped. Check the selected Google calendar before retrying."
-  );
+  const known = SHARED_FAILURES.get(message) ?? LOCAL_FAILURES.get(message);
+  if (known) return known;
+  // Intl rejects an unknown event time zone with an engine-worded RangeError.
+  if (e?.name === "RangeError" && /time ?zone/i.test(message))
+    return "An event's time zone is not recognized. Review the event before syncing.";
+  return "Sync stopped. Check the selected Google calendar before retrying.";
 }
 
 /** Plain status text for a finished pass. Any conflict, unconfirmed or refused change asks for review. */

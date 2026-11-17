@@ -13,7 +13,7 @@ async function harness(options={}){
  const records=new Map(),gate=deferred(),entered=deferred();let held=false,fail=false;
  let session={origin:'owned-origin',ownerId:'owner-a',agentId:'agent-a'},binding={sessionId:'session-a',client:{async phoneCatalog(){return {palette:[],triggers:[],...options.catalog};}}};
  const storage={async secureRead({slot}){return {value:records.get(slot)??null};},async secureCompareExchange(input){if(held){entered.resolve();await gate.promise;}if(fail)throw Error('Synthetic write unavailable');if((records.get(input.slot)??null)!==input.expectedValue)return {status:'conflict'};records.set(input.slot,input.value);return {status:'saved'};}};
- const ctx=vm.createContext({...workflowTime,describePhoneTrigger,phoneTriggerClockChangeNote,WorkflowTypedRejected,workflowErrorText,AbortController,TextEncoder,document:{hidden:false},browserLocalAgentEnabled:true,browserDevProfile:false,developmentWorkflowDraftStore:storage,registerPlugin:()=>({}),workflowSha:async values=>JSON.stringify(values),normalizePhoneSpec:spec=>JSON.parse(JSON.stringify(spec)),assertPhoneCapabilities:()=>{},connectionController:{getWorkflowClient:()=>binding,getWorkflowDeviceTarget:()=>null,getSnapshot:()=>({session,open:false})},WORKFLOW_OPERATION_LABELS:{supplied_text:'Read supplied text'},checkWorkflowScope,PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL,phoneWorkflowRequiredProtocol});
+ const ctx=vm.createContext({...workflowTime,describePhoneTrigger,phoneTriggerClockChangeNote,WorkflowTypedRejected,workflowErrorText,AbortController,TextEncoder,document:{hidden:false},browserLocalAgentEnabled:true,browserDevProfile:false,developmentWorkflowDraftStore:storage,registerPlugin:()=>({}),workflowSha:async values=>JSON.stringify(values),normalizePhoneSpec:spec=>JSON.parse(JSON.stringify(spec)),assertPhoneCapabilities:()=>{},connectionController:{getWorkflowClient:()=>binding,getWorkflowDeviceTarget:()=>null,getWorkflowDeviceProtocol:()=>null,getSnapshot:()=>({session,open:false})},WORKFLOW_OPERATION_LABELS:{supplied_text:'Read supplied text'},checkWorkflowScope,PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL,phoneWorkflowRequiredProtocol});
  vm.runInContext(source+';globalThis.create=createWorkflowAuthoring',ctx);
  const authoring=ctx.create(()=>({toast:options.toast??(()=>{})}),()=>{},async()=>{}),api={ic:{},get:()=>({})};
  await authoring.open();for(let i=0;i<5;i++)await Promise.resolve();
@@ -107,4 +107,16 @@ test('updater flush waits for queued draft bytes and refuses a failed write',asy
 });
 test('updater flush refuses a generation change while a draft write is pending',async()=>{
  const h=await harness();await h.editHeld('Keep me');const flushing=h.authoring.flushForAppUpdate(()=>true);h.authoring.close();h.release();await assert.rejects(flushing,/Workflow draft changed/);assert.equal(h.stored(),'Keep me');
+});
+test('a local field mistake keeps its own sentence and an unknown local failure never reads as an agent request',async()=>{
+ const toasts=[],h=await harness({toast:text=>toasts.push(text)});
+ const range={calendarIds:['c1'],start:'2026-11-20T09:00:00.000Z',end:'2026-11-20T17:00:00.000Z',timeZone:'UTC',maximumEvents:10};
+ await h.reopen({id:'cal',name:'Calendar',versionId:'cal-v1',phoneSpec:{version:1,name:'Calendar',description:'',trigger:{kind:'manual'},steps:[{id:'s1',kind:'Read',operation:'calendar_range',range}]}});
+ // Listing calendars fails on this host (no native Calendar): a local sentence, not a failed agent request.
+ h.render().steps.find(row=>row.k==='Read').tap();for(let i=0;i<10;i++)await Promise.resolve();
+ assert.equal(h.render().typedStatus,'Calendars on this phone are unavailable. Try again.');
+ const start=h.render().sp.fields.find(field=>field.label==='Range start');
+ start.change({target:{value:''}});
+ assert.deepEqual(toasts,['Choose a valid local date and time.'],'a cleared date keeps its own sentence');
+ h.authoring.close();
 });

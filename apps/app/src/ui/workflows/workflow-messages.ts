@@ -8,9 +8,11 @@
  * reads for each: refusals by class, contract checks, client checks and generation failures by
  * the check named. The shared client raises its own checks as plain `Error`s, so those are keyed
  * on the reviewed message text. A contract check this module does not know is shown as
- * {@link UNRECOGNIZED_CHECK} and any other unknown error as {@link REQUEST_UNAVAILABLE}, never as
- * the error's own text. Two kinds of text pass through: an agent's clarification question
- * ("Workflow needs clarification: …") and the sentences Alpha's own authoring code raises.
+ * {@link UNRECOGNIZED_CHECK} and any other unknown error as {@link REQUEST_UNAVAILABLE} (or the
+ * caller's own local sentence, for an edit that sent nothing), never as the error's own text. The
+ * phone's own Calendar and Notes refusals the editor reaches are keyed on their reviewed text too.
+ * Two kinds of text pass through: an agent's clarification question ("Workflow needs
+ * clarification: …") and the sentences Alpha's own authoring code raises.
  */
 import { PhoneWorkflowSpecError } from "@elizaos/contracts/phone-workflow";
 import {
@@ -189,9 +191,14 @@ const CLIENT_CHECKS: Readonly<Record<string, string>> = {
   ),
 };
 
-/** The sentences Alpha's own workflow authoring raises (`prototype/workflow-authoring.ts`). */
+/**
+ * The sentences Alpha's own workflow authoring raises (`prototype/workflow-authoring.ts`), with
+ * the local date and time checks its fields call (`runtime/workflow-local-time.ts`).
+ */
 const OWN_NOTICES: ReadonlySet<string> = new Set([
   "Add a Read step first",
+  "Choose a valid local date and time.",
+  "This local time does not exist. Choose another time.",
   "Calendar read permission was not granted",
   "Changed",
   "Choose Connect calendars to grant read access",
@@ -209,6 +216,25 @@ const OWN_NOTICES: ReadonlySet<string> = new Set([
   "This operation needs a newer qualified phone capability",
   "This agent cannot save a Calendar range from the run day. Choose fixed dates or reconnect to an updated agent.",
 ]);
+
+/**
+ * The phone's own refusals the workflow editor reaches while it lists calendars or selects a
+ * note, keyed by their reviewed text: the native Calendar plugin's `workflowCalendars`, Alpha's
+ * Android launch bridge (`LateLaunch.CLOSED`) for `requestWorkflowReadAccess`, and the Notes
+ * document store's conflict checks.
+ */
+const PHONE_CHECKS: Readonly<Record<string, string>> = {
+  "Open Workflows before reading calendar sources":
+    "Open Workflows before reading calendar sources.",
+  "Selected calendar sources could not be read":
+    "The calendars on this phone could not be read. Try again.",
+  "Android could not show this request; Alpha may have closed. Reopen Alpha and try again.":
+    "Android could not show this request; Alpha may have closed. Reopen Alpha and try again.",
+  "Notes changed in another view. Reopen before editing.":
+    "Notes changed in another view. Reopen Notes before selecting.",
+  "Older Notes changed. Close older tabs and review recovery before editing.":
+    "Older Notes changed. Close older tabs and review recovery before selecting.",
+};
 
 /** The agent's own clarification question for a description it could not draft from. */
 const AGENT_CLARIFICATION = "Workflow needs clarification: ";
@@ -235,7 +261,9 @@ export function workflowRefusalText(error: unknown): string | undefined {
 
 /**
  * What the owner reads for a failed workflow request or check: `fallback` when it is not an
- * Error, and `unknown` for an error this module does not recognise.
+ * Error, and `unknown` for an error this module does not recognise. A caller whose action sent
+ * nothing to the agent (a field edit, adding a step, listing calendars) passes its own local
+ * sentence as `unknown`, so a local mistake never reads as a failed agent request.
  */
 export function workflowErrorText(
   error: unknown,
@@ -260,6 +288,7 @@ export function workflowErrorText(
   if (Object.hasOwn(GENERATION_FAILURES, message))
     return GENERATION_FAILURES[message];
   if (Object.hasOwn(CLIENT_CHECKS, message)) return CLIENT_CHECKS[message];
+  if (Object.hasOwn(PHONE_CHECKS, message)) return PHONE_CHECKS[message];
   if (
     OWN_NOTICES.has(message) ||
     (message.startsWith(AGENT_CLARIFICATION) &&

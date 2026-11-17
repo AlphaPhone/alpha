@@ -113,16 +113,111 @@ const SHARE_RESULTS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Alpha's sentence for a storage result that did not succeed, keyed on its status code; a
- * backend's own `message` is never shown. `fallback` is used for a status Alpha has no words for.
+ * The outcomes a status does not identify on its own (one `unsupported` is the share limit,
+ * another a folder in the selection or no app for the file), keyed by the sentence the backend
+ * returns for it, with Alpha's wording. The keys are the reviewed sentences of Alpha's Android
+ * plugin (`AlphaFilesPlugin.java`), the staged plugin-files browser volume (`storage-volume.ts`)
+ * and Alpha's browser library (`apps/app/src/browser/files.ts`); the key is never shown itself.
+ */
+export const STORAGE_OUTCOMES: ReadonlyMap<string, string> = new Map([
+  // Both backends
+  ["Invalid name or path.", "That name or location is not allowed."],
+  ["That name is already used here.", "That name is already used here."],
+  ["This item is no longer there.", "This item is no longer there. Refresh and try again."],
+  ["This storage is not mounted.", "This storage is not mounted."],
+  ["The operation could not be confirmed.", "The operation could not be confirmed."],
+  ["Confirm before deleting permanently.", "Confirm before deleting permanently."],
+  // Android (AlphaFilesPlugin.java)
+  ["Files closed.", "Files closed before this finished. Try again."],
+  ["Allow storage access to browse files.", "Allow storage access to browse files."],
+  ["Allow all-files access to browse storage.", "Allow all files access to browse storage."],
+  ["Android's app settings are unavailable.", "Android’s app settings are unavailable."],
+  ["Android's file access settings are unavailable.", "Android’s file access settings are unavailable."],
+  ["Open Files to review these items.", "Open Files to review these items."],
+  ["Choose one file to review.", "Choose one file to review."],
+  ["A file couldn’t be verified. Nothing changed.", "A file couldn’t be verified. Nothing changed."],
+  ["This file changed. Select it again.", "This file changed. Select it again."],
+  ["Choose a supported photo or document.", "Choose a supported photo or document."],
+  ["Choose a file up to 20 MiB.", "Choose a file up to 20 MiB."],
+  ["Select files without folders to share.", "Select files without folders to share."],
+  ["Sharing could not open.", "Sharing could not open."],
+  ["No app can open this file.", "No app can open this file."],
+  // Browser (storage-volume.ts, apps/app/src/browser/files.ts)
+  ["A selected item changed. Refresh and select again.", "A selected item changed. Refresh and select it again."],
+  ["Select files to share.", "Select files to share."],
+  ["Sharing is unavailable in this browser.", "Sharing is unavailable in this browser."],
+  ["Unsupported file operation.", "Files cannot do that here."],
+  ["Nothing selected", "Nothing is selected."],
+]);
+
+/** Android's share limit (`MAX_SHARE_FILES`); the count is kept as data. */
+const SHARE_LIMIT = /^Select up to (\d{1,6}) files to share\.$/;
+
+/**
+ * Alpha's sentence for a storage result that did not succeed. A reviewed backend sentence picks
+ * its specific outcome from `STORAGE_OUTCOMES`; otherwise the status code is worded (sharing in
+ * its own terms), and `fallback` is used for a status Alpha has no words for. A backend's own
+ * text is never shown.
  */
 export function storageResultText(
-  status: unknown,
+  result: { status?: unknown; message?: unknown },
   fallback: string,
   operation?: "share",
 ): string {
-  const key = typeof status === "string" ? status : "";
+  const message =
+    typeof result.message === "string" ? result.message.trim() : "";
+  const known = STORAGE_OUTCOMES.get(message);
+  if (known) return known;
+  const limit = SHARE_LIMIT.exec(message);
+  if (limit) return `Select up to ${Number(limit[1])} files to share.`;
+  const key = typeof result.status === "string" ? result.status : "";
   if (operation === "share" && Object.hasOwn(SHARE_RESULTS, key))
     return SHARE_RESULTS[key];
   return Object.hasOwn(STORAGE_RESULTS, key) ? STORAGE_RESULTS[key] : fallback;
+}
+
+/** The text preview of a selected document, by the status its reader returned. */
+const PREVIEW_RESULTS: Readonly<Record<string, string>> = {
+  read: "Loaded",
+  // The browser library previews up to 2 MB of text.
+  large: "Open or download this file to read it.",
+  binary: "Open or download this file.",
+  "too-large":
+    "Text preview is limited to 64 KiB. Open this document in a compatible app.",
+  unsupported:
+    "This file type has no text preview. Open it in a compatible app.",
+  unavailable: "Select this document again before reading it.",
+  failed: "This document could not be read.",
+};
+
+/**
+ * Android's reader (the shared `SelectedDocuments.read`) answers several outcomes under one
+ * status; its reviewed sentence picks the outcome, with Alpha's wording.
+ */
+export const PREVIEW_OUTCOMES: ReadonlyMap<string, string> = new Map([
+  ["Select this document again before reading it.", "Select this document again before reading it."],
+  ["The document provider could not open this selection.", "The app that stores this document could not open it."],
+  ["Access expired. Select this document again.", "Access expired. Select this document again."],
+  ["This file type has no text preview. Open it in a compatible app.", "This file type has no text preview. Open it in a compatible app."],
+  ["This document does not contain supported UTF-8 text.", "This document does not contain supported UTF-8 text."],
+  ["Text preview requires UTF-8. Open this document in a compatible app.", "Text preview requires UTF-8. Open this document in a compatible app."],
+  ["Text preview is limited to 64 KiB. Open this document in a compatible app.", "Text preview is limited to 64 KiB. Open this document in a compatible app."],
+  ["The document provider could not read this selection.", "The app that stores this document could not read it."],
+]);
+
+/**
+ * What a selected document's preview says after its text was read: Alpha's sentence for the
+ * reader's status, or for the reviewed sentence that identifies the outcome. The reader's own
+ * text is never shown.
+ */
+export function selectedPreviewText(result: {
+  status?: unknown;
+  message?: unknown;
+}): string {
+  const message =
+    typeof result.message === "string" ? result.message.trim() : "";
+  const known = PREVIEW_OUTCOMES.get(message);
+  if (known) return known;
+  const key = typeof result.status === "string" ? result.status : "";
+  return Object.hasOwn(PREVIEW_RESULTS, key) ? PREVIEW_RESULTS[key] : "No preview";
 }

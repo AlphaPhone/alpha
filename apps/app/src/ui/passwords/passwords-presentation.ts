@@ -32,9 +32,27 @@ const FAILURES: Readonly<Record<PasswordsFailureCode, string>> = {
 
 /**
  * The vault's validation refusals (code `invalid`) and the website check's, keyed by their
- * reviewed text without its final full stop, with Alpha's wording.
+ * reviewed text without its final full stop, with Alpha's wording. The keys are every fixed
+ * `invalid` sentence the passwords bridge can deliver: the plugin's own refusals, the store
+ * messages its `SAFE_MESSAGES` lets through (PasswordsPlugin.java in plugin-native-passwords),
+ * the client's (`client.ts`) and `normalizeWebsite`'s (`bindings.ts`). Any other text falls back
+ * to the generic entry sentence.
  */
 const VALIDATION: ReadonlyMap<string, string> = new Map([
+  // Store refusals passed through by the plugin's SAFE_MESSAGES.
+  ["Enter a name", "Enter a name."],
+  ["Enter a shorter username", "Enter a shorter username."],
+  ["Enter a password", "Enter a password."],
+  ["Add at least one website or app", "Add at least one website or app."],
+  ["Password no longer exists", "This password no longer exists."],
+  ["Password vault is full", "The password vault is full."],
+  ["Use an HTTPS website address without a path", "Use an HTTPS website address without a path."],
+  ["Invalid binding", "That website or app link is not valid."],
+  ["Invalid app package", "That app package is not valid."],
+  ["Invalid app signing certificate", "That app's signing certificate is not valid."],
+  ["Saved passwords are not damaged", "Saved passwords are not damaged."],
+  // The plugin's, client's and website check's own refusals.
+  ["Editor does not accept draft fields", "The password editor does not accept draft fields."],
   ["Enter a website address", "Enter a website address."],
   ["Use an HTTPS website address", "Use an HTTPS website address."],
   ["Remove the user name from the address", "Remove the user name from the website address."],
