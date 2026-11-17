@@ -17,6 +17,11 @@ export function startNativeGoogleAgentHost(options: {
 }) {
   return startSharedHost({
     ...options,
+    // The resident installs its Android DNS-aware fetch after this host starts.
+    request: options.request ?? Object.assign(
+      (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+      {preconnect: (url: Parameters<typeof fetch.preconnect>[0]) => globalThis.fetch.preconnect(url)},
+    ),
     apiOrigin: productionCloud.api,
     userAgent: 'AlphaPhone-Native-Google/1',
     gmailReadBodyMaxCharacters: 32_000,
