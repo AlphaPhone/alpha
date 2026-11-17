@@ -7354,7 +7354,7 @@
       },
       {
         "path": "apps/app/src/runtime/connection-ui.tsx",
-        "name": "manageProviderKey"
+        "name": "saveProviderKeys"
       },
       {
         "path": "apps/app/src/runtime/connection-ui.tsx",
@@ -7378,7 +7378,7 @@
       }
     ],
     "stateMapping": {
-      "operation": "the single operation controller taken by work(), manageProviderKey, a sign-in return or a rebind; every release, manageProviderKey's included, runs runQueuedResidentRebind then runQueuedSignInReturn",
+      "operation": "the single operation controller taken by work(), saveProviderKeys, a sign-in return or a rebind; every release, saveProviderKeys's included, runs runQueuedResidentRebind then runQueuedSignInReturn",
       "startupResolved": "state.startupResolved set when initialize() settles",
       "queuedReturn/returnsArrived/returnsHandled/returnsReplaced": "queuedSignInReturn single slot and signInReturned",
       "incomplete/incompleteFenced/viewChanged/notices/noticesDropped": "queuedSignInIncomplete with its captured epoch and sign-in view, and showSignInIncomplete",
@@ -7387,7 +7387,7 @@
     "abstractions": [
       "Three returns, notices and rebinds. A rebind blocked only by a turn in flight, automatic restart, plan re-checks and resident liveness are ResidentLiveness and CloudPlanRecheck.",
       "A wanted rebind claims the freed slot before the sign-in queue, except when the step that ends is itself a rebind: the queued return or notice then goes first and the wanted rebind runs at the next release. A rebind retires the connection, so a fenced notice queued before it is dropped and one that arrives during it is shown. A key-manager request releases the slot the same way whether it completed or failed.",
-      "Replayed against work, releaseOperation, manageProviderKey, the rebind request and the sign-in return and notice queue sliced from connection-ui.tsx with the shared ResidentRebindQueue and held ports (test/quint-connection-controller.test.mjs). No installed WebView or native event-delivery claim."
+      "Replayed against work, releaseOperation, saveProviderKeys, the rebind request and the sign-in return and notice queue sliced from connection-ui.tsx with the shared ResidentRebindQueue and held ports (test/quint-connection-controller.test.mjs). No installed WebView or native event-delivery claim."
     ],
     "sharedSources": [
       "packages/auth/src/auth/cloud-resident-binding.ts"
