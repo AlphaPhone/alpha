@@ -102,7 +102,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         const result = await port.share({ items: pending.items });
         status = result.status === 'opened' ? '' : 'Share failed';
       } else {
-        // Native (PermittedMediaReview) resolves only after Android approved: {status:'complete'|'partial',
+        // Native (AlphaMediaReview) resolves only after Android approved: {status:'complete'|'partial',
         // outcomes:[{status:'favorited'|'unfavorited'|'trashed'|'restored'|'unchanged'|'stale'|'unverified'}]}.
         // A cancelled review rejects with LIBRARY_DECLINED and a revision changed before review with LIBRARY_STALE.
         const result = await port.requestChange({ operation: pending.action, items: pending.items });
@@ -113,7 +113,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       }
     } catch (failure) {
       const code = (failure as { code?: string })?.code;
-      // The review answers in its own words (PermittedMediaReview); Alpha words each sentence and keeps its code's line otherwise.
+      // The review answers in its own words (AlphaMediaReview); Alpha words each sentence and keeps its code's line otherwise.
       status = refusalText(failure, PHOTOS_MESSAGES, code === 'LIBRARY_DECLINED' ? 'Nothing changed.' : code === 'LIBRARY_STALE' ? 'Item changed' : 'Failed', { ownErrors: false });
     } finally { acting = false; changed(); }
   }

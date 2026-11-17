@@ -39,9 +39,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  });}
  private static final Set<AlphaVoiceCloudPlugin> activeVoices=new java.util.concurrent.CopyOnWriteArraySet<>();
  private static final Set<Streaming> activeStreams=new java.util.concurrent.CopyOnWriteArraySet<>();
- private final ai.eliza.plugins.passwords.PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
- @Override protected void handleOnDestroy(){activeVoices.remove(this);ai.eliza.plugins.passwords.PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
- @Override protected boolean sensitiveSurfaceActive(){return ai.eliza.plugins.passwords.PasswordSurfaces.visible();}
+ private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
+ @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+ @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
  static void retireProviderAuthority(){
   for(AlphaVoiceCloudPlugin voice:activeVoices)voice.mainHandler().post(voice::retireSpeechAuthority);
   for(Streaming stream:activeStreams)stream.retireProvider();
@@ -84,7 +84,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private volatile boolean noteForeground=true;
  /** The shared bridge's refusal code for an active call, so the renderer shows its one call line. */
  private static final String CALL_ACTIVE_CODE="call-active";
- @Override public void load(){super.load();activeVoices.add(this);ai.eliza.plugins.passwords.PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
+ @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
  @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();}
  @Override protected void handleOnPause(){noteForeground=false;super.handleOnPause();}
  private boolean callActive(){android.media.AudioManager audio=(android.media.AudioManager)getContext().getSystemService(android.content.Context.AUDIO_SERVICE);int mode=audio==null?android.media.AudioManager.MODE_NORMAL:audio.getMode();return mode==android.media.AudioManager.MODE_IN_CALL||mode==android.media.AudioManager.MODE_IN_COMMUNICATION||mode==android.media.AudioManager.MODE_RINGTONE;}
@@ -305,10 +305,10 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  @CapacitorPlugin(name="AlphaCloudSpeechStream",permissions={@Permission(alias="microphone",strings={android.Manifest.permission.RECORD_AUDIO})})
  public static final class Streaming extends SpeechStreamBridgePlugin {
   private void retireProvider(){new android.os.Handler(android.os.Looper.getMainLooper()).post(this::retireSpeechAuthority);}
-  private final ai.eliza.plugins.passwords.PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
-  @Override public void load(){super.load();activeStreams.add(this);ai.eliza.plugins.passwords.PasswordSurfaces.addListener(secretSurface);}
-  @Override protected void handleOnDestroy(){activeStreams.remove(this);ai.eliza.plugins.passwords.PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
-  @Override protected boolean sensitiveSurfaceActive(){return ai.eliza.plugins.passwords.PasswordSurfaces.visible();}
+  private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
+  @Override public void load(){super.load();activeStreams.add(this);PasswordSurfaces.addListener(secretSurface);}
+  @Override protected void handleOnDestroy(){activeStreams.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+  @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
   @Override protected long authorityEpoch(){return AlphaLocalAgentPlugin.credentialAuthorityEpoch();}
   @Override protected String cloudOrigin(String environment)throws Exception{return "https://"+CloudSpeechPolicy.host(false,environment);}
   @Override protected String diagnosticFormat(){return "alpha-cloud-stream-timing-v1";}

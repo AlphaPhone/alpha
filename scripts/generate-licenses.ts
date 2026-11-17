@@ -617,8 +617,11 @@ export function androidDependencyFingerprint(root: string) {
     .map(module => [module.name, referencePath(module.source)]).sort(([a], [b]) => a.localeCompare(b));
   const toolchain = readJson(root, `${HOST_TEMPLATES}/toolchain.json`);
   const template = read(root, `${HOST_TEMPLATES}/app.gradle`).split('\n').map(line => line.trim()).filter(line => /\b(implementation|add)\b.*(module|dependency)/.test(line));
+  // Unit-test and instrumentation dependencies (testImplementation, androidTestImplementation) are
+  // never on the packaged runtime classpath.
+  const dependencies = profile.dependencies.filter(dependency => !/^(?:test|androidTest)[A-Z]/.test(dependency.configuration));
   const declared = [
-    `${HOST_DESCRIPTOR}:\n${JSON.stringify({dependencies: profile.dependencies, modules})}`,
+    `${HOST_DESCRIPTOR}:\n${JSON.stringify({dependencies, modules})}`,
     `${HOST_TEMPLATES}/toolchain.json:\n${JSON.stringify({androidGradlePlugin: toolchain.androidGradlePlugin, kotlin: toolchain.kotlin, versions: toolchain.versions})}`,
     `${HOST_TEMPLATES}/app.gradle:\n${template.join('\n')}`,
   ];

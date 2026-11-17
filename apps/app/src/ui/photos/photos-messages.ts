@@ -1,6 +1,6 @@
 /**
- * What Photos and the camera's Keep show when the shared native Photos bridge refuses or answers
- * with a sentence. Android's `PhotosPlugin` (plugin-native-media, registered as `AlphaPhotos`)
+ * What Photos and the camera's Keep show when Alpha's native Photos bridge refuses or answers
+ * with a sentence. Android's `AlphaPhotosPlugin` (forked from plugin-native-media `PhotosPlugin`)
  * and the stores it calls (`OwnedPhotoEdits`, `VideoCopyEdits`, `VideoEditSpec`, `OwnedAlbums`,
  * `OwnedMediaLibrary`, `OwnedMediaSelection`, `TrashDeleteRequest`, `OwnedCaptures`,
  * `CaptureAdmission`, `PhotoCrop`, `PermittedPhotosPlugin`) answer in English; each sentence is
@@ -141,7 +141,7 @@ export const PHOTOS_MESSAGES: ReadonlyMap<string, string> = new Map([
   // PermittedPhotosPlugin.
   ["Photo library changed or is unavailable. Refresh Photos and check its access.", "Photos changed or isn’t available. Refresh Photos and check its access."],
   ["Unlock and reopen Photos before reading the library.", "Unlock the phone, then reopen Photos."],
-  // PermittedMediaReview (favorite, trash, restore, delete forever and replace reviews of device photos).
+  // AlphaMediaReview (favorite, trash, restore, delete forever and replace reviews of device photos).
   ["Photo change cancelled or expired. No change was dispatched.", "The photo change was cancelled or timed out. Nothing changed."],
   ["Photos closed before dispatch. Review the selection again.", "Photos closed before the change was made. Review the selection again."],
   ["Select 1–20 distinct permitted items.", "Select 1 to 20 different items you’ve allowed Alpha to use."],
