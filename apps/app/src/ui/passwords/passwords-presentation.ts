@@ -56,8 +56,8 @@ const VALIDATION: ReadonlyMap<string, string> = new Map([
   ["Enter a website address", "Enter a website address."],
   ["Use an HTTPS website address", "Use an HTTPS website address."],
   ["Remove the user name from the address", "Remove the user name from the website address."],
-  ["Choose a length from 8 to 128 with at least one character type", "Choose a length from 8 to 128 with at least one character type."],
-  ["Choose a length from 8 to 128", "Choose a length from 8 to 128."],
+  ["Choose a length from 8 to 128 with at least one character type", "Choose a length from 8 to 128 characters with at least one character type."],
+  ["Choose a length from 8 to 128", "Choose a length from 8 to 128 characters."],
   ["Choose at least one character type", "Choose at least one character type."],
   ["Choose a typed or generated password", "Type a password or generate one."],
   ["Choose a saved password", "Choose a saved password."],
@@ -79,6 +79,40 @@ export function passwordsFailureText(failure: {
   return Object.hasOwn(FAILURES, failure.code)
     ? FAILURES[failure.code as PasswordsFailureCode]
     : FAILURES.unavailable;
+}
+
+/**
+ * The password generator's rules (`PasswordGenerator.java` in plugin-native-passwords:
+ * `MIN_LENGTH`, `MAX_LENGTH`, and at least one of lowercase, uppercase, digits and symbols, each
+ * on unless turned off). The plugin refuses a request outside them with one sentence naming the
+ * range in digits, which the shared client's message filter drops, so Alpha checks them itself
+ * before asking the vault to generate.
+ */
+export const GENERATED_PASSWORD_LENGTH = Object.freeze({ min: 8, max: 128 });
+
+/**
+ * Alpha's sentence for generator options the vault would refuse, or '' when they are accepted. The
+ * length must be a whole number of characters in range; a character type left out is on.
+ */
+export function generatedPasswordText(options: {
+  length: unknown;
+  lowercase?: boolean;
+  uppercase?: boolean;
+  digits?: boolean;
+  symbols?: boolean;
+}): string {
+  const { min, max } = GENERATED_PASSWORD_LENGTH;
+  const length = options.length;
+  if (typeof length !== "number" || !Number.isInteger(length) || length < min || length > max)
+    return `Choose a length from ${min} to ${max} characters.`;
+  if (
+    options.lowercase === false &&
+    options.uppercase === false &&
+    options.digits === false &&
+    options.symbols === false
+  )
+    return "Choose at least one character type.";
+  return "";
 }
 
 /** Alpha's sentence for a website the form refused (`normalizeWebsite`). */

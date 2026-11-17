@@ -211,3 +211,46 @@ test('each fixed vault refusal is shown in Alpha wording, and only unknown text 
   assert.equal(t.find(t.rows(t.entryPage().groups),'Password').value,'new-secret-2','the draft is kept');
  }
 });
+
+test('the generator length is checked in Alpha before the vault is asked, with the native rules',async()=>{
+ const {generatedPasswordText,GENERATED_PASSWORD_LENGTH}=await import('../apps/app/src/ui/passwords/passwords-presentation.ts');
+ const {readFileSync}=await import('node:fs');
+ const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
+ const generator=read('vendor/eliza/plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordGenerator.java');
+ const plugin=read('vendor/eliza/plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordsPlugin.java');
+ const client=read('vendor/eliza/plugins/plugin-native-passwords/src/client.ts');
+ // Alpha's range is the generator's own.
+ const [,min,max]=/MIN_LENGTH = (\d+), MAX_LENGTH = (\d+)/.exec(generator);
+ assert.deepEqual({...GENERATED_PASSWORD_LENGTH},{min:Number(min),max:Number(max)});
+ // The native refusals name the range in digits, which the shared client's pass-through drops:
+ // that is why the form cannot rely on them.
+ const refusal=/call\.reject\("(Choose a length from[^"]*)", "invalid"\)/.exec(plugin)[1];
+ assert.equal(refusal,'Choose a length from 8 to 128 with at least one character type');
+ assert.match(generator,/"Choose a length from 8 to 128"/);
+ assert.match(generator,/"Choose at least one character type"/);
+ const passThrough=new RegExp(/\/(\^\[A-Za-z ,.'-\]\{1,80\}\$)\//.exec(client)[1]);
+ assert.ok(!passThrough.test(refusal),'the client drops the length refusal');
+ // Alpha's sentences carry the same information.
+ for(const length of [7,0,-1,129,1000,20.5,Number.NaN,Number.POSITIVE_INFINITY,'20',undefined,null])
+  assert.equal(generatedPasswordText({length}),'Choose a length from 8 to 128 characters.',String(length));
+ for(const length of [8,16,20,32,128])assert.equal(generatedPasswordText({length}),'',String(length));
+ assert.equal(generatedPasswordText({length:20,lowercase:false,uppercase:false,digits:false,symbols:false}),'Choose at least one character type.');
+ assert.equal(generatedPasswordText({length:20,lowercase:false,uppercase:false,digits:false}),'','a type left out is on');
+ assert.equal(generatedPasswordText({length:200,lowercase:false,uppercase:false,digits:false,symbols:false}),'Choose a length from 8 to 128 characters.');
+ // The form runs the check before it calls the vault, and sends the checked options.
+ const manager=read('apps/app/src/passwords/password-manager.ts');
+ const save=manager.slice(manager.indexOf('function save('),manager.indexOf('export function passwordManagerGroups('));
+ assert.ok(save.indexOf('generatedPasswordText(generate)')>0&&save.indexOf('generatedPasswordText(generate)')<save.indexOf('vault.save('));
+ assert.match(save,/\.\.\.\(generate \? \{ generate \} :/);
+});
+
+test('a generated password is saved with the length the owner picked',async()=>{
+ const t=await mount();await t.openShop();
+ await t.press(t.rows(t.entryPage().groups),'Generate');
+ t.find(t.rows(t.entryPage().groups),'Length').opts.find(option=>option.label==='32').pick();
+ await t.press(t.rows(t.entryPage().groups),'Save');
+ const saves=t.calls.filter(([method])=>method==='save');
+ assert.equal(saves.length,1);
+ assert.deepEqual(saves[0][1].generate,{length:32});
+ assert.equal(saves[0][1].password,undefined);
+});

@@ -708,6 +708,7 @@ export const moduleInventory = {
     "apps/app/src/ui/documents/scan-pdf-messages.ts",
     "apps/app/src/ui/files/files-browser-adapter.ts",
     "apps/app/src/ui/files/files-operation-presentation.ts",
+    "apps/app/src/ui/files/selected-document-messages.ts",
     "apps/app/src/ui/files/storage-presentation.ts",
     "apps/app/src/ui/gestures/constants.ts",
     "apps/app/src/ui/gestures/lost-capture.ts",
