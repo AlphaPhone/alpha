@@ -3438,7 +3438,7 @@ export const connectionController = {
       const row=history.messages.find(row=>row.id===target.messageId);
       if(!row||row.role!=='user'||row.source==='local_command'||typeof row.text!=='string'||restoredText(row.text,row.userTextFormat)!==target.text)throw Error('Changed · reload');
       if(JSON.stringify(navigationContext?.())!==contextKey)throw Error('The active screen changed. Nothing was sent.');
-      const branch=await selected.remote.forkConversation(target.conversationId,target.messageId,requestId,controller.signal);current();
+      const branch=await selected.remote.forkConversation(target.conversationId,target.messageId,requestId,row.text,controller.signal);current();
       await restoreConversationHistory(branch.id,controller.signal,false);
     }finally{releaseOperation(controller);}
   },
