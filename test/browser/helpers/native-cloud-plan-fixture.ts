@@ -24,12 +24,20 @@ export async function entitlements(overrides:Record<string,unknown>={}){
  return {keys:[jwk],tokens};
 }
 
-type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits?:'active'|'none'|'canceled'|'balance-only'|'absent'|'503';identity?:'ok'|'offline'|'401';
+type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits?:'active'|'past_due'|'none'|'canceled'|'balance-only'|'absent'|'503';identity?:'ok'|'offline'|'401';
  redeem?:'ok'|'invalid'|'rate'|'already'|'transport-once';redeemPlan?:string;saved?:boolean;expiresAt?:number;holdProvider?:boolean;providerFailure?:string;
  /** Exact USD organization credit balance in the billing snapshot (data.v2.balance); absent when unset. */
  credits?:string;storage?:Record<string,string>;fullApp?:boolean;
  /** Actual Android connectivity observation, independent of whether Cloud answers. */
- networkConnected?:boolean};
+ networkConnected?:boolean;
+ /** Holds the next entitlement read with the answer it had when asked, until releaseEntitlement() (a slow, stale read). */
+ holdEntitlement?:boolean;
+ /** The plan the held read answers (a read that started before Cloud recorded the purchase); else the plan when asked. */
+ holdEntitlementAs?:string;
+ /** Cloud has no payment evidence yet: a checkout confirm answers no subscription. */
+ confirmUnpaid?:boolean;
+ /** Alpha Cloud cutover: Cloud's payment evidence confirms the pending checkout (otherwise only once the plan is active). */
+ checkoutPaid?:boolean};
 export type NativePlanFixture = Fixture & {tokens?:Record<string,string>;keys?:unknown[]};
 
 /** Supply closed native ports to the actual chooser and resident controller. */
@@ -39,11 +47,11 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
   const w=window as any;
   if(initial.fullApp)w.androidBridge={};
   if(!sessionStorage.getItem('plan-fixture-seeded')){sessionStorage.setItem('plan-fixture-seeded','1');for(const [key,value] of Object.entries(initial.storage||{}))localStorage.setItem(key,value as string);}
-  const f=w.planFixture={plan:'active',route:'signed',limits:'absent',identity:'ok',redeem:'ok',redeemPlan:'active',saved:true,holdProvider:true,networkConnected:true,...initial,calls:[]as any[],bodies:[]as any[],releaseProvider:null as null|(()=>void)};
+  const f=w.planFixture={plan:'active',route:'signed',limits:'absent',identity:'ok',redeem:'ok',redeemPlan:'active',saved:true,holdProvider:true,networkConnected:true,...initial,calls:[]as any[],bodies:[]as any[],releaseProvider:null as null|(()=>void),releaseEntitlement:null as null|(()=>void)};
   const residentId='9f1dc45a-4011-4e44-947a-30d999d24fa5';
   const resident=w.residentAgent=w.createResidentAgentPlugin({owner:()=>residentId,agentId:residentId});
   const credential={credentialId:'11111111-1111-4111-8111-111111111111',token:'synthetic-plan-token',expiresAt:initial.expiresAt??Date.now()+60*24*3600*1000};
-  const names={ElizaSystem:['getNetworkStatus'],AlphaCloudSignIn:['status','startEmail','verifyEmail','cancel','addListener','removeListener'],AlphaConnection:['secureRead','secureWrite','secureRemove','request','cancel','openExternal','addListener','removeListener'],Agent:['stop','getStatus','configureCloudProvider','clearProvider','providerStatus','start','request','setGoogleAgentAccess'],AlphaHostedResults:['disableBackground','addListener','removeListener'],DailyApps:['addListener','removeListener'],AlphaNotifications:['status','addListener','removeListener'],AlphaVoiceCloud:['checkPermissions']};
+  const names={ElizaSystem:['getNetworkStatus'],AlphaCloudSignIn:['status','startEmail','verifyEmail','cancel','addListener','removeListener'],AlphaConnection:['secureRead','secureWrite','secureRemove','request','cancel','openExternal','addListener','removeListener'],Agent:['stop','getStatus','configureCloudProvider','clearProvider','providerStatus','start','request','setGoogleAgentAccess'],AlphaHostedResults:['disableBackground','addListener','removeListener'],DailyApps:['addListener','removeListener'],AlphaNotifications:['status','addListener','removeListener'],AlphaVoiceCloud:['checkPermissions'],AlphaBillingAuthority:['status','start','verify','clear','perform']};
   // Android's active-network observation follows the simulated network events.
   window.addEventListener('offline',()=>{f.networkConnected=false;});
   window.addEventListener('online',()=>{f.networkConnected=true;});
@@ -70,6 +78,18 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
     if(method==='request'){const id=residentId;const body=input.path==='/api/auth/me'?{identity:{id,kind:'owner'},access:{role:'OWNER',mode:'local'}}:input.path==='/api/agents'?{agents:[{id,name:'Alpha',status:'running'}]}:input.path==='/api/conversations'?{conversations:[]}:{};return {status:200,body:JSON.stringify(body)};}
     return {};
    }
+   // Alpha Cloud cutover: the native billing authority with an account session already confirmed. Plan
+   // changes answer synthetic quotes and commands; an upgrade needs payment action on a synthetic invoice page.
+   if(plugin==='AlphaBillingAuthority'){
+    if(method==='status')return {status:'authorized',expiresAt:Date.now()+3_600_000};
+    if(method!=='perform')return {};
+    (f.billing??=[]).push(input.operation);
+    const later=new Date(Date.now()+300_000).toISOString(),invoice={amountDueCents:7000};
+    if(input.operation==='upgrade-review')return {status:200,body:{success:true,data:{quoteId:'quote_synthetic',review:{kind:'upgrade_estimate',targetPlanKey:input.targetPlanKey,dueNow:invoice,recurringEstimate:{amountDueCents:10000},expiresAt:later}}}};
+    if(input.operation==='upgrade-confirm')return {status:200,body:{success:true,data:{commandId:'cmd_upgrade',status:'PREPARED'}}};
+    if(input.operation==='upgrade-payment')return {status:200,body:{success:true,data:{command:{commandId:'cmd_upgrade',status:'PREPARED'},continuation:{hostedInvoiceUrl:'https://invoice.stripe.com/i/acct_synthetic/inv_synthetic'}}}};
+    return {status:404,body:{}};
+   }
    if(plugin==='AlphaNotifications')return method==='status'?{permissionGranted:false,appEnabled:false}:{};
    // Retiring a running agent pauses its hosted background delivery.
    if(plugin==='AlphaHostedResults')return {};
@@ -81,11 +101,12 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
    if(method!=='request')return {};
    const path=new URL(input.url).pathname;
    if(path==='/api/v1/user'){if(f.identity==='offline')throw Error('Connection request failed');return f.identity==='401'?{status:401,data:{}}:{status:200,data:{success:true,data:{id:'22222222-2222-4222-8222-222222222222',email:'synthetic-plan@example.invalid'}}};}
-   // In-app plans (cloud-plans.ts): the public catalogue and the owner's referral code.
+   // Alpha Cloud cutover, in-app plans (cloud-plans.ts): the public catalogue and the owner's referral code.
    if(path==='/api/v1/subscriptions/plans')return {status:200,data:{success:true,data:{catalogVersion:'v1',plans:[{key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25.00'}},{key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90.00'}}]}}};
    if(path==='/api/v1/referrals')return {status:200,data:{code:'ALPHA-FIXTURE',total_referrals:0,is_active:true}};
    if(path==='/api/v1/subscription/entitlement-keys')return {status:200,data:{keys:f.keys??[]}};
    if(path==='/api/v1/subscription/entitlement'){
+    if(f.holdEntitlement&&f.route==='signed'){f.holdEntitlement=false;const stale=f.tokens[f.holdEntitlementAs??f.plan];await new Promise<void>(resolve=>f.releaseEntitlement=resolve);return {status:200,data:{entitlement:stale}};}
     if(f.route==='signed')return {status:200,data:{entitlement:f.tokens[f.plan]}};
     if(f.route==='401')return {status:401,data:{}};
     if(f.route==='503')return {status:503,data:{success:false,code:'service_unavailable'}};
@@ -100,7 +121,8 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
      ? {status:'unavailable',source:'subscriptions',observedAt,error:{code:'subscription_unavailable',retryable:true}}
      : f.limits==='none'
       ? {status:'not_applicable',reason:'no_organization_subscription'}
-      : {status:'available',value:{planKey:'plus_monthly',state:f.limits,currentPeriodEnd:'2099-01-01T00:00:00.000Z'}};
+      : {status:'available',value:{subscriptionId:'sub_synthetic',planKey:'plus_monthly',lifecycleRevision:'1',state:f.limits,currentPeriodEnd:'2099-01-01T00:00:00.000Z',cancelAtPeriodEnd:false,pendingPlanKey:null,
+        cancellationControl:{action:'cancel',expectedSubscriptionRevision:1,eligible:f.limits!=='canceled'}}};
     const balance=f.credits===undefined?{}:{balance:{status:'available',source:'organizations',observedAt,value:{balance:{value:f.credits,unit:'usd',currency:'USD'},revision:'1'}}};
     return {status:200,data:{success:true,data:{schemaVersion:2,v2:{subscription,...balance}}}};
    }
@@ -114,6 +136,11 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
     return {status:200,data:{success:true,replayed:f.bodies.length>1,grant:{id:'synthetic-grant',planKey:'plus_monthly',startsAt:'2026-10-13T00:00:00.000Z',endsAt:'2027-04-14T00:00:00.000Z',revoked:false,paidPlanTakesPrecedence:false},entitlement:{plan:{id:'plus_monthly',name:'Plus',status:'active'},source:'grant',effectiveUntil:'2027-04-14T00:00:00.000Z'}}};
    }
    if(path==='/api/auth/cli-session')return {status:503,data:{}};
+   // Alpha Cloud cutover, in-app plans (cloud-plans.ts): device-key checkout on a synthetic Stripe URL
+   // (the browser opening is the recorded openExternal call; nothing is bought).
+   if(path==='/api/v1/subscriptions/checkout'){f.bodies.push(JSON.parse(input.body));return {status:200,data:{success:true,data:{status:'open',commandId:'cmd_synthetic',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_synthetic',sessionId:'cs_test_synthetic',expiresAt:new Date(Date.now()+1_800_000).toISOString()}}};}
+   // Cloud confirms only from its own payment evidence: here, once the synthetic plan became active (or checkoutPaid).
+   if(path==='/api/v1/subscriptions/checkout/confirm'){const body=JSON.parse(input.body);f.bodies.push({confirm:body});return {status:200,data:{success:true,data:{subscriptionId:body.sessionId==='cs_test_synthetic'&&(f.plan==='active'||f.checkoutPaid)&&!f.confirmUnpaid?'sub_synthetic':null}}};}
    throw Error('Unexpected Cloud route '+path);
   }};
  },initial);

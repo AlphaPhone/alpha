@@ -208,8 +208,10 @@ export function webViewFilters(tree: ManifestNode) {
       const other = [...new Set(data.flatMap(node => Object.keys(node.attrs)))]
         .filter(name => !['scheme', 'host', 'path', 'pathPrefix', 'pathPattern', 'pathAdvancedPattern', 'pathSuffix'].includes(name))
         .sort().map(name => ` [${name}=${values(name).join(',')}]`).join('');
+      // A component declared disabled resolves no intent; it is listed as such, never dropped.
+      const disabled = ['0x0', 'false'].includes(component.attrs.enabled ?? '') ? ' [disabled]' : '';
       for (const scheme of schemes) for (const host of hosts) for (const shape of paths.length ? paths : [' (any path)'])
-        lines.add(`${componentName(component.attrs.name, manifest)} ${scheme}://${host}${shape}${other}`);
+        lines.add(`${componentName(component.attrs.name, manifest)} ${scheme}://${host}${shape}${other}${disabled}`);
     }
   }
   return [...lines].sort();

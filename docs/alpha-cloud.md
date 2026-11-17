@@ -3,7 +3,8 @@
 Alpha Phone's own Cloud: sign-in, AI inference, voice, subscriptions and billing for
 `ai.alphacompute.alphaphone`, on Cloudflare under `alphacompute.ai`. It is built from the pinned
 upstream source (`vendor/eliza` at `upstream.lock.json`, exported, never edited) and described by
-data in this repository. The shipped app still uses Eliza Cloud until the cutover in section 8.
+data in this repository. The shipped app still uses Eliza Cloud: everything in the app that is
+specific to Alpha Cloud is behind the cutover flag (section 8), which is off by default.
 
 ## 1. What the Cloud does, and what it does not
 
@@ -63,13 +64,15 @@ keys for staging and live keys for production.
 
 | Name | Where to get it | Notes |
 |---|---|---|
-| **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.ai` zone, on Workers Paid with Containers | `CLOUDFLARE_ACCOUNT_ID` and an API token: Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone DNS edit on `alphacompute.ai`. Your current wrangler login is the Eliza Labs account; do not deploy there. |
+| **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.ai` zone, on Workers Paid with Containers | Set `CLOUDFLARE_ACCOUNT_ID` and use a token for that account. Grant Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone read and DNS edit on `alphacompute.ai`. |
 | `DATABASE_URL` | Postgres for Cloud (Neon, Supabase or Railway) | Its own database. Hyperdrive is created from it. |
+| `DATABASE_IDENTITY_EXPECTED_CLUSTER_SHA256`, `DATABASE_IDENTITY_EXPECTED_AUTHORITY_SHA256` | Reviewed output of `database-identity` for that environment | Migration and registration both verify these receipts against the connection they use. |
 | `STEWARD_DATABASE_URL` | A second Postgres database for Steward | Must differ from `DATABASE_URL`. Steward migrates it at start. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis → REST API | Rate limits, auth denylist, speech sessions. |
 | `CEREBRAS_API_KEY` | cloud.cerebras.ai → API keys | Serves `qwen-3.8-27b`. `OPENROUTER_API_KEY` (optional) adds other models. |
 | `CARTESIA_API_KEY`, `CARTESIA_STT_USD_PER_CREDIT` (optional) | play.cartesia.ai → API keys; price per credit from your plan | Without them STT and TTS use Workers AI. |
 | `RESEND_API_KEY` | resend.com, with `alphacompute.ai` verified as a sending domain | Sends sign-in codes from `noreply@alphacompute.ai`. |
+| `CLOUD_PUBLIC_SERVICE_TERMS_JSON`, `CLOUD_PUBLIC_SERVICE_PRIVACY_JSON` | Alpha Compute's approved Terms and Privacy text | Each value is one line of JSON with `title`, `revision`, and a nonempty `sections` array. Each section has a `title` and a nonempty `paragraphs` array of plain-text strings. Limit each value to 5120 UTF-8 bytes. The API publishes the documents for the in-app sign-in screen. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web application) in an AlphaCompute project | Authorized redirect URIs: `https://login.alphacompute.ai/auth/oauth/google/callback` and `https://api.alphacompute.ai/api/v1/oauth/google/callback` (staging: the `-staging` hosts). Used for sign-in (Steward) and the Gmail/Calendar connector (API). |
 | `STEWARD_GOOGLE_NATIVE_CLIENT_IDS` (optional) | An Android OAuth client: package `ai.alphacompute.alphaphone`, SHA-1 of the release certificate | JSON `{"alpha-phone": ["<id>.apps.googleusercontent.com"]}`. Only needed for native Google sign-in; the app uses browser sign-in today. |
 | `GOOGLE_MAPS_API_KEY` (optional) | Google Cloud → Maps Platform key restricted to Geocoding, Places and Routes | Without it Maps is unavailable. |
@@ -88,9 +91,11 @@ and `ALPHA_CLOUD_ENV` (the whole completed env file).
 ```bash
 bun run cloud:worker -- prepare                       # export, install and build the pin (about 2 GB, once per pin)
 bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha-cloud/staging.env
-# add the provider values to that file, then run `secrets` again until nothing is MISSING
+# add the provider values, report and verify the database receipts, then rerun `secrets`
+bun run cloud:worker -- database-identity --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provision --environment staging --env-file ~/.config/alpha-cloud/staging.env --write
 bun run cloud:worker -- check --environment staging   # render and bundle, no network
+CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha-cloud/staging.env
 bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
 CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
@@ -99,12 +104,31 @@ bun run cloud:worker -- pricing --environment staging --env-file ~/.config/alpha
 bun run cloud:worker -- smoke --environment staging
 ```
 
-`deploy` uploads each Worker's secrets with its version (`wrangler deploy --secrets-file`); `secrets
---apply` pushes them alone, for a rotation. `provision` creates the KV namespace, R2 bucket and Hyperdrive configuration, plus proxied DNS
-records for the API and blob hosts, and writes their ids to `cloud/resources.json` (commit that
-file). The login and web hosts are Worker custom domains, which Cloudflare creates on deploy.
-After the first deployment, the **Cloud deploy** workflow does the same from `main` with
-`--frozen` secrets. Then:
+`deploy` uploads each Worker's secrets with its version using `wrangler deploy --secrets-file`.
+`secrets --apply` pushes them alone for a rotation. `provision` verifies the account's zone, KV
+namespace, Hyperdrive configuration, R2 bucket and proxied DNS for the API and blob hosts.
+It creates missing resources and confirms them by readback. If a previous run stopped partway,
+rerun with the same account and environment to recover the resources by name. Resolve conflicts
+in the account or resource configuration before continuing. With `--write`, commit the updated
+`cloud/resources.json`. The login and web hosts are Worker custom domains created on deployment.
+
+`preflight` reads the configured resources from the selected account without changing them. With
+`--env-file`, it also checks that Hyperdrive's host, port, database and user match `DATABASE_URL`.
+`deploy` repeats these checks with its env file before uploading. Run `preflight` with the frozen
+env file before migrating or seeding.
+The `smoke` step checks which API environment answered, the Terms and Privacy text,
+public entitlement keys, the exact native client and S256 callback binding, the plan catalogue, sign-in
+providers, the enrolled release certificate's App Links grant, and the hosted callback page.
+
+Exercise the live integrations after these checks pass.
+
+For each environment, check the target database and role against the operator's database record
+before accepting the reported digests into its env file. Use a direct or session-pinned connection
+whose migration role can read `pg_catalog.pg_control_system()`. `database-identity` only reports
+redacted digests. `migrate` verifies them under the upstream migration lock, and `seed` verifies
+them again inside its write transaction. If an interrupted initial migration hits the upstream
+compatibility barrier before 0282, resolve it with the database owner before continuing. The tool
+requires explicit migration completion before the workflow proceeds.
 
 - In Stripe, send a test webhook and check that it returns 200.
 - `bun run cloud:worker -- pricing --environment staging --env-file …` fills the model price
@@ -115,7 +139,9 @@ After the first deployment, the **Cloud deploy** workflow does the same from `ma
 
 ## 5. Subscription management in the app
 
-Account → Plan opens the plan manager. Nothing is done on a website.
+With the cutover flag on (section 8), Account → Plan opens the plan manager. Nothing is done on a
+website. With it off (every distributed build today), Plan and Add funds open the current Cloud's
+hosted billing page, as before.
 
 | Action | Authority | Route |
 |---|---|---|
@@ -128,8 +154,12 @@ Account → Plan opens the plan manager. Nothing is done on a website.
 
 Upstream accepts plan changes and cancellation only with a fresh account session. The app asks
 "Confirm it's you" and emails a one-time code to the account's own address. The native plugin keeps
-the resulting session in memory for at most an hour and checks that it is the phone's account. It
-is never stored and never shown to the web view.
+the resulting session in memory for at most an hour. It is bound to the phone's own stored Cloud key,
+and to the account Cloud names for that key (`/api/v1/user`), never to an account the web view names.
+It ends at sign-out, a new or renewed key, or an account switch. It is never stored and never shown to the web view.
+
+Alpha Cloud has no in-app credit top-up: with the flag on, the account sheet does not offer Add
+funds (subscription allowances only). A top-up surface is a separate change.
 
 ## 6. OTA updates
 
@@ -171,27 +201,67 @@ Validated 2026-11-15 at the main pin `f86b5038f8`, on this computer, not deploye
   that asset links are served from the registration; and that the edge forwarding of the callback
   works while an unregistered path is refused.
 - Unit tests: `test/cloud-worker.test.mjs`, `test/cloud-plans.test.mjs` (including the native route
-  table on a JVM), `test/update-channel-status.test.mjs` and `test/connection-routes.test.mjs`.
+  table and the account-bound billing session on a JVM), `test/cloud-provision.test.mjs`,
+  `test/cloud-candidate-deployment.test.mjs` (the cutover flag), `test/update-channel-status.test.mjs`
+  and `test/connection-routes.test.mjs` (both flag states).
 
 Not yet proven: anything deployed; Stripe test-mode checkout end to end; Cerebras and Cartesia
 calls (they need the keys); Google sign-in against a real client; the Steward container on
 Cloudflare (Eliza runs that Worker with `LOGIN_ENABLED=false` and hosts Steward elsewhere, so
 Alpha would be its first production user); the plan manager on a device.
 
-## 8. Cutover (shipped app → Alpha Cloud)
+## 8. Cutover flag (shipped app → Alpha Cloud)
 
-The shipped policy (`scripts/cloud-deployment-policy.ts`) still names Eliza Cloud. Once staging and
-production pass `smoke` and a test-mocks build passes sign-in, plans and voice against them
-(`ALPHA_CLOUD_DEPLOYMENT_FILE=cloud/policy.json`):
+Alpha Cloud is merged dormant. One flag decides whether a build uses it: `ALPHA_CLOUD_CUTOVER` in
+`scripts/cloud-deployment-policy.ts`, derived from the deployment rows (`"alphaCloud": true` in
+`cloud/policy.json`; absent in the shipped Eliza Cloud rows). `scripts/cloud-deployment.ts` writes it
+into every build output: `alphaCloudCutover` (renderer, `cloud-deployment.generated.ts`),
+`CloudDeployment.ALPHA_CLOUD_CUTOVER` (Java) and `alphaCloudCutover` (Gradle).
 
-1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/policy.json`'s rows. The App Link host becomes
-   `cloud.alphacompute.ai`.
+**Off (default; every distributed build).** The app uses the shipped Eliza Cloud and behaves as
+before: Plan, Choose a plan, Add funds and the chat plan card open the hosted billing page; no
+`alphacompute.ai` host, in-app plan route (`/api/v1/subscriptions/plans|checkout`, `/referrals`) or
+Stripe page is admitted by either transport; the native billing authority plugin is not registered
+(and refuses if called); the `/alphaphone/billing/return` App Link alias (`AlphaCloudBillingReturn`)
+is declared disabled, so it resolves no intent; `scripts/verify-apks.ts` requires exactly that.
+
+**On.** The deployment is `cloud/policy.json` (Alpha Cloud hosts and its own credential namespace),
+the plan manager, native billing authority, Stripe pages, referral routes and the billing App Link
+are live.
+
+Enable it for a development, test or validation build (never a distribution):
+
+```bash
+ALPHA_CLOUD_CUTOVER=1 bun scripts/cloud-deployment.ts        # regenerate the build outputs for Alpha Cloud
+ALPHA_CLOUD_CUTOVER=1 bun run android:build -- --allow-unpackaged-runtime   # or dev:ui / build:only
+git checkout -- apps/app/src/runtime/cloud-deployment.generated.ts \
+  android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java android/app/cloud-deployment.generated.gradle
+```
+
+Keep `ALPHA_CLOUD_CUTOVER=1` set for every command of that build: the build checks
+(`cloud-deployment.ts --check`, Vite) compare the outputs with the selected deployment. A flag-on
+build is a candidate deployment: it has its own credential namespace (phones sign in again) and
+`scripts/audit-production-bundle.ts` refuses it, so it cannot be distributed by accident.
+`ALPHA_CLOUD_DEPLOYMENT_FILE` can name another Alpha Cloud rows file instead of `cloud/policy.json`.
+
+Validate: `test/cloud-candidate-deployment.test.mjs` (flag values and generated outputs),
+`test/cloud-plans.test.mjs` and `test/connection-routes.test.mjs` (routes and hosts in both states),
+`test/verify-apks.test.mjs` (the App Link alias), and `test/browser/native-cloud-subscription.spec.ts`
+("Alpha Cloud cutover flag": off keeps the hosted page; on runs the in-app plans against the
+generated Alpha Cloud authorities). Then a flag-on device build against staging: sign-in, plans,
+checkout return, plan change with the emailed code, and voice.
+
+The cutover release itself, once staging and production pass `smoke` and a flag-on build passes the
+checks above:
+
+1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/policy.json`'s rows (with `"alphaCloud": true`), which
+   turns the flag on for every build. The App Link host becomes `cloud.alphacompute.ai`.
 2. Append the new storage namespace to `STORAGE_NAMESPACES` and add the namespace migration. Users
    sign in again; Eliza Cloud accounts, subscriptions and Google grants do not move by themselves.
 3. Build, sign and publish through OTA (section 6).
 
 Changing the policy before the Cloud is live would sign every phone out to a Cloud that does not
-answer, so this stays a separate, deliberate release.
+answer, so this stays a separate, deliberate release that the owner approves.
 
 ## 9. Upstream
 

@@ -24,7 +24,7 @@ function compile(text) {
   return stripTypeScriptTypes([
     line('export const PLAN_RECHECK_INTERVAL_MS').replace('export ', ''),
     line('let lastPlanRecheck ='), line('let planManagementReturn ='),
-    line('function planCheckScope()'), line('let networkLostUnder:'), line('let planRecheck:'),
+    line('function planCheckScope()'), line('let networkLostUnder:'), line('let planRecheck:'), line('let planRecheckAgain ='),
     line('let homePresentationRevision ='),
     section('async function recheckResidentPlan()', '/** Bind or unbind'),
     section('async function work(', '/** Release only this operation'),
