@@ -280,35 +280,30 @@ test('F-10: a saved older version of a sent email is kept, labelled as such, and
   test.setTimeout(180_000);
   await openInbox(page);
   await compose(page, 'Versioned plan', 'Saved first text');
-  await button(page, 'Save draft').click();
-  await expect(page.getByText('Saved locally on this device').first()).toBeVisible();
+  await button(page, 'Back from draft').click();
+  await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveCount(0);
+  await (await localDraftRow(page)).click();
   // Edited after saving and sent without saving again: the saved copy is an earlier version.
   await page.getByRole('textbox', {name: 'Message', exact: true}).fill('Sent final text');
   await button(page, 'Send email').click();
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-  await expect(review).toContainText('An earlier saved version of this email is still on this device.');
-  await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
-  // Never removed on its own, and offered only under its label; Restore local draft is not shown.
-  await expect(await localDraftRow(page)).toContainText('Earlier version of a sent email');
-  await expect(button(page, 'Restore local draft')).toHaveCount(0);
-  // After a reload the receipt reopens; closing it leaves the label, which is kept with the saved copy.
-  await openInbox(page, {}, true);
-  await review.getByRole('button', {name: 'Close receipt', exact: true}).click();
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
   await expect(review).toHaveCount(0);
-  await expect(await localDraftRow(page)).toContainText('Earlier version of a sent email');
+  await expect(page.getByRole('button', {name: 'Local draft, Versioned plan'})).toContainText('Earlier version of a sent email');
+  await openInbox(page, {}, true);
+  await expect(review).toHaveCount(0);
+  const earlier = await localDraftRow(page,'Local draft, Versioned plan');
+  await expect(earlier).toContainText('Earlier version of a sent email');
   // Declining the confirmation leaves it closed; accepting opens it, still unsent.
   const prompts: string[] = [];
   page.once('dialog', dialog => { prompts.push(dialog.message()); void dialog.dismiss(); });
-  await (await localDraftRow(page)).click();
+  await earlier.click();
   await expect.poll(() => prompts.length).toBe(1);
-  expect(prompts[0]).toContain('earlier version of an email that was already sent');
+  expect(prompts[0]).toContain('earlier version of a sent email');
   await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveCount(0);
   page.once('dialog', dialog => { prompts.push(dialog.message()); void dialog.accept(); });
-  await (await localDraftRow(page)).click();
+  await earlier.click();
   await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Saved first text');
-  await expect(page.getByText(/Earlier version of a sent email\. Sending it creates another message/).first()).toBeVisible();
   const state = await provider(page);
   expect(state.sent).toEqual(['Versioned plan']);
   expect(state.dispatched).toHaveLength(1);

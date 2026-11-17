@@ -2060,7 +2060,12 @@ export function createMailDraftsController(
             ...(shelf?.items
               .filter((row) => row.draft.id !== local?.id)
               .map((row) => ({
-                ...chip("Open local draft", () => void openShelved(row)),
+                ...chip(
+                  row.draft.earlierThanSent
+                    ? "Earlier version of a sent email"
+                    : "Open local draft",
+                  () => void openShelved(row),
+                ),
                 subject: row.draft.subject || "(No subject)",
                 snippet: row.draft.body.slice(0, 160) || "Draft on this device",
               })) || []),
