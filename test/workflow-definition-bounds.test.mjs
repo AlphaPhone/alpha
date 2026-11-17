@@ -181,3 +181,55 @@ console.log(JSON.stringify({
  assert.equal(out.clarification,'Workflow needs clarification: Which notes?');
  assert.equal(out.thrown,'Unavailable');
 });
+
+test('the workflow editor keeps each local and phone reason, and words an unknown local failure locally',()=>{
+ const out=run(`
+// A zone with a spring-forward gap: 02:30 on 8 March 2026 does not exist there.
+process.env.TZ='America/New_York';
+const M=await import(${JSON.stringify(resolve(root,'apps/app/src/ui/workflows/workflow-messages.ts'))});
+const T=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/workflow-local-time.ts'))});
+const fs=await import('node:fs');
+const thrown=run=>{try{run();return null;}catch(error){return error;}};
+// The phone's own refusals, read from their sources so a reworded refusal fails here.
+const nativeCalendar=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-native-calendar/android/src/main/java/ai/eliza/plugins/calendar/CalendarPlugin.java'))},'utf8');
+const listing=nativeCalendar.slice(nativeCalendar.indexOf('public void workflowCalendars('),nativeCalendar.indexOf('public void readWorkflowRange('));
+const lateLaunch=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java'))},'utf8');
+const notesDocument=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-notes/src/client/notes-document-store.ts'))},'utf8');
+const browserNotes=fs.readFileSync(${JSON.stringify(resolve(root,'apps/app/src/runtime/browser-notes-document.ts'))},'utf8');
+const phone=[
+ ...[...listing.matchAll(/reject\\("([^"]+)"/g)].map(match=>match[1]),
+ /CLOSED="([^"]+)"/.exec(lateLaunch)[1],
+ ...new Set([...notesDocument.matchAll(/new NotesDocumentConflict\\(\\s*"([^"]+)"/g)].map(match=>match[1])),
+ /throw Error\\('(Older Notes changed[^']+)'\\)/.exec(browserNotes)[1],
+];
+const local='Invalid time';
+console.log(JSON.stringify({
+ invalid:M.workflowErrorText(thrown(()=>T.localDate('')),local,local),
+ gap:M.workflowErrorText(thrown(()=>T.localDate('2026-03-08T02:30')),local,local),
+ gapRaised:thrown(()=>T.localDate('2026-03-08T02:30'))?.message??null,
+ phone:phone.map(message=>[message,M.workflowErrorText(new Error(message),'','Local')]),
+ unknownLocal:M.workflowErrorText(new TypeError('calendar.workflowCalendars is not a function'),local,local),
+ unknownRemote:M.workflowErrorText(new TypeError('calendar.workflowCalendars is not a function'),''),
+ thrownLocal:M.workflowErrorText('not an error',local,local),
+}));`);
+ assert.equal(out.invalid,'Choose a valid local date and time.','a cleared or invalid date keeps its own sentence');
+ assert.equal(out.gapRaised,'This local time does not exist. Choose another time.','the time falls in the spring-forward gap');
+ assert.equal(out.gap,'This local time does not exist. Choose another time.','the instruction to pick another time is kept');
+ assert.deepEqual(out.phone.map(([message])=>message),[
+  'Open Workflows before reading calendar sources',
+  'Selected calendar sources could not be read',
+  'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.',
+  'Notes changed in another view. Reopen before editing.',
+  'Older Notes changed. Close older tabs and review recovery before editing.',
+ ],'the phone refusals the editor reaches were read from their sources');
+ assert.deepEqual(Object.fromEntries(out.phone),{
+  'Open Workflows before reading calendar sources':'Open Workflows before reading calendar sources.',
+  'Selected calendar sources could not be read':'The calendars on this phone could not be read. Try again.',
+  'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.':'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.',
+  'Notes changed in another view. Reopen before editing.':'Notes changed in another view. Reopen Notes before selecting.',
+  'Older Notes changed. Close older tabs and review recovery before editing.':'Older Notes changed. Close older tabs and review recovery before selecting.',
+ });
+ assert.equal(out.unknownLocal,'Invalid time','an unknown local failure reads as a local sentence');
+ assert.equal(out.unknownRemote,'Workflow request unavailable. Check execution history before repeating a run.');
+ assert.equal(out.thrownLocal,'Invalid time');
+});

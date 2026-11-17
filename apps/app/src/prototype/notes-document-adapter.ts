@@ -21,7 +21,7 @@ export function installNotesDocumentAdapter(Component:any,views:Record<string,Ba
   const receipt=(message:string)=>{const token=epoch;void whenVisible().then(()=>{if(token===epoch&&api.isActive())api.toast(message);});};
   const perform=async(task:()=>Promise<any>,apply:(value:any)=>void|Promise<void>)=>{if(busy){api.toast('Busy');return;}const token=epoch;busy=true;api.set({noteDocumentBusy:true});try{const value=await task();if(token!==epoch||!api.isActive())return;await apply(value);}catch{if(token===epoch)receipt('Import failed');}finally{busy=false;api.set({noteDocumentBusy:false});}};
   view.importText=()=>{if(!testMocksEnabled)return;void perform(()=>documents.importText(),async value=>{
-   if(value.status!=='read'||typeof value.text!=='string'){receipt(noteDocumentText('import',value.status==='read'?'failed':value.status));return;}
+   if(value.status!=='read'||typeof value.text!=='string'){receipt(noteDocumentText('import',value.status==='read'?'failed':value.status,value.message));return;}
    const current=api.get('notes'),id=crypto.randomUUID();if(current.list.length>=10000){receipt('Notes full');return;}
    const note={id,kind:'text',title:String(value.name||'Imported note').replace(/\.(txt|md|markdown)$/i,'').slice(0,200),body:value.text,pinned:false,when:'Imported'};
    if(await api.saveImportedNote({list:[note,...current.list],open:id,sheet:null}))receipt('Imported');
@@ -29,7 +29,7 @@ export function installNotesDocumentAdapter(Component:any,views:Record<string,Ba
   view.canImportText=testMocksEnabled;view.documentBusy=busy;
   const selected=state.list?.find((n:Bag)=>n.id===state.open);
   view.canExportText=!!selected;
-  view.exportText=()=>{const current=api.get('notes'),note=current.list.find((n:Bag)=>n.id===current.open);if(!note||!api.isActive()){api.toast('Open a note');return;}const snapshot=noteShareText(note);api.set({sheet:null});void perform(()=>documents.exportText(snapshot),value=>receipt(noteDocumentText('export-text',value.status)));};
+  view.exportText=()=>{const current=api.get('notes'),note=current.list.find((n:Bag)=>n.id===current.open);if(!note||!api.isActive()){api.toast('Open a note');return;}const snapshot=noteShareText(note);api.set({sheet:null});void perform(()=>documents.exportText(snapshot),value=>receipt(noteDocumentText('export-text',value.status,value.message)));};
   return view;
  };
 }

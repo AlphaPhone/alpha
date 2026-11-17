@@ -8,6 +8,7 @@ import {readScanDraft,saveScanDraft,deleteScanDraft} from '../browser/scan-draft
 import {captureScanPage,type ScanPageCamera} from './scan-page-camera';
 import {inputFiles,runFilePicker} from '../browser/file-picker';
 import {scanExportTitle,exportScanPdf,ScanPdfExportError,duringSystemPicker,systemPickerActive} from './scan-pdf';
+import {scanPdfErrorText} from '../ui/documents/scan-pdf-messages';
 // The document state (page rules, order, one operation at a time, export snapshots, compare-and-set
 // autosave) is Alpha's scan compose state; this file presents it in Alpha's dialog. The image types
 // and limits are the shared camera plugin's.
@@ -109,7 +110,7 @@ export function openScanDocument(first?:Blob,pageCamera?:ScanPageCamera):()=>voi
  const searchable=button(native?'Save searchable PDF':'Download searchable PDF',()=>search());
  const add=button('Add page',()=>void pick()),capture=button('Capture new page',()=>void pick(undefined,true)),save=button(native?'Save document PDF':'Download document PDF',()=>{
   if(!doc.snapshot().controls.export)return;status.textContent='Preparing document…';
-  void doc.exportPages((pages,_layers,signal)=>exportScanPdf(pages,signal,scanExportTitle('document')),error=>error instanceof ScanPdfExportError).then(result=>{if(!closed&&result)status.textContent=result.message;},error=>{if(closed)return;status.textContent=error instanceof ScanPdfExportError?'Export unconfirmed':error instanceof Error?error.message:'PDF failed';});
+  void doc.exportPages((pages,_layers,signal)=>exportScanPdf(pages,signal,scanExportTitle('document')),error=>error instanceof ScanPdfExportError).then(result=>{if(!closed&&result)status.textContent=result.message;},error=>{if(closed)return;status.textContent=error instanceof ScanPdfExportError?'Export unconfirmed':scanPdfErrorText(error);});
  }),close=button('Close document',()=>void requestClose());
  capture.setAttribute('aria-label','Capture new page');capture.textContent='Capture page';add.setAttribute('aria-label','Add page');add.textContent='Add image';
  save.setAttribute('aria-label',native?'Save document PDF':'Download document PDF');save.textContent=native?'Save PDF':'Download PDF';save.className='primary';

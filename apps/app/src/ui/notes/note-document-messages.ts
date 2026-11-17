@@ -2,6 +2,11 @@
  * What the owner reads after a Notes document import or export, or a scan PDF export. The
  * document backends (Android's document picker and the browser's file input and downloads)
  * report a status code; Alpha words it here and never shows a backend's own text.
+ *
+ * Android's `AlphaNoteDocumentsPlugin` reports several distinct reasons under one status (a busy
+ * picker, a locked or backgrounded note and an unusable provider result are all "unavailable").
+ * Each of those reviewed native sentences is keyed below to an Alpha sentence that keeps the
+ * step that fixes it; any other text falls back to the status sentence.
  */
 
 /** Which document operation a status belongs to. */
@@ -41,11 +46,65 @@ const BY_OPERATION: Readonly<
   Record<NoteDocumentOperation, Readonly<Record<string, string>>>
 > = { import: IMPORT, "export-text": EXPORT_TEXT, "export-pdf": EXPORT_PDF };
 
-/** Alpha's sentence for a document result status; an unknown status reads as a failure. */
+/** A reviewed native result: its status and its exact message. */
+const native = (status: string, message: string) => `${status}\n${message}`;
+
+const BUSY = native("unavailable", "A document operation is already open.");
+const NO_DOCUMENT = native(
+  "unavailable",
+  "The document provider returned no accessible document.",
+);
+const CLOSED = native("cancelled", "Document operation closed.");
+const NOT_WRITTEN = native(
+  "failed",
+  "The selected destination could not be written.",
+);
+
+const NATIVE_IMPORT: Readonly<Record<string, string>> = {
+  [BUSY]: "Another document is already open. Finish it, then try again.",
+  [NO_DOCUMENT]:
+    "The chosen file could not be opened. Choose another file. Nothing imported.",
+  [CLOSED]: "Document operation closed. Nothing imported.",
+};
+
+const NATIVE_EXPORT: Readonly<Record<string, string>> = {
+  [BUSY]: "Another document is already open. Finish it, then try again.",
+  [NO_DOCUMENT]:
+    "The chosen location could not be opened. Choose another location. Nothing exported.",
+  [CLOSED]: "Document operation closed. Nothing exported.",
+  [NOT_WRITTEN]: "The chosen location could not be written. Nothing exported.",
+};
+
+const NATIVE_BY_OPERATION: Readonly<
+  Record<NoteDocumentOperation, Readonly<Record<string, string>>>
+> = {
+  import: NATIVE_IMPORT,
+  "export-text": {
+    ...NATIVE_EXPORT,
+    [native("unavailable", "Open and unlock the selected note before saving.")]:
+      "Open and unlock the note, then save again.",
+  },
+  "export-pdf": {
+    ...NATIVE_EXPORT,
+    [native("failed", "PDF export requires valid PDF bytes of at most 8 MB.")]:
+      "Export requires a valid PDF of at most 8 MB.",
+  },
+};
+
+/**
+ * Alpha's sentence for a document result. A reviewed native `message` picks its specific
+ * sentence; otherwise the status decides, and an unknown status reads as a failure.
+ */
 export function noteDocumentText(
   operation: NoteDocumentOperation,
   status: unknown,
+  message?: unknown,
 ): string {
+  if (typeof status === "string" && typeof message === "string") {
+    const specific = NATIVE_BY_OPERATION[operation];
+    const key = native(status, message);
+    if (Object.hasOwn(specific, key)) return specific[key];
+  }
   const table = BY_OPERATION[operation];
   return typeof status === "string" && Object.hasOwn(table, status)
     ? table[status]

@@ -12,8 +12,10 @@
  * Slot names (`inbox-drafts:v1:<owner>` and `inbox-drafts:v1:shelf:<sha256>`)
  * and record layouts are installed-data identifiers.
  *
- * Alpha owns this controller and its composer text. Attachment checks, the
- * digest, the retained-copy record and the mailbox types stay upstream
+ * Alpha owns this controller and its composer text, including the wording of
+ * every attachment refusal (`attachmentRefusalText`, `outgoingAttachmentRefusal`).
+ * The attachment limits and checks, the refusal type, the digest, the
+ * retained-copy record and the mailbox types stay upstream
  * (`@elizaos/plugin-inbox/mailbox/*`).
  */
 import {
@@ -24,6 +26,7 @@ import {
   outgoingAttachmentLimits,
 } from "@elizaos/plugin-inbox/mailbox/attachments";
 import { sha256Hex } from "@elizaos/plugin-inbox/mailbox/digest";
+import { attachmentRefused } from "@elizaos/plugin-inbox/mailbox/failures";
 import type { InboxUnsaved } from "@elizaos/plugin-inbox/mailbox/retained-draft";
 import type { GmailMessage } from "@elizaos/plugin-inbox/mailbox/types";
 
@@ -94,6 +97,129 @@ export type SuggestionTarget =
     };
 
 type Policy = { maximumOutgoing: number; maximumTotalBytes: number };
+
+/**
+ * A refusal this controller words itself; attach() and attachReviewed() show its message as is.
+ * Anything else that stops an attachment is worded by `attachmentRefusalText`.
+ */
+class AttachmentNotice extends Error {}
+
+const MIB = 1024 * 1024;
+const ATTACHMENT_TOO_LARGE =
+  "This file is larger than 5 MiB. Choose a file up to 5 MiB.";
+const ATTACHMENT_TYPES =
+  "Attach a PDF, PNG, JPEG, WebP or UTF-8 TXT file up to 5 MiB. Its content must match its type.";
+const ATTACHMENT_REFUSED = `This file can't be attached. ${ATTACHMENT_TYPES}`;
+const ATTACHMENT_UNAVAILABLE = "Attachment unavailable";
+
+/**
+ * Alpha's sentence for each known refusal from the file pickers and the shared attachment review,
+ * keyed by the reviewed text they raise. That text is never shown itself.
+ */
+const ATTACHMENT_REFUSALS: ReadonlyMap<string, string> = new Map([
+  // plugin-files `reviewMailAttachment` (typed as a refusal by runtime/inbox-attachment.ts).
+  [
+    "Invalid attachment name or encoding",
+    "This file's name or encoding can't be attached. Rename it or choose another file.",
+  ],
+  ["Attachment exceeds 5 MiB", ATTACHMENT_TOO_LARGE],
+  [
+    "Supported attachments: PDF, PNG, JPEG, WebP and UTF-8 TXT up to 5 MiB. File content must match its type.",
+    ATTACHMENT_TYPES,
+  ],
+  // plugin-files `BrowserFiles.attachment`, read by the web picker (browser/mail-attachments.ts).
+  ["Choose a file up to 5 MiB.", ATTACHMENT_TOO_LARGE],
+  [
+    "Select this file again.",
+    "The selected file is no longer available. Select it again.",
+  ],
+  // Android `AlphaMailAttachmentsPlugin.readSelected`.
+  [
+    "Select a valid PDF, PNG, JPEG, WebP or UTF-8 TXT file up to 5 MiB. Selection cancelled or unavailable.",
+    "Select a PDF, PNG, JPEG, WebP or UTF-8 TXT file up to 5 MiB. The selection was cancelled or is no longer available.",
+  ],
+  [
+    "Attachment service closed.",
+    "Attaching stopped before the file was read. Attach it again.",
+  ],
+]);
+
+/**
+ * What the composer shows when a file cannot be attached: the controller's own notice, a file
+ * larger than allowed (`too-large` from either picker), a known picker or review refusal, any other
+ * refusal of the file itself, a cancelled read, and otherwise "Attachment unavailable".
+ */
+export function attachmentRefusalText(error: unknown): string {
+  if (error instanceof AttachmentNotice) return error.message;
+  const value = (error ?? {}) as {
+    code?: unknown;
+    message?: unknown;
+    name?: unknown;
+  };
+  if (value.code === "too-large") return ATTACHMENT_TOO_LARGE;
+  const known =
+    typeof value.message === "string" &&
+    ATTACHMENT_REFUSALS.get(value.message);
+  if (known) return known;
+  if (attachmentRefused(error)) return ATTACHMENT_REFUSED;
+  if (value.name === "AbortError")
+    return "Attaching was cancelled. Nothing was added.";
+  return ATTACHMENT_UNAVAILABLE;
+}
+
+/**
+ * Alpha's sentence when an outgoing list breaks the shared limits (`checkOutgoingAttachments`):
+ * the file count, two names that match (forwarded originals included), the combined size, or
+ * the file count with the forwarded originals. Null when the list is within them.
+ */
+export function outgoingAttachmentRefusal(
+  files: readonly { name: string; dataBase64: string }[],
+  policy: Policy,
+  forwarded: readonly { name: string; size: number }[] = [],
+): string | null {
+  const maximum = Math.min(
+    policy.maximumOutgoing,
+    outgoingAttachmentLimits.maximumFiles,
+  );
+  if (files.length > maximum)
+    return maximum === 1
+      ? "This account accepts one attachment per email. Remove it to choose another."
+      : `Attach at most ${maximum} files.`;
+  const names = [...files, ...forwarded].map((file) =>
+    file.name.toLowerCase(),
+  );
+  if (new Set(names).size !== names.length)
+    return "Two attachments have the same name. Rename one to attach both.";
+  const total =
+    files.reduce((sum, file) => sum + attachmentBytes(file), 0) +
+    forwarded.reduce((sum, file) => sum + file.size, 0);
+  const cap = Math.min(
+    policy.maximumTotalBytes,
+    outgoingAttachmentLimits.maximumTotalBytes,
+  );
+  if (total > cap)
+    return `Attachments exceed ${Math.round(cap / MIB)} MiB in total. Remove one or choose a smaller file.`;
+  if (files.length + forwarded.length > outgoingAttachmentLimits.maximumFiles)
+    return `Attach at most ${outgoingAttachmentLimits.maximumFiles} files including forwarded ones.`;
+  return null;
+}
+
+/** Admits an outgoing list in Alpha's words, then confirms it with the shared rule. */
+function admitOutgoingAttachments(
+  files: readonly { name: string; dataBase64: string }[],
+  policy: Policy,
+  forwarded: readonly { name: string; size: number }[] = [],
+) {
+  const refusal = outgoingAttachmentRefusal(files, policy, forwarded);
+  if (refusal) throw new AttachmentNotice(refusal);
+  try {
+    checkOutgoingAttachments(files, policy, forwarded);
+  } catch {
+    throw new AttachmentNotice(
+      "These attachments can't be sent together. Remove one and try again.",
+    );
+  }
+}
 
 /** The account-scoped recovery copy of the email being edited (host-owned, durable). */
 interface RetainedMailEdits {
@@ -1433,11 +1559,13 @@ export function createMailDraftsController(
         !selected.selectionId ||
         !selected.name
       )
-        throw new Error("Select one supported document or image");
+        throw new AttachmentNotice("Select one supported document or image.");
       const file = await options.attachments.read(selected.selectionId);
       const checked = await options.reviewAttachment(file);
       if (checked.sha256 !== file.sha256 || checked.size !== file.size)
-        throw new Error("Selected file changed");
+        throw new AttachmentNotice(
+          "The selected file changed while it was checked. Select it again.",
+        );
       if (token !== epoch || !draft) return;
       const next = [
         ...(draft.attachments || []),
@@ -1447,23 +1575,12 @@ export function createMailDraftsController(
           dataBase64: file.dataBase64,
         },
       ];
-      checkOutgoingAttachments(next, policy(), draft.forward?.parts);
-      if (
-        draft.forward &&
-        next.length + draft.forward.parts.length >
-          outgoingAttachmentLimits.maximumFiles
-      )
-        throw new Error(
-          `Attach at most ${outgoingAttachmentLimits.maximumFiles} files including forwarded ones.`,
-        );
+      admitOutgoingAttachments(next, policy(), draft.forward?.parts);
       draft.attachments = next;
       status = `${next.length} attachment${next.length === 1 ? "" : "s"} selected locally. Nothing is uploaded until you review it.`;
       persist();
     } catch (error) {
-      if (token === epoch)
-        toast(
-          error instanceof Error ? error.message : "Attachment unavailable",
-        );
+      if (token === epoch) toast(attachmentRefusalText(error));
     } finally {
       if (selectionId)
         await options.attachments.forget(selectionId).catch(() => {});
@@ -1641,16 +1758,9 @@ export function createMailDraftsController(
         },
       ];
       try {
-        checkOutgoingAttachments(next, policy(), draft?.forward?.parts);
-        if (
-          next.length + (draft?.forward?.parts.length || 0) >
-          outgoingAttachmentLimits.maximumFiles
-        )
-          throw Error("Too many attachments.");
+        admitOutgoingAttachments(next, policy(), draft?.forward?.parts);
       } catch (error) {
-        toast(
-          error instanceof Error ? error.message : "Attachment unavailable",
-        );
+        toast(attachmentRefusalText(error));
         return false;
       }
       if (!draft && !begin()) return false;

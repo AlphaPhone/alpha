@@ -339,7 +339,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
     ) {
       toast(
         storageResultText(
-          value.status,
+          value,
           "The operation could not be confirmed.",
           operation,
         ),
@@ -924,7 +924,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
               ...onVolume(d.volume),
             });
       if (value.status === "exists" || value.status === "invalid") {
-        toast(storageResultText(value.status, "Choose another name."));
+        toast(storageResultText(value, "Choose another name."));
         return;
       }
       if (failed(value)) return;
@@ -1220,7 +1220,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           : {
               status: "failed",
               summary: storageResultText(
-                value.status,
+                value,
                 "Sharing could not open.",
                 "share",
               ),
@@ -1240,7 +1240,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           : {
               status: "failed",
               summary: storageResultText(
-                value.status,
+                value,
                 "The folder was not created.",
               ),
             };
@@ -1264,7 +1264,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       if (value.status !== "ready")
         return {
           status: "failed",
-          summary: storageResultText(value.status, "Nothing was changed."),
+          summary: storageResultText(value, "Nothing was changed."),
         };
       const done = (value.outcomes || []).filter(
         (o) => o.status === (op.type === "files_move" ? "moved" : "trashed"),
