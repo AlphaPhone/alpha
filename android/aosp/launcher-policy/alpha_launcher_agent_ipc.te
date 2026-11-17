@@ -1,0 +1,6 @@
+# Alpha's launcher is a privileged app (READ_PRIVILEGED_PHONE_STATE), so it runs as priv_app. Its
+# local agent serves the app over an owner-only filesystem socket (0600) in the app's own
+# files/ipc directory (0700). priv_app may not create socket files in privapp_data_file by default,
+# so without this the agent exits with EACCES at every start and no message can be sent.
+# AOSP grants the same to vmlauncher_app; the socket stays inside the app's private data.
+allow priv_app privapp_data_file:sock_file { create unlink getattr setattr write rename };

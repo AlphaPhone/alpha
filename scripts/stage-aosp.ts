@@ -23,6 +23,7 @@ import { CUTTLEFISH_TARGETS, cuttlefishProductProblems } from "../vendor/eliza/p
 import { assertSenseLauncher, assertSenseQualification, readSenseQualification, senseLauncherDigest, writeSenseImageActivation, type SenseImageActivation } from './aosp-sense-image.ts';
 import { stageAlphaSensePolicy } from './aosp-sense-policy.ts';
 import { verifyPinnedUpstream } from './pinned-upstream-source.ts';
+import { stageLauncherAgentIpcPolicy } from './aosp-launcher-policy.ts';
 
 export const PRODUCT_DESCRIPTOR = "android/aosp/product.json";
 /**
@@ -491,6 +492,9 @@ if (senseImage) assertSenseLauncher(provisioningTree, identity.appId);
 if (production || senseImage)
   assertProvisioningUpdateChannel(apkUpdateChannelOrLegacy(parseXmlTree(provisioningTree), identity), reviewedUpdateChannel);
 fs.appendFileSync(path.join(output, "product.mk"), clockProductRequirement);
+// A privileged launcher runs as priv_app, which cannot create its local agent's owner-only socket in
+// its own private data without this policy; the agent would never start and nothing could be sent.
+if (reviewed.privilegedPermissions !== undefined) stageLauncherAgentIpcPolicy(output);
 // The image system feature Alpha Phone requires, with a system-partition install, before it offers
 // Phone, Contacts or SMS (P-36). Every image declares it, but the app also requires a release
 // launcher and the provisioning overlay written below for production and admitted Sense qualification
