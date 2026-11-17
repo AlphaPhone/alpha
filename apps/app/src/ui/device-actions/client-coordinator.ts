@@ -990,7 +990,8 @@ export class DeviceActionCoordinator<
       isNotesOperation(op) ||
       isCalendarOperation(op) ||
       op.type === "create_note" ||
-      op.type === "create_reminder"
+      op.type === "create_reminder" ||
+      op.type === "open_view"
         ? this.profile.presentRecord(op, context.timeZone)
         : undefined;
     const agenda = op.type === "read_calendar_range" && !proposal.workflow;
