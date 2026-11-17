@@ -383,6 +383,22 @@ test('a refused send without a saved copy goes back ahead of text typed while it
   await expect(conversation(page).getByText('First question', { exact: true })).toHaveCount(0);
 });
 
+test('a refused send without a saved copy never restores into another conversation', async ({ page }) => {
+  await connected(page);
+  await harness(page, f => { f.draftSlotsFail = true; });
+  await setStub(page, { stream: 'busyHeld' });
+  await composer(page).fill('Keep this with the original conversation');
+  await composer(page).press('Enter');
+  await expect.poll(() => stub(page, s => typeof s.release)).toBe('function');
+  const panel=await openYourAgent(page);
+  await panel.getByRole('button',{name:'New conversation',exact:true}).click();
+  await composer(page).fill('Different conversation text');
+  await stub(page, s => s.release?.());
+  await frames(page);
+  await expect(composer(page)).toHaveValue('Different conversation text');
+  expect(await harness(page, f => f.posts)).toEqual([]);
+});
+
 test('pressing Send twice dispatches one message', async ({ page }) => {
   test.setTimeout(90_000);
   const foreign = await connected(page);

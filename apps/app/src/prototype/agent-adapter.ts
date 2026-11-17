@@ -193,7 +193,7 @@ function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:strin
   if(undurableText!==undefined){
     if(!shell.live||!undurableText.trim())return;
     const key=draft.binding;
-    if(heldKey&&key&&key!==heldKey&&!createdFromSlot(heldKey,key)){shell.toast('Not sent. The conversation changed, so the message was not restored.',ERROR_TOAST);return;}
+    if(!heldKey||!key||(key!==heldKey&&!createdFromSlot(heldKey,key))){shell.toast('Not sent. The conversation changed, so the message was not restored.',ERROR_TOAST);return;}
     shell.setState((previous:Shell)=>{const now=String(previous.draft||'');return{draft:now.trim()?`${undurableText}\n${now}`:undurableText};});
     shell.toast('Not sent. Your message is back in the composer.');
     return;
