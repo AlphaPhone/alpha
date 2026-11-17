@@ -67,7 +67,7 @@ import { installPrototypeVoiceAdapter } from './prototype/voice-adapter';
 import { installPrototypeBrowserAdapter } from './prototype/browser-adapter';
 import { installCalendarAdapter } from './prototype/calendar-adapter';
 import { installSystemBarAppearance, type SystemBars } from './prototype/system-bar-appearance';
-import { automaticUpdateIdle, hasAppearancePreview, installSettingsAdapter, readAppearanceChoice, resolveAppearance } from './prototype/settings-adapter';
+import { automaticUpdateIdle, automaticUpdateSurface, hasAppearancePreview, installSettingsAdapter, readAppearanceChoice, resolveAppearance } from './prototype/settings-adapter';
 import { ConnectionChooser, connectionController, connectionChooserVisible, residentAlwaysPresent } from './runtime/connection-ui';
 import { protectedPowerLaunchState } from './runtime/power-launch-state';
 import { installListenerInvocation, stopWakeListenerForChatOnly } from './runtime/always-on-listener';
@@ -343,8 +343,7 @@ async function applyDeviceLocale() {
 async function prepareMountedUpdate(activationCurrent: () => boolean, automatic = false, editingAtFreeze = false) {
   const owner = shell;
   const voiceActive = () => owner?.voiceConversationActive?.() !== false;
-  const idle = () => automaticUpdateIdle(owner.S(),connectionController.getSnapshot(),
-    !!document.querySelector('input:focus,textarea:focus,[contenteditable="true"]:focus,[data-alpha-chat-recorder],[data-alpha-subview="notes-recorder"]'),voiceActive());
+  const idle = () => { const surface = automaticUpdateSurface(); return automaticUpdateIdle(owner.S(),surface.connection,surface.editor,voiceActive()); };
   const current = () => activationCurrent() && shell === owner && owner?.live === true && !voiceActive() && (!automatic || !editingAtFreeze && idle());
   if (!current()) throw Error('App is still opening');
   if (connectionController.getSnapshot().busy || document.querySelector('[data-alpha-chat-recorder],[data-alpha-subview="notes-recorder"]'))
@@ -364,6 +363,8 @@ const appUpdatePresentation = {
   dialogClass: 'alpha-update-startup', dialogLabel: 'App update',
   pendingLabel: 'Updating Alpha…', continueLabel: 'Continue update',
   navigationEvents: ['alpha-back', 'launcher-home'],
+  // The resting sign-in card focuses its own empty field: that is not an edit in progress.
+  editing: () => automaticUpdateSurface().editor,
 };
 async function mountPhone() {
   const capacitor = Capacitor as typeof Capacitor & {PluginHeaders?:unknown};

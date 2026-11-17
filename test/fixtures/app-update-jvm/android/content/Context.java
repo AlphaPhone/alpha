@@ -8,6 +8,9 @@ public class Context {
  public Context(java.io.File cache){this.cache=cache;try{data=java.nio.file.Files.createTempDirectory("alpha-update-native-").toFile();java.nio.file.Files.write(new java.io.File(data,"base.apk").toPath(),new byte[]{1,2,3});}catch(Exception failure){throw new RuntimeException(failure);}}
  public boolean applicationPublished=true;
  public boolean imageAdmitted;
+ /** INSTALL_SELF_UPDATES as the Alpha image grants it to its preinstalled launcher. */
+ public boolean selfUpdateGranted;
+ public int checkSelfPermission(String permission){return selfUpdateGranted&&"android.permission.INSTALL_SELF_UPDATES".equals(permission)?android.content.pm.PackageManager.PERMISSION_GRANTED:android.content.pm.PackageManager.PERMISSION_DENIED;}
  public android.telecom.TelecomManager calls=new android.telecom.TelecomManager();
  public <T>T getSystemService(Class<T> type){return type==android.telecom.TelecomManager.class?type.cast(calls):null;}
  public Context getApplicationContext(){return applicationPublished?this:null;}

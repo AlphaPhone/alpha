@@ -209,6 +209,11 @@ export async function checkMountedUpdateAdmission() {
   const automaticIdleStart=settings.indexOf('export function automaticUpdateIdle(');
   assert.ok(idleStart>=0&&automaticIdleStart>idleStart);
   const idlePolicy=settings.slice(idleStart,settings.indexOf('\n}',automaticIdleStart)+2).replace(/^export /gm,'');
+  // The product reader of the connection and page. This model shows no sign-in card.
+  const restingStart=settings.indexOf('export function signInCardResting('),surfaceStart=settings.indexOf('export function automaticUpdateSurface(');
+  assert.ok(restingStart>0&&surfaceStart>restingStart);
+  const surfacePolicy='const productionCloudSignInRequired=()=>false;\n'+(settings.slice(restingStart,settings.indexOf('\n}',restingStart)+2)+'\n'+
+    settings.slice(surfaceStart,settings.indexOf('\nconst UPDATE_KEY',surfaceStart))).replace(/^export /gm,'');
   const start = text.indexOf('async function prepareMountedUpdate(');
   const end = text.indexOf('\nlet nativeAppUpdateGate', start);
   assert.ok(start > 0 && end > start);
@@ -219,6 +224,7 @@ export async function checkMountedUpdateAdmission() {
   const code = new vm.Script(stripTypeScriptTypes(`
 let shell = fixtureShell;
 ${idlePolicy}
+${surfacePolicy}
 ${text.slice(start, end)}
 ${prepared}
 globalThis.watch = watchMountedAppUpdates;

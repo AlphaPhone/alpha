@@ -255,10 +255,15 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  static final String UPDATE_STATUS="ai.alphacompute.alphaphone.UPDATE_STATUS";
- /** Self-update without a system dialog is supported from Android 12. Android still decides at commit. */
+ /**
+  * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
+  * The Alpha image allow-lists INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher, and Android
+  * grants it to that launcher's own updates: Android then admits Alpha's update of itself, and only that, without the
+  * owner's install-unknown-apps choice. Every other install needs that choice once.
+  */
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";
-  if(!context.getPackageManager().canRequestPackageInstalls())return "permission-required";
+  if(!(context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==android.content.pm.PackageManager.PERMISSION_GRANTED)&&!context.getPackageManager().canRequestPackageInstalls())return "permission-required";
   // Android's default silent-update policy also throttles a first attempt during early boot.
   return android.os.SystemClock.uptimeMillis()<=30_000L?"starting":"supported";
  }
@@ -706,7 +711,7 @@ public final class AlphaDevicePlugin extends Plugin {
    String status=automaticUpdateStatus(getContext());
    if(!"supported".equals(status)){call.resolve(new JSObject().put("status",status));return;}
   }
-  if(!getContext().getPackageManager().canRequestPackageInstalls()){
+  if(!(getContext().checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==android.content.pm.PackageManager.PERMISSION_GRANTED)&&!getContext().getPackageManager().canRequestPackageInstalls()){
    // Consent can be revoked between the automatic capability read and this read.
    // Only an explicit manual request may open Android's settings page.
    if(automatic){call.resolve(new JSObject().put("status","permission-required"));return;}

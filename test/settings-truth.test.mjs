@@ -83,6 +83,15 @@ test('unattended installation waits for idle Home and never interrupts foregroun
  assert.equal(m.automaticUpdateIdle({...home,chat:'hidden'}, {},false,true),false,'compact voice is active even when the legacy voice flag is off');
  assert.equal(m.automaticUpdateIdle(home,{},false,undefined),false,'unknown voice ownership is not idle');
 });
+test('a signed-out phone resting on the untouched sign-in card can take an unattended update',()=>{
+ const resting={open:true,busy:false,cloudAccount:null,signIn:{step:'choose'}};
+ assert.equal(m.signInCardResting(resting,true,['']),true);
+ assert.equal(m.signInCardResting({...resting,signIn:null},true,[]),true);
+ assert.equal(m.signInCardResting(resting,false,['']),false,'only the required signed-out card rests');
+ assert.equal(m.signInCardResting(resting,true,['a@example.test']),false,'an entry is the owner\'s work');
+ for(const change of [{busy:true},{open:false},{cloudAccount:{sessionId:'s'}},{signIn:{step:'code'}},{signIn:{step:'google'}},{signIn:{step:'mfa'}}])
+  assert.equal(m.signInCardResting({...resting,...change},true,['']),false,JSON.stringify(change));
+});
 test('dead-end and negative Settings rows are gone from the adapter',()=>{
  for(const row of ["info('Other connectors'","info('Personality settings'","info('Runtime'","info('Display only'","info('Delivery timing'","'Last change'"])assert.ok(!source.includes(row),row);
  // The revised groups expose controls and diagnostics, without a device-facts summary page.

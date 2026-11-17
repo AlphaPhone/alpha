@@ -25,7 +25,7 @@ export const PRODUCT_DESCRIPTOR = "android/aosp/product.json";
  * SIM serial for Settings → Phone. The shared overlay stager installs the launcher under priv-app
  * with an allow-list naming exactly this; every other privileged permission stays refused.
  */
-export const LAUNCHER_PRIVILEGED_PERMISSIONS = ["android.permission.READ_PRIVILEGED_PHONE_STATE"];
+export const LAUNCHER_PRIVILEGED_PERMISSIONS = ["android.permission.READ_PRIVILEGED_PHONE_STATE", "android.permission.INSTALL_SELF_UPDATES"];
 export const SHARED_CUTTLEFISH_LOCK = "vendor/eliza/packages/os/android/aosp.lock.json";
 export const AOSP_TARGETS = CUTTLEFISH_TARGETS;
 type ReviewedSourcePatch = ReturnType<typeof listenerSystemuiPatch>;

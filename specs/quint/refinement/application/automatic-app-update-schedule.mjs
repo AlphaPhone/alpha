@@ -48,6 +48,10 @@ export async function checkAutomaticAppUpdateSchedule() {
   const pollStart=product.indexOf('  async function pollAutomaticUpdate(');
   const pollSource=product.slice(pollStart,product.indexOf('\n  let gmail =',pollStart));
   assert.ok(pollStart>0&&facts&&pollSource,'actual renderer update poll exists');
+  // The product reader of the connection and page. This model shows no sign-in card.
+  const surfaceStart=product.indexOf('export function automaticUpdateSurface(');
+  assert.ok(surfaceStart>0,'actual renderer update surface exists');
+  const surfaceSource='const productionCloudSignInRequired=()=>false;\n'+product.slice(surfaceStart,product.indexOf('\nconst UPDATE_KEY',surfaceStart)).replace(/^export /gm,'');
   const signer='5c'.repeat(32),hash='0a'.repeat(32);
   const offer={schema:'alpha-update/v1',variant:'launcher',signerSha256:signer,versionCode:8,
     apkUrl:'https://example.test/launcher-8.apk',sha256:hash,sizeBytes:500};
@@ -73,7 +77,7 @@ export async function checkAutomaticAppUpdateSchedule() {
           maxInFlight=Math.max(maxInFlight,++inFlight);installWait=deferred();
           try{return await installWait.promise;}finally{inFlight--;}
         }},system:{getBuildInfo:async()=>({launcher:true})}});
-    vm.runInContext(stripTypeScriptTypes(facts.replace(/^export /gm,'')+'\n'+pollSource+
+    vm.runInContext(stripTypeScriptTypes(facts.replace(/^export /gm,'')+'\n'+surfaceSource+'\n'+pollSource+
       '\nglobalThis.api={pollAutomaticUpdate,automaticUpdateIdle,parseUpdateManifest};',{mode:'strip'}),context);
     api=context.api;
     const scheduler=createAppUpdateScheduler({intervalMs:4,retryMs:1,now:()=>now,

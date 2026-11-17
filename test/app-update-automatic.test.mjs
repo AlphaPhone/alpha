@@ -11,6 +11,10 @@ const facts=source.slice(source.indexOf('// settings-facts:begin'),source.indexO
 const start=source.indexOf('  async function pollAutomaticUpdate(');
 const poll=source.slice(start,source.indexOf('\n  let gmail =',start));
 assert.ok(poll.includes('automatic:true'),'execute the product automatic install orchestration');
+// The product reader of the connection and page; these fixtures show no sign-in card.
+const surfaceStart=source.indexOf('export function automaticUpdateSurface(');
+const surface='const productionCloudSignInRequired=()=>false;\n'+source.slice(surfaceStart,source.indexOf('\nconst UPDATE_KEY',surfaceStart)).replace(/^export /gm,'');
+assert.ok(surface.includes('signInCardResting('),'execute the product update surface');
 const root='5c'.repeat(32), sha256='0a'.repeat(32);
 const manifest={schema:'alpha-update/v1',variant:'launcher',signerSha256:root,versionCode:8,
   apkUrl:'https://example.test/launcher-8.apk',sha256,sizeBytes:500};
@@ -21,7 +25,7 @@ function fixture(voiceShell){
   let current=true, editor=false, answer=true, pending=false, capability='supported', inFlight=0, maxInFlight=0;
   let read=()=>Promise.resolve({appVersionCode:7,appSigner:root,appAutomaticUpdates:capability}), install=async()=>({});
   const shell={screen:'home',view:null,voice:'off',typing:false,chat:'input'};
-  const context=vm.createContext({URL,Number,document:{querySelector:()=>editor?{}:null},
+  const context=vm.createContext({URL,Number,document:{querySelector:selector=>selector!=='.alpha-cloud-sign-in'&&editor?{}:null},
     owner:voiceShell??{S:()=>shell,voiceConversationActive:()=>false},connectionController:{getSnapshot:()=>({busy:false,open:false})},
     updateBusy:'',changed(){},checkForUpdate:async()=>answer,savedUpdate:()=>({manifest}),
     device:{snapshot:()=>read(),updateState:async()=>({pending}),installUpdate:async input=>{
@@ -29,7 +33,7 @@ function fixture(voiceShell){
       try{return await install();}finally{inFlight--;}
     }},
     system:{getBuildInfo:async()=>({launcher:true})}});
-  vm.runInContext(stripTypeScriptTypes(facts.replace(/^export /gm,'')+'\n'+poll+'\n'+scheduler.replace(/^export /gm,'')+'\nglobalThis.poll=pollAutomaticUpdate;globalThis.schedule=createAppUpdateScheduler;',{mode:'strip'}),context);
+  vm.runInContext(stripTypeScriptTypes(facts.replace(/^export /gm,'')+'\n'+surface+'\n'+poll+'\n'+scheduler.replace(/^export /gm,'')+'\nglobalThis.poll=pollAutomaticUpdate;globalThis.schedule=createAppUpdateScheduler;',{mode:'strip'}),context);
   return {installs,shell,run:()=>context.poll(()=>current),retire(){current=false;},editor(){editor=true;},offline(){answer=false;},pending(){pending=true;},unsupported(){capability='permission-required';},capability(value){capability=value;},read(value){read=value;},install(value){install=value;},maxInFlight:()=>maxInFlight,
     scheduled(){
       let now=0,serial=0;const jobs=new Map();
@@ -132,7 +136,7 @@ test('the product preparer refuses an automatic update when modal freeze already
   const main=readFileSync('apps/app/src/main.tsx','utf8'),start=main.indexOf('async function prepareMountedUpdate(');
   const preparer=main.slice(start,main.indexOf('\nlet nativeAppUpdateGate',start));
   const context=vm.createContext({fixtureShell:{live:true,voiceConversationActive:()=>false},document:{querySelector:()=>null},connectionController:{getSnapshot:()=>({busy:false})}});
-  vm.runInContext(stripTypeScriptTypes('let shell=fixtureShell;\n'+preparer+'\nglobalThis.prepare=prepareMountedUpdate;',{mode:'strip'}),context);
+  vm.runInContext(stripTypeScriptTypes('let shell=fixtureShell;\n'+facts.replace(/^export /gm,'')+'\n'+surface+'\n'+preparer+'\nglobalThis.prepare=prepareMountedUpdate;',{mode:'strip'}),context);
   await assert.rejects(context.prepare(()=>true,true,true),/still opening/);
 });
 
@@ -164,7 +168,7 @@ async function mountedVoiceGate(owner,automatic,{holdFlush=false}={}){
   const context=vm.createContext({window,document,HTMLElement:window.HTMLElement,fixtureShell:owner,
     connectionController:{getSnapshot:()=>({busy:false,open:false}),captureAppUpdateReconnect:()=>async()=>{}},
     setTimeout(callback){waits.push(callback);}});
-  vm.runInContext(stripTypeScriptTypes('let shell=fixtureShell;\n'+facts.replace(/^export /gm,'')+'\n'+preparer+'\n'+gate.replace(/^export /gm,'')+'\nglobalThis.prepare=prepareMountedUpdate;globalThis.watch=watchMountedAppUpdates;',{mode:'strip'}),context);
+  vm.runInContext(stripTypeScriptTypes('let shell=fixtureShell;\n'+facts.replace(/^export /gm,'')+'\n'+surface+'\n'+preparer+'\n'+gate.replace(/^export /gm,'')+'\nglobalThis.prepare=prepareMountedUpdate;globalThis.watch=watchMountedAppUpdates;',{mode:'strip'}),context);
   const activationId='11111111-2222-4333-8444-555555555555',bridgeId='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   let state={pending:true,phase:'preparing',activationId,bridgeId,automatic};
   await context.watch({async updateState(){return state;},async addListener(){return {remove:async()=>{}};},

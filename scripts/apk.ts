@@ -289,9 +289,10 @@ export function validateApk(file: string, identity: {appId: string}, wantsHome: 
     throw new Error(`Invalid CALL_PHONE permission for distribution in ${file}`);
   // Phone state (the native phone plugin's permission, removed for standalone) and the system shade
   // are launcher-only; the merged manifest, not the source manifests, is what ships.
-  // READ_PRIVILEGED_PHONE_STATE is the one privileged permission the launcher declares: the Alpha
-  // image allow-lists exactly it (IMEI and SIM serial in Settings); no other install is granted it.
-  for (const permission of ['READ_PHONE_STATE', 'READ_PHONE_NUMBERS', 'READ_PRIVILEGED_PHONE_STATE', 'EXPAND_STATUS_BAR'])
+  // READ_PRIVILEGED_PHONE_STATE (IMEI and SIM serial in Settings) and INSTALL_SELF_UPDATES (hands-off
+  // launcher updates) are the privileged permissions the launcher declares: the Alpha image allow-lists
+  // exactly them; no other install is granted either.
+  for (const permission of ['READ_PHONE_STATE', 'READ_PHONE_NUMBERS', 'READ_PRIVILEGED_PHONE_STATE', 'INSTALL_SELF_UPDATES', 'EXPAND_STATUS_BAR'])
     if (data.xml.includes(`android.permission.${permission}`) !== wantsHome)
       throw new Error(`Invalid ${permission} permission for distribution in ${file}`);
   for (const component of ['AlphaInCallService', 'AlphaCallActivity', 'AlphaDialPadActivity', 'AlphaSmsDeliverReceiver', 'AlphaSmsSendReceiver', 'AlphaMmsWapPushReceiver', 'AlphaMmsResultReceiver', 'AlphaRespondViaMessageService', 'AlphaSmsComposeActivity'])

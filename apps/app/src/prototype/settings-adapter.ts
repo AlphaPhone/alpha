@@ -18,7 +18,7 @@ import {createPhoneInfoLoader,identifiersElsewhere,phoneDefaultRows,phoneLineSec
 import { broaderPageNotice, switchValue } from './native-adapter';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps } from '../daily';
-import { agentPendingText, connectionController } from '../runtime/connection-ui';
+import { agentPendingText, connectionController, productionCloudSignInRequired } from '../runtime/connection-ui';
 import {googleConnectionController} from '../runtime/google-connection-ui';
 import {GOOGLE_ACCOUNTS_CHANGED,googleDisconnectConfirmation,googleDisconnectMessage} from '../runtime/google-accounts';
 import { browserLocalAgentEnabled, modelLabel } from '../runtime/local-agent';
@@ -226,6 +226,15 @@ export function automaticUpdateIdle(shell: {screen?:unknown;view?:unknown;voice?
     busy: !!connection.busy, open: !!connection.open, editor: !!editor,
   });
 }
+/**
+ * A signed-out phone rests on the required sign-in card. While nothing has been typed, chosen or
+ * started there, an automatic update loses nothing, and it is the only way such a phone receives a
+ * repaired sign-in. Any entry, a later step (code, Google, second factor) or work in flight blocks.
+ */
+export function signInCardResting(connection: {busy?:unknown;open?:unknown;cloudAccount?:unknown;signIn?:{step?:unknown}|null}, required: boolean, entries: readonly unknown[]): boolean {
+  return required && !!connection.open && !connection.busy && !connection.cloudAccount &&
+    (!connection.signIn || connection.signIn.step === 'choose') && entries.every(value => value === '');
+}
 /** The Privacy page's voice fact: the speech route in use now (voice-selection.ts) and what it sends.
  * It replaces the prototype's on-device model row; device settings links are untouched. */
 export function voicePrivacyRow(label: string, route: SpeechRoute, serviceName = 'Cloud'): [string, string] | null {
@@ -267,6 +276,20 @@ const systemScheme = () => { try { return matchMedia('(prefers-color-scheme: dar
 /** The theme a choice draws now; an unreadable system preference draws light. */
 export function resolveAppearance(choice: AppearanceChoice): 'light' | 'dark' {
   return choice === 'system' ? (systemScheme()?.matches ? 'dark' : 'light') : choice;
+}
+
+/**
+ * What an automatic update reads from the connection and the page. The resting sign-in card
+ * (signInCardResting) and the focus it gives its own empty field are not foreground activity.
+ */
+export function automaticUpdateSurface(root: ParentNode = document): {connection: {busy: boolean; open: boolean}; editor: boolean} {
+  const snapshot = connectionController.getSnapshot();
+  const editing = root.querySelector('input:focus,textarea:focus,[contenteditable="true"]:focus,[data-alpha-chat-recorder],[data-alpha-subview="notes-recorder"]');
+  const card = root.querySelector('.alpha-cloud-sign-in');
+  const resting = !!card && signInCardResting(snapshot, productionCloudSignInRequired(snapshot),
+    Array.from(card.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea'), field => field.value));
+  return {connection: {busy: !!snapshot.busy, open: !!snapshot.open && !resting},
+    editor: !!editing && !(resting && card.contains(editing) && editing.matches('input:focus'))};
 }
 
 const UPDATE_KEY = 'alpha.app-update.v1';
@@ -377,9 +400,8 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     if (await checkForUpdate(false) === false) throw Error('Update check unavailable');
     if (!current()) return;
     changed();
-    const idle = () => automaticUpdateIdle(owner?.S?.() ?? {},connectionController.getSnapshot(),
-      !!document.querySelector('input:focus,textarea:focus,[contenteditable="true"]:focus,[data-alpha-chat-recorder],[data-alpha-subview="notes-recorder"]'),
-      owner?.voiceConversationActive?.() !== false);
+    const idle = () => { const surface = automaticUpdateSurface(); return automaticUpdateIdle(owner?.S?.() ?? {},surface.connection,surface.editor,
+      owner?.voiceConversationActive?.() !== false); };
     if (updateBusy || !idle())
       throw Error('Current activity must finish');
     const [installed, build, pending] = await Promise.all([device.snapshot(), system.getBuildInfo(), device.updateState()]);

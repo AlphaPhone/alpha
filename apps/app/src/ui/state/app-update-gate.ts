@@ -13,6 +13,8 @@ export type AppUpdatePresentation = {
   pendingLabel: string;
   continueLabel: string;
   navigationEvents: readonly string[];
+  /** Whether the owner is editing when input freezes; the default is any focused text field. */
+  editing?: () => boolean;
 };
 type LivePort = StartupPort & {
   addListener(
@@ -211,13 +213,13 @@ export async function watchMountedAppUpdates(
   let checking = false;
   let notified = false;
   let editingAtFreeze = false;
-  const editing = () => {
+  const editing = appearance.editing ?? (() => {
     const element = document.activeElement;
     return (
       element instanceof HTMLElement &&
       (element.matches("input,textarea") || element.isContentEditable)
     );
-  };
+  });
   const stopNavigation = (event: Event) => {
     if (!active) return;
     event.preventDefault();

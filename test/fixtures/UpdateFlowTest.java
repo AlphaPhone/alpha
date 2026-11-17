@@ -1914,6 +1914,20 @@ public final class UpdateFlowTest {
    check(context.packages.installer.committed.equals(List.of(session))&&connections.isEmpty(),"Continue neither downloads nor commits again");
   }
  }
+ private static void imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(File cache)throws Exception{
+  for(int sdk:new int[]{30,37}){
+   Context context=installing(cache);Build.VERSION.SDK_INT=sdk;context.packages.installsAllowed=false;context.selfUpdateGranted=true;android.os.SystemClock.uptime=35000;
+   AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);connections.clear();
+   String expected=sdk<31?"unsupported":"supported";
+   check(expected.equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"the image self-update grant replaces only the consent read: "+sdk);
+   PluginCall result=automatic(owner);
+   if(sdk<31)check(result.resolved.get()==1&&"unsupported".equals(result.result.optString("status"))&&context.packages.installer.sessions.isEmpty(),"the grant does not widen unsupported Android");
+   else check(result.resolved.get()==1&&result.rejected.get()==0&&owner.activity.started.isEmpty()&&context.packages.installer.sessions.size()==1,"a granted image launcher stages its update with no consent and no settings handoff");
+   Build.VERSION.SDK_INT=37;
+  }
+  Context denied=installing(cache);denied.packages.installsAllowed=false;android.os.SystemClock.uptime=35000;
+  check("permission-required".equals(AlphaDevicePlugin.automaticUpdateStatus(denied)),"without the image grant the owner's consent is still required");
+ }
  private static void consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(File cache)throws Exception{
   Context context=installing(cache);context.packages.installsAllowed=false;
   context.packages.installConsentAnswers.add(true);context.packages.installConsentAnswers.add(false);
@@ -2120,6 +2134,7 @@ public final class UpdateFlowTest {
    automaticPendingActionWaitsForAnExplicitContinue(cache);
    aReceivedConfirmationSurvivesOnlyUntilFirstLaunch(cache);
    consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(cache);
+   imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(cache);
    automaticSuccessReconcilesTheExactInstalledSuccessor(cache);
    automaticDraftRefusalNeverStopsOrCommits(cache);
    automaticModeIsStrictAndExplicitFalseKeepsManualBehavior(cache);
