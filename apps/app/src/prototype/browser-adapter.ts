@@ -565,7 +565,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // destination must not silently switch to saved sign-ins and history.
       const privateTab=!!(shell.S?.().view==='browser'&&isPrivate(selected));
       // Reuse an untouched New tab or the agent's own earlier tab, so opens do not fill the tab limit.
-      const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab));
+      const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab) && !tabInfo(tab));
       const id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
       if (id) agentTab = id;
       const present = () => {
