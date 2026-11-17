@@ -259,8 +259,8 @@ export function smsReceiptLabel(status: SmsSendResult["status"]): string {
     cancelled: "Cancelled — not sent",
     denied: "Access changed — not sent",
     failed:
-      "Failure reported; some parts may have sent. Do not repeat automatically.",
-    unknown: "Outcome unknown. Check the recipient before sending again.",
+      "Sending failed; some parts may have sent.",
+    unknown: "Outcome unknown; check before sending again.",
     submitted: "Submitted to Android; sending and delivery are not confirmed.",
     sent: "All parts sent; delivery is not confirmed.",
     delivered: "All parts have delivery confirmation.",

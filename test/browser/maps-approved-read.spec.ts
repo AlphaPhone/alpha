@@ -129,10 +129,10 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
     if(mode==='stale-after-read'){
       await expect.poll(()=>page.evaluate(()=>typeof (window as any).releaseMapsFinish)).toBe('function');
       await page.evaluate(async()=>{const {clearMapsSelection}=await import('/src/maps/agent-context.ts');clearMapsSelection();(window as any).releaseMapsFinish();});
-      await expect(page.getByText(/Not synced yet; open action history to retry\./).last()).toBeVisible();
+      await expect(page.getByText(/, but it isn't synced yet\./).last()).toBeVisible();
       expect(await page.evaluate(()=>(window as any).mapsRetained.result.mapsResult.fields.label)).toBe('Private fixture destination');
     } else if(mode.endsWith('replay')) {
-      await expect(page.getByText(/Not synced yet; open action history to retry\./).last()).toBeVisible();
+      await expect(page.getByText(/, but it isn't synced yet\./).last()).toBeVisible();
       const retained=await page.evaluate(()=>(window as any).mapsRetained.result.mapsResult);
       await page.evaluate(async stale=>{
         if(stale){const {clearMapsSelection}=await import('/src/maps/agent-context.ts');clearMapsSelection();}

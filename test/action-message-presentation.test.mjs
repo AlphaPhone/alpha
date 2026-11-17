@@ -49,9 +49,14 @@ test('receipt names the created tab and refuses a malformed or non-HTTPS destina
 });
 
 test('a completed Browser card preserves its unsynced receipt notice',()=>{
+ // Current receipts: one sentence, kept as written.
+ const current=tabCreated.replace(/\.$/,'')+", but it isn't synced yet.";
+ let rows=[user,{...action,card:{...action.card,sub:current}}];
+ assert.equal(projectActionMessages(render(rows),rows)[1].displayText,current);
+ // Receipts stored by older builds keep their old notice and get the current tab description.
  const pending=' Not synced yet; open action history to retry.';
  for(const summary of [tabCreated,legacySummary]){
-  const rows=[user,{...action,card:{...action.card,sub:summary+pending}}];
+  rows=[user,{...action,card:{...action.card,sub:summary+pending}}];
   assert.equal(projectActionMessages(render(rows),rows)[1].displayText,tabCreated+pending);
  }
 });
@@ -146,6 +151,7 @@ test('only a browser proposal receipt that succeeded with its exact summary name
  for(const [proposal,receipt] of [
   [card,{status:'succeeded',summary:tabCreated+' Server receipt is pending; check action history.'}],
   [card,{status:'succeeded',summary:legacySummary+' Not synced yet; open action history to retry.'}],
+  [card,{status:'succeeded',summary:tabCreated.replace(/\.$/,'')+", but it isn't synced yet."}],
   [card,{status:'failed',summary:'Browser navigation is unavailable, so no page opened.'}],
   [card,{...opened,status:'unknown'}],
   [{id:'p',description:'Open browser destination https://other.example'},opened],

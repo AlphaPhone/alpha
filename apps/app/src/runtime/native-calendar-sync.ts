@@ -59,7 +59,7 @@ export const nativeCalendarSync = {
      const response=await call('deletion',{...input,operationId:operation},current,signal);if(response.status!=='receipt')throw error(response);const receipt=object(response.receipt),phase=receipt.phase;
      if(phase==='deleted'){if(await get(id)!==null)throw Error('Calendar deletion readback changed');await call('ack',{...input,operationId:operation},current,signal);window.dispatchEvent(new CustomEvent('alpha:calendar-committed',{detail:{eventId:id}}));return;}
      if(phase==='undone'){undone.add(id);await call('ack',{...input,operationId:operation},current,signal);throw new CalendarSyncNotice('Deletion undone. The local event is kept and its Google link is paused.');}
-     if(phase!=='queued')throw new CalendarSyncNotice('Calendar deletion is paused or unconfirmed. It will not be repeated.');
+     if(phase!=='queued')throw new CalendarSyncNotice('Calendar deletion is paused or unconfirmed and won’t be repeated.');
      await new Promise<void>((resolve,reject)=>{const stop=()=>{clearTimeout(timer);reject(new DOMException('Calendar sync stopped','AbortError'));};const timer=setTimeout(()=>{signal.removeEventListener('abort',stop);resolve();},400);signal.addEventListener('abort',stop,{once:true});if(signal.aborted)stop();});
     }
     throw new CalendarSyncNotice('Calendar deletion is still pending. Check its Undo receipt; it will not be repeated.');
