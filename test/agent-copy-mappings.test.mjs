@@ -152,6 +152,7 @@ test('every workflow run status, event type and approval state reads as an Alpha
  for(const status of statuses){const label=presentation.workflowRunStatusLabel(status);assert.notEqual(label,status);assert.notEqual(label,'Status unknown',status);}
  assert.equal(presentation.workflowRunStatusLabel('waiting-approval'),'Waiting for approval');
  assert.equal(presentation.workflowRunStatusLabel('finished'),'Finished');
+ assert.equal(presentation.workflowRunStatusLabel('succeeded'),'Finished');
  assert.equal(presentation.workflowRunStatusLabel('completed'),'Completed');
  assert.equal(presentation.workflowRunStatusLabel('error'),'Failed');
  assert.equal(presentation.workflowRunStatusLabel('constructor'),'Status unknown');

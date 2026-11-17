@@ -106,6 +106,7 @@ const RUN_STATUS: Readonly<Record<string, string>> = {
   "waiting-quota": "Waiting for capacity",
   "waiting-timer": "Waiting for a timer",
   success: "Finished",
+  succeeded: "Finished",
   error: "Failed",
   skipped: "Skipped",
 };
