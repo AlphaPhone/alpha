@@ -21,6 +21,29 @@ the device. This branch rebuilds it on the stack below.
   packaging, with the requirements in `legacy/docs/prd.md`. Nothing in the
   workspace imports from it. Change it only to delete an area, in the change
   that checks in its rebuild.
+- **The app is built area by area.** An area's requirements are
+  `spec/app/<area>/`: `index.md`, and a child spec for each further machine.
+  Its screens and shell are `apps/app/src/<area>/`, its journeys
+  `apps/app/test/<area>.*`, and what it shows is built from components in
+  `packages/ui`. `spec/app/shell/` with `apps/app/src/shell/` is the worked
+  area: read it before starting another.
+- **The kit holds what areas share.** `spec/kit/` has the rules several areas
+  keep: a read whose late answers are refused, an attempt sent once with an
+  honest outcome, a review of what was shown, an undo window, a draft and a
+  permission. Import one under a name (`import read as R from
+  "../../kit/read"`) and hold its component in the area's state. A rule
+  moves there when a second area needs it; never model the same state twice.
+- **The world is a service.** A native bridge, the resident agent or a cloud
+  API is a `service` in `apps/app/src/platform/`, beside the layer a browser
+  runs. What a transition needs done outside is its `out`; the area's shell
+  carries each item out through the service and sends the answer back as an
+  event that names its ticket, so the rules refuse a late answer. The shell
+  passes the time in as an event's `now`: no component reads a clock, runs a
+  timer or uses an effect hook.
+- **Components show, areas decide.** A component in `packages/ui` takes props
+  and holds no rule. A screen in `apps/app/src/<area>/` reads its machine
+  through `useMachine`, offers each control exactly when `can` allows its
+  event, and sends events.
 - **Upstream is pinned.** The agent runtime is elizaOS at the commit
   `legacy/upstream.lock.json` records, in the submodule `legacy/vendor/eliza`.
   Never edit its checkout: make shared changes upstream and advance the pin.
