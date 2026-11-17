@@ -198,18 +198,19 @@ forked from the elizaOS native plugins at commit `1803ea88c9460f2e3cb779abe31cd7
 | `CalendarProviderPlugin`, `CalendarEventSnapshot` (behind `AlphaCalendarPlugin`), `WorkflowNoticePoster`, `GmailNoticePoster` | `plugins/plugin-native-calendar/android` (`CalendarPlugin`, the single-event part of `CalendarEventGuard`) and `plugins/plugin-native-notifications/android` (`HostNoticePoster`, `MailNoticePoster`) | the calendar configuration, journals, readers and `deleteReviewedExact`; `NoticeDelivery`, `NoticeRoutes`, `NotificationsHostPlugin` |
 | `AlphaPhotosPlugin`, `AlphaPhotoLibraryPlugin`, `AlphaMediaReview`, `AlphaShareSheet`, `AlphaMailPdfActivity`, `AlphaMediaCopy` | `plugins/plugin-native-media/android` (`PhotosPlugin`, `DeviceLibraryPlugin`, `PermittedMediaReview`, `SelectedDocuments.shareUri`, `IsolatedPdfViewerActivity`) | the media catalog, owned stores, video copies, selected-document registry and the isolated PDF renderer |
 | `AlphaPasswordsPlugin`, `PasswordFillActivity`, `PasswordSaveActivity`, `PasswordEditor`, `PasswordSheet`, `PasswordUnlock`, `PasswordSurfaces`, `SecretSurfaces`, `PasswordVaultGate`, `AutofillStructures`, with the strings in `res/values/alpha_passwords.xml` | `plugins/plugin-native-passwords/android` (the plugin and its screens) | the vault custody (`PasswordVaultAccess`, `PasswordRequests`, `PasswordsConfig`), the form policies and the Autofill service |
+| `android/shared-ui/` copies under the shared names: `ReminderStore` (the due-reminder notification and its Done, Snooze and Ask Alpha actions) and `ElizaPasswordAutofillService` (the Autofill offer row and fill and save flow), listed in `android/shared-ui-overrides.json` | `plugins/plugin-native-reminders/android` (`ReminderStore`) and `plugins/plugin-native-passwords/android` (`ElizaPasswordAutofillService`); each is the pinned upstream file below its declaration (`test/shared-ui-overrides.test.mjs` fails when upstream changes it) | every other file of both modules; `android/app/product.gradle` compiles each copy in place of the shared file inside the shared module, because `ReminderStore` is package-private and the Autofill provider's installed name cannot move |
 | the listener APK (`android/sense/src/main`: manifest, resources, `ConsentActivity`, `ListenerTileService`, `ListenerNotifications`, `ListenerLabels` and the service glue they need) | `packages/app/platforms/android/sense` | the pure policies `ListenerPolicy`, `CrashLoopBreaker`, `SpeechGate`, `WakePhrase`, `IndicatorLease`; `android/sense/build.gradle` leaves every other shared listener class out of the compile |
 
 Installed identifiers did not move: component names, Capacitor plugin names, notification
 channel ids, intent actions and extras, PendingIntent request codes, preference and file names and
-Keystore aliases are the ones Alpha shipped before. The shared Autofill service keeps its installed
+Keystore aliases are the ones Alpha shipped before. The Autofill provider keeps its installed
 component name (`ai.eliza.plugins.passwords.ElizaPasswordAutofillService`), because Android keeps
-the selected provider by that name and a service has no alias: it draws only the offer row, from
-Alpha's string (each `eliza_passwords_*` name in `res/values/eliza_passwords.xml` points at Alpha's),
-and the shared fill and save activity names are aliases of Alpha's screens. Two pieces stay shared
-until upstream takes a hook: the due-reminder notification the shared `ReminderEngine` posts (its
-channel names are Alpha's, its "Done" and "Snooze 10 minutes" actions are not), and the resident
-runtime service, which is staged with Alpha's resources through counted rewrites.
+the selected provider by that name and a service has no alias, so Alpha's copy compiles under that
+name; it draws only the offer row, from Alpha's string (each `eliza_passwords_*` name in
+`res/values/eliza_passwords.xml` points at Alpha's), and the shared fill and save activity names
+are aliases of Alpha's screens. The due-reminder notification is posted by Alpha's copy of the
+reminder store under the shared name, with the same actions, channels, tags and request codes. The
+resident runtime service stays staged from upstream with Alpha's resources through counted rewrites.
 
 `test/native-ui-self-contained.test.mjs` keeps it that way: every registered plugin, every merged
 manifest component of the app and the listener and every shared class Alpha's Java reaches must

@@ -225,6 +225,9 @@ const REVIEWED_SHARED_UI = new Map([
   ['ai.eliza.plugins.messages.MmsStore', {ui: ['notifyIncoming'], reason: 'the MMS store, read marks and notice cancellation; incoming notices are Alpha\'s (AlphaMessageNotices) with the same tag, id and receipt extra'}],
   ['ai.eliza.plugins.messages.TelephonyPlugin', {reached: true, ui: ['reviewMmsOnMain', 'reviewSmsOnMain'], reason: 'reached only through the shared MmsStore, which reads its constants; Alpha registers AlphaTelephonyPlugin over AlphaTelephonyBase and never this plugin'}],
   ['ai.eliza.plugins.passwords.PasswordEditor', {reached: true, ui: ['PasswordEditor', 'askSameLogin', 'dispatchTouchEvent', 'field'], reason: 'reached only through the shared vault custody (PasswordVaultAccess), which would close a shared editor on lock; Alpha opens only its own PasswordEditor and never the shared one'}],
+  ['ai.eliza.plugins.passwords.PasswordFillActivity', {ui: ['<class>'], reason: 'named by Alpha\'s ElizaPasswordAutofillService only as the component its one-shot fill token opens; the merged manifest removes the shared screen and declares this name as an alias of Alpha\'s PasswordFillActivity'}],
+  ['ai.eliza.plugins.passwords.PasswordSaveActivity', {ui: ['<class>', 'write'], reason: 'named by Alpha\'s ElizaPasswordAutofillService only as the component its one-shot save token opens; the merged manifest removes the shared screen and declares this name as an alias of Alpha\'s PasswordSaveActivity'}],
+  ['ai.eliza.plugins.passwords.PasswordUnlock', {reached: true, ui: ['prompt'], reason: 'reached only through the shared PasswordFillActivity above, which is never declared; Alpha\'s screens unlock through its own PasswordUnlock'}],
   ['ai.eliza.plugins.passwords.PasswordSheet', {reached: true, ui: ['PasswordSheet', 'button', 'text'], reason: 'reached only through the shared PasswordEditor above; Alpha\'s screens use its own PasswordSheet'}],
   ['ai.eliza.plugins.passwords.SecretSurfaces', {reached: true, ui: ['reveal'], reason: 'reached only through the shared vault custody, which would close a shared reveal on lock; Alpha reveals passwords and provider keys through its own SecretSurfaces'}],
   ['ai.eliza.plugins.notifications.HostNoticePoster', {ui: ['approval', 'redacted', 'step'], reason: 'AlphaNotificationsPlugin passes the shared NotificationsHostPlugin its CONFIG identities only; workflow notices are posted by Alpha\'s WorkflowNoticePoster through its own delivery()'}],
@@ -238,7 +241,7 @@ const SHARED_PLUGINS = new Map([
 ]);
 // Shared component names a manifest declares. None presents UI; an alias must open Alpha's screen.
 const SHARED_COMPONENTS = new Map([
-  ['ai.eliza.plugins.passwords.ElizaPasswordAutofillService', {ui: ['<class>', 'presentation'], reason: 'Android keeps the selected Autofill provider by this installed component name and a service has no alias; it draws only the offer row, from Alpha\'s string, and its fill and save tokens open Alpha\'s screens through the two aliases (test/password-native-copy.test.mjs)'}],
+  ['ai.eliza.plugins.passwords.ElizaPasswordAutofillService', 'the installed Autofill provider name (Android keeps the selected provider by it and a service has no alias); the class is Alpha\'s copy (android/shared-ui-overrides.json), and its fill and save tokens open Alpha\'s screens through the two aliases below'],
   ['ai.eliza.plugins.passwords.PasswordFillActivity', 'alias of Alpha\'s PasswordFillActivity: the name the shared Autofill service\'s one-shot fill token opens'],
   ['ai.eliza.plugins.passwords.PasswordSaveActivity', 'alias of Alpha\'s PasswordSaveActivity: the name the shared Autofill service\'s one-shot save token opens'],
   ['ai.eliza.plugins.messages.MmsFileProvider', 'the MMS PDU file provider; no UI'],
