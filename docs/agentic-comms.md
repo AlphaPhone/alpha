@@ -80,7 +80,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | ID | Requirement | Acceptance |
 | --- | --- | --- |
 | AC-23 | Remove the suggestion chip row (`data-alpha-chat-suggestions`, `template.html` around line 4426) from the conversation sheet. Per-view suggestions feed AC-24 instead. | No chip row renders in any state. |
-| AC-24 | At most one faint suggestion, inside the bar. Closed in a thread: a suggested reply to the person, only while the existing opt-in for suggested replies is on (`sms-adapter.ts`, `alpha.messages.suggest-replies.v1`); otherwise none. Open: the single most likely next request to Alpha about what is on screen. It names something specific, never a feature ("Set a reminder"). Tapping it or swiping right on the bar puts it in the field without sending it; typing replaces it. | Accepting fills the field and sends nothing; with the opt-in off, a thread shows no faint reply. |
+| AC-24 | At most one faint suggestion, inside the bar. Closed in a thread: a suggested reply to the person, on by default, with a persistent off switch in Settings → Apps → Messages (`sms-adapter.ts`, `alpha.messages.suggest-replies.v1`); otherwise none. Open: the single most likely next request to Alpha about what is on screen. It names something specific, never a feature ("Set a reminder"). Tapping it or swiping right on the bar puts it in the field without sending it; typing replaces it. | Accepting fills the field and sends nothing; with the Settings switch off, a thread shows no faint reply. |
 | AC-25 | The briefing is one or two sentences of facts from actual sources about the current screen, shown as Alpha's first line when the chat opens on a new context. It isn't repeated when nothing has changed. With nothing known (production builds have no fixtures), it is absent. | Reopening the chat on an unchanged thread adds no new briefing. |
 | AC-26 | At most one open proposal at a time, with one button, executed through the existing approval path (AP-04, AP-11). An ignored proposal stays in history and is never executed later. | A second proposal replaces the first; neither executes without a tap. |
 | AC-27 | No attention ring or badge on the Alpha button. | The Alpha button looks the same in every state. |
@@ -138,6 +138,16 @@ An AP-16 implementation updates the related models and runs `bun run quint:check
 - `specs/lemma/apps/app/src/prototype/chat-overlay-motion-adapter.dfy`: height bounds (sheet minimum, stage cap).
 
 ## Verification
+
+Messages renders credential-free HTTP(S) links as text links; only an owner's tap opens the existing
+Alpha Browser tab host. Long-press (or the keyboard context-menu key) on a complete listed provider
+row offers Copy and Delete. Delete asks for confirmation, then passes that row's exact id, kind,
+thread and date to the shared client. Pending local bubbles have no delete action. Unknown,
+unavailable or mismatched results retain the row and block another delete attempt in this renderer.
+Contacts shows First name, Last name, Phone, Email and Notes immediately, and displays saved Notes
+in details. Omitted native name components, photos and unrelated provider rows remain native-owned.
+The Messages, Contacts and AOSP-views browser specs exercise these UI flows over synthetic providers;
+they do not establish real-provider or device acceptance.
 
 Keep the layers separate (AGENTS.md); none proves another:
 

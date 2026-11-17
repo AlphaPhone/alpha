@@ -1,4 +1,4 @@
-import {isIncompleteSmsRow,normalizePhoneNumber} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {isIncompleteSmsRow,normalizePhoneNumber,type MessageDeleteReference} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {createAddressBookClient,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
@@ -18,10 +18,11 @@ export type SmsReplySuggester=(thread:OpenThread,signal:AbortSignal)=>Promise<st
 let suggester:SmsReplySuggester|null=null;
 /** Installed only while the owner has suggested replies turned on; null turns them off. */
 export function setSmsReplySuggester(next:SmsReplySuggester|null){suggester=next;}
-/* Suggested replies are off until the owner turns them on in a conversation; the choice stays on this phone. */
+/* Suggested replies are on by default; the owner's Settings choice stays on this phone. */
 const SUGGEST_KEY='alpha.messages.suggest-replies.v1';
-const suggestOn=()=>{try{return globalThis.localStorage?.getItem(SUGGEST_KEY)==='1';}catch{return false;}};
-const setSuggest=(on:boolean)=>{try{if(on)globalThis.localStorage?.setItem(SUGGEST_KEY,'1');else globalThis.localStorage?.removeItem(SUGGEST_KEY);}catch{/* The switch then simply stays off. */}};
+export const smsSuggestedRepliesEnabled=()=>{try{return globalThis.localStorage?.getItem(SUGGEST_KEY)!=='0';}catch{return false;}};
+const suggestOn=smsSuggestedRepliesEnabled;
+export const setSmsSuggestedRepliesEnabled=(on:boolean)=>{globalThis.localStorage.setItem(SUGGEST_KEY,on?'1':'0');window.dispatchEvent(new Event('alpha:sms-suggestions-changed'));};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
 /** The selected thread identity for on-device approval checks. */
 export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
@@ -77,12 +78,69 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const native=registerPlugin<MessagesBridge>('AlphaTelephony');
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
+ let messageMenu:{target:MessageDeleteReference;text:string;confirm:boolean}|null=null,deleting=false;
+ let messageHold:ReturnType<typeof setTimeout>|undefined;
+ const uncertainDeletes=new Set<string>();
+ const cancelMessageHold=()=>{clearTimeout(messageHold);messageHold=undefined;};
+ const menuRow=()=>messageMenu&&session.state.rows.find(row=>!isIncompleteSmsRow(row)&&row.id===messageMenu!.target.id&&row.kind===messageMenu!.target.kind&&row.threadId===session.state.thread&&row.date===messageMenu!.target.date);
+ const closeMessageMenu=()=>{if(!deleting){cancelMessageHold();messageMenu=null;paint();}};
+ const showMessageMenu=(row:SmsMessage,event?:Event)=>{
+  event?.preventDefault();event?.stopPropagation();cancelMessageHold();
+  if(!inFront()||deleting||row.threadId!==session.state.thread)return;
+  messageMenu={target:{id:row.id,kind:row.kind,threadId:row.threadId,date:row.date},text:row.body||'',confirm:false};paint();
+ };
+ async function deleteSelectedMessage(){
+  if(!messageMenu?.confirm||deleting||!inFront()||!menuRow()||uncertainDeletes.has(messageMenu.target.id))return;
+  const selection=messageMenu,visit=lifecycle;deleting=true;paint();
+  try{
+   const result=await client.deleteMessage(selection.target);
+   if(result.status==='unknown')uncertainDeletes.add(selection.target.id);
+   if(visit!==lifecycle||!inFront()||messageMenu!==selection)return;
+   messageMenu=null;
+   if(result.status==='deleted')void session.refresh();
+   else if(result.status==='unknown')owner?.toast('Deletion outcome unknown. The message is kept on screen.');
+   else{owner?.toast(result.status==='stale'?'This message changed. Review it again.':'This message was not found. Refresh Messages.');void session.refresh();}
+  }catch{
+   uncertainDeletes.add(selection.target.id);
+   if(visit===lifecycle&&inFront()){messageMenu=null;owner?.toast('Deletion unavailable or unconfirmed. The message is kept on screen.');}
+  }finally{deleting=false;if(inFront())paint();}
+ }
  let receipt:SmsSendResult|null=null,selectedThread:{id:string;addresses:string[]}|null=null;
  /* Composer draft and suggested reply (MessageThreads.qnt); contact names for the visit only. */
- let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,suggestConfirm=false,suggesting:AbortController|null=null,namesLoaded=false,api:Bag|null=null;
+ let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,suggesting:AbortController|null=null,namesLoaded=false,api:Bag|null=null;
  /* AC-22: the list filter, typed in the bar or applied by Alpha. AC-15: the bubble just sent, until the provider lists it. */
  let listFilter:CommsListFilter|null=null,bubbleSent:{by:'alpha'|'owner';text:string}|null=null;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
+ // Render ordinary text as text nodes, never HTML. Only credential-free HTTP(S) URLs are links.
+ const messageSegments=(text:string)=>{
+  const parts:{text:string;link:boolean;plain:boolean;href?:string;open?:(event:Event)=>void}[]=[];
+  let at=0;
+  for(const match of text.matchAll(/\bhttps?:\/\/[^\s<>"']+/gi)){
+   const raw=match[0].replace(/[.,!?;:]+$/,'').replace(/\)+$/,tail=>{
+    const opens=(match[0].match(/\(/g)||[]).length,closes=(match[0].match(/\)/g)||[]).length;
+    return tail.slice(0,Math.max(0,tail.length-Math.max(0,closes-opens)));
+   });
+   let url:URL;try{url=new URL(raw);if(!url.hostname||url.username||url.password)continue;}catch{continue;}
+   const start=match.index!;
+   if(start>at)parts.push({text:text.slice(at,start),link:false,plain:true});
+   parts.push({text:raw,link:true,plain:false,href:url.href,open:(event:Event)=>{event.preventDefault();event.stopPropagation();if(inFront())void owner?.browserNavigateFromTap?.(url.href);}});
+   at=start+raw.length;
+  }
+  if(at<text.length)parts.push({text:text.slice(at),link:false,plain:true});
+  return parts;
+ };
+ const messageActions=(id:string)=>{
+  const row=session.state.rows.find(value=>value.id===id);
+  if(!row||isIncompleteSmsRow(row))return {};
+  let point:{x:number;y:number}|null=null;
+  return {
+   down:(event:PointerEvent)=>{cancelMessageHold();if(event.button!==0||(event.target as Element).closest('a'))return;point={x:event.clientX,y:event.clientY};messageHold=setTimeout(()=>showMessageMenu(row),500);},
+   move:(event:PointerEvent)=>{if(point&&Math.hypot(event.clientX-point.x,event.clientY-point.y)>10)cancelMessageHold();},
+   up:cancelMessageHold,
+   context:(event:Event)=>showMessageMenu(row,event),
+   key:(event:KeyboardEvent)=>{if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey)showMessageMenu(row,event);},
+  };
+ };
  /* The reviewed text an operation ID was assigned for: the native send and its read-back hash exactly this. */
  let smsReview:ReviewedSms|null=null;
  let composerAbort=new AbortController();
@@ -101,7 +159,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  /* Android's picture chooser covers the WebView and reports it hidden; the draft stays while it is open. */
  const sync=()=>{const next=!!owner&&owner.S().view==='messages'&&(!document.hidden||picking);if(next===active)return;active=next;lifecycle++;
   if(next)composerAbort=new AbortController();else composerAbort.abort();
-  session.setActive(next);if(!next){recipientPicker.close();busy=false;suggestConfirm=false;draftRevision++;
+  session.setActive(next);if(!next){cancelMessageHold();messageMenu=null;recipientPicker.close();busy=false;draftRevision++;
   // Provider rows are visit-only. The owner's draft and its operation identity are stored separately.
   // Contact names, a suggestion in flight and an untouched automatic suggestion are for the visit only.
   suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;bubbleSent=null;
@@ -234,7 +292,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const normalized=normalizeRecipients(addresses);
   const switching=(shelf?draftThread!==id:!!draftThread&&draftThread!==id)||!sameRecipients(normalizeRecipients(inputRecipients()),normalized);
   if(switching||!normalized.length)clearDraft();
-  selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;suggestConfirm=false;bubbleSent=null;
+  selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;bubbleSent=null;
   if(normalized.length&&(switching||!retained))loadDraft(id,normalized);
   session.openThread(id);
  };
@@ -243,7 +301,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const state=shell.S();
   return owner===shell&&!shell.props?.assistantSurface&&!document.hidden&&state.screen==='home'
    &&!state.typing&&!state.recording&&!state.draft&&(!state.voice||state.voice==='off')
-   &&editable()&&!picking&&!recipientPicker.snapshot()&&!suggestConfirm&&!body&&!attachments.length&&!operationId&&!mmsOperationId
+   &&editable()&&!picking&&!recipientPicker.snapshot()&&!body&&!attachments.length&&!operationId&&!mmsOperationId
    &&!(draftThread===null&&recipients&&!sent&&!mmsSent);
  };
  async function drainSmsNotice(){
@@ -294,14 +352,14 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   }
  }
  const wakeSmsNotice=()=>{noticeSignal++;noticeRequested=true;void drainSmsNotice();};
- const closeThread=()=>{if(!busy){selectedThread=null;suggestConfirm=false;session.openThread(null);}};
+ const closeThread=()=>{if(messageMenu){closeMessageMenu();return;}if(!busy&&!deleting){selectedThread=null;session.openThread(null);}};
  const compose=(prefill?:string)=>{
   if(!editable())return;
   recipientPicker.close();
   const switching=draftThread!==null;
   if(switching||(!shelf&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
   if(shelf&&prefill&&!recipients)recipients=prefill;
-  draftThread=null;composing=true;selectedThread=null;suggestConfirm=false;
+  draftThread=null;composing=true;selectedThread=null;
   if(switching||!retained)loadDraft(null);
   if(session.state.thread)session.openThread(null);else changed();
  };
@@ -530,7 +588,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(!recipientPicker.close())composing=false;
   changed();
  };
- const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){if(suggestConfirm){suggestConfirm=false;paint();}else closeThread();return true;}if(composing){closeNew();return true;}return back?back(st,api):false;};
+ const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){closeThread();return true;}if(composing){closeNew();return true;}return back?back(st,api):false;};
  views.messages.reply=()=>null;views.messages.suggestions=()=>[];
  /* AC-15: a quiet line in the chat; it is never written to the SMS provider or a thread (AC-31). */
  const noteSent=(title:string)=>api?.note?.('Sent to '+title);
@@ -644,9 +702,11 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    needsAccess:access&&!showNew,showList:!access&&!state.thread&&!composing,showThread,showNew,showComposer:showComposer&&!picker,
    showNewButton:!state.thread&&!composing,readFailed:!status&&!state.busy,showEmpty:!!status&&!state.busy&&state.threads.length===0,
    compose:()=>compose(),closeNew,
+   recipientValue:picker?picker.query:recipients,recipientPlaceholder:picker?'Recipient '+(sendingTo.length+1):'To',
+   onRecipientInput:(event:Event)=>{if(picker)recipientPicker.setQuery((event.target as HTMLInputElement).value);else if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},
    contactsOpen:!!picker,
    contactsLabel:picker?'Close contact picker':'Choose contacts',
-   toggleContacts:()=>{if(recipientPicker.close())paint();else recipientPicker.open();},
+   toggleContacts:()=>{if(recipientPicker.close())paint();else{recipientPicker.open();owner?.setState({},()=>document.querySelector<HTMLInputElement>('[data-alpha-messages-recipients]')?.focus());}},
    contacts:picker&&{
     ...picker,onQuery:(event:Event)=>recipientPicker.setQuery((event.target as HTMLInputElement).value),
     onKey:(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();void recipientPicker.search();}},
@@ -662,18 +722,22 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    threads:listed,noMatches:!!listFilter&&!listed.length&&state.threads.length>0,
    filterChip:listFilter?.by==='alpha'?{label:listFilter.label,clearLabel:'Clear filter '+listFilter.label,clear:listFilterHandler.clear}:null,
    title,ini:initials(title),canCall:!!sole,call:()=>{if(sole)api?.open?.('phone',{prefill:sole});},callLabel:`Call ${title}`,
-   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,stageLast:index===newestIn?true as const:undefined})),
+   messageMenu:messageMenu&&menuRow()?{
+    confirm:messageMenu.confirm,choices:!messageMenu.confirm,busy:deleting,canDelete:!uncertainDeletes.has(messageMenu.target.id),close:closeMessageMenu,
+    focus:(element:HTMLElement|null)=>{if(element&&!element.contains(document.activeElement))element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});},
+    key:(event:KeyboardEvent)=>{
+     if(event.key==='Escape'){event.preventDefault();closeMessageMenu();}
+     if(event.key==='Tab'){
+      const buttons=Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="menu"] button:not(:disabled),[role="dialog"] button:not(:disabled)'));
+      if(buttons.length){event.preventDefault();const at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(event.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}
+     }
+    },
+    copy:async()=>{if(!messageMenu||!menuRow())return;const text=messageMenu.text;try{await navigator.clipboard.writeText(text);closeMessageMenu();owner?.toast('Copied');}catch{owner?.toast('Copy unavailable');}},
+    askDelete:()=>{if(messageMenu&&!uncertainDeletes.has(messageMenu.target.id)){messageMenu.confirm=true;paint();}},
+    remove:()=>void deleteSelectedMessage(),
+   }:null,
+   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,actions:messageActions(row.id),segments:messageSegments(row.text),stageLast:index===newestIn?true as const:undefined})),
    draftBubble:bubble(viewApi),picks:composing&&!picker&&!state.thread&&!local.length?picks():[],
-   canSuggest:!!suggester,suggesting:suggestOn(),suggestLabel:suggestOn()?'Suggested replies on':'Suggested replies off',suggestBg:suggestOn()?'var(--s2)':'transparent',suggestFill:suggestOn()?'var(--acct)':'var(--mut)',
-   suggestConfirm,enableSuggest:()=>{if(!suggestConfirm||!inFront()||!openRow())return;suggestConfirm=false;setSuggest(true);changed();},
-   cancelSuggest:()=>{suggestConfirm=false;paint();},
-   toggleSuggest:()=>{
-    if(!inFront()||!openRow())return;
-    if(!suggestOn()){suggestConfirm=true;paint();return;}
-    setSuggest(false);suggesting?.abort();suggesting=null;draft=readinessLost(draft);
-    if(draft.draft==='agent'&&!operationId&&!mmsOperationId)dismissSuggestion();
-    changed();
-   },
    cannotSend:!editable()||!direct||!hasDraft||!sendingTo.length,submit,
    pickSim:sims.length>1,sims:sims.map(row=>{const on=String(row.id)===sim;return {label:row.displayName||`SIM ${row.slot+1}`,on,bg:on?'var(--fg)':'var(--s2)',fg:on?'var(--bg)':'var(--fg)',
     pick:()=>{if(!editable())return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);retainDraft();changed();}};}),
@@ -718,16 +782,20 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   this.smsNoticeWake=()=>{if(owner===this)wakeSmsNotice();};
   this.smsReturn=watchReturnToApp(()=>{void session.refresh();this.smsNoticeWake();});
   this.smsHide=()=>{if(!document.hidden)picking=false;sync();};
+  this.smsSuggestionsChanged=()=>{if(!suggestOn()){suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId)dismissSuggestion();}changed();};
   document.addEventListener('visibilitychange',this.smsHide);
+  window.addEventListener('alpha:sms-suggestions-changed',this.smsSuggestionsChanged);
   window.addEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
   sync();wakeSmsNotice();
  };
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();void drainSmsNotice();};
  p.componentWillUnmount=function(){
+  cancelMessageHold();messageMenu=null;
   this.smsSelection=undefined;this.smsReturn?.();
   document.removeEventListener('visibilitychange',this.smsHide);
+  window.removeEventListener('alpha:sms-suggestions-changed',this.smsSuggestionsChanged);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
-  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;suggestConfirm=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
+  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
   unmount?.call(this);
  };
 }

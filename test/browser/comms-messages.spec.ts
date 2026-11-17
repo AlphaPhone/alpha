@@ -33,6 +33,85 @@ async function draftReachable(page: Page) {
 }
 
 test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-telephony-views.spec.ts)', () => {
+  for(const scale of [1,2])test(`long-press Copy and confirmed Delete act on one provider row, never the unsent draft (text ${scale*100}%)`, async ({page,context},testInfo)=>{
+    await context.grantPermissions(['clipboard-read','clipboard-write']);
+    await setupTelephony(page);
+    await page.getByRole('button',{name:'Messages',exact:true}).first().click();
+    await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    await setTextScale(page,scale);
+    const target=page.locator('[data-alpha-message-id="sms:4"]');
+    await target.scrollIntoViewIfNeeded();
+    const text=await target.innerText();
+    const box=(await target.boundingBox())!;
+    await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+    await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toBeVisible();
+    await page.mouse.up();
+    await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toBeInViewport({ratio:1});
+    if(scale===2)await testInfo.attach('message-menu-200-percent',{body:await page.screenshot(),contentType:'image/png'});
+    await page.getByRole('menuitem',{name:'Copy',exact:true}).click();
+    expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(text);
+    expect(await inputs(page,'deleteMessage')).toEqual([]);
+    await target.dispatchEvent('contextmenu');
+    await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'Delete message?',exact:true});
+    await expect(dialog).toBeVisible();expect(await inputs(page,'deleteMessage')).toEqual([]);
+    await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+    await expect(target).toBeVisible();expect(await inputs(page,'deleteMessage')).toEqual([]);
+    await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Copy',exact:true}).press('Escape');
+    await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toHaveCount(0);
+    await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+    await dialog.getByRole('button',{name:'Delete',exact:true}).click();
+    await expect(target).toHaveCount(0);
+    const deleted=await inputs(page,'deleteMessage');expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toEqual({id:'sms:4',kind:'sms',threadId:'thread:101',date:expect.any(Number)});
+    await expect(page.locator('[data-alpha-message-id]')).toHaveCount(3);
+    expect(await sms(page,'placeAskedSmsDraft','Unsent owner review')).toBe('drafted');await openAlpha(page);
+    await page.locator(bubble).dispatchEvent('contextmenu');
+    await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toHaveCount(0);
+    expect(await inputs(page,'deleteMessage')).toHaveLength(1);expect(await inputs(page,'sendComposedSms')).toEqual([]);
+  });
+
+  for(const answer of ['unknown','wrong-target','unavailable'] as const)test(`unconfirmed deletion (${answer}) keeps the row and refuses a second attempt`,async({page})=>{
+    await setupTelephony(page);
+    await page.evaluate(answer=>{(window as any).telephonyAnswers={deleteMessage:async(input:any)=>{
+      if(answer==='unavailable')throw Error('Not implemented on this host');
+      return {status:answer==='unknown'?'unknown':'deleted',message:answer==='wrong-target'?{...input,id:'sms:999'}:input};
+    }};},answer);
+    await page.getByRole('button',{name:'Messages',exact:true}).first().click();await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    const target=page.locator('[data-alpha-message-id="sms:4"]');
+    await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
+    await page.getByRole('dialog',{name:'Delete message?',exact:true}).getByRole('button',{name:'Delete',exact:true}).click();
+    await expect(page.getByRole('dialog',{name:'Delete message?',exact:true})).toHaveCount(0);
+    await expect(target).toBeVisible();expect(await inputs(page,'deleteMessage')).toHaveLength(1);
+    await target.dispatchEvent('contextmenu');await expect(page.getByRole('menuitem',{name:'Copy',exact:true})).toBeVisible();
+    await expect(page.getByRole('menuitem',{name:'Delete',exact:true})).toHaveCount(0);
+    expect(await inputs(page,'deleteMessage')).toHaveLength(1);
+  });
+
+  test('message links are credential-free HTTP(S), stay inert until tapped, and open Alpha Browser', async ({page}) => {
+    await setupTelephony(page);
+    await page.evaluate(() => {
+      const w=window as any,cap=w.Capacitor,native=cap.nativePromise;
+      cap.PluginHeaders.find((h:any)=>h.name==='AlphaBrowser').methods.push({name:'navigate',rtype:'promise'});
+      cap.nativePromise=async(plugin:string,method:string,input:any)=>{
+        if(plugin==='AlphaBrowser'&&['create','navigate'].includes(method)){w.telephonyInputs.push(['browser.'+method,input]);return {};}
+        return native(plugin,method,input);
+      };
+      w.messages['thread:101'][0].body='Read https://example.invalid/guide?q=a&b=c, then http://example.invalid/plain. Keep javascript:alert(1) and https://user:password@example.invalid/private as text.';
+    });
+    await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
+    await page.getByRole('button', {name: /^Ada Okafor/}).click();
+    const thread=page.locator('[data-alpha-messages-thread]');
+    await expect(thread.getByRole('link')).toHaveCount(2);
+    await expect(thread).toContainText('Keep javascript:alert(1) and https://user:password@example.invalid/private as text.');
+    expect(await inputs(page,'browser.navigate')).toEqual([]);
+    await thread.getByRole('link',{name:'http://example.invalid/plain',exact:true}).click();
+    await expect.poll(()=>inputs(page,'browser.navigate')).toHaveLength(1);
+    expect((await inputs(page,'browser.navigate'))[0].url).toBe('http://example.invalid/plain');
+    await expect(page.getByRole('button',{name:'Edit address',exact:true})).toBeVisible();
+    expect(await inputs(page,'sendComposedSms')).toEqual([]);
+  });
+
   test('a 1,600-character Alpha draft is reachable line by line with Edit and Send on screen, at default and largest text', async ({page}) => {
     await setupTelephony(page);
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
@@ -125,24 +204,40 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
-  test('a suggested reply is faint text only while the owner has turned suggested replies on; accepting it sends nothing', async ({page}) => {
+  test('suggested replies default on without a prompt, can be disabled in Settings, and never send automatically', async ({page}) => {
     await setupTelephony(page);
     await page.evaluate(async () => (await import('/src/prototype/sms-adapter.ts' as string)).setSmsReplySuggester(async () => 'See you at three'));
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
     await page.getByRole('button', {name: /^Ada Okafor/}).click();
     await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
-    await page.waitForTimeout(300);
-    await expect(page.locator('[data-alpha-faint]'), 'opt-in off: no faint reply').toHaveCount(0);
-    await page.locator('[data-alpha-messages-suggest]').click();
-    await page.getByRole('group', {name: 'Turn on suggested replies'}).getByRole('button', {name: 'Turn on'}).click();
-    await page.locator('[data-alpha-messages]').getByRole('button', {name: 'Back', exact: true}).click();
-    await page.getByRole('button', {name: /^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-messages-suggest]')).toHaveCount(0);
+    await expect(page.getByRole('group', {name: 'Turn on suggested replies'})).toHaveCount(0);
+    await expect(page.getByRole('button', {name:'Back to apps',exact:true})).not.toBeVisible();
+    await expect(page.locator('[data-alpha-messages]').getByRole('button', {name:'Back',exact:true})).toBeVisible();
     const faint = page.locator('[data-alpha-faint]');
     await expect(faint).toHaveAttribute('aria-label', 'Suggestion: See you at three, double-tap to use');
     await expect(page.locator(personField)).toHaveValue('');
     await faint.click();
     await expect(page.locator(personField)).toHaveValue('See you at three');
     expect(await inputs(page, 'sendComposedSms')).toEqual([]);
+    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
+    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
+    await page.getByRole('button', {name:'Settings',exact:true}).click();
+    const current=()=>page.locator('[data-settings-page]:not([inert])').last();
+    await current().getByRole('button', {name:'General',exact:true}).click();
+    for(const name of ['Wi-Fi','Bluetooth','Mobile data','Battery','Sound & vibration'])await expect(current().getByRole('button',{name,exact:true})).toHaveCount(0);
+    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
+    await current().getByRole('button', {name:'Apps',exact:true}).click();
+    await current().getByRole('button', {name:'Messages',exact:true}).click();
+    await current().getByRole('switch', {name:'Suggested replies',exact:true}).click();
+    await expect(current().getByRole('switch', {name:'Suggested replies',exact:true})).toHaveAttribute('aria-checked','false');
+    await page.reload();
+    await page.evaluate(async () => (await import('/src/prototype/sms-adapter.ts' as string)).setSmsReplySuggester(async () => 'See you at three'));
+    await page.getByRole('button', {name:'Messages',exact:true}).first().click();
+    await page.getByRole('button', {name:/^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-faint]')).toHaveCount(0);
+    expect(await sms(page,'smsSuggestedRepliesEnabled')).toBe(false);
+    expect(await inputs(page,'sendComposedSms')).toEqual([]);
   });
 });
 

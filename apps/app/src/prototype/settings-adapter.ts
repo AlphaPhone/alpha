@@ -1,3 +1,4 @@
+import {smsSuggestedRepliesEnabled,setSmsSuggestedRepliesEnabled} from './sms-adapter';
 import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import {BrowserReviews} from '../browser/review';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
@@ -1084,7 +1085,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'License details',hasTitle:true,backLabel:'Back to licenses',back:()=>api.set({page:'licenses'}),hero:{},groups:item?[group([info(item.name,item.version+' · '+item.license)]),...(item.source?[group([{kLegalText:true,label:'Source',text:item.source}])]:[]),...(licenseFlagRows(item).length?[group(licenseFlagRows(item))]:[]),group([{kLegalText:true,label:'License and notices',text:item.text||'License text missing'}])]:[group([info('Unavailable','')])]});
         }
 
-        if (owner?.props.systemShell === false) {
+        {
           const systemOnly = new Set(['Wi-Fi', 'Bluetooth', 'Mobile data', 'Battery', 'Sound & vibration']);
           page.groups = page.groups.map((g:Bag) => ({...g, rows:g.rows.filter((row:Bag) => !systemOnly.has(row.label))})).filter((g:Bag) => g.rows.length);
         }
@@ -1287,7 +1288,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       if(Capacitor.isNativePlatform())settingsTop.groups.push(group([{...nav('Android settings','system'),lucide:'settings'}]));
       if(wakeListeningStopUnconfirmed())settingsTop.groups.unshift(group([micMayBeOn()],'wake-stop-unconfirmed'));
       const appSettingsRows=detailGroups.filter((section:Bag)=>section.cap==='Apps').flatMap((section:Bag)=>section.rows);
-      const appCatalog=[['Browser','browser'],['Calendar','calendar'],['Camera','camera'],['Files','files'],['Inbox','inbox'],['Maps','maps'],['Notes','notes'],['Passwords','passwords'],['Photos','photos'],['Workflows','workflows']] as const;
+      const appCatalog=[['Browser','browser'],['Calendar','calendar'],['Camera','camera'],['Files','files'],['Inbox','inbox'],['Maps','maps'],...(aospImage?[['Messages','messages'] as const]:[]),['Notes','notes'],['Passwords','passwords'],['Photos','photos'],['Workflows','workflows']] as const;
       const existingAppRow=(id:string)=>appSettingsRows.find((row:Bag)=>row.label===(id==='calendar'?'Calendar':id==='photos'?'Photos':id==='passwords'?'Password manager':''));
       const selected=categories.find(([key])=>key===categoryPage);
       if(selected){
@@ -1305,7 +1306,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       }
     }
     if(appSettingsPage){
-      const names:Record<string,string>={browser:'Browser',calendar:'Calendar',camera:'Camera',files:'Files',inbox:'Inbox',maps:'Maps',notes:'Notes',passwords:'Passwords',photos:'Photos',workflows:'Workflows'};
+      const names:Record<string,string>={browser:'Browser',calendar:'Calendar',camera:'Camera',files:'Files',inbox:'Inbox',maps:'Maps',messages:'Messages',notes:'Notes',passwords:'Passwords',photos:'Photos',workflows:'Workflows'};
       const rows:Bag[]=[];
       if(appSettingsPage==='inbox')rows.push({kNav:true,label:'Google & email',lbl:'Google & email',chev:true,noAB:true,go:()=>googleConnectionController.open()});
       if(appSettingsPage==='inbox'){
@@ -1315,6 +1316,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           toggle:async()=>{if(devicePreferencesStatus()!=='ready')return;try{await editDevicePreferences(value=>{value.autoLoadMailImages=!value.autoLoadMailImages;});changed();}catch{api.toast('Not saved');}}});
         if(preferences==='unavailable')rows.push({kNav:true,label:'Recover device settings',lbl:'Recover device settings',hasSub:true,sub:'Back up first',chev:true,noAB:true,go:()=>openDevicePreferencesRecovery()});
       }
+      if(appSettingsPage==='messages'){const on=smsSuggestedRepliesEnabled();rows.push({kTog:true,label:'Suggested replies',aria:'Suggested replies',hasSub:true,sub:'Use recent messages in open one-person conversations with your connected model provider.',on,track:on?'background:var(--acc)':'background:var(--line)',kx:on?20:0,toggle:()=>{try{setSmsSuggestedRepliesEnabled(!smsSuggestedRepliesEnabled());changed();}catch{api.toast('Not saved');}}});}
       if(appSettingsPage==='workflows'){const channel=(delivery.channels||[]).find((c:Bag)=>c.id==='reminders');if(channel&&!Capacitor.isNativePlatform())rows.push({kTog:true,label:'Alerts',aria:'Show alerts',on:!channel.blocked,track:!channel.blocked?'background:var(--acc)':'background:var(--line)',kx:!channel.blocked?20:0,toggle:()=>void run(async()=>{await notifications.setAlertPreferences({channelId:channel.id,enabled:!!channel.blocked});})});}
       const permissions:Record<string,string[]>={camera:['Camera','Microphone'],maps:['Location'],notes:['Microphone']};
       for(const label of permissions[appSettingsPage]||[]){const val=typeof facts.permissions?.[label]==='boolean'?(facts.permissions[label]?'Allowed':'Off'):'—';rows.push(Capacitor.isNativePlatform()?{...action(label,manage('privacy')),val,hasVal:true,hasDot:val!=='—',dot:permissionDot(val),hasExt:true,chev:false}:permissionInfo(label,val));}
