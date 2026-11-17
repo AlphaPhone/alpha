@@ -1,271 +1,242 @@
-lemma NoTwiceView(xs: seq<Tile>)
-  ensures noTileTwice(xs) == !(exists t :: t in xs && !(|ProofLib.Filter((u: Tile) => (u == t), xs)| == 1))
+lemma ListingView(h: Home)
+  ensures listing(h) == ProofLib.Filter((a: string) => matches(a, h.query), h.installed.apps)
 {
 }
 
-lemma DistinctNoTwice(xs: seq<Tile>)
-  requires ProofLib.Distinct(xs)
-  ensures noTileTwice(xs)
+lemma savedRead_ensures(h: Home, ticket: int, found: app__home__tiles_Found, tiles: seq<app__home__tiles_Tile>)
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> alwaysNothingIsToldBeforeTheStart(savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> alwaysTheTilesKeepTheirRules(savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> alwaysOffThePhoneNothingIsAsked(savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> alwaysTheInstalledAppsKeepTheirRules(savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> alwaysEditingIsAlone(savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> alwaysTheMenuIsForAListedApp(savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepNumbersOnlyRise(h, "savedRead", savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepARestartForgetsAllButItsNumbers(h, "savedRead", savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepAReadingAfterARefusalTellsNothing(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepOnlyARefusalReadsQuietly(h, "savedRead", savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepReadingsAreTicketed(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepTheTouchThatOpensAMenuNeverOpensItsApp(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepNothingOpensWhileEditing(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepARefusedOpeningReadsTheAppsAgain(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepOneAskAtATime(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepAddingFromTheMenuClosesTheDrawer(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepEveryChangeIsSentToBeSaved(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepFailuresAreToldExactly(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepBackClosesOneLayer(h, "savedRead", savedRead(h, ticket, found, tiles).state))
+  ensures (inv(h) ==> canSavedRead(h, ticket) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "savedRead", savedRead(h, ticket, found, tiles).state, savedRead(h, ticket, found, tiles).out))
 {
-  NoTwiceView(xs);
-  forall t | t in xs ensures |ProofLib.Filter((u: Tile) => (u == t), xs)| == 1 {
-    ProofLib.FilterDistinctCountOne((u: Tile) => (u == t), xs, t);
-  }
-}
-
-lemma NoTwiceDistinct(xs: seq<Tile>)
-  requires noTileTwice(xs)
-  ensures ProofLib.Distinct(xs)
-{
-  NoTwiceView(xs);
-  forall i, j | 0 <= i < j < |xs| ensures xs[i] != xs[j] {
-    if xs[i] == xs[j] {
-      var t := xs[i];
-      assert t in xs;
-      assert |ProofLib.Filter((u: Tile) => (u == t), xs)| == 1;
-      ProofLib.FilterTwo((u: Tile) => (u == t), xs, i, j);
-    }
-  }
-}
-
-lemma DistinctAppend(xs: seq<Tile>, x: Tile)
-  requires ProofLib.Distinct(xs) && !(x in xs)
-  ensures ProofLib.Distinct(xs + [x])
-{
-  forall i, j | 0 <= i < j < |xs + [x]| ensures (xs + [x])[i] != (xs + [x])[j] {
-    if j == |xs| {
-      assert (xs + [x])[i] == xs[i];
-      assert xs[i] in xs;
-    }
-  }
-}
-
-lemma DistinctConcat(a: seq<Tile>, b: seq<Tile>)
-  requires ProofLib.Distinct(a) && ProofLib.Distinct(b)
-  requires forall x :: x in a ==> !(x in b)
-  ensures ProofLib.Distinct(a + b)
-{
-  forall i, j | 0 <= i < j < |a + b| ensures (a + b)[i] != (a + b)[j] {
-    if j < |a| {
-      assert (a + b)[i] == a[i] && (a + b)[j] == a[j];
-    } else if i < |a| {
-      assert (a + b)[i] == a[i] && (a + b)[j] == b[j - |a|];
-      assert a[i] in a && b[j - |a|] in b;
+  if inv(h) && canSavedRead(h, ticket) {
+    var after := savedRead(h, ticket, found, tiles);
+    app__home__tiles_savedRead_ensures(h.tiles, ticket, found, tiles);
+    var read := app__home__tiles_savedRead(h.tiles, ticket, found, tiles);
+    if read.load.status.Failed? {
+      assert after.out[0] == Effect.TellSavedUnreadable;
+      assert after.out[0] in after.out;
     } else {
-      assert (a + b)[i] == b[i - |a|] && (a + b)[j] == b[j - |a|];
+      assert forall e :: e in after.out ==> e.ReadApps?;
     }
   }
 }
 
-lemma DistinctFilter(p: Tile -> bool, xs: seq<Tile>)
-  requires ProofLib.Distinct(xs)
-  ensures ProofLib.Distinct(ProofLib.Filter(p, xs))
+lemma appsRead_ensures(h: Home, ticket: int, ok: bool, listed: seq<string>, visible: bool)
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> alwaysNothingIsToldBeforeTheStart(appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> alwaysTheTilesKeepTheirRules(appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> alwaysOffThePhoneNothingIsAsked(appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> alwaysTheInstalledAppsKeepTheirRules(appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> alwaysEditingIsAlone(appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> alwaysTheMenuIsForAListedApp(appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepNumbersOnlyRise(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepARestartForgetsAllButItsNumbers(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepAReadingAfterARefusalTellsNothing(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepOnlyARefusalReadsQuietly(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepReadingsAreTicketed(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepTheTouchThatOpensAMenuNeverOpensItsApp(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepNothingOpensWhileEditing(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepARefusedOpeningReadsTheAppsAgain(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepOneAskAtATime(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepAddingFromTheMenuClosesTheDrawer(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepEveryChangeIsSentToBeSaved(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepFailuresAreToldExactly(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepBackClosesOneLayer(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state))
+  ensures (inv(h) ==> canAppsRead(h, ticket) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "appsRead", appsRead(h, ticket, ok, listed, visible).state, appsRead(h, ticket, ok, listed, visible).out))
 {
-  assert ProofLib.DistinctBy(xs, (t: Tile) => t);
-  ProofLib.FilterKeepsDistinctBy(p, xs, (t: Tile) => t);
-}
-
-lemma RemoveView(h: Home, tile: Tile)
-  ensures removeFromHome(h, tile).state.favourites == ProofLib.Filter((t: Tile) => (t != tile), h.favourites)
-{
-}
-
-lemma FilterConcat(p: Tile -> bool, a: seq<Tile>, b: seq<Tile>)
-  ensures ProofLib.Filter(p, a + b) == ProofLib.Filter(p, a) + ProofLib.Filter(p, b)
-  decreases |b|
-{
-  if |b| == 0 {
-    assert a + b == a;
-    ProofLib.FilterNil(p, b);
-  } else {
-    var c := b[..|b| - 1];
-    var x := b[|b| - 1];
-    assert b == c + [x];
-    assert a + b == (a + c) + [x];
-    FilterConcat(p, a, c);
-    ProofLib.FilterAppend(p, a + c, x);
-    ProofLib.FilterAppend(p, c, x);
-  }
-}
-
-lemma PlacedStep(xs: seq<Tile>, last: Tile, tile: Tile, onto: Tile, behind: bool)
-  ensures placed(xs + [last], tile, onto, behind) == placed(xs, tile, onto, behind) + (if (last == tile) then [] else (if (last == onto) then (if behind then [last, tile] else [tile, last]) else [last]))
-{
-  ProofLib.FoldLeftAppend((placed: seq<Tile>, t: Tile) => (placed + (if (t == tile) then [] else (if (t == onto) then (if behind then [t, tile] else [tile, t]) else [t]))), [], xs, last);
-}
-
-lemma PlacedMembers(xs: seq<Tile>, tile: Tile, onto: Tile, behind: bool)
-  requires tile != onto
-  ensures forall x :: x in placed(xs, tile, onto, behind) <==> ((x in xs && x != tile) || (x == tile && onto in xs))
-  decreases |xs|
-{
-  if |xs| == 0 {
-    assert placed(xs, tile, onto, behind) == [];
-  } else {
-    var prefix := xs[..|xs| - 1];
-    var last := xs[|xs| - 1];
-    assert xs == prefix + [last];
-    PlacedStep(prefix, last, tile, onto, behind);
-    PlacedMembers(prefix, tile, onto, behind);
-  }
-}
-
-lemma PlacedDistinct(xs: seq<Tile>, tile: Tile, onto: Tile, behind: bool)
-  requires tile != onto && ProofLib.Distinct(xs)
-  ensures ProofLib.Distinct(placed(xs, tile, onto, behind))
-  decreases |xs|
-{
-  if |xs| == 0 {
-    assert placed(xs, tile, onto, behind) == [];
-  } else {
-    var prefix := xs[..|xs| - 1];
-    var last := xs[|xs| - 1];
-    assert xs == prefix + [last];
-    assert ProofLib.Distinct(prefix);
-    assert !(last in prefix);
-    PlacedStep(prefix, last, tile, onto, behind);
-    PlacedDistinct(prefix, tile, onto, behind);
-    PlacedMembers(prefix, tile, onto, behind);
-    var tail := (if (last == tile) then [] else (if (last == onto) then (if behind then [last, tile] else [tile, last]) else [last]));
-    assert ProofLib.Distinct(tail);
-    DistinctConcat(placed(prefix, tile, onto, behind), tail);
-  }
-}
-
-lemma PlacedRest(xs: seq<Tile>, tile: Tile, onto: Tile, behind: bool)
-  ensures ProofLib.Filter((t: Tile) => (t != tile), placed(xs, tile, onto, behind)) == ProofLib.Filter((t: Tile) => (t != tile), xs)
-  decreases |xs|
-{
-  if |xs| == 0 {
-    assert placed(xs, tile, onto, behind) == [];
-  } else {
-    var prefix := xs[..|xs| - 1];
-    var last := xs[|xs| - 1];
-    assert xs == prefix + [last];
-    PlacedStep(prefix, last, tile, onto, behind);
-    PlacedRest(prefix, tile, onto, behind);
-    var tail := (if (last == tile) then [] else (if (last == onto) then (if behind then [last, tile] else [tile, last]) else [last]));
-    FilterConcat((t: Tile) => (t != tile), placed(prefix, tile, onto, behind), tail);
-    ProofLib.FilterAppend((t: Tile) => (t != tile), prefix, last);
-    if |tail| > 0 {
-      ProofLib.FilterCons((t: Tile) => (t != tile), tail);
-      if |tail| > 1 {
-        ProofLib.FilterCons((t: Tile) => (t != tile), tail[1..]);
-        ProofLib.FilterNil((t: Tile) => (t != tile), tail[1..][1..]);
-      } else {
-        ProofLib.FilterNil((t: Tile) => (t != tile), tail[1..]);
-      }
+  if inv(h) && canAppsRead(h, ticket) {
+    var after := appsRead(h, ticket, ok, listed, visible);
+    if (!(ok) && !(h.installed.quiet)) && onHome(h.installed.apps, h.tiles.favourites) {
+      assert after.out[0] == Effect.TellAppsUnread;
+      assert after.out[0] in after.out;
     } else {
-      ProofLib.FilterNil((t: Tile) => (t != tile), tail);
+      assert forall e :: e in after.out ==> e.ReadApps?;
     }
   }
 }
 
-lemma RestView(tiles: seq<Tile>, tile: Tile, onto: Tile, behind: bool)
-  ensures lawTheRestKeepTheirOrder(tiles, tile, onto, behind) == (ProofLib.Filter((t: Tile) => (t != tile), placed(tiles, tile, onto, behind)) == ProofLib.Filter((t: Tile) => (t != tile), tiles))
+lemma lawTheDrawerListsOnlyReadApps_ensures(home: Home)
+  ensures (lawTheDrawerListsOnlyReadApps(home) == true)
 {
-}
-
-lemma lawTheRestKeepTheirOrder_ensures(tiles: seq<Tile>, tile: Tile, onto: Tile, behind: bool)
-  ensures (lawTheRestKeepTheirOrder(tiles, tile, onto, behind) == true)
-{
-  RestView(tiles, tile, onto, behind);
-  PlacedRest(tiles, tile, onto, behind);
-}
-
-lemma addToHome_ensures(h: Home, tile: Tile)
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysAppsComeOnlyFromAReading(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysABrowserHasNoPhone(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysNoTileIsOnHomeTwice(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysHomeShowsWhatIsSaved(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysAddToHomeIsPartOfEditing(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysEditingAndTheDrawerNeverMix(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> alwaysTheMenuIsForAListedApp(addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepUnreadAppsAreToldOnce(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepReadingsAreTicketed(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepOneAskAtATime(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepOnlyAndroidSaysItOpened(h, "addToHome", addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepNotOpenedIsToldOnlyWhenTrue(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepAMoveKeepsTheSameTiles(h, "addToHome", addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepEveryChangeIsSentToBeSaved(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepAFailedSaveChangesNothing(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepOnlyTheOwnerRearrangesHome(h, "addToHome", addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepARestartShowsWhatWasSaved(h, "addToHome", addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepBackClosesOneLayer(h, "addToHome", addToHome(h, tile).state))
-  ensures (inv(h) ==> canAddToHome(h, tile) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "addToHome", addToHome(h, tile).state, addToHome(h, tile).out))
-{
-  if inv(h) && canAddToHome(h, tile) {
-    NoTwiceDistinct(h.favourites);
-    DistinctAppend(h.favourites, tile);
-    DistinctNoTwice(h.favourites + [tile]);
+  ListingView(home);
+  forall x | x in listing(home) ensures x in home.installed.apps {
+    ProofLib.FilterMember((a: string) => matches(a, home.query), home.installed.apps, x);
+  }
+  if home.query == "" {
+    forall x | x in home.installed.apps ensures x in listing(home) {
+      lawAnEmptySearchMatchesEveryApp_ensures(x);
+      ProofLib.FilterMember((a: string) => matches(a, home.query), home.installed.apps, x);
+    }
   }
 }
 
-lemma removeFromHome_ensures(h: Home, tile: Tile)
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysAppsComeOnlyFromAReading(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysABrowserHasNoPhone(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysNoTileIsOnHomeTwice(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysHomeShowsWhatIsSaved(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysAddToHomeIsPartOfEditing(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysEditingAndTheDrawerNeverMix(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> alwaysTheMenuIsForAListedApp(removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepUnreadAppsAreToldOnce(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepReadingsAreTicketed(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepOneAskAtATime(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepOnlyAndroidSaysItOpened(h, "removeFromHome", removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepNotOpenedIsToldOnlyWhenTrue(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepAMoveKeepsTheSameTiles(h, "removeFromHome", removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepEveryChangeIsSentToBeSaved(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepAFailedSaveChangesNothing(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepOnlyTheOwnerRearrangesHome(h, "removeFromHome", removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepARestartShowsWhatWasSaved(h, "removeFromHome", removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepBackClosesOneLayer(h, "removeFromHome", removeFromHome(h, tile).state))
-  ensures (inv(h) ==> canRemoveFromHome(h, tile) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "removeFromHome", removeFromHome(h, tile).state, removeFromHome(h, tile).out))
+lemma lawNothingMatchesOnlyASearch_ensures(home: Home)
+  ensures (lawNothingMatchesOnlyASearch(home) == true)
 {
-  if inv(h) && canRemoveFromHome(h, tile) {
-    NoTwiceDistinct(h.favourites);
-    RemoveView(h, tile);
-    DistinctFilter((t: Tile) => (t != tile), h.favourites);
-    DistinctNoTwice(ProofLib.Filter((t: Tile) => (t != tile), h.favourites));
+  if drawer(home).NoMatch? && home.query == "" {
+    ListingView(home);
+    assert |home.installed.apps| > 0;
+    var x := home.installed.apps[0];
+    lawAnEmptySearchMatchesEveryApp_ensures(x);
+    ProofLib.FilterMember((a: string) => matches(a, home.query), home.installed.apps, x);
+    assert x in listing(home);
   }
 }
 
-lemma moveTile_ensures(h: Home, tile: Tile, onto: Tile, behind: bool)
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysAppsComeOnlyFromAReading(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysABrowserHasNoPhone(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysNoTileIsOnHomeTwice(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysHomeShowsWhatIsSaved(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysAddToHomeIsPartOfEditing(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysEditingAndTheDrawerNeverMix(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> alwaysTheMenuIsForAListedApp(moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepUnreadAppsAreToldOnce(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepReadingsAreTicketed(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepOneAskAtATime(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepOnlyAndroidSaysItOpened(h, "moveTile", moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepNotOpenedIsToldOnlyWhenTrue(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepAMoveKeepsTheSameTiles(h, "moveTile", moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepEveryChangeIsSentToBeSaved(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepAFailedSaveChangesNothing(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepOnlyTheOwnerRearrangesHome(h, "moveTile", moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepARestartShowsWhatWasSaved(h, "moveTile", moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepBackClosesOneLayer(h, "moveTile", moveTile(h, tile, onto, behind).state))
-  ensures (inv(h) ==> canMoveTile(h, tile, onto) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "moveTile", moveTile(h, tile, onto, behind).state, moveTile(h, tile, onto, behind).out))
+lemma addToHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, by_: Actor)
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysNothingIsToldBeforeTheStart(addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysTheTilesKeepTheirRules(addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysOffThePhoneNothingIsAsked(addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysTheInstalledAppsKeepTheirRules(addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysEditingIsAlone(addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> alwaysTheMenuIsForAListedApp(addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepNumbersOnlyRise(h, "addToHome", addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepARestartForgetsAllButItsNumbers(h, "addToHome", addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepOnlyARefusalReadsQuietly(h, "addToHome", addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepReadingsAreTicketed(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepTheTouchThatOpensAMenuNeverOpensItsApp(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepNothingOpensWhileEditing(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepOneAskAtATime(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepAddingFromTheMenuClosesTheDrawer(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepEveryChangeIsSentToBeSaved(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepFailuresAreToldExactly(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepBackClosesOneLayer(h, "addToHome", addToHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canAddToHome(h, tile, shell, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "addToHome", addToHome(h, tile, shell, by_).state, addToHome(h, tile, shell, by_).out))
 {
-  if inv(h) && canMoveTile(h, tile, onto) {
-    NoTwiceDistinct(h.favourites);
-    PlacedDistinct(h.favourites, tile, onto, behind);
-    DistinctNoTwice(placed(h.favourites, tile, onto, behind));
-    PlacedMembers(h.favourites, tile, onto, behind);
+  if inv(h) && canAddToHome(h, tile, shell, by_) {
+    var after := addToHome(h, tile, shell, by_);
+    app__home__tiles_addTile_ensures(h.tiles, tile);
+    assert after.out[0].SaveHome? && after.out[0] in after.out;
+    if menuIsOpen(h.menu) {
+      assert after.out[1] == Effect.CloseDrawer;
+      assert after.out[1] in after.out;
+    } else {
+      assert after.out == [after.out[0]];
+    }
+    assert forall e :: e in after.out ==> (e.SaveHome? ==> e == after.out[0]);
   }
 }
 
-lemma initialHolds_ensures()
-  ensures inv(initialHolds())
+lemma removeFromHome_ensures(h: Home, tile: app__home__tiles_Tile, shell: app__shell_Shell, by_: Actor)
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysNothingIsToldBeforeTheStart(removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysTheTilesKeepTheirRules(removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysOffThePhoneNothingIsAsked(removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysTheInstalledAppsKeepTheirRules(removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysEditingIsAlone(removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> alwaysTheMenuIsForAListedApp(removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepNumbersOnlyRise(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepARestartForgetsAllButItsNumbers(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepOnlyARefusalReadsQuietly(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepReadingsAreTicketed(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepTheTouchThatOpensAMenuNeverOpensItsApp(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepNothingOpensWhileEditing(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepOneAskAtATime(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepAddingFromTheMenuClosesTheDrawer(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepEveryChangeIsSentToBeSaved(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepFailuresAreToldExactly(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepBackClosesOneLayer(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state))
+  ensures (inv(h) ==> canRemoveFromHome(h, tile, shell, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "removeFromHome", removeFromHome(h, tile, shell, by_).state, removeFromHome(h, tile, shell, by_).out))
 {
-  forall i, j | 0 <= i < j < |defaults| ensures defaults[i] != defaults[j] {
+  if inv(h) && canRemoveFromHome(h, tile, shell, by_) {
+    var after := removeFromHome(h, tile, shell, by_);
+    app__home__tiles_removeTile_ensures(h.tiles, tile);
+    assert after.out[0] in after.out;
   }
-  DistinctNoTwice(defaults);
+}
+
+lemma moveTile_ensures(h: Home, tile: app__home__tiles_Tile, onto: app__home__tiles_Tile, behind: bool, shell: app__shell_Shell, by_: Actor)
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysNothingIsToldBeforeTheStart(moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysTheTilesKeepTheirRules(moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysOffThePhoneNothingIsAsked(moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysTheInstalledAppsKeepTheirRules(moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysEditingIsAlone(moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> alwaysTheMenuIsForAListedApp(moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepNumbersOnlyRise(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepARestartForgetsAllButItsNumbers(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepAReadingAfterARefusalTellsNothing(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepOnlyARefusalReadsQuietly(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepReadingsAreTicketed(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepTheTouchThatOpensAMenuNeverOpensItsApp(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepNothingOpensWhileEditing(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepARefusedOpeningReadsTheAppsAgain(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepOneAskAtATime(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepAddingFromTheMenuClosesTheDrawer(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepEveryChangeIsSentToBeSaved(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepFailuresAreToldExactly(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepBackClosesOneLayer(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state))
+  ensures (inv(h) ==> canMoveTile(h, tile, onto, shell, by_) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "moveTile", moveTile(h, tile, onto, behind, shell, by_).state, moveTile(h, tile, onto, behind, shell, by_).out))
+{
+  if inv(h) && canMoveTile(h, tile, onto, shell, by_) {
+    var after := moveTile(h, tile, onto, behind, shell, by_);
+    app__home__tiles_moveTile_ensures(h.tiles, tile, onto, behind);
+    assert after.out[0] in after.out;
+  }
+}
+
+lemma homeSaved_ensures(h: Home, ticket: int, ok: bool)
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> alwaysNothingIsToldBeforeTheStart(homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> alwaysTheTilesKeepTheirRules(homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> alwaysOffThePhoneNothingIsAsked(homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> alwaysTheInstalledAppsKeepTheirRules(homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> alwaysEditingIsAlone(homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> alwaysTheMenuIsForAListedApp(homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepNumbersOnlyRise(h, "homeSaved", homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepARestartForgetsAllButItsNumbers(h, "homeSaved", homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepAReadingAfterARefusalTellsNothing(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepUnreadAppsAreToldOnlyWhenTrue(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepOnlyARefusalReadsQuietly(h, "homeSaved", homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepReadingsAreTicketed(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepTheTouchThatOpensAMenuNeverOpensItsApp(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepNothingOpensWhileEditing(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepARefusedOpeningReadsTheAppsAgain(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepNotOpenedIsToldOnlyWhenRefused(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepAndroidIsAskedOnlyWhatHomeHas(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepOneAskAtATime(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepAddingFromTheMenuClosesTheDrawer(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepEveryChangeIsSentToBeSaved(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepFailuresAreToldExactly(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepBackClosesOneLayer(h, "homeSaved", homeSaved(h, ticket, ok).state))
+  ensures (inv(h) ==> canHomeSaved(h, ticket) ==> stepTheShadeIsNeverSaidToHaveOpened(h, "homeSaved", homeSaved(h, ticket, ok).state, homeSaved(h, ticket, ok).out))
+{
+  if inv(h) && canHomeSaved(h, ticket) {
+    var after := homeSaved(h, ticket, ok);
+    if !ok {
+      assert after.out[0] in after.out;
+    }
+  }
 }
