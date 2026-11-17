@@ -4,6 +4,7 @@ import {parseClientTurnObservation,parseClientCalendarDayObservation} from '../.
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
 import {CAMERA_CAPTURE_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
 import {telephonyActionCapabilities} from './telephony-actions-contract.ts';
@@ -155,6 +156,8 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);
   for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
+  // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.
+  for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[])])if(agent.includes(capability))capabilities.push(capability);
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
   // The device photo library is offered only where the native Photos plugin exists and the agent offers it.

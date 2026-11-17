@@ -19,7 +19,7 @@ import vm from 'node:vm';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {parseBrowserAddressInput} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/address-input.ts';
 import {BrowserTabSession} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts';
-import {BrowserOpenRefused} from '../../../../apps/app/src/browser/browser-poll.ts';
+import {BrowserOpenRefused, searchAddress, tabLimitRefusal} from '../../../../apps/app/src/browser/browser-poll.ts';
 import {modelTraces, plain, repositoryRoot} from './browser-model-traces.mjs';
 import {scaledTimeout} from '../timeouts.mjs';
 
@@ -63,7 +63,7 @@ export function addressInputHarness() {
     const state = {cur: 'owned', tabs: [{id: 'owned'}], editing: true}, navigations = [], reports = [];
     const tabs = new BrowserTabSession({session: 'session'});
     await tabs.ensure('owned', false, async () => undefined);
-    const context = {URL, Error, BrowserOpenRefused, MAX_TABS: 8, parseBrowserAddressInput, session: 'session', disposed: false, state: () => state, isPrivate: () => false,
+    const context = {URL, Error, BrowserOpenRefused, searchAddress, tabLimitRefusal, MAX_TABS: 8, parseBrowserAddressInput, session: 'session', disposed: false, state: () => state, isPrivate: () => false,
       newTabId: () => 'new', agentTab: undefined, restored: new Map(), tabs, restoreAttempts: new Map(), ensure: id => tabs.creation(id) ?? tabs.ensure(id, false, async () => undefined),
       shell: {vset(_key, patch) { Object.assign(state, patch); }}, Browser: {async navigate(input) { navigations.push(input); }, async close() {}},
       refresh() {}, report(error) { reports.push(error.message); }};

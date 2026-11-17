@@ -8,15 +8,18 @@
  */
 import type {ContactDraft, ContactRecord, TelephonyReview} from '../runtime/telephony-executor';
 import {displayNumber, initials} from './telephony-presenters';
+import type {BrowserTabChoice} from './browser-adapter';
 
-type Pending = {review: TelephonyReview; settle: (choice: number | null) => void};
+/** The open tabs a chat request's words match, when there are several (browser-adapter.ts browserControl). */
+type TabReview = {kind: 'tab'} & BrowserTabChoice;
+type Pending = {review: TelephonyReview | TabReview; settle: (choice: number | null) => void};
 let pending: Pending | null = null, repaint: () => void = () => {};
 const ICON = {
   call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z',
-  message: 'M12 19V5M6 11l6-6 6 6', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', add: 'M12 5v14M5 12h14',
+  message: 'M12 19V5M6 11l6-6 6 6', tab: 'M4 6h16v12H4zM4 10h16', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', add: 'M12 5v14M5 12h14',
 };
 /** Shows the review and resolves with the chosen option's index, or null when nothing was chosen. */
-export function askTelephonyReview(review: TelephonyReview, signal: AbortSignal): Promise<number | null> {
+export function askTelephonyReview(review: TelephonyReview | TabReview, signal: AbortSignal): Promise<number | null> {
   return new Promise(resolve => {
     pending?.settle(null);
     if (signal.aborted || (typeof document !== 'undefined' && document.hidden) || !review.options.length) { resolve(null); return; }
@@ -40,6 +43,9 @@ export function presentTelephonyReview(entry: Pending | null) {
   const plain = (text: string) => [{text, struck: false, added: false}];
   const rows = review.options.map((option, index) => {
     const choose = () => settle(index);
+    if (review.kind === 'tab') { const tab = review.options[index], closing = review.verb === 'Close';
+      return {ini: initials(tab.title), name: tab.title, lines: style([...(tab.priv ? ['Private tab'] : []), ...(tab.host ? [tab.host] : [])].flatMap(plain)), choose, icon: closing ? ICON.dismiss : ICON.tab,
+        bg: closing ? 'var(--alpha-call-red)' : 'var(--acc)', label: `${review.verb} ${tab.priv ? 'private ' : ''}tab ${tab.title}${tab.host ? ' ' + tab.host : ''}`}; }
     if (review.kind === 'call' || review.kind === 'message') { const match = option as {name: string; number: string};
       return {ini: initials(match.name), name: match.name, lines: style(plain(displayNumber(match.number))), choose, icon: ICON[review.kind],
         bg: review.kind === 'call' ? 'var(--alpha-call-green)' : 'var(--acc)', label: `${review.kind === 'call' ? 'Call' : 'Message'} ${match.name} ${displayNumber(match.number)}`}; }

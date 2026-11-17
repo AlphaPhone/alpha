@@ -48,7 +48,7 @@ import {BrowserOpenRefused} from '../browser/browser-poll';
 import {presentDeviceRecordOperation} from './device-record-presentation';
 import {validateMapsSelectedObject} from '../maps/agent-context';
 import {isMvpView} from '../prototype/mvp-features';
-import {alphaViewLabel} from '../product/alpha-product';
+import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
@@ -71,7 +71,7 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   appName:'Alpha',
   // The name the owner says. The agent's character carries the same name, so the server and this
   // phone read "Alpha, open …" as the same direct request.
-  assistantName:'Alpha',
+  assistantName:ALPHA_PRODUCT.identity.characterName,
   operations,
   workflow:{parseBinding:parseWorkflowBinding,parseRead:parseWorkflowRead,validateResult:validateWorkflowResult,assertOperation:assertWorkflowOperation},
   presentRecord:(operation,timeZone)=>operation.type==='open_view'?presentOpenView(operation.view):isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
@@ -80,9 +80,9 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
 };
-/** Runs an approved Browser open for the device executor. An open that Browser refused before
- * creating or loading any tab closes the attempt as not started, with Browser's reason; any other
- * failure may have reached the tab host and stays an unknown outcome. */
+/** Runs an approved Browser open or control for the device executor. One that Browser refused
+ * before any effect closes the attempt as not started, with Browser's reason; any other failure
+ * may have reached the tab host and stays an unknown outcome. */
 export async function approvedBrowserOpen<T>(open:()=>Promise<T>):Promise<T>{
   try{return await open();}catch(error){if(error instanceof BrowserOpenRefused)throw new DeviceActionNotStarted(error.message);throw error;}
 }

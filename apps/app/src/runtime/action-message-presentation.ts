@@ -2,6 +2,7 @@ import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/co
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
 import {ownerReceiptText} from '../ui/telephony/telephony-receipt-text.ts';
+import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
 type Message = Record<string, any>;
 /** Only the service-authored check-in suffix is presentation markup. */
@@ -27,6 +28,17 @@ export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
   return `Created a browser tab for ${destination.host}.`;
+}
+/** What the owner reads after a reviewed Browser control ran. It stays on this phone. */
+export function browserControlSummary(operation: BrowserControlOperation): string {
+  switch (operation.type) {
+    case 'browser_search': return `Searching the web for “${operation.query}”.`;
+    case 'browser_tab_new': return operation.private ? 'Opened a private tab.' : 'Opened a new tab.';
+    case 'browser_tab_switch': return 'Switched tabs in Browser.';
+    case 'browser_tab_close': return 'Closed the tab.';
+    case 'browser_find': return `Finding “${operation.text}” in the page.`;
+    case 'browser_history': return {back: 'Went back a page.', forward: 'Went forward a page.', reload: 'Reloading the page.', stop: 'Stopped loading the page.'}[operation.action];
+  }
 }
 function legacyBrowserNavigationSummary(url: string): string {
   return `Opened ${new URL(url).host}.`;
