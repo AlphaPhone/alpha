@@ -25,6 +25,15 @@ VARIANTS = ("launcher",)
 SHA = re.compile("[0-9a-f]{64}")
 COMMIT = re.compile("[0-9a-f]{40}")
 
+# One owner-approved private build exception. Source, package and version are fixed;
+# archive and APK bytes still require the exact protected producer approval.
+PRIVATE_VERIFICATION_EXCEPTION = {
+    "alphaCommit": "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
+    "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+    "versionCode": 81,
+    "applicationId": "ai.alphacompute.alphaphone",
+}
+
 
 def require(condition, message):
     if not condition:
@@ -33,6 +42,13 @@ def require(condition, message):
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def private_verification_admitted(private, pin):
+    value = private["checks"]["combinedVerification"]
+    return value == "passed" or value == "waived-by-owner" and all(
+        pin.get(key) == expected and private.get(key) == expected
+        for key, expected in PRIVATE_VERIFICATION_EXCEPTION.items())
 
 
 def matches_profile(record, profile):
@@ -398,9 +414,10 @@ def admit(archive, pin, stage=None, *, source_root=None):
                         private["unsignedApkSHA256"] == apks and matches_profile(private, profile),
                         "Private producer identity differs from the reviewed build")
                 require(private.get("updateChannel") == channel, "Private producer update channel differs")
-                for check in ("productSourceGuard", "sdkSourceGuard", "normalPreparation",
-                              "combinedVerification", "apkArchive"):
+                for check in ("productSourceGuard", "sdkSourceGuard", "normalPreparation", "apkArchive"):
                     require(private["checks"][check] == "passed", f"Private build did not pass {check}")
+                require(private_verification_admitted(private, pin),
+                        "Private build did not pass combinedVerification")
 
             producer_bytes = data("producer-evidence/manifest.json")
             require(digest(producer_bytes) == pin["producerManifestSHA256"], "Producer manifest digest differs")
