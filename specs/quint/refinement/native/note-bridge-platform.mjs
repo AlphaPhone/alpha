@@ -42,6 +42,7 @@ public class PluginCall {
  public PluginCall(JSObject data){this.data=data;}
  public String getString(String key){return data.getString(key);}
  public String getString(String key,String fallback){return data.getString(key,fallback);}
+ public Boolean getBoolean(String key){return getBoolean(key,null);}
  public Boolean getBoolean(String key,Boolean fallback){return data.getBoolean(key,fallback);}
  public JSObject getData(){return data;}
  public Long getLong(String key){return data.has(key)?data.optLong(key):null;}
