@@ -22,6 +22,7 @@ import {reviewMailContext,validateMailContext,type MailContextSource} from '../r
 import { inboxProviderControls } from './inbox-provider-controls';
 import { homeReadIsStale, presentHomeInboxCard } from './home-cards';
 import { inboxDrafts, type ComposePrefill } from './inbox-drafts';
+import { ChatAttachmentPicker } from './attachment-picker';
 import { attachmentReadFailure, classifyGmailFailure, gmailReadable, MailReadStateGuard, mailReadStateMessage, newestMailBodies, GMAIL_ACCOUNTS_CHANGED, type GmailFailureKind } from '../runtime/gmail-mailbox';
 import { connectionController, agentPendingText } from '../runtime/connection-ui';
 import { gmailGrantChange, gmailInboxAllows, gmailModifyIncomplete, gmailReadCacheKey } from '../runtime/gmail-grants';
@@ -377,7 +378,20 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
 
   const publish = (patch: Bag = {}) => shell?.vset('inbox', { nativeMailTick: Date.now(), ...patch });
   const provider = inboxProviderControls(() => publish(), text => api?.toast(text));
-  const drafts = inboxDrafts(() => publish(), text => api?.toast(text), provider);
+  const drafts = inboxDrafts(() => publish(), text => api?.toast(text), provider,
+    () => !!api?.isActive() && !document.hidden, async current => {
+      const owner = shell;
+      if (!owner || !current()) return;
+      const abort = new AbortController();
+      owner.chatAttachmentPicker ??= new ChatAttachmentPicker(() => owner.live && owner.setState({}));
+      try {
+        const [file] = await owner.chatAttachmentPicker.choose(abort.signal, 1,
+          () => owner === shell && current(), '[data-alpha-mail-attach]');
+        return file;
+      } finally {
+        abort.abort();
+      }
+    });
   const recipientBook=createAddressBookClient(registerPlugin<AddressBookNativePlugin>('AlphaContacts'));
   type Recipient={name:string;email:string};
   let recipientVisit='',recipientEpoch=0,recipientAll=false,recipientRows:Recipient[]=[],recipientNext:string|undefined;
@@ -438,7 +452,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     await drafts.flushForAppUpdate(exact);
   };
   provider.setEditor((proposal,reference,review)=>drafts.editProvider(proposal,reference,review));
-  provider.setComposer(()=>drafts.email());
+  provider.setComposer(()=>api?.isActive() && drafts.render().composing ? drafts.email() : null);
   const readable = () => accounts.filter(gmailReadable);
   const currentQuery = () => String(api?.get('inbox')?.q || '').trim() || folderQuery[folder];
   /** Read-cache identity of the selected account now; null while nothing it read may be shown. */
@@ -904,7 +918,8 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   view.back = (st: Bag, current: Bag) => {
     if(attachmentView){void attachmentNative.cancel().catch(()=>{});attachmentView=null;publish();return true;}
     if (provider.close()) return true;
-    if (drafts.close()) return true;
+    if (drafts.render().composing && provider.render().provider.busy) return true;
+    if (drafts.back()) return true;
     const menu=document.querySelector<HTMLDetailsElement>('.mail-message-menu[open]');if(menu){menu.open=false;menu.querySelector<HTMLElement>('summary')?.focus();return true;}
     if (st.open != null) { if(!accountsFromDisk)cancelOperation();body = null; current.set({ open: null, nativeMailSelection: null }); return true; }
     if (st.q != null) { changeQuery(null); return true; }
@@ -1108,7 +1123,8 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     const needsGmailConnection=!!binding&&accountsChecked&&accountsSession===binding.sessionId&&!selected&&!operation&&phase!=='scheduled'&&!failure;
     const draftView = drafts.render(), composer = recipientComposer(draftView.c);
     const fromAccounts = readable().map(account => ({id: account.connectionId, label: account.label}));
-    const compose = composer ? {...composer, busy: composer.busy || !!switchingFrom, sendDisabled: composer.sendDisabled || !!switchingFrom,
+    const reviewView = provider.render();
+    const compose = composer ? {...composer, busy: composer.busy || !!switchingFrom || reviewView.provider.busy, sendDisabled: composer.sendDisabled || !!switchingFrom || reviewView.provider.busy,
       fromId: selected, fromAccounts, onFrom: (event: Event) => {
         const control = event.currentTarget as HTMLSelectElement;
         const target = control.value;
@@ -1117,11 +1133,14 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       }} : null;
     return {folderTitle:folder==='inbox'?'Inbox':folder==='sent'?'Sent':folder==='archive'?'Archive':extraFolders.find(row=>row.value===folder)?.label||'Inbox',folderChips:chips.filter(row=>['Inbox','Sent','Archive'].includes(row.label)),actionChips:chips.filter(row=>!['Inbox','Sent','Archive'].includes(row.label)),hasActionChips:chips.some(row=>!['Inbox','Sent','Archive'].includes(row.label)),extraFolders,hasExtraFolders:!!extraFolders.length,folderPicker:extraFolders.length?React.createElement(MailFolderPicker,{folders:extraFolders,menuId:'alpha-mail-folders',themeTokens:MAIL_MENU_TOKENS,selectedStyle:MAIL_MENU_SELECTED}):null, attachmentOpen:!!attachmentView,attachment:attachmentView?{...attachmentView,saveLabel:attachmentSaveLabel,saveButtonText:nativeAttachmentDestination?attachmentSaveLabel:'Save',close:()=>{void attachmentNative.cancel().catch(()=>{});attachmentView=null;publish();}}:null,chips, rows, searching: st.q != null, notSearching: st.q == null, q: st.q || '', hasQ: false,
       openSearch: () => changeQuery(''), closeSearch: () => changeQuery(null), clearSearch:()=>{changeQuery('');queueMicrotask(()=>document.querySelector<HTMLInputElement>('.mail-search-input')?.focus());}, onQ: (e: Bag) => changeQuery(e.target.value), submitSearch:(event:Event)=>{event.preventDefault();const input=(event.currentTarget as HTMLFormElement).querySelector<HTMLInputElement>('input');if(!input?.value.trim())return;input.blur();void load();},
-      compose: () => void drafts.newEmail(), openSendSettings: () => shell?.openView?.('settings', {page: 'connections'}), empty: rows.length === 0, emptyIcon: 'M4 6h16v12H4zM4 6l8 6 8-6', emptyText: restoringCloud ? 'Loading Inbox…' : pendingCompose && !selected && binding && !failure ? needsGmailConnection ? 'Connect Gmail' : 'Checking…' : status,
+      compose: (event?: MouseEvent) => {
+        if (event && event.detail > 1 && provider.recentlySettled()) return;
+        void drafts.newEmail();
+      }, openSendSettings: () => shell?.openView?.('settings', {page: 'connections'}), empty: rows.length === 0, emptyIcon: 'M4 6h16v12H4zM4 6l8 6 8-6', emptyText: restoringCloud ? 'Loading Inbox…' : pendingCompose && !selected && binding && !failure ? needsGmailConnection ? 'Connect Gmail' : 'Checking…' : status,
       hasMore: !accountsFromDisk && rows.length > 0 && (!!nextPageToken || (!!operation && loadingMore)), loadingMore: !!operation && loadingMore, loadMoreDisabled: !!operation, loadMoreLabel: operation && loadingMore ? 'Loading more…' : 'Load more', loadMore: () => void load(true),
       canRefresh: !!binding, refreshDisabled: !!operation, refresh: () => { if(failure){failure.retry();return;}if(!selected||accountsFromDisk){void refreshAccounts(accountsFromDisk);return;}const shown=cachedListShown; invalidateList(false); cachedListShown=shown; void provider.bind(selected); void load(); },
       cachedListShown, cachedListNotice,
-      emptyAdd: needsGmailConnection, addAccountLabel: 'Connect Gmail', addAcct: () => googleConnectionController.open(), detail: !!activeBody, ...draftView, c: compose, ...provider.render(),
+      emptyAdd: needsGmailConnection, addAccountLabel: 'Connect Gmail', addAcct: () => googleConnectionController.open(), detail: !!activeBody, ...draftView, c: compose, ...reviewView,
       d: activeBody ? { actionsAvailable: !accountsFromDisk&&!activeBody.missingSavedBody, closeMenu:(event:Event)=>{(event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open');},menuKey:(event:KeyboardEvent)=>{if(event.key==='Escape'){const menu=event.currentTarget as HTMLDetailsElement;menu.open=false;menu.querySelector<HTMLElement>('summary')?.focus();event.stopPropagation();}},hasThread:!!thread&&thread.total>1,threadRows:thread?thread.messages.filter(row=>row.message.id!==activeBody.message.id).map(row=>({name:row.message.from,date:date(row.message.receivedAt),preview:row.message.snippet,pick:()=>{body=row;remoteImagesShown=false;publish({open:row.message.id,nativeMailSelection:mailSelection(row.message.id)});}})):[], hasPreviousThread:!!thread&&thread.previousOffsets.length>0,previousThread:()=>void nextThreadPage(true),hasNextThread:thread?.nextOffset!=null, nextThread:()=>void nextThreadPage(), subj: activeBody.message.subject || '(no subject)', name: activeBody.message.from,
         fullFrom:activeBody.message.fromEmail?`${activeBody.message.from} <${activeBody.message.fromEmail}>`:'Unknown sender',fullTo:activeBody.message.to.join(', ')||'Undisclosed recipients',fullCc:(activeBody.message.cc||[]).join(', '),hasCc:!!activeBody.message.cc?.length,fullReplyTo:activeBody.message.replyTo||'',hasReplyTo:!!activeBody.message.replyTo&&activeBody.message.replyTo!==activeBody.message.fromEmail,fullDate:formatFullDateTime(new Date(activeBody.message.receivedAt)),ini: activeBody.message.from.slice(0, 1).toUpperCase(), senderImage:mailSenderImage(activeBody.message.fromEmail,true),hideSenderImage:(event:Event)=>{(event.currentTarget as HTMLImageElement).style.display='none';}, meta: `To ${activeBody.message.to.join(', ')} · ${date(activeBody.message.receivedAt)}`,
         hasHtml:!!formatted,noHtml:!formatted,htmlDocument:formatted?.document||'',htmlLoaded,formattedMailRef,hasRemoteImages:!accountsFromDisk&&!!formatted?.remoteImages&&!showRemoteImages,showImages:()=>{if(body!==activeBody)return;remoteImagesShown=true;publish();},failed:!accountsFromDisk&&(!!activeBody.failed||!!activeBody.missingSavedBody),retry:()=>void open(activeBody.message),

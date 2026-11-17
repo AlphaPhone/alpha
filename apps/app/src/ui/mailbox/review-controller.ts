@@ -306,10 +306,12 @@ export function createMailReviewController(
     try {
       await bound.load();
       if (token !== epoch) return;
-      if (bound.snapshot()) {
+      const restored = bound.snapshot();
+      if (restored) {
         status =
           "Saved mail operation. Check its exact review and receipt before continuing.";
-        visible = true;
+        const sent = sentSource(restored);
+        visible = !sent || !!sent.providerDraft;
         settleSent(bound);
       }
       if (capabilityRead !== read) {
@@ -468,13 +470,67 @@ export function createMailReviewController(
   async function prepare(
     proposal: Bag,
     source?: Parameters<InboxOperation["prepare"]>[1],
+    mode?: "send-from-composer",
   ) {
-    if (!operation) return;
+    if (!operation || busy) return;
     const kind = proposal.kind;
     if (!allowed(proposal)) {
       toast(
         "This account has not allowed Gmail changes. Allow them in Settings, then try again. Nothing was changed.",
       );
+      return;
+    }
+    if (mode === "send-from-composer" && kind === "send" && source && composer) {
+      const owned = operation;
+      let dispatchId: string | undefined;
+      visible = false;
+      await run(async (operation, check) => {
+        const previous = sentSource(operation.snapshot());
+        if (previous && !previous.providerDraft) {
+          if (previous.draftId === source.draftId)
+            throw new MailReviewNotice("This email was already sent.");
+          await operation.clear();
+          check();
+        }
+        const pending = unsent();
+        if (
+          pending?.phase !== "review" ||
+          pending.proposal.kind !== "send" ||
+          binding(pending) !== "bound" ||
+          pending.composer?.draftId !== source.draftId ||
+          composerContent(pending.proposal) !== composerContent(proposal)
+        ) {
+          if (pending) await operation.clear();
+          check();
+          await operation.prepare(proposal, source);
+        }
+        check();
+        const record = operation.snapshot();
+        if (record?.phase !== "review" || record.receipt?.state !== "prepared") return;
+        const email = composer?.() ?? null;
+        if (reviewBinding(record, email) !== "bound") {
+          await operation.clear();
+          throw new MailReviewNotice("Email changed before sending. Check it and tap Send again.");
+        }
+        if (!allowed(proposal)) {
+          await operation.clear();
+          throw new MailReviewNotice("Gmail send access changed. Check Settings and try again.");
+        }
+        dispatchId = record.requestId;
+        await operation.confirm(email);
+      });
+      if (owned !== operation) return;
+      const record = owned.snapshot();
+      if (dispatchId && record?.requestId === dispatchId && record.phase === "observed" && record.receipt?.state === "succeeded") {
+        settle();
+        toast("Sent.");
+      } else if (
+        record?.phase === "dispatching" ||
+        (record?.phase === "observed" && record.receipt?.state !== "succeeded")
+      ) {
+        visible = true;
+        publish();
+      }
       return;
     }
     visible = true;
@@ -821,6 +877,7 @@ export function createMailReviewController(
       onRestored = value;
     },
     capabilities: () => caps,
+    recentlySettled: doubleTap,
     setObservers(value: MailReviewObservers) {
       onStale = value.stale || null;
       onReceipt = value.receipt || null;
@@ -834,7 +891,9 @@ export function createMailReviewController(
       return true;
     },
     chips<T>(chip: (label: string, action: () => void) => T): T[] {
-      return operation?.snapshot()
+      const record = operation?.snapshot() ?? null;
+      const sent = sentSource(record);
+      return record && (!sent || sent.providerDraft)
         ? [
             chip("Mail review / receipt", () => {
               visible = true;

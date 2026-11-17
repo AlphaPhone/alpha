@@ -29,6 +29,7 @@ import { sha256Hex } from "@elizaos/plugin-inbox/mailbox/digest";
 import { attachmentRefused } from "@elizaos/plugin-inbox/mailbox/failures";
 import type { InboxUnsaved } from "@elizaos/plugin-inbox/mailbox/retained-draft";
 import type { GmailMessage } from "@elizaos/plugin-inbox/mailbox/types";
+import { readFileAsBase64 } from "../utils/image-attachment";
 
 // biome-ignore lint/suspicious/noExplicitAny: proposals and composer events are host data validated here.
 type Bag = Record<string, any>;
@@ -272,6 +273,7 @@ export interface MailDraftsProvider {
       savedRevision?: string;
       providerDraft?: { draftId: string; providerDigest: string };
     },
+    mode?: "send-from-composer",
   ): Promise<void>;
   capabilities(): {
     send: boolean;
@@ -315,7 +317,8 @@ interface MailDraftsControllerOptions {
   ): boolean | Promise<boolean>;
   /** Whether the host is still showing the mailbox that can admit the review. */
   reviewActive?(): boolean;
-  attachments: MailAttachmentPicker;
+  attachments?: MailAttachmentPicker;
+  chooseAttachment?(current: () => boolean): Promise<File | undefined>;
   reviewAttachment: MailAttachmentReviewer;
 }
 
@@ -1546,28 +1549,41 @@ export function createMailDraftsController(
       );
       return;
     }
-    const token = epoch;
+    const token = epoch, draftId = draft.id;
+    const current = () =>
+      token === epoch && open && draft?.id === draftId &&
+      options.reviewActive?.() !== false;
+    const picker = options.attachments;
     let selectionId: string | undefined;
     busy = true;
     publish();
     try {
-      const selected = await options.attachments.select();
-      selectionId = selected.selectionId;
-      if (token !== epoch) return;
-      if (selected.status === "cancelled") return;
-      if (
-        selected.status !== "selected" ||
-        !selected.selectionId ||
-        !selected.name
-      )
-        throw new AttachmentNotice("Select one supported document or image.");
-      const file = await options.attachments.read(selected.selectionId);
+      let file: OutgoingMailAttachment & { size: number; sha256?: string };
+      if (options.chooseAttachment) {
+        const selected = await options.chooseAttachment(current);
+        if (!selected || !current()) return;
+        if (selected.size > 5 * MIB) throw new AttachmentNotice(ATTACHMENT_TOO_LARGE);
+        file = {
+          name: selected.name,
+          mimeType: selected.type,
+          size: selected.size,
+          dataBase64: await readFileAsBase64(selected),
+        };
+      } else {
+        if (!picker) return;
+        const selected = await picker.select();
+        selectionId = selected.selectionId;
+        if (!current() || selected.status === "cancelled") return;
+        if (selected.status !== "selected" || !selectionId || !selected.name)
+          throw new AttachmentNotice("Select one supported document or image.");
+        file = await picker.read(selectionId);
+      }
       const checked = await options.reviewAttachment(file);
-      if (checked.sha256 !== file.sha256 || checked.size !== file.size)
+      if ((file.sha256 && checked.sha256 !== file.sha256) || checked.size !== file.size)
         throw new AttachmentNotice(
           "The selected file changed while it was checked. Select it again.",
         );
-      if (token !== epoch || !draft) return;
+      if (!current() || !draft) return;
       const next = [
         ...(draft.attachments || []),
         {
@@ -1583,8 +1599,8 @@ export function createMailDraftsController(
     } catch (error) {
       if (token === epoch) toast(attachmentRefusalText(error));
     } finally {
-      if (selectionId)
-        await options.attachments.forget(selectionId).catch(() => {});
+      if (selectionId && picker)
+        await picker.forget(selectionId).catch(() => {});
       if (token === epoch) {
         busy = false;
         publish();
@@ -1989,9 +2005,14 @@ export function createMailDraftsController(
       }
       open = false;
       confirm = false;
-      if (status === "Unsaved local draft")
-        toast(retained?.status || "Edits remain in this session.");
       publish();
+      return true;
+    },
+    back() {
+      if (!open) return false;
+      reviewVisit++;
+      retireReview();
+      if (!busy) void setAside();
       return true;
     },
     /** The email now in the composer, in the shape Send reviews. A review of anything else is stale. */
@@ -2108,6 +2129,7 @@ export function createMailDraftsController(
           ? {
               local: true,
               status,
+              showDraftStatus: staleBase,
               busy,
               confirm,
               recoveryVisible: !!retained?.error || !!retained?.conflict,
@@ -2120,7 +2142,7 @@ export function createMailDraftsController(
                     ? "Reply"
                     : current.mode === "forward"
                       ? "Forward"
-                      : "New message",
+                      : "New email",
               showRecipientDetails:
                 recipientDetails ||
                 !!current.cc?.length ||
@@ -2182,6 +2204,7 @@ export function createMailDraftsController(
                       ? { providerDraft: { ...sending.provider } }
                       : {}),
                   },
+                  "send-from-composer",
                 );
               },
               canSaveProvider: !!caps?.providerDrafts,

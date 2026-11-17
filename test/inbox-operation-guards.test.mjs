@@ -113,6 +113,43 @@ const controls = () => controlsModule ??= bundle('apps/app/src/prototype/inbox-p
   'inbox-attachment': attachmentPort,
 });
 
+test('a manual Send never dispatches a composer that changed during preparation', async () => {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const d = device(JSON.stringify(['production', 'owner-1', '']));
+  const toasts = [];
+  const started = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  const prepare = d.client.gmailPrepareOperation;
+  d.client.gmailPrepareOperation = async (...args) => {
+    started.resolve();
+    await released.promise;
+    return prepare(...args);
+  };
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    const provider = inboxProviderControls(() => {}, text => toasts.push(text));
+    const proposal = {kind: 'send', mode: 'compose', to: ['reader@example.invalid'], cc: [], bcc: [], subject: 'Approved email', bodyText: 'First version', attachments: []};
+    let composer = {draftId: 'draft-1', proposal};
+    provider.setComposer(() => composer);
+    await provider.bind('grant-a');
+    const send = provider.prepare(proposal, {draftId: 'draft-1'}, 'send-from-composer');
+    await started.promise;
+    composer = {...composer, proposal: {...proposal, bodyText: 'Edited version'}};
+    released.resolve();
+    await send;
+    assert.equal(d.remote.dispatches, 0);
+    assert.equal(d.slot(), null);
+    assert.equal(provider.render().providerReview, false);
+    assert.equal(toasts.at(-1), 'Email changed before sending. Check it and tap Send again.');
+  } finally {
+    released.resolve();
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+});
+
 test('the review sheet keeps a confirmed receipt when Check gets a regressed answer, and never dispatches again', async () => {
   const account = {environment: 'production', userId: 'owner-1'}, owner = JSON.stringify(['production', 'owner-1', '']);
   const d = device(owner), toasts = [];
