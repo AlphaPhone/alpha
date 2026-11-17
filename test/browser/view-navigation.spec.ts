@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-async function setup(page: import("@playwright/test").Page) {
+async function setup(page: import("@playwright/test").Page, image = false) {
+	// The verified Alpha image is the Android bridge with its image-only telephony plugin (runtime/aosp-image.ts).
+	if (image) await page.addInitScript(() => Object.assign(window, { androidBridge: {}, Capacitor: { PluginHeaders: [{ name: "AlphaTelephony", methods: [{ name: "imageCapability" }] }] } }));
 	// Native WebView and localhost are secure contexts; about:blank is not.
 	await page.route('**/__navigation-fixture',route=>route.fulfill({contentType:'text/html',body:'<main id="screen">Home</main>'}));
 	await page.goto('/__navigation-fixture');
@@ -244,9 +246,15 @@ test("an owner change during acknowledgment cannot report delivery in the replac
 	expect(result).toEqual({ status: "unknown" });
 });
 
-for (const [registered, local] of [["inbox","inbox"],["calendar","calendar"],["browser","browser"],["camera","camera"],["photos","photos"],["maps","maps"],["notes","notes"],["files","files"],["automations","workflows"],["settings","settings"]])
- test(`canonical ${registered} handoff retains its binding and opens Alpha ${local}`, async ({page}) => {
-  await setup(page);
+// The Alpha image adds Phone and Messages, and Contacts once the image admits its adapter.
+for (const [registered, local, image] of [...[["inbox","inbox"],["calendar","calendar"],["browser","browser"],["camera","camera"],["photos","photos"],["maps","maps"],["notes","notes"],["files","files"],["automations","workflows"],["settings","settings"]].flatMap(([registered,local])=>[[registered,local,false],[registered,local,true]] as const),["phone","phone",true],["messages","messages",true],["contacts","contacts",true]] as const)
+ test(`canonical ${registered} handoff retains its binding and opens Alpha ${local}${image?' on the Alpha image':''}`, async ({page}) => {
+  await setup(page,image);
+  if(registered==='contacts'){
+   const refused=await page.evaluate(async()=>{const win=window as any;try{return (await win.client.deliver([win.summary('contacts')],win.attempt,win.navigate)).status==='unavailable';}catch{return true;}});
+   expect(refused).toBe(true);expect(await page.evaluate(()=>(window as any).requests)).toEqual([]);
+   await page.evaluate(async()=>(await import('/src/prototype/mvp-features.ts' as string)).admitImageContacts(true));
+  }
   const value=await page.evaluate(async ({registered})=>{const win=window as any;const summary=win.summary(registered);const result=await win.client.deliver([summary],win.attempt,win.navigate);return {result,view:win.current.view,metadata:win.client.metadata(win.current),requests:win.requests};},{registered});
   expect(value.result.status).toBe('delivered');expect(value.view).toBe(local);expect(value.metadata.uiView).toBe(registered);expect(value.requests[0].body.viewId).toBe(registered);expect(value.requests[1].body).toMatchObject({viewId:registered,success:true,result:{switched:true}});
  });
