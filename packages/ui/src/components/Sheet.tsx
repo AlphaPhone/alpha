@@ -1,9 +1,12 @@
 import type { ComponentProps, ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "../lib/cn.ts";
+import { surfaceDescription, surfaceTitle } from "../lib/styles.ts";
 import { DialogOverlay } from "./Dialog.tsx";
 
 export type SheetProps = ComponentProps<typeof DialogPrimitive.Root>;
+export type SheetTriggerProps = ComponentProps<typeof DialogPrimitive.Trigger>;
+export type SheetCloseProps = ComponentProps<typeof DialogPrimitive.Close>;
 export type SheetContentProps = Omit<ComponentProps<typeof DialogPrimitive.Content>, "title"> & {
   /** The sheet's heading and accessible name. */
   title: string;
@@ -38,8 +41,8 @@ export function SheetContent({ title, description, actions, className, children,
         {...props}
       >
         <div className="flex flex-col gap-1">
-          <DialogPrimitive.Title className="text-xl font-semibold">{title}</DialogPrimitive.Title>
-          {description ? <DialogPrimitive.Description className="text-sm text-muted-foreground">{description}</DialogPrimitive.Description> : null}
+          <DialogPrimitive.Title className={surfaceTitle}>{title}</DialogPrimitive.Title>
+          {description ? <DialogPrimitive.Description className={surfaceDescription}>{description}</DialogPrimitive.Description> : null}
         </div>
         {children ? <div className="-mx-5 min-h-0 flex-1 overflow-y-auto px-5">{children}</div> : null}
         {actions ? <div className="flex gap-2 *:flex-1">{actions}</div> : null}

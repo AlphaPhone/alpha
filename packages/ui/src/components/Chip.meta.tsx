@@ -8,9 +8,8 @@ const onClear = fn();
 export const meta: ComponentMeta<ChipProps> = {
   args: { children: "Unread", onClear: undefined },
   examples: {
-    On: { defaultPressed: true },
     Empty: { "aria-label": "Starred", children: <Star aria-hidden className="size-4" /> },
-    Clearable: { defaultPressed: true, children: "From Ana", clearLabel: "Clear From Ana", onClear },
+    Clearable: { defaultPressed: true, children: "From Ana", onClear },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

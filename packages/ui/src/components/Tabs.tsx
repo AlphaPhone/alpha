@@ -12,18 +12,18 @@ export function Tabs({ className, ...props }: TabsProps) {
   return <TabsPrimitive.Root className={cn("flex flex-col gap-4", className)} {...props} />;
 }
 
-/** The segmented control that switches the view: a `TabsTrigger` for each. Name it with `aria-label`. */
+/** The segmented control that switches the view, 48px tall like a field: a `TabsTrigger` for each. Name it with `aria-label`. */
 export function TabsList({ className, ...props }: TabsListProps) {
-  return <TabsPrimitive.List className={cn("flex rounded-full bg-secondary p-1", className)} {...props} />;
+  return <TabsPrimitive.List className={cn("flex rounded-full bg-secondary p-0.5", className)} {...props} />;
 }
 
-/** One segment: pressing it shows the `TabsContent` of the same value. */
+/** One segment: pressing it shows the `TabsContent` of the same value; the chosen one is filled, as an on `Chip` is. */
 export function TabsTrigger({ className, ...props }: TabsTriggerProps) {
   return (
     <TabsPrimitive.Trigger
       className={cn(
         focusRing,
-        "min-h-11 min-w-11 flex-1 rounded-full px-4 text-sm font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm",
+        "min-h-11 min-w-11 flex-1 rounded-full px-4 text-sm font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-foreground data-[state=active]:text-background",
         className,
       )}
       {...props}

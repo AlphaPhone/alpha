@@ -5,8 +5,7 @@ import type { SwitchProps } from "./Switch.tsx";
 const onCheckedChange = fn();
 
 export const meta: ComponentMeta<SwitchProps> = {
-  args: { "aria-label": "Do not disturb", onCheckedChange },
-  examples: { On: { defaultChecked: true } },
+  args: { "aria-label": "Do not disturb", defaultChecked: false, onCheckedChange },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onCheckedChange.mockClear();

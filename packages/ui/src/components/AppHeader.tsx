@@ -2,7 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 
 export type AppHeaderProps = Omit<ComponentProps<"header">, "title"> & {
-  /** The screen's one title. */
+  /** The screen's one title; under large text it wraps rather than being cut. */
   title: string;
   /** The control that leaves the screen, usually a back `Button`; shown before the title. */
   leading?: ReactNode;
@@ -15,7 +15,7 @@ export function AppHeader({ title, leading, className, children, ...props }: App
   return (
     <header className={cn("flex min-h-14 items-center gap-1 px-2", className)} {...props}>
       {leading}
-      <h1 className={cn("min-w-0 flex-1 truncate font-display text-3xl font-light", leading ? null : "pl-3")}>{title}</h1>
+      <h1 className={cn("min-w-0 flex-1 py-2 font-display text-3xl font-light break-words", leading ? null : "pl-3")}>{title}</h1>
       {children}
     </header>
   );

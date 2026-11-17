@@ -1,21 +1,25 @@
 import type { ComponentProps } from "react";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
-import { Check } from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import { cn } from "../lib/cn.ts";
-import { mark, markTarget } from "../lib/styles.ts";
+import { markTarget } from "../lib/styles.ts";
 
 export type CheckboxProps = Omit<ComponentProps<typeof CheckboxPrimitive.Root>, "children"> & {
   /** Marks the choice as refused, visibly and through `aria-invalid`. */
   invalid?: boolean;
 };
 
-/** A yes-or-no choice. Name it with a `Label` or `aria-label`. */
+/** A yes-or-no choice, square where a radio button is round; `checked="indeterminate"` shows a dash for a choice made for some of many. Name it with a `Label` or `aria-label`. */
 export function Checkbox({ invalid = false, className, ...props }: CheckboxProps) {
   return (
     <CheckboxPrimitive.Root aria-invalid={invalid || undefined} className={cn(markTarget, className)} {...props}>
-      <span className={cn(mark, "text-primary-foreground group-aria-invalid:border-destructive group-data-[state=checked]:border-primary group-data-[state=checked]:bg-primary")}>
-        <CheckboxPrimitive.Indicator>
-          <Check aria-hidden strokeWidth={3} className="size-4" />
+      <span className="relative flex size-6 items-center justify-center text-primary-foreground">
+        <svg aria-hidden viewBox="0 0 24 24" className="absolute inset-0 size-full fill-background stroke-input stroke-2 transition-colors duration-fast ease-standard group-aria-invalid:stroke-destructive group-data-[state=checked]:fill-primary group-data-[state=checked]:stroke-primary group-data-[state=indeterminate]:fill-primary group-data-[state=indeterminate]:stroke-primary">
+          <rect x="1" y="1" width="22" height="22" rx="6" />
+        </svg>
+        <CheckboxPrimitive.Indicator className="relative flex">
+          <Check aria-hidden strokeWidth={3} className="size-4 group-data-[state=indeterminate]:hidden" />
+          <Minus aria-hidden strokeWidth={3} className="hidden size-4 group-data-[state=indeterminate]:block" />
         </CheckboxPrimitive.Indicator>
       </span>
     </CheckboxPrimitive.Root>

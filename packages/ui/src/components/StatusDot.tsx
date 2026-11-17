@@ -16,21 +16,21 @@ const shapes = {
 export type StatusDotProps = Omit<ComponentProps<"span">, "children"> & {
   /** The state of the thing; each has its own color and shape. */
   status: NonNullable<VariantProps<typeof dotVariants>["status"]>;
-  /** The state in a word, such as "Connected": shown beside the dot, or kept as its accessible name. */
+  /** The state in a word, such as "Connected": the shape's accessible name, or shown beside it with `showLabel`. */
   label: string;
-  /** Keeps the word out of sight, where the dot stands in a tight space. */
-  hideLabel?: boolean;
+  /** Shows the word beside the shape, where the shape alone would not be understood. */
+  showLabel?: boolean;
 };
 
-/** The state of something at a glance: a colored shape that always carries its word. */
-export function StatusDot({ status, label, hideLabel = false, className, ...props }: StatusDotProps) {
-  const named = hideLabel ? { role: "img", "aria-label": label } : {};
+/** The state of something at a glance: a colored shape that carries its word as its accessible name. */
+export function StatusDot({ status, label, showLabel = false, className, ...props }: StatusDotProps) {
+  const named = showLabel ? {} : { role: "img", "aria-label": label };
   return (
     <span className={cn("inline-flex items-center gap-2 text-sm text-foreground", className)} {...named} {...props}>
       {status === "busy"
         ? <Spinner aria-hidden className={dotVariants({ status })} />
         : <svg aria-hidden viewBox="0 0 12 12" fill="currentColor" className={dotVariants({ status })}>{shapes[status]}</svg>}
-      {hideLabel ? null : label}
+      {showLabel ? label : null}
     </span>
   );
 }

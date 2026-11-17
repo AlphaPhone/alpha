@@ -22,7 +22,7 @@ const children = (
         </>
       }
     >
-      <ListGroup>
+      <ListGroup surface="plain">
         <ListRow title="Personal" detail="12 notes" onClick={() => undefined} />
         <ListRow title="Work" detail="48 notes" onClick={() => undefined} />
         <ListRow title="Travel" detail="5 notes" onClick={() => undefined} />

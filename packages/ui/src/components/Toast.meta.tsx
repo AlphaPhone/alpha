@@ -6,11 +6,11 @@ const onUndo = fn();
 
 export const meta: ComponentMeta<ToastProps> = {
   args: { children: "Note deleted", onUndo: undefined },
-  examples: { Undo: { onUndo } },
+  examples: { Undo: { onUndo }, "Two lines": { children: "3 notes moved to Travel, where they are kept until the trip ends", onUndo } },
   play: {
     Undo: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onUndo.mockClear();
-      await userEvent.click(within(within(canvasElement).getByRole("status")).getByRole("button", { name: "Undo" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Undo" }));
       await expect(onUndo.mock.calls.length).toBe(1);
     },
   },

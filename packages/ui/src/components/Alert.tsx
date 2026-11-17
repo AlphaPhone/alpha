@@ -11,7 +11,7 @@ const icons = { info: Info, ok: CircleCheck, warn: TriangleAlert, destructive: C
 
 export type AlertProps = ComponentProps<"div"> & VariantProps<typeof alertVariants>;
 
-/** A message about what just happened, marked by the color and shape of its icon. `warn` and `destructive` interrupt a screen reader; the others wait their turn. */
+/** A message about what just happened, marked by the color and shape of its icon. `warn` and `destructive` interrupt a screen reader; the others wait their turn. A given `role` replaces that. */
 export function Alert({ variant, className, children, ...props }: AlertProps) {
   const tone = variant ?? "info";
   const Icon = icons[tone];
