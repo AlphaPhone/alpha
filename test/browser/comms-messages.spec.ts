@@ -204,22 +204,24 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
-  test('suggested replies default on without a prompt, can be disabled in Settings, and never send automatically', async ({page}) => {
+  test('suggested replies stay off until turned on in Settings, can be turned off again, and never send automatically', async ({page}) => {
+    const suggest=()=>page.evaluate(async () => (await import('/src/prototype/sms-adapter.ts' as string)).setSmsReplySuggester(async () => 'See you at three'));
+    const openAda=async()=>{
+      await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
+      await page.getByRole('button', {name: /^Ada Okafor/}).click();
+      await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    };
+    const faint = page.locator('[data-alpha-faint]');
     await setupTelephony(page);
-    await page.evaluate(async () => (await import('/src/prototype/sms-adapter.ts' as string)).setSmsReplySuggester(async () => 'See you at three'));
-    await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
-    await page.getByRole('button', {name: /^Ada Okafor/}).click();
-    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    await suggest();await openAda();
     await expect(page.locator('[data-alpha-messages-suggest]')).toHaveCount(0);
     await expect(page.getByRole('group', {name: 'Turn on suggested replies'})).toHaveCount(0);
     await expect(page.getByRole('button', {name:'Back to apps',exact:true})).not.toBeVisible();
     await expect(page.locator('[data-alpha-messages]').getByRole('button', {name:'Back',exact:true})).toBeVisible();
-    const faint = page.locator('[data-alpha-faint]');
-    await expect(faint).toHaveAttribute('aria-label', 'Suggestion: See you at three, double-tap to use');
-    await expect(page.locator(personField)).toHaveValue('');
-    await faint.click();
-    await expect(page.locator(personField)).toHaveValue('See you at three');
-    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
+    // A phone that never chose sends no thread to the model provider and shows no suggestion.
+    await page.waitForTimeout(300);
+    await expect(faint, 'never turned on: no faint reply').toHaveCount(0);
+    expect(await sms(page,'smsSuggestedRepliesEnabled')).toBe(false);
     await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
     await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
     await page.getByRole('button', {name:'Settings',exact:true}).click();
@@ -229,15 +231,28 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
     await current().getByRole('button', {name:'Apps',exact:true}).click();
     await current().getByRole('button', {name:'Messages',exact:true}).click();
-    await current().getByRole('switch', {name:'Suggested replies',exact:true}).click();
     await expect(current().getByRole('switch', {name:'Suggested replies',exact:true})).toHaveAttribute('aria-checked','false');
+    await current().getByRole('switch', {name:'Suggested replies',exact:true}).click();
+    await expect(current().getByRole('switch', {name:'Suggested replies',exact:true})).toHaveAttribute('aria-checked','true');
+    // The choice persists; the suggestion is faint text only and accepting it sends nothing.
     await page.reload();
-    await page.evaluate(async () => (await import('/src/prototype/sms-adapter.ts' as string)).setSmsReplySuggester(async () => 'See you at three'));
-    await page.getByRole('button', {name:'Messages',exact:true}).first().click();
-    await page.getByRole('button', {name:/^Ada Okafor/}).click();
-    await expect(page.locator('[data-alpha-faint]')).toHaveCount(0);
+    await suggest();await openAda();
+    await expect(faint).toHaveAttribute('aria-label', 'Suggestion: See you at three, double-tap to use');
+    await expect(page.locator(personField)).toHaveValue('');
+    // Turning it off withdraws the suggestion on screen, and that choice persists too.
+    await sms(page,'setSmsSuggestedRepliesEnabled',false);
+    await expect(faint).toHaveCount(0);
+    await page.reload();
+    await suggest();await openAda();
+    await page.waitForTimeout(300);
+    await expect(faint).toHaveCount(0);
     expect(await sms(page,'smsSuggestedRepliesEnabled')).toBe(false);
-    expect(await inputs(page,'sendComposedSms')).toEqual([]);
+    await sms(page,'setSmsSuggestedRepliesEnabled',true);
+    await page.reload();
+    await suggest();await openAda();
+    await faint.click();
+    await expect(page.locator(personField)).toHaveValue('See you at three');
+    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 });
 
