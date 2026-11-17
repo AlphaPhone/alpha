@@ -3,7 +3,8 @@
 Alpha Phone's own Cloud: sign-in, AI inference, voice, subscriptions and billing for
 `ai.alphacompute.alphaphone`, on Cloudflare under `alphacompute.ai`. It is built from the pinned
 upstream source (`vendor/eliza` at `upstream.lock.json`, exported, never edited) and described by
-data in this repository. The shipped app still uses Eliza Cloud until the cutover in section 8.
+data in this repository. The shipped app still uses Eliza Cloud: everything in the app that is
+specific to Alpha Cloud is behind the cutover flag (section 8), which is off by default.
 
 ## 1. What the Cloud does, and what it does not
 
@@ -138,7 +139,9 @@ requires explicit migration completion before the workflow proceeds.
 
 ## 5. Subscription management in the app
 
-Account → Plan opens the plan manager. Nothing is done on a website.
+With the cutover flag on (section 8), Account → Plan opens the plan manager. Nothing is done on a
+website. With it off (every distributed build today), Plan and Add funds open the current Cloud's
+hosted billing page, as before.
 
 | Action | Authority | Route |
 |---|---|---|
@@ -151,8 +154,12 @@ Account → Plan opens the plan manager. Nothing is done on a website.
 
 Upstream accepts plan changes and cancellation only with a fresh account session. The app asks
 "Confirm it's you" and emails a one-time code to the account's own address. The native plugin keeps
-the resulting session in memory for at most an hour and checks that it is the phone's account. It
-is never stored and never shown to the web view.
+the resulting session in memory for at most an hour. It is bound to the account in the phone's own
+stored Cloud credential (never to an account the web view names) and ends at sign-out, a new key or
+an account switch. It is never stored and never shown to the web view.
+
+Alpha Cloud has no in-app credit top-up: with the flag on, the account sheet does not offer Add
+funds (subscription allowances only). A top-up surface is a separate change.
 
 ## 6. OTA updates
 
@@ -194,27 +201,67 @@ Validated 2026-11-15 at the main pin `f86b5038f8`, on this computer, not deploye
   that asset links are served from the registration; and that the edge forwarding of the callback
   works while an unregistered path is refused.
 - Unit tests: `test/cloud-worker.test.mjs`, `test/cloud-plans.test.mjs` (including the native route
-  table on a JVM), `test/update-channel-status.test.mjs` and `test/connection-routes.test.mjs`.
+  table and the account-bound billing session on a JVM), `test/cloud-provision.test.mjs`,
+  `test/cloud-candidate-deployment.test.mjs` (the cutover flag), `test/update-channel-status.test.mjs`
+  and `test/connection-routes.test.mjs` (both flag states).
 
 Not yet proven: anything deployed; Stripe test-mode checkout end to end; Cerebras and Cartesia
 calls (they need the keys); Google sign-in against a real client; the Steward container on
 Cloudflare (Eliza runs that Worker with `LOGIN_ENABLED=false` and hosts Steward elsewhere, so
 Alpha would be its first production user); the plan manager on a device.
 
-## 8. Cutover (shipped app → Alpha Cloud)
+## 8. Cutover flag (shipped app → Alpha Cloud)
 
-The shipped policy (`scripts/cloud-deployment-policy.ts`) still names Eliza Cloud. Once staging and
-production pass `smoke` and a test-mocks build passes sign-in, plans and voice against them
-(`ALPHA_CLOUD_DEPLOYMENT_FILE=cloud/policy.json`):
+Alpha Cloud is merged dormant. One flag decides whether a build uses it: `ALPHA_CLOUD_CUTOVER` in
+`scripts/cloud-deployment-policy.ts`, derived from the deployment rows (`"alphaCloud": true` in
+`cloud/policy.json`; absent in the shipped Eliza Cloud rows). `scripts/cloud-deployment.ts` writes it
+into every build output: `alphaCloudCutover` (renderer, `cloud-deployment.generated.ts`),
+`CloudDeployment.ALPHA_CLOUD_CUTOVER` (Java) and `alphaCloudCutover` (Gradle).
 
-1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/policy.json`'s rows. The App Link host becomes
-   `cloud.alphacompute.ai`.
+**Off (default; every distributed build).** The app uses the shipped Eliza Cloud and behaves as
+before: Plan, Choose a plan, Add funds and the chat plan card open the hosted billing page; no
+`alphacompute.ai` host, in-app plan route (`/api/v1/subscriptions/plans|checkout`, `/referrals`) or
+Stripe page is admitted by either transport; the native billing authority plugin is not registered
+(and refuses if called); the `/alphaphone/billing/return` App Link alias (`AlphaCloudBillingReturn`)
+is declared disabled, so it resolves no intent; `scripts/verify-apks.ts` requires exactly that.
+
+**On.** The deployment is `cloud/policy.json` (Alpha Cloud hosts and its own credential namespace),
+the plan manager, native billing authority, Stripe pages, referral routes and the billing App Link
+are live.
+
+Enable it for a development, test or validation build (never a distribution):
+
+```bash
+ALPHA_CLOUD_CUTOVER=1 bun scripts/cloud-deployment.ts        # regenerate the build outputs for Alpha Cloud
+ALPHA_CLOUD_CUTOVER=1 bun run android:build -- --allow-unpackaged-runtime   # or dev:ui / build:only
+git checkout -- apps/app/src/runtime/cloud-deployment.generated.ts \
+  android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java android/app/cloud-deployment.generated.gradle
+```
+
+Keep `ALPHA_CLOUD_CUTOVER=1` set for every command of that build: the build checks
+(`cloud-deployment.ts --check`, Vite) compare the outputs with the selected deployment. A flag-on
+build is a candidate deployment: it has its own credential namespace (phones sign in again) and
+`scripts/audit-production-bundle.ts` refuses it, so it cannot be distributed by accident.
+`ALPHA_CLOUD_DEPLOYMENT_FILE` can name another Alpha Cloud rows file instead of `cloud/policy.json`.
+
+Validate: `test/cloud-candidate-deployment.test.mjs` (flag values and generated outputs),
+`test/cloud-plans.test.mjs` and `test/connection-routes.test.mjs` (routes and hosts in both states),
+`test/verify-apks.test.mjs` (the App Link alias), and `test/browser/native-cloud-subscription.spec.ts`
+("Alpha Cloud cutover flag": off keeps the hosted page; on runs the in-app plans against the
+generated Alpha Cloud authorities). Then a flag-on device build against staging: sign-in, plans,
+checkout return, plan change with the emailed code, and voice.
+
+The cutover release itself, once staging and production pass `smoke` and a flag-on build passes the
+checks above:
+
+1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/policy.json`'s rows (with `"alphaCloud": true`), which
+   turns the flag on for every build. The App Link host becomes `cloud.alphacompute.ai`.
 2. Append the new storage namespace to `STORAGE_NAMESPACES` and add the namespace migration. Users
    sign in again; Eliza Cloud accounts, subscriptions and Google grants do not move by themselves.
 3. Build, sign and publish through OTA (section 6).
 
 Changing the policy before the Cloud is live would sign every phone out to a Cloud that does not
-answer, so this stays a separate, deliberate release.
+answer, so this stays a separate, deliberate release that the owner approves.
 
 ## 9. Upstream
 

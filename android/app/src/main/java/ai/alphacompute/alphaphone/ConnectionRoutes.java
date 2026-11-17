@@ -14,12 +14,20 @@ final class ConnectionRoutes {
  private ConnectionRoutes() {}
  /** The hosted invoice an upgrade that needs payment action answers (Stripe's invoice page only). */
  static final String STRIPE_INVOICE_HOST="invoice.stripe.com";
- static final CloudConnectionPolicy POLICY=new CloudConnectionPolicy(new CloudConnectionPolicy.Hosts(
-  CloudDeployment.PRODUCTION_API_HOST,CloudDeployment.STAGING_API_HOST,CloudDeployment.PRODUCTION_WEB_HOST,CloudDeployment.STAGING_WEB_HOST,
-  CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,
-  // Google consent, and the Stripe pages an in-app checkout or plan upgrade answers (cloud-plans.ts).
-  java.util.Set.of("accounts.google.com",CloudConnectionPolicy.SUBSCRIPTION_CHECKOUT_HOST,STRIPE_INVOICE_HOST)));
- /** Referral read and apply with the device's own key (Alpha manages referrals in the app). */
+ /**
+  * The external hosts this build opens: Google consent always; with the Alpha Cloud cutover
+  * (CloudDeployment.ALPHA_CLOUD_CUTOVER) also the Stripe pages an in-app checkout or plan upgrade
+  * answers (cloud-plans.ts). Without it the current Cloud's hosted billing page is the only billing surface.
+  */
+ static CloudConnectionPolicy policy(boolean alphaCloud){
+  return new CloudConnectionPolicy(new CloudConnectionPolicy.Hosts(
+   CloudDeployment.PRODUCTION_API_HOST,CloudDeployment.STAGING_API_HOST,CloudDeployment.PRODUCTION_WEB_HOST,CloudDeployment.STAGING_WEB_HOST,
+   CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,
+   alphaCloud?java.util.Set.of("accounts.google.com",CloudConnectionPolicy.SUBSCRIPTION_CHECKOUT_HOST,STRIPE_INVOICE_HOST):java.util.Collections.singleton("accounts.google.com")));
+ }
+ private static final CloudConnectionPolicy CURRENT_CLOUD=policy(false),ALPHA_CLOUD=policy(true);
+ static final CloudConnectionPolicy POLICY=CloudDeployment.ALPHA_CLOUD_CUTOVER?ALPHA_CLOUD:CURRENT_CLOUD;
+ /** Referral read and apply with the device's own key (Alpha Cloud manages referrals in the app). */
  static boolean referral(String path,String query,String method,boolean hasBody){
   if(query!=null)return false;
   if("/api/v1/referrals".equals(path))return "GET".equals(method)&&!hasBody;
@@ -32,9 +40,12 @@ final class ConnectionRoutes {
   * through the native host, so it refuses the hand-off ahead of the shared route set.
   */
  static boolean cloudSignInHandOff(String path){return path!=null&&("/api/auth/cli-session".equals(path)||path.startsWith("/api/auth/cli-session/"));}
- static boolean managedService(String path,String query,String method,boolean hasBody){return !cloudSignInHandOff(path)&&(POLICY.managedService(path,query,method,hasBody,false)||referral(path,query,method,hasBody));}
+ static boolean managedService(String path,String query,String method,boolean hasBody){return managedService(path,query,method,hasBody,CloudDeployment.ALPHA_CLOUD_CUTOVER);}
+ /** Referral routes exist only with the Alpha Cloud cutover; the shared route set is the same either way. */
+ static boolean managedService(String path,String query,String method,boolean hasBody,boolean alphaCloud){return !cloudSignInHandOff(path)&&(POLICY.managedService(path,query,method,hasBody,false)||alphaCloud&&referral(path,query,method,hasBody));}
  static boolean calendarSync(String path,String query,String method,boolean hasBody){return CloudConnectionPolicy.calendarSync(path,query,method,hasBody);}
  static boolean externalHost(String scheme,String host,int port){return POLICY.externalHost(scheme,host,port,false);}
+ static boolean externalHost(String scheme,String host,int port,boolean alphaCloud){return (alphaCloud?ALPHA_CLOUD:CURRENT_CLOUD).externalHost(scheme,host,port,false);}
  static boolean externalCliLogin(String host,String path){return POLICY.externalCliLogin(host,path,false);}
  static boolean admittedHeader(String name){return CloudConnectionPolicy.admittedHeader(name,false);}
  static boolean mapsRequestIdentity(String name,String value,String path,String method){return CloudConnectionPolicy.mapsRequestIdentity(name,value,path,method);}

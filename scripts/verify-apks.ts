@@ -32,7 +32,7 @@ import {renderSensePermissions} from "../vendor/eliza/packages/os/scripts/androi
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {sha256, sha256File} from "./sha256.ts";
-import { CLOUD_DEPLOYMENT } from "./cloud-deployment-policy.ts";
+import { ALPHA_CLOUD_CUTOVER, CLOUD_DEPLOYMENT } from "./cloud-deployment-policy.ts";
 import { readUpstreamPin } from "./upstream-pin.ts";
 import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
@@ -131,14 +131,15 @@ if(cloudEvidenceArgs.length){
 
 const identity = androidIdentity(process.cwd());
 const callbackHost = new URL(CLOUD_DEPLOYMENT.production.web).hostname;
-// The only web VIEW filters an APK may carry: the main manifest's three returns on the production web
-// host (android/app/product.gradle supplies appLinkHost). Add a new app link here deliberately.
+// The only web VIEW filters an APK may carry: the main manifest's two returns on the production web
+// host (android/app/product.gradle supplies appLinkHost), and the Alpha Cloud billing return alias,
+// enabled only with the cutover flag and otherwise declared disabled. Add a new app link here deliberately.
 const mainActivity = `${identity.appId}.MainActivity`;
 const webViewFiltersAllowed = [
   `${mainActivity} https://${callbackHost}/alphaphone/auth/callback`,
   `${mainActivity} https://${callbackHost}/alphaphone/gmail/callback`,
   // The in-app checkout's return (apps/app/src/runtime/cloud-plans.ts): opening the app is its whole job.
-  `${mainActivity} https://${callbackHost}/alphaphone/billing/return`,
+  `${identity.appId}.AlphaCloudBillingReturn https://${callbackHost}/alphaphone/billing/return${ALPHA_CLOUD_CUTOVER ? '' : ' [disabled]'}`,
 ];
 const buildRecordFile = path.join(directory, "build-config.json");
 if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run bun run android:build first.`);

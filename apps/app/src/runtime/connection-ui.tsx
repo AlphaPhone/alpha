@@ -81,6 +81,7 @@ import './connection-ui.css';
 import {CloudMembershipControls,FUNDING_NEEDED,fundingRefusedReply,type MembershipBalance} from './cloud-membership-ui';
 import {CloudPlanManager} from './cloud-plan-ui';
 import type {BillingAuthorityPort} from './cloud-plans';
+import {alphaCloudCutover} from './cloud-deployment.generated.ts';
 
 /** `offline` and `none` exist only where no resident agent runs (test-mocks builds and the flag-off
  * web preview). Android production and browser development migrate them to `resident` on read
@@ -315,6 +316,8 @@ function planCheckScope(){return JSON.stringify([ownProviderSelected()||(state.c
 let networkLostUnder: string | null = null;
 /** The plan check a return started (recheckResidentPlan); while it runs it answers the network's return. */
 let planRecheck: AbortController | null = null;
+/** A plan change confirmed while planRecheck ran (connectionController.planChanged): check once more after it. */
+let planRecheckAgain = false;
 type PlanAdmissionRecord = ResidentPlanAdmissionRecord<CloudEnvironment>;
 /** The stored record, parsed by the shared controller's rules; installed data keeps its key. */
 function readPlanAdmission(): PlanAdmissionRecord | null {
@@ -512,15 +515,16 @@ async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<
 }
 let deviceReadReview:((proposal:ActionProposal,context:ContextEnvelope,signal:AbortSignal)=>Promise<void>)|undefined;
 const actionJournal = registerPlugin<ActionJournal>('AlphaActionJournal');
-/** Native account-session authority for plan changes and cancellation (AlphaBillingAuthorityPlugin). The
- * browser build has none: plan changes there answer that this device cannot make them. */
-const billingAuthority = registerPlugin<BillingAuthorityPort>('AlphaBillingAuthority',{web:()=>({
+/** Native account-session authority for plan changes and cancellation (AlphaBillingAuthorityPlugin), only
+ * with the Alpha Cloud cutover (native registers it only then). The browser build has none: plan
+ * changes there answer that this device cannot make them. */
+const billingAuthority = alphaCloudCutover ? registerPlugin<BillingAuthorityPort>('AlphaBillingAuthority',{web:()=>({
   status:async()=>({status:'required' as const}),
   start:async()=>{throw new Error('Plan changes need the phone');},
   verify:async()=>{throw new Error('Plan changes need the phone');},
   clear:async()=>{},
   perform:async()=>{throw new Error('Plan changes need the phone');},
-})});
+})}) : null;
 let savedCloudEnvironment: unknown;
 try { savedCloudEnvironment = localStorage.getItem(CLOUD_SERVICE); } catch { /* Use the explicit public preview default when storage is unavailable. */ }
 let cloud = makeCloud(resolveCloudEnvironment(cloudEnvironmentPolicy, savedCloudEnvironment));
@@ -1383,6 +1387,8 @@ async function recheckResidentPlan(){
     if(startedOffline)networkLostUnder??=planCheckScope();
     if(planRecheck===controller)planRecheck=null;
     runQueuedResidentRebind();
+    // A confirmed plan change arrived while this check ran: its result may predate it, so check again.
+    if(planRecheckAgain&&!planRecheck){planRecheckAgain=false;planManagementReturn=true;connectionController.recheckPlanOnReturn();}
   }
 }
 /** Bind or unbind Eliza Cloud inference before the agent starts. Returns the binding in effect. */
@@ -3157,10 +3163,24 @@ export const connectionController = {
     await ensureResident();
     }
   },
-  /** Opens the in-app plan manager (cloud-plan-ui.tsx): plans, checkout, plan changes, cancellation and
-   * referrals all happen in Alpha Phone. Nothing is bought or changed until the owner acts there. */
+  /** Without the Alpha Cloud cutover (alpha-cloud-cutover.ts): opens the current Cloud's hosted billing
+   * page; no purchase or account change happens here. With it: opens the in-app plan manager
+   * (cloud-plan-ui.tsx), where nothing is bought or changed until the owner acts. */
   async residentManagePlan() {
     if(operation)return;
+    if(!alphaCloudCutover){
+      const account=service;
+      if(!account?.identity.email){update({open:true,error:'Sign in first'});return;}
+      await work('Opening billing',async signal=>{
+        if(service!==account)throw Error(ACCOUNT_CHANGED);
+        await account.client.openSubscriptionManagement(signal);
+        signal.throwIfAborted();
+        if(service!==account)throw Error(ACCOUNT_CHANGED);
+        planManagementReturn=true;
+        update({message:''});
+      });
+      return;
+    }
     if(!service?.identity.email){update({open:true,error:'Sign in first'});return;}
     // An account sheet already showing (a funding prompt) keeps its purpose, so it still closes by itself
     // once a purchase activates the plan; otherwise the plan sheet opens.
@@ -3171,10 +3191,13 @@ export const connectionController = {
   /** The plan manager handed the owner to a Stripe payment page: the next return checks the plan
    * inside the once-a-minute limit, even when Cloud has not confirmed the payment yet. */
   paymentPageOpened() { planManagementReturn=true; },
-  /** A plan action finished in the plan manager: read the account and plan again now. */
+  /** A plan action finished in the plan manager: read the account and plan again now. A plan check
+   * already running (the return from Stripe's page) may have read the plan before Cloud confirmed
+   * it, so this check runs again once that one ends instead of being dropped. */
   planChanged() {
     planManagementReturn=true;
     void refreshMembershipBalance();
+    if(planRecheck)planRecheckAgain=true;
     connectionController.recheckPlanOnReturn();
   },
   /**
@@ -4019,14 +4042,14 @@ export function ConnectionChooser() {
   // is no longer offered for retry.
   const savedSignInRejected=snapshot.errorKind==='sign-in-rejected';
   const savedSignInOffered=residentCloudFlow()&&!snapshot.cloudAccount&&snapshot.residentSavedCredential===true&&!savedSignInRejected;
-  const membershipControls=snapshot.cloudAccount&&<CloudMembershipControls key={`${snapshot.cloudAccount.environment}:${snapshot.cloudAccount.userId}:${snapshot.cloudAccount.organizationId}:${snapshot.cloudAccount.credentialId}`} email={snapshot.cloudAccount.email} credits={snapshot.membershipCredits} plan={snapshot.membershipPlan} endsAt={snapshot.planEndsAt} lastLimit={snapshot.fundingRefused&&snapshot.lastServiceLimit?.kind==='billing-refused'?null:snapshot.lastServiceLimit} refused={!!snapshot.fundingRefused} serviceName={serviceName} codeEntry={snapshot.membershipCodeEntry} balance={snapshot.membershipBalance??'unavailable'} busy={snapshot.busy} error={snapshot.redeemError} connectionError={snapshot.error} notice={snapshot.redeemNotice} onRedeem={code=>connectionController.residentRedeem(code)} onManagePlan={()=>void connectionController.residentManagePlan()} onRefresh={()=>void connectionController.refreshAccount()}/>;
+  const membershipControls=snapshot.cloudAccount&&<CloudMembershipControls key={`${snapshot.cloudAccount.environment}:${snapshot.cloudAccount.userId}:${snapshot.cloudAccount.organizationId}:${snapshot.cloudAccount.credentialId}`} email={snapshot.cloudAccount.email} credits={snapshot.membershipCredits} plan={snapshot.membershipPlan} endsAt={snapshot.planEndsAt} lastLimit={snapshot.fundingRefused&&snapshot.lastServiceLimit?.kind==='billing-refused'?null:snapshot.lastServiceLimit} refused={!!snapshot.fundingRefused} serviceName={serviceName} codeEntry={snapshot.membershipCodeEntry} balance={snapshot.membershipBalance??'unavailable'} busy={snapshot.busy} error={snapshot.redeemError} connectionError={snapshot.error} notice={snapshot.redeemNotice} onRedeem={code=>connectionController.residentRedeem(code)} onManagePlan={()=>void connectionController.residentManagePlan()} onAddFunds={alphaCloudCutover?undefined:()=>void connectionController.residentManagePlan()} onRefresh={()=>void connectionController.refreshAccount()}/>;
   const fundingRequired=!ownProviderSelected()&&!!snapshot.cloudAccount&&(snapshot.membershipBalance==='zero'||!!snapshot.fundingRefused);
   const accountSheet=fundingRequired||snapshot.purpose==='plan'||snapshot.purpose==='cloud-account';
   if(accountSheet)return <div className="alpha-connection-scrim" data-alpha-billing-overlay="true" data-alpha-membership-sheet="true"><div className="alpha-connection alpha-account-sheet" role="dialog" aria-modal="true" aria-labelledby="alpha-membership-title" tabIndex={-1} ref={panel} data-alpha-membership-panel="true">
     <div className="alpha-membership-drag-handle" aria-hidden="true"/>
     <header>{accountSection&&<button aria-label="Back to Account" onClick={()=>setAccountSection(null)}><span aria-hidden="true" data-alpha-icon="/icons/lucide/chevron-left.svg" style={iconStyle('chevron-left')}/></button>}<h1 id="alpha-membership-title">{signOutAccount?'Sign out?':accountSection?'AI connection':'Account'}</h1><button aria-label="Close Account" onClick={()=>{if(signOutAccount)setSignOutAccount(null);else dismiss();}}><span aria-hidden="true" data-alpha-icon="/icons/lucide/x.svg" style={iconStyle('x')}/></button></header>
     {signOutAccount?<><p><span aria-hidden="true" data-alpha-icon="/icons/lucide/phone.svg" style={iconStyle('phone')}/> Data stays on device</p><div className="alpha-membership-secondary-actions"><button className="alpha-account-confirm" disabled={snapshot.busy} onClick={()=>{const expected=signOutAccount;setSignOutAccount(null);const current=connectionController.getSnapshot().cloudAccount;if(current&&expected&&current.environment===expected.environment&&current.userId===expected.userId&&current.organizationId===expected.organizationId&&current.credentialId===expected.credentialId&&current.sessionId===expected.sessionId)void connectionController.cloudSignOut();}}>Sign out</button></div></>:accountSection?providerChoiceFor(false,snapshot.error):<>
-      {accountCreatedNotice}{membershipControls}{snapshot.planManager&&service&&snapshot.cloudAccount&&service.identity.sessionId===snapshot.cloudAccount.sessionId&&<CloudPlanManager key={service.identity.credentialId} account={{client:service.client,identity:service.identity}} authority={billingAuthority} serviceName={serviceName} onChanged={()=>connectionController.planChanged()} onPaymentOpened={()=>connectionController.paymentPageOpened()}/>}
+      {accountCreatedNotice}{membershipControls}{alphaCloudCutover&&billingAuthority&&snapshot.planManager&&service&&snapshot.cloudAccount&&service.identity.sessionId===snapshot.cloudAccount.sessionId&&<CloudPlanManager key={service.identity.credentialId} account={{client:service.client,identity:service.identity}} authority={billingAuthority} serviceName={serviceName} onChanged={()=>connectionController.planChanged()} onPaymentOpened={()=>connectionController.paymentPageOpened()}/>}
       {snapshot.cloudAccount?.expiresAt!==undefined&&snapshot.cloudAccount.expiresAt-Date.now()<=CLOUD_KEY_EXPIRY_WARNING_MS&&<div className="alpha-account-expiry"><p><span aria-hidden="true" data-alpha-icon="/icons/lucide/clock.svg" style={iconStyle('clock')}/> <StatusDot tone="warn">Expires {new Date(snapshot.cloudAccount.expiresAt).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</StatusDot></p><button disabled={snapshot.busy} onClick={()=>void connectionController.residentCloudLogin()}><span aria-hidden="true" data-alpha-icon="/icons/lucide/rotate-cw.svg" style={iconStyle('rotate-cw')}/>Renew</button></div>}
       {!snapshot.cloudAccount&&<><p className="alpha-membership-account"><span aria-hidden="true" data-alpha-icon="/icons/lucide/user-round.svg" style={iconStyle('user-round')}/><span className="alpha-sr">Not signed in</span></p><button className="alpha-account-confirm" disabled={snapshot.busy} onClick={()=>void connectionController.residentCloudLogin()}>Sign in</button></>}
       <div className="alpha-account-links">

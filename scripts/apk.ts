@@ -90,6 +90,8 @@ const MANAGE_ROLE_HOLDERS = "android.permission.MANAGE_ROLE_HOLDERS";
 export const EXPORTED_COMPONENTS = Object.freeze({
   "ai.alphacompute.alphaphone.MainActivity": null,
   "ai.alphacompute.alphaphone.AlphaAssistActivity": null,
+  // Alpha Cloud cutover only: the billing return App Link alias, declared disabled unless the cutover flag is on.
+  "ai.alphacompute.alphaphone.AlphaCloudBillingReturn": null,
   // Power entry is reserved for platform status-bar callers.
   "ai.alphacompute.alphaphone.AlphaPowerVoiceActivity": "android.permission.STATUS_BAR_SERVICE",
   "ai.alphacompute.alphaphone.AlphaNotificationListener": "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",

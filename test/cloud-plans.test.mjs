@@ -9,7 +9,7 @@ import {nativeSource,runJvm,jsonJarSkip} from './fixtures/jvm-tools.mjs';
 
 const plans=await import('../apps/app/src/runtime/cloud-plans.ts');
 const {managedServiceRequest:allowed}=await import('../apps/app/src/runtime/managed-service-routes.ts');
-const {productionCloud}=await import('../apps/app/src/runtime/cloud-deployment.generated.ts');
+const {productionCloud,alphaCloudCutover}=await import('../apps/app/src/runtime/cloud-deployment.generated.ts');
 
 const envelope=data=>({success:true,data});
 const plan=(key,name,amountCents,amountUsd)=>({key,name,catalogVersion:'v1',active:true,interval:'month',intervalCount:1,currency:'usd',amountCents,
@@ -63,6 +63,22 @@ test('plan change quotes, commands and upgrade payment continuation',()=>{
  assert.equal(plans.parseUpgradePayment(envelope({command:{commandId:'c1',status:'APPLIED'},continuation:null})).invoiceUrl,null);
 });
 
+test('a confirmed upgrade is reported as done only when its command is applied',()=>{
+ const command=status=>({commandId:'c1',status,failure:null});
+ const pay=(body,status=200)=>({status,body:envelope(body)});
+ // Applied by the payment step, or already applied at confirmation with an unreadable payment step.
+ assert.deepEqual(plans.upgradeOutcome(command('PREPARED'),pay({command:{commandId:'c1',status:'APPLIED'},continuation:null})),{kind:'applied'});
+ assert.deepEqual(plans.upgradeOutcome(command('APPLIED'),null),{kind:'applied'});
+ // A payment that needs action continues on Stripe's invoice page.
+ assert.deepEqual(plans.upgradeOutcome(command('PREPARED'),pay({command:{commandId:'c1',status:'PREPARED'},continuation:{hostedInvoiceUrl:'https://invoice.stripe.com/i/x'}})),{kind:'pay',invoiceUrl:'https://invoice.stripe.com/i/x'});
+ // The payment step failed, was refused or answered for another command: never "upgraded".
+ for(const payment of [null,{status:500,body:{}},{status:401,body:{}},pay({nonsense:true}),pay({command:{commandId:'other',status:'APPLIED'},continuation:null})])
+  assert.deepEqual(plans.upgradeOutcome(command('PREPARED'),payment),{kind:'pending'},JSON.stringify(payment));
+ assert.deepEqual(plans.upgradeOutcome(command('OUTCOME_UNKNOWN'),pay({command:{commandId:'c1',status:'OUTCOME_UNKNOWN'},continuation:null})),{kind:'pending'});
+ assert.deepEqual(plans.upgradeOutcome(command('PREPARED'),pay({command:{commandId:'c1',status:'FAILED'},continuation:null})),{kind:'failed'});
+ assert.deepEqual(plans.upgradeOutcome(command('FAILED'),null),{kind:'failed'});
+});
+
 test('referrals: own code, and entered codes are normalized conservatively',()=>{
  assert.deepEqual(plans.parseReferral({code:'ALPHA-123',total_referrals:2,is_active:true}),{code:'ALPHA-123',totalReferrals:2,active:true});
  assert.throws(()=>plans.parseReferral({code:'',total_referrals:0,is_active:true}),plans.PlanResponseError);
@@ -80,17 +96,29 @@ test('billing operations carry only their own fields',()=>{
  assert.notEqual(plans.billingOperationProblem({operation:'portal'}),null);
 });
 
-test('the device transport admits the plan catalogue, checkout and referrals, never plan changes',()=>{
+test('without the Alpha Cloud cutover the device transport admits none of the in-app plan routes',()=>{
  const api=productionCloud.api;
- assert.equal(allowed(api+'/api/v1/subscriptions/plans','GET'),true);
- assert.equal(allowed(api+'/api/v1/subscriptions/checkout','POST',true),true);
- assert.equal(allowed(api+'/api/v1/subscriptions/checkout/confirm','POST',true),true);
- assert.equal(allowed(api+'/api/v1/referrals','GET'),true);
- assert.equal(allowed(api+'/api/v1/referrals/apply','POST',true),true);
+ assert.equal(alphaCloudCutover,false,'shipped builds keep the current Cloud');
+ for(const [path,method,body] of [['/api/v1/subscriptions/plans','GET',false],['/api/v1/subscriptions/checkout','POST',true],['/api/v1/subscriptions/checkout/confirm','POST',true],['/api/v1/referrals','GET',false],['/api/v1/referrals/apply','POST',true]]){
+  assert.equal(allowed(api+path,method,body),false,`default ${method} ${path}`);
+  assert.equal(allowed(api+path,method,body,{alphaCloud:false}),false,`flag off ${method} ${path}`);
+ }
+ // The current Cloud's own routes are unchanged.
+ assert.equal(allowed(api+'/api/v1/billing/limits','GET'),true);
+ assert.equal(allowed(api+'/api/v1/subscription/redeem','POST',true),true);
+});
+
+test('with the Alpha Cloud cutover the device transport admits the plan catalogue, checkout and referrals, never plan changes',()=>{
+ const api=productionCloud.api,on={alphaCloud:true};
+ assert.equal(allowed(api+'/api/v1/subscriptions/plans','GET',false,on),true);
+ assert.equal(allowed(api+'/api/v1/subscriptions/checkout','POST',true,on),true);
+ assert.equal(allowed(api+'/api/v1/subscriptions/checkout/confirm','POST',true,on),true);
+ assert.equal(allowed(api+'/api/v1/referrals','GET',false,on),true);
+ assert.equal(allowed(api+'/api/v1/referrals/apply','POST',true,on),true);
  for(const [path,method,body] of [['/api/v1/subscriptions/checkout','POST',false],['/api/v1/subscriptions/checkout?x=1','POST',true],['/api/v1/referrals','POST',true],['/api/v1/referrals/apply','GET',false],
   ['/api/v1/subscriptions/cancel','POST',true],['/api/v1/subscriptions/cancel/undo','POST',true],['/api/v1/subscriptions/upgrade/review','POST',true],['/api/v1/subscriptions/portal','POST',true],['/api/v1/subscriptions/commands','GET',false]])
-  assert.equal(allowed(api+path,method,body),false,`${method} ${path}`);
- assert.equal(allowed('https://other.invalid/api/v1/referrals','GET'),false);
+  assert.equal(allowed(api+path,method,body,on),false,`${method} ${path}`);
+ assert.equal(allowed('https://other.invalid/api/v1/referrals','GET',false,on),false);
 });
 
 test('the native billing authority performs only its fixed routes with validated bodies',{skip:jsonJarSkip},()=>{
@@ -128,10 +156,41 @@ public class BillingRoutesTest {
   check(!BillingAuthorityRoutes.sameAccount(user,"u2","o1"));
   check(!BillingAuthorityRoutes.sameAccount(user,"u1","o2"));
   check(!BillingAuthorityRoutes.sameAccount(null,"u1","o1"));
+  // The session is bound to the phone's stored Cloud credential, never to a renderer-named account.
+  BillingAuthorityRoutes.Account a=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\",\\"userId\\":\\"u1\\",\\"organizationId\\":\\"o1\\",\\"token\\":\\"eliza_mobile_x\\"}");
+  BillingAuthorityRoutes.Account sameKey=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\",\\"userId\\":\\"u1\\",\\"organizationId\\":\\"o1\\",\\"expiresAt\\":5}");
+  BillingAuthorityRoutes.Account newKey=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c2\\",\\"userId\\":\\"u1\\",\\"organizationId\\":\\"o1\\"}");
+  BillingAuthorityRoutes.Account other=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c3\\",\\"userId\\":\\"u2\\",\\"organizationId\\":\\"o2\\"}");
+  check(a!=null&&a.userId.equals("u1")&&a.organizationId.equals("o1")&&a.same(sameKey)&&!a.same(newKey)&&!a.same(other)&&!a.same(null));
+  check(BillingAuthorityRoutes.Account.of(null)==null&&BillingAuthorityRoutes.Account.of("{}")==null&&BillingAuthorityRoutes.Account.of("not json")==null);
+  BillingAuthorityRoutes.Session session=new BillingAuthorityRoutes.Session();
+  try{session.pending(null,"e@example.invalid","v",now+60_000);throw new AssertionError("code sent signed out");}catch(SecurityException expected){checks++;}
+  session.pending(a,"e@example.invalid","v",now+60_000);
+  check(session.pendingFor(other,now)==null);
+  check(session.pendingFor(a,now)==null);
+  session.pending(a,"e@example.invalid","v",now+60_000);
+  check(session.pendingFor(a,now)[0].equals("e@example.invalid"));
+  check(!session.bind(other,a,"jwt",now+600_000)&&session.current(a,now)==null);
+  session.pending(a,"e@example.invalid","v",now+60_000);
+  check(session.bind(sameKey,a,"jwt",now+600_000)&&session.pendingFor(a,now)==null);
+  check("jwt".equals(session.current(a,now))&&session.expiresAt()==now+600_000);
+  // Sign-out ends it.
+  check(session.current(null,now)==null&&session.current(a,now)==null);
+  session.bind(a,a,"jwt",now+600_000);
+  // A new key for the same account, or another account, ends it.
+  check(session.current(newKey,now)==null&&session.current(a,now)==null);
+  session.bind(a,a,"jwt",now+600_000);
+  check(session.current(other,now)==null&&session.current(a,now)==null);
+  // Expiry, a refusal and clear() end it.
+  session.bind(a,a,"jwt",now+600_000);
+  check(session.current(a,now+600_000)==null);
+  session.bind(a,a,"jwt",now+600_000);session.spent("other");check("jwt".equals(session.current(a,now)));
+  session.spent("jwt");check(session.current(a,now)==null);
+  session.bind(a,a,"jwt",now+600_000);session.clear();check(session.current(a,now)==null&&session.expiresAt()==0);
   System.out.println("PASS billing routes "+checks);
  }
 }
 `);
-  assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),source],'ai.alphacompute.alphaphone.BillingRoutesTest',{json:true}),/^PASS billing routes 19/);
+  assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),source],'ai.alphacompute.alphaphone.BillingRoutesTest',{json:true}),/^PASS billing routes 35\b/);
  }finally{rmSync(root,{recursive:true,force:true});}
 });

@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import './cloud-plan-ui.css';
 import {Busy,StatusDot} from './status-ui';
-import {billingOperationProblem,formatUsd,normalizeReferralCode,parseCommand,parseQuote,parseUpgradePayment,
+import {billingOperationProblem,formatUsd,normalizeReferralCode,parseCommand,parseQuote,upgradeOutcome,
  type BillingAuthorityPort,type BillingAuthorityStatus,type BillingOperation,type CheckoutStart,type PlanChangeQuote,
  type PlanKey,type PlanOffer,type ReferralState,type SubscriptionState} from './cloud-plans';
 
@@ -110,24 +110,31 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
   if(!answer)return;
   if(answer.status===409)throw Error('Your plan changed. Check it again.');
   if(answer.status<200||answer.status>=300)throw Error('Not accepted');
-  switch(operation.operation){
-   case 'upgrade-review':case 'downgrade-review':
-    setStep({kind:'quote',quote:parseQuote(answer.body,operation.operation==='upgrade-review'?'upgrade':'downgrade')});return;
-   case 'upgrade-confirm':{
-    const command=parseCommand(answer.body);
-    if(command.status==='FAILED')throw Error('The upgrade was not made');
-    // A payment that needs action (3-D Secure, a new card) continues on Stripe's invoice page.
-    const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId});
-    const continuation=payment.status>=200&&payment.status<300?parseUpgradePayment(payment.body):null;
-    if(continuation?.invoiceUrl){opened.current?.();await client.openPaymentPage(continuation.invoiceUrl,signal);setNotice('Finish payment, then come back');}
-    else setNotice('Plan upgraded');
-    break;
-   }
-   case 'downgrade-confirm':{const command=parseCommand(answer.body);if(command.status==='FAILED')throw Error('The change was not made');setNotice('Plan changes at renewal');break;}
-   case 'cancel':setNotice('Plan ends at the end of this period');break;
-   case 'undo-cancel':setNotice('Plan continues');break;
+  if(operation.operation==='upgrade-review'||operation.operation==='downgrade-review'){
+   setStep({kind:'quote',quote:parseQuote(answer.body,operation.operation==='upgrade-review'?'upgrade':'downgrade')});return;
   }
-  setStep({kind:'idle'});notifyChanged();await load(signal);
+  // Cloud accepted a change: its quote is spent and is never offered for another confirm, and the plan
+  // is read again whatever happens next.
+  setStep({kind:'idle'});
+  try{
+   switch(operation.operation){
+    case 'upgrade-confirm':{
+     const command=parseCommand(answer.body);
+     if(command.status==='FAILED')throw Error('The upgrade was not made');
+     // A payment that needs action (3-D Secure, a new card) continues on Stripe's invoice page.
+     const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId}).catch(()=>null);
+     const outcome=upgradeOutcome(command,payment);
+     if(outcome.kind==='failed')throw Error('The upgrade was not made');
+     if(outcome.kind==='pay'){opened.current?.();await client.openPaymentPage(outcome.invoiceUrl,signal);setNotice('Finish payment, then come back');}
+     else setNotice(outcome.kind==='applied'?'Plan upgraded':'Upgrade not finished yet. Check your plan again shortly.');
+     break;
+    }
+    case 'downgrade-confirm':{const command=parseCommand(answer.body);if(command.status==='FAILED')throw Error('The change was not made');setNotice('Plan changes at renewal');break;}
+    case 'cancel':setNotice('Plan ends at the end of this period');break;
+    case 'undo-cancel':setNotice('Plan continues');break;
+   }
+  }finally{notifyChanged();}
+  await load(signal);
  },[client,authority,load,notifyChanged,withAuthority]);
 
  const subscribe=(plan:PlanOffer)=>void act('Opening checkout',async signal=>{

@@ -138,6 +138,24 @@ export function parseUpgradePayment(value: unknown): {command: PlanCommand; invo
   return {command: parseCommand(result.command), invoiceUrl};
 }
 
+/**
+ * What a confirmed upgrade became, from the confirmation's command and the payment step's answer
+ * (null when that step could not be read). Only an APPLIED command is an upgrade; a payment that
+ * needs action continues on Stripe's invoice page; anything else is not reported as done.
+ */
+export type UpgradeOutcome = {kind: 'applied'} | {kind: 'pay'; invoiceUrl: string} | {kind: 'pending'} | {kind: 'failed'};
+export function upgradeOutcome(confirmed: PlanCommand, payment: {status: number; body: unknown} | null): UpgradeOutcome {
+  if (confirmed.status === 'FAILED') return {kind: 'failed'};
+  let step: ReturnType<typeof parseUpgradePayment> | null = null;
+  if (payment && payment.status >= 200 && payment.status < 300) { try { step = parseUpgradePayment(payment.body); } catch { step = null; } }
+  if (step && step.command.commandId !== confirmed.commandId) step = null;
+  if (step?.invoiceUrl) return {kind: 'pay', invoiceUrl: step.invoiceUrl};
+  const status = step?.command.status ?? confirmed.status;
+  if (status === 'APPLIED') return {kind: 'applied'};
+  if (status === 'FAILED') return {kind: 'failed'};
+  return {kind: 'pending'};
+}
+
 export const formatUsd = (amountCents: number) => `$${(amountCents / 100).toLocaleString(undefined, {minimumFractionDigits: amountCents % 100 ? 2 : 0, maximumFractionDigits: 2})}`;
 
 /** Referral codes are short public tokens; whitespace is trimmed and nothing else is changed. */
