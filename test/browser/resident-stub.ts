@@ -90,6 +90,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       // Per page load: conversation reads (the recent window, not older pages), list reads and turn
       // aborts. holdReads holds both reads until heldRead() / heldList().
       reads: 0, lists: 0, aborts: 0, holdReads: false, heldRead: null as null | (() => void), heldList: null as null | (() => void),
+      chatSearchQueries: [] as string[], chatSearchWindows: [] as Array<{conversationId:string;messageId:string}>,
       // Cloud's answer to the next code redemption: 'ok' grants Plus; 'invalid' is Cloud's one answer
       // for unknown, expired, disabled and used-up codes (400 invalid_subscription_code).
       redeem: 'ok' as 'ok' | 'invalid', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
@@ -108,6 +109,13 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     let agent: { conversations: { id: string; title: string }[]; history: Record<string, any[]> } = { conversations: [], history: {} };
     try { agent = JSON.parse(sessionStorage.getItem('resident-stub-agent') || 'null') ?? agent; } catch { /* first load */ }
     const record = (conversation: string, row: any) => { agent.history[conversation].push(row); sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); };
+    s.seedConversation = (id:string,text:string) => {
+      const messageId=crypto.randomUUID();
+      agent.conversations.push({id,title:'Earlier chat'});
+      agent.history[id]=[];
+      record(id,{id:messageId,role:'assistant',text,timestamp:Date.now()-60_000});
+      return messageId;
+    };
     const room = 'c0ffee00-1111-4222-8333-444455556666';
     const conversations = async (method: string, path: string, body: any): Promise<{ status: number; data: unknown } | null> => {
       if (path === '/api/conversations' && method === 'POST') { const row = { id: 'resident-chat-' + (agent.conversations.length + 1), title: String(body.title || 'Alpha Phone') }; agent.conversations.push(row); agent.history[row.id] = []; sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); return { status: 200, data: { conversation: row } }; }
@@ -115,9 +123,29 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
         s.lists++; if (s.holdReads) await new Promise<void>(resolve => { s.heldList = resolve; });
         return { status: 200, data: { conversations: options.abortRoute ? agent.conversations.map(row => ({ ...row, roomId: room })) : agent.conversations } };
       }
-      const read = /^\/api\/conversations\/([^/]+)\/messages$/.exec(path.split('?')[0]);
+      const [route, query] = path.split('?',2);
+      const params=new URLSearchParams(query);
+      if(route==='/api/conversations/messages/search'&&method==='GET'){
+        const needle=(params.get('q')||'').toLowerCase();
+        s.chatSearchQueries.push(needle);
+        const results=agent.conversations.flatMap(({id})=>
+          (agent.history[id]||[]).filter(row=>row.text.toLowerCase().includes(needle)).map(row=>({
+            messageId:row.id,conversationId:id,roomId:id,role:row.role,text:row.text,snippet:row.text,createdAt:row.timestamp,
+          })),
+        );
+        const offset=Number(params.get('offset')||0);
+        return {status:200,data:{results:results.slice(offset,offset+50)}};
+      }
+      const read = /^\/api\/conversations\/([^/]+)\/messages$/.exec(route);
       if (read && method === 'GET') {
-        if (!new URLSearchParams(path.split('?')[1] ?? '').has('before')) { s.reads++; if (s.holdReads) await new Promise<void>(resolve => { s.heldRead = resolve; }); }
+        const messageId=params.get('around');
+        if(messageId){
+          const conversationId=read[1],messages=agent.history[conversationId]||[];
+          s.chatSearchWindows.push({conversationId,messageId});
+          return messages.some(row=>row.id===messageId)
+            ? {status:200,data:{messages}} : {status:404,data:{}};
+        }
+        if (!params.has('before')) { s.reads++; if (s.holdReads) await new Promise<void>(resolve => { s.heldRead = resolve; }); }
         return { status: 200, data: { messages: (agent.history[read[1]] || []).slice(-200) } };
       }
       if (/^\/api\/turns\/[^/]+\/abort$/.test(path)) { s.aborts++; return options.abortRoute && path.includes(room) ? { status: 200, data: { aborted: false, roomId: room } } : { status: 404, data: {} }; }

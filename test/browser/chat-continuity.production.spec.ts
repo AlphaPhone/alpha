@@ -474,16 +474,24 @@ test('a refused new message after Stop keeps the earlier unknown outcome', async
   await noResend(page, foreign, 1);
 });
 
-test('a new conversation after Stop retires the check; the stopped reply never replaces the new chat', async ({ page }) => {
+test('selecting an earlier chat after Stop retires the check and keeps the late reply in its original chat', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await connected(page, { clock: true });
   const asked = 'Asked in the first conversation';
   await heldSend(page, asked);
   const reads = await stub(page, s => s.reads);
   await stopReply(page);
-  const panel = await openYourAgent(page);
-  await panel.getByRole('button', { name: 'New conversation', exact: true }).click();
-  await expect.poll(() => conversationCount(page), { timeout: 15_000 }).toBe(2);
+  const target=await stub(page,s=>s.seedConversation('retained-chat','Earlier conversation marker'));
+  await button(page,'Chat actions').click();
+  await button(page,'Search chat').click();
+  const search=page.getByRole('dialog',{name:'Search chats',exact:true});
+  await search.getByRole('textbox',{name:'Search messages',exact:true}).fill('conversation marker');
+  await search.getByRole('button',{name:/Earlier conversation marker/}).click();
+  await expect(search).toHaveCount(0);
+  await expect(conversation(page).getByText('Earlier conversation marker',{exact:true})).toBeVisible();
+  expect(await stub(page,s=>s.chatSearchQueries)).toEqual(['conversation marker']);
+  expect(await stub(page,s=>s.chatSearchWindows)).toEqual([{conversationId:'retained-chat',messageId:target}]);
+  expect(await conversationCount(page)).toBe(2);
   // The first conversation's reply lands on the agent; the retired check never reads it.
   await finishAfterStop(page);
   await pastStopCheck(page);
