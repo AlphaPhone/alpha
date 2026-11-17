@@ -187,8 +187,17 @@ function createdFromSlot(slot:string,key:string){
 }
 function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string){
   const draft=shell.composerDraft;draft.release();
-  // A send made without a durable copy has no saved text to restore, so the composer gets it back directly.
-  if(undurableText!==undefined){if(shell.live&&undurableText.trim())shell.setState((previous:Shell)=>String(previous.draft||'').trim()?null:{draft:undurableText});return;}
+  // A send made without a durable copy has no saved text to restore, so the composer gets it back directly,
+  // ahead of anything typed since (as the durable release does). It goes back only to the conversation it was
+  // written for, or the one this send created for the same owner and agent; never to another binding.
+  if(undurableText!==undefined){
+    if(!shell.live||!undurableText.trim())return;
+    const key=draft.binding;
+    if(heldKey&&key&&key!==heldKey&&!createdFromSlot(heldKey,key)){shell.toast('Not sent. The conversation changed, so the message was not restored.',ERROR_TOAST);return;}
+    shell.setState((previous:Shell)=>{const now=String(previous.draft||'');return{draft:now.trim()?`${undurableText}\n${now}`:undurableText};});
+    shell.toast('Not sent. Your message is back in the composer.');
+    return;
+  }
   const key=draft.binding;
   if(!heldKey||!key||key===heldKey||!heldText.trim()||String(shell.S().draft||'').trim()||!createdFromSlot(heldKey,key))return;
   shell.setState((previous:Shell)=>draft.binding!==key||String(previous.draft||'').trim()?null:{draft:heldText},()=>{

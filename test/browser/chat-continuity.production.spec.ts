@@ -367,6 +367,22 @@ test('a message is sent even when the local draft copy cannot be saved', async (
   await noResend(page, foreign, 1);
 });
 
+test('a refused send without a saved copy goes back ahead of text typed while it was pending', async ({ page }) => {
+  test.setTimeout(90_000);
+  await connected(page);
+  await harness(page, f => { f.draftSlotsFail = true; });
+  await setStub(page, { stream: 'busyHeld' });
+  await composer(page).fill('First question');
+  await composer(page).press('Enter');
+  await expect.poll(() => stub(page, s => typeof s.release), { timeout: 30_000 }).toBe('function');
+  await expect(composer(page)).toHaveValue('');
+  await composer(page).fill('Typed meanwhile');
+  await stub(page, s => s.release());
+  await expect(composer(page)).toHaveValue('First question\nTyped meanwhile', { timeout: 15_000 });
+  expect(await harness(page, f => f.posts)).toEqual([]);
+  await expect(conversation(page).getByText('First question', { exact: true })).toHaveCount(0);
+});
+
 test('pressing Send twice dispatches one message', async ({ page }) => {
   test.setTimeout(90_000);
   const foreign = await connected(page);

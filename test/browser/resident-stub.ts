@@ -19,6 +19,8 @@ export type StubStream =
   | 'reject'
   /** The runtime refuses admission with HTTP 429; nothing is recorded. */
   | 'busy'
+  /** As 'busy', but the 429 is held until `release()`, so the owner can type while the send is pending. */
+  | 'busyHeld'
   /** The runtime answers 401: the resident's owner session is no longer accepted. */
   | 'expired'
   /** HTTP 200 and the user turn is recorded, then the stream fails before a terminal frame. */
@@ -250,6 +252,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           setTimeout(() => { emit(streamId, { type: 'response', status: 200, headers: { 'content-type': 'text/event-stream' } }); if (mode === 'hold') s.release = finish; else if (holdChunk) s.heldChunk = finish; else finish(); }, 0);
           return { streamId };
         }
+        if (mode === 'busyHeld') { s.release = () => { s.release = null; emit(streamId, { type: 'response', status: 429, headers: { 'content-type': 'application/json' } }); emit(streamId, { type: 'complete' }); }; return { streamId }; }
         if (mode === 'busy' || mode === 'expired') { setTimeout(() => { emit(streamId, { type: 'response', status: mode === 'busy' ? 429 : 401, headers: { 'content-type': 'application/json' } }); emit(streamId, { type: 'complete' }); }, 0); return { streamId }; }
         f.posts.push(String(body.text));
         const userMessageId = crypto.randomUUID();
