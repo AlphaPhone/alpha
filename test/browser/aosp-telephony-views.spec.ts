@@ -495,6 +495,8 @@ test('Messages adds a selected contact number and keeps its unsent draft at larg
   await expect(picker).toBeVisible();
   await expect(recipients).toHaveAttribute('placeholder','Recipient 2');
   await expect(recipients).toBeFocused();
+  // Names are typed here, so the field must bring up the text keyboard, never the dial pad.
+  await expect(recipients).toHaveAttribute('type','text');
   await recipients.fill('Bao');
   await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('Bao');
   await picker.getByRole('button', {name: 'Bao Tran, (555) 010-0112'}).click();
@@ -507,6 +509,30 @@ test('Messages adds a selected contact number and keeps its unsent draft at larg
   await expect(body).toHaveValue('Keep this message unsent.');
   expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   expect(await inputs(page, 'sendComposedMms')).toEqual([]);
+});
+
+test('Messages keeps a number typed into the open contact picker when the picker closes', async ({page}) => {
+  await setupTelephony(page);
+  await open(page, 'Messages');
+  const recipients = page.getByRole('textbox', {name: 'To', exact: true});
+  await page.locator('[data-alpha-messages-new]').click();
+  await expect(recipients).toHaveAttribute('type','text');
+  await recipients.fill('+15550100101');
+  await page.getByRole('button', {name: 'Choose contacts'}).click();
+  const picker = page.getByRole('region', {name: 'Choose a contact'});
+  await expect(picker).toBeVisible();
+  // A number with no saved contact: nothing to pick, and closing must not discard it.
+  await recipients.fill('+1 (555) 010-0999');
+  await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('+1 (555) 010-0999');
+  await page.getByRole('button', {name: 'Close contact picker'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(recipients).toHaveValue('+15550100101, +15550100999');
+  // A name that matched nobody is a search, not a recipient.
+  await page.getByRole('button', {name: 'Choose contacts'}).click();
+  await recipients.fill('Nobody here');
+  await page.getByRole('button', {name: 'Close contact picker'}).click();
+  await expect(recipients).toHaveValue('+15550100101, +15550100999');
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
 test('Contacts searches from the bar, edits in the app with the version it read, and deletes after confirmation', async ({page}) => {

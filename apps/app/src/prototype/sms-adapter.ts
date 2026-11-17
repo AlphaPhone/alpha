@@ -20,7 +20,8 @@ let suggester:SmsReplySuggester|null=null;
 export function setSmsReplySuggester(next:SmsReplySuggester|null){suggester=next;}
 /* Suggested replies are on by default; the owner's Settings choice stays on this phone. */
 const SUGGEST_KEY='alpha.messages.suggest-replies.v1';
-export const smsSuggestedRepliesEnabled=()=>{try{return globalThis.localStorage?.getItem(SUGGEST_KEY)!=='0';}catch{return false;}};
+/* Without storage the Settings switch could not turn them off again, so they stay off. */
+export const smsSuggestedRepliesEnabled=()=>{try{const store=globalThis.localStorage;return !!store&&store.getItem(SUGGEST_KEY)!=='0';}catch{return false;}};
 const suggestOn=smsSuggestedRepliesEnabled;
 export const setSmsSuggestedRepliesEnabled=(on:boolean)=>{globalThis.localStorage.setItem(SUGGEST_KEY,on?'1':'0');window.dispatchEvent(new Event('alpha:sms-suggestions-changed'));};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
@@ -79,7 +80,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
  let messageMenu:{target:MessageDeleteReference;text:string;confirm:boolean}|null=null,deleting=false;
- let messageHold:ReturnType<typeof setTimeout>|undefined;
+ let messageHold:ReturnType<typeof setTimeout>|undefined,holdPoint:{x:number;y:number}|null=null;
  const uncertainDeletes=new Set<string>();
  const cancelMessageHold=()=>{clearTimeout(messageHold);messageHold=undefined;};
  const menuRow=()=>messageMenu&&session.state.rows.find(row=>!isIncompleteSmsRow(row)&&row.id===messageMenu!.target.id&&row.kind===messageMenu!.target.kind&&row.threadId===session.state.thread&&row.date===messageMenu!.target.date);
@@ -132,10 +133,10 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const messageActions=(id:string)=>{
   const row=session.state.rows.find(value=>value.id===id);
   if(!row||isIncompleteSmsRow(row))return {};
-  let point:{x:number;y:number}|null=null;
   return {
-   down:(event:PointerEvent)=>{cancelMessageHold();if(event.button!==0||(event.target as Element).closest('a'))return;point={x:event.clientX,y:event.clientY};messageHold=setTimeout(()=>showMessageMenu(row),500);},
-   move:(event:PointerEvent)=>{if(point&&Math.hypot(event.clientX-point.x,event.clientY-point.y)>10)cancelMessageHold();},
+   // The press origin outlives a repaint (a message arriving mid-press), so a moving finger still cancels the hold.
+   down:(event:PointerEvent)=>{cancelMessageHold();if(event.button!==0||(event.target as Element).closest('a'))return;holdPoint={x:event.clientX,y:event.clientY};messageHold=setTimeout(()=>showMessageMenu(row),500);},
+   move:(event:PointerEvent)=>{if(messageHold!==undefined&&holdPoint&&Math.hypot(event.clientX-holdPoint.x,event.clientY-holdPoint.y)>10)cancelMessageHold();},
    up:cancelMessageHold,
    context:(event:Event)=>showMessageMenu(row,event),
    key:(event:KeyboardEvent)=>{if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey)showMessageMenu(row,event);},
@@ -706,7 +707,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    onRecipientInput:(event:Event)=>{if(picker)recipientPicker.setQuery((event.target as HTMLInputElement).value);else if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},
    contactsOpen:!!picker,
    contactsLabel:picker?'Close contact picker':'Choose contacts',
-   toggleContacts:()=>{if(recipientPicker.close())paint();else{recipientPicker.open();owner?.setState({},()=>document.querySelector<HTMLInputElement>('[data-alpha-messages-recipients]')?.focus());}},
+   // Closing the picker keeps a typed number that matched no contact as a recipient instead of discarding it.
+   toggleContacts:()=>{const typed=picker?.query.trim()||'';if(recipientPicker.close()){const number=/^[+\d][\d\s().-]*$/.test(typed)?normalizePhoneNumber(typed):null;if(number)addRecipient(number);paint();}else{recipientPicker.open();owner?.setState({},()=>document.querySelector<HTMLInputElement>('[data-alpha-messages-recipients]')?.focus());}},
    contacts:picker&&{
     ...picker,onQuery:(event:Event)=>recipientPicker.setQuery((event.target as HTMLInputElement).value),
     onKey:(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();void recipientPicker.search();}},

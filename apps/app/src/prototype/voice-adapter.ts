@@ -962,7 +962,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     // Home may paint while startup still replaces its provisional resident session. Await that
     // existing startup before capturing the speech binding; an account or composer change cancels.
     if(developmentCloudVoiceEnabled){
-      await connectionController.initialize();
+      // A failed startup must not leave Talk silently doing nothing.
+      try{await connectionController.initialize();}catch{if(startRevision===voiceStartRevision&&this.live!==false)this.toast('Alpha is still connecting. Try Talk again shortly.');return;}
       if(startRevision!==voiceStartRevision||startGeneration!==generation||this.live===false||document.hidden||this.S().view!==state.view||this.S().chat!==state.chat||String(this.S().draft||'')!==String(state.draft||'')||this.messageReplyTarget!==reply||this.messageEditTarget!==edit||connectionController.getSnapshot().open||JSON.stringify(JSON.parse(composerBinding()).slice(1))!==JSON.stringify(beforeStartup))return;
       if(!connectionController.getBrowserSpeechAgent()){this.toast('Alpha is still connecting. Try Talk again shortly.');return;}
     }

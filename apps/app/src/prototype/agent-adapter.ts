@@ -1902,6 +1902,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       throw error;
     }finally{if(this.voiceSendTurnId===turnId&&this.live)await new Promise<void>(resolve=>this.setState(()=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{typing:false}:null,()=>{if(this.voiceSendTurnId===turnId)this.voiceSendTurnId=undefined;resolve();}));}
   };
+  /** True, with the reason shown, while the resident has no owner session to take a send. A caller
+   * that clears its own field on send (the comms bar) asks first, so the text is not lost. */
+  p.sendUnavailable = function () {
+    const readiness=connectionController.getSnapshot();
+    if(!residentAlwaysPresent||readiness.session)return false;
+    this.toast(agentPendingText(readiness),ERROR_TOAST);return true;
+  };
   p.send = async function (argument?: string, expectedSession?: {sessionId:string;agentId:string;ownerId:string;origin:string}, focusAfterCommit?:()=>void) {
     const before=this.S(),reply=this.messageReplyTarget,edit=this.messageEditTarget;
     const filesAtStart:ChatFile[]|undefined=argument===undefined?this.fileAttachments:undefined;

@@ -6313,6 +6313,8 @@ class Component extends DCLogic {
       if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
       e.preventDefault();
       var text = String(barValue || "").trim(); if (!text) return;
+      // A question Alpha cannot take yet stays in the bar; the adapter says why.
+      if (typeof self.sendUnavailable === "function" && self.sendUnavailable()) return;
       self.barFilter = null; self.send(text); if (closed.onText) closed.onText("");
     } : barTarget === "person" ? undefined : onKey;
     var barDictate = isOn && (barTarget === "filter" || barTarget === "person");
