@@ -77,6 +77,32 @@ test('stopping voice releases capture and lets the accepted reply finish in chat
  await noMedia(page);
 });
 
+// Only the owner's Stop keeps a pending voice reply. A send that retires voice aborts it, so the
+// message is never held behind the reply. This fixture has no agent, so delivery is not shown here.
+test('a send while a voice reply is pending aborts that reply',async({page})=>{
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const f=(window as any).chatVoiceFixture;
+  connectionController.voiceConversationCurrent=()=>true;
+  Component.prototype.sendVoiceTurn=async function(input:any){
+   f.sends++;f.replySignal=input.signal;
+   await new Promise<void>(resolve=>input.signal.addEventListener('abort',()=>resolve(),{once:true}));
+   input.signal.throwIfAborted();throw Error('unreachable');
+  };
+ });
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await page.getByRole('button',{name:'Talk',exact:true}).click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(1);
+ await page.evaluate(()=>{void (window as any).chatVoiceFixture.shell.send('Typed while voice replies');});
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.replySignal.aborted)).toBe(true);
+ await expect(voice(page)).toHaveCount(0);
+ await noMedia(page);
+});
+
 // The Home pill is the hidden-chat voice surface off the Cloud route; Cloud speech opens the sheet
 // (voice-adapter startVoice). A refused Cloud request holds this account on on-device speech
 // (voice-selection noteNetworkSpeechFailure): the account stays signed in and the fixture's

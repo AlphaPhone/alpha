@@ -2420,7 +2420,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     } catch { this.toast('Speech recognition is unavailable on this device.'); }
   };
   p.stopVoice = function () {
-    const stopping=this.stopVoiceConversation?.();
+    const stopping=this.stopVoiceConversation?.(true);
     if(stopping)return stopping;
     this.pendingActionApproval?.abort();this.cancelReadReplyCompletions?.();alphaClient.cancel();this.setState({voice:'off',typing:false});
   };
