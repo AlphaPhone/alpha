@@ -140,7 +140,7 @@ test('the image bar filters Recents in memory, keeps an Alpha filter as a cleara
  const {views,calls}=mount({status:status('granted'),listRecentCalls:{calls:[call,other]}});await settle();
  const shown=()=>views.phone.render({},{}).recents.map(row=>row.name),reads=calls.length;
  const spec=views.phone.bar();
- assert.deepEqual([spec.target.kind,spec.closed.kind,spec.closed.placeholder,spec.left.label,spec.contextKey,spec.end,spec.incoming],['recents','filter','Call or ask','Back to the keypad','phone:recents:',null,null]);
+ assert.deepEqual([spec.target.kind,spec.closed.kind,spec.closed.placeholder,spec.left,spec.contextKey,spec.end,spec.incoming],['recents','filter','Call or ask',null,'phone:recents:',null,null],'no keypad slot beside the open chat field');
  assert.match(spec.briefing,/^Ada called .* and you missed it\.$/);
  spec.closed.onText('ben');assert.deepEqual(shown(),['Ben Ode']);assert.equal(views.phone.bar().closed.value,'ben');
  views.phone.bar().closed.onText('646');assert.deepEqual(shown(),['Ben Ode'],'digits match numbers');
@@ -150,7 +150,6 @@ test('the image bar filters Recents in memory, keeps an Alpha filter as a cleara
  assert.deepEqual(views.phone.render({},{}).filterChip,{label:'Ada',clearLabel:'Clear filter Ada'});assert.deepEqual(shown(),['Ada']);
  views.phone.bar().closed.onText('');assert.deepEqual(shown(),['Ada'],'clearing the sent text keeps the Alpha filter');
  views.phone.render({},{}).clearFilter();assert.deepEqual(shown(),['Ada','Ben Ode']);
- views.phone.bar().left.run();assert.equal(views.phone.render({},{}).isKeypad,true);
  assert.equal(calls.length,reads,'filtering reads nothing from the device');
 });
 

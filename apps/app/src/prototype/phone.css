@@ -39,13 +39,13 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
  * with the top-edge band where Android opens its shade. */
 .alpha-phone{--alpha-chat-full-top:max(60px,calc((max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 16px) / var(--phone-scale,1)))}
 /* Messages uses the same scaled canvas as Home. Reserve the new-message action's
- * full height on the list and keep the thread and compose headers below the bar. */
+ * row (search and new message) full height on the list and keep the thread and compose headers below the bar. */
 [data-alpha-messages] {
   --alpha-messages-top-inset:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1));
   padding-top:calc(var(--alpha-messages-top-inset) + 8px);
 }
-[data-alpha-messages]:has([data-alpha-messages-new]) { padding-top:calc(var(--alpha-messages-top-inset) + 52px); }
-[data-alpha-messages-new] { top:calc(var(--alpha-messages-top-inset) + 4px); }
+[data-alpha-messages]:has([data-alpha-messages-actions]) { padding-top:calc(var(--alpha-messages-top-inset) + 52px); }
+[data-alpha-messages-actions] { top:calc(var(--alpha-messages-top-inset) + 4px); }
 .voice-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.2);font-family:'Public Sans',sans-serif;display:flex;align-items:end}
 .voice-overlay .dialog-backdrop{width:100%}
 .voice-overlay .dialog{background:var(--alpha-white);color:var(--alpha-black);border-radius:30px 30px 0 0;padding:24px;max-height:85dvh;overflow:auto}
@@ -875,7 +875,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .mail-sender-avatar{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--s2);font-size:14px;font-weight:700;overflow:hidden}
 .mail-sender-avatar img{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;object-fit:contain;padding:9px;background:var(--s2)}
 
-.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
+.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
 .content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
 .content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}
