@@ -18,10 +18,11 @@ export type SmsReplySuggester=(thread:OpenThread,signal:AbortSignal)=>Promise<st
 let suggester:SmsReplySuggester|null=null;
 /** Installed only while the owner has suggested replies turned on; null turns them off. */
 export function setSmsReplySuggester(next:SmsReplySuggester|null){suggester=next;}
-/* Suggested replies are on by default; the owner's Settings choice stays on this phone. */
+/* Suggested replies send recent messages to the model provider, so they are off until the owner turns
+ * them on in Settings. A phone that never chose, or switched them off before the Settings switch
+ * existed (which left no value), stays off. The choice stays on this phone. */
 const SUGGEST_KEY='alpha.messages.suggest-replies.v1';
-/* Without storage the Settings switch could not turn them off again, so they stay off. */
-export const smsSuggestedRepliesEnabled=()=>{try{const store=globalThis.localStorage;return !!store&&store.getItem(SUGGEST_KEY)!=='0';}catch{return false;}};
+export const smsSuggestedRepliesEnabled=()=>{try{return globalThis.localStorage?.getItem(SUGGEST_KEY)==='1';}catch{return false;}};
 const suggestOn=smsSuggestedRepliesEnabled;
 export const setSmsSuggestedRepliesEnabled=(on:boolean)=>{globalThis.localStorage.setItem(SUGGEST_KEY,on?'1':'0');window.dispatchEvent(new Event('alpha:sms-suggestions-changed'));};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;

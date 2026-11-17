@@ -179,7 +179,7 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     assert.deepEqual(Object.fromEntries(['apkUrl','sha256','sizeBytes','versionCode'].map(key => [key,receipt[key]])),
       Object.fromEntries(['apkUrl','sha256','sizeBytes','versionCode'].map(key => [key,offered[key]])));
     const args = [...native.map(([, [code, body]]) => ['manifest',String(code),body]),
-      ['deadline'], ['index'], ...modes.map(mode => [mode,JSON.stringify(receipt)])];
+      ['deadline'], ['index'], ['selfUpdateGrant'], ...modes.map(mode => [mode,JSON.stringify(receipt)])];
     const results = javaTraceCampaign(harness,[members,...compiled],args);
     const responses = Object.fromEntries(native.map(([key],index) => [key,results[index]]));
     assert.deepEqual(responses.offer1,{resolved:true,manifest:offerJson,manifestSha256:sha(offerJson)});
@@ -192,6 +192,12 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     // Alpha ships only the launcher. Both parsers skip another signer's row, but an index carrying a
     // non-launcher row is malformed as a whole: it offers nothing, not even its launcher row.
     assert.deepEqual(results[native.length + 1],{otherSigner:9,standalone:0});
+    // The image's INSTALL_SELF_UPDATES grant stands in for the owner's install consent only: never below
+    // Android 12, never past the early-boot throttle, and without it the owner's consent is still required.
+    assert.deepEqual(results[native.length + 2],{
+      granted30:{status:'unsupported',admitted:true}, granted:{status:'supported',admitted:true},
+      grantedEarlyBoot:{status:'starting',admitted:true}, neither:{status:'permission-required',admitted:false},
+      consent:{status:'supported',admitted:true}});
     const parser = vm.createContext({Date, URL, Capacitor:{isNativePlatform:() => true},
       localStorage:{getItem:() => null, setItem() {}}, device:{checkForUpdate() {throw Error('not called');}}});
     program.runInContext(parser);
@@ -217,7 +223,7 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     restored.request(true);await restored.answer('invalid');
     traces.push(restored.trace);
 
-    for (const [index,result] of results.slice(native.length+2).entries()) {
+    for (const [index,result] of results.slice(native.length+3).entries()) {
       if (result.skip) {
         assert.equal(modes[index],'cache-delete-refused');
         skipped.push({mode:modes[index],reason:result.skip});

@@ -424,7 +424,8 @@ public final class UpdateStagingHarness {
   });
   Path cache=Files.createTempDirectory("quint-update-staging");
   try{
-   if(args[0].equals("manifest"))System.out.println(manifest(cache,Integer.parseInt(args[1]),args[2]));
+   if(args[0].equals("selfUpdateGrant")){System.out.println(UpdateFlowTest.selfUpdateGrantStatuses(cache.toFile()));UpdateFlowTest.retireFixtureWorkers();}
+   else if(args[0].equals("manifest"))System.out.println(manifest(cache,Integer.parseInt(args[1]),args[2]));
    else{
     var fixture=new UpdateStagingHarness(args[0],cache,new JSONObject(args[1]));
     try{System.out.println(fixture.run(args[0]));}finally{fixture.close();}

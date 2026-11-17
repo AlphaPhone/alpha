@@ -10,7 +10,7 @@ type View = typeof ROOT[number] | 'Reminders' | 'Notifications';
 const VIEWS: View[] = [...ROOT, 'Reminders', 'Notifications'];
 const EMPTY: Record<View, RegExp> = {
   Inbox: /Connect Eliza Cloud/,
-  Calendar: /Connect/,
+  Calendar: /Not connected/,
   Browser: /No open pages|New tab/,
   Camera: /^Can’t start camera$/,
   Photos: /^No photos$/,
