@@ -51,7 +51,7 @@ import {executeCalendarAvailability,type AvailabilityProvider} from '../runtime/
 import {availabilityReview} from './calendar-availability-review';
 import {presentDeviceRecordOperation} from '../runtime/device-record-presentation';
 import { passwordSurfaceOpen } from '../passwords/password-manager';
-import {AssistantDraftController,DEFAULT_DURABLE_DRAFT_MESSAGES} from './assistant-draft-controller';
+import {AssistantDraftController,DEFAULT_DURABLE_DRAFT_MESSAGES,residentDraftOwner,residentRestartDraftScope} from './assistant-draft-controller';
 import {assistantDraftStore} from '../runtime/assistant-draft-store';
 import {browserNotesPort,browserNotesRecovery} from '../runtime/browser-notes-document';
 import {audioDeletionRecovery} from '../runtime/note-audio-deletions';
@@ -104,19 +104,6 @@ const elizaSystem = registerPlugin<{ setFlashlight(input: { enabled: boolean }):
 // The reference renderer is a JavaScript state machine. Its presentation API is
 // intentionally kept intact; authenticated effects are installed at this seam.
 type Shell = any;
-function residentRestartDraftScope(snapshot: ReturnType<typeof connectionController.getSnapshot>): string {
-  const account = snapshot.cloudAccount;
-  const provider = snapshot.providerStatus;
-  return JSON.stringify([
-    account?.environment, account?.userId, account?.organizationId, account?.credentialId,
-    provider?.mode ?? provider?.provider, provider?.selected ? provider.revision : undefined,
-  ]);
-}
-function residentDraftOwner(snapshot: ReturnType<typeof connectionController.getSnapshot>): string | undefined {
-  const session = snapshot.session;
-  if (snapshot.kind === 'resident' && session)
-    return JSON.stringify([session.origin, session.ownerId, session.agentId]);
-}
 /** One composer send. A message is dispatched once the transport accepted it for delivery. */
 type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>};
 /** Refused before any request carrying the message could leave this phone. */

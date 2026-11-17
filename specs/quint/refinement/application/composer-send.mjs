@@ -17,6 +17,7 @@ import {randomUUID} from 'node:crypto';
 import {tsImport} from '../../../../test/support/ts-import.mjs';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {systemNoticeKind, systemNoticeDisplayText, collapseSystemNotices} from '../../../../apps/app/src/runtime/action-message-presentation.ts';
+import {residentDraftOwner,residentRestartDraftScope} from '../../../../apps/app/src/prototype/assistant-draft-controller.ts';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 
 export const model = {path: 'specs/quint/application/ComposerSend.qnt', module: 'ComposerSend'};
@@ -46,7 +47,7 @@ export async function compile() {
 export async function createDriver({code, subscription, DurableDraftController, AlphaClient, AlphaClientError}) {
   let sessionNumber = 0, changed = () => {};
   const session = () => ({sessionId: `session-${sessionNumber}`, agentId: 'agent-a', ownerId: 'owner-a', origin: 'https://agent.invalid'});
-  let snapshot = {session: session(), history: null, busy: false, open: false, startupResolved: true};
+  let snapshot = {kind:'resident',session: session(), history: null, busy: false, open: false, startupResolved: true};
   const timers = [], stores = new Map(), attempts = new Map(), decisions = new Map();
   const alphaClient = new AlphaClient();
   class NotDispatched extends Error {}
@@ -104,7 +105,7 @@ export async function createDriver({code, subscription, DurableDraftController, 
   });
   alphaClient.setViewContext({view: 'calendar'});
   attach();
-  const ports = {connectionController, alphaClient, cancelMessageContext() {}, clearMapsSelection() {}, syncStoppedReplyNotice() {}, syncCanonicalNotes() {},
+  const ports = {connectionController, alphaClient, residentDraftOwner, residentRestartDraftScope, cancelMessageContext() {}, clearMapsSelection() {}, syncStoppedReplyNotice() {}, syncCanonicalNotes() {},
     context() {}, restoreAttachments: async messages => messages, collapseSystemNotices, mergeConversationDelivery: messages => messages};
   new Function(...Object.keys(ports), subscription).call(shell, ...Object.values(ports));
   shell.refreshDraftBinding();

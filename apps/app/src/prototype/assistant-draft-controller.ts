@@ -5,6 +5,21 @@
  * never offered for a second send. This name is kept for the existing call sites.
  */
 import {DurableDraftController} from '../ui/state/durable-draft-controller.ts';
+import type {ConnectionSnapshot} from '../runtime/connection-ui';
+
+export function residentRestartDraftScope(snapshot: Pick<ConnectionSnapshot,'cloudAccount'|'providerStatus'>): string {
+  const account = snapshot.cloudAccount;
+  const provider = snapshot.providerStatus;
+  return JSON.stringify([
+    account?.environment, account?.userId, account?.organizationId, account?.credentialId,
+    provider?.mode ?? provider?.provider, provider?.selected ? provider.revision : undefined,
+  ]);
+}
+export function residentDraftOwner(snapshot: Pick<ConnectionSnapshot,'kind'|'session'>): string | undefined {
+  const session = snapshot.session;
+  if (snapshot.kind === 'resident' && session)
+    return JSON.stringify([session.origin, session.ownerId, session.agentId]);
+}
 
 export class AssistantDraftController<Recovery=unknown> extends DurableDraftController<Recovery> {
   override async open(key:string):Promise<void> {
