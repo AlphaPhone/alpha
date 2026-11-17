@@ -681,7 +681,15 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           // The streaming bridge must bind gain to the same native speech session.
           const mute='setOutputMuted' in streamingCloud?streamingCloud.setOutputMuted:undefined;
           if(typeof mute==='function')conversationSpeaker={muted:false,set:async muted=>{await mute.call(streamingCloud,muted);}};
-        }else conversationSpeaker={muted:false,set:muted=>deviceVoice.setSpeechOutputMuted({muted}),reset:()=>deviceVoice.setSpeechOutputMuted({muted:false})};
+        }else{
+          // A native build without speaker gain keeps Stop speaking; the control appears only
+          // after the plugin accepts the call.
+          void deviceVoice.setSpeechOutputMuted({muted:false}).then(()=>{
+            if(token!==generation||chatDestination!==chat||conversationSpeaker)return;
+            conversationSpeaker={muted:false,set:muted=>deviceVoice.setSpeechOutputMuted({muted}),reset:()=>deviceVoice.setSpeechOutputMuted({muted:false})};
+            refresh();
+          }).catch(()=>{});
+        }
       }
       const selected = cloudDriver ?? {
         startRecording:()=>deviceVoice.startRecording({maxDurationMs:29000}),
@@ -1029,7 +1037,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(assistant)messages.speaking='Alpha is speaking.';
     if(assistant?assistantState.muted:direct?.microphoneMuted)messages.listening='Microphone off.';
     const held=assistantState.inputHeld===true&&!assistant?.muted;
-    const assistantControls=assistant&&phase!=='error'?{canMute:phase!=='awaiting-user-input',muteAutomatically:held,muted:assistant.muted||held?'true':'false',muteLabel:held?'Microphone paused while Alpha responds':assistant.muted?'Unmute microphone':'Mute microphone',toggleMute:()=>{if(owned()){liveCapture?.release();void assistant.setMuted(!assistant.muted).finally(refresh);}}}:{};
+    const assistantControls=assistant&&phase!=='error'?{canMute:phase!=='awaiting-user-input',muteAutomatically:held,muted:assistant.muted||held?'true':'false',muteLabel:held?'Microphone paused while Alpha responds':assistant.muted?'Unmute microphone':'Mute microphone',toggleMute:()=>{if(owned()){liveCapture?.release();void assistant.setMuted(!assistant.muted).finally(refresh);}},canInterrupt:phase==='speaking'&&!conversationSpeaker,interrupt:()=>{if(owned()&&assistant.interruptSpeech())refresh();}}:{};
     const extra=assistant?assistantControls:direct?{canMute:true,muteAutomatically:direct.microphoneAutomaticallyMuted,muteLabel:direct.microphoneAutomaticallyMuted?'Microphone paused while Alpha responds':direct.microphoneMuted?'Unmute microphone':'Mute microphone',muted:direct.microphoneMuted||direct.microphoneAutomaticallyMuted?'true':'false',toggleMute:()=>{if(owned()){direct.setMicrophoneMuted(!direct.microphoneMuted);refresh();}},needsPlaybackUnlock:direct.needsPlaybackUnlock,unlockPlayback:()=>{if(owned())void direct.unlockPlayback().then(refresh).catch(failure=>{error=failure instanceof Error?failure.message:'Playback could not unlock.';refresh();});}}:{};
     const speaker=conversationSpeaker;
     const speakerControls=speaker&&phase!=='error'&&phase!=='idle'?{
