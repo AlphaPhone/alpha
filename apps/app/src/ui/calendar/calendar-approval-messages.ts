@@ -5,7 +5,7 @@
  * The agent's Calendar plugin queues each change with a reason sentence
  * (`plugins/plugin-calendar/src/actions/mutation-approval.ts`) and answers a resolution with an
  * outcome sentence (`calendarApprovalOutcome` in `plugins/plugin-calendar/src/mutations/resolve.ts`).
- * Neither is shown. The request line is Alpha's, built from the reviewed payload; only the event
+ * Neither is shown, in the review or above its card in the conversation. The request line is Alpha's, built from the reviewed payload; only the event
  * title is read from the queued reason (data the agent recorded, not copy), and only when the
  * reason matches one of the reviewed templates. The result is keyed on the reply's kind and
  * failure code; a completed reply's operation, title and duplicate flag are read from the reviewed
@@ -111,14 +111,29 @@ const REASON_TEMPLATES: readonly RegExp[] = [
   new RegExp(`^${VERB} "([\\s\\S]*)" on ${STAMP}${NOTIFY}\\.$`),
 ];
 
-/** The event title a queued reason names, when it matches a reviewed template; else "". */
-export function calendarApprovalReasonTitle(reason: string): string {
-  const first = reason.split(/\r?\n/, 1)[0] ?? "";
+/** The event title a reason line names when it matches a reviewed template; else null. */
+function reasonTitle(line: string): string | null {
   for (const template of REASON_TEMPLATES) {
-    const match = template.exec(first);
+    const match = template.exec(line);
     if (match) return match[1].trim();
   }
-  return "";
+  return null;
+}
+
+/** The event title a queued reason names, when it matches a reviewed template; else "". */
+export function calendarApprovalReasonTitle(reason: string): string {
+  return reasonTitle(reason.split(/\r?\n/, 1)[0] ?? "") ?? "";
+}
+
+/**
+ * The line shown above a Calendar approval card. The agent replies with the queued reason
+ * sentence, which carries UTC timestamps and calendar ids; when the reply's prose is exactly that
+ * sentence, Alpha's own line replaces it. Any other prose is shown as written.
+ */
+export function calendarApprovalCardText(prose: string): string {
+  const title = /[\r\n]/.test(prose) ? null : reasonTitle(prose);
+  if (title === null) return prose;
+  return title ? `Review this Calendar change: ${quoted(title)}.` : "Review this Calendar change.";
 }
 
 /**
