@@ -3745,7 +3745,7 @@ export function connectionChooserVisible(snapshot: Pick<ConnectionSnapshot,'open
   }
   return snapshot.open && !(snapshot.automaticRestore && snapshot.busy && !snapshot.error);
 }
-export function ConnectionChooser() {
+export function ConnectionChooser({onPresentation}:{onPresentation?:(visible:boolean)=>void}={}) {
   const snapshot = useSyncExternalStore(connectionController.subscribe, connectionController.getSnapshot);
   // Production Android always enters through sign-in while signed out.
   // Only the explicit test-mocks build retains developer bypass behavior.
@@ -3791,6 +3791,7 @@ export function ConnectionChooser() {
     void connectionController.beginSignIn(residentEnvironment(), refreshNegative, true);
   }, [signInPageShown, snapshot.busy, snapshot.signIn, snapshot.cloudAccount, snapshot.startupResolved, snapshot.automaticRestore, cloudSignInNetwork.offline, cloudSignInNetwork.unvalidated, cloudSignInNetwork.reachable, cloudSignInNetwork.checking]);
   const visible=signInEntryRequired||connectionChooserVisible(snapshot,!!sending);
+  useLayoutEffect(()=>{onPresentation?.(visible);return ()=>onPresentation?.(false);},[visible,onPresentation]);
   const [accountSection,setAccountSection]=useState<'provider'|'funds'|null>(null);
   const [signOutAccount,setSignOutAccount]=useState<ConnectionSnapshot['cloudAccount']>(null);
   useEffect(()=>{setAccountSection(null);setSignOutAccount(null);},[snapshot.purpose,visible,snapshot.cloudAccount?.environment,snapshot.cloudAccount?.userId,snapshot.cloudAccount?.organizationId,snapshot.cloudAccount?.credentialId,snapshot.cloudAccount?.sessionId]);
