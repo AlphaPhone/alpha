@@ -1,6 +1,6 @@
 import {openCloudPlanFromSettings} from './helpers/cloud-plan-settings';
 import {seedCompletedAccessSetup} from './flag-off-android';
-import {completeAccessSetup, openYourAgent} from './flag-off-android';
+import {completeAccessSetup} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -415,12 +415,12 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
   // Every Alpha Phone needs an Eliza Cloud account for AI: signed out, the sign-in dialog opens
   // by itself and cannot be dismissed. Without an admissible plan a non-blocking notice beside the
   // running agent offers Redeem code and Choose a plan; its Redeem code opens the plan panel. A
-  // sign-in that changed underneath admission is reported in the dialog. Otherwise nothing opens.
+  // credential that changed underneath admission stays saved, and the resident remains available.
   // On the phone's own agent that plan panel is the resident account & plan panel; it carries the
   // approved Subscription controls, opened at the code field.
   const signedOut=mode==='signed-out'||mode==='legacy-offline'||mode==='unpackaged',needsPlan=mode==='empty'||mode==='unavailable';
   const requiresSignIn=signedOut;
-  const dialog=signedOut?page.locator('[role="main"].alpha-cloud-sign-in'):mode==='replaced'?page.getByRole('region',{name:'Settings',exact:true}):page.getByRole('dialog',{name:'Account',exact:true});
+  const dialog=signedOut?page.locator('[role="main"].alpha-cloud-sign-in'):page.getByRole('dialog',{name:'Account',exact:true});
   if(needsPlan){
    const notice=page.getByRole('region',{name:'Eliza Cloud plan notice'});
    await expect(notice).toContainText('AI off');
@@ -434,10 +434,12 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
    // and the required sign-in page never covers the running resident's Home.
    if(mode==='replaced')await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
    await expect(page.getByRole('dialog')).toHaveCount(0);
-   if(mode==='replaced')await openYourAgent(page);
-   else{await page.getByRole('button',{name:'Settings',exact:true}).click();await openCloudPlanFromSettings(page);}
+   if(mode!=='replaced'){
+    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await openCloudPlanFromSettings(page);
+   }
   }
-  await expect(dialog).toBeVisible();
+  if(mode!=='replaced')await expect(dialog).toBeVisible();
   if(mode==='unpackaged'){
    // A developer build without the runtime still allows sign-in.
    await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toBeVisible();
@@ -462,13 +464,18 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
    await expect(dialog.getByRole('region',{name:'Balance and membership',exact:true}).getByText(mode==='empty'?'No plan':'Unconfirmed',{exact:true})).toHaveCount(1);
    await expect(dialog).not.toContainText(/Available credits|Add credits|\$\d/);
   }
-  if(mode==='replaced'){await expect(dialog.getByText(/account changed/i)).toBeVisible();const saved=await page.evaluate(async()=>JSON.parse((await (window as any).Capacitor.nativePromise('AlphaConnection','secureRead',{slot:'cloud:production'})).value));expect(saved.credentialId).toBe('f04d4d24-6978-42a2-a968-995d76debf77');}
+  if(mode==='replaced'){
+   await page.getByRole('button',{name:'Notes',exact:true}).click();
+   await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
+   const saved=await page.evaluate(async()=>JSON.parse((await (window as any).Capacitor.nativePromise('AlphaConnection','secureRead',{slot:'cloud:production'})).value));
+   expect(saved.credentialId).toBe('f04d4d24-6978-42a2-a968-995d76debf77');
+  }
   if(admitted)await expect(dialog.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
   // Legacy credit admission keeps the subscription and membership-code options visible.
   if(mode==='credits'){await expect(dialog).toContainText('Expires ');await expect(dialog.getByRole('button',{name:'Use code',exact:true})).toBeVisible();await expect(dialog.getByRole('textbox',{name:'Membership code',exact:true})).toHaveCount(0);}
   for(const retired of ['Use local apps without AI','Continue offline'])await expect(dialog.getByRole('button',{name:retired,exact:true})).toHaveCount(0);
   // Every dialog but the required sign-in closes; the agent keeps running.
-  if(needsPlan){await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);}else if(mode==='replaced'){await dialog.getByRole('button',{name:'Back to About',exact:true}).click();await expect(dialog.getByRole('heading',{name:'About',exact:true})).toBeVisible();}else if(!signedOut){await dialog.getByRole('button',{name:'Close Account',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();}
+  if(needsPlan){await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);}else if(!signedOut&&mode!=='replaced'){await dialog.getByRole('button',{name:'Close Account',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();}
   if(mode==='legacy-offline'||mode==='signed-out')expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual({kind:'resident'});
   const calls=await page.evaluate(()=>(window as any).residentCalls);
   expect(calls.some((c:any)=>c.url?.includes('/personal/')||c.url?.includes('/upgrade-tier')||c.url?.includes('/credits/'))).toBe(false);
@@ -517,9 +524,9 @@ test('resident always present (P-43): a kept local-apps choice and a saved sign-
  await expect.poll(async()=>((await page.evaluate(()=>(window as any).residentCalls)) as any[]).filter(c=>c.plugin==='Agent').map(c=>c.method)).toContain('start');
  await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
  // Owner, 2026-11-03: Cloud being unreachable shows no banner or status text, and asks for no sign-in.
- const settings=await openYourAgent(page);
- await expect(settings.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
- await expect(settings).not.toContainText('Sign in required');
+ await page.getByRole('button', { name: 'Notes', exact: true }).click();
+ await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
+ await expect(page.getByText('Sign in required', { exact: true })).toHaveCount(0);
  await expect(page.getByRole('region',{name:'Eliza Cloud plan notice',exact:true})).toHaveCount(0);
  await expect(page.getByText(/Cloud cannot be reached/)).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Use local apps without AI',exact:true})).toHaveCount(0);
