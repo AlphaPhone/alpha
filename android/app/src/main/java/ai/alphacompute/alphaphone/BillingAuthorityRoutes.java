@@ -193,4 +193,101 @@ final class BillingAuthorityRoutes {
   /** A session Cloud refused is spent. */
   synchronized void spent(String session) { if (session != null && session.equals(token)) { token = null; account = null; expiresAt = 0; } }
  }
+
+ /** One Cloud answer: HTTP status and JSON body. */
+ static final class Reply { final int status; final JSONObject body; Reply(int status, JSONObject body) { this.status = status; this.body = body == null ? new JSONObject() : body; } }
+
+ /** What the billing authority needs from the phone and Cloud; the plugin supplies the real ones. */
+ interface Ports {
+  /** The Alpha Cloud cutover flag (CloudDeployment.ALPHA_CLOUD_CUTOVER). */
+  boolean enabled();
+  /** The stored `cloud:production` slot, or null when signed out. */
+  String savedCredential() throws Exception;
+  /** Cloud's identity for the device key ({userId, organizationId?}). */
+  JSONObject identity(String deviceToken) throws Exception;
+  Reply sendCode(String email, String verifier) throws Exception;
+  /** When a sent code expires, from Cloud's answer (the shared CloudEmailCode rule). */
+  long codeExpiresAt(Object reported, long now);
+  Reply verifyCode(String email, String code, String verifier) throws Exception;
+  /** One request to the production Cloud API with a bearer. */
+  Reply request(String method, String path, JSONObject body, String bearer) throws Exception;
+  long now();
+ }
+
+ /**
+  * The billing authority's decisions, without Android: refuse unless the cutover flag is on, find the
+  * signed-in account from the stored key and Cloud's identity for it, refuse a renderer-claimed user
+  * that is not that account, and keep the session bound to the key (Session).
+  * Throws UnsupportedOperationException (flag off), SecurityException (refused) or
+  * IllegalArgumentException (invalid input); any other exception means Cloud was unavailable.
+  */
+ static final class Authority {
+  private final Ports ports;
+  final Session session = new Session();
+  Authority(Ports ports) { this.ports = ports; }
+
+  private void requireEnabled() { if (!ports.enabled()) throw new UnsupportedOperationException("Not available"); }
+  private Account key() throws Exception { return Account.of(ports.savedCredential()); }
+
+  JSONObject status() throws Exception {
+   requireEnabled();
+   Account key = key();
+   JSONObject answer = new JSONObject();
+   if (session.current(key, ports.now()) != null) return answer.put("status", "authorized").put("expiresAt", session.expiresAt());
+   return answer.put("status", "required");
+  }
+
+  void clear() { session.clear(); }
+
+  /** Sends a one-time code for the signed-in account; answers when it expires. */
+  long start(String email, String verifier) throws Exception {
+   requireEnabled();
+   String saved = ports.savedCredential();
+   Account key = Account.of(saved);
+   if (key == null) throw new SecurityException("Sign in first");
+   Account account = key.withIdentity(ports.identity(Account.token(saved)));
+   Reply sent = ports.sendCode(email, verifier);
+   if (sent.status == 429) throw new SecurityException("Try again later");
+   if (sent.status < 200 || sent.status >= 300) throw new SecurityException("Code not sent");
+   long expiresAt = ports.codeExpiresAt(sent.body.opt("expiresAt"), ports.now());
+   session.pending(account, email, verifier, expiresAt);
+   return expiresAt;
+  }
+  /** Redeems the code and binds the session to the account the code was sent for. */
+  JSONObject verify(String code, String claimedUserId) throws Exception {
+   requireEnabled();
+   Account key = key();
+   if (key == null) { session.clear(); throw new SecurityException("Sign in first"); }
+   Account account = session.pendingAccount(key);
+   if (account == null) throw new SecurityException("Code expired");
+   if (claimedUserId != null && !claimedUserId.equals(account.userId)) { session.clear(); throw new SecurityException("A different account"); }
+   String[] pending = session.pendingFor(key, ports.now());
+   if (pending == null) throw new SecurityException("Code expired");
+   Reply verified = ports.verifyCode(pending[0], code, pending[1]);
+   if (verified.status == 400 || verified.status == 401) throw new SecurityException("Wrong code");
+   if (verified.status < 200 || verified.status >= 300) throw new SecurityException("Code not accepted");
+   Object token = verified.body.opt("token");
+   if (!(token instanceof String) && verified.body.optJSONObject("data") != null) token = verified.body.getJSONObject("data").opt("token");
+   if (!(token instanceof String)) throw new SecurityException("Code not accepted");
+   long expiresAt = sessionExpiry((String) token, ports.now());
+   Reply user = ports.request("GET", "/api/v1/user", null, (String) token);
+   if (user.status != 200 || !sameAccount(user.body.optJSONObject("data"), account.userId, account.organizationId)) {
+    session.clear();
+    throw new SecurityException("A different account");
+   }
+   // The phone may have signed out or switched accounts while the code was checked.
+   if (!session.bind(key(), account, (String) token, expiresAt)) throw new SecurityException("A different account");
+   return status();
+  }
+
+  /** One billing operation with the session; a refused session is spent. */
+  Reply perform(Route route) throws Exception {
+   requireEnabled();
+   String token = session.current(key(), ports.now());
+   if (token == null) throw new SecurityException("Confirm it's you");
+   Reply answer = ports.request(route.method, route.path, route.body, token);
+   if (answer.status == 401) session.spent(token);
+   return answer;
+  }
+ }
 }

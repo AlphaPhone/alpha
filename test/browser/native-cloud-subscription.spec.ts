@@ -853,6 +853,9 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await fixture(page,{plan:'active',holdEntitlement:true,holdEntitlementAs:'none'});
   await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
   await expect.poll(async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscriptions/checkout/confirm').length).toBe(1);
+  // The checkout asked for exactly Plus on the mobile return, and the return confirmed exactly its session.
+  const bodies=await page.evaluate(()=>(window as any).planFixture.bodies);
+  expect(bodies).toEqual([{planKey:'plus_monthly',idempotencyKey:expect.stringMatching(/^[0-9a-f-]{36}$/),presentation:'mobile'},{confirm:{sessionId:'cs_test_synthetic'}}]);
   await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plan active',{exact:true})).toBeVisible({timeout:30_000});
   await expect.poll(()=>page.evaluate(()=>typeof (window as any).planFixture.releaseEntitlement)).toBe('function');
   await page.evaluate(()=>(window as any).planFixture.releaseEntitlement());
@@ -892,6 +895,27 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await page.evaluate(()=>(window as any).planController.planChanged());
   await page.evaluate(()=>(window as any).planFixture.releaseEntitlement());
   await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().residentSubscription?.status),{timeout:30_000}).toBe('past_due');
+ });
+
+ test('on: returning from an upgrade\'s Stripe invoice checks the plan inside the once-a-minute limit',async({page})=>{
+  await boot(page,{...await alpha(),plan:'active',limits:'active',holdProvider:false});
+  await expect.poll(()=>configured(page)).toBe(1);await idle(page);
+  await openAccountPlan(page);
+  await page.getByRole('button',{name:'Manage plan',exact:true}).click();
+  const plans=await openPlans(page);
+  const reads=async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement').length;
+  // Spend the plan screen's own return allowance.
+  await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());await idle(page);
+  await plans.getByRole('listitem').filter({hasText:'Pro'}).getByRole('button',{name:'Switch to Pro',exact:true}).click();
+  await plans.getByRole('group',{name:'Review plan change'}).getByRole('button',{name:'Confirm',exact:true}).click();
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://invoice.stripe.com/i/acct_synthetic/inv_synthetic']);
+  await expect(plans.getByText('Finish payment, then come back',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>(window as any).planFixture.billing)).toEqual(['upgrade-review','upgrade-confirm','upgrade-payment']);
+  // The immediate check after the confirm has run; the owner's return from the invoice still checks again.
+  await page.waitForTimeout(1500);await idle(page);
+  const before=await reads();
+  await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
+  await expect.poll(reads,{timeout:15_000}).toBeGreaterThan(before);
  });
 
 });

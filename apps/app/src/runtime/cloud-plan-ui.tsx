@@ -116,6 +116,9 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
   // Cloud accepted a change: its quote is spent and is never offered for another confirm, and the plan
   // is read again whatever happens next.
   setStep({kind:'idle'});
+  // A Stripe invoice page opened for the upgrade: the plan is read now, and the owner's return from
+  // that page still checks inside the once-a-minute limit (re-armed after the immediate check).
+  let paying=false;
   try{
    switch(operation.operation){
     case 'upgrade-confirm':{
@@ -125,7 +128,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
      const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId}).catch(()=>null);
      const outcome=upgradeOutcome(command,payment);
      if(outcome.kind==='failed')throw Error('The upgrade was not made');
-     if(outcome.kind==='pay'){opened.current?.();await client.openPaymentPage(outcome.invoiceUrl,signal);setNotice('Finish payment, then come back');}
+     if(outcome.kind==='pay'){paying=true;opened.current?.();await client.openPaymentPage(outcome.invoiceUrl,signal);setNotice('Finish payment, then come back');}
      else setNotice(outcome.kind==='applied'?'Plan upgraded':'Upgrade not finished yet. Check your plan again shortly.');
      break;
     }
@@ -133,7 +136,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
     case 'cancel':setNotice('Plan ends at the end of this period');break;
     case 'undo-cancel':setNotice('Plan continues');break;
    }
-  }finally{notifyChanged();}
+  }finally{notifyChanged();if(paying)opened.current?.();}
   await load(signal);
  },[client,authority,load,notifyChanged,withAuthority]);
 

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {nativeSource,runJvm,jsonJarSkip} from './fixtures/jvm-tools.mjs';
+import {fixture,nativeSource,runJvm,jsonJarSkip} from './fixtures/jvm-tools.mjs';
 
 const plans=await import('../apps/app/src/runtime/cloud-plans.ts');
 const {managedServiceRequest:allowed}=await import('../apps/app/src/runtime/managed-service-routes.ts');
@@ -210,4 +210,15 @@ public class BillingRoutesTest {
 `);
   assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),source],'ai.alphacompute.alphaphone.BillingRoutesTest',{json:true}),/^PASS billing routes \d+/);
  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('the native billing authority refuses with the flag off, binds to Cloud\'s identity for the stored key, and refuses claimed or switched accounts',{skip:jsonJarSkip},()=>{
+ assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),fixture('BillingAuthorityTest.java')],'ai.alphacompute.alphaphone.BillingAuthorityTest',{json:true}),/^PASS billing authority \d+/);
+});
+
+test('MainActivity registers the native billing authority only with the cutover flag',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const main=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java','utf8');
+ const registrations=main.split('\n').filter(line=>line.includes('AlphaBillingAuthorityPlugin'));
+ assert.deepEqual(registrations.map(line=>line.trim()),['if (CloudDeployment.ALPHA_CLOUD_CUTOVER) registerPlugin(AlphaBillingAuthorityPlugin.class);']);
 });
