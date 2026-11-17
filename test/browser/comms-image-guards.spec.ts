@@ -46,16 +46,56 @@ const runAll = (page: Page) => page.evaluate(async () => {
     dial: await run({type: 'phone_dial', target: {kind: 'number', number: '+15550100103'}}),
     call: await run({type: 'phone_call', target: {kind: 'number', number: '+15550100103'}}),
     create: await run({type: 'contact_create', contact: {displayName: 'Nia Brooks', phoneNumbers: ['+15550100199'], emailAddresses: []}}),
-    text: await run({type: 'sms_compose', query: 'Carmen', body: 'On my way'}),
     send: await run({type: 'sms_send', recipients: ['+15550100103'], body: 'On my way', subscriptionId: 1}),
   };
 });
+
+/**
+ * An action the owner confirms on the phone: its approved card carries the review (who matched, or
+ * the contact to delete), `pick` chooses a row or 'Not now', and the executor's summary is returned.
+ */
+async function reviewed(page: Page, operation: Record<string, unknown>, pick: string, seen: (review: ReturnType<Page['locator']>) => Promise<void> = async () => {}) {
+  await page.evaluate(operation => {
+    const el = document.querySelector('[data-screen]') as any;
+    let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
+    while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
+    const shell = fiber.stateNode, w = window as any, id = `p-${operation.type}`;
+    shell.setState({chat: 'sheet'});
+    shell.propose({id, kind: 'other', title: 'Reviewed action', detail: String(operation.query), button: 'Approve', acts: true, act: {mod: 'alpha', fn: 'execute'}, args: {proposalId: id}, proposalId: id}, 'Review?');
+    shell.pendingActionApprovalProposalId = id;
+    w.__reviewed = w.__installedDeviceExecutor(operation, crypto.randomUUID(), w.__reviewContext, new AbortController().signal)
+      .then((result: any) => result.summary ?? result.status, (error: Error) => `threw: ${error.message}`);
+  }, operation);
+  const review = page.locator('[data-alpha-proposal-review]').first();
+  await expect(review).toBeVisible();
+  await seen(review);
+  await review.locator('button').filter({hasText: pick}).first().click();
+  return page.evaluate(() => (window as any).__reviewed);
+}
+const textCarmen = {type: 'sms_compose', query: 'Carmen', body: 'On my way'};
 
 test.describe('Alpha image: the installed executor refuses side effects during a call that may be an emergency call (AC-19)', () => {
   test('with no call each branch reaches the bridge', async ({page}) => {
     await installedExecutor(page);
     await runAll(page);
+    await reviewed(page, textCarmen, 'Carmen');
     expect((await bridgeEffects(page)).sort()).toEqual(['contacts.save', 'dial', 'placeCall', 'sendSms', 'sendSms'].sort());
+  });
+
+  test('a text to one matching contact shows the matched name and number before the native review opens', async ({page}) => {
+    await installedExecutor(page);
+    // Dismissed: the owner saw who matched and nothing reached the bridge.
+    const dismissed = await reviewed(page, textCarmen, 'Not now', async review => {
+      await expect(review.locator('[data-alpha-telephony-review-body]')).toHaveText('On my way');
+      await expect(review.getByRole('button', {name: /^Message Carmen .*555.*0103/})).toHaveCount(1);
+      expect(await bridgeEffects(page)).toEqual([]);
+    });
+    expect(dismissed).toBe('The owner dismissed the message. Nothing was sent.');
+    expect(await bridgeEffects(page)).toEqual([]);
+    // Chosen: the same number goes to the native review.
+    await reviewed(page, textCarmen, 'Carmen');
+    expect(await bridgeEffects(page)).toEqual(['sendSms']);
+    expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).find(([method]) => method === 'sendSms')![1].recipients)).toEqual(['+15550100103']);
   });
 
   for (const [name, state] of [
@@ -67,26 +107,12 @@ test.describe('Alpha image: the installed executor refuses side effects during a
     await page.evaluate(state => (window as any).setDeviceCallState(state), state);
     const summaries = await runAll(page);
     expect(await bridgeEffects(page)).toEqual([]);
-    expect(summaries.dial).toBe('Nothing was done during a call that may be an emergency call.');
-    expect(summaries.send).toBe('Nothing was done during a call that may be an emergency call.');
+    // Every branch says why, in the same words: not "another call was in progress", not an unconfirmed result.
+    expect(summaries).toEqual(Object.fromEntries(Object.keys(summaries).map(branch => [branch, 'Nothing was done during a call that may be an emergency call.'])));
   });
 
   /** A contact deletion: the owner picks the contact in the approved card's review, then the write runs. */
-  async function removeAda(page: Page) {
-    await page.evaluate(() => {
-      const el = document.querySelector('[data-screen]') as any;
-      let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];
-      while (fiber && !(fiber.stateNode && typeof fiber.stateNode.cardAct === 'function')) fiber = fiber.return;
-      const shell = fiber.stateNode, w = window as any;
-      shell.setState({chat: 'sheet'});
-      shell.propose({id: 'remove-ada', kind: 'other', title: 'Delete Ada Okafor', detail: 'Ada Okafor', button: 'Approve', acts: true, act: {mod: 'alpha', fn: 'execute'}, args: {proposalId: 'p-remove'}, proposalId: 'p-remove'}, 'Delete Ada?');
-      shell.pendingActionApprovalProposalId = 'p-remove';
-      w.__removal = w.__installedDeviceExecutor({type: 'contact_delete', query: 'Ada'}, crypto.randomUUID(), w.__reviewContext, new AbortController().signal)
-        .then((result: any) => result.summary ?? result.status, (error: Error) => `threw: ${error.message}`);
-    });
-    await page.locator('[data-alpha-proposal-review] button').filter({hasText: 'Ada Okafor'}).first().click();
-    return page.evaluate(() => (window as any).__removal);
-  }
+  const removeAda = (page: Page) => reviewed(page, {type: 'contact_delete', query: 'Ada'}, 'Ada Okafor');
 
   test('a contact removal reaches the bridge with no call, and not during an emergency call', async ({page}) => {
     await installedExecutor(page);

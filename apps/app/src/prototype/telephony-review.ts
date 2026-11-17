@@ -1,7 +1,8 @@
 /**
  * The on-phone confirmation of an agent-proposed call, text or contact change (telephony-executor.ts).
  * It shows exactly what will happen: the contact's name and the number that will be called or
- * texted, or a contact's fields before and after. One tap on a row chooses it; "Not now", leaving
+ * texted, a contact's fields before and after, or the contact already in Contacts that a new one
+ * would repeat. One tap on a row chooses it; "Not now", leaving
  * the app or a cancelled request chooses nothing. The rows render inside the chat card whose
  * approval is running (AP-16 D8: the proposal card is the one approval surface, never a modal).
  */
@@ -12,7 +13,7 @@ type Pending = {review: TelephonyReview; settle: (choice: number | null) => void
 let pending: Pending | null = null, repaint: () => void = () => {};
 const ICON = {
   call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z',
-  message: 'M12 19V5M6 11l6-6 6 6', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  message: 'M12 19V5M6 11l6-6 6 6', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', add: 'M12 5v14M5 12h14',
 };
 /** Shows the review and resolves with the chosen option's index, or null when nothing was chosen. */
 export function askTelephonyReview(review: TelephonyReview, signal: AbortSignal): Promise<number | null> {
@@ -42,10 +43,15 @@ export function presentTelephonyReview(entry: Pending | null) {
     if (review.kind === 'call' || review.kind === 'message') { const match = option as {name: string; number: string};
       return {ini: initials(match.name), name: match.name, lines: style(plain(displayNumber(match.number))), choose, icon: ICON[review.kind],
         bg: review.kind === 'call' ? 'var(--alpha-call-green)' : 'var(--acc)', label: `${review.kind === 'call' ? 'Call' : 'Message'} ${match.name} ${displayNumber(match.number)}`}; }
-    if (review.kind === 'contact-save') { const change = option as {before: ContactRecord; after: ContactDraft}, renamed = change.after.displayName !== change.before.displayName;
+    if (review.kind === 'contact-create') { const twin = option as {name: string; numbers: string[]};
+      return {ini: initials(twin.name), name: 'Add anyway', lines: style([`${twin.name} is already in Contacts`, ...twin.numbers.slice(0, 2).map(displayNumber)].flatMap(plain)), choose, icon: ICON.add, bg: 'var(--acc)',
+        label: `Add anyway: ${twin.name} is already in Contacts`}; }
+    if (review.kind === 'contact-save') { const change = option as {before: ContactRecord; after: ContactDraft; keeps?: 'add' | 'replace'}, renamed = change.after.displayName !== change.before.displayName;
+      // The same request offered both ways says which row keeps the contact's other numbers and addresses.
+      const way = change.keeps === 'add' ? 'Add (keep existing)' : change.keeps === 'replace' ? 'Replace' : '';
       return {ini: initials(change.after.displayName || change.before.displayName), name: change.after.displayName || change.before.displayName,
-        lines: style([...(renamed ? [{text: change.before.displayName, struck: true, added: false}] : []), ...contactChangeLines(change.before, change.after)]), choose, icon: ICON.save, bg: 'var(--acc)',
-        label: `Save changes to ${change.before.displayName}`}; }
+        lines: style([...(way ? [{text: way, struck: false, added: true}] : []), ...(renamed ? [{text: change.before.displayName, struck: true, added: false}] : []), ...contactChangeLines(change.before, change.after)]), choose, icon: change.keeps === 'add' ? ICON.add : ICON.save, bg: 'var(--acc)',
+        label: way ? `${way}: save changes to ${change.before.displayName}` : `Save changes to ${change.before.displayName}`}; }
     const contact = option as ContactRecord;
     return {ini: initials(contact.displayName), name: contact.displayName, lines: style([...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)].slice(0, 2).flatMap(plain)),
       choose, icon: ICON.delete, bg: 'var(--alpha-call-red)', label: `Delete ${contact.displayName}`};

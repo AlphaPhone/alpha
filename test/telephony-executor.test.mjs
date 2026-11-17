@@ -14,7 +14,7 @@ process.on('exit', () => rmSync(dir, {recursive: true, force: true}));
 const output = await build({entryPoints: [resolve('apps/app/src/runtime/telephony-executor.ts')], bundle: true, format: 'esm', platform: 'node', write: false,
   alias: {'@elizaos/contracts/telephony-actions': resolve('.eliza/client-features/packages/contracts/src/telephony-actions.ts')}});
 writeFileSync(join(dir, 'executor.mjs'), output.outputFiles[0].text);
-const {executeTelephonyAction, appliedContactChange} = await import(pathToFileURL(join(dir, 'executor.mjs')));
+const {executeTelephonyAction, appliedContactChange, refuseTelephonyAction} = await import(pathToFileURL(join(dir, 'executor.mjs')));
 
 const priya = {id: '1', displayName: 'Priya Nair', phoneNumbers: ['+14155550132']};
 const reyes = {id: '2', displayName: 'Daniel Reyes', phoneNumbers: ['+15105550119', '(510) 555-0164']};
@@ -77,11 +77,16 @@ test('a review that is no longer current stops before anything happens', async (
   await assert.rejects(run({type: 'phone_call', target: {kind: 'contact', query: 'Priya'}}, p), /context changed/);
   assert.equal(did(p, 'call').length, 0);
 });
-test('a text to a contact uses the native review under the proposal id; an unknown outcome is not a failure', async () => {
+test('a text to a contact shows who matched, then uses the native review under the proposal id; an unknown outcome is not a failure', async () => {
   let p = ports();
   let result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p, 'proposal-9');
-  assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-9']]); assert.equal(did(p, 'ask').length, 0, 'one number goes straight to the native review');
+  assert.deepEqual(did(p, 'ask').map(row => row[1]), [{kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'On my way'}], 'one match is still confirmed with its name and number');
+  assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-9']]);
   assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'submitted'}); assert.equal(result.status, 'succeeded');
+  // The lookup is a fuzzy filter: the owner can see it matched someone else and stop it.
+  p = ports({ask: async review => { p.log.push(['ask', review]); return null; }});
+  result = await run({type: 'sms_compose', query: 'Pri', body: 'On my way'}, p);
+  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'cancelled'}); assert.equal(did(p, 'ask').length, 1); assert.equal(did(p, 'sms').length, 0);
   p = ports({searchContacts: async () => [reyes], ask: async review => { p.log.push(['ask', review]); return 1; }});
   await run({type: 'sms_compose', query: 'Daniel', body: 'Hi'}, p);
   assert.equal(did(p, 'ask')[0][1].kind, 'message'); assert.deepEqual(did(p, 'sms')[0].slice(1, 3), ['5105550164', 'Hi']);
@@ -108,12 +113,12 @@ test('a text to the contact whose conversation is open becomes a draft there ins
   let result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p);
   assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'drafted'}); assert.equal(result.status, 'succeeded');
   assert.deepEqual(did(p, 'draft'), [['draft', 'On my way', '+14155550132']], 'only the conversation with exactly that number');
-  assert.equal(did(p, 'sms').length, 0, 'the draft is not sent');
+  assert.equal(did(p, 'sms').length, 0, 'the draft is not sent'); assert.equal(did(p, 'ask').length, 0, 'the open conversation already shows who it is');
   // A message is being sent or has pictures there, or another conversation is open: the reviewed send is used as before.
   for (const status of ['occupied', 'none-selected', 'unavailable']) {
     p = ports({draftInOpenThread: () => status});
     result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p, 'proposal-3');
-    assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-3']], status);
+    assert.deepEqual(did(p, 'sms'), [['sms', '+14155550132', 'On my way', 'proposal-3']], status); assert.equal(did(p, 'ask').length, 1, status);
     assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'submitted'});
   }
 });
@@ -138,11 +143,53 @@ test('a contact change shows before and after and writes under the version that 
   p = ports({searchContacts: async () => []});
   assert.equal((await run({type: 'contact_delete', query: 'Nobody'}, p)).telephonyResult.status, 'not-found');
 });
-test('a new contact is written as approved, without a lookup', async () => {
+test('a new contact is written as approved when nobody in Contacts has its name or number', async () => {
   const p = ports();
   const result = await run({type: 'contact_create', contact: {displayName: 'Grace Hopper', phoneNumbers: ['+12025550101'], emailAddresses: []}}, p);
   assert.deepEqual(did(p, 'save')[0].slice(1), [{displayName: 'Grace Hopper', phoneNumbers: [{number: '+12025550101', type: 'mobile'}], emailAddresses: []}, undefined]);
-  assert.equal(did(p, 'search').length, 0); assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status: 'saved'});
+  assert.deepEqual(did(p, 'search'), [['search', 'Grace Hopper', 10]]); assert.equal(did(p, 'ask').length, 0);
+  assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status: 'saved'});
+});
+test('a new contact that repeats a name or number is added only after the owner says Add anyway', async () => {
+  const create = contact => ({type: 'contact_create', contact: {emailAddresses: [], ...contact}});
+  // The same name in other letter case, and the same number under another name and formatting.
+  for (const contact of [{displayName: 'priya nair', phoneNumbers: []}, {displayName: 'Priya (work)', phoneNumbers: ['+1 (415) 555-0132']}]) {
+    let p = ports();
+    let result = await run(create(contact), p);
+    assert.deepEqual(did(p, 'ask').map(row => row[1]), [{kind: 'contact-create', options: [{name: 'Priya Nair', numbers: ['+14155550132']}]}]);
+    assert.equal(did(p, 'save').length, 1, 'Add anyway writes it'); assert.equal(result.telephonyResult.status, 'saved');
+    p = ports({ask: async () => null});
+    result = await run(create(contact), p);
+    assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status: 'cancelled'}); assert.equal(did(p, 'save').length, 0, 'Not now writes nothing');
+    assert.match(result.summary, /Nothing was changed/);
+  }
+  // A lookup that fails cannot rule a duplicate out: nothing is written.
+  const p = ports({searchContacts: async () => { throw Error('Contacts closed'); }});
+  const result = await run(create({displayName: 'Grace Hopper', phoneNumbers: []}), p);
+  assert.equal(result.telephonyResult.status, 'unavailable'); assert.equal(did(p, 'save').length, 0);
+});
+test('a change that would drop a number or address offers adding to them as well as replacing them', async () => {
+  const sam = {...record('1'), displayName: 'Sam Lee', phoneNumbers: [{number: '+14155550132', type: 'mobile'}, {number: '+14155550199', type: 'work'}], emailAddresses: [{address: 'sam@work.example', type: 'work'}]};
+  const update = {type: 'contact_update', query: 'Sam', set: {emailAddresses: ['sam@example.com']}};
+  for (const [choice, keeps, emails] of [[0, 'add', [{address: 'sam@work.example', type: 'work'}, {address: 'sam@example.com', type: 'home'}]], [1, 'replace', [{address: 'sam@example.com', type: 'home'}]]]) {
+    const p = ports({getContact: async () => sam, ask: async review => { p.log.push(['ask', review]); return choice; }});
+    const result = await run(update, p);
+    assert.deepEqual(did(p, 'ask')[0][1].options.map(option => option.keeps), ['add', 'replace'], 'both ways are offered for the one match');
+    assert.equal(did(p, 'ask')[0][1].options[choice].keeps, keeps);
+    assert.deepEqual(did(p, 'save')[0][1], {displayName: 'Sam Lee', phoneNumbers: sam.phoneNumbers, emailAddresses: emails}, keeps);
+    assert.equal(result.telephonyResult.status, 'saved');
+  }
+  // "Change Sam's number" keeps or replaces both numbers; a number already there is not repeated.
+  let p = ports({getContact: async () => sam});
+  await run({type: 'contact_update', query: 'Sam', set: {phoneNumbers: ['+1 (415) 555-0199', '+16285550148']}}, p);
+  assert.deepEqual(did(p, 'ask')[0][1].options.map(option => option.after.phoneNumbers.map(row => row.number)),
+    [['+14155550132', '+14155550199', '+16285550148'], ['+1 (415) 555-0199', '+16285550148']]);
+  // Nothing would be dropped (a rename, or a list that still holds every value): one row, as before.
+  for (const set of [{displayName: 'Samuel Lee'}, {phoneNumbers: ['+14155550132', '+14155550199', '+16285550148']}]) {
+    p = ports({getContact: async () => sam});
+    await run({type: 'contact_update', query: 'Sam', set}, p);
+    assert.deepEqual(did(p, 'ask')[0][1].options.map(option => option.keeps), [undefined]);
+  }
 });
 test('the agent reads only what the owner has open, and a voicemail delete is the owner\'s confirmation', async () => {
   let p = ports();
@@ -178,4 +225,52 @@ test('uncertain create, update and delete receipts stay unknown without repeatin
    assert.match(result.summary,/could not confirm/);assert.doesNotMatch(result.summary,/Nothing was changed/);
   }
  }
+});
+
+const coded = (message, code) => Object.assign(Error(message), {code});
+test('a call the phone refused before Telecom was asked is "nothing was called", never unknown', async () => {
+  for (const code of ['role-required', 'permission-required', 'unavailable', 'invalid']) {
+    const p = ports({placeCall: async number => { p.log.push(['call', number]); throw coded('refused', code); }});
+    const result = await run({type: 'phone_call', target: {kind: 'contact', query: 'Priya'}}, p);
+    assert.deepEqual(result.telephonyResult, {kind: 'phone-call', status: 'unavailable', contact: true}, code);
+    assert.equal(result.status, 'failed'); assert.match(result.summary, /Nothing was called/); assert.equal(did(p, 'call').length, 1, 'never retried');
+  }
+});
+test('a contact write the phone refused before it touched the address book says nothing was changed', async () => {
+  const operations = [{type: 'contact_create', contact: {displayName: 'Ada', phoneNumbers: [], emailAddresses: []}}, {type: 'contact_update', query: 'Priya', set: {displayName: 'Ada'}}, {type: 'contact_delete', query: 'Priya'}];
+  for (const operation of operations) {
+    for (const [code, status] of [['permission-required', 'unavailable'], ['unavailable', 'unavailable'], ['invalid', 'failed'], ['not-found', operation.type === 'contact_create' ? 'failed' : 'not-found']]) {
+      let writes = 0; const refuse = async () => { writes++; throw coded('refused', code); };
+      const p = ports({saveContact: refuse, removeContact: refuse}); const result = await run(operation, p);
+      assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status}, `${operation.type} ${code}`);
+      assert.equal(result.status, 'failed'); assert.match(result.summary, /Nothing was changed/); assert.equal(writes, 1);
+    }
+  }
+});
+test('a contact that could not be read is not reported as "no matching contact"', async () => {
+  for (const operation of [{type: 'contact_update', query: 'Priya', set: {displayName: 'Ada'}}, {type: 'contact_delete', query: 'Priya'}]) {
+    // Contacts paused or closed during the read: the contact may well exist.
+    let p = ports({getContact: async () => { throw coded('Contacts access changed', 'unavailable'); }});
+    let result = await run(operation, p);
+    assert.equal(result.telephonyResult.status, 'unavailable'); assert.doesNotMatch(result.summary, /No matching contact/);
+    // The only match holds more than the editor reads, or went away: it cannot be offered, and it is not "no match" either.
+    for (const code of ['incomplete', 'not-found']) {
+      p = ports({getContact: async () => { throw coded('skipped', code); }});
+      assert.equal((await run(operation, p)).telephonyResult.status, 'unavailable', code);
+      // Beside a readable match it is only left out.
+      p = ports({searchContacts: async () => [priya, reyes], getContact: async id => { if (id === '1') throw coded('skipped', code); return record(id); }});
+      result = await run(operation, p);
+      assert.equal(did(p, 'ask')[0][1].options.length, 1); assert.match(result.telephonyResult.status, /saved|deleted/);
+    }
+    assert.equal(did(p, 'save').length + did(p, 'remove').length, 1);
+  }
+});
+test('an action refused before it ran carries the typed unavailable result of its kind', () => {
+  const kinds = {phone_call: 'phone-call', sms_compose: 'sms-compose', sms_reply_selected: 'sms-reply', contact_create: 'contact-write', contact_update: 'contact-write', contact_delete: 'contact-write',
+    messages_read_selected: 'messages-read', voicemail_read_selected: 'voicemail-read', voicemail_delete_selected: 'voicemail-delete'};
+  for (const [type, kind] of Object.entries(kinds)) {
+    const refused = refuseTelephonyAction({type}, 'Nothing was done. Keep Alpha open and unlocked, then ask again.');
+    assert.equal(refused.status, 'failed', type); assert.equal(refused.summary, 'Nothing was done. Keep Alpha open and unlocked, then ask again.');
+    assert.deepEqual(refused.telephonyResult, kind === 'phone-call' ? {kind, status: 'unavailable', contact: false} : {kind, status: 'unavailable'});
+  }
 });
