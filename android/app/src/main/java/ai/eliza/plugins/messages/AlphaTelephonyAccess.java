@@ -24,17 +24,22 @@ public final class AlphaTelephonyAccess {
  private AlphaTelephonyAccess() {}
 
  // ---- Reviewed sends (SmsTelephony, SmsSendJournal) --------------------------------------------
+ // These four were reachable only inside the shared package, behind the shared native review. Each
+ // must run only after the owner pressed Send on Alpha's native review (AlphaTelephonyReview in
+ // AlphaTelephonyBase, or AlphaSmsComposeActivity) with its unlocked-phone check, or to record that
+ // review's cancel or denial. test/native-ui-self-contained.test.mjs admits calls from those two
+ // files only.
 
  /** The platform SmsManager of one subscription. */
  public static SmsManager manager(Context context, int subscriptionId) { return SmsTelephony.manager(context, subscriptionId); }
 
- /** Journals and dispatches a reviewed SMS ({@link SmsTelephony#dispatch}). */
+ /** Journals and dispatches a reviewed SMS ({@link SmsTelephony#dispatch}). Only after an owner-confirmed native review. */
  public static SmsSendJournal.Record dispatch(Context context, SmsTelephonyConfiguration config, SmsSendJournal journal, String operationId,
    String[] recipients, String body, int subscriptionId, ArrayList<String> parts, SmsTelephony.DispatchGuard guard) throws IOException {
   return SmsTelephony.dispatch(context, config, journal, operationId, recipients, body, subscriptionId, parts, guard);
  }
 
- /** Journals and dispatches a reviewed MMS ({@link SmsTelephony#dispatchMms}). */
+ /** Journals and dispatches a reviewed MMS ({@link SmsTelephony#dispatchMms}). Only after an owner-confirmed native review. */
  public static SmsSendJournal.Record dispatchMms(Context context, SmsTelephonyConfiguration config, SmsSendJournal journal, String operationId,
    String[] recipients, String body, SmsSendJournal.Attachment[] attachments, byte[] pdu, List<MmsPdu.Part> parts, int subscriptionId,
    SmsTelephony.DispatchGuard guard) throws IOException {
@@ -47,7 +52,7 @@ public final class AlphaTelephonyAccess {
  /** The PDU transaction ID of a reviewed MMS ({@link SmsTelephony#mmsTransaction}). */
  public static String mmsTransaction(String operationId) { return SmsTelephony.mmsTransaction(operationId); }
 
- /** Records a terminal decision (cancelled or denied) before any dispatch ({@link SmsSendJournal#decide}). */
+ /** Records a terminal decision (cancelled or denied) before any dispatch ({@link SmsSendJournal#decide}). Only for the native review's own outcome. */
  public static SmsSendJournal.Record decide(SmsSendJournal journal, String operationId, String[] recipients, String body, int subscriptionId,
    String decision, long now, long boot) throws IOException {
   return journal.decide(operationId, recipients, body, subscriptionId, decision, now, boot);

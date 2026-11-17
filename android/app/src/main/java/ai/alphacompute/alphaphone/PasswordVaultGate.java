@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.eliza.plugins.passwords.AlphaPasswordAdmission;
 import ai.eliza.plugins.passwords.PasswordVaultAccess;
 import android.content.Context;
 import android.content.pm.PackageInfo;
@@ -20,20 +21,36 @@ final class PasswordVaultGate {
   /** The vault is locked or the screen asking for it is gone. Reported to the renderer as {@code locked}. */
   static final class Locked extends Exception { Locked() { super("Saved passwords are locked", null, false, false); } }
 
-  private static volatile PasswordVaultAccess.Admission admission = context -> true;
   /**
    * Registers Alpha's rule for whether the vault may be reached now, once, from
    * {@code Application#onCreate}. Every bridge, Autofill, fill and save entry asks it first and
-   * refuses with {@code not-admitted}. It also becomes the shared custody's rule, so the two never
-   * disagree. It must be fast, must not show UI and returns false when it cannot decide. The
-   * default admits.
+   * refuses with {@code not-admitted}. The rule is kept in one place, the shared custody
+   * ({@link PasswordVaultAccess#setAdmission}), which the Autofill service asks too, so Alpha's
+   * screens and Autofill can never disagree; this is the only Alpha code that sets it
+   * (test/native-ui-self-contained.test.mjs). It must be fast, must not show UI and returns false
+   * when it cannot decide. The default admits.
    */
-  static void setAdmission(PasswordVaultAccess.Admission rule) { admission = rule; PasswordVaultAccess.setAdmission(rule); }
-  static boolean admitted(Context context) { return admission.admit(context); }
+  static void setAdmission(PasswordVaultAccess.Admission rule) { PasswordVaultAccess.setAdmission(rule); }
+  static boolean admitted(Context context) { return AlphaPasswordAdmission.admitted(context); }
 
   /** Closes the editor and a revealed secret, on the main thread. */
   static void closeSurfaces() {
     new Handler(Looper.getMainLooper()).post(() -> { PasswordEditor.dismiss(); SecretSurfaces.dismiss(); });
+  }
+
+  /**
+   * The shared {@link PasswordVaultAccess#lockAndClose} closes only the shared editor and reveal,
+   * which Alpha never opens. Alpha's native lifecycle (sign-out, owner revoke) locks through here so
+   * Alpha's own editor and revealed secret close too. Alpha code never calls the shared method
+   * directly (test/native-ui-self-contained.test.mjs).
+   */
+  static void lockAndClose(PasswordVaultAccess access) {
+    try { access.lockAndClose(); } finally { closeSurfaces(); }
+  }
+
+  /** As {@link #lockAndClose}, for {@link PasswordVaultAccess#destroyVault}: Alpha's surfaces close even when deletion throws. */
+  static void destroyVault(PasswordVaultAccess access) throws Exception {
+    try { access.destroyVault(); } finally { closeSurfaces(); }
   }
 
   /** Rotation-aware: the package's signing history includes this SHA-256 certificate digest. */

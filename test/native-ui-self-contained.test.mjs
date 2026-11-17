@@ -286,3 +286,42 @@ ${extra}`, badging: `package: name='${APP_ID}' versionCode='15' versionName='15'
   assert.match(assess(element('activity', 'ai.eliza.plugins.messages.SmsComposeActivity')).join(), /Shared activity ai\.eliza\.plugins\.messages\.SmsComposeActivity/);
   assert.match(assess(element('service', 'ai.eliza.plugins.system.AssistantEntryTile')).join(), /Shared service/);
 });
+
+// Shared entry points whose safety depends on Alpha's own UI around them. The split-package bridges
+// (AlphaTelephonyAccess, AlphaPasswordAdmission) make package-private shared members public, and the
+// shared vault custody's lock and destroy close only the shared surfaces Alpha no longer opens, so
+// each is called only from the Alpha file that owns the surrounding review or close.
+const GUARDED_CALLS = [
+  {call: /\bAlphaTelephonyAccess\s*\.\s*(?:dispatch|dispatchMms|decide|decideMms)\s*\(/, owners: ['AlphaTelephonyBase.java', 'AlphaSmsComposeActivity.java'],
+    why: 'a journaled send or decision runs only behind Alpha\'s owner-confirmed native review'},
+  {call: /(?<!\bPasswordVaultGate\s*)\.\s*(?:lockAndClose|destroyVault)\s*\(/, owners: ['PasswordVaultGate.java'],
+    why: 'PasswordVaultGate.lockAndClose and destroyVault also close Alpha\'s editor and revealed secret'},
+  {call: /\bPasswordVaultAccess\s*\.\s*setAdmission\s*\(/, owners: ['PasswordVaultGate.java'], why: 'PasswordVaultGate.setAdmission is the one writer of the vault admission rule'},
+  {call: /\bAlphaPasswordAdmission\s*\.\s*admitted\s*\(/, owners: ['PasswordVaultGate.java'], why: 'Alpha\'s screens ask PasswordVaultGate.admitted'},
+];
+// Alpha sources that sit in a shared package to reach its package-private members.
+const SPLIT_PACKAGE_SOURCES = new Map([
+  ['ai.eliza.plugins.messages.AlphaTelephonyAccess', 'the reviewed SMS/MMS journal, dispatch, MMS file and read-marker glue'],
+  ['ai.eliza.plugins.passwords.AlphaPasswordAdmission', 'the shared vault admission rule, read so Autofill and Alpha\'s screens share one rule'],
+]);
+
+test('shared entry points behind Alpha\'s reviews and closes are called only by their owners', () => {
+  const offences = [];
+  for (const source of alpha.values()) {
+    const file = path.basename(source.file);
+    for (const {call, owners, why} of GUARDED_CALLS)
+      if (call.test(source.text) && !owners.includes(file)) offences.push(`${source.file} calls ${call.source}: ${why}`);
+  }
+  assert.deepEqual(offences, []);
+  for (const {call, owners} of GUARDED_CALLS)
+    assert.ok([...alpha.values()].some(source => owners.includes(path.basename(source.file)) && call.test(source.text)), `${call.source} is still called by its owner`);
+  for (const [sample, guarded] of [['AlphaTelephonyAccess.dispatch(ctx', true], ['AlphaTelephonyAccess . decideMms (j', true], ['PasswordVaultAccess.get(this).destroyVault()', true],
+    ['access.lockAndClose();', true], ['PasswordVaultGate.lockAndClose(access);', false], ['PasswordVaultAccess.setAdmission(rule)', true], ['AlphaTelephonyAccess.manager(ctx, 1)', false]])
+    assert.equal(GUARDED_CALLS.some(({call}) => call.test(sample)), guarded, sample);
+  const vaultGate = alpha.get(`${APP_ID}.PasswordVaultGate`).text;
+  assert.match(vaultGate, /static void lockAndClose\(PasswordVaultAccess access\) \{\s*try \{ access\.lockAndClose\(\); \} finally \{ closeSurfaces\(\); \}/);
+  assert.match(vaultGate, /static void destroyVault\(PasswordVaultAccess access\) throws Exception \{\s*try \{ access\.destroyVault\(\); \} finally \{ closeSurfaces\(\); \}/);
+  assert.match(vaultGate, /static boolean admitted\(Context context\) \{ return AlphaPasswordAdmission\.admitted\(context\); \}/, 'Alpha asks the shared rule, so there is one');
+  const split = [...alpha.values()].filter(source => source.pkg.startsWith('ai.eliza.')).map(source => `${source.pkg}.${source.simple}`).sort();
+  assert.deepEqual(split, [...SPLIT_PACKAGE_SOURCES.keys()].sort(), 'an Alpha source in a shared package is reviewed');
+});

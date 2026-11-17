@@ -232,6 +232,7 @@ export const moduleInventory = {
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/TabLayer.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/release/DataIntegrityProvider.java",
     "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
+    "android/app/src/main/java/ai/eliza/plugins/passwords/AlphaPasswordAdmission.java",
     "apps/app/src/browser/agent-speech.ts",
     "apps/app/src/browser/alert-audio.ts",
     "apps/app/src/browser/apps.ts",
