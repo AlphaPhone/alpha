@@ -436,12 +436,19 @@ test('loops B, C and J04 in the web build: Agent Calendar requires a connection,
   await page.addInitScript(offline);
   await page.goto('/');
   await button(page, 'Calendar').click();
-  await expect(page.getByRole('region', {name: 'Calendar', exact: true})).toContainText('Connect');
+  const calendar = page.getByRole('region', {name: 'Calendar', exact: true});
+  // No dead Connect or Retry control: the empty grid says Not connected and offers the way to Settings.
+  await expect(calendar.getByRole('region', {name: 'Calendar timeline', exact: true})).toContainText('Not connected');
+  await expect(calendar.getByRole('button', {name: 'Retry calendar and reminders', exact: true})).toHaveCount(0);
+  await expect(calendar.getByText('Connect', {exact: true})).toHaveCount(0);
+  await expect(calendar.getByRole('button', {name: 'Open Calendar settings', exact: true})).toBeVisible();
   await button(page, 'New event').click();
   await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveCount(0);
   await expect(button(page, 'Save event')).toHaveCount(0);
   expect(await storedEvents(page)).toEqual([]);
   // An unavailable Agent Calendar must not silently create a local event.
+  await calendar.getByRole('button', {name: 'Open Calendar settings', exact: true}).click();
+  await expect(page.getByRole('region', {name: 'Settings', exact: true}).getByRole('button', {name: 'Google Calendar', exact: true})).toBeVisible();
   await page.goto('/');
   await button(page, 'Maps').click();
   await expect(page.getByRole('region', {name: 'Map', exact: true})).toBeVisible();

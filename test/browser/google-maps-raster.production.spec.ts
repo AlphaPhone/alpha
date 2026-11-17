@@ -104,7 +104,12 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
    await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
    // No separate data-source control: the Google attribution itself is always on the map.
    await expect(attribution.getByText('Data sources',{exact:true})).toHaveCount(0);
-   await expect(attribution.locator('.alpha-google-copyright')).toBeVisible();
+   // Google's Map Tiles policy: the viewport copyright is shown in full, on the map, at every size.
+   const copyright=attribution.locator('.alpha-google-copyright');
+   await expect(copyright).toHaveText('Map data © Google · synthetic viewport');
+   expect(await copyright.evaluate(el=>{const r=el.getBoundingClientRect(),style=getComputedStyle(el);
+    return {clipped:el.scrollWidth>el.clientWidth+1||el.scrollHeight>el.clientHeight+1,ellipsis:style.textOverflow==='ellipsis'&&style.overflow!=='visible',
+     inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight};})).toEqual({clipped:false,ellipsis:false,inside:true});
    await page.screenshot({path:info.outputPath(`google-credit-${stage}-${layout.name}.png`),animations:'disabled'});
    // The compact information control and full recipient roles remain reachable
    // at the same enlarged/landscape sizes as the data-source attribution.

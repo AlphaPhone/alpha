@@ -215,7 +215,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
     out.calendarSourceLabel=Capacitor.isNativePlatform()?'On-device calendars':'Browser calendar';
     out.calendarSourceText=Capacitor.isNativePlatform()?'':'';
     out.nativeStatusLabel=[rangeReady&&truncated?'Incomplete':'',reminderStale?'Stale':''].filter(Boolean).join(' ');
-    out.nativeStatusRetry=()=>{void refresh(false,true);void owner?.refreshReminders();};
+    out.nativeStatusRetry=()=>{void refresh(false,true);void owner?.refreshReminders();};out.nativeStatusAria='Retry calendar and reminders';out.nativeStatusRetries=true;
     out.browserRecovery=!Capacitor.isNativePlatform()&&loadFailed&&!loading;out.openBrowserRecovery=openCalendarRecovery;
     out.reminderRecovery=!Capacitor.isNativePlatform()&&reminderStale;out.openReminderRecovery=openReminderRecovery;out.openReminderCreationRecovery=openReminderCreationRecovery;out.openReminderActionRecovery=openReminderActionRecovery;out.anyRecovery=out.browserRecovery||out.reminderRecovery;
     if(!rangeReady&&!state.open&&!state.form)out.empty=true;

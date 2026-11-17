@@ -115,6 +115,8 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
    diagnose('restore-finished');
   }catch{diagnose('bootstrap-failed');discard();}
  };
+ // The agent's first start after launch, before any failure: it connects by itself.
+ const agentStarting=()=>{const snapshot=connectionController.getSnapshot();return snapshot.kind==='starting'&&!snapshot.residentRecoveryReason;};
  const zone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
  const range=(state:Bag)=>{const today=new Date(),day=new Date(today.getFullYear(),today.getMonth(),today.getDate()+Number(state.day||0));day.setMonth(day.getMonth()+Number(state.month||0));return{side:'owner' as const,timeMin:new Date(day.getFullYear(),day.getMonth()-1,1).toISOString(),timeMax:new Date(day.getFullYear(),day.getMonth()+2,1).toISOString(),timeZone:zone()};};
  const invalidate=(sessionId:string)=>{const target=port();if(!target?.current()||target.sessionId!==sessionId||invalidating)return;invalidating=true;queueMicrotask(()=>{invalidating=false;const current=port();if(owner?.live&&current?.current()&&current.sessionId===sessionId)refresh(true);});};
@@ -229,8 +231,10 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   const presentation={...state,add:null,events:visibleRows,canonicalCalendars:cals,calendarPresentationSources:presentationSources};
   const out=render(presentation,api);
   presentCalendarIntervals(render,presentation,api,out,legacy?!!model?.legacy?.readable:!!model?.feed);
-  out.calendarSourceLabel=legacy?'Saved · Read only':'Agent Calendar';out.calendarSourceText=!legacy&&model?.savedAt!=null?(controller?.refreshing?'Refreshing':'Couldn’t refresh') : !legacy&&model?.status==='unavailable'?'Unavailable':model?.error??(!model?.ownerKey?'Connect':model?.status==='loading'?'Loading':unresolvedCalendarSources||model?.status==='partial'?'Refresh Calendar':model?.status==='transition-required'?'Review needed':model?.status==='legacy-recovery'?'Needs review':'');
-  out.nativeStatusLabel=model?.status==='ready'&&!unresolvedCalendarSources?'':out.calendarSourceText;out.nativeStatusRetry=()=>refresh(true);out.newEvent=out.addAt=()=>legacy?api.toast('Agent Calendar only'):newForm(api);
+  out.calendarSourceLabel=legacy?'Saved · Read only':'Agent Calendar';out.calendarSourceText=!legacy&&model?.savedAt!=null?(controller?.refreshing?'Refreshing':'Couldn’t refresh') : !legacy&&model?.status==='unavailable'?'Unavailable':model?.error??(!model?.ownerKey?(agentStarting()?'Starting…':'Not connected'):model?.status==='loading'?'Loading':unresolvedCalendarSources||model?.status==='partial'?'Refresh Calendar':model?.status==='transition-required'?'Review needed':model?.status==='legacy-recovery'?'Needs review':'');
+  // No agent session owns this Calendar: nothing here can be retried, so the action opens Settings › Calendar.
+  const notConnected=!legacy&&out.calendarSourceText==='Not connected',openCalendarSettings=()=>{const shell=owner;if(shell?.live)shell.openView('settings',{page:'calendar'});};
+  out.nativeStatusLabel=model?.status==='ready'&&!unresolvedCalendarSources?'':out.calendarSourceText;out.nativeStatusRetry=notConnected?openCalendarSettings:()=>refresh(true);out.nativeStatusAria=notConnected?'Open Calendar settings':'Retry calendar and reminders';out.nativeStatusOpensSettings=notConnected;out.nativeStatusRetries=!notConnected;out.newEvent=out.addAt=()=>legacy?api.toast('Agent Calendar only'):newForm(api);
   out.calendarAuthorityChoices=choices(state,api);
   out.canConfirmCalendarTransition=model?.status==='transition-required';
   if(out.canConfirmCalendarTransition){
@@ -305,6 +309,10 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   // An incomplete window cannot establish that the selected day is free, even if verified rows exist on other days.
   if(out.empty&&!legacy&&(unresolvedCalendarSources>0||model?.status==='partial'||model?.status==='unavailable')&&out.nativeStatusLabel)out.emptyText=out.nativeStatusLabel;
   // The header already owns this warning and its retry action; do not repeat it in the grid.
+  // Not connected is the one status the empty grid owns: the text in the centre with the way to Settings under it.
+  if(out.empty&&notConnected){out.nativeStatusLabel='';out.emptyText='Not connected';out.notConnected=true;out.openCalendarSettings=openCalendarSettings;}
+  // Routine agent startup needs no action from the owner: the grid says so and offers nothing to press.
+  else if(out.empty&&!legacy&&out.calendarSourceText==='Starting…'){out.nativeStatusLabel='';out.emptyText='Starting…';}
   if(out.empty&&out.nativeStatusLabel&&out.emptyText===out.nativeStatusLabel)out.empty=false;
   return out;
  };
