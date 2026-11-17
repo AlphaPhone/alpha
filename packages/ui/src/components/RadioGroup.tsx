@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { cn } from "../lib/cn.ts";
-import { mark, markTarget } from "../lib/styles.ts";
+import { markTarget, radioMark } from "../lib/styles.ts";
 
 export type RadioGroupProps = ComponentProps<typeof RadioGroupPrimitive.Root>;
 export type RadioGroupItemProps = Omit<ComponentProps<typeof RadioGroupPrimitive.Item>, "children">;
@@ -15,7 +15,7 @@ export function RadioGroup({ className, ...props }: RadioGroupProps) {
 export function RadioGroupItem({ className, ...props }: RadioGroupItemProps) {
   return (
     <RadioGroupPrimitive.Item className={cn(markTarget, className)} {...props}>
-      <span className={cn(mark, "group-data-[state=checked]:border-primary")}>
+      <span className={radioMark}>
         <RadioGroupPrimitive.Indicator className="size-3 rounded-full bg-primary" />
       </span>
     </RadioGroupPrimitive.Item>

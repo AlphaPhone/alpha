@@ -7,6 +7,7 @@ export type CardProps = ComponentProps<"div"> & {
   asChild?: boolean;
 };
 export type CardTitleProps = ComponentProps<"h3">;
+export type CardFooterProps = ComponentProps<"div">;
 
 /** A surface that groups what belongs to one thing. */
 export function Card({ asChild = false, className, ...props }: CardProps) {
@@ -20,6 +21,6 @@ export function CardTitle({ className, ...props }: CardTitleProps) {
 }
 
 /** The actions of a `Card`, in a row at its end. */
-export function CardFooter({ className, ...props }: Omit<CardProps, "asChild">) {
+export function CardFooter({ className, ...props }: CardFooterProps) {
   return <div className={cn("flex items-center justify-end gap-2", className)} {...props} />;
 }

@@ -14,6 +14,7 @@ const children = (
 
 export const meta: ComponentMeta<ScreenProps> = {
   args: { title: "Notes", children },
+  decorator: (story) => <div className="h-dvh">{story()}</div>,
   examples: {
     Leading: { leading: <Button variant="ghost" size="icon" aria-label="Back"><ChevronLeft /></Button> },
     Actions: { actions: <Button variant="ghost" size="icon" aria-label="New note"><Plus /></Button> },

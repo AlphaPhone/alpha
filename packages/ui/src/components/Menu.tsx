@@ -4,6 +4,7 @@ import { cn } from "../lib/cn.ts";
 import { floatingPanel, floatingRow } from "../lib/styles.ts";
 
 export type MenuProps = ComponentProps<typeof MenuPrimitive.Root>;
+export type MenuTriggerProps = ComponentProps<typeof MenuPrimitive.Trigger>;
 export type MenuContentProps = ComponentProps<typeof MenuPrimitive.Content>;
 export type MenuItemProps = ComponentProps<typeof MenuPrimitive.Item> & {
   /** Marks an action that cannot be taken back, such as Delete. */
