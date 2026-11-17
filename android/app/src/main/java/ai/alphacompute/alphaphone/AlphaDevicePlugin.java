@@ -255,6 +255,11 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  static final String UPDATE_STATUS="ai.alphacompute.alphaphone.UPDATE_STATUS";
+ /** The image's INSTALL_SELF_UPDATES grant, or the owner's install-unknown-apps consent. Every install read uses this. */
+ static boolean selfUpdateAdmitted(Context context){
+  return context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==PackageManager.PERMISSION_GRANTED
+   ||context.getPackageManager().canRequestPackageInstalls();
+ }
  /**
   * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
   * An image may allow-list INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher. Android then admits
@@ -262,11 +267,6 @@ public final class AlphaDevicePlugin extends Plugin {
   * update only when the image's own launcher also declares it. The launcher does not declare it yet: the shared image
   * stager must first admit it to its reviewed privileged set. Until then every install needs that choice once.
   */
- /** The image's INSTALL_SELF_UPDATES grant, or the owner's install-unknown-apps consent. Every install read uses this. */
- static boolean selfUpdateAdmitted(Context context){
-  return context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==PackageManager.PERMISSION_GRANTED
-   ||context.getPackageManager().canRequestPackageInstalls();
- }
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";
   if(!selfUpdateAdmitted(context))return "permission-required";
