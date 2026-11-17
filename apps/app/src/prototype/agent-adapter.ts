@@ -1647,6 +1647,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     document.addEventListener('pointerdown',retire,{capture:true,signal:events.signal});
     document.addEventListener('keydown',retire,{capture:true,signal:events.signal});
     document.addEventListener('focusin',event=>{if(event.target!==origin)retire();},{capture:true,signal:events.signal});
+    // A native keyboard dismissal can blur the editor without another pointer or key event.
+    if(typeof origin.moveBefore==='function'&&previousFocus===origin)origin.addEventListener('blur',retire,{signal:events.signal});
     document.addEventListener('visibilitychange',retire,{signal:events.signal});
     unsubscribe=connectionController.subscribe(()=>{if(typedSendBinding()!==binding)retire();});
     const restore=()=>{
@@ -1656,7 +1658,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       retire();
       if(!current)return;
       const input=document.querySelector<HTMLTextAreaElement>('textarea[data-alpha-composer]:not([disabled])');
-      input?.focus({preventScroll:true});input?.setSelectionRange(input.value.length,input.value.length);
+      if(input&&active!==input){input.focus({preventScroll:true});input.setSelectionRange(input.value.length,input.value.length);}
     };
     // Focus follows the accepted optimistic commit, never a later network reply.
     void shell.send(undefined,undefined,restore).finally(retire);

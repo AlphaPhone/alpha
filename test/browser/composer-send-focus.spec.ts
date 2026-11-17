@@ -2,7 +2,7 @@ import {returnToApps} from './app-navigation';
 import {test,expect} from '@playwright/test';
 test.use({hasTouch:true});
 async function setup(page:any){
- await page.route('https://**/*',r=>r.abort());await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).sendFocus={sent:[],holdConsume:false};if(navigator.mediaDevices)navigator.mediaDevices.getUserMedia=async()=>{throw Error('No real microphone');};});await page.goto('/?connections=advanced');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeEnabled();
+ await page.route('https://**/*',r=>r.abort());await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).sendFocus={sent:[]};if(navigator.mediaDevices)navigator.mediaDevices.getUserMedia=async()=>{throw Error('No real microphone');};});await page.goto('/?connections=advanced');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeEnabled();
  await page.evaluate(async()=>{const {Component}=await import('/src/prototype/model.js'),{alphaClient}=await import('/src/runtime/alpha-client.ts');const f=(window as any).sendFocus;Component.prototype.connectAgent=async()=>{};alphaClient.send=async(text:string)=>{f.sent.push(text);await new Promise<void>(r=>f.reply=r);return {text:'Closed fixture reply'};};const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){f.shell=this;return render.call(this);};});
  // Capture the instrumented shell during an explicit render; a settled startup need not
  // produce another incidental render just to initialize this fixture.
@@ -28,9 +28,7 @@ for(const detent of ['input','sheet','full'])for(const method of ['Enter','click
  await expect(next).toBeFocused();
  const continuity=await next.evaluate((e:any)=>({sameInput:e===(window as any).sendFocus.input,oldInputConnected:(window as any).sendFocus.input.isConnected,blurs:(window as any).sendFocus.blurs}));
  await info.attach('composer-continuity',{body:JSON.stringify({detent,method,...continuity}),contentType:'application/json'});
- // Opening a chat from the Home dock still changes its container. This patch prevents
- // the Send button's focus transfer within an already open chat; it does not unify containers.
- if(detent!=='input')expect(continuity).toEqual({sameInput:true,oldInputConnected:true,blurs:0});
+ expect(continuity).toEqual({sameInput:true,oldInputConnected:true,blurs:0});
  await page.keyboard.type('Next prompt');await expect(next).toHaveValue('Next prompt');
  expect(await next.evaluate((e:any)=>e.selectionStart)).toBe(11);
  await next.press('Enter');expect(await page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);
@@ -39,6 +37,26 @@ for(const detent of ['input','sheet','full'])for(const method of ['Enter','click
 });
 test('a later provider reply never steals the user’s new focus',async({page})=>{
  await setup(page);const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('First prompt');await input.press('Enter');await expect.poll(()=>page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);const chosen=page.getByRole('button',{name:'Resize chat',exact:true});await chosen.focus();await page.evaluate(()=>(window as any).sendFocus.reply());await expect(chosen).toBeFocused();
+});
+test('Android keyboard dismissal while the send waits does not reopen it',async({page})=>{
+ await setup(page);
+ await page.evaluate(()=>{
+  const f=(window as any).sendFocus,c=f.shell.composerDraft,hold=c.hold.bind(c);
+  c.hold=async(...args:any[])=>{await new Promise<void>(resolve=>{f.releaseHold=resolve;});return hold(...args);};
+  window.dispatchEvent(new CustomEvent('alpha-keyboard-visibility',{detail:{visible:true}}));
+ });
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
+ await input.fill('Send then dismiss');await input.press('Enter');
+ await expect.poll(()=>page.evaluate(()=>!!(window as any).sendFocus.releaseHold)).toBe(true);
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('alpha-keyboard-visibility',{detail:{visible:false}})));
+ await expect(input).not.toBeFocused();
+ await page.evaluate(()=>(window as any).sendFocus.releaseHold());
+ await expect.poll(()=>page.evaluate(()=>(window as any).sendFocus.sent)).toEqual(['Send then dismiss']);
+ const next=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await expect(next).not.toBeFocused();
+ await page.evaluate(()=>(window as any).sendFocus.reply());
+ await expect(page.getByRole('button',{name:'Message actions: Closed fixture reply',exact:true})).toBeVisible();
+ await expect(next).not.toBeFocused();await next.tap();await expect(next).toBeFocused();
 });
 test('empty Enter, IME confirmation and multiline input preserve the draft without dispatch',async({page})=>{
  await setup(page);const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.focus();await input.press('Enter');await expect(input).toBeFocused();await input.fill('Keep this');await input.dispatchEvent('keydown',{key:'Enter',isComposing:true});await input.press('End');await input.press('Shift+Enter');await page.keyboard.type('second line');await expect(input).toHaveValue('Keep this\nsecond line');expect(await page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(0);

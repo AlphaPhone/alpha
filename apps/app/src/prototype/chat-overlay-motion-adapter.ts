@@ -1,3 +1,5 @@
+import { createElement } from 'react';
+import { ComposerEditor } from './composer-editor';
 import {
 	clamp01,
 	OVERLAY_EASE,
@@ -1299,6 +1301,37 @@ export function installChatOverlayMotion(Component: Shell) {
 				if (ownedPress(event)) settleScrim();
 			},
 		};
+		// Both layouts and their gesture targets stay where they are. The text field
+		// has one owner so promoting a typed send does not replace its input session.
+		const composerSlots = shell.composerSlots ??= {dock:null,chat:null};
+		shell.composerDockRef ??= (node: HTMLElement | null) => { composerSlots.dock = node; };
+		shell.composerChatRef ??= (node: HTMLElement | null) => { composerSlots.chat = node; };
+		out.composerDockRef = shell.composerDockRef;
+		out.composerChatRef = shell.composerChatRef;
+		const openEditor = out.panelComposer && (!out.showComposer || isOpen(s.chat));
+		out.editor = {
+			target: openEditor ? 'alpha' : out.barTarget,
+			label: openEditor ? out.panelLabel : out.cmpPlaceholder,
+			placeholder: openEditor ? out.panelPlaceholder : out.barPlaceholder,
+			value: openEditor ? out.draft : out.barValue,
+			maxLength: openEditor ? undefined : out.barMaxLength,
+			change: openEditor ? out.onDraft : out.barOnText,
+			key: openEditor ? out.onKey : out.barOnKey,
+			down: openEditor ? out.composerPointer : out.inputComposerPointer,
+			// Portal events do not bubble through the dock's gesture handlers.
+			move: openEditor ? undefined : handlers.move,
+			up: openEditor ? undefined : handlers.up,
+			cancel: openEditor ? undefined : handlers.cancel,
+			lost: openEditor ? undefined : handlers.lost,
+			focus: openEditor ? undefined : out.inputComposerFocus,
+			blur: openEditor ? undefined : out.inputComposerBlur,
+			style: openEditor ? '' : `touch-action:${out.inputComposerTouchAction};padding-left:8px`,
+		};
+		out.composerEditor = createElement(ComposerEditor, {
+			slots: composerSlots,
+			surface: openEditor ? 'chat' : out.showComposer ? 'dock' : null,
+			keepFocus: openEditor && !!s.typing,
+		});
 		return out;
 	};
 }
