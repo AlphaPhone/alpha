@@ -959,8 +959,16 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     connectionController.warmInference();
     const state=this.S();
     const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
+    // A restored browser account can paint Home before its resident has attached.
+    // Finish that existing startup before constructing a session-bound speech driver.
+    if(developmentCloudVoiceEnabled&&!connectionController.getBrowserSpeechAgent()){
+      await connectionController.initialize();
+      if(this.live===false||document.hidden||this.S().view!==state.view||String(this.S().draft||'')!==chat.draft||connectionController.getSnapshot().open)return;
+      if(!connectionController.getBrowserSpeechAgent()){this.toast('Alpha is still connecting. Try Talk again shortly.');return;}
+    }
     const readingStopped=stopLocalSpeechPlayback();
-    enter(undefined,'default',chat);this.beginVoiceScrollFollow();stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';quietRetries=0;const token=generation;
+    try{enter(undefined,'default',chat);}catch{cleanup();this.toast('Voice could not start. Try again, or use the keyboard.');return;}
+    this.beginVoiceScrollFollow();stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';quietRetries=0;const token=generation;
     // Cloud speech opens the voice sheet from a hidden chat; other routes stay in the Home pill.
     const networkVoice=speechRoute()==='cloud';
     await new Promise<void>(resolve=>this.setState({chat:state.chat==='hidden'&&!networkVoice?'hidden':state.chat==='full'?'full':'sheet',voice:'off'},()=>{document.querySelector<HTMLElement>(state.chat==='hidden'&&!networkVoice?'[data-alpha-pill-voice] button':'[data-alpha-chat-recorder] button')?.focus({preventScroll:true});if(chatDestination===chat&&generation===token){void beginConversation().finally(resolve);}else resolve();}));
