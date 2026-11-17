@@ -35,7 +35,7 @@ async function fixture(t,{native=false,imageDefaults=false,denied=false,unsuppor
 }
 test('the required permission order leads to Ready and Home without an immediate exit',async t=>{
  const f=await fixture(t);let homes=0;window.addEventListener('launcher-home',()=>homes++);
- for(const title of ['Notifications','Microphone','Camera','Location']){assert.equal(f.heading(),title);assert(![...document.querySelectorAll('button')].some(x=>/Skip|Not now|Back/.test(x.textContent)));assert.equal(document.querySelector('.alpha-startup-header'),null);await f.click('Continue');}
+ for(const title of ['Notifications','Microphone','Camera','Location']){assert.equal(f.heading(),title);assert(![...document.querySelectorAll('button')].some(x=>/Not now|Back/.test(x.textContent)));assert.equal(document.querySelector('.alpha-startup-header'),null);await f.click('Continue');}
  assert.equal(f.heading(),'All set');assert.equal(f.calls.length,0);await f.click('Done');assert.equal(document.querySelector('dialog'),null);assert.equal(homes,1);assert.deepEqual(f.progress(),{version:1,status:'completed',step:4});assert.deepEqual(JSON.parse(localStorage.getItem('alpha.startup-permissions.v1')).attempted,{camera:true});await f.remount();assert.equal(document.querySelector('dialog'),null);
 });
 test('denied native permission stays on required step, blocks dismissal, and settings never repeats its prompt',async t=>{
@@ -108,14 +108,14 @@ test('explicit sign-in Ready preserves a completed legacy installation without f
 });
 
 
-test('blocked access exposes a per-step skip after 20 seconds and completed choices survive refresh and auth',async t=>{
+test('known blocked access exposes skip immediately and completed choices survive refresh and auth',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});
  const f=await fixture(t,{denied:true});
- assert.equal(document.querySelector('.alpha-permission-skip'),null);
+ assert(f.button('Skip'));
  await f.click('Check');assert.match(document.body.textContent,/Still off/);assert.doesNotMatch(document.body.textContent,/skip this step/);
- await React.act(async()=>t.mock.timers.tick(19999));assert.equal(document.querySelector('.alpha-permission-skip'),null);
+ await React.act(async()=>t.mock.timers.tick(19999));assert(f.button('Skip'));
  await React.act(async()=>t.mock.timers.tick(1));await f.click('Skip');
- assert.equal(f.heading(),'Microphone');assert.equal(document.querySelector('.alpha-permission-skip'),null);
+ assert.equal(f.heading(),'Microphone');assert(f.button('Skip'));
  assert.deepEqual(f.progress().choices,['skipped']);
  await f.remount();assert.equal(f.heading(),'Microphone');
  for(let i=0;i<3;i++){await React.act(async()=>t.mock.timers.tick(20000));await f.click('Skip');}
@@ -204,7 +204,7 @@ test('a failed completion write is retried by Done',async t=>{
 const completed={version:1,status:'completed',step:4};
 test('Settings review of completed setup closes at once by button, Escape or back and never rewrites completion',async t=>{
  const f=await fixture(t,{durable:completed});assert.equal(f.dialog(),null);
- await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue','Close']);assert.deepEqual(f.progress(),completed);
+ await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue','Skip','Close']);assert.deepEqual(f.progress(),completed);
  await f.click('Continue');assert.equal(f.heading(),'Microphone');assert.deepEqual(f.progress(),completed);
  await f.click('Close');assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);
  await f.reopen();assert.equal(f.heading(),'Notifications');await f.cancel();assert.equal(f.dialog(),null);
@@ -218,12 +218,12 @@ test('a targeted review of completed setup closes on Escape without rewriting co
  const f=await fixture(t,{durable:completed});await f.reopen('camera');assert.equal(f.heading(),'Camera');assert.equal(f.buttons().includes('Close'),false);await f.cancel();assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);
 });
 test('an unfinished walkthrough reopened from Settings stays required: no Close, Escape and back keep it open',async t=>{
- const f=await fixture(t,{active:false});assert.equal(f.dialog(),null);await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue']);
+ const f=await fixture(t,{active:false});assert.equal(f.dialog(),null);await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue','Skip']);
  await f.cancel();await f.back();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.progress(),{version:1,status:'pending',step:0});
 });
 test('a Settings review with one permission denied stops on it, can be left or skipped, and keeps completion',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});const f=await fixture(t,{durable:completed});f.state.camera=false;
- await f.reopen();for(let i=0;i<2;i++)await f.click('Continue');assert.equal(f.heading(),'Camera');assert.deepEqual(f.buttons(),['Check','Continue','Close']);
+ await f.reopen();for(let i=0;i<2;i++)await f.click('Continue');assert.equal(f.heading(),'Camera');assert.deepEqual(f.buttons(),['Check','Continue','Skip','Close']);
  await f.click('Check');assert.equal(f.heading(),'Camera');assert.deepEqual(f.progress(),completed);
  await f.remount();assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);
  await f.reopen();for(let i=0;i<2;i++)await f.click('Continue');assert.equal(f.heading(),'Camera');
