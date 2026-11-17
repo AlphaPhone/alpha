@@ -858,6 +858,20 @@ class CloudSigningInputTest(unittest.TestCase):
 
 
 class PrivateProducerSourceReviewTest(unittest.TestCase):
+    def test_owner_verification_exception_is_bound_to_one_exact_producer(self):
+        pin = dict(ADMISSION.PRIVATE_VERIFICATION_EXCEPTION)
+        private = {**pin, "checks": {"combinedVerification": "waived-by-owner"}}
+        self.assertTrue(ADMISSION.private_verification_admitted(private, pin))
+        for key in pin:
+            changed = {**pin, key: 82 if key == "versionCode" else "other"}
+            self.assertFalse(ADMISSION.private_verification_admitted(private, changed))
+            self.assertFalse(ADMISSION.private_verification_admitted({**private, **changed}, pin))
+        for value in ("failed", "skipped", None):
+            self.assertFalse(ADMISSION.private_verification_admitted(
+                {**private, "checks": {"combinedVerification": value}}, pin))
+        self.assertTrue(ADMISSION.private_verification_admitted(
+            {"checks": {"combinedVerification": "passed"}}, {}))
+
     def test_isolated_source_requires_exact_committed_approval(self):
         self.assertEqual(PRODUCER.REPOSITORY, "eliza-research/alpha")
         with tempfile.TemporaryDirectory(prefix="alpha-source-review-") as directory:
