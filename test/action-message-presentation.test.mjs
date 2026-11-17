@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
 const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -175,4 +175,25 @@ test('a telephony receipt reads in the second person on screen while the stored 
  assert.equal(shown.find(m=>m.id==='action').displayText,'Calling. Alpha can’t tell whether it was answered.');
  assert.equal(shown.find(m=>m.id==='device-receipt:q').displayText,'You dismissed the message. Nothing was sent.');
  assert.deepEqual(rows,frozen);
+});
+const mapsCard=body=>mapsChatText(`Maps\n\n[MAPSCARD]\n${JSON.stringify(body)}\n[/MAPSCARD]`).cards[0];
+test('a Maps locate card takes its subject from the card fields, and from the prompt only when an older agent names none',()=>{
+ const pharmacy={name:'Corner Pharmacy',latitude:37.79,longitude:-122.4,provider:'eliza-cloud',providerPlaceId:'g:p1',categories:[]};
+ const nearPrompt='I need your precise location to search near you for “coffee”.';
+ // The card's own query wins over the prompt's wording.
+ assert.deepEqual(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt,query:'espresso bar'}),{kind:'locate',title:'“espresso bar” near you',lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:'espresso bar',nearMe:true});
+ assert.equal(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt}).mapQuery,'coffee');
+ // A resolved destination is carried whole, with the travel mode, and is never searched again by name.
+ const exact=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Corner Pharmacy.',destination:pharmacy,travelMode:'walk'});
+ assert.deepEqual(exact,{kind:'locate',title:'Directions to Corner Pharmacy',lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',place:pharmacy,directionsFromHere:true,travelMode:'walk'});
+ // A kind of place: search around the phone, then directions to the closest.
+ const nearest=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to pharmacy.',query:'pharmacy'});
+ assert.equal(nearest.mapQuery,'pharmacy');assert.equal(nearest.nearMe,true);assert.equal(nearest.directionsFromHere,true);assert.equal(nearest.place,undefined);
+ // An older agent: the destination name from the prompt, searched by name.
+ const old=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Corner Pharmacy.'});
+ assert.equal(old.mapQuery,'Corner Pharmacy');assert.equal(old.nearMe,undefined);assert.equal(old.directionsFromHere,true);
+ // An invalid optional field is dropped and the card still reads from the prompt.
+ assert.equal(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt,query:'x'.repeat(501),travelMode:'teleport'}).mapQuery,'coffee');
+ // Place and hand-off cards keep the exact place, so "Show on map" opens it under its name.
+ assert.deepEqual(mapsCard({kind:'place',place:pharmacy,attribution:null}).place,pharmacy);
 });

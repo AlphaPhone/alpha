@@ -34,7 +34,8 @@ import { mapsConnection, onMapsConnectionChange } from '../maps/runtime';
 import { MapsScreenController, type MapsScreenView } from '../maps/screen';
 import { connectionController } from '../runtime/connection-ui';
 import { cloudServiceName } from '../runtime/cloud-protocol';
-import type { TravelMode } from '../maps/contracts';
+import { coordinate, place, type Place, type TravelMode } from '../maps/contracts';
+import type { MapsCardPlace } from '../ui/components/chat/message-maps-parser';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
@@ -63,12 +64,33 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   let submittedOriginEpoch=-1,submittedOriginText='',submittedOriginKind:'search'|'route'|'location'='route';
   const cancelSearchTimers=()=>{if(queryTimer!==undefined)clearTimeout(queryTimer);if(originTimer!==undefined)clearTimeout(originTimer);queryTimer=originTimer=undefined;};
   const retireSearch=()=>{++searchEpoch;cancelSearchTimers();queryDraft=originDraft=undefined;};
-  // A chat card's request, taken once: a search around the phone, directions from the phone, or a planned route to draw.
+  // A chat card's request, taken once: a search around the phone, directions from the phone, a planned route to draw,
+  // or the exact place the agent resolved (with directions to it from the phone when `fromHere`).
   type AgentRoute={origin:string;destination:string;name:string;travelMode:TravelMode};
+  type AgentPlace={place:MapsCardPlace;fromHere:boolean;travelMode?:TravelMode};
   // `epoch` is searchEpoch after the flow's own last step: any later user action in Maps moves it and ends the flow.
-  type NearSearch={query:string;located:boolean;epoch:number};
-  let nearSearch:NearSearch|undefined,pendingRoute:AgentRoute|undefined,fromHere:{query:string;stage:'search'|'place';epoch:number}|undefined;
-  const retireCard=()=>{nearSearch=pendingRoute=fromHere=undefined;const maps=api?.get('maps');if(maps&&(maps.nearMe||maps.fromHere||maps.agentRoute))api!.set({nearMe:null,fromHere:null,agentRoute:null});};
+  // `directions`: after the search, directions to the closest result start from the same fix.
+  type NearSearch={query:string;located:boolean;epoch:number;directions?:{travelMode?:TravelMode}};
+  type FromHere={query:string;stage:'search'|'place';epoch:number;closest:boolean;travelMode?:TravelMode};
+  let nearSearch:NearSearch|undefined,pendingRoute:AgentRoute|undefined,pendingPlace:AgentPlace|undefined,fromHere:FromHere|undefined;
+  const retireCard=()=>{nearSearch=pendingRoute=pendingPlace=fromHere=undefined;const maps=api?.get('maps');if(maps&&(maps.nearMe||maps.fromHere||maps.agentRoute||maps.agentPlace))api!.set({nearMe:null,fromHere:null,routeMode:null,agentRoute:null,agentPlace:null});};
+  // Asks this phone for a fresh fix (the platform may prompt), then searches around it; see the render below.
+  const locateThenSearch=(near:NearSearch)=>{retireSearch();screen.unwind();near.located=true;nearSearch=near;screen.recenter();near.epoch=searchEpoch;};
+  // A chat card's place under this phone's provider: a Cloud place is read again by its id, any other is a named pin.
+  const cardPlace=(value:MapsCardPlace):{place:Place;resolveDetails:boolean}|undefined=>{
+    const config=mapsConnection().config;
+    if(config.status!=='configured')return undefined;
+    const cloud=!regionalMapsConfigured&&(value.provider==='eliza-cloud'||value.provider===config.providerId);
+    try{return {place:place({providerId:config.providerId,id:cloud?value.providerPlaceId:'coordinates',name:value.name,coordinate:coordinate({latitude:value.latitude,longitude:value.longitude}),...(value.formattedAddress?{address:value.formattedAddress}:{}),attribution:cloudMapsCoverage()?.attribution||'Chosen in chat',fetchedAt:Date.now()},config.providerId),resolveDetails:cloud};}
+    catch{return undefined;}
+  };
+  // Directions to a place the card resolved (or the closest match it asked for), started from a fresh fix: the card's
+  // tap is the explicit location request, so the platform may prompt. Any later step in Maps ends it.
+  const directionsFromHere=(target:Place,resolveDetails:boolean,travelMode?:TravelMode)=>{
+    const current=mapsController?.snapshot().mode??'drive',mode=travelMode&&mapsController?.capabilities().modes.includes(travelMode)?travelMode:current;
+    const showing=surface.showDirections(target,mode,resolveDetails),epoch=searchEpoch;
+    void showing.then(()=>{if(epoch===searchEpoch&&active())screen.locate();},()=>{});
+  };
   const mapsDiagnostics=()=>regionalMapsConfigured?regionalDiagnostics():cloudMapsDiagnostics();
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
   const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
@@ -210,7 +232,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // Cross-app navigation carries a one-use search, not a selected destination.
     // Consume it outside render and fence it against leaving or a newer action.
     // "Directions to X from here": the hand-off below searches the destination; the stages after the view finish it.
-    if(st.fromHere&&typeof st.query==='string'&&st.query.trim()&&!pendingHandoff)fromHere={query:st.query.trim(),stage:'search',epoch:-1};
+    if(st.fromHere&&!st.nearMe&&typeof st.query==='string'&&st.query.trim()&&!pendingHandoff)fromHere={query:st.query.trim(),stage:'search',epoch:-1,closest:false};
     if(typeof st.query==='string'&&st.query.trim()&&!st.nearMe&&!pendingHandoff){
       const handoff=pendingHandoff={query:st.query};
       queueMicrotask(()=>{
@@ -224,15 +246,32 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // prompt), then Maps searches around it. The position goes to the Maps service only, as for any search.
     // A second tap replaces the first request; the phone is asked for one fix either way.
     if(st.nearMe&&typeof st.query==='string'&&st.query.trim()&&nearSearch?.query!==st.query.trim()&&!pendingHandoff){
-     const near:NearSearch=nearSearch={query:st.query.trim(),located:false,epoch:-1};
+     // With `fromHere` the card names a kind of place: directions go to the closest match around the fix.
+     const near:NearSearch=nearSearch={query:st.query.trim(),located:false,epoch:-1,...(st.fromHere?{directions:st.routeMode?{travelMode:st.routeMode}:{}}:{})};
      queueMicrotask(()=>{
       if(nearSearch!==near)return;
       if(disposed||!currentApi.isActive()||currentApi.get('maps').query!==st.query){nearSearch=undefined;return;}
       // Leave any route, place or results of an earlier visit first, as system Back would.
-      currentApi.set({query:null,nearMe:null});retireSearch();screen.unwind();near.located=true;screen.recenter();near.epoch=searchEpoch;
+      currentApi.set({query:null,nearMe:null,fromHere:null,routeMode:null});locateThenSearch(near);
      });
     }
-    else if(st.nearMe&&nearSearch&&!pendingHandoff)queueMicrotask(()=>{if(!disposed&&currentApi.isActive()&&currentApi.get('maps').nearMe)currentApi.set({query:null,nearMe:null});});
+    else if(st.nearMe&&nearSearch&&!pendingHandoff)queueMicrotask(()=>{if(!disposed&&currentApi.isActive()&&currentApi.get('maps').nearMe)currentApi.set({query:null,nearMe:null,fromHere:null,routeMode:null});});
+    // A chat card's exact place, as the agent resolved it: selected by its provider id and coordinates under its
+    // own name, never searched again by name. With `fromHere` the card's tap is also the location request.
+    if(st.agentPlace&&!pendingPlace){
+     const card=pendingPlace=st.agentPlace as AgentPlace;
+     queueMicrotask(()=>{
+      if(pendingPlace!==card)return;pendingPlace=undefined;
+      if(disposed||!currentApi.isActive()||currentApi.get('maps').agentPlace!==card)return;
+      if(mapsConnection().config.status!=='configured'&&!mapsDiagnostics().error){screen.ensure();return;}
+      currentApi.set({agentPlace:null});retireSearch();
+      const shown=cardPlace(card.place);
+      // Without a provider the screen's own message explains why; the pin keeps the place's name.
+      if(!shown){screen.handoff(`${card.place.latitude}, ${card.place.longitude}`,false);screen.rename(card.place.name);return;}
+      if(card.fromHere)directionsFromHere(shown.place,shown.resolveDetails,card.travelMode);
+      else void surface.showPlace(shown.place,shown.resolveDetails).catch(()=>{});
+     });
+    }
     // A chat route card: the same pin, starting point and travel mode the user could enter by hand.
     if(st.agentRoute&&!pendingRoute){
      const route=pendingRoute=st.agentRoute as AgentRoute;
@@ -255,7 +294,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
      const near=nearSearch,position=mapsController?.snapshot().position;
      if(near.epoch!==searchEpoch)nearSearch=undefined;
      // The search is ranked around the fix itself, not around the area the map last showed.
-     else if(position?.phase==='ready'&&position.value){const fix=position.value.coordinate;nearSearch=undefined;queueMicrotask(()=>{if(!disposed&&currentApi.isActive()){screen.setViewport(fix,15);screen.searchFor(near.query);}});}
+     else if(position?.phase==='ready'&&position.value){const fix=position.value.coordinate;nearSearch=undefined;queueMicrotask(()=>{if(!disposed&&currentApi.isActive()){screen.setViewport(fix,15);screen.searchFor(near.query);if(near.directions)fromHere={query:near.query,stage:'search',epoch:searchEpoch,closest:true,...near.directions};}});}
      // A refused or failed fix keeps the screen's own location message; nothing is searched elsewhere.
      else if(position?.phase==='error'||!view.status.locationBusy&&position?.phase!=='loading')nearSearch=undefined;
     }
@@ -263,7 +302,13 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
      const pending=fromHere,first=view.results.find(row=>!row.saved);
      // The agent offers this only after its own search resolved the name to one place, so the first match is taken.
      if(pending.epoch!==searchEpoch||view.query!==pending.query||view.noResults)fromHere=undefined;
-     else if(pending.stage==='search'&&view.mode==='results'&&first){pending.stage='place';queueMicrotask(()=>{if(fromHere===pending&&!disposed&&currentApi.isActive()){screen.choose(first.key);pending.epoch=searchEpoch;}});}
+     else if(pending.stage==='search'&&view.mode==='results'&&first){pending.stage='place';queueMicrotask(()=>{
+      if(fromHere!==pending||disposed||!currentApi.isActive())return;
+      // A kind of place ("the nearest pharmacy") takes the match closest to the fix the search ran around.
+      const closest=pending.closest?screen.closest():undefined;
+      if(pending.closest){fromHere=undefined;if(closest)directionsFromHere(closest,true,pending.travelMode);}
+      else{screen.choose(first.key);pending.epoch=searchEpoch;}
+     });}
      else if(pending.stage==='place'&&view.mode==='place'&&view.place?.canDirections){
       fromHere=undefined;
       // The card's tap is the explicit location request: the platform may prompt, and the route starts from the fix.
@@ -576,7 +621,7 @@ export function installMapsChatAdapter(Component:Bag){
    return {...message,displayText:parsed.displayText,hasCalendarText:message.hasCalendarText!==false&&!!parsed.displayText,
     messageActionsLabel:message.messageActionsLabel?'Message actions: '+(parsed.displayText||parsed.cards[0]?.title||'Maps'):message.messageActionsLabel,
     mapsCards:parsed.cards.map(card=>({...card,lines:card.lines.map(text=>({text})),hasAttribution:!!card.attribution,canOpenMap:current(),
-      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere}:{keepState:true});}})),
+      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.place?{agentPlace:{place:card.place,fromHere:!!card.directionsFromHere,...(card.travelMode?{travelMode:card.travelMode}:{})}}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere,routeMode:card.travelMode??null}:{keepState:true});}})),
     hasMapsChoice:open,mapsChoices:open?choice!.options.map(option=>({label:option.label,choose:()=>void answer(this,id,option.value,current)})):[]};
   });return out;
  };
