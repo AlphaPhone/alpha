@@ -65,6 +65,16 @@ export function installContactsAdapter(Component:any,views:Bag){
   try{const value=parseContactDetail(await contacts.get({id}),id);if(token===detailEpoch&&detailFor===id&&available()){detail=value;changed();}}
   catch{/* An incomplete or unreadable contact keeps the list fields and the system editor. */}
  }
+ /* Alpha changed the address book from chat (image-telephony.ts): the open list and contact are read
+    again, a deleted contact closes, and an unconfirmed write holds edits until the owner refreshes. */
+ async function agentWrote(event:Event){
+  if((event as CustomEvent).detail?.status==='unknown'){uncertain=true;status='Outcome unknown · refresh Contacts';changed();}
+  if(!available())return;
+  const open=detailFor;await refresh();
+  if(!open||detailFor!==open||!loaded||!available())return;
+  if(rows.some(row=>row.id===open))void loadDetail(open);
+  else{detail=null;detailFor='';detailEpoch++;confirming=false;api?.set?.({open:null});changed();}
+ }
  const unknownWrite=()=>{uncertain=true;form=null;confirming=false;detail=null;detailFor='';detailEpoch++;api?.set?.({open:null});status='Outcome unknown · refresh Contacts';owner?.toast('Outcome unknown. Refresh Contacts before trying again.');changed();};
  const blank=():ContactDraft=>({displayName:'',phoneNumbers:[{number:'',type:'mobile'}],emailAddresses:[{address:'',type:'home'}]});
  async function openEditor(selected?:Bag){
@@ -194,7 +204,7 @@ export function installContactsAdapter(Component:any,views:Bag){
  };
  /* Back closes the editor or the delete confirmation before it leaves the contact. */
  const back=views.contacts.back;views.contacts.back=(st:Bag,viewApi:Bag)=>{if(form){if(!saving){form=null;changed();}return true;}if(confirming){if(!saving){confirming=false;changed();}return true;}if(!st.open&&(st.q||st.chip)){clearListFilter('contacts');return true;}return back?back(st,viewApi):false;};
- p.componentDidMount=function(){mount?.call(this);owner=this;this.contactsReturn=watchReturnToApp(()=>void refresh());this.contactsHide=()=>sync();document.addEventListener('visibilitychange',this.contactsHide);sync();};
+ p.componentDidMount=function(){mount?.call(this);owner=this;this.contactsReturn=watchReturnToApp(()=>void refresh());this.contactsHide=()=>sync();document.addEventListener('visibilitychange',this.contactsHide);if(typeof window!=='undefined')window.addEventListener('alpha:contacts-committed',agentWrote);sync();};
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();};
- p.componentWillUnmount=function(){this.contactsReturn?.();document.removeEventListener('visibilitychange',this.contactsHide);if(owner===this){owner=null;active=false;clear();}unmount?.call(this);};
+ p.componentWillUnmount=function(){this.contactsReturn?.();document.removeEventListener('visibilitychange',this.contactsHide);if(typeof window!=='undefined')window.removeEventListener('alpha:contacts-committed',agentWrote);if(owner===this){owner=null;active=false;clear();}unmount?.call(this);};
 }

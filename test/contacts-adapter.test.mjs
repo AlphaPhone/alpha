@@ -309,3 +309,31 @@ test('a new contact can take notes',async()=>{
  typeInto(book.model({}).ed.onNotes,'Met at the library');book.model({}).ed.save();await settle();
  assert.deepEqual(book.calls.find(([m])=>m==='save')[1],{displayName:'',givenName:'',familyName:'',phoneNumbers:[],emailAddresses:[],notes:'Met at the library'});
 });
+
+// Alpha's own contact writes from chat (image-telephony.ts) announce alpha:contacts-committed.
+test('an agent contact write refreshes the open Contacts view, closes a deleted contact and holds edits after an unknown outcome',async()=>{
+ const previous=globalThis.window;globalThis.window=new EventTarget();
+ try{
+  let record=detail('a1'.repeat(32)),list=[ada];
+  const book=mountBook({get:()=>record});
+  globalThis.contactsPlugin=(inner=>async(method,options)=>method==='list'?(book.calls.push([method,options]),{contacts:list,more:false}):inner(method,options))(globalThis.contactsPlugin);
+  await settle();book.model();await settle();
+  assert.equal(book.model().d.fields[0].v,'(555) 555-0100');
+  const reads=method=>book.calls.filter(([m])=>m===method).length,listsBefore=reads('list'),getsBefore=reads('get');
+  // Alpha changed the open contact's number.
+  record={...detail('b2'.repeat(32)),phoneNumbers:[{number:'+15555550148',type:'mobile'}]};
+  window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'saved'}}));await settle();await settle();
+  assert.equal(reads('list'),listsBefore+1,'the list is read again');assert.equal(reads('get'),getsBefore+1,'and so is the open contact');
+  assert.equal(book.model().d.fields[0].v,'(555) 555-0148','the screen shows what the phone holds now');
+  // Alpha deleted it: the contact closes instead of showing fields that are gone.
+  list=[];window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'deleted'}}));await settle();await settle();
+  assert.deepEqual(book.sets.at(-1),{open:null});
+  // An unconfirmed write: the owner must read Contacts again before editing.
+  list=[ada];window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'unknown'}}));await settle();await settle();
+  assert.equal(book.model().nativeStatus,'Outcome unknown · refresh Contacts');
+  book.model({}).addNew();await settle();assert.equal(book.model({}).ed.open,false);assert.deepEqual(book.toasts.at(-1),'Refresh Contacts first');
+  book.model({}).nativeRefresh();await settle();assert.notEqual(book.model({}).nativeStatus,'Outcome unknown · refresh Contacts','an explicit refresh clears it');
+  // After the view is gone nothing listens.
+  const lists=reads('list');book.shell.componentWillUnmount();window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'saved'}}));await settle();assert.equal(reads('list'),lists);
+ }finally{globalThis.window=previous;}
+});
