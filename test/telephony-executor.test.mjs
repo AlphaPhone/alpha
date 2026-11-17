@@ -246,7 +246,7 @@ test('a contact write the phone refused before it touched the address book reads
       let writes = 0; const refuse = async () => { writes++; throw coded('refused', code); };
       const p = ports({saveContact: refuse, removeContact: refuse}); const result = await run(operation, p);
       assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status}, `${operation.type} ${code}`);
-      assert.equal(result.status, 'failed'); assert.equal(result.summary, {unavailable: 'Contacts are unavailable right now.', failed: 'The contact could not be saved.', 'not-found': 'No matching contact was found.'}[status]); assert.equal(writes, 1);
+      assert.equal(result.status, 'failed'); assert.equal(result.summary, {unavailable: 'Contacts are unavailable right now.', failed: 'The contact change failed.', 'not-found': 'No matching contact was found.'}[status]); assert.equal(writes, 1);
     }
   }
 });
@@ -364,7 +364,7 @@ test('the agent reads the open contact whole and within the contract bounds, or 
   let p = ports({openContact: () => open});
   let result = await run({type: 'contact_read_selected'}, p);
   assert.deepEqual(result.telephonyResult, {kind: 'contact-read', status: 'read', contact: {displayName: 'Priya Nair', phoneNumbers: ['(415) 555-0132'], emailAddresses: ['p@example.com']}});
-  assert.equal(result.status, 'succeeded'); assert.match(result.summary, /untrusted data/);
+  assert.equal(result.status, 'succeeded'); assert.equal(result.summary, 'Shared the open contact.');
   assert.equal(did(p, 'search').length + did(p, 'get').length, 0, 'only the contact on screen: the address book is not searched');
   assert.deepEqual((await run({type: 'contact_read_selected'}, ports({openContact: () => ({...open, displayName: ''})}))).telephonyResult.contact.displayName, null);
   assert.deepEqual((await run({type: 'contact_read_selected'}, ports())).telephonyResult, {kind: 'contact-read', status: 'none-selected'});

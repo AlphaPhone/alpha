@@ -36,7 +36,7 @@ async function approve(open){
 test('an open Browser refused before creating a tab is recorded as not started, with its reason',async()=>{
  const reason='Browser already has 8 tabs open. Close one, then ask again.';
  const {result,entry}=await approve(async()=>{throw new BrowserOpenRefused(reason);});
- assert.equal(result.status,'failed');assert.equal(result.summary,'Not started. Nothing was sent. '+reason);
+ assert.equal(result.status,'failed');assert.equal(result.summary,'Not started: '+reason.replace(/[.!]\s*$/,'')+'.');
  assert.equal(entry.status,'failed');assert.equal(entry.result.dispatch,'not_started');
 });
 test('an open that fails after reaching the tab host keeps an unknown outcome',async()=>{
