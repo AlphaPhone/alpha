@@ -138,6 +138,7 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
    if(path==='/api/auth/cli-session')return {status:503,data:{}};
    // Alpha Cloud cutover, in-app plans (cloud-plans.ts): device-key checkout on a synthetic Stripe URL
    // (the browser opening is the recorded openExternal call; nothing is bought).
+   if(path==='/api/v1/credits/checkout'){f.funds=JSON.parse(input.body);return {status:200,data:{url:'https://checkout.stripe.com/c/pay/cs_test_funds',sessionId:'cs_test_funds'}};}
    if(path==='/api/v1/subscriptions/checkout'){f.bodies.push(JSON.parse(input.body));return {status:200,data:{success:true,data:{status:'open',commandId:'cmd_synthetic',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_synthetic',sessionId:'cs_test_synthetic',expiresAt:new Date(Date.now()+1_800_000).toISOString()}}};}
    // Cloud confirms only from its own payment evidence: here, once the synthetic plan became active (or checkoutPaid).
    if(path==='/api/v1/subscriptions/checkout/confirm'){const body=JSON.parse(input.body);f.bodies.push({confirm:body});return {status:200,data:{success:true,data:{subscriptionId:body.sessionId==='cs_test_synthetic'&&(f.plan==='active'||f.checkoutPaid)&&!f.confirmUnpaid?'sub_synthetic':null}}};}

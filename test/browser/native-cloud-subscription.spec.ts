@@ -93,7 +93,7 @@ const signInPage=(page:Page)=>page.locator('.alpha-cloud-sign-in[role="main"]');
 async function openAccountPlan(page:Page){await page.evaluate(()=>(window as any).planController.openPlan());const panel=accountPanel(page);await expect(panel).toBeVisible();return panel;}
 async function confirmBillingAccount(page:Page){
  await expect(page.getByRole('dialog',{name:'Review billing account',exact:true})).toHaveCount(0);
- await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').length).toBeGreaterThan(0);
+ await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plus',{exact:true})).toBeVisible();
 }
 
 async function confirmSignOut(page:Page){const dialog=page.getByRole('dialog',{name:'Sign out?',exact:true});await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Sign out',exact:true}).click();}
@@ -210,7 +210,7 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('past-due-warning.png'),animations:'disabled'});
   await release(page);
   await page.getByRole('button',{name:'Manage plan',exact:true}).click();await confirmBillingAccount(page);
-  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://cloud.eliza.app/cloud/billing']);
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual([]);
  });
 
  for(const status of ['canceled','none'] as const)test(`a ${status} plan shows "needs plan" beside the running agent and binds no inference`,async({page},info)=>{
@@ -218,6 +218,7 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   await needsPlan(page);
   await expect(planDetails(page).getByText('No plan',{exact:true})).toBeVisible();
   await expect(planDetails(page).getByText('Active',{exact:true})).toHaveCount(0);
+  if(!await page.getByRole('textbox',{name:'Membership code'}).isVisible())await page.getByRole('button',{name:'Use code',exact:true}).click();
   await expect(page.getByRole('textbox',{name:'Membership code'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Redeem',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Refresh account',exact:true})).toBeVisible();
@@ -229,7 +230,7 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath(`needs-plan-${status}.png`),animations:'disabled'});
   // Choose a plan opens exactly the allowlisted hosted page in the system browser.
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await confirmBillingAccount(page);
-  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://cloud.eliza.app/cloud/billing']);
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual([]);
   expect(await configured(page)).toBe(0);
  });
 
@@ -767,17 +768,18 @@ test('Home keeps the plan notice without a sign-in expiry banner after Settings'
 // The Alpha Cloud cutover flag (docs/alpha-cloud.md). Off is every test above: the current Cloud's
 // hosted billing page, no in-app plans. On is the cutover build (cloud/policy.json authorities).
 test.describe('Alpha Cloud cutover flag',()=>{
- test('off: Add funds opens the current Cloud hosted billing page and no in-app plan route is read',async({page})=>{
+ test('Add funds opens its amount form and creates only the reviewed balance checkout',async({page})=>{
   await boot(page,{...await entitlements(),plan:'active',limits:'active',credits:'0',holdProvider:false});
   await expect.poll(()=>configured(page)).toBe(1);await idle(page);
   await page.evaluate(()=>(window as any).planController.openPlan());
-  const panel=accountPanel(page);await expect(panel).toBeVisible();
-  await panel.getByRole('button',{name:'Add funds',exact:true}).click();await confirmBillingAccount(page);
-  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://cloud.eliza.app/cloud/billing']);
-  await expect(page.getByRole('region',{name:'Plans',exact:true})).toHaveCount(0);
-  const routes=(await calls(page)).filter(c=>c.method==='request').map(c=>c.url??'');
-  expect(routes.filter(url=>/\/api\/v1\/(subscriptions|referrals)\b/.test(url))).toEqual([]);
-  expect(routes.filter(url=>url.includes('alphacompute.ai'))).toEqual([]);
+  await accountPanel(page).getByRole('button',{name:'Add funds',exact:true}).click();
+  const funds=page.getByRole('dialog',{name:'Add funds',exact:true});
+  await expect(funds.getByRole('spinbutton',{name:'Amount in dollars'})).toHaveValue('10');
+  expect((await calls(page)).filter(c=>c.method==='openExternal')).toEqual([]);
+  await funds.getByRole('button',{name:'Continue',exact:true}).click();
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://checkout.stripe.com/c/pay/cs_test_funds']);
+  const sent=await page.evaluate(()=>(window as any).planFixture.funds);
+  expect(sent).toEqual({amountUsd:10,success_url:'https://eliza.app/alphaphone/billing/return',cancel_url:'https://eliza.app/alphaphone/billing/return?cancelled=1'});
  });
 
  const alpha=async(extra:Record<string,unknown>={})=>({...await entitlements({iss:'https://api.alphacompute.ai',aud:'ai.alphacompute.alphaphone',...extra}),alphaCloud:true});
@@ -796,10 +798,10 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://checkout.stripe.com/c/pay/cs_test_synthetic']);
  }
 
- test('on: Choose a plan opens the in-app plans on Alpha Cloud, Subscribe opens Stripe checkout, and Add funds is not offered',async({page})=>{
+ test('on: Choose a plan opens the in-app plans on Alpha Cloud, Subscribe opens Stripe checkout, and Add funds stays separate',async({page})=>{
   await boot(page,{...await alpha(),plan:'none',limits:'canceled'});
   await needsPlan(page);await started(page);
-  await expect(accountPanel(page).getByRole('button',{name:'Add funds',exact:true})).toHaveCount(0);
+  await expect(accountPanel(page).getByRole('button',{name:'Add funds',exact:true})).toHaveCount(1);
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await subscribePlus(page);
   expect(await configured(page)).toBe(0);
   const requests=(await calls(page)).filter(c=>c.plugin==='AlphaConnection'&&c.method==='request').map(c=>c.url??'');
