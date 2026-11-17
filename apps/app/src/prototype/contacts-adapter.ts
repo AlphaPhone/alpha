@@ -1,5 +1,6 @@
 import { registerPlugin } from '../platform-plugins';
 import { watchReturnToApp } from './native-adapter';
+import { onContactsChanged } from './contacts-changes';
 import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
 import { applyListFilter, clearListFilter, setListFilterHandler } from '../runtime/comms-bar';
@@ -194,7 +195,7 @@ export function installContactsAdapter(Component:any,views:Bag){
  };
  /* Back closes the editor or the delete confirmation before it leaves the contact. */
  const back=views.contacts.back;views.contacts.back=(st:Bag,viewApi:Bag)=>{if(form){if(!saving){form=null;changed();}return true;}if(confirming){if(!saving){confirming=false;changed();}return true;}if(!st.open&&(st.q||st.chip)){clearListFilter('contacts');return true;}return back?back(st,viewApi):false;};
- p.componentDidMount=function(){mount?.call(this);owner=this;this.contactsReturn=watchReturnToApp(()=>void refresh());this.contactsHide=()=>sync();document.addEventListener('visibilitychange',this.contactsHide);sync();};
+ p.componentDidMount=function(){mount?.call(this);owner=this;this.contactsReturn=watchReturnToApp(()=>void refresh());this.contactsChanged=onContactsChanged(()=>void refresh());this.contactsHide=()=>sync();document.addEventListener('visibilitychange',this.contactsHide);sync();};
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();};
- p.componentWillUnmount=function(){this.contactsReturn?.();document.removeEventListener('visibilitychange',this.contactsHide);if(owner===this){owner=null;active=false;clear();}unmount?.call(this);};
+ p.componentWillUnmount=function(){this.contactsReturn?.();this.contactsChanged?.();document.removeEventListener('visibilitychange',this.contactsHide);if(owner===this){owner=null;active=false;clear();}unmount?.call(this);};
 }

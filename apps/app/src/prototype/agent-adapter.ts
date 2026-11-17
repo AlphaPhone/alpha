@@ -30,6 +30,7 @@ import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,type TelephonyPorts} from '
 import {normalizePhoneNumber,reviewSms} from '../runtime/aosp-telephony';
 import {parseContactDetail,parseContactRemove,parseContactSave} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {askTelephonyReview} from './telephony-review';
+import {contactsChanged} from './contacts-changes';
 import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
@@ -1094,8 +1095,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
           placeCall:number=>client.placeCall(number),
           getContact:async id=>parseContactDetail(await book.get({id}),id),
-          saveContact:async(draft,target)=>{const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};},
-          removeContact:async(id,version)=>parseContactRemove(await book.remove({id,version})),
+          // A dispatched write, whatever its answer, has the open Contacts list read the provider again.
+          saveContact:async(draft,target)=>{try{const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};}finally{contactsChanged();}},
+          removeContact:async(id,version)=>{try{return parseContactRemove(await book.remove({id,version}));}finally{contactsChanged();}},
           // The same native review and journalled send as a text to a number; the review shows the resolved number and the text.
           sendSms:async(number,body,id,sendSignal)=>{
             const status=await client.status();current();
