@@ -20,7 +20,7 @@ test('staging writes the reviewed policy beside the product and includes it once
   const product = fs.readFileSync(path.join(output, 'product.mk'), 'utf8');
   assert.ok(product.endsWith(LAUNCHER_POLICY_PRODUCT_INCLUDE));
   assert.equal(product.match(/SEPOLICY_DIRS/g).length, 1);
-  assert.match(product, /SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS \+= \$\(patsubst %\/,%,\$\(dir \$\(lastword \$\(MAKEFILE_LIST\)\)\)\)\/sepolicy/);
+  assert.match(product, /^SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS \+= vendor\/alphaphone\/sepolicy$/m);
   // A second stage into the same output is refused rather than merged.
   assert.throws(() => stageLauncherAgentIpcPolicy(output));
   fs.rmSync(output, { recursive: true, force: true });
