@@ -64,6 +64,47 @@ test('a Gmail request Cloud refuses is worded by Alpha, never by Cloud’s reaso
  }
 });
 
+const {CLOUD_INBOX_REFUSALS,cloudInboxRefusal}=await import('../apps/app/src/ui/mailbox/failures.ts');
+test('every refusal Cloud’s Inbox routes send with HTTP 400 or 413 keeps its reason in Alpha’s words',()=>{
+ const cloud=[
+  'vendor/eliza/packages/cloud/api/v1/eliza/google/gmail/inbox-v1/route.ts',
+  ...['inbox-managed.ts','inbox-operation-routes.ts','inbox-receipts.ts','inbox-provider.ts']
+   .map(n=>'vendor/eliza/packages/cloud/shared/src/lib/services/agent-google-connector/'+n),
+ ].map(path=>readFileSync(new URL('../'+path,import.meta.url),'utf8'));
+ const constructed=cloud.reduce((n,text)=>n+(text.match(/new\s+InboxContractError\(/g)??[]).length,0);
+ const refusals=cloud.flatMap(text=>[...text.matchAll(/new\s+InboxContractError\(\s*(\d+)\s*,\s*([`"])((?:(?!\2).)+)\2\s*(?:,\s*"(\w+)")?\s*,?\s*\)/gs)]
+  .map(m=>({status:Number(m[1]),text:m[3].replace('${outgoingAttachmentCount}','10'),code:m[4]})));
+ // Every refusal is read, so a new or reworded one cannot slip past as the generic sentence.
+ assert.equal(refusals.length,constructed);
+ const worded=new Set();
+ for(const {status,text,code} of refusals){
+  if(status!==400&&status!==413)continue;
+  const failure=Object.assign(new Error(`Cloud http (${status})`),{name:'CloudProtocolError',code:'http',status,data:{error:text,...(code?{code}:{})}});
+  const alpha=cloudInboxRefusal({error:text});
+  assert.ok(alpha,'Cloud refusal has an Alpha sentence: '+text);
+  assert.notEqual(alpha,text,text);
+  for(const context of ['read','operation'])assert.deepEqual(classifyGmailFailure(failure,context,true),{kind:'rejected',message:alpha},text);
+  worded.add(text);
+ }
+ assert.ok(worded.size>=40,'refusals read: '+worded.size);
+ // Every key is still a sentence Cloud sends.
+ for(const key of CLOUD_INBOX_REFUSALS.keys())assert.ok(worded.has(key),'still sent by Cloud: '+key);
+ const PINNED=[
+  ['At most 50 recipients are supported','Send to at most 50 recipients in all.'],
+  ['At least one recipient is required to send','Add at least one recipient before sending.'],
+  ['Use an unambiguous email address without a display name','Enter each recipient as a plain email address, without a name.'],
+  ['Attachment names must be unique','Two attachments have the same name. Rename one to attach both.'],
+  ['Attachments exceed 5 MiB in total','Attachments are over 5 MiB in total.'],
+  ['Attachment exceeds 5 MiB','An attachment is larger than 5 MiB.'],
+  ['At most 10 attachments are supported','Attach at most 10 files.'],
+  ['Thread exceeds the explicit 2000-message support limit','This conversation has more than 2,000 messages. Open it in Gmail.'],
+ ];
+ for(const [text,alpha] of PINNED)assert.equal(cloudInboxRefusal({error:text}),alpha,text);
+ assert.equal(cloudInboxRefusal({error:'Some upstream server sentence'}),undefined);
+ assert.equal(cloudInboxRefusal({error:'constructor'}),undefined);
+ assert.equal(cloudInboxRefusal(null),undefined);
+});
+
 const {attachmentRefusalText}=await import('../apps/app/src/ui/mailbox/drafts-controller.ts');
 test('the shared attachment review’s refusals reach Use in email and the note source review in Alpha’s words',()=>{
  const sentences=thrown(staged('plugins/plugin-files/src/browser/attachment.ts'));

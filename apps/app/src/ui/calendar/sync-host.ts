@@ -116,6 +116,13 @@ export class CalendarSyncNotice extends Error {
 
 const GOOGLE_INVALID =
   "Google returned a Calendar event this phone could not use. Nothing was applied.";
+/**
+ * An event Google returned that this phone cannot represent. The shared port runs the same checks
+ * on the read-back of a create or update Google already stored, so this does not claim nothing was
+ * applied.
+ */
+const GOOGLE_EVENT_UNUSABLE =
+  "Google returned an event this phone could not use.";
 const REQUEST_INVALID =
   "This Calendar change could not be sent safely. Nothing was applied.";
 
@@ -134,11 +141,11 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   ["An exact Google event revision is required.", REQUEST_INVALID],
   ["Unsupported Calendar operation.", REQUEST_INVALID],
   ["Google returned an incomplete Calendar event. Nothing was applied.", GOOGLE_INVALID],
-  ["Google returned invalid all-day dates.", GOOGLE_INVALID],
-  ["Google returned an event without its timezone.", GOOGLE_INVALID],
-  ["Google returned invalid attendees.", GOOGLE_INVALID],
-  ["Google returned invalid recurrence.", GOOGLE_INVALID],
-  ["Google returned an invalid event state.", GOOGLE_INVALID],
+  ["Google returned invalid all-day dates.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned an event without its timezone.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned invalid attendees.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned invalid recurrence.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned an invalid event state.", GOOGLE_EVENT_UNUSABLE],
   ["This Google calendar does not support safe sync.", "This Google calendar cannot be synced safely. Choose another calendar."],
   ["Google account and calendar names could not be verified. Review the connection before syncing.", "The Google account and calendar names could not be verified. Review the connection before syncing."],
   ["Calendar sync protocol is unavailable. Nothing was applied.", "Calendar sync is unavailable on this server. Nothing was applied."],

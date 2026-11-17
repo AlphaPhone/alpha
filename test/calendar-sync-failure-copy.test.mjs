@@ -141,3 +141,21 @@ test('an unknown event time zone is named; other unknown errors get the generic 
   assert.equal(await statusFor(new DOMException('Calendar sync context changed', 'AbortError')),
     'Sync paused or the selected account changed. Check linked events before retrying.');
 });
+
+// The shared Google port runs these checks on the read-back of a create or update Google already
+// stored, so the owner's sentence must not claim nothing was applied.
+test('an event Google returned that this phone cannot use never claims nothing was applied', async () => {
+  const port = 'vendor/eliza/plugins/plugin-calendar/src/linked-sync/google-sync-port.ts';
+  for (const thrown of [
+    'Google returned invalid all-day dates.',
+    'Google returned an event without its timezone.',
+    'Google returned invalid attendees.',
+    'Google returned invalid recurrence.',
+    'Google returned an invalid event state.',
+  ]) {
+    assert.ok(plainThrows(port).includes(thrown), `${port} still throws ${JSON.stringify(thrown)}`);
+    const shown = await statusFor(Error(thrown));
+    assert.equal(shown, 'Google returned an event this phone could not use.', thrown);
+    assert.doesNotMatch(shown, /Nothing was applied/);
+  }
+});

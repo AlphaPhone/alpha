@@ -213,6 +213,37 @@ test('a digest result, its status and the panel’s source refusals read in Alph
  assert.equal(digests.digestCalendarErrorText(new Error(digests.DIGEST_CALENDAR_PERMISSION_DENIED)),digests.DIGEST_CALENDAR_PERMISSION_DENIED);
 });
 
+// The error a hosted digest run records is the agent's own text; its fixed reasons keep their meaning.
+test('every fixed error a hosted digest run records keeps its reason in Alpha’s words',()=>{
+ const services='plugins/plugin-workflow/src/services/';
+ // Startup wiring and a calendar-list timeout the listing swallows; neither reaches a run's error.
+ const NOT_RUN_ERRORS=new Set(['Native source reader already configured','Read timeout']);
+ const errors=['hosted-digest.ts','hosted-native-source.ts','hosted-google-source.ts'].flatMap(name=>{
+  const text=vendor(services+name);
+  const found=literals(text,/new (?:WorkflowApiError|Error)\(\s*'([^']+)'/g);
+  assert.equal(found.length,(text.match(/new (?:WorkflowApiError|Error)\(/g)??[]).length,name+': every error is a fixed sentence');
+  return found;
+ }).filter(text=>!NOT_RUN_ERRORS.has(text));
+ const service=vendor(services+'embedded-workflow-service.ts');
+ const grant="throw new WorkflowApiError('Hosted source grant expired or was revoked', 409)";
+ assert.ok(service.includes(grant),'live grant check: '+grant);
+ errors.push('Hosted source grant expired or was revoked');
+ assert.ok(vendor(services+'hosted-digest.ts').includes('error: execution.error?.message ?? null'),'a run records the execution error as its result error');
+ const keys=new Set(digests.DIGEST_RUN_ERRORS.keys());
+ for(const error of errors){
+  assert.ok(keys.has(error),'digest run error has an Alpha sentence: '+error);
+  const shown=digests.digestSummaryText({runId:'run',status:'failed',output:null,error});
+  assert.notEqual(shown,digests.DIGEST_RUN_FAILED,error);
+  assert.notEqual(shown,error,error);
+ }
+ for(const key of keys)assert.ok(errors.includes(key),'still recorded by the agent: '+key);
+ assert.equal(digests.digestSummaryText({runId:'run',status:'failed',output:null,error:'Native source consent expired or revoked'}),
+  'Your consent for this digest to read this phone expired or was revoked. Review the source to turn it back on.');
+ assert.equal(digests.digestSummaryText({runId:'run',status:'failed',output:null,error:'Hosted source grant expired or was revoked'}),
+  'This digest’s source expired or was revoked, so it did not run. Renew or review the source.');
+ assert.equal(digests.digestSummaryText({runId:'run',status:'failed',output:null,error:'constructor'}),digests.DIGEST_RUN_FAILED);
+});
+
 // --- Chat: an approved Notes change (staged plugin-notes) --------------------------------------
 const notes=await import('../apps/app/src/ui/notes/notes-action-messages.ts');
 test('every shared Notes refusal on the approved change path is worded by Alpha',()=>{
