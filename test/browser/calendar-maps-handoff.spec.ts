@@ -1,6 +1,7 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
+import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 const address='12 Market Street, Test Town';
 async function event(page:Page,configured=true,deferred:boolean|'all'=false,options:{routePending?:boolean;emptyReplacement?:boolean}={}){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
@@ -21,7 +22,16 @@ test('event address searches once, preserves result choice and returns to the sa
  await expect(page.getByRole('button',{name:/^East entrance/}).first()).toBeVisible();await expect(page.getByRole('button',{name:/^West entrance/}).first()).toBeVisible();
  expect(await page.evaluate(()=>(window as any).travelQueries)).toEqual([address]);
  await page.getByRole('button',{name:/^West entrance/}).first().click();await expect(page.getByRole('button',{name:'Directions',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Directions',exact:true}).click();const origin=page.getByRole('textbox',{name:'Starting point'});await origin.fill('43.738, 7.424');await expect(page.getByText(/no live traffic/).first()).toBeVisible();await origin.press('Enter');expect(await page.evaluate(()=>(window as any).travelRoutes)).toEqual([{from:{latitude:43.738,longitude:7.424},to:{latitude:43.74,longitude:7.425},mode:'drive'}]);await page.screenshot({path:info.outputPath('reviewed-event-route.png')});
+ await page.getByRole('button',{name:'Directions',exact:true}).click();
+ const origin=page.getByRole('textbox',{name:'Starting point'});
+ const routes=()=>page.evaluate(()=>(window as any).travelRoutes);
+ const expectedRoute=[{from:{latitude:43.738,longitude:7.424},to:{latitude:43.74,longitude:7.425},mode:'drive'}];
+ await origin.fill('43.738, 7.424');
+ await expect.poll(routes,{timeout:scaledTimeout(15_000)}).toEqual(expectedRoute);
+ await expect(page.getByText(/no live traffic/).first()).toBeVisible();
+ await origin.press('Enter');
+ expect(await routes()).toEqual(expectedRoute);
+ await page.screenshot({path:info.outputPath('reviewed-event-route.png')});
  // Unwind the route and selected place, then the event-owned search returns directly to Calendar.
  // A fourth Back would dismiss the event detail we are checking.
  await back(page);await expect(page.getByRole('button',{name:'Directions',exact:true})).toBeVisible();
