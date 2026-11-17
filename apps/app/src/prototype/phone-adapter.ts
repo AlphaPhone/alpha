@@ -233,7 +233,7 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   return {target:{kind:'recents',app:'Phone',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Call or ask',value:filter?.by==='owner'?filter.query:'',submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null,
     onText:text=>{if(!text&&filter?.by==='alpha')return;filter=text?{query:text,label:'',by:'owner'}:null;changed();}},
-   left:{icon:'keypad',label:'Back to the keypad',initials:null,run:()=>selectPhoneTab('keypad')},
+   left:null,
    context:'Phone',contextKey:'phone:recents:',strip:{title:'Phone',subtitle:'',initials:null,live:false,actions:[]},
    end:null,incoming:null,emergency:false,fit:null,
    briefing:callsBriefing(missed,voicemails.filter(row=>row.isNew).map(row=>({name:who(row)})),now)};

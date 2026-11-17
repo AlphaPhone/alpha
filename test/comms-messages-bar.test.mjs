@@ -45,7 +45,7 @@ test('the Messages list bar filters on this phone and never sends', () => {
   const spec = M.msgBar(state(), api);
   assert.deepEqual(plain({target: spec.target, kind: spec.closed.kind, placeholder: spec.closed.placeholder, left: spec.left, context: spec.context, contextKey: spec.contextKey, strip: spec.strip}),
     {target: {kind: 'list', app: 'Messages', name: null, first: null, initials: null}, kind: 'filter', placeholder: 'Search or ask',
-      left: {icon: 'search', label: 'Back to search', initials: null, run: null}, context: 'Messages', contextKey: 'messages:list:', strip: {title: 'Messages', subtitle: '', initials: null, live: false, actions: []}});
+      left: null, context: 'Messages', contextKey: 'messages:list:', strip: {title: 'Messages', subtitle: '', initials: null, live: false, actions: []}});
   assert.equal(spec.closed.submit, null);
   assert.equal(spec.fit, null);
   spec.closed.onText('still');

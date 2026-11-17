@@ -140,7 +140,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  /* Composer draft; contact names for the visit only. */
  let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,namesLoaded=false,api:Bag|null=null;
  /* AC-22: the list filter, typed in the bar or applied by Alpha. AC-15: the bubble just sent, until the provider lists it. */
- let listFilter:CommsListFilter|null=null,bubbleSent:{by:'alpha'|'owner';text:string}|null=null;
+ let listFilter:CommsListFilter|null=null,listSearching=false,bubbleSent:{by:'alpha'|'owner';text:string}|null=null;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
  // Render ordinary text as text nodes, never HTML. Only credential-free HTTP(S) URLs are links.
  const messageSegments=(text:string)=>{
@@ -226,7 +226,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   session.setActive(next);if(!next){cancelMessageHold();messageMenu=null;recipientPicker.close();busy=false;draftRevision++;
   // Provider rows are visit-only. The owner's draft and its operation identity are stored separately.
   // Contact names and the thread view are for the visit only.
-  if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;bubbleSent=null;
+  if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;listSearching=false;bubbleSent=null;
   outgoing.clear();matchedProviderRows.clear();
  }else{void reconcile();void reconcileMms();}};
  const resetMms=(pictures:boolean)=>{mmsOperationId='';mmsReview=null;if(pictures){attachments=[];pictureSeq=0;}};
@@ -641,7 +641,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(!recipientPicker.close())composing=false;
   changed();
  };
- const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){closeThread();return true;}if(composing){closeNew();return true;}return back?back(st,api):false;};
+ const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){closeThread();return true;}if(composing){closeNew();return true;}if(listSearching){closeListSearch();return true;}return back?back(st,api):false;};
  views.messages.reply=()=>null;views.messages.suggestions=()=>[];
  /* AC-15: a quiet line in the chat; it is never written to the SMS provider or a thread (AC-31). */
  const noteSent=(title:string)=>api?.note?.('Sent to '+title);
@@ -697,12 +697,16 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   }
   return {target:{kind:'list',app:'Messages',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Search or ask',value:listFilter?.by==='owner'?listFilter.query:'',onText:(text:string)=>{listFilter=text.trim()?{query:text,label:text.trim(),by:'owner'}:null;paint();},submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null},
-   left:{icon:'search',label:'Back to search',initials:null,run:null},
+   left:null,
    context:'Messages',contextKey:'messages:list:',strip:{title:'Messages',subtitle:'',initials:null,live:false,actions:[]},
    end:null,incoming:null,emergency:false,fit:null,briefing:null};
  };
  /* AC-22: the list filters on this phone over each conversation's title and snippet; no request is made. */
  const listMatches=(title:string,snippet:string)=>{const query=listFilter?.query.trim().toLowerCase();return !query||(title+' '+snippet).toLowerCase().includes(query);};
+ /* Header search (the Inbox pattern): it types the same owner list filter as the bar; Back closes it. */
+ const focusListSearch=()=>owner?.setState({},()=>document.querySelector<HTMLInputElement>('.messages-search-input')?.focus());
+ const openListSearch=()=>{listSearching=true;listFilter=null;paint();focusListSearch();};
+ const closeListSearch=()=>{listSearching=false;listFilter=null;paint();};
  const listFilterHandler={apply:(filter:CommsListFilter)=>{listFilter=filter.query.trim()?{...filter}:null;paint();return true;},clear:()=>{listFilter=null;paint();},current:()=>listFilter};
  /** Values of the designed Messages view: a thread list, one thread with its composer, or a new message. */
  function designed(opens:readonly {open:()=>void}[],viewApi:Bag){
@@ -765,6 +769,10 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    canHandoff:!!status&&!direct&&!attachments.length&&!operationId&&!mmsOperationId&&hasBody&&sendingTo.length>0,
    threads:listed,noMatches:!!listFilter&&!listed.length&&state.threads.length>0,
    filterChip:listFilter?.by==='alpha'?{label:listFilter.label,clearLabel:'Clear filter '+listFilter.label,clear:listFilterHandler.clear}:null,
+   searching:listSearching,notSearching:!listSearching,searchQ:listFilter?.by==='owner'?listFilter.query:'',
+   openSearch:openListSearch,closeSearch:closeListSearch,clearSearch:()=>{listFilter=null;paint();focusListSearch();},
+   onSearch:(event:Event)=>{const text=(event.target as HTMLInputElement).value;listFilter=text.trim()?{query:text,label:text.trim(),by:'owner'}:null;paint();},
+   submitSearch:(event:Event)=>{event.preventDefault();(event.currentTarget as HTMLFormElement).querySelector('input')?.blur();},
    title,ini:initials(title),canCall:!!sole,call:()=>{if(sole)api?.open?.('phone',{prefill:sole});},callLabel:`Call ${title}`,
    messageDelete:messageMenu?.confirm&&menuRow()?{
     busy:deleting,
@@ -846,7 +854,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   document.removeEventListener('pointerdown',this.smsOutsideActions,true);
   document.removeEventListener('visibilitychange',this.smsHide);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
-  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
+  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;listSearching=false;bubbleSent=null;composing=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
   unmount?.call(this);
  };
 }

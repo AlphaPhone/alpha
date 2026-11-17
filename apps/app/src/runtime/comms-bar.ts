@@ -9,7 +9,7 @@ export type CommsApp = 'Messages' | 'Phone' | 'Contacts';
 export type CommsTargetKind = 'list' | 'thread' | 'recents' | 'call' | 'incoming' | 'contact';
 /** What the closed bar's field addresses: the person (SMS text), the list filter, or Alpha. */
 export type CommsFieldKind = 'person' | 'filter' | 'alpha';
-export type CommsLeftIcon = 'avatar' | 'call' | 'search' | 'keypad';
+export type CommsLeftIcon = 'avatar' | 'call';
 export type CommsStripActionId = 'mute' | 'end' | 'send' | 'answer' | 'decline';
 
 export type CommsTarget = {
@@ -50,8 +50,9 @@ export type CommsIncoming = { id: string; answer: () => void; decline: () => voi
 export type CommsBarSpec = {
 	target: CommsTarget;
 	closed: CommsClosedField;
-	/** Open-state left slot (AC-08) and its TalkBack name (AC-29). `run` follows the shell's close. */
-	left: { icon: CommsLeftIcon; label: string; initials: string | null; run: (() => void) | null };
+	/** Open-state left slot (AC-08) and its TalkBack name (AC-29). `run` follows the shell's close.
+	 *  Null on lists, Recents and the keypad: their search lives in the app header, not beside the chat field. */
+	left: { icon: CommsLeftIcon; label: string; initials: string | null; run: (() => void) | null } | null;
 	/** Sheet header context (AC-09), for example "Maya Chen · Messages". */
 	context: string;
 	/** Changes exactly when the subject on screen changes: `${view}:${target.kind}:${subjectId}`. */

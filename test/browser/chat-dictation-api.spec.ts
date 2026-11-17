@@ -171,7 +171,7 @@ test('API dictation: a comms list filter is filled by dictation, never sent to A
   w.filterText='';
   VIEWS.notes.bar=()=>({target:{kind:'list',app:'Contacts',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Search or ask',value:w.filterText,onText:(text:string)=>{w.filterText=text;w.dictationApiFixture.setState({});},submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null},
-   left:{icon:'search',label:'Back to search',initials:null,run:null},context:'Contacts',contextKey:'notes:list:',
+   left:null,context:'Contacts',contextKey:'notes:list:',
    strip:{title:'Contacts',subtitle:'',initials:null,live:false,actions:[]},end:null,incoming:null,emergency:false,fit:null,briefing:null});
   shell.openView('notes',null,'input');
  });
