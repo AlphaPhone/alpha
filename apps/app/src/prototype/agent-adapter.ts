@@ -1683,7 +1683,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.removeMail=()=>{this.mailAttachment=null;this.setState({});};
     out.attachedTranscript=this.S().msgs.some((m:Shell)=>m.transcriptAttachment&&m.transcriptAttachment===this.transcriptAttachment)?'':this.transcriptAttachment?.title||'';
     out.removeTranscript=()=>{this.transcriptAttachment=null;this.setState({});};
-    out.messageComposeContext=composeTarget?(this.messageEditTarget?'Editing message':'Replying to '+(composeTarget.from==='user'?'your message':out.name))+': '+composeTarget.text.replace(/\s+/g,' ').slice(0,160):'';
+    out.messageComposeContext=composeTarget&&!this.S().typing?(this.messageEditTarget?'Editing message':'Replying to '+(composeTarget.from==='user'?'your message':out.name))+': '+composeTarget.text.replace(/\s+/g,' ').slice(0,160):'';
     out.cancelMessageContext=()=>{cancelMessageContext(this);this.setState({});};
     const draft=this.composerDraft?.state;
     out.draftRecovery=!!draft?.error&&!!this.composerDraft?.recovery();
