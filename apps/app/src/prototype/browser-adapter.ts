@@ -273,6 +273,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     tabs.forget([id]); restored.delete(id);
     shell.vset('browser', {tabs: rest.length ? rest : [{id: fallback, hist: ['newtab'], pos: 0}], cur: state().cur === id ? (rest[0]?.id || fallback) : state().cur});
   }
+  // The open tabs a chat request names by a few words. A private tab is found only for a request
+  // made from a private tab. A switch never names the tab that is already showing.
+  const tabPage = (id: string) => { const known = tabInfo(id) || restored.get(id); return known && {title: pageTitle(known.title, known.url), url: known.url as string}; };
+  function namedTabs(target: string, closing: boolean) {
+    const s = state(), fromPrivate = shell.S?.().view === 'browser' && isPrivate(s.cur);
+    const visible: (Bag & {id: string})[] = s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv);
+    return {visible, found: matchingTabs(closing ? visible : visible.filter(tab => tab.id !== s.cur), target, tabPage)};
+  }
   async function command(command: string) {
     const id = state()?.cur; if (!id || !tabs.has(id)) return;
     try { await Browser.command({ session, id, command }); } catch (error) { report(error); }
@@ -618,12 +626,11 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         if (target === undefined && isPrivate(selected) && !fromPrivate) refuse('The tab showing in Browser is private. Ask again from that tab.');
         let id = selected;
         if (target !== undefined) {
-          const page = (tab: string) => { const known = tabInfo(tab) || restored.get(tab); return known && {title: pageTitle(known.title, known.url), url: known.url}; };
-          const visible = s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv), found = matchingTabs<Bag & {id: string}>(closing ? visible : visible.filter((tab: Bag) => tab.id !== selected), target, page);
-          if (!found.length) refuse(!closing && matchingTabs(visible, target, page).length ? 'That tab is already showing.' : `No open tab matches “${target}”.`);
+          const {visible, found} = namedTabs(target, closing);
+          if (!found.length) refuse(!closing && matchingTabs(visible, target, tabPage).length ? 'That tab is already showing.' : `No open tab matches “${target}”.`);
           let choice: number | null = 0;
           if (found.length > 1) {
-            choice = await input.choose({verb: closing ? 'Close' : 'Switch to', options: found.map(tab => { const known = page(tab.id); return {title: known?.title || known?.url || (tab.priv ? 'New private tab' : 'New tab'), host: known?.url && URL.canParse(known.url) ? new URL(known.url).host : '', priv: !!tab.priv}; })}, signal);
+            choice = await input.choose({verb: closing ? 'Close' : 'Switch to', options: found.map(tab => { const known = tabPage(tab.id); return {title: known?.title || known?.url || (tab.priv ? 'New private tab' : 'New tab'), host: known?.url && URL.canParse(known.url) ? new URL(known.url).host : '', priv: !!tab.priv}; })}, signal);
             signal.throwIfAborted();
           }
           const chosen = choice === null ? undefined : found[choice]?.id;
@@ -652,6 +659,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       if (action === 'stop' && !info.loading) refuse('The page is not loading.');
       return () => { if (still() && tabInfo(selected)?.navigation === navigation) { show(); void command(action); } };
     };
+    this.browserTabNeedsChoice = (target: string) => !disposed && !!state() && namedTabs(target, false).found.length > 1;
     // Identity only: visible page content, URL and browsing history are not
     // transmitted merely by opening the agent. Navigation changes the revision
     // so a proposal for an earlier document cannot retain current authority.

@@ -102,10 +102,16 @@ let filesReviewIdentity: ((paths:string[],signal:AbortSignal)=>Promise<string[]>
 export function setFilesReviewIdentity(read: (paths:string[],signal:AbortSignal)=>Promise<string[]>) {
   filesReviewIdentity=read;
 }
+/** Browser's answer to whether a tab switch's words match several open tabs. Such a switch is
+ * never run directly: its review card lists the tabs for the owner to pick. */
+let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
+export function setBrowserTabNeedsChoice(read: (target:string)=>boolean) {
+  browserTabNeedsChoice=read;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target)});
   }
 }

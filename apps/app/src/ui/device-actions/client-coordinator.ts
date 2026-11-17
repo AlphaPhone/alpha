@@ -620,6 +620,8 @@ export class DeviceActionCoordinator<
     private readonly options: {
       currentRequestBrowserPolicy?: boolean;
       currentRequestTelephonyPolicy?: boolean;
+      /** Whether a tab switch's words match several open tabs on this phone. */
+      browserTabNeedsChoice?: (target: string) => boolean;
     } = {},
   ) {
     this.ports = ports;
@@ -1342,6 +1344,13 @@ export class DeviceActionCoordinator<
         continue;
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
+      // Words that match several tabs need the owner's pick, and only the
+      // action's review card can show it.
+      if (
+        entry.proposal.operation.type === "browser_tab_switch" &&
+        this.options.browserTabNeedsChoice?.(entry.proposal.operation.target)
+      )
+        continue;
       const browser =
         this.options.currentRequestBrowserPolicy &&
         (entry.proposal.operation.type === "browser_navigate" ||

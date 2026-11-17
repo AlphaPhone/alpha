@@ -13,7 +13,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setFilesReviewIdentity} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -1047,6 +1047,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||expectedContext.sensitive||!['home','calendar'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Availability review context changed');};
       return executeCalendarAvailability(registerPlugin<AvailabilityProvider>('AlphaCalendar'),operation,expectedContext.timeZone,signal,current,availabilityReview);
     });
+    setBrowserTabNeedsChoice(target=>!!this.browserTabNeedsChoice?.(target));
     setFilesReviewIdentity(async (paths, signal) => {
       const files=this.filesAgent as FilesAgentRunner|undefined;
       if(!files||!this.live||document.hidden)throw Error('Files is unavailable');

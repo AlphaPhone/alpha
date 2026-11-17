@@ -61,6 +61,7 @@ test('several matching tabs are listed for the owner to pick; picking none does 
  await browser(async({host,open,control,asked})=>{
   const one=await open('https://shop.example/shoes','Shoes — Shop',{fresh:false}),two=await open('https://shop.example/hats','Hats — Shop');
   const other=await open('https://owner.example/','Owner page');
+  assert.equal(host.component.browserTabNeedsChoice('shop'),true);assert.equal(host.component.browserTabNeedsChoice('owner'),false);assert.equal(host.component.browserTabNeedsChoice('recipes'),false);
   await (await control({type:'browser_tab_switch',target:'shop'},{pick:1}))();
   assert.equal(host.state().cur,two);
   assert.deepEqual(asked,[{verb:'Switch to',options:[{title:'Shoes — Shop',host:'shop.example',priv:false},{title:'Hats — Shop',host:'shop.example',priv:false}]}]);
@@ -165,6 +166,10 @@ for(const [operation,text] of direct)test(`a ${operation.type} bound to the owne
  const on=bound(operation);assert.deepEqual(await on.run(text,async()=>false),[]);assert.deepEqual(on.actions.calls,[],'with "Ask before Alpha acts" on, the card is the only way to run it');
  const unbound=bound(operation,null);assert.deepEqual(await unbound.run(text),[]);assert.deepEqual(unbound.actions.calls,[]);
  const older=bound(operation,'an-earlier-message');assert.deepEqual(await older.run(text),[]);assert.deepEqual(older.actions.calls,[]);
+});
+test('a bound switch whose words match several tabs is left for its card, where the owner picks',async()=>{
+ const f=bound({type:'browser_tab_switch',target:'shop'});f.actions.options.browserTabNeedsChoice=target=>target==='shop';
+ assert.deepEqual(await f.run('switch to the shop tab'),[]);assert.deepEqual(f.actions.calls,[]);assert.ok(f.actions.proposals.has('control'),'the proposal keeps its review card');
 });
 test('closing a tab is never run without its card',async()=>{
  const f=bound({type:'browser_tab_close',target:'news'});assert.deepEqual(await f.run('close the news tab'),[]);assert.deepEqual(f.actions.calls,[]);
