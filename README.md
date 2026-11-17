@@ -122,7 +122,8 @@ build). On a phone running an Alpha image, where Alpha is the image's system app
 refuses before building: a debuggable update over it drops Alpha's Phone and Messages roles. Flash
 an image there, or add `--allow-system-update` deliberately. It skips the input preflight, lint, the instrumentation APK, `verify-apks`,
 licence notices and the SBOM. Add `-- --restage` after changing agent sources. Its
-APK is never distributable: it stays out of `artifacts/`, its packaged
+APK is never distributable: it stays in `artifacts/fast/`, apart from the top-level
+`artifacts/` files that `verify-apks`, signing and archives read, its packaged
 `build-flags.json` records `fastIteration: true`, and the production bundle audit,
 `verify-apks` and every release path refuse it. Use `android:build:local` before
 pushing Android changes. `./gradlew --stop` in `android/` ends the daemon.

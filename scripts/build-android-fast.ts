@@ -12,8 +12,8 @@
  * skips the input preflight, upstream verification, Android lint, the instrumentation APK, the
  * release APK, verify-apks, the licence notices and the SBOM, and keeps a Gradle daemon warm.
  *
- * The result is never distributable. It goes to artifacts/fast/, apart from the artifacts/ that
- * verify-apks, signing, archives and update manifests read, and its packaged
+ * The result is never distributable. It goes to artifacts/fast/, apart from the top-level
+ * artifacts/ files that verify-apks, signing, archives and update manifests read, and its packaged
  * build-flags.json records `fastIteration: true`, which scripts/audit-production-bundle.ts
  * (and so verify-apks, archives and every release path behind them) refuses. The build is flag-off
  * like every APK build: ELIZA_DEV_ALLOW_TEST_MOCKS never reaches it.
@@ -23,13 +23,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { androidIdentity } from "./android-identity.ts";
+import { ANDROID_PUBLIC } from "./android-gzip-assets.ts";
 import { sha256File } from "./sha256.ts";
 
 export const FAST_OUTPUT = "artifacts/fast";
 export const FAST_APK = "launcher-debug.apk";
 export const FAST_RECORD = "build-config.json";
-/** The packaged web payload Gradle copies into the APK (scripts/android-gzip-assets.ts ANDROID_PUBLIC). */
-const PACKAGED_FLAGS = "android/app/src/main/assets/public/build-flags.json";
+/** The synced web payload's flags, which Gradle packages as assets/public/build-flags.json. */
+export const PACKAGED_FLAGS = path.posix.join(ANDROID_PUBLIC, "build-flags.json");
+/** Where PACKAGED_FLAGS and the staged runtime land inside the APK. */
+export const APK_FLAGS_ENTRY = "assets/public/build-flags.json";
+export const APK_RUNTIME_ENTRY = "assets/agent/agent-bundle.js";
 /** What `bun run agent:stage-android` leaves behind; the same marker the SBOM uses (build-android.ts). */
 export const STAGED_RUNTIME = "android/app/src/main/assets/agent/agent-bundle.js";
 /** The prepare/stage chain of `android:build:local`, without its preflight and Gradle build. */
@@ -111,16 +115,29 @@ export function fastBuildOptions(env: NodeJS.ProcessEnv, root: string) {
 }
 
 /** The `verify` step: confirm the marker reached the APK and record a non-distributable manifest. */
-function inspect(root: string) {
+export function inspect(root: string) {
   const apk = path.join(root, FAST_OUTPUT, FAST_APK);
-  const flags = JSON.parse(execFileSync("unzip", ["-p", apk, "assets/public/build-flags.json"], { encoding: "utf8" }));
+  const flags = JSON.parse(execFileSync("unzip", ["-p", apk, APK_FLAGS_ENTRY], { encoding: "utf8" }));
   if (flags.testMocks !== false) throw new Error(`${apk} packages testMocks=${flags.testMocks}`);
   if (flags.fastIteration !== true) throw new Error(`${apk} does not carry the fastIteration marker`);
-  if (!execFileSync("unzip", ["-l", apk], { encoding: "utf8" }).includes("assets/agent/agent-bundle.js"))
+  // Exact entry names (`unzip -Z1`), so e.g. agent-bundle.js.map alone does not pass for the runtime.
+  if (!execFileSync("unzip", ["-Z1", apk], { encoding: "utf8" }).split(/\r?\n/).includes(APK_RUNTIME_ENTRY))
     throw new Error(`${apk} does not package the staged resident runtime`);
   const row = { file: FAST_APK, variant: "launcher", mode: "debug", fastIteration: true, distributable: false, verified: false,
     sha256: sha256File(apk), bytes: fs.statSync(apk).size };
   fs.writeFileSync(path.join(root, FAST_OUTPUT, "apk-manifest.json"), `${JSON.stringify({ fastIteration: true, apks: [row] }, null, 2)}\n`);
+}
+
+/**
+ * Sync the web payload into the Android project, mark it, then build. `android:sync` recopies
+ * build-flags.json, so the marker has to follow the last sync and precede Gradle.
+ */
+export function syncMarkAndBuild(root: string, run: (cmd: string, args: string[]) => unknown, build: () => unknown) {
+  run("bun", ["scripts/android-host.ts"]);
+  run("bun", ["run", "android:sync"]);
+  run("bun", ["scripts/android-host.ts"]);
+  markFastIteration(path.join(root, PACKAGED_FLAGS));
+  return build();
 }
 
 async function main() {
@@ -147,12 +164,8 @@ async function main() {
     process.exit(2);
   }
   console.log(`Android fast build: launcher debug only, no lint/tests/verify-apks, NOT distributable -> ${FAST_OUTPUT}/`);
-  run("bun", ["scripts/android-host.ts"]);
-  run("bun", ["run", "android:sync"]);
-  run("bun", ["scripts/android-host.ts"]);
-  markFastIteration(path.join(root, PACKAGED_FLAGS));
   const { buildAndroidConsumer } = await import("../vendor/eliza/packages/app/scripts/mobile/android/build-consumer.mjs");
-  (buildAndroidConsumer as unknown as (o: ReturnType<typeof fastBuildOptions>) => unknown)(fastBuildOptions(env, root));
+  syncMarkAndBuild(root, run, () => (buildAndroidConsumer as unknown as (o: ReturnType<typeof fastBuildOptions>) => unknown)(fastBuildOptions(env, root)));
   const apk = path.join(FAST_OUTPUT, FAST_APK);
   console.log(`Fast build done in ${((Date.now() - started) / 1000).toFixed(0)}s: ${apk} (developer APK, not distributable)`);
   if (options.install) run(adb, ["install", "-r", apk]);
