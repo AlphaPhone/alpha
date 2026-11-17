@@ -154,7 +154,13 @@ bun run android:build:inputs       # report missing build inputs
 bun run android:build:local        # prepare, build worker, stage runtime and build (debug only)
 bun run android:build:local -- --release   # the same, also building the release APK (CI)
 bun run android:verify            # inspect APK contents and signatures
+bun run android:build:fast -- --install   # developer rebuild after build:local; never distributable
 ```
+
+`android:build:fast` (scripts/build-android-fast.ts) is an APK build only, with fewer checks:
+no preflight, lint, instrumentation APK, verify-apks or SBOM. It writes `artifacts/fast/`, marks the
+packaged `build-flags.json` `fastIteration: true` so the production bundle audit refuses it, and is
+not evidence for a distributable build, an emulator HOME-role test or device acceptance.
 
 There is one launcher product/flavor. A local build produces the debug APK under
 `artifacts/` and an instrumentation APK under `artifacts/instrumentation/`; it uses

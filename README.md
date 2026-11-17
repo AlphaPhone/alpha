@@ -109,6 +109,22 @@ and builds the debug APK and its instrumentation APK into `artifacts/`; add
 `-- --release` (`bun run android:build:local -- --release`) to build the release
 APK too, as CI does. The third checks their contents and signatures.
 
+While iterating on a phone, rebuild after that first `android:build:local` with:
+
+```bash
+bun run android:build:fast -- --install
+```
+
+It reuses the staged agent runtime and native outputs, runs the web build, sync and
+only `:app:assembleLauncherDebug` on a warm Gradle daemon, and installs
+`artifacts/fast/launcher-debug.apk` with `adb install -r` (drop `--install` to only
+build). It skips the input preflight, lint, the instrumentation APK, `verify-apks`,
+licence notices and the SBOM. Add `-- --restage` after changing agent sources. Its
+APK is never distributable: it stays out of `artifacts/`, its packaged
+`build-flags.json` records `fastIteration: true`, and the production bundle audit,
+`verify-apks` and every release path refuse it. Use `android:build:local` before
+pushing Android changes. `./gradlew --stop` in `android/` ends the daemon.
+
 The first build downloads the pinned models and toolchain inputs, builds the
 native voice and embedding libraries, and caches the verified outputs. Later
 builds reuse that cache after checking its source recipe and file hashes.
