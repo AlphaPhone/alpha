@@ -245,6 +245,29 @@ test('every fixed error a hosted digest run records keeps its reason in Alpha’
  assert.equal(digests.digestSummaryText({runId:'run',status:'failed',output:null,error:'constructor'}),digests.DIGEST_RUN_FAILED);
 });
 
+// --- Chat: a workflow the agent saved, changed or started (plugin-workflow WORKFLOW action) -----
+const chat=await import('../apps/app/src/runtime/action-message-presentation.ts');
+test('every WORKFLOW action sentence the agent delivers unparaphrased reads in Alpha’s words',()=>{
+ // Text bound to effect receipts is the action's canonical reply: core delivers it exactly as written.
+ assert.match(vendor('packages/core/src/runtime/action-handler-settlement.ts'),/callbackText !== expectedText/);
+ const bound=literals(vendor('plugins/plugin-workflow/src/actions/workflow.ts'),/text:\s*`([^`]+)`,\s*effectReceipts: (?!\[\])/g);
+ const values={'workflow.name':'Morning digest','workflow.id':'0b0e2f4e-6a51-4c0e-9a55-0d2f6f0f3a11','workflow.versionId':'7d1f3c2a-1b7e-4f0a-8d1c-5e2a9b6c4d33',"workflow.active ? 'active' : 'inactive'":'inactive','execution.id':'run-1',marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
+ const sentence=template=>template.replaceAll('\\n','\n').replace(/\$\{([^}]+)\}/g,(_whole,name)=>{assert.ok(name in values,'template value: '+name);return values[name];});
+ const PINNED=[
+  ['Created “${workflow.name}” as an inactive Smithers workflow (${workflow.id}, version ${workflow.versionId}).','Created “Morning digest”. It is paused until you turn it on.'],
+  ['Updated “${workflow.name}”.','Updated “Morning digest”.'],
+  ["${workflow.name} is now ${workflow.active ? 'active' : 'inactive'}.",'Morning digest is now inactive.'],
+  ['Submitted workflow run ${execution.id}.\\n\\n[WORKFLOW]\\n${marker}\\n[/WORKFLOW]','Submitted workflow run run-1.'],
+  ['Restored “${workflow.name}”.','Restored “Morning digest”.'],
+ ];
+ assert.deepEqual(bound,PINNED.map(([upstream])=>upstream));
+ for(const [upstream,alpha] of PINNED){
+  assert.equal(chat.workflowReplyText(sentence(upstream)).text,alpha,upstream);
+  // The same sentence inside a longer reply is reworded in place.
+  assert.equal(chat.workflowReplyText('Done.\n\n'+sentence(upstream)).text,'Done.\n\n'+alpha,upstream);
+ }
+});
+
 // --- Chat: an approved Notes change (staged plugin-notes) --------------------------------------
 const notes=await import('../apps/app/src/ui/notes/notes-action-messages.ts');
 test('every shared Notes refusal on the approved change path is worded by Alpha',()=>{
