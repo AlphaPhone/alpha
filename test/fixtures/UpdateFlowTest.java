@@ -2032,6 +2032,16 @@ public final class UpdateFlowTest {
    check(context.packages.installer.committed.equals(List.of(session))&&connections.isEmpty(),"Continue neither downloads nor commits again");
   }
  }
+ private static void imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(File cache)throws Exception{
+  for(int sdk:new int[]{30,37}){
+   Context context=installing(cache);Build.VERSION.SDK_INT=sdk;context.packages.installsAllowed=false;context.selfUpdateGranted=true;android.os.SystemClock.uptime=35000;
+   String expected=sdk<31?"unsupported":"supported";
+   check(expected.equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"the image self-update grant replaces only the consent read: "+sdk);
+   Build.VERSION.SDK_INT=37;
+  }
+  Context denied=installing(cache);denied.packages.installsAllowed=false;android.os.SystemClock.uptime=35000;
+  check("permission-required".equals(AlphaDevicePlugin.automaticUpdateStatus(denied)),"without the image grant the owner's consent is still required");
+ }
  private static void consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(File cache)throws Exception{
   Context context=installing(cache);context.packages.installsAllowed=false;
   context.packages.installConsentAnswers.add(true);context.packages.installConsentAnswers.add(false);
@@ -2470,6 +2480,7 @@ public final class UpdateFlowTest {
    automaticPendingActionWaitsForAnExplicitContinue(cache);
    aReceivedConfirmationSurvivesOnlyUntilFirstLaunch(cache);
    consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(cache);
+   imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(cache);
    automaticSuccessReconcilesTheExactInstalledSuccessor(cache);
    automaticDraftRefusalNeverStopsOrCommits(cache);
    automaticModeIsStrictAndExplicitFalseKeepsManualBehavior(cache);
