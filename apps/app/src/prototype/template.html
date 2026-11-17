@@ -3710,7 +3710,7 @@
   </div>
   <sc-if value="{{workflows.automation.detail}}">
     <section ref="{{workflows.detailFocus}}" data-alpha-subview="automations-detail" class="automation-detail" aria-label="{{workflows.automation.title}}">
-      <div data-alpha-app-header="detail" class="automation-detail-header"><button class="ib" aria-label="Back to workflows" disabled="{{workflows.automation.busy}}" onClick="{{workflows.automation.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button><h2 data-alpha-app-title>{{workflows.automation.title}}</h2></div>
+      <div data-alpha-app-header="detail" class="automation-detail-header"><button class="ib" aria-label="Back to workflows" disabled="{{workflows.automation.busy}}" onClick="{{workflows.automation.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button><h2 data-alpha-app-title>{{workflows.automation.title}}</h2><sc-if value="{{workflows.automation.power}}"><button class="automation-power" aria-label="Turn {{workflows.automation.title}} on or off" aria-pressed="{{workflows.automation.powerOn}}" aria-disabled="{{workflows.automation.powerDisabled}}" onClick="{{workflows.automation.togglePower}}" style="{{workflows.automation.powerTrack}}"><span style="transform: translateX({{workflows.automation.powerKx}}px)"></span></button></sc-if></div>
       <div data-alpha-app-scroll="automation-detail" class="automation-detail-body scr">
         <sc-if value="{{workflows.automation.clockContext}}"><p role="note">{{workflows.automation.clockContext}}</p></sc-if>
         <sc-if value="{{workflows.automation.creating}}"><div class="automation-new">

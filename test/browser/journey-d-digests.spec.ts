@@ -72,14 +72,12 @@ async function connect(page:Page){
  await dialog.getByRole('button',{name:'Connect development profile'}).click();
  await expect(dialog).toHaveCount(0);
 }
-/** Workflows -> Scheduled digests is the rendered entry point, including when its list is empty. */
+/** The Workflows list no longer carries a Scheduled digests row; the panel opens from its own event. */
 async function openDigests(page:Page){
  await returnToApps(page);
  await page.getByRole('button',{name:'Workflows',exact:true}).click();
- // The management rows can move when the removed-workflows inventory arrives.
- const entry=page.getByRole('button',{name:'Scheduled digests',exact:true});
- await expect(entry).toBeEnabled();
- await entry.click();
+ await expect(page.getByRole('button',{name:'Scheduled digests',exact:true})).toHaveCount(0);
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));
  const panel=panelOf(page);await expect(panel).toBeVisible();return panel;
 }
 async function createSchedules(page:Page){
