@@ -56,7 +56,7 @@ export function calendarApprovalFields(row:CalendarApproval,labels:CalendarAppro
    if(row.action==='schedule_event'&&!Array.isArray(value.attendees))throw Error('Guests unavailable');
    if(value.attendees!=null){if(!Array.isArray(value.attendees))throw Error('Guests unavailable');add('Guests',value.attendees.length?value.attendees.map(person=>{if(text(person))return person;if(!object(person)||!text(person.email)||person.optional!==undefined&&typeof person.optional!=='boolean')throw Error('Invalid guest');return `${text(person.displayName)&&person.displayName?person.displayName+' · ':''}${person.email}${person.optional?' (optional)':''}`;}).join('\n'):'No guests');}
    if(value.recurrence!=null)add('Repeat',repeatText(value.recurrence));
-  }else{if(p.cancellationMode!=null&&!['organizer_cancel','decline_invitation','remove_private_copy'].includes(String(p.cancellationMode)))throw Error('Invalid cancellation');if(instant(p.expectedEventStartAtMs))add('Event starts',localTime(p.expectedEventStartAtMs));}
+  }else{if(p.cancellationMode!=null&&!['organizer_cancel','decline_invitation','remove_private_copy'].includes(String(p.cancellationMode)))throw Error('Invalid cancellation');}
   if(p.recurrenceScope!=null){const scopes:Record<string,string>={instance:'This occurrence',this_and_following:'This and following',series:'Entire series'};if(!text(p.recurrenceScope)||!scopes[p.recurrenceScope])throw Error('Invalid scope');add('Applies to',scopes[p.recurrenceScope]);}
   if(p.notifyAttendees!==undefined&&typeof p.notifyAttendees!=='boolean')throw Error('Notifications unavailable');
   if(row.action==='cancel_event'&&typeof p.notifyAttendees!=='boolean')throw Error('Notifications unavailable');

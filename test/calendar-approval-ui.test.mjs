@@ -67,6 +67,16 @@ test('an opaque cancel or modify target without a verified current event cannot 
  assert.equal(calendarApprovalFields(change).complete,false);assert.equal(calendarApprovalFields(change,current).complete,true);
  const dates=calendarApprovalFields(row(),{...current,eventStartsAt:Date.parse('2026-11-10T00:00:00Z'),eventEndsAt:Date.parse('2026-11-12T00:00:00Z'),eventAllDay:true});assert.equal(dates.fields.find(field=>field.label==='Current time').value,'All day');assert.match(dates.fields.find(field=>field.label==='Current dates').value,/10.*11/);
 });
+test('an all-day cancellation west of UTC names only the event\'s own day',()=>{
+ const prior=process.env.TZ;process.env.TZ='America/Los_Angeles';setLocalePreferences({locale:'en-US',hourCycle:'h12'});
+ try{
+  const start=Date.parse('2026-11-20T00:00:00Z'),shown=calendarApprovalFields(row({payload:{...dto().payload,expectedEventStartAtMs:start}}),{event:'Offsite',eventStartsAt:start,eventEndsAt:start+86400000,eventAllDay:true,targetVerified:true});
+  assert.equal(shown.complete,true);assert.equal(shown.fields.find(field=>field.label==='Current dates').value,'November 20, 2026');
+  for(const field of shown.fields)assert.doesNotMatch(field.value,/Nov(ember)? 19|\bPST\b/,field.label);
+  const timed=calendarApprovalFields(row({payload:{...dto().payload,expectedEventStartAtMs:start}}),{event:'Call',eventStartsAt:start,eventEndsAt:start+3600000,targetVerified:true});
+  assert.equal(timed.fields.filter(field=>/4:00/.test(field.value)).length,1,'a timed event states its start once');
+ }finally{if(prior===undefined)delete process.env.TZ;else process.env.TZ=prior;setLocalePreferences();}
+});
 const bundle=await build({entryPoints:['apps/app/src/prototype/calendar-approval-review.ts'],bundle:true,platform:'node',format:'esm',write:false});
 const {reviewCalendarApproval:mountedReview}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const targetFacts={calendar:'Personal',event:'Disposable event',eventStartsAt:Date.parse('2026-10-14T18:00:00Z'),eventEndsAt:Date.parse('2026-10-14T19:00:00Z'),targetVerified:true};
