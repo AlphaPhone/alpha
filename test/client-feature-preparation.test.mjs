@@ -220,7 +220,7 @@ test('actual pinned client features retain shared voice source unchanged and exc
  const scan='plugins/plugin-native-camera/src/scan-document.ts';
  assert.equal(stamp.sourceFiles[scan],stamp.files[scan],'Scan state is copied from the pinned shared owner without a product patch');
  assert.deepEqual(fs.readFileSync(path.join(source,scan)),fs.readFileSync(path.join('vendor/eliza',scan)));
-assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,15);
+assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,16);
  // The browser parser stays byte-exact except its one Node-compatible value import.
  const browserCommand='plugins/plugin-browser/src/native-client-command.ts';
  const browserOriginal=fs.readFileSync(path.join('vendor/eliza',browserCommand),'utf8');
@@ -299,17 +299,35 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  // The WebView signal shim is upstream (elizaOS/eliza#37315); the relay is carried unchanged.
  assert.equal(stamp.sourceFiles[relayPath],stamp.files[relayPath]);
  assert.match(fs.readFileSync(path.join(source,relayPath),'utf8'),/host\.anySignal \? host\.anySignal\(signals\)/);
- // Alpha draws the map with its own renderer (apps/app/src/maps/map-plane.ts). Upstream
- // maps-screen.ts names only the renderer's overlay type, so map-plane.ts is staged as a type-only
- // leaf: the upstream declarations up to the renderer class, with no maplibre-gl import.
- const mapScreen=fs.readFileSync(path.join(source,'plugins/plugin-maps/src/client/maps-screen.ts'),'utf8');
- assert.deepEqual([...mapScreen.matchAll(/^import .* from "\.\/map-plane\.ts";$/gm)].map(match=>match[0]),['import type { MapOverlay } from "./map-plane.ts";']);
- const mapPlanePath='plugins/plugin-maps/src/client/map-plane.ts',mapPlane=fs.readFileSync(path.join(source,mapPlanePath),'utf8'),upstreamMapPlane=fs.readFileSync(path.join('vendor/eliza',mapPlanePath),'utf8');
- assert.notEqual(stamp.files[mapPlanePath],stamp.sourceFiles[mapPlanePath],'the staged map-plane.ts is projected');
- assert.deepEqual(importsOf(mapPlane),['./contracts.ts'],'the staged map-plane.ts imports nothing from maplibre-gl');
- assert.doesNotMatch(mapPlane,/maplibre|\bclass\b|\bfunction\b|^(?:export )?(?:const|let|var) /m,'the staged map-plane.ts declares types only');
- assert.match(mapPlane,/^import type \{ Coordinate, Route \} from "\.\/contracts\.ts";$/m);
- assert.ok(upstreamMapPlane.replace(/^import \{[^}]*\} from "maplibre-gl";\n/,'').startsWith(mapPlane),'the staged declarations are the upstream ones, unchanged');
+ // Alpha owns every screen controller and its view-model; the upstream ones are not staged, and
+ // neither is a staged index that would re-export them.
+ const alphaScreens={
+  'plugins/plugin-maps/src/client/maps-screen.ts':'maps/maps-screen.ts','plugins/plugin-maps/src/client/map-plane.ts':'maps/map-plane.ts',
+  'plugins/plugin-maps/src/client/share.ts':'maps/share.ts','plugins/plugin-maps/src/client/map-layout.ts':null,'plugins/plugin-maps/src/client/index.ts':null,
+  'plugins/plugin-files/src/browser/files-browser-adapter.ts':'files/files-browser-adapter.ts','plugins/plugin-files/src/documents/scan-event.ts':'documents/scan-event.ts','plugins/plugin-files/src/index.ts':null,
+  'plugins/plugin-inbox/src/mailbox/review-controller.ts':'mailbox/review-controller.ts','plugins/plugin-inbox/src/mailbox/drafts-controller.ts':'mailbox/drafts-controller.ts',
+  'plugins/plugin-inbox/src/mailbox/use-in-email.ts':'mailbox/use-in-email.ts','plugins/plugin-inbox/src/mailbox/preview.ts':'mailbox/preview.ts','plugins/plugin-inbox/src/mailbox/index.ts':null,
+  'plugins/plugin-notes/src/client/notes-controller.ts':'notes/notes-controller.ts','plugins/plugin-notes/src/client/notes-editor.ts':'notes/notes-editor.ts',
+  'plugins/plugin-notes/src/client/notes-snapshot-state.ts':'notes/notes-snapshot-state.ts','plugins/plugin-notes/src/client/index.ts':null,
+  'plugins/plugin-native-system/src/client/shade.ts':'shell/notification-shade.ts','packages/core/src/views/completed-action-navigation.ts':'shell/completed-action-navigation.ts',
+  'packages/contracts/src/native-telephony-session.ts':'messages/sms-session.ts','plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts':'device-actions/device-record-presentation.ts',
+ };
+ for(const [file,alpha]of Object.entries(alphaScreens)){
+  assert.equal(stamp.files[file],undefined,file+' is not staged');
+  if(alpha)assert.ok(fs.existsSync(path.join('apps/app/src/ui',alpha)),alpha+' is Alpha-owned');
+ }
+ // The shared device-action module is staged without upstream's review screen (Alpha's
+ // ui/device-actions/client-coordinator.ts): the queue protocol is the upstream text, unchanged.
+ const coordinatorPath='plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
+ const coordinator=fs.readFileSync(path.join(source,coordinatorPath),'utf8'),upstreamCoordinator=fs.readFileSync(path.join('vendor/eliza',coordinatorPath),'utf8');
+ assert.notEqual(stamp.files[coordinatorPath],stamp.sourceFiles[coordinatorPath],'the staged coordinator is projected');
+ assert.doesNotMatch(coordinator,/class DeviceActionCoordinator|ContextNotice|describeForegroundReview|device-record-presentation/);
+ for(const name of ['actionScope','smsAgentHash','validateReviewableDeviceOperation','DeviceActionNotStarted','publishCommittedDeviceChanges','deviceJournalContext','DeviceActionCoordinatorPorts'])assert.match(coordinator,new RegExp('^export (?:async )?(?:function|class|interface) '+name+'\\b','m'),name+' is kept');
+ // Apart from the import bindings only the screen used, each kept block is upstream text.
+ const statements=/^import (type )?\{[^}]*\} from "[^"]+";\n/gm,bindings=text=>new Set([...text.matchAll(/^import (?:type )?\{([^}]*)\} from "([^"]+)";$/gm)].flatMap(([,names,from])=>names.split(',').map(name=>name.trim()).filter(Boolean).map(name=>from+' '+name)));
+ const upstreamBindings=bindings(upstreamCoordinator);
+ assert.deepEqual([...bindings(coordinator)].filter(binding=>!upstreamBindings.has(binding)),[],'every kept import binding is upstream');
+ for(const block of coordinator.replace(statements,'').split(/\n(?=\/\*\*\n \* Thrown by a device executor|\/\/ ── Committed-change publication)/))assert.ok(upstreamCoordinator.replace(statements,'').includes(block.trimEnd()),'each kept block is upstream text');
  const calendarPath='packages/contracts/src/calendar-linked-sync.ts';
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
@@ -325,13 +343,9 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.match(fs.readFileSync('apps/app/src/ui/state/app-update-gate.ts','utf8'),/export function createAppUpdateScheduler/);
  for(const file of [
   calendarPath,
-  'plugins/plugin-inbox/src/mailbox/review-controller.ts',
-  'plugins/plugin-inbox/src/mailbox/drafts-controller.ts',
   'plugins/plugin-native-system/src/crash-log.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
-  'plugins/plugin-files/src/browser/files-browser-adapter.ts',
   'plugins/plugin-files/src/browser/storage-volume.ts',
-  'plugins/plugin-files/src/browser/files.ts',
   'plugins/plugin-assistant/src/services/device-actions/photo-library-contract.ts',
   'packages/voice/src/native-cloud-speech.ts',
   'packages/voice/src/cloud-speech-chunks.ts',
@@ -339,6 +353,23 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is staged directly');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
  }
+ // Browser downloads, file inputs and the voice-entry focus policy are Alpha's: the staged Files
+ // backend takes the download as a host option, the Notes document module keeps no browser code
+ // and the Sense module keeps no invocation controller. Everything kept is upstream text.
+ const staged=file=>fs.readFileSync(path.join(source,file),'utf8'),pinned=file=>fs.readFileSync(path.join('vendor/eliza',file),'utf8');
+ const filesPath='plugins/plugin-files/src/browser/files.ts',filesText=staged(filesPath);
+ assert.notEqual(stamp.files[filesPath],stamp.sourceFiles[filesPath],'the staged Files backend is projected');
+ assert.doesNotMatch(filesText,/document\.createElement\("a"\)/);
+ assert.equal(filesText.split('this.options.download(').length,3,'both downloads use the host option');
+ assert.match(filesText,/\n  download\(url: string, name: string\): void;\n\}/);
+ const notesDocumentsPath='plugins/plugin-notes/src/client/note-documents.ts',notesDocuments=staged(notesDocumentsPath);
+ assert.notEqual(stamp.files[notesDocumentsPath],stamp.sourceFiles[notesDocumentsPath],'the staged Notes document module is projected');
+ assert.doesNotMatch(notesDocuments,/document\.|createElement|createBrowserNoteDocuments/);
+ assert.ok(pinned(notesDocumentsPath).includes(notesDocuments.slice(notesDocuments.indexOf('\nexport interface NoteDocumentResult'))),'the kept Notes document rules are upstream text');
+ const sensePath='plugins/plugin-native-system/src/sense.ts',sense=staged(sensePath);
+ assert.notEqual(stamp.files[sensePath],stamp.sourceFiles[sensePath],'the staged Sense module is projected');
+ assert.doesNotMatch(sense,/\bdocument\.|\bwindow\.|SENSE_MODAL_SELECTOR|createSenseInvocationController/);
+ for(const kept of ['export function listenerStartsVoice(','export const SENSE_INVOCATION_EVENT','export interface SenseInvocationHost','export const SENSE_BRIDGE_TIMEOUT_MS','export function mobileVoiceEntryPolicy(','export async function stopSenseListenerForChatOnly('])assert.ok(sense.includes(kept),kept);
  // Their shell consumers are Alpha's own modules, never staged from upstream.
  for(const file of ['mobile-shell/view-registry.ts','accessibility/screen-focus.ts','mobile-shell/InstalledAppsGridDrawer.tsx','mobile-shell/photos-view.ts']){
   assert.ok(fs.existsSync(path.join('apps/app/src/ui',file)),file+' is Alpha-owned');

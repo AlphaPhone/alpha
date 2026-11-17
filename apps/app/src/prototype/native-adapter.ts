@@ -6,7 +6,7 @@ import { Capacitor } from '@capacitor/core';
 import { DailyApps, type Action, type NativeResult } from '../daily';
 import { connectionController, agentAvailabilityNotice, agentPendingText, type ConnectionSnapshot } from '../runtime/connection-ui';
 import { askAboutCapture } from './camera-adapter';
-import { broaderPageNotice, handoffGate, switchValue, SYSTEM_TILE_SETTINGS_PAGES, tileAccessibleName, tileFactsFromSystemFacts, tileStateText, type SystemTileFacts, type SystemTileKey } from '@elizaos/capacitor-system/settings';
+import { broaderPageNotice, handoffGate, switchValue, SYSTEM_TILE_SETTINGS_PAGES, tileAccessibleName, tileFactsFromSystemFacts, tileStateText, type SystemTileFacts, type SystemTileKey } from '../ui/settings/system-settings.ts';
 import { captureQuestion, locationMimeTypes } from './context-selection';
 
 type Bag = Record<string, any>;
@@ -60,7 +60,7 @@ const text = (value: unknown) => typeof value === 'string' ? value : '';
 /** Only directly observed native facts. A missing key means unknown: no on/off is shown. */
 export type TileKey = SystemTileKey;
 export type TileFacts = SystemTileFacts;
-/** Alpha's tile labels; state, wording and handoff pages are the shared @elizaos/capacitor-system/settings. */
+/** Alpha's tile labels; state, wording and handoff pages are ui/settings/system-settings.ts. */
 export const tileKeys: Record<string, TileKey> = { 'Wi-Fi': 'wifi', 'Bluetooth': 'bt', 'Do not disturb': 'dnd', 'Agent can listen': 'mic', 'Location': 'loc', 'Airplane mode': 'plane', 'Flashlight': 'torch' };
 /** Settings page each tile hands off to (AlphaDevice.openSettings). The flashlight is a direct control. */
 export const tileSettingsPages: Partial<Record<TileKey, string>> = SYSTEM_TILE_SETTINGS_PAGES;

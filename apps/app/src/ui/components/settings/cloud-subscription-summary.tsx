@@ -2,22 +2,26 @@
  * Shared account surface for an Eliza Cloud subscription: plan state, the plan
  * allowance Cloud reports, and the most recent Cloud limit with its retry time.
  *
- * The facts come from `@elizaos/cloud-sdk/subscription-entitlement`
- * (`subscriptionSummary`, `serviceLimitNextChange`); this module only exposes
- * them to the app's own markup through `useCloudSubscriptionSummary`. It never
+ * The summary and its timing come from Alpha's subscription presentation
+ * (`../../cloud/subscription-presentation`: `subscriptionSummary`,
+ * `serviceLimitNextChange`) over the plan view and Cloud refusal of
+ * `@elizaos/cloud-sdk/subscription-entitlement`; this module only exposes them
+ * to the app's own markup through `useCloudSubscriptionSummary`. It never
  * reads billing, buys anything or selects a price, quota or limit.
  *
  * Re-rendering is driven by the shown limit only: the surface updates when the
  * limit's wait ends or its reset passes, never as a per-second countdown.
  */
+import type {
+  ServiceLimit,
+  SubscriptionView,
+} from "@elizaos/cloud-sdk/subscription-entitlement";
 import {
-  type ServiceLimit,
   type SubscriptionCopy,
   type SubscriptionSummary,
-  type SubscriptionView,
   serviceLimitNextChange,
   subscriptionSummary,
-} from "@elizaos/cloud-sdk/subscription-entitlement";
+} from "../../cloud/subscription-presentation";
 import { useEffect, useState } from "react";
 
 /** A Cloud limit together with the time this app observed it. */

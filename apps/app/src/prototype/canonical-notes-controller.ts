@@ -1,7 +1,7 @@
-import {NotesController,type NotesControllerHooks} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts';
+import {NotesController,type NotesControllerHooks} from '../ui/notes/notes-controller.ts';
 import {createNotesClient} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts';
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
-export type {NotesPhase} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts';
+export type {NotesPhase} from '../ui/notes/notes-controller.ts';
 export type CanonicalNotesViewHooks=NotesControllerHooks;
 export const CANONICAL_NOTES_INVALIDATED_EVENT='alpha:canonical-notes-invalidated';
 const binding=(port:AppRecordPort)=>JSON.stringify([port.sessionId,port.scope??null,port.identity.ownerId,port.identity.agentId,port.identity.sessionId,port.identity.origin]);

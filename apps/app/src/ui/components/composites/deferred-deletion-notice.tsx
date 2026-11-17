@@ -3,23 +3,26 @@
  * reminders and other device records). Rules live in `@elizaos/contracts/deletion-window`:
  * Undo is offered only while the window is open or paused, Undo is confirmed only by an
  * `undone` receipt, and an uncertain outcome can be refreshed or dismissed but never replayed.
+ * The notice's wording is Alpha's own (`../../deletions/deletion-notice.ts`).
  *
  * The host supplies its bridge, an owner/session identity (a change clears every row), a
  * concealment check (hidden document, locked screen) and a change callback that refreshes the
  * record views. The notice shows no rows while concealed.
  */
 import {
-  DELETION_NOTICE_TEXT,
   type DeferredDeletionEntry,
   type DeferredDeletionsBridge,
   type DeletedRecordOrigin,
-  deletionNotice,
   deletionNoticeSignature,
   pendingDeletionNotices,
-  UNDO_TOO_LATE,
   undoConfirmed,
 } from "@elizaos/contracts/deletion-window";
 import { useEffect, useRef, useState } from "react";
+import {
+  DELETION_NOTICE_TEXT,
+  deletionNotice,
+  UNDO_TOO_LATE,
+} from "../../deletions/deletion-notice";
 
 export interface DeferredDeletionIdentity {
   /** A stable key for the current owner/session; an empty string means none. */

@@ -9,8 +9,10 @@ import {captureScanPage,type ScanPageCamera} from './scan-page-camera';
 import {inputFiles,runFilePicker} from '../browser/file-picker';
 import {scanExportTitle,exportScanPdf,ScanPdfExportError,duringSystemPicker,systemPickerActive} from './scan-pdf';
 // The document state (page rules, order, one operation at a time, export snapshots, compare-and-set
-// autosave) is the shared camera plugin's; this file presents it in Alpha's dialog.
-import {admitScanDimensions,admitScanImage,createScanDocument,SCAN_IMAGE_TYPES,SCAN_LIMITS} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts';
+// autosave) is Alpha's scan compose state; this file presents it in Alpha's dialog. The image types
+// and limits are the shared camera plugin's.
+import {admitScanDimensions,admitScanImage,createScanDocument} from '../ui/camera/scan-document';
+import {SCAN_IMAGE_TYPES,SCAN_LIMITS} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts';
 import {Capacitor} from '@capacitor/core';
 import {DailyApps} from '../daily';
 import {BrowserReviews} from '../browser/review';

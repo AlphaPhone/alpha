@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { prototypeScript } from './fixtures/prototype-script.ts';
 import { createMapsNotificationOpen } from '../apps/app/src/runtime/maps-notification-open.ts';
 import { usableNavigationFix } from '../.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts';
-import { MapsController } from '../.eliza/client-features/plugins/plugin-maps/src/client/state.ts';
+import { MapsController } from '../apps/app/src/ui/maps/state.ts';
 import { SavedPlaces } from '../apps/app/src/maps/saved-places.ts';
 import { isGoogleMapsCoverage, isGoogleMapsProvider, isLocalMapsPlace } from '../apps/app/src/maps/cloud-provider.ts';
 import { MapsFailure, coordinate, failure } from '../.eliza/client-features/plugins/plugin-maps/src/client/contracts.ts';

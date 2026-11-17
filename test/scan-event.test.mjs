@@ -1,10 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-// J01 poster inference rules are the shared plugin-files documents/scan-event module and its tests
-// cover every rule. Alpha keeps only the mapping of a reviewed proposal onto its local Calendar form.
+// J01 poster inference rules and their review copy are Alpha's apps/app/src/ui/documents/scan-event.ts,
+// copied from plugin-files documents/scan-event. prototype/scan-event maps a reviewed proposal onto
+// Alpha's local Calendar form.
 const alpha=await import('../apps/app/src/prototype/scan-event.ts');
-const shared=await import('../.eliza/client-features/plugins/plugin-files/src/documents/scan-event.ts');
+const shared=await import('../apps/app/src/ui/documents/scan-event.ts');
 const {scanEventDraft}=alpha;
-test('Alpha uses the shared poster suggestion rules, not a copy',()=>{
+test('the Calendar form uses the one poster suggestion module, not a second copy',()=>{
  assert.equal(alpha.suggestScanEvent,shared.suggestScanEvent);
  assert.equal(alpha.suggestScanEventDetails,shared.suggestScanEventDetails);
  assert.deepEqual(alpha.suggestScanEvent('Open studio\n2026-10-10\n18:30\nMain hall'),{title:'Open studio',date:'2026-10-10',time:'18:30',minutes:60,location:''});

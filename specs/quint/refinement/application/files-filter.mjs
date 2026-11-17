@@ -8,7 +8,7 @@ import {checkTraces, qmap, qset} from '../check-traces.mjs';
 import {boundInputs, call, captureSources, checkpoint, deferred, root, tick, trace} from './support.mjs';
 
 const driver = fileURLToPath(import.meta.url);
-const source = '.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
+const source = 'apps/app/src/ui/files/files-browser-adapter.ts';
 const ids = [1, 2, 3], kinds = ['old', 'new'];
 const files = ['Old.txt', 'New.txt', 'Old-New.txt', 'Irrelevant.txt'].map((name, index) => ({
   name, path: 'Download/' + name, mimeType: 'text/plain', size: 4, modified: index + 1, directory: false,

@@ -58,7 +58,7 @@ test('a rejected save keeps the typed password, so the retry sends it',async()=>
  t.type('Password','new-secret-1');
  t.fail.save=Object.assign(new Error('Use an HTTPS website address'),{code:'invalid'});
  await t.press(t.rows(t.entryPage().groups),'Save');
- assert.deepEqual(t.find(t.rows(t.entryPage().groups),'Not saved').val,'Use an HTTPS website address');
+ assert.deepEqual(t.find(t.rows(t.entryPage().groups),'Not saved').val,'Use an HTTPS website address.');
  assert.equal(t.find(t.rows(t.entryPage().groups),'Password').value,'new-secret-1');
  await t.press(t.rows(t.entryPage().groups),'Save');
  const saves=t.calls.filter(([m])=>m==='save');

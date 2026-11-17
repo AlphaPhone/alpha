@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-const {restartAfterResume}=await import('../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts');
+const {restartAfterResume}=await import('../apps/app/src/ui/camera/host-ports.ts');
 const stopped=()=>({denied:'camera',phase:'error',disposed:false});
 
 test('a resume after "Don\'t allow" does not ask for the camera again',async()=>{

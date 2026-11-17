@@ -15,7 +15,7 @@ const shellSource = 'apps/app/src/prototype/model.js';
 const template = 'apps/app/src/prototype/template.html';
 const shared = 'vendor/eliza/plugins/plugin-assistant/src/services/device-actions/';
 const dependencyPaths = ['apps/app/src/runtime/clock-contract.ts', 'apps/app/src/runtime/clock-handoff-history.ts',
-  'apps/app/src/runtime/inline-modal.ts', 'apps/app/src/runtime/modal-inert.ts',
+  'apps/app/src/runtime/inline-modal.ts', 'apps/app/src/runtime/modal-inert.ts', 'apps/app/src/ui/clock/clock-handoff-presentation.ts',
   ...['clock-contract.ts', 'clock-handoff.ts', 'clock-handoff-history.ts'].map(path => shared+path)];
 export const workflowClockSources = [clock, agent, shellSource, template, 'apps/app/src/main.tsx',
   'scripts/test-clock-handoff-flow.ts', 'test/support/strip-types.mjs', ...dependencyPaths];

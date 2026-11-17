@@ -1,8 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 // Photos view agent tools. Source-level: the phone
-// consumer tests of the shared Photos view leaf.
+// consumer tests of the shared Photos view leaf and of Alpha's Photos review card.
 const m=await import('../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts');
 const {LIBRARY_LIMITS}=await import('../apps/app/src/runtime/photo-library.ts');
+const {describePhotosViewOperation}=await import('../apps/app/src/ui/photos/photos-view-presentation.ts');
 const id=(n,kind='i')=>`lib:${kind}:${n}:${n*10}`;
 const ids=count=>Array.from({length:count},(_,i)=>id(i+1));
 const v=m.validatePhotosViewOperation;
@@ -51,7 +52,7 @@ test('photos_open, photos_album_create and photos_share validation',()=>{
 });
 
 test('review text is short and names Photos',()=>{
-  const d=op=>m.describePhotosViewOperation(op,'Alpha');
+  const d=describePhotosViewOperation;
   assert.deepEqual(d({type:'photos_filter'}),{title:'Filter Photos',description:'Everything'});
   assert.deepEqual(d({type:'photos_filter',kind:'video',favorite:true,album:'camera',text:'beach',from:1}),{title:'Filter Photos',description:'Videos · Favorites · In Camera · “beach” · In the requested dates'});
   assert.deepEqual(d({type:'photos_open',id:id(1)}),{title:'Open photo',description:''});

@@ -109,7 +109,8 @@ async function mounted(extraSources) {
   checkClientFeatures();
   const cacheDir = resolve(root, 'test-results/quint-refinement/legacy-sign-in-vite-cache');
   const watched = new Set(['apps/app/src/runtime/connection-ui.tsx', 'apps/app/src/runtime/cloud-sign-in.ts',
-    'apps/app/src/runtime/cloud-sign-in-ui.tsx', '.eliza/client-features/packages/auth/src/auth/native-cloud-sign-in.ts']
+    'apps/app/src/runtime/cloud-sign-in-ui.tsx', 'apps/app/src/ui/auth/native-cloud-sign-in-copy.ts',
+    '.eliza/client-features/packages/auth/src/auth/native-cloud-sign-in.ts']
     .map(path => resolve(root, path)));
   const sources = [...new Set([
     ...filesWithin(resolve(root, 'apps/app/src')), ...filesWithin(resolve(root, '.eliza/client-features')),

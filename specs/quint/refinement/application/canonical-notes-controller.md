@@ -1,7 +1,7 @@
 # Current canonical Notes controller
 
 `CanonicalNotesController` models Alpha's current controller wrapper and the
-shared `NotesController` / `NotesSnapshotState` that it invokes. It retains
+`NotesController` / `NotesSnapshotState` (`apps/app/src/ui/notes/`) that it invokes. It retains
 separate identities for the current read pointer and all still-outstanding
 transport requests, so aborting a read does not invent a completed transport.
 

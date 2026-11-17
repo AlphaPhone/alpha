@@ -1,9 +1,11 @@
 /**
- * Alpha's binding to the shared phone-side device-action coordinator
- * (plugin-assistant device-actions/client-coordinator). Parsing, capability
- * admission, screen binding, approve → journal → claim → execute → receipt,
- * journal recovery and reconciliation are upstream. Alpha supplies only its
- * product profile: owner-facing name, record copy, the views it ships, its
+ * Alpha's binding to the device-action coordinator. Parsing, capability
+ * admission, approve → journal → claim → execute → receipt, journal recovery
+ * and reconciliation are the shared queue protocol
+ * (plugin-assistant device-actions/client-coordinator); the screen binding,
+ * review cards and context notices are Alpha's coordinator
+ * (ui/device-actions/client-coordinator.ts). Alpha supplies its product
+ * profile: owner-facing name, record copy, the views it ships, its
  * browser-safe workflow validators, the Maps selection and foreground state.
  * Executors and the durable journal slots are registered by the composition
  * root (agent adapter / local-agent storage).
@@ -11,11 +13,8 @@
 import {
   actionScope,
   deviceJournalContext,
-  CAMERA_CONTEXT_NOTICE,
-  ContextNotice,
   type DeviceActionClientProfile,
   type CurrentDeviceActionRequest,
-  DeviceActionCoordinator,
   type DeviceActionJournal,
   type DeviceCredential,
   type DeviceExecutor as SharedDeviceExecutor,
@@ -25,7 +24,6 @@ import {
   type DeviceRecovery,
   type ForegroundReviewExecutor as SharedForegroundReviewExecutor,
   type PendingReviewItem as SharedPendingReviewItem,
-  proposalContextNotice as sharedProposalContextNotice,
   publishCommittedDeviceChanges as sharedPublishCommittedDeviceChanges,
   type ReviewableDeviceOperation,
   validateDeviceOperation as sharedValidateDeviceOperation,
@@ -33,6 +31,12 @@ import {
   type WorkflowNoticeRoute,
   type WorkflowPresentationOperation,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
+import {
+  CAMERA_CONTEXT_NOTICE,
+  ContextNotice,
+  DeviceActionCoordinator,
+  proposalContextNotice as alphaProposalContextNotice,
+} from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
 import {isReminderOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
@@ -72,7 +76,7 @@ export function validateDeviceOperation(value: unknown): DeviceOperation { retur
 /** Every proposal operation, including foreground reviews. */
 export function validateReviewableDeviceOperation(value: unknown): ReviewableDeviceOperation { return sharedValidateReviewableDeviceOperation(value,operations); }
 /** Owner-facing reason a pending proposal cannot be reviewed from this screen, or undefined. */
-export function proposalContextNotice(operation:ReviewableDeviceOperation,context:ContextEnvelope):string|undefined{return sharedProposalContextNotice(operation,context,alphaDeviceActionProfile);}
+export function proposalContextNotice(operation:ReviewableDeviceOperation,context:ContextEnvelope):string|undefined{return alphaProposalContextNotice(operation,context,alphaDeviceActionProfile);}
 /** Queue only delivered receipts; publish `alpha:<view>-committed` when the same owner session is idle. */
 export function publishCommittedDeviceChanges(receipt:OperationReceipt,client:Pick<AlphaClient,'getState'|'subscribe'>,session:VerifiedSession){
  sharedPublishCommittedDeviceChanges(receipt,client,session,view=>{if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('alpha:'+view+'-committed'));});

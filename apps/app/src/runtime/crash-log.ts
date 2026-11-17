@@ -3,18 +3,19 @@ import {registerPlugin} from '../platform-plugins.ts';
 import {
  CRASH_LOG_MAX_ENTRIES,
  CRASH_LOG_RETENTION_MS,
- describeNativeCrashEntry,
  errorClassOf,
  sanitizeCrashEntry,
  type CrashLogPort,
  type NativeCrashEntry,
  type RendererFailureKind,
 } from '../../../../.eliza/client-features/plugins/plugin-native-system/src/crash-log.ts';
+import {describeNativeCrashEntry} from '../ui/settings/crash-entry.ts';
 
 /**
  * Alpha's binding of the shared privacy-bounded problem log (@elizaos/capacitor-system/crash-log;
  * native crash.CrashLog in no-backup storage, reached through AlphaDevice). Entries hold failure
- * classes only; the shared module owns the native allowlist, renderer error naming and entry text.
+ * classes only; the shared module owns the native allowlist and renderer error naming, and
+ * ui/settings/crash-entry.ts the entry text.
  * Alpha adds only its renderer-owned finite Cloud inference records and the browser-profile copy
  * used by web builds.
  */

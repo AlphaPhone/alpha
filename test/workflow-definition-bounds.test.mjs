@@ -143,3 +143,41 @@ console.log(JSON.stringify(out));`);
  for(const key of ['otherWorkflow','otherMutation','otherVersion','otherStatus','otherCode','create'])assert.match(out[key],/^WorkflowHttpError: /,key);
  assert.equal(out.network,'TypeError: Failed to fetch');
 });
+
+test('the workflow screens word every refusal and every check of the pinned contract themselves',()=>{
+ const out=run(`
+const M=await import(${JSON.stringify(resolve(root,'apps/app/src/ui/workflows/workflow-messages.ts'))});
+const C=await import(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/workflow-client.ts'))});
+const W=await import(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/phone-workflow.ts'))});
+const source=(await import('node:fs')).readFileSync(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/phone-workflow.ts'))},'utf8');
+// Every literal message the pinned contract can throw: fail("…"), record(value, "…"), its default and the trigger check.
+const checks=[...new Set([...source.matchAll(/(?:fail\\(|record\\([^,()]+,|message = |const invalid = )\\s*"([^"]+)"/g)].map(match=>match[1]))];
+const clientSource=(await import('node:fs')).readFileSync(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/workflow-client.ts'))},'utf8');
+const clientChecks=[...new Set([...clientSource.matchAll(/new Error\\(\\s*"([^"]+)"/g)].map(match=>match[1]))];
+const unknownPlain=M.workflowErrorText(new Error('A check a later client adds'),'');
+const refusals=['WorkflowAdmissionRejected','WorkflowTypedRejected','WorkflowMetadataRejected','WorkflowLifecycleRejected','WorkflowActivationRejected'];
+console.log(JSON.stringify({
+ checks:checks.length,
+ unworded:checks.filter(text=>M.workflowErrorText(new W.PhoneWorkflowSpecError(text),'')!==text),
+ refusals:refusals.map(name=>[name,M.workflowRefusalText(new C[name]()),M.workflowErrorText(new C[name](),''),new C[name]().message]),
+ http:M.workflowErrorText(new C.WorkflowHttpError(409,{code:'WORKFLOW_LIFECYCLE_NOT_APPLIED'}),''),httpRefusal:M.workflowRefusalText(new C.WorkflowHttpError(409,{})) ?? null,
+ newer:M.workflowErrorText(new W.PhoneWorkflowSpecError('A check a later contract adds'),''),
+ own:M.workflowErrorText(new Error('Notes changed. Reopen Notes before selecting'),''),
+ // Every literal plain error the pinned shared client throws, worded by Alpha rather than shown.
+ client:{checks:clientChecks.length,unknown:unknownPlain,unworded:clientChecks.filter(check=>M.workflowErrorText(new Error(check),'')===unknownPlain)},
+ clarification:M.workflowErrorText(new Error('Workflow needs clarification: Which notes?'),''),
+ thrown:M.workflowErrorText('not an error','Unavailable'),
+}));`);
+ assert.ok(out.checks>=30,'the pinned contract checks were listed');
+ assert.deepEqual(out.unworded,[],'every pinned contract check has Alpha wording');
+ for(const [name,refusal,text,pinned] of out.refusals){assert.equal(refusal,pinned,name);assert.equal(text,pinned,name);}
+ assert.equal(out.http,'Workflow request unavailable. Check execution history before repeating a run.');
+ assert.equal(out.httpRefusal,null);
+ assert.equal(out.newer,'This workflow could not be checked. Review its steps and try again.');
+ assert.equal(out.own,'Notes changed. Reopen Notes before selecting');
+ assert.ok(out.client.checks>=50,'the pinned client checks were listed');
+ assert.deepEqual(out.client.unworded,[],'every pinned client check has Alpha wording');
+ assert.equal(out.client.unknown,'Workflow request unavailable. Check execution history before repeating a run.','an unknown plain error is never shown as written');
+ assert.equal(out.clarification,'Workflow needs clarification: Which notes?');
+ assert.equal(out.thrown,'Unavailable');
+});

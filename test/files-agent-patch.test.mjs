@@ -1,4 +1,4 @@
-// Check the pinned Files SDK and the client copy used by Alpha Phone.
+// Check the pinned Files SDK, Alpha's coordinator and Files review card, and the client copy used by Alpha Phone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,9 +12,11 @@ const featuresReady=fs.existsSync(path.join(features,sharedDirectory,'files-brow
 
 test('the shipped coordinator and Files view agree on approved operations', {skip:!featuresReady&&'prepared client features are missing'}, async()=>{
  const moduleAt=name=>tsImport(path.join(features,sharedDirectory,name),import.meta.url);
- const {validateDeviceOperation,proposalContextNotice}=await moduleAt('client-coordinator.ts');
+ const {validateDeviceOperation}=await moduleAt('client-coordinator.ts');
+ const {proposalContextNotice}=await tsImport(path.join(root,'apps/app/src/ui/device-actions/client-coordinator.ts'),import.meta.url);
  const {deviceOperationSupportedByCapabilities}=await moduleAt('contract.ts');
  const shared=await moduleAt('files-browser-contract.ts');
+ const review=await tsImport(path.join(root,'apps/app/src/ui/files/files-operation-presentation.ts'),import.meta.url);
  const alpha=await tsImport(path.join(features,'plugins/plugin-files/src/browser/files-agent-contract.ts'),import.meta.url);
  const policy = {admitView: () => true, parseWorkflowRead: () => { throw Error('no'); }};
  const good = [
@@ -37,7 +39,7 @@ test('the shipped coordinator and Files view agree on approved operations', {ski
    assert.deepEqual(valid, op);
    assert.deepEqual(validateDeviceOperation(valid, policy), valid, 'a validated operation validates again unchanged');
    assert.deepEqual(alpha.validateFilesOperation(op), valid, 'Alpha and the shared contract agree');
-   assert.deepEqual(alpha.describeFilesOperation(valid), shared.describeFilesOperation(valid));
+   assert.deepEqual(alpha.describeFilesOperation(valid), review.describeFilesOperation(valid));
    assert.equal(deviceOperationSupportedByCapabilities(op.type, ['files.browser.v1']), true);
    assert.equal(deviceOperationSupportedByCapabilities(op.type, ['camera.capture-photo.v1']), false);
    assert.equal(deviceOperationSupportedByCapabilities(op.type, undefined), false);

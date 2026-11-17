@@ -1,20 +1,22 @@
 /**
- * Joins a product's views to the shared installed-app launcher. Product
+ * Joins a product's views to the installed-app launcher. Product
  * entries open inside the shell and never reach the platform launcher;
  * installed apps launch by their exact component as before. The favorites
  * list is the product's installed record: its older view ids are migrated
  * once, before the launcher first reads it.
  */
+import type {
+  InstalledApp,
+  LauncherBridge,
+} from "@elizaos/capacitor-system/launcher";
 import {
   appKey,
   createLauncher,
   type FavoritesStore,
-  type InstalledApp,
   type Launcher,
-  type LauncherBridge,
   localFavorites,
   observeLauncher,
-} from "@elizaos/capacitor-system/launcher";
+} from "./installed-launcher";
 import type { MobileProductRegistration } from "./product-registration";
 import {
   type LauncherViewIdMigration,

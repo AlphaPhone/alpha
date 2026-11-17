@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {transformSync} from 'esbuild';import {stripTypeScriptTypes} from './fixtures/ts-source.mjs';
 import {nextDefaultNoteTitle} from '../apps/app/src/runtime/note-default-title.ts';
 import {authoredNoteText} from '../.eliza/client-features/plugins/plugin-notes/src/note-authored.ts';
-// The staged canonical client, controller and snapshot state run with
+// Alpha's Notes controller and snapshot state, over the staged canonical client, run with
 // WebView113's static AbortSignal surface. Only the resident transport is a fixture.
 function fixture({wait=false}={}){
  const compile=file=>transformSync(fs.readFileSync(file,'utf8'),{loader:'ts',target:'es2022',format:'cjs'}).code;

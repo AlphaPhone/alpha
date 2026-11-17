@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pathToFileURL} from 'node:url';
 import {tsImport} from './support/ts-import.mjs';
 import {prepareClientFeatures} from '../scripts/prepare-client-features.ts';
 
-const root = prepareClientFeatures();
-const {createScanDocument} = await tsImport(pathToFileURL(`${root}/plugins/plugin-native-camera/src/scan-document.ts`).href, import.meta.url);
+// Alpha's scan compose state reads the shared image limits and draft port from the prepared tree.
+prepareClientFeatures();
+const {createScanDocument} = await tsImport('../apps/app/src/ui/camera/scan-document.ts', import.meta.url);
 const image = () => ({type:'image/png', size:10});
 function fixture() {
   let saved, serial = 0, removed = 0;

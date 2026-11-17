@@ -12,7 +12,6 @@ const stubs={
  '../runtime/connection-ui':'export const connectionController=globalThis.activityController;export const agentAvailabilityNotice=()=>"";export const agentPendingText=(_c,t)=>t;',
  '../runtime/local-agent':'export const modelLabel=(a,b)=>a+" · "+b;',
  './camera-adapter':'export const askAboutCapture=()=>false;',
- '@elizaos/capacitor-system/settings':'export const broaderPageNotice=0,handoffGate=0,switchValue=0,SYSTEM_TILE_SETTINGS_PAGES={},tileAccessibleName=0,tileFactsFromSystemFacts=0,tileStateText=0;',
  './context-selection':'export const captureQuestion=()=>undefined,locationMimeTypes=()=>undefined;',
 };
 const dir=mkdtempSync(join(tmpdir(),'native-activity-'));

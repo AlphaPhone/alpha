@@ -40,7 +40,8 @@ const authoringEntry=`export * from './apps/app/src/runtime/workflow-local-time.
 export {normalizePhoneSpec,assertPhoneCapabilities,describePhoneTrigger,phoneTriggerClockChangeNote} from './apps/app/src/runtime/phone-workflow-authoring.ts';
 export {workflowSha,workflowBytes} from './apps/app/src/runtime/workflow-device-contract.ts';
 export {WorkflowTypedRejected} from './apps/app/src/runtime/workflow-protocol.ts';
-export {checkWorkflowScope,WORKFLOW_OPERATION_LABELS} from './.eliza/client-features/packages/contracts/src/workflow-scope.ts';
+export {checkWorkflowScope,WORKFLOW_OPERATION_LABELS} from './apps/app/src/ui/workflows/workflow-scope.ts';
+export {workflowErrorText} from './apps/app/src/ui/workflows/workflow-messages.ts';
 export {PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL,phoneWorkflowRequiredProtocol,resolvePhoneCalendarRange} from './.eliza/client-features/packages/contracts/src/phone-workflow.ts';
 export {projectNoteForModel} from './.eliza/client-features/plugins/plugin-notes/src/types.ts';`;
 

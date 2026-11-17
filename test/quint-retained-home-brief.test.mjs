@@ -99,6 +99,7 @@ async function scenario(actual, name, drive) {
 async function checkRetainedHomeBrief(extraSources = []) {
   captureSources([driver, implementation, ...extraSources]);
   const {exports, sources} = await bundledSource(implementation);
+  assert.ok(sources.includes('apps/app/src/ui/digests/hosted-digests.ts'), 'the store and brief selection are Alpha’s own');
   const run = (name, drive) => scenario(exports, name, drive);
   const traces = [
     await run('same-scope-and-equivalent-result-do-not-republish', f => {
@@ -128,7 +129,7 @@ async function checkRetainedHomeBrief(extraSources = []) {
   ];
   return await checkTraces(boundInputs({model, traces, sources: [driver, ...sources, ...extraSources],
     scope: 'bounded-component', assumptions: [
-      'Actual Alpha retained-brief wrapper and pinned shared store execute with synthetic results and an EventTarget observer.',
+      'Actual Alpha retained-brief wrapper and its own retained-brief store execute with synthetic results and an EventTarget observer.',
       'Two scoped owners, one unbound profile and three observers. The store keys only by scope. A caller must fence an old same-scope publication after an ABA owner transition.',
       'Mounted Home rendering and active inbox/provider completion have separate evidence.',
     ]}));

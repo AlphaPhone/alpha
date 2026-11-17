@@ -17,7 +17,7 @@ function endLabel(endsAt:number):string {
 /**
  * Shared Account presentation (owner consolidation, 2026-11-09). Plan and
  * actions remain bound to the current Cloud account. The shared subscription summary
- * (`@elizaos/cloud-sdk/subscription-entitlement`, through the shared `useCloudSubscriptionSummary` hook) adds, read-only, the plan allowance Cloud reports and
+ * (Alpha's `ui/cloud/subscription-presentation`, through the `useCloudSubscriptionSummary` hook) adds, read-only, the plan allowance Cloud reports and
  * the latest Cloud limit with its retry time (#410). Plan management opens Cloud's
  * billing page after the account review; Enter membership code reveals the code field.
  * A grant's access window is never presented as a paid renewal date.

@@ -1,6 +1,6 @@
 # Canonical Notes remove and restore
 
-`CanonicalNotesMutation` executes the actual shared `NotesEditor` through Alpha's
+`CanonicalNotesMutation` executes Alpha's actual `NotesEditor` (`apps/app/src/ui/notes/`) through its
 canonical controller and Notes wire codec. It extends the source coverage of
 `CanonicalNotesDraft` to the remove and restore methods and their asynchronous
 continuations. The existing editor compiler provides its read-only captured-save
