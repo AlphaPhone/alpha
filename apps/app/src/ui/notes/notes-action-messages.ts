@@ -68,12 +68,36 @@ export const NOTES_ACTION_REFUSALS: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+const PREVIOUS_NOTES_NOT_READY = "Previous notes isn’t ready.";
+const PREVIOUS_NOTES_NOT_CHOSEN = "Open Notes options, choose On this phone, then ask again.";
+const PREVIOUS_NOTES_ABSENT = "There are no earlier notes on this phone.";
+
+/**
+ * Why an agent request for the notes saved on this phone ("Previous notes") did not run, and that
+ * nothing was `effect`. `legacy`: Previous notes is the open source but its store is not ready.
+ * Otherwise the phone says there are no earlier notes only when the presence read proved it
+ * (`absent`); a store that is present, unreadable or not yet read sends the owner to Notes.
+ */
+export function previousNotesRefusal(
+  source: "canonical" | "legacy",
+  availability: "present" | "absent" | "unavailable" | null,
+  effect: "shared" | "changed" | "saved",
+): string {
+  const reason =
+    source === "legacy"
+      ? PREVIOUS_NOTES_NOT_READY
+      : availability === "absent"
+        ? PREVIOUS_NOTES_ABSENT
+        : PREVIOUS_NOTES_NOT_CHOSEN;
+  return `${reason} Nothing was ${effect}.`;
+}
+
 /** Alpha's own refusals on the approved Notes path (`prototype/agent-adapter.ts`), shown as they are. */
-const OWN_REFUSALS: ReadonlySet<string> = new Set([
-  "Previous notes isn’t ready. Nothing was changed.",
-  "Open Notes options, choose On this phone, then ask again. Nothing was changed.",
-  "There are no earlier notes on this phone. Nothing was changed.",
-]);
+const OWN_REFUSALS: ReadonlySet<string> = new Set(
+  [PREVIOUS_NOTES_NOT_READY, PREVIOUS_NOTES_NOT_CHOSEN, PREVIOUS_NOTES_ABSENT].map(
+    (reason) => `${reason} Nothing was changed.`,
+  ),
+);
 
 /** Alpha's own check that the reviewed Notes screen is still open, worded for the owner. */
 const CONTEXT_CHANGED = "Selected Notes context changed";

@@ -73,6 +73,8 @@ import { deviceActionRefusal } from '../ui/device-actions/device-action-messages
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
 import { offeredByEither, phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
+import {browserPreviousNotesAvailability,devicePreviousNotesAvailability,type LegacyNotesAvailability} from '../prototype/legacy-notes-access';
+import {browserNotesPort} from './browser-notes-document';
 import {calendarSource,calendarTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import { CloudSignInPanel, SIGN_IN_SENDING } from './cloud-sign-in-ui';
 import { useCloudSignInNetwork } from './cloud-sign-in-network';
@@ -502,6 +504,11 @@ async function calendarAgendaObservation(actions:DeviceActions,context:ContextEn
   return sourceEpoch===calendarAgendaObservationEpoch&&source.sourceId===requested.sourceId&&source.sourceRevision===requested.sourceRevision?source:undefined;
  }catch{return undefined;}
 }
+/** Whether notes saved on this phone before canonical Notes exist, read without initializing them.
+ * An unreadable store is `unavailable`, never `absent`. */
+export function readPreviousNotesAvailability(signal:AbortSignal,current:()=>boolean):Promise<LegacyNotesAvailability>{
+  return isAndroid?devicePreviousNotesAvailability(secureConnectionStore,signal,current):browserPreviousNotesAvailability(browserNotesPort,signal,current);
+}
 /** The X-Eliza-Device-Capabilities value for every runtime (remote, resident, Cloud), selected by
  * selectDeviceCapabilities for this phone's platform. */
 async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<string>{
@@ -509,6 +516,8 @@ async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<
   return selectDeviceCapabilities(offered,{android,native:Capacitor.isNativePlatform(),
     camera:Capacitor.isPluginAvailable('ElizaCamera')||!android&&typeof navigator!=='undefined'&&typeof navigator.mediaDevices?.getUserMedia==='function',
     foregroundReview:typeof foregroundExecutor==='function',canonicalNotes,
+    // Previous notes are never created once canonical Notes is the default, so a phone without them never offers their query.
+    previousNotes:await readPreviousNotesAvailability(new AbortController().signal,()=>true)!=='absent',
     photoLibrary:Capacitor.isNativePlatform()&&Capacitor.isPluginAvailable('AlphaPhotoLibrary'),
     files:Capacitor.isPluginAvailable('AlphaFiles'),
     clockRepeatDays:android&&Array.isArray(offered)&&offered.includes('clock.handoff.v2')&&await clockRepeatDaysSupported(),

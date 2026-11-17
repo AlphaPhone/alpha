@@ -12,9 +12,9 @@ const everything = [
   'calendar.availability-read.v1', 'calendar.named-read.v1', 'clock.handoff.v1', 'clock.handoff.v2', 'clock.alarms.v1', 'sms.send.v1',
   'phone.dial.v1', 'notes.search.v1', 'device.named-target.v1',
 ];
-const apk = {android: true, native: true, camera: true, foregroundReview: true, clockRepeatDays: true, aospImage: false};
-const browser = {android: false, native: false, camera: true, foregroundReview: true, clockRepeatDays: false, aospImage: false};
-const ios = {android: false, native: true, camera: true, foregroundReview: true, clockRepeatDays: false, aospImage: false};
+const apk = {android: true, native: true, camera: true, foregroundReview: true, previousNotes: true, clockRepeatDays: true, aospImage: false};
+const browser = {android: false, native: false, camera: true, foregroundReview: true, previousNotes: true, clockRepeatDays: false, aospImage: false};
+const ios = {android: false, native: true, camera: true, foregroundReview: true, previousNotes: true, clockRepeatDays: false, aospImage: false};
 
 test('each platform profile offers only what it can run', () => {
   const rows = [
@@ -58,6 +58,16 @@ test('a Cloud agent whose registration offers calls and texts by name gets them 
   assert.equal(new Set(selected).size, selected.length);
   assert.ok(!selectDeviceCapabilities(offeredByEither(route, registration), apk).some(capability => telephony.includes(capability)));
   assert.deepEqual(offeredByEither(undefined, ['a'], 'not a list', ['a', 'b']), ['a', 'b']);
+});
+
+// notes.query.v1 reads only the notes saved on this phone before canonical Notes; a phone without
+// them never offers a query that could only fail.
+test('the Previous notes query is offered only where Previous notes exist', () => {
+  for (const profile of [apk, browser, ios]) {
+    assert.ok(selectDeviceCapabilities(everything, profile).includes('notes.query.v1'));
+    assert.ok(!selectDeviceCapabilities(everything, {...profile, previousNotes: false}).includes('notes.query.v1'));
+    assert.ok(!selectDeviceCapabilities([], profile).includes('notes.query.v1'), 'the agent must offer it');
+  }
 });
 
 test('canonical Notes negotiates only the exact foreground list filter', () => {

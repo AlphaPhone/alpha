@@ -134,9 +134,10 @@ export function phoneContextMessage(text: string, input: ContextEnvelope): { tex
 export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
 /** What this phone can run, for the capability negotiation. `native`: a Capacitor app (Android or
  * iOS); `camera`: a camera it can capture with; `foregroundReview`: the shell supplied the review
- * executor; `canonicalNotes`: the same resident session owns canonical app records; `files`: the native
+ * executor; `canonicalNotes`: the same resident session owns canonical app records; `previousNotes`:
+ * notes saved on this phone before canonical Notes exist (or cannot be read), the only store `notes.query.v1` reads; `files`: the native
  * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
-export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
+export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; previousNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
 /** Every capability either list offers. The Cloud agent answers two lists, its capabilities route
  * and its device registration, and the registration is the complete one. */
 export function offeredByEither(...offers: unknown[]): unknown[] {
@@ -152,7 +153,7 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   if(agent.includes('reminders.local-record.v2'))capabilities.push('reminders.local-record.v2');else if(agent.includes('reminders.local-record.v1'))capabilities.push('reminders.local-record.v1');
   // Browser chat reminders use the runtime scheduler; do not offer a second device-creation lifecycle.
   if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);
-  for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),'notes.query.v1',...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
+  for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
