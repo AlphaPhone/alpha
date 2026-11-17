@@ -4,7 +4,8 @@
  *
  *   bun run android:build:fast              web build, sync and :app:assembleLauncherDebug only
  *   bun run android:build:fast -- --restage also re-run the agent prepare/stage chain first
- *   bun run android:build:fast -- --install then `adb install -r` the APK
+ *   bun run android:build:fast -- --install then `adb install -r` the APK (refused over the image's
+ *                                           system app unless --allow-system-update is also given)
  *
  * It reuses what `bun run android:build:local` already prepared and staged (the resident runtime,
  * on-device voice and embedding outputs); without them it exits 2 and names that command. It
@@ -35,17 +36,35 @@ export const STAGED_RUNTIME = "android/app/src/main/assets/agent/agent-bundle.js
 export const RESTAGE_SCRIPTS = Object.freeze([
   "agent:build-embedding-host", "agent:prepare", "agent:build-workflow-worker", "agent:stage-android", "licenses:packaged-runtime",
 ]);
-const USAGE = "Usage: bun run android:build:fast [-- --restage] [-- --install]";
+const USAGE = "Usage: bun run android:build:fast [-- --restage] [-- --install [--allow-system-update]]";
 
 export function parseFastArgs(argv: readonly string[]) {
-  const options = { restage: false, install: false, inspect: false };
+  const options = { restage: false, install: false, inspect: false, allowSystemUpdate: false };
   for (const arg of argv) {
-    const key = ({ "--restage": "restage", "--install": "install", "--inspect": "inspect" } as const)[arg];
+    const key = ({ "--restage": "restage", "--install": "install", "--inspect": "inspect", "--allow-system-update": "allowSystemUpdate" } as const)[arg];
     if (!key || options[key]) throw new Error(`Unknown option ${arg}. ${USAGE}`);
     options[key] = true;
   }
-  if (options.inspect && (options.restage || options.install)) throw new Error(`--inspect takes no other option. ${USAGE}`);
+  if (options.inspect && (options.restage || options.install || options.allowSystemUpdate)) throw new Error(`--inspect takes no other option. ${USAGE}`);
+  if (options.allowSystemUpdate && !options.install) throw new Error(`--allow-system-update only applies with --install. ${USAGE}`);
   return options;
+}
+
+/** True when `pm list packages -s <appId>` output names exactly this package (a system app, updated or not). */
+export function systemPackageInstalled(pmSystemList: string, appId: string) {
+  return pmSystemList.split(/\r?\n/).some(line => line.trim() === `package:${appId}`);
+}
+
+/**
+ * On an Alpha image the launcher is the image's privileged system app. A debuggable update over it
+ * fails the image capability check, so Android drops Alpha's Phone and Messages roles and the update
+ * outranks the image's app. --install refuses that unless the developer asks for it explicitly.
+ */
+export function systemUpdateRefusal(appId: string, isSystemApp: boolean, allowSystemUpdate: boolean): string | null {
+  if (!isSystemApp || allowSystemUpdate) return null;
+  return `${appId} is a system app on this device (the Alpha image's priv-app). Installing this debuggable developer APK over it `
+    + `fails the image check and drops Alpha's Phone and Messages roles. Build and flash an image instead, or pass `
+    + `--allow-system-update to replace it anyway (undo with: adb shell pm uninstall-system-updates ${appId}).`;
 }
 
 /** Mark the synced web payload as a fast iteration build, so no production audit admits the APK. */
@@ -113,6 +132,15 @@ async function main() {
   const { androidEnv } = await import("./toolchain.ts");
   const env = buildEnv(androidEnv());
   const run = (cmd: string, args: string[]) => execFileSync(cmd, args, { stdio: "inherit", env, cwd: root });
+  // androidEnv() resolved the SDK even when ANDROID_HOME is unset, the same adb the other device scripts use.
+  const adb = path.join(env.ANDROID_HOME!, "platform-tools", "adb");
+  if (options.install) {
+    // Checked before building, so a refusal costs nothing.
+    const appId = androidIdentity(root, env.ALPHA_ANDROID_APPLICATION_ID || "").appId;
+    const systemList = execFileSync(adb, ["shell", "pm", "list", "packages", "-s", appId], { encoding: "utf8", env });
+    const refusal = systemUpdateRefusal(appId, systemPackageInstalled(systemList, appId), options.allowSystemUpdate);
+    if (refusal) { console.error(refusal); process.exit(2); }
+  }
   if (options.restage) for (const script of RESTAGE_SCRIPTS) run("bun", ["run", script]);
   if (!fs.existsSync(path.join(root, STAGED_RUNTIME))) {
     console.error(`No staged resident runtime (${STAGED_RUNTIME}). Run bun run android:build:local once, or bun run android:build:fast -- --restage.`);
@@ -127,8 +155,7 @@ async function main() {
   (buildAndroidConsumer as unknown as (o: ReturnType<typeof fastBuildOptions>) => unknown)(fastBuildOptions(env, root));
   const apk = path.join(FAST_OUTPUT, FAST_APK);
   console.log(`Fast build done in ${((Date.now() - started) / 1000).toFixed(0)}s: ${apk} (developer APK, not distributable)`);
-  // androidEnv() resolved the SDK even when ANDROID_HOME is unset, the same adb the other device scripts use.
-  if (options.install) run(path.join(env.ANDROID_HOME!, "platform-tools", "adb"), ["install", "-r", apk]);
+  if (options.install) run(adb, ["install", "-r", apk]);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

@@ -118,7 +118,9 @@ bun run android:build:fast -- --install
 It reuses the staged agent runtime and native outputs, runs the web build, sync and
 only `:app:assembleLauncherDebug` on a warm Gradle daemon, and installs
 `artifacts/fast/launcher-debug.apk` with `adb install -r` (drop `--install` to only
-build). It skips the input preflight, lint, the instrumentation APK, `verify-apks`,
+build). On a phone running an Alpha image, where Alpha is the image's system app, `--install`
+refuses before building: a debuggable update over it drops Alpha's Phone and Messages roles. Flash
+an image there, or add `--allow-system-update` deliberately. It skips the input preflight, lint, the instrumentation APK, `verify-apks`,
 licence notices and the SBOM. Add `-- --restage` after changing agent sources. Its
 APK is never distributable: it stays out of `artifacts/`, its packaged
 `build-flags.json` records `fastIteration: true`, and the production bundle audit,

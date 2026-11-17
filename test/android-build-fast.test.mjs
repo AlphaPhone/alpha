@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {buildAndroidConsumer} from '../vendor/eliza/packages/app/scripts/mobile/android/build-consumer.mjs';
 import {buildEnv} from '../scripts/build-android.ts';
-import {FAST_OUTPUT, fastBuildOptions, markFastIteration, parseFastArgs} from '../scripts/build-android-fast.ts';
+import {FAST_OUTPUT, fastBuildOptions, markFastIteration, parseFastArgs, systemPackageInstalled, systemUpdateRefusal} from '../scripts/build-android-fast.ts';
 import {auditWebBundle, FAST_ITERATION_ERROR} from '../scripts/audit-production-bundle.ts';
 
 const tmp = t => {
@@ -18,9 +18,10 @@ const tmp = t => {
 };
 
 test('fast build options parse strictly', () => {
- assert.deepEqual(parseFastArgs([]), {restage: false, install: false, inspect: false});
- assert.deepEqual(parseFastArgs(['--restage', '--install']), {restage: true, install: true, inspect: false});
- for (const bad of [['--release'], ['--restage', '--restage'], ['--inspect', '--install']]) assert.throws(() => parseFastArgs(bad));
+ assert.deepEqual(parseFastArgs([]), {restage: false, install: false, inspect: false, allowSystemUpdate: false});
+ assert.deepEqual(parseFastArgs(['--restage', '--install']), {restage: true, install: true, inspect: false, allowSystemUpdate: false});
+ assert.deepEqual(parseFastArgs(['--install', '--allow-system-update']), {restage: false, install: true, inspect: false, allowSystemUpdate: true});
+ for (const bad of [['--release'], ['--restage', '--restage'], ['--inspect', '--install'], ['--allow-system-update'], ['--inspect', '--allow-system-update']]) assert.throws(() => parseFastArgs(bad));
 });
 
 fixtureTest('a fast build assembles only the debug launcher with a warm daemon, no lint and no androidTest, into artifacts/fast', t => {
@@ -72,4 +73,19 @@ test('a test-mocks payload is never marked as a fast build', t => {
  const file = path.join(tmp(t), 'build-flags.json');
  fs.writeFileSync(file, JSON.stringify({testMocks: true}));
  assert.throws(() => markFastIteration(file), /testMocks=true/);
+});
+
+test('--install refuses to replace the image system app unless explicitly allowed', () => {
+ const id = 'ai.alphacompute.alphaphone';
+ // `pm list packages -s` lists system apps, including ones already carrying a /data update.
+ assert.equal(systemPackageInstalled('package:ai.alphacompute.alphaphone\r\n', id), true);
+ assert.equal(systemPackageInstalled('package:ai.alphacompute.alphaphone.test\npackage:ai.alphacompute.alphaphone.imagecapabilities\n', id), false);
+ assert.equal(systemPackageInstalled('', id), false);
+ const refusal = systemUpdateRefusal(id, true, false);
+ assert.match(refusal, /system app on this device/);
+ assert.match(refusal, /Phone and Messages roles/);
+ assert.match(refusal, /--allow-system-update/);
+ assert.match(refusal, /pm uninstall-system-updates ai\.alphacompute\.alphaphone/);
+ assert.equal(systemUpdateRefusal(id, true, true), null);
+ assert.equal(systemUpdateRefusal(id, false, false), null);
 });
