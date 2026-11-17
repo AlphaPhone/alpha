@@ -8,6 +8,7 @@ import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-fea
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
 import {actionResultText,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
+import {workflowChanges,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
@@ -299,6 +300,11 @@ function planActionCard(action:unknown):Shell|undefined{
 function enrichSettledAssistant(message:Shell,card:Shell|undefined,binding?:{conversationId:string;session:unknown}):Shell {
   if(!card||!['plan','retry','sign-in','provider'].includes(card.planAction)||message.card!=null||message.from!=='agent'||!binding||message.messageBinding?.conversationId!==binding.conversationId||JSON.stringify(message.messageBinding?.session)!==JSON.stringify(binding.session))return message;
   return {...message,card};
+}
+/** A workflow the agent saved or changed in this reply: the settled reply carries it, and shows a card that opens it. */
+function keepWorkflowChanges(shell:Shell,reply:{messageId?:string;actionResults?:readonly unknown[]},current:()=>boolean){
+  const changes=workflowChanges(reply.actionResults);
+  if(changes.length&&reply.messageId)shell.setState((previous:Shell)=>current()?{msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,workflowChanges:changes}:m)}:null);
 }
 /** Failure kinds upstream raises before any model output (credits, provider access, no provider,
  * throttling). Their streamed text is upstream's own failure prose, so Alpha's message replaces it. */
@@ -1798,10 +1804,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     });
     // A chat-started workflow run replies with a [WORKFLOW] block: it shows as a card that opens the
     // run in Workflows, and a malformed block is hidden. Stored and copied text stay unchanged.
+    // A workflow the reply saved or changed shows a card that opens it, while its agent is the one connected.
+    const workflowSession=connectionController.getWorkflowClient()?.sessionId;
     out.msgs=(out.msgs||[]).map((m:Shell)=>{
-      if(!m.isAgent||typeof m.text!=='string'||m.displayText!==m.text)return m;
-      const parsed=workflowReplyText(m.text);if(parsed.text===m.text)return m;
-      return {...m,displayText:parsed.text,hasCalendarText:m.hasCalendarText!==false&&!!parsed.text,workflowRuns:parsed.runs.map(run=>({...run,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}}))};
+      if(!m.isAgent)return m;
+      const sent=workflowSession?live.find(item=>item.id===m.id):undefined,changes:WorkflowChange[]=sent?.workflowChanges&&sent.messageBinding?.session?.sessionId===workflowSession?sent.workflowChanges:[];
+      const parsed=typeof m.text==='string'&&m.displayText===m.text?workflowReplyText(m.text):null,rewritten=!!parsed&&parsed.text!==m.text;
+      if(!rewritten&&!changes.length)return m;
+      return {...m,...(rewritten?{displayText:parsed.text,hasCalendarText:m.hasCalendarText!==false&&!!parsed.text}:{}),workflowRuns:[
+        ...(parsed?.runs||[]).map(run=>({...run,status:'Submitted',label:'Open workflow run '+run.title,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}})),
+        ...changes.map(change=>({workflowId:change.workflowId,runId:'',title:'Workflow',status:change.change,label:'Open workflow',open:()=>{if(typeof this.openWorkflow==='function')this.openWorkflow(change.workflowId);else this.openView('workflows');}})),
+      ]};
     });
     out.msgs=projectActionMessages(out.msgs||[],live);
     out.canStopReply=!!this.S().typing&&alphaClient.getState().pending;
@@ -1939,6 +1952,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(!reply.messageId||!reply.userMessageId||!identity||identity.conversationId!==binding.conversationId||JSON.stringify(identity.session)!==JSON.stringify(binding.session)||!reply.text.trim())throw Error('The voice reply could not be matched to this conversation. Check history before speaking again.');
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
+      keepWorkflowChanges(this,reply,belongs);
       const delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
       const nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
       current();
@@ -2154,6 +2168,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // A conversation delivery can land the saved reply before this rename; keep its content and enrich only a missing plan control.
       if(streamed)this.setState((previous:Shell)=>settlementCurrent()?{msgs:reply.messageId&&previous.msgs.some((m:Shell)=>m.id===reply.messageId)?previous.msgs.filter((m:Shell)=>m.id!==streamedId).map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planCard,identity):m):previous.msgs.map((m:Shell)=>m.id===streamedId?{...m,id:reply.messageId||m.id,messageBinding:reply.messageId?identity:undefined,text:reply.text,streaming:false,...(planCard?{card:planCard}:{})}:m)}:null);else this.agentSay(reply.text,planCard,reply.messageId&&identity?{id:reply.messageId,messageBinding:identity}:undefined,settlementCurrent);
       if(reply.userMessageId&&identity)await new Promise<void>(resolve=>this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m)}:null,resolve));
+      keepWorkflowChanges(this,reply,settlementCurrent);
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
       let cameraOpened=false,cameraReceipts=0;
       if(sourceDraft&&sourceSession&&JSON.stringify(sourceSession)===JSON.stringify(connectionController.getSnapshot().session))this.agentSay('Review this answer before saving it with its source.',{type:'generic',icon:'note',title:'Review summary note',sub:sourceDraft.name,sourceSummary:{source:sourceDraft,text:reply.text,session:sourceSession}});
