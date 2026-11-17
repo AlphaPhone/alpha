@@ -22,7 +22,6 @@ import {reviewMailContext,validateMailContext,type MailContextSource} from '../r
 import { inboxProviderControls } from './inbox-provider-controls';
 import { homeReadIsStale, presentHomeInboxCard } from './home-cards';
 import { inboxDrafts, type ComposePrefill } from './inbox-drafts';
-import { ChatAttachmentPicker } from './attachment-picker';
 import { attachmentReadFailure, classifyGmailFailure, gmailReadable, MailReadStateGuard, mailReadStateMessage, newestMailBodies, GMAIL_ACCOUNTS_CHANGED, type GmailFailureKind } from '../runtime/gmail-mailbox';
 import { connectionController, agentPendingText } from '../runtime/connection-ui';
 import { gmailGrantChange, gmailInboxAllows, gmailModifyIncomplete, gmailReadCacheKey } from '../runtime/gmail-grants';
@@ -381,11 +380,10 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   const drafts = inboxDrafts(() => publish(), text => api?.toast(text), provider,
     () => !!api?.isActive() && !document.hidden, async current => {
       const owner = shell;
-      if (!owner || !current()) return;
+      if (!owner?.chooseLocalAttachments || !current()) return;
       const abort = new AbortController();
-      owner.chatAttachmentPicker ??= new ChatAttachmentPicker(() => owner.live && owner.setState({}));
       try {
-        const [file] = await owner.chatAttachmentPicker.choose(abort.signal, 1,
+        const [file] = await owner.chooseLocalAttachments(abort.signal, 1,
           () => owner === shell && current(), '[data-alpha-mail-attach]');
         return file;
       } finally {

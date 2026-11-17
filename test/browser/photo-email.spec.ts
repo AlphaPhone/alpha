@@ -1,6 +1,7 @@
 import {choosePhotoAction} from './helpers/owned-photo';
 import {test,expect,type Page} from '@playwright/test';
 import {photosBridge} from './helpers/photos-bridge';
+import {savedInboxAttachments} from './inbox-draft-navigation';
 const dialog=(page:Page)=>page.getByRole('dialog',{name:'Attach to email',exact:true});
 async function setup(page:Page){
  // Start from Home: Inbox must load its reviewed draft target before Photos hands it a source.
@@ -37,10 +38,10 @@ test('Photos source requires separate attachment review and preserves source byt
  await page.screenshot({path:test.info().outputPath('photo-email-review.png')});
  await dialog(page).getByRole('checkbox').check();await insert.click();
  await expect(page.getByRole('button',{name:'Remove source.png',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Save draft',exact:true}).click();
- await expect(page.getByText('Saved locally on this device',{exact:true}).first()).toBeVisible();
- const saved=await page.evaluate(async()=>{const {secureConnectionStore}=await import('/src/runtime/native-connection.ts');return await secureConnectionStore.read<any>('inbox-drafts:v1:'+JSON.stringify(['production','file-owner','','file-grant']));});
- expect(saved.attachments[0]).toEqual({name:'source.png',mimeType:'image/png',dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII='});
+ await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
+ const saved=await savedInboxAttachments(page,['production','file-owner','','file-grant']);
+ expect(saved[0]).toEqual({name:'source.png',mimeType:'image/png',dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII='});
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='readPhotoSelected').length)).toBe(2);
 });

@@ -457,13 +457,14 @@ export function createMailDraftsController(
   async function saveShelf(next: Shelf) {
     const token = epoch,
       expected = shelf;
-    const receipt = await store.compareExchange(shelfSlot(), expected, next);
+    const value = next.items.length ? next : null;
+    const receipt = await store.compareExchange(shelfSlot(), expected, value);
     if (token !== epoch) throw Error("Draft account changed");
     if (receipt.status !== "saved")
       throw Error(
         "Drafts changed in another window. Reload before continuing.",
       );
-    shelf = next;
+    shelf = value;
   }
 
   const pendingEdits = new Map<
@@ -919,6 +920,7 @@ export function createMailDraftsController(
     const copies = new Map<string, Shelved>();
     for (const row of shelf?.items || []) copies.set(row.draft.id, row);
     if (saved) copies.set(saved.id, { draft: structuredClone(saved), toQ: "" });
+    const savedIds = new Set(copies.keys());
     if (kept)
       copies.set(kept.draft.id, {
         draft: structuredClone(kept.draft) as LocalMailDraft,
@@ -929,7 +931,9 @@ export function createMailDraftsController(
     const next: Shelf = {
       version: 1,
       owner,
-      items: [...copies.values()].filter(meaningful),
+      items: [...copies.values()].filter(
+        (row) => savedIds.has(row.draft.id) || meaningful(row),
+      ),
     };
     if (
       !shelfValid(next) ||

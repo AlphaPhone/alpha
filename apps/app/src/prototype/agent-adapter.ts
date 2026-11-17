@@ -1624,6 +1624,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // for the authored text, escaped filenames and the bounded phone observation.
     return files.reduce((sum,file)=>sum+file.data.length,0)+(cameraImage?.length??0)<=19*1024*1024;
   }
+  p.chooseLocalAttachments=function(signal:AbortSignal,maximum:number,current:()=>boolean,returnFocus?:string):Promise<File[]>{
+    this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
+    return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
+  };
   async function pickChatAttachments(shell:Shell){
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
@@ -1635,12 +1639,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const current=()=>!abort.signal.aborted&&shell.live&&!document.hidden&&shell.S().view===view&&
       attachmentBinding()===binding&&shell.fileAttachments===existing&&shell.cameraAttachment===camera&&
       !connectionController.getSnapshot().open&&!shell.S().typing&&!shell.messageEditTarget&&!shell.draftSendPending&&!shell.composerDraft?.holding;
-    shell.chatAttachmentPicker??=new ChatAttachmentPicker(()=>shell.live&&shell.setState({}));
     const retire=()=>abort.abort();
     for(const event of ['pagehide','launcher-home','alpha:device-state'])window.addEventListener(event,retire,{signal:abort.signal});
     const unsubscribe=connectionController.subscribe(()=>{if(!current())abort.abort();});
     try{
-      const files:File[]=await shell.chatAttachmentPicker.choose(abort.signal,maximum,current);
+      const files:File[]=await shell.chooseLocalAttachments(abort.signal,maximum,current);
       if(!current()||!files.length)return;
       const encoded=await encodeChatAttachments(files);
       if(!current())return;
