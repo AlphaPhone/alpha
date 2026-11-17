@@ -27,7 +27,9 @@ const imports = {
   ],
 }
 // AGENTS.md, "Hard rules": an interface keeps its state in the spec's Machine and leaves effects and time to the shell.
-const noEffects = { paths: [{ name: "react", importNames: ["useEffect", "useLayoutEffect", "useInsertionEffect"], message: 'Send an event to the Machine, or run the effect in the shell: AGENTS.md, "Hard rules".' }], patterns: imports.patterns }
+// AGENTS.md, "This project": fakes and fixtures live in tests and development only, never in what a build ships.
+const noTests = { regex: "(^|/)test/", message: 'An application never imports its tests or their fakes: AGENTS.md, "This project".' }
+const noEffects = { paths: [{ name: "react", importNames: ["useEffect", "useLayoutEffect", "useInsertionEffect"], message: 'Send an event to the Machine, or run the effect in the shell: AGENTS.md, "Hard rules".' }], patterns: [...imports.patterns, noTests] }
 const dialogs = ["alert", "confirm", "prompt"].map((name) => ({ name, message: "Use Dialog or Alert from @repo/ui." }))
 const timers = ["setTimeout", "setInterval", "requestAnimationFrame", "requestIdleCallback"].map((name) => ({ name, message: 'Time belongs to the shell, as an Effect: AGENTS.md, "Hard rules".' }))
 const noReact = { patterns: [...imports.patterns, { regex: "^react(?:-dom)?(?:/|$)", message: `Tool and domain code does not import React: ${monorepo}.` }] }
@@ -133,5 +135,6 @@ export default defineConfig(
   },
   // The application and its components: no effect hooks and no timers.
   { files: ["apps/**/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers, ...dialogs] } },
+  { files: ["apps/**/src/**/*.vibe"], rules: { "no-restricted-imports": ["error", { patterns: [...noReact.patterns, noTests] }] } },
   { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers] } },
 )

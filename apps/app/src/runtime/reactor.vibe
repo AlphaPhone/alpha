@@ -1,0 +1,144 @@
+// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"
+
+/** What a transition that returns effects gives: the state it led to and what it asks of the world. */
+export interface Moved<S, Fx> {
+  readonly state: S
+  readonly out: ReadonlyArray<Fx>
+}
+
+/** The members of every generated `Machine`, whatever its module; `M` is what `send` returns: the state, or a `Moved`. */
+export interface Steps<S, Ev, M, Refused, Undecoded> {
+  readonly changes: Stream.Stream<S>
+  get(): S!!
+  send(event: Ev): M!Refused
+  receive(input: unknown): M!Undecoded
+}
+
+/**
+ * How the shell carries out one item of `out`. `Run` streams its answers back to the machine as events, and the first
+ * one the rules refuse ends it; a later `Run` or a `Stop` under the same key interrupts it.
+ */
+export data Job<Ev, R> {
+  Run { key: string; answers: Stream.Stream<Ev, never, R> }
+  Stop { key: string }
+}
+
+/** What a component writes for `now`: the machine replaces every `now` with the clock's time when it applies the event. */
+export const untimed = 0
+
+/** The one answer of `answered`, an effect that has already turned each failure into an event. */
+export function answer<Ev, R>(key: string, answered: Ev!!R): Job<Ev, R> {
+  return Job.Run({ key, answers: Stream.fromEffect(answered) })
+}
+
+/** Every answer of `answers`, a stream that has already turned its failure into a last event. */
+export function stream<Ev, R>(key: string, answers: Stream.Stream<Ev, never, R>): Job<Ev, R> {
+  return Job.Run({ key, answers })
+}
+
+/** Interrupt what runs under `key`. */
+export function stop<Ev>(key: string): Job<Ev, never> {
+  return Job.Stop({ key })
+}
+
+/** How long a wake sleeps before it reads the clock again, so that a phone that slept wakes it at most this late. */
+const glance = 1000
+
+/** `event` once the clock reaches `at`, or at once if it has. */
+export function wake<Ev>(key: string, at: number, event: Ev): Job<Ev, never> {
+  return answer(key, effect {
+    for (let now = try Clock.currentTimeMillis; now < at; now = try Clock.currentTimeMillis) try sleep(Math.min(at - now, glance))
+    return event
+  })
+}
+
+function stamped<A>(event: A, now: number): A {
+  return typeof event === "object" && event !== null && "now" in event ? { ...event, now } : event
+}
+
+/** `work` with a defect logged, so that a job or a follower never dies silently. */
+function watched<R>(work: void!!R, what: string): void!!R {
+  return Effect.tapCause(work, (cause) => Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError(`${what} died`, cause))
+}
+
+function steps<I, S, Ev, M, Fx, Refused, Undecoded, R>(
+  tag: Context.Key<I, Steps<S, Ev, M, Refused, Undecoded>>,
+  outOf: (moved: M) => ReadonlyArray<Fx>,
+  carry: (fx: Fx) => Job<Ev, R>,
+  opening: Ev | undefined,
+) {
+  return Layer.effect(tag, effect {
+    const inner = try tag
+    const world = try Effect.context<R>()
+    const running = try FiberMap.make<string>()
+    effect function taken(event: Ev): boolean!! {
+      return effect { try send(event); return true } catch () => false
+    }
+    effect function start(moved: M): void!! {
+      for (const fx of outOf(moved)) {
+        match (carry(fx)) {
+          when { _tag: "Run", let key, let answers }: try FiberMap.run(running, key, Effect.provideContext(watched(Stream.runForEachWhile(answers, taken), `job ${key}`), world));
+          when { _tag: "Stop", let key }: try FiberMap.remove(running, key);
+        }
+      }
+    }
+    effect function send(event: Ev): M!Refused {
+      const now = try Clock.currentTimeMillis
+      uninterruptible {
+        const moved = try inner.send(stamped(event, now))
+        try start(moved)
+        return moved
+      }
+    }
+    effect function receive(input: unknown): M!Undecoded {
+      const now = try Clock.currentTimeMillis
+      uninterruptible {
+        const moved = try inner.receive(stamped(input, now))
+        try start(moved)
+        return moved
+      }
+    }
+    if (opening !== undefined) try ignore(send(opening))
+    return { changes: inner.changes, get: () => inner.get(), send, receive }
+  })
+}
+
+/** An opening for a machine kept in a store, which must take one; one in memory may. */
+type Opening<Ev, LR> = [LR] extends [never] ? [opening?: Ev] : [opening: Ev]
+
+/**
+ * The machine `tag` names, kept by `inner`, with each `now` stamped from the clock on `send` and `receive`, and each item
+ * of `out` carried out by `carry` once the state that asked for it is kept. A machine kept in a store must take the
+ * spec's `opening` event, sent once when the layer is built: what was under way when Alpha stopped is taken up again.
+ */
+export function reacting<I, S, Ev, Fx, Refused, Undecoded, R, LE, LR>(
+  tag: Context.Key<I, Steps<S, Ev, Moved<S, Fx>, Refused, Undecoded>>,
+  inner: Layer.Layer<I, LE, LR>,
+  carry: (fx: Fx) => Job<Ev, R>,
+  ...[opening]: Opening<Ev, LR>
+) {
+  return Layer.provide(steps(tag, (moved: Moved<S, Fx>) => moved.out, carry, opening), inner)
+}
+
+/** `reacting` for a machine whose transitions return only the state: it stamps `now` and takes its `opening`. */
+export function quiet<I, S, Ev, Refused, Undecoded, LE, LR>(tag: Context.Key<I, Steps<S, Ev, S, Refused, Undecoded>>, inner: Layer.Layer<I, LE, LR>, ...[opening]: Opening<Ev, LR>) {
+  return Layer.provide(steps(tag, (): never[] => [], (fx: never): Job<Ev, never> => fx, opening), inner)
+}
+
+/**
+ * Tell the machine `target` names each new fact it needs from the machine `source` names, which another area owns:
+ * `fact` reads it from each state the source publishes, now and on every change, and `told` makes it the target's
+ * event. A fact is a primitive, so equal facts in a row are told once; one the target refuses changes nothing.
+ */
+export function following<IA, A, IB, Ev, Refused, F extends string | number | boolean>(
+  source: Context.Key<IA, { readonly changes: Stream.Stream<A> }>,
+  fact: (a: A) => F,
+  target: Context.Key<IB, { send(event: Ev): unknown!Refused }>,
+  told: (fact: F) => Ev,
+) {
+  return Layer.effectDiscard(effect {
+    const from = try source
+    const to = try target
+    try fork.scoped watched(Stream.runForEach(Stream.changes(Stream.map(from.changes, fact)), (value) => ignore(to.send(told(value)))), "following")
+  })
+}

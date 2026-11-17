@@ -1,0 +1,41 @@
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { agentAt } from "../../src/platform/agent.vibe"
+import { cloudAt } from "../../src/platform/cloud.vibe"
+import { Device } from "../../src/platform/device.vibe"
+import type { Platform } from "../../src/platform/platform.ts"
+import { Vault } from "../../src/platform/vault.vibe"
+import { type Answering, fetched } from "./routes.ts"
+import { type Scene, pressed, services } from "./scene.ts"
+
+/** An HttpClient that hands each request to a fake service as fetch would: a web Request, with its abort signal. */
+function fetching(answer: Answering) {
+  return Layer.succeed(HttpClient.HttpClient, HttpClient.make((request, url, signal) => effect {
+    const body = request.body._tag === "Uint8Array" ? request.body.body : undefined
+    const response = try tryPromise({
+      try: () => fetched(answer, url, { method: request.method, headers: request.headers, body, signal }),
+      catch: (cause) => new HttpClientError.HttpClientError({ reason: new HttpClientError.TransportError({ request, cause }) }),
+    })
+    return HttpClientResponse.fromWeb(request, response)
+  }))
+}
+
+/** The world outside Alpha, faked over `world`, keeping machines in `store`: the real agent and cloud clients over the fake services. */
+export function fakeWorld(world: Scene, store: Layer.Layer<KeyValueStore.KeyValueStore>): Layer.Layer<Platform> {
+  const { agent, cloud } = services(world)
+  return Layer.mergeAll(
+    store,
+    Layer.succeed(Device, {
+      capabilities: () => sync(() => ({ image: world.image, contacts: world.image })),
+      setTextScale: (scale: number) => sync(() => { world.textScale = scale }),
+      buttons: Stream.map(Stream.fromEventListener<Event>(world.buttons, "press"), pressed),
+    }),
+    Layer.succeed(Vault, {
+      read: (slot: string) => sync(() => Option.map(Option.fromUndefinedOr(world.secrets.get(slot)), Redacted.make)),
+      write: (slot: string, secret: Redacted.Redacted<string>) => sync(() => { world.secrets.set(slot, Redacted.value(secret)) }),
+      remove: (slot: string) => sync(() => { world.secrets.delete(slot) }),
+    }),
+    Layer.provide(agentAt("http://agent.test"), fetching(agent)),
+    Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)),
+  )
+}

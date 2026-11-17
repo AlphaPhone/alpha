@@ -1,0 +1,93 @@
+// spec/kit/read.md, "Story: Read from outside"
+import { type Failure, Garbled, type Remote, Refused, Unreachable, parsed } from "./remote.vibe"
+
+module web {
+  interface Plugins { readonly Plugins?: Record<string, Record<string, unknown>> }
+  interface Handle { remove(): Promise<void> }
+  /** @throws {never} */
+  export function method(plugin: string, name: string): ((options: unknown) => Promise<unknown>) | undefined {
+    const plugins = (globalThis as { Capacitor?: Plugins }).Capacitor?.Plugins
+    const found = plugins?.[plugin]?.[name]
+    return typeof found === "function" ? (options: unknown) => (found as (o: unknown) => Promise<unknown>).call(plugins?.[plugin], options) : undefined
+  }
+  /** @throws {never} */
+  export function subscribe(plugin: string, event: string, heard: (data: unknown) => void): Promise<() => Promise<void>> | undefined {
+    const add = method(plugin, "addListener") as ((event: string, heard: (data: unknown) => void) => Promise<Handle>) | undefined
+    return add === undefined ? undefined : add(event, heard).then((handle) => () => handle.remove())
+  }
+}
+import { method, subscribe } from web
+
+/** The plugin or its method is not there, as in a browser, or its call failed. */
+export error BridgeFailed { plugin: string; method: string; cause: unknown }
+
+/**
+ * The one door to Android: every Capacitor plugin is reached through it, and what comes back is untrusted until the
+ * service that asked has decoded it with its schema. Only the phone's platform layers use it; areas use those services.
+ */
+export service Bridge {
+  call(plugin: string, method: string, options: unknown): unknown!BridgeFailed
+  listen(plugin: string, event: string): Stream.Stream<unknown, BridgeFailed>
+}
+
+/** Capacitor's bridge, on the phone. */
+export const capacitorBridge = Layer.succeed(Bridge, {
+  effect call(plugin: string, name: string, options: unknown) {
+    const found = method(plugin, name)
+    if (found === undefined) throw new BridgeFailed({ plugin, method: name, cause: "missing" })
+    return try tryPromise({ try: () => found(options), catch: (cause) => new BridgeFailed({ plugin, method: name, cause }) })
+  },
+  listen(plugin: string, event: string) {
+    return Stream.callback<unknown, BridgeFailed>((queue) => effect {
+      const remove = try tryPromise({
+        try: () => subscribe(plugin, event, (data) => { Queue.offerUnsafe(queue, data) }) ?? Promise.reject(new Error("missing")),
+        catch: (cause) => new BridgeFailed({ plugin, method: event, cause }),
+      })
+      try addFinalizer(() => ignore(tryPromise(() => remove())))
+    })
+  },
+})
+
+/** What a plugin's `request` answers. */
+schema Relayed { readonly status: number; readonly body: string }
+/** What a plugin's `requestStream` answers, and each event it then emits under that id. */
+schema Opened { readonly streamId: string }
+schema Streamed { readonly streamId: string; readonly data?: string; readonly done?: boolean }
+
+effect function decoded<A>(said: unknown, schema: Schema.Decoder<A>): A!Garbled {
+  return Schema.decodeUnknownEffect(schema)(said) catch effect (cause) => { throw new Garbled({ cause }) }
+}
+
+function relay(request: HttpClientRequest.HttpClientRequest) {
+  const body = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : undefined
+  return { method: request.method, path: request.url, headers: request.headers, body }
+}
+
+/**
+ * A service over HTTP that `plugin` relays, so that its bearer tokens never leave native code: the resident agent
+ * through `Agent`, the cloud through `AlphaConnection`. It is `remoteAt` of remote.vibe for the phone.
+ */
+export effect function relayed(plugin: string): Remote!!Bridge {
+  const bridge = try Bridge
+  return {
+    effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
+      const said = bridge.call(plugin, "request", relay(request)) catch effect (cause) => { throw new Unreachable({ cause }) }
+      const answered = try decoded(said, Relayed)
+      if (answered.status < 200 || answered.status >= 300) throw new Refused({ status: answered.status })
+      return try parsed(answered.body)
+    },
+    events(request: HttpClientRequest.HttpClientRequest) {
+      return Stream.unwrap(effect {
+        const said = bridge.call(plugin, "requestStream", relay(request)) catch effect (cause) => { throw new Unreachable({ cause }) }
+        const { streamId } = try decoded(said, Opened)
+        return bridge.listen(plugin, "streamEvent")
+          |> Stream.mapError(%, (cause): Failure => new Unreachable({ cause }))
+          |> Stream.mapEffect(%, (event) => decoded(event, Streamed))
+          |> Stream.filter(%, (event) => event.streamId === streamId)
+          |> Stream.takeWhile(%, (event) => event.done !== true)
+          |> Stream.mapEffect(%, (event) => parsed(event.data ?? "null"))
+          |> Stream.ensuring(%, ignore(bridge.call(plugin, "cancelStream", { streamId })))
+      })
+    },
+  }
+}

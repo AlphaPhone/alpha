@@ -1,0 +1,14 @@
+// spec/kit/read.md, "Story: Read from outside"
+import { relayed } from "./bridge.vibe"
+import { type Remote, remoteAt } from "./remote.vibe"
+
+/** The cloud account's API: inference, speech, Gmail, Calendar and Maps. Areas reach it with `ask(Cloud, …)` and `listen(Cloud, …)`. */
+export service Cloud: Remote {}
+
+/** The cloud over HTTP at `base`: in a browser the page's own `/cloud`, which the dev server answers. */
+export function cloudAt(base: string) {
+  return Layer.effect(Cloud, remoteAt(base))
+}
+
+/** The cloud on the phone, through `AlphaConnection`, which holds the session and chooses the host. */
+export const relayedCloud = Layer.effect(Cloud, relayed("AlphaConnection"))

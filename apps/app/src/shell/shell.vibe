@@ -1,11 +1,19 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import { Machine, stored } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
+import { quiet } from "../runtime/reactor.vibe"
 
-export const shell = stored("alpha.shell")
+// spec/app/shell/index.md, "When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed"
+const kept = quiet(Machine, stored("alpha.shell"), { type: "reopen" })
 
-// spec/app/shell/index.md, "The phone says what it admits, and an app it no longer admits leaves the trail"
-export effect function admitted() {
-  const facts = try (try Device).capabilities()
-  return try (try Machine).send({ type: "admit", image: facts.image, contacts: facts.contacts })
-}
+// spec/app/shell/index.md, "The phone says what it admits, and an app it no longer admits leaves the trail"; spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
+const told = Layer.effectDiscard(effect {
+  const device = try Device
+  const shell = try Machine
+  const facts = try device.capabilities()
+  try ignore(shell.send({ type: "admit", image: facts.image, contacts: facts.contacts }))
+  try fork.scoped Stream.runForEach(device.buttons, (button) => ignore(shell.send(button === "back" ? { type: "goBack" } : { type: "goHome" })))
+})
+
+/** The shell, kept across restarts, told what the phone admits and which buttons it hands over. */
+export const shell = Layer.provideMerge(told, kept)

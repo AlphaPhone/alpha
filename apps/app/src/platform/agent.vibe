@@ -1,0 +1,14 @@
+// spec/kit/read.md, "Story: Read from outside"
+import { relayed } from "./bridge.vibe"
+import { type Remote, remoteAt } from "./remote.vibe"
+
+/** The resident agent's HTTP and event-stream API. Areas reach it with `ask(Agent, …)` and `listen(Agent, …)` of remote.vibe. */
+export service Agent: Remote {}
+
+/** The agent over HTTP at `base`: in a browser the page's own `/agent`, which the dev server answers. */
+export function agentAt(base: string) {
+  return Layer.effect(Agent, remoteAt(base))
+}
+
+/** The agent on the phone, through the `Agent` plugin. */
+export const relayedAgent = Layer.effect(Agent, relayed("Agent"))

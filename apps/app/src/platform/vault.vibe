@@ -1,0 +1,40 @@
+// spec/kit/attempt.md, "Story: Do something outside, once"
+import { Bridge } from "./bridge.vibe"
+
+/** The secure store refused, or there is none, as in a browser. */
+export error VaultFailed { slot: string; cause: unknown }
+
+/**
+ * Secrets, in the phone's secure store: never in the KeyValueStore, never in a machine's state, and redacted so that
+ * no log shows them. A bearer token never comes here: it stays in native code, behind the relayed Agent and Cloud.
+ */
+export service Vault {
+  read(slot: string): Option.Option<Redacted.Redacted<string>>!VaultFailed
+  write(slot: string, secret: Redacted.Redacted<string>): void!VaultFailed
+  remove(slot: string): void!VaultFailed
+}
+
+/** What `secureRead` answers. */
+schema Slot { readonly value?: string }
+
+/** The phone's secure store, through `AlphaConnection`'s secure slots. */
+export const capacitorVault = Layer.effect(Vault, effect {
+  const bridge = try Bridge
+  effect function slotted<A>(slot: string, method: string, options: object, done: (said: unknown) => A!unknown): A!VaultFailed {
+    return effect {
+      return try done(try bridge.call("AlphaConnection", method, { ...options, slot }))
+    } catch effect (cause) => { throw new VaultFailed({ slot, cause }) }
+  }
+  return {
+    read: (slot: string) => slotted(slot, "secureRead", {}, effect (said) => Option.map(Option.fromUndefinedOr((try Schema.decodeUnknownEffect(Slot)(said)).value), Redacted.make)),
+    write: (slot: string, secret: Redacted.Redacted<string>) => slotted(slot, "secureWrite", { value: Redacted.value(secret) }, () => Effect.void),
+    remove: (slot: string) => slotted(slot, "secureRemove", {}, () => Effect.void),
+  }
+})
+
+/** A browser keeps no secrets: every slot is refused, and the area shows that it cannot. */
+export const browserVault = Layer.succeed(Vault, {
+  read: (slot: string) => Effect.fail(new VaultFailed({ slot, cause: "no secure store in a browser" })),
+  write: (slot: string) => Effect.fail(new VaultFailed({ slot, cause: "no secure store in a browser" })),
+  remove: (slot: string) => Effect.fail(new VaultFailed({ slot, cause: "no secure store in a browser" })),
+})
