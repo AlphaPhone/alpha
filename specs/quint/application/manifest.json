@@ -11910,6 +11910,7 @@
       "partialFailureRestoreTest",
       "ownerChoiceWinsTest",
       "ownerReturnsLegacyTest",
+      "ownerChoiceWhileIneligibleTest",
       "crashAfterGrantTest"
     ],
     "sources": [
@@ -11918,7 +11919,7 @@
       "scripts/stage-alpha-os-branding.py"
     ],
     "abstractions": [
-      "One of three independent roles, durable intent and completion receipt, primary unmanaged system-image identity and role qualification as checked inputs. The Android controller serializes role requests. Source compilation tests exercise all three roles, partial failure restoration and owner request paths. Device reboot persistence, other privileged controller clients and real role grants require image qualification. Progress needs stable eligibility, qualified APK, successful durable writes and fair successful role grants."
+      "One of three independent roles, durable intent and completion receipt, primary unmanaged system-image identity and role qualification as checked inputs. The Android controller serializes role requests. Eligibility can be lost and regained, and an owner request records the receipt either way. The CI compilation test runs the real staging projection, policy and Android adapter over a synthetic controller that carries the projection anchors, and exercises partial failure restoration plus owner add, remove and clear requests on unfinished migrations, including a choice made while ineligible. Compiling the pinned AOSP controller runs only where its hash-checked input is fetched locally, not in CI. Device reboot persistence, other privileged controller clients and real role grants require image qualification. Progress needs stable eligibility, qualified APK, successful durable writes and fair successful role grants."
     ]
   }
 ]

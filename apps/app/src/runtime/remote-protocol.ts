@@ -229,11 +229,6 @@ export class RemoteProtocol {
     const conversation = object(value.conversation);
     return { ...conversation, id: string(conversation.id) };
   }
-  async truncateMessages(id:string,messageId:string,signal:AbortSignal):Promise<void> {
-    const value=object(await this.authorized(`/api/conversations/${encodeURIComponent(string(id))}/messages/truncate`,'POST',{messageId,inclusive:true},signal));
-    if(value.ok!==true||!Number.isSafeInteger(value.deletedCount)||Number(value.deletedCount)<1)throw new RemoteProtocolError('message_replacement_unconfirmed');
-  }
-
   async forkConversation(id:string,messageId:string,requestId:string,expectedText:string,signal:AbortSignal):Promise<RemoteConversation> {
     const value=object((await this.authorized(`/api/conversations/${encodeURIComponent(string(id))}/fork`,'POST',{messageId,requestId,expectedText},signal) as {conversation:unknown}).conversation);
     return {...value,id:string(value.id)};

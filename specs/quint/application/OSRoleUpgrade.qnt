@@ -20,13 +20,16 @@ module OSRoleUpgrade {
   action restore = all { s.receipt == "pending", s.holder == "none", not(s.applying),
     s' = { ...s, holder: "legacy" } }
   action restart = s' = { ...s, applying: false }
+  /// An explicit request records the receipt whether or not the migration is eligible now.
   action ownerSelect(value: str): bool = all { not(s.applying),
     s' = { ...s, holder: value, receipt: "done", ownerChoice: true, ownerValue: value } }
   action ineligible = all { not(s.applying), s' = { ...s, eligible: false } }
+  /// Setup completing, or the app being enabled or unsuspended, makes the migration eligible again.
+  action eligibleAgain = all { not(s.applying), s' = { ...s, eligible: true } }
   action unqualified = all { not(s.applying), s' = { ...s, qualified: false } }
   action step = any { prepare, adopt, acknowledge, failure, partialFailure, restore,
     restart, ownerSelect("other"), ownerSelect("legacy"), ownerSelect("none"),
-    ineligible, unqualified }
+    ineligible, eligibleAgain, unqualified }
   val safety = s.holder.in(Set("legacy", "alpha", "other", "none"))
     and s.receipt.in(Set("", "pending", "done"))
     and (not(s.ownerChoice) or s.holder == s.ownerValue)
@@ -41,6 +44,8 @@ module OSRoleUpgrade {
     .then(restart).expect(s.holder == "other" and s.receipt == "done" and safety)
   run ownerReturnsLegacyTest = init.then(prepare).then(adopt).then(acknowledge)
     .then(ownerSelect("legacy")).then(restart).expect(s.holder == "legacy" and safety)
+  run ownerChoiceWhileIneligibleTest = init.then(ineligible).then(ownerSelect("legacy"))
+    .then(eligibleAgain).expect(s.holder == "legacy" and s.receipt == "done" and safety)
   run crashAfterGrantTest = init.then(prepare).then(adopt).then(restart)
     .expect(s.holder == "alpha" and s.receipt == "pending" and safety)
 }

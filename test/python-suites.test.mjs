@@ -19,6 +19,7 @@ const noGrpc=python(['-c','import grpc, grpc_tools'],30000).status===0?false:'Py
 
 // Hermetic: repository files, Bun (the runner's ALPHA_BUN) and synthetic stage fixtures only.
 test('the canonical Pixel source packet admission and stage preimages are rechecked',()=>run('aosp-image-packet.test.py'));
-test('the canonical role upgrade preserves owner choices and recovers partial grants',()=>run('aosp-role-upgrade.test.py'));
+// The pinned AOSP controller compile in this file skips without fetched inputs; its synthetic-controller test always runs.
+test('the role upgrade policy and projected owner hook preserve owner choices and recover partial grants',()=>run('aosp-role-upgrade.test.py'));
 
 test('emulator microphone preflight never injects or reads audio unsafely',{skip:noGrpc},()=>run('emulator-microphone-preflight.test.py'));

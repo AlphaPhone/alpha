@@ -77,7 +77,10 @@ def project_role_controller(original):
         if (mAlphaRoleUpgradeRunning) return true;
         AlphaRoleUpgradeAndroid upgrade = new AlphaRoleUpgradeAndroid(
                 mContext, mUser, mUserRoleManager, this);
-        return !upgrade.eligible() || upgrade.keepOwnerChoice(roleName);
+        // Record the choice even while the migration is ineligible (setup open, app disabled or
+        // suspended): eligibility can return, and the choice must still retire the migration.
+        // Only an eligible device refuses the request when the marker cannot be written.
+        return upgrade.keepOwnerChoice(roleName) || !upgrade.eligible();
     }
     @Override
     @WorkerThread
