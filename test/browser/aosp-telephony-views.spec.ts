@@ -273,6 +273,38 @@ test('a missing composer reply releases Send and a retry retains its operation i
   expect(await inputs(page, 'sendSms')).toEqual([]);
 });
 
+test('leaving Messages after the composer took the draft keeps the operation and never says nothing was sent', async ({page}) => {
+  await setupTelephony(page, {controlledSms: true});
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator(personField);
+  const send = barSend(page);
+  const body = 'Leaving mid-send must not invite a second copy.';
+  await draft.fill(body);
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(1);
+  const [first] = await inputs(page, 'sendComposedSms');
+
+  // The native composer already holds the draft; hiding the page aborts the visit before it replies.
+  const visible = (hidden: boolean) => page.evaluate(hidden => {
+    Object.defineProperty(document, 'hidden', {configurable: true, get: () => hidden});
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+  await visible(true);
+  await visible(false);
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  await expect(draft).toHaveValue(body);
+  await expect(send).toBeEnabled();
+  await expect(page.getByText(/Nothing was sent/)).toHaveCount(0);
+  await expect.poll(async () => (await inputs(page, 'smsSendResult')).map(input => input.operationId)).toContain(first.operationId);
+
+  // A retry asks about the same operation; it never mints a fresh one that could send twice.
+  await send.click();
+  await expect.poll(async () => (await inputs(page, 'sendComposedSms')).map(input => input.operationId)).toEqual([first.operationId, first.operationId]);
+  await expect(page.getByText(/Nothing was sent/)).toHaveCount(0);
+  expect(await inputs(page, 'sendSms')).toEqual([]);
+});
+
 test('the journal clears a sent draft after the composer reply times out', async ({page}) => {
   await page.clock.install();
   await setupTelephony(page, {controlledSms: true});

@@ -247,7 +247,9 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
      port.removeEventListener('message',receive);
      signal.removeEventListener('abort',abort);
     };
-    const abort=()=>{cleanup();reject(unavailable());};
+    // Past postMessage the native composer may already have sent: an abort leaves the outcome
+    // unknown, like a missing reply, so the operation ID stays for journaled reconcile.
+    const abort=()=>{cleanup();reject(new Error('Messages composer did not reply.'));};
     const receive=(event:Event)=>{
      const data=(event as MessageEvent).data;
      if(typeof data!=='string')return;

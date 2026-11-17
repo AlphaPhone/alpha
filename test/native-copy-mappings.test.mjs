@@ -238,6 +238,26 @@ test('every send refusal a Messages screen shows is worded by Alpha',()=>{
  assert.equal(sendRefusalText(new Error('MMS is too large'),'Couldn’t open'),'These pictures are too large to send together.');
  assert.equal(sendRefusalText(new Error('Refresh Messages, then review the MMS again.'),'Couldn’t open'),'Refresh Messages, then review the MMS again.');
 });
+test('Alpha’s Messages composer refusals keep their remedy instead of the code’s generic sentence',()=>{
+ const ALPHA='android/app/src/main/java/ai/alphacompute/alphaphone/';
+ const java=source(ALPHA+'AlphaMessagesComposerPort.java')+source(ALPHA+'AlphaTelephonyPlugin.java');
+ const composed=[...java.matchAll(/call\.reject\("([^"]+)", "(invalid|unavailable)"\);/g)].map(m=>({message:m[1],code:m[2]}))
+  .filter(({message})=>/Messages/.test(message));
+ const renderer=/new Error\('(Open the Messages composer[^']+)'\),\{code:'(unavailable)'\}/.exec(source('apps/app/src/prototype/sms-adapter.ts'));
+ assert.ok(renderer,'sms-adapter composerClient refusal');
+ composed.push({message:renderer[1],code:renderer[2]});
+ assert.ok(composed.length>=4,'composer refusals: '+composed.length);
+ const PINNED={
+  'Open the Messages composer to send this draft.':'Open the Messages composer to send this draft. Nothing was sent.',
+  'Invalid Messages draft.':'This draft can’t be sent from the Messages composer. Nothing was sent.',
+ };
+ for(const {message,code} of composed){
+  assert.ok(Object.hasOwn(PINNED,message),'composer refusal: '+message);
+  // The renderer rebuilds the port's reply, and throws its own, as a plain Error with the code.
+  assert.equal(sendRefusalText(Object.assign(new Error(message),{code}),'Not sent'),PINNED[message],message);
+  assert.equal(sendRefusalText(rejection(message,code),'Not sent'),PINNED[message],message);
+ }
+});
 
 // --- Installed app launcher (SystemPlugin.launchApp, SystemLauncherApps) --------------------------
 const {LAUNCH_REFUSALS,launchFailureText}=await import('../apps/app/src/ui/mobile-shell/installed-launcher.ts');
