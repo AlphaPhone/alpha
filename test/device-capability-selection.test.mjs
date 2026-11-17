@@ -3,7 +3,7 @@
 // Evidence class: unit test of the pure selection; not a device, image or model run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts';
+import {offeredByEither, selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts';
 import {readFileSync} from 'node:fs';
 
 const everything = [
@@ -44,6 +44,22 @@ test('the agent must offer a capability, and platform gates still apply', () => 
   assert.ok(image.includes('phone.dial.v1'));
 });
 
+// The Cloud agent's capabilities route lists no calls, contact changes or texts by name; its device
+// registration, like the remote and resident agents', lists them. The Cloud connection offers both.
+test('a Cloud agent whose registration offers calls and texts by name gets them on the image', () => {
+  const route = ['calendar.local-event.v1', 'calendar.agenda-read.v1', 'notes.local-record.v1', 'photos.library.v1', 'reminders.local-record.v1', 'reminders.local-record.v2', 'sms.send.v1'];
+  const registration = ['calendar.local-event.v1', 'notes.local-record.v1', 'reminders.local-record.v2', 'sms.send.v1', 'phone.dial.v1', 'phone.call.v1', 'contacts.write.v1', 'sms.compose.v1', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
+  const telephony = ['phone.dial.v1', 'phone.call.v1', 'contacts.write.v1', 'sms.compose.v1', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
+  const image = {...apk, aospImage: true, photoLibrary: true};
+  const fromRoute = selectDeviceCapabilities(route, image), selected = selectDeviceCapabilities(offeredByEither(route, registration), image);
+  for (const capability of telephony) { assert.ok(!fromRoute.includes(capability), `route alone: ${capability}`); assert.ok(selected.includes(capability), capability); }
+  // What only the route lists is kept, nothing is offered twice, and a standalone APK still gets no telephony.
+  for (const capability of fromRoute) assert.ok(selected.includes(capability), capability);
+  assert.equal(new Set(selected).size, selected.length);
+  assert.ok(!selectDeviceCapabilities(offeredByEither(route, registration), apk).some(capability => telephony.includes(capability)));
+  assert.deepEqual(offeredByEither(undefined, ['a'], 'not a list', ['a', 'b']), ['a', 'b']);
+});
+
 test('canonical Notes negotiates only the exact foreground list filter', () => {
   const capability = 'notes.list-filter.v1';
   const offer = [capability, 'notes.organize.v1', 'notes.search.v1'];
@@ -62,7 +78,7 @@ test('only the resident connection may negotiate the canonical Notes filter', ()
   const calls = name => [...body(name).matchAll(/deviceCapabilities\(([^()]*(?:\([^()]*\))?[^()]*)\)/g)].map(match => match[1]);
   assert.deepEqual(calls('connectResident'), ['registered.capabilities,true']);
   assert.deepEqual(calls('connectRemote'), ['registered.capabilities']);
-  assert.deepEqual(calls('connectCloud'), ['device?.capabilities']);
+  assert.deepEqual(calls('connectCloud'), ['device?.capabilities', 'offeredByEither(device?.capabilities,registered.capabilities)']);
   assert.equal([...ui.matchAll(/deviceCapabilities\([^)]*,\s*true\)/g)].length, 1);
   assert.ok(!body('connectRemote').includes('NOTES_LIST_FILTER_CAPABILITY') && !body('connectCloud').includes('NOTES_LIST_FILTER_CAPABILITY'));
   assert.ok(!body('connectRemote').includes('notes.list-filter.v1') && !body('connectCloud').includes('notes.list-filter.v1'));

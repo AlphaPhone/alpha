@@ -72,7 +72,7 @@ import { entitlementErrorText } from '../ui/cloud/subscription-presentation.ts';
 import { deviceActionRefusal } from '../ui/device-actions/device-action-messages.ts';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
-import { phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
+import { offeredByEither, phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
 import {calendarSource,calendarTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import { CloudSignInPanel, SIGN_IN_SENDING } from './cloud-sign-in-ui';
 import { useCloudSignInNetwork } from './cloud-sign-in-network';
@@ -1663,6 +1663,9 @@ async function connectCloud(agentId: string, signal: AbortSignal, expectedOwner?
     if (registered.installationId!==credential.installationId || typeof registered.enrollmentId!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId)) throw new Error('Cloud device registration was not verified');
     if(registered.userTextFormatVersion===1)next.userTextFormatVersion=1;
     const profileReason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
+    // The registration answers the agent's full device capability list, as it does for the remote
+    // and resident connections; the capabilities route above lists only part of it (no calls, no text by name).
+    target.headers["X-Eliza-Device-Capabilities"]=await deviceCapabilities(offeredByEither(device?.capabilities,registered.capabilities));
 
     credential.enrollmentId=registered.enrollmentId; await secureConnectionStore.write(slot,credential); signal.throwIfAborted();
     credential.capabilities=target.headers["X-Eliza-Device-Capabilities"].split(",");
