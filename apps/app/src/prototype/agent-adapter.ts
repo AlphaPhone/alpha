@@ -1738,11 +1738,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       onDraft(event);
     };
     out.composerPointer=(event:PointerEvent)=>event.stopPropagation();
-    // A pointer press must not focus Send: that blurs the editor and closes Android's
-    // keyboard before the accepted send restores focus. Keyboard activation is unchanged.
+    // Keep pointer presses from blurring the composer before Send or a chat action review.
+    const keepComposerFocus=(event:MouseEvent)=>{
+      if(event.button===0&&document.activeElement?.matches('textarea[data-alpha-composer]'))event.preventDefault();
+    };
     out.sendPointer=(event:PointerEvent)=>{
       event.stopPropagation();
-      if(event.button===0&&document.activeElement?.matches('textarea[data-alpha-composer]'))event.preventDefault();
+      keepComposerFocus(event);
     };
     out.sendNow=()=>sendFromComposer(this);
     out.attachmentPicker=this.chatAttachmentPicker?.view(out.ic)??{open:false};
@@ -1779,8 +1781,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
-        {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,open:()=>{if(!busy)void this.declineCard(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,keepComposerFocus,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,keepComposerFocus,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
     // A chat-started workflow run replies with a [WORKFLOW] block: it shows as a card that opens the
