@@ -111,7 +111,7 @@ try{
  assert.equal((await invoke({path:'/api/conversations/thread/messages/truncate',method:'GET',ownerId:'owner'})).status,400);
  await client.truncateMessages('thread','11111111-1111-4111-8111-111111111111',signal);assert.equal(truncates,1);
  mode='unconfirmed';await assert.rejects(client.truncateMessages('thread','11111111-1111-4111-8111-111111111111',signal),/not confirmed/);assert.equal(truncates,2);mode='ok';
- assert.equal((await client.forkConversation('thread','11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222',signal)).id,'forked-thread');assert.equal(forks,1);
+ assert.equal((await client.forkConversation('thread','11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','Hello',signal)).id,'forked-thread');assert.equal(forks,1);
  assert.equal((await invoke({path:'/api/conversations/thread/fork',method:'GET',ownerId:'owner'})).status,400);
  mode='unauthorized';await assert.rejects(client.send('thread','Do not replay'),{status:401});assert.equal(sends,2);
  mode='ok';await client.connect(signal);assert.equal(pairs,2);
