@@ -49,7 +49,7 @@ import { PersonalProtocolError, type CloudPersonalProtocol, type PersonalView, t
 import { holdPhoneInert } from './modal-inert';
 import { pauseHostedBackground } from './hosted-background';
 import {developmentDeviceStore,developmentActionJournal} from './local-agent-storage';
-import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentRefusal, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,removeLocalProviderKey,revealLocalProviderKey,type LocalProviderKey,type LocalProviderReveal,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
+import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentRefusal, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
 import { presentDeviceRecordOperation } from './device-record-presentation';
 import {actionResultText,checkinDisplayText, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
 import type { MessagePage } from './remote-protocol';
@@ -1058,17 +1058,14 @@ async function restartAfterProviderChange(signal: AbortSignal, fromSettings: boo
 }
 /** Key-manager requests share the connection operation slot; revealed values
  * return only to the transient panel, never the connection snapshot. */
-async function manageProviderKey(action:'reveal',key:LocalProviderKey,expectedRevision:string,signal:AbortSignal):Promise<LocalProviderReveal>;
-async function manageProviderKey(action:'edit'|'remove',key:LocalProviderKey,expectedRevision:string,signal:AbortSignal,value?:string):Promise<void>;
-async function manageProviderKey(action:'edit'|'remove'|'reveal',key:LocalProviderKey,expectedRevision:string,external:AbortSignal,value?:string):Promise<void|LocalProviderReveal>{
+async function saveProviderKeys(values:{textKey?:string;voiceKey?:string},expectedRevision:string,external:AbortSignal):Promise<void>{
  if(operation||sending)throw Error('Busy');
  external.throwIfAborted();
  const controller=new AbortController(),signal=anyAbortSignal([external,controller.signal]);cancelStoppedVoiceRead();signInReadinessOwner=null;operation=controller;providerStatusGeneration++;
  update({busy:true,backgroundWork:false,error:'',message:''});
  let changed:LocalProviderStatus|undefined;
  try{
-  if(action==='reveal')return await revealLocalProviderKey({key,expectedRevision},signal);
-  changed=action==='edit'?await editLocalProviderKeys({expectedRevision,...(key==='text'?{textKey:value}:{voiceKey:value})},signal):await removeLocalProviderKey({key,expectedRevision},signal);
+  changed=await editLocalProviderKeys({expectedRevision,...values},signal);
   signal.throwIfAborted();
   // An inactive Own-key edit must not interrupt a Cloud reply or change its route.
   if(changed.mode==='own')await restartAfterProviderChange(signal,true);
@@ -1077,8 +1074,8 @@ async function manageProviderKey(action:'edit'|'remove'|'reveal',key:LocalProvid
  }catch{
   // A failed or cancelled mutation may have committed before its result arrived.
   // Read status once, without replaying it, and never forward a provider exception.
-  if(action!=='reveal')try{changed=await localProviderStatus();}catch{}
-  throw Error(action==='reveal'?'Couldn’t show':'Not confirmed');
+  try{changed=await localProviderStatus();}catch{}
+  throw Error('Not confirmed');
  }finally{
   // Releasing the slot services a rebind or sign-in return that arrived behind this request.
   if(operation===controller){
@@ -3951,7 +3948,7 @@ export function ConnectionChooser() {
     </div>;
   }
   const ownKeySaving=snapshot.busy&&snapshot.message===OWN_KEY_CHECKING;
-  const providerChoiceFor=(heading:boolean,error='')=><OwnProviderChoice heading={heading} busy={snapshot.busy} replying={!!sending} saving={ownKeySaving} status={snapshot.providerStatus} statusUnavailable={!!snapshot.providerStatusError} signedIn={!!snapshot.cloudAccount} error={error} onDismissError={()=>connectionController.dismissError()} onSave={(key,voice)=>connectionController.configureLocal(key,LOCAL_PROVIDER_MODEL,voice)} onCloud={()=>connectionController.selectCloudProvider()} onOwn={()=>connectionController.selectSavedProvider('own')} onRetryStatus={()=>void connectionController.refreshProviderStatus()}/>;
+  const providerChoiceFor=(heading:boolean,error='')=><OwnProviderChoice heading={heading} busy={snapshot.busy} replying={!!sending} saving={ownKeySaving} status={snapshot.providerStatus} statusUnavailable={!!snapshot.providerStatusError} signedIn={!!snapshot.cloudAccount} email={snapshot.cloudAccount?.email} error={error} onDismissError={()=>connectionController.dismissError()} onSave={(key,voice)=>connectionController.configureLocal(key,LOCAL_PROVIDER_MODEL,voice)} onCloud={()=>connectionController.selectCloudProvider()} onOwn={()=>connectionController.selectSavedProvider('own')} onRetryStatus={()=>void connectionController.refreshProviderStatus()}/>;
   const providerChoice=providerChoiceFor(true);
   if(snapshot.purpose==='provider')return <div className="alpha-connection-scrim" data-alpha-provider-overlay="true"><div className="alpha-connection alpha-connection-native alpha-provider-panel alpha-provider-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-title" tabIndex={-1} ref={panel}>
     <div className="alpha-provider-handle" aria-hidden="true"/>
@@ -4178,9 +4175,8 @@ function OwnKeyForm({busy,replying=false,saving,error,onSave,onCancel,idleCancel
  useEffect(()=>{if(!error||busy)return;const field=(voiceError?speech:ai).current;field?.focus();field?.select();},[error,busy]);
  if(!host)return <div className="alpha-own-keys"><p role="status"><span aria-hidden="true" data-alpha-icon="/icons/lucide/phone.svg" style={iconStyle('phone')}/> Android only</p><div className="alpha-form-actions"><button type="button" className="alpha-btn alpha-btn--text alpha-btn--quiet" onClick={onCancel}>{idleCancelLabel}</button></div></div>;
  return <form className="alpha-own-keys" aria-label="Own API keys" onSubmit={event=>{event.preventDefault();const key=ai.current?.value||'',voice=speech.current?.value||'';void onSave(key,voice||undefined);}}>
-  <label><span aria-hidden="true" data-alpha-icon="/icons/lucide/lock-keyhole.svg" style={iconStyle('lock-keyhole')}/>Text key<input ref={ai} type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} required disabled={busy} aria-invalid={(!!error&&!voiceError)||undefined} aria-describedby={error&&!voiceError?'own-keys-error':undefined}/></label>
-  <label><span aria-hidden="true" data-alpha-icon="/icons/lucide/lock-keyhole.svg" style={iconStyle('lock-keyhole')}/>Voice key<input ref={speech} placeholder="Optional" type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} disabled={busy} aria-invalid={voiceError||undefined} aria-describedby={voiceError?'own-keys-error':undefined}/></label>
-  <p className="alpha-own-keys-note">Prompts → Cerebras · Voice → Cartesia{native?'':<span className="alpha-chip"><span aria-hidden="true" data-alpha-icon="/icons/lucide/clock.svg" style={iconStyle('clock')}/>Session</span>}</p>
+  <label>Text key<input ref={ai} type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} required disabled={busy} aria-invalid={(!!error&&!voiceError)||undefined} aria-describedby={error&&!voiceError?'own-keys-error':undefined}/></label>
+  <label>Voice key<input ref={speech} placeholder="Optional" type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} disabled={busy} aria-invalid={voiceError||undefined} aria-describedby={voiceError?'own-keys-error':undefined}/></label>
   {error&&<p id="own-keys-error" role="alert" className="alpha-connection-error">{error}</p>}
   <div className="alpha-form-actions">
    <button className="alpha-btn alpha-btn--primary" disabled={busy||replying} aria-busy={saving||undefined}>{saving?<Busy label={OWN_KEY_CHECKING}/>:'Save'}</button>
@@ -4189,8 +4185,9 @@ function OwnKeyForm({busy,replying=false,saving,error,onSave,onCancel,idleCancel
  </form>;
 }
 /** Selecting Cloud or Own is independent of saved-key custody. */
-function OwnProviderChoice({heading,busy,replying=false,saving,status,statusUnavailable,signedIn,error,onSave,onCloud,onOwn,onDismissError,onRetryStatus}:{heading:boolean;busy:boolean;replying?:boolean;saving:boolean;status?:LocalProviderStatus|null;statusUnavailable:boolean;signedIn:boolean;error:string;onSave:(key:string,voice?:string)=>Promise<void>;onCloud:()=>Promise<void>;onOwn:()=>Promise<void>;onDismissError:()=>void;onRetryStatus:()=>void}){
- const [editing,setEditing]=useState(false),[viewing,setViewing]=useState(false);
+function OwnProviderChoice({heading,busy,replying=false,saving,status,statusUnavailable,signedIn,email,error,onSave,onCloud,onOwn,onDismissError,onRetryStatus}:{heading:boolean;busy:boolean;replying?:boolean;saving:boolean;status?:LocalProviderStatus|null;statusUnavailable:boolean;signedIn:boolean;email?:string;error:string;onSave:(key:string,voice?:string)=>Promise<void>;onCloud:()=>Promise<void>;onOwn:()=>Promise<void>;onDismissError:()=>void;onRetryStatus:()=>void}){
+ const [editing,setEditing]=useState(false);
+ const [tab,setTab]=useState<'cloud'|'own'>(()=>status?.mode==='own'?'own':'cloud');
  const managed=status?.keys&&status.revision&&status.mode&&status.persistence?status as ManagedLocalProviderStatus:null;
  const own=managed?managed.mode==='own':status?.selected===true&&status.provider==='cerebras';
  const cloud=managed?managed.mode==='cloud':!own&&(signedIn||(status?.provider==='elizacloud'&&status.configured===true));
@@ -4199,92 +4196,45 @@ function OwnProviderChoice({heading,busy,replying=false,saving,status,statusUnav
   {heading&&<h3>AI connection</h3>}
   {statusUnavailable&&!busy&&<div className="alpha-provider-status"><p role="status"><StatusDot tone="off">Unavailable</StatusDot></p><button type="button" className="alpha-btn alpha-btn--text" aria-label="Try again" disabled={busy} onClick={onRetryStatus}><span aria-hidden="true" data-alpha-icon="/icons/lucide/rotate-cw.svg" style={iconStyle('rotate-cw')}/></button></div>}
   <div className="alpha-segmented" role="group" aria-label="Provider">
-   <button type="button" disabled={busy||replying} aria-pressed={!editing&&cloud} onClick={()=>{setEditing(false);onDismissError();if(!cloud)void onCloud();}}>Cloud</button>
-   <button type="button" disabled={busy||replying} aria-pressed={own||editing} onClick={()=>{connectionController.cancelProviderSelection();onDismissError();if(!own){if(managed?.keys.text.configured){setEditing(false);void onOwn();}else setEditing(true);}}}>Own keys</button>
+   <button type="button" disabled={busy||replying} aria-pressed={tab==='cloud'} onClick={()=>{setTab('cloud');setEditing(false);onDismissError();}}>Cloud</button>
+   <button type="button" disabled={busy||replying} aria-pressed={tab==='own'} onClick={()=>{setTab('own');connectionController.cancelProviderSelection();onDismissError();setEditing(!managed?.keys.text.configured);}}>Direct</button>
   </div>
-  {!editing&&<div className="alpha-provider-own">
-   <p role={busy?'status':undefined}>{busy?<Busy label="Updating"/>:own?(status?.configured?<><StatusDot tone="ok">Text</StatusDot> <StatusDot tone={status.voiceConfigured?'ok':'off'}>{status.voiceConfigured?'Voice':'Voice off'}</StatusDot></>:<StatusDot tone="warn">Text key needed</StatusDot>):null}</p>
-   {managed&&<button type="button" className="alpha-btn alpha-btn--secondary" disabled={busy} onClick={()=>{onDismissError();setViewing(value=>!value);}}><span aria-hidden="true" style={iconStyle(viewing?'chevron-up':'chevron-down')}/>Keys</button>}
-  </div>}
-  {viewing&&managed&&!editing&&<ProviderKeys status={managed} busy={busy||replying} retirement={epoch}
-   onEdit={async(key,value,revision,signal)=>{await manageProviderKey('edit',key,revision,signal,value);}}
-   onRemove={async(key,revision,signal)=>{await manageProviderKey('remove',key,revision,signal);}}
-   onReveal={(key,revision,signal)=>manageProviderKey('reveal',key,revision,signal)}/>}
-  {editing&&<OwnKeyForm busy={busy} replying={replying} saving={saving} error={error} onSave={onSave} onCancel={()=>{setEditing(false);onDismissError();}}/>}
+  {tab==='cloud'&&<div className="alpha-provider-own"><p>{signedIn?<>{email}<br/>Signed in</>:'Not signed in'}</p>{!cloud&&<button type="button" className="alpha-btn alpha-btn--primary" disabled={busy||replying} onClick={()=>void onCloud()}>Switch to Cloud</button>}</div>}
+  {tab==='own'&&!own&&managed?.keys.text.configured&&<button type="button" className="alpha-btn alpha-btn--primary" disabled={busy||replying} onClick={()=>void onOwn()}>Switch to Direct</button>}
+  {tab==='own'&&managed?.keys.text.configured&&!editing&&<ProviderKeys status={managed} busy={busy||replying} retirement={epoch}
+   onSave={(values,revision,signal)=>saveProviderKeys(values,revision,signal)}/> }
+  {tab==='own'&&(editing||!!managed&&!managed.keys.text.configured)&&<OwnKeyForm busy={busy} replying={replying} saving={saving} error={error} onSave={onSave} onCancel={()=>{setEditing(false);setTab(own?'own':'cloud');onDismissError();}}/>}
   {!editing&&error&&<p role="alert" className="alpha-connection-error">{error}</p>}
  </section>;
 }
 
-type ProviderKeyStatus=Pick<ManagedLocalProviderStatus,'revision'|'keys'>;
 type ProviderKeysProps={
- status:ProviderKeyStatus;
+ status:Pick<ManagedLocalProviderStatus,'revision'|'keys'>;
  busy:boolean;
  retirement?:number;
- onEdit:(key:LocalProviderKey,value:string,revision:string,signal:AbortSignal)=>Promise<void>;
- onRemove:(key:LocalProviderKey,revision:string,signal:AbortSignal)=>Promise<void>;
- onReveal:(key:LocalProviderKey,revision:string,signal:AbortSignal)=>Promise<LocalProviderReveal>;
+ onSave:(values:{textKey?:string;voiceKey?:string},revision:string,signal:AbortSignal)=>Promise<void>;
 };
 
-/** Keys stay masked until an explicit View. Native custody uses its own secure
- * surface; only the browser host's explicit reveal may return a value here. */
-function ProviderKeys({status,busy,retirement=0,onEdit,onRemove,onReveal}:ProviderKeysProps){
- const [editing,setEditing]=useState<LocalProviderKey|null>(null),[removing,setRemoving]=useState<LocalProviderKey|null>(null);
- const [revealed,setRevealed]=useState<{key:LocalProviderKey;value:string}|null>(null),[pending,setPending]=useState(false),[error,setError]=useState('');
- const field=useRef<HTMLInputElement>(null),request=useRef<AbortController|null>(null),epoch=useRef(0),revision=useRef(status.revision);
- const requestKind=useRef<'edit'|'remove'|'reveal'|null>(null);
- revision.current=status.revision;
- const clear=()=>{epoch.current++;request.current?.abort();request.current=null;requestKind.current=null;if(field.current)field.current.value='';setRevealed(null);setEditing(null);setRemoving(null);setPending(false);setError('');};
- // A successful edit publishes a new revision during connectResident, before
- // startup finishes. Redaction must not abort the mutation's own reconnect.
- // Native request/revision fences own mutation admission; explicit Cancel and
- // unmount still cancel it. Reveals never survive either revision or retirement.
- useLayoutEffect(()=>{if(requestKind.current==='reveal'){clear();return;}if(field.current)field.current.value='';setRevealed(null);setEditing(null);setRemoving(null);setError('');},[status.revision,retirement]);
- useEffect(()=>{const hide=()=>{if(document.hidden)clear();};document.addEventListener('visibilitychange',hide);window.addEventListener('pagehide',clear);return()=>{epoch.current++;request.current?.abort();if(field.current)field.current.value='';document.removeEventListener('visibilitychange',hide);window.removeEventListener('pagehide',clear);};},[]);
- useEffect(()=>{if(!revealed)return;const timer=window.setTimeout(()=>setRevealed(null),30000);return()=>window.clearTimeout(timer);},[revealed]);
- useEffect(()=>{if(editing)field.current?.focus();},[editing]);
- async function run(key:LocalProviderKey,action:'edit'|'remove'|'reveal'){
+/** Empty fields preserve saved keys. Secrets are never fetched merely to show Settings. */
+function ProviderKeys({status,busy,retirement=0,onSave}:ProviderKeysProps){
+ const text=useRef<HTMLInputElement>(null),voice=useRef<HTMLInputElement>(null),request=useRef<AbortController|null>(null);
+ const [pending,setPending]=useState(false),[error,setError]=useState('');
+ const clear=()=>{if(text.current)text.current.value='';if(voice.current)voice.current.value='';};
+ useLayoutEffect(()=>{clear();setError('');},[status.revision,retirement]);
+ useEffect(()=>{const hide=()=>{if(document.hidden){request.current?.abort();clear();}};document.addEventListener('visibilitychange',hide);return()=>{request.current?.abort();clear();document.removeEventListener('visibilitychange',hide);};},[]);
+ async function save(){
   if(busy||pending||document.hidden)return;
-  const value=action==='edit'?field.current?.value:undefined;
-  if(action==='edit'&&!value){field.current?.focus();return;}
-  const expected=status.revision,token=++epoch.current,controller=new AbortController();request.current=controller;requestKind.current=action;setPending(true);setError('');setRevealed(null);
-  try{
-   if(action==='reveal'){
-    const result=await onReveal(key,expected,controller.signal);
-    if(controller.signal.aborted||token!==epoch.current||revision.current!==expected||document.hidden)return;
-    if(result.key!==key||result.revision!==expected)throw Error('Changed key');
-    if('value' in result&&typeof result.value==='string')setRevealed({key,value:result.value});
-   }else{
-    if(action==='edit')await onEdit(key,value!,expected,controller.signal);
-    else await onRemove(key,expected,controller.signal);
-    if(controller.signal.aborted||token!==epoch.current||document.hidden)return;
-    if(field.current)field.current.value='';setEditing(null);setRemoving(null);
-   }
-  }catch{
-   // Provider errors can contain request material. Never put raw exceptions or
-   // keys into the UI, diagnostics or model context.
-   if(!controller.signal.aborted&&token===epoch.current&&!document.hidden)setError(action==='reveal'?'Couldn’t show':action==='remove'?'Couldn’t remove':'Key rejected');
-  }finally{if(token===epoch.current){request.current=null;requestKind.current=null;setPending(false);}}
+  const textKey=text.current?.value||'',voiceKey=voice.current?.value||'';
+  if(!textKey&&!voiceKey)return;
+  const controller=new AbortController();request.current=controller;setPending(true);setError('');
+  try{await onSave({...textKey?{textKey}:{},...voiceKey?{voiceKey}:{}},status.revision,controller.signal);if(!controller.signal.aborted)clear();}
+  catch{if(!controller.signal.aborted)setError('Keys could not be saved. Check them and try again.');}
+  finally{if(request.current===controller){request.current=null;setPending(false);}}
  }
- const disabled=busy||pending;
- return <div className="alpha-own-keys" aria-label="Saved API keys">
-  {(['text','voice'] as const).map(key=>{
-   const title=key==='text'?'Text':'Voice',configured=status.keys[key].configured;
-   return <section key={key} aria-label={`${title} key`}>
-    <div className="alpha-key-heading"><h4>{title}</h4><span aria-hidden="true" style={iconStyle(configured?'circle-check':'circle')}/><span className="alpha-sr">{configured?'Added':'Not added'}</span></div>
-    {revealed?.key===key&&<input aria-label={`${title} API key`} type="text" value={revealed.value} readOnly autoComplete="off" spellCheck={false}/>}
-    {editing===key?<form onSubmit={event=>{event.preventDefault();void run(key,'edit');}}>
-     <label>{title} API key<input ref={field} type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} required disabled={disabled}/></label>
-     <div className="alpha-form-actions"><button className="alpha-btn alpha-btn--primary" disabled={disabled}>Save</button><button type="button" className="alpha-btn alpha-btn--text alpha-btn--quiet" onClick={clear}>Cancel</button></div>
-    </form>:removing===key?<div>
-     <p>Remove?</p>
-     <div className="alpha-form-actions"><button type="button" className="alpha-btn alpha-btn--secondary" disabled={disabled} onClick={()=>void run(key,'remove')}><span aria-hidden="true" data-alpha-icon="/icons/lucide/trash-2.svg" style={iconStyle('trash-2')}/>Remove</button><button type="button" className="alpha-btn alpha-btn--text alpha-btn--quiet" onClick={clear}>Cancel</button></div>
-    </div>:<div className="alpha-form-actions">
-     {configured&&<button type="button" className="alpha-btn alpha-btn--text" disabled={disabled} aria-label={revealed?.key===key?'Hide':'View'} onClick={()=>revealed?.key===key?setRevealed(null):void run(key,'reveal')}><span aria-hidden="true" style={iconStyle('eye')}/></button>}
-     <button type="button" className="alpha-btn alpha-btn--text" disabled={disabled} aria-label={configured?'Edit':'Add'} onClick={()=>{clear();setEditing(key);}}><span aria-hidden="true" style={iconStyle(configured?'edit':'plus')}/></button>
-     {configured&&<button type="button" className="alpha-btn alpha-btn--text alpha-btn--quiet" disabled={disabled} aria-label="Remove" onClick={()=>{clear();setRemoving(key);}}><span aria-hidden="true" style={iconStyle('trash-2')}/></button>}
-    </div>}
-   </section>;
-  })}
+ return <form className="alpha-own-keys" aria-label="Saved API keys" onSubmit={event=>{event.preventDefault();void save();}}>
+  <label>Text key<input ref={text} type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} disabled={busy||pending} placeholder={status.keys.text.configured?'Saved — enter to replace':'Enter text key'}/></label>
+  <label>Voice key<input ref={voice} type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} disabled={busy||pending} placeholder={status.keys.voice.configured?'Saved — enter to replace':'Enter voice key (optional)'}/></label>
   {error&&<p role="alert" className="alpha-connection-error">{error}</p>}
- </div>;
+  <button className="alpha-btn alpha-btn--primary" disabled={busy||pending}>{pending?<Busy label="Saving"/>:'Save'}</button>
+ </form>;
 }

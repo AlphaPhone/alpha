@@ -110,7 +110,7 @@ async function openProvider(page:Page,pressed:'Cloud'|'Own keys'='Cloud'){
  await expect(dialog(page).getByRole('button',{name:pressed,exact:true})).toHaveAttribute('aria-pressed','true');
 }
 /** Settings uses the Cloud / Own keys choice; the welcome page offers one "Use my own keys" entry. */
-async function enterKeys(page:Page,container=dialog(page),entry='Own keys'){
+async function enterKeys(page:Page,container=dialog(page),entry='Direct'){
  await container.getByRole('button',{name:entry,exact:true}).click();
  await expect(container.getByLabel('Text key',{exact:true})).toHaveAttribute('type','password');
  await expect(container.getByLabel('Voice key',{exact:true})).toHaveAttribute('autocomplete','off');
@@ -567,5 +567,38 @@ for(const superseding of ['Close','already-selected Own'] as const)test(`delayed
  else{await expect(dialog(page)).toBeVisible();await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');await expect(dialog(page).getByRole('alert')).toHaveCount(0);}
  expect(await page.evaluate(async()=>{const f=(window as any).ownProvider;return {saved:f.saved,selected:f.selected,cleared:f.cleared,status:await (window as any).Capacitor.nativePromise('Agent','providerStatus',{})};})).toEqual(before);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {emailStarts:f.emailStarts,emailVerifications:f.emailVerifications,cloud:(window as any).flagOff.slots['cloud:production']??null};})).toEqual({emailStarts:0,emailVerifications:0,cloud:null});
+ await noLeaks(page,observed);
+});
+
+test('Cloud hides keys; Own keys exposes two masked fields and Enter saves without an extra menu',async({page})=>{
+ const observed=await fixture(page);await residentHome(page);await openProvider(page);
+ await expect(dialog(page).getByRole('button',{name:'Keys',exact:true})).toHaveCount(0);
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveCount(0);
+ await expect(dialog(page)).toContainText('Signed in');
+ await dialog(page).getByRole('button',{name:'Direct',exact:true}).click();
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveAttribute('type','password');
+ await dialog(page).getByLabel('Text key',{exact:true}).fill(AI_KEY);
+ await dialog(page).getByLabel('Voice key',{exact:true}).fill(VOICE_KEY);
+ await expect(dialog(page).getByText(/Prompts →|Session/)).toHaveCount(0);
+ await dialog(page).getByLabel('Voice key',{exact:true}).press('Enter');
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.saved)).toBe(1);
+ await expect(dialog(page)).toHaveCount(0);
+ await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
+ await dialog(page).getByRole('button',{name:'Direct',exact:true}).click();
+ await expect(dialog(page).getByRole('button',{name:'Keys',exact:true})).toHaveCount(0);
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveAttribute('type','password');
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveValue('');
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toHaveValue('');
+ await dialog(page).getByLabel('Voice key',{exact:true}).fill('synthetic-replacement-voice-key');
+ await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.edited)).toBe(1);
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveValue('');
+ expect(await page.evaluate(()=>(window as any).ownProvider.revealed)).toBe(0);
+ await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+ await expect(dialog(page)).toContainText('Signed in');
+ await expect(dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true})).toBeVisible();
+ await dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.selected)).toBe(1);
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveCount(0);
  await noLeaks(page,observed);
 });
