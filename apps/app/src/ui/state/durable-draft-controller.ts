@@ -86,7 +86,7 @@ interface DurableDraftMessages {
   changedNothingSent: string;
 }
 
-const DEFAULT_DURABLE_DRAFT_MESSAGES: Readonly<DurableDraftMessages> =
+export const DEFAULT_DURABLE_DRAFT_MESSAGES: Readonly<DurableDraftMessages> =
   Object.freeze({
     openFailed:
       "Local draft could not be opened. Your current text is retained.",

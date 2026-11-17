@@ -1,6 +1,6 @@
 /**
- * Alpha's composer, Calendar and email recovery drafts use the shared durable draft controller
- * (elizaOS packages/ui/src/state/durable-draft-controller.ts): durable hold/commit/release around
+ * Alpha's composer, Calendar and email recovery drafts use Alpha's durable draft controller
+ * (ui/state/durable-draft-controller.ts): durable hold/commit/release around
  * each send, conversation and owner fencing by binding, and an unknown dispatch outcome that is
  * never offered for a second send. This name is kept for the existing call sites.
  */
