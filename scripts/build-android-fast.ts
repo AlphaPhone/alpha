@@ -127,7 +127,8 @@ async function main() {
   (buildAndroidConsumer as unknown as (o: ReturnType<typeof fastBuildOptions>) => unknown)(fastBuildOptions(env, root));
   const apk = path.join(FAST_OUTPUT, FAST_APK);
   console.log(`Fast build done in ${((Date.now() - started) / 1000).toFixed(0)}s: ${apk} (developer APK, not distributable)`);
-  if (options.install) run(path.join(env.ANDROID_HOME ?? env.ANDROID_SDK_ROOT ?? "", "platform-tools", "adb"), ["install", "-r", apk]);
+  // androidEnv() resolved the SDK even when ANDROID_HOME is unset, the same adb the other device scripts use.
+  if (options.install) run(path.join(env.ANDROID_HOME!, "platform-tools", "adb"), ["install", "-r", apk]);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
