@@ -1182,3 +1182,10 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 
 /* Message actions follow the author of their selected bubble. */
 [data-alpha-message-actions][data-alpha-user-actions="true"]{align-self:flex-end!important}
+/* Owner issue 4: the ongoing-call bar (runtime/ongoing-call.ts) under the status bar of every view but
+   the call screen. White text on the text-safe call green (AC-28, 4.5:1); 48px targets. */
+.alpha-call-bar{position:absolute;z-index:99;left:12px;right:12px;top:48px;display:flex;align-items:center;gap:4px;min-height:52px;padding:0 4px;box-sizing:border-box;border-radius:26px;background:var(--alpha-call-green-text);color:var(--alpha-white);box-shadow:0 4px 16px var(--shc,rgba(0,0,0,.2))}
+.native-phone .alpha-call-bar{top:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1) + 6px)}
+.alpha-call-bar-return{flex:1 1 auto;min-width:0;min-height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;color:inherit;text-align:left;font-size:15px;font-weight:600}
+.alpha-call-bar-status{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.alpha-call-bar .alpha-end-button{width:48px;height:48px;min-width:48px;border-radius:24px}

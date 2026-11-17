@@ -132,6 +132,26 @@ final class AlphaCallPresentation {
         }
     }
 
+    /**
+     * What the WebView's ongoing-call bar is told a call is doing (AlphaOngoingCallPlugin): one of
+     * {@code dialing}, {@code ringing}, {@code active} or {@code held}, or null for a call that is
+     * ending, ended, or in a state the owner does not see.
+     */
+    static String ongoingState(int state) {
+        switch (state) {
+            case Call.STATE_RINGING:
+            case Call.STATE_SIMULATED_RINGING: return "ringing";
+            case Call.STATE_NEW:
+            case Call.STATE_SELECT_PHONE_ACCOUNT:
+            case Call.STATE_DIALING:
+            case Call.STATE_CONNECTING:
+            case Call.STATE_PULLING_CALL: return "dialing";
+            case Call.STATE_ACTIVE: return "active";
+            case Call.STATE_HOLDING: return "held";
+            default: return null;
+        }
+    }
+
     /** A call nobody is named for: no name, and no number Telecom reports. */
     static final String UNKNOWN_CALLER = "Unknown caller";
 

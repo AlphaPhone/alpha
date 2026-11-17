@@ -356,12 +356,17 @@ registerView("phone", {
     if (st.vmOpen) { if (st.playing) pnStop(api); api.set({ vmOpen: null, playing: null, vpos: 0 }); return true; }
     return false;
   },
-  /* calls and ringing keep going in the background: status-bar chip returns here. Its white text sits
-     on the text-safe call green (AC-28, 4.5:1). */
+  /* ringing keeps going in the background: status-bar chip returns here. Its white text sits on the
+     text-safe call green (AC-28, 4.5:1). A placed or answered call has the ongoing-call bar instead. */
   ongoing: function (st, api) {
     if (st.incoming) { var ip = pnWho(api, st.incoming); return { label: (st.ring === "screen" ? api.name + " · " : "Incoming · ") + (ip ? pnFirst(ip) : "Unknown"), icon: "phone", color: "var(--alpha-call-green-text)" }; }
-    if (st.callWho) return { label: st.liveAt ? (st.hold ? "Hold " : "") + pnClock((Date.now() - st.liveAt) / 1000) : "Calling…", icon: "phone", color: "var(--alpha-call-green-text)" };
     return null;
+  },
+  /* Owner issue 4: the call that keeps going while another view is in front, for the ongoing-call bar
+     (runtime/ongoing-call.ts). End is the call screen's own hang-up. */
+  callBar: function (st, api) {
+    if (!st.callWho) return null;
+    return { state: !st.liveAt ? "dialing" : st.hold ? "held" : "active", connectedAt: st.liveAt || null, end: function () { pnEnd(api); } };
   },
   onLeave: function (api) {
     var st = api.st;

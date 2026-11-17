@@ -373,7 +373,7 @@ export function installPrototypeNativeAdapters(
   }
   for (const [module, definition] of Object.entries(views)) {
     if (!externalModules.has(module) || typeof definition.render !== 'function') continue;
-    const render = definition.render, actions = definition.actions, leave = definition.onLeave, ongoing = definition.ongoing, bar = definition.bar;
+    const render = definition.render, actions = definition.actions, leave = definition.onLeave, ongoing = definition.ongoing, bar = definition.bar, callBar = definition.callBar;
     definition.render = (state: Bag, api: Bag) => {
       // Rendering cannot start a fake phone call, navigation timer, capture or booking.
       const renderingApi = ['phone', 'browser', 'camera', 'maps'].includes(module)
@@ -385,8 +385,10 @@ export function installPrototypeNativeAdapters(
     // offers only says it is unavailable. fit() only measures, so it stays.
     if (typeof bar === 'function') definition.bar = (state: Bag, api: Bag) => unavailableBar(bar(state, api), api);
     if (['phone', 'camera', 'maps', 'workflows'].includes(module)) definition.ongoing = () => null;
+    // The reference phone never has a call here; the image's calls come from Telecom (runtime/ongoing-call.ts).
+    if (callBar) definition.callBar = () => null;
     if (leave && ['phone', 'camera', 'maps'].includes(module)) definition.onLeave = () => {};
-    restore.push(() => { definition.render = render; definition.actions = actions; definition.onLeave = leave; definition.ongoing = ongoing; definition.bar = bar; });
+    restore.push(() => { definition.render = render; definition.actions = actions; definition.onLeave = leave; definition.ongoing = ongoing; definition.bar = bar; definition.callBar = callBar; });
   }
   const settings = views.settings;
   if (settings && typeof settings.render === 'function') {
