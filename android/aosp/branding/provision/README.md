@@ -23,12 +23,18 @@ preinstall the enabled release app and pass Android's normal role qualification.
 role held solely by the former Alpha package is moved. Each role records a durable pending
 intent before the grant and a completion marker after readback. A failed grant attempts to restore
 the old holder when Android left the role empty. A later explicit role request retires
-that role's migration before it changes the holder. Custom choices, managed users and
+that role's migration before it changes the holder, including a request made while the
+migration is ineligible (setup open, app disabled or suspended), so the choice still holds
+when eligibility returns. Custom choices, managed users and
 secondary users retain their assignments. No credential or application data is copied.
 
-Run `python3 test/aosp-role-upgrade.test.py` for the complete patched-controller JVM test
-and the failure/recovery policy cases. The tests compile the actual controller and adapter
-with Android boundary doubles. A real signed image upgrade remains the device gate.
+`python3 test/aosp-role-upgrade.test.py` (also run by `bun run test`) compiles the policy
+cases, and the real staging projection, policy and Android adapter over a synthetic controller
+that carries the projection anchors, with Android boundary doubles. That synthetic controller
+test drives owner add, remove and clear requests through the injected hook. The test that
+compiles the pinned AOSP `RoleControllerServiceImpl` runs only when its hash-checked input is in
+`.cache/` (or `ALPHA_FRESH_PRESET_INPUTS`); CI does not fetch it and skips that test. A real
+signed image upgrade remains the device gate.
 
 A rejected request, timeout, unavailable role, or failed readback leaves setup open for
 retry. The recovery button opens Home, Default apps, Input method, or ordinary Settings
