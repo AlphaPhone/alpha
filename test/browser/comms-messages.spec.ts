@@ -36,6 +36,26 @@ async function draftReachable(page: Page) {
 }
 
 test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-telephony-views.spec.ts)', () => {
+  test('a press that moves is not a long-press, even when the thread repaints mid-press', async ({page})=>{
+    await setupTelephony(page);
+    await page.getByRole('button',{name:'Messages',exact:true}).first().click();
+    await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    const target=page.locator('[data-alpha-message-id="sms:4"]');
+    await target.scrollIntoViewIfNeeded();
+    const menu=page.getByRole('menu',{name:'Message actions',exact:true});
+    const box=(await target.boundingBox())!,x=box.x+box.width/2,y=box.y+box.height/2;
+    await page.mouse.move(x,y);await page.mouse.down();
+    // The provider reports a change while the finger is down: the thread reads again and repaints.
+    const reads=(await inputs(page,'listMessages')).length;
+    await page.evaluate(()=>(window as any).smsProviderChanged());
+    await expect.poll(async()=>(await inputs(page,'listMessages')).length).toBeGreaterThan(reads);
+    // Still inside the bubble, but further than a held finger drifts.
+    await page.mouse.move(x+16,y,{steps:4});
+    await page.waitForTimeout(700);
+    await expect(menu).toHaveCount(0);
+    await page.mouse.up();
+  });
+
   for(const scale of [1,2])test(`inline Copy and confirmed Delete act on one provider row, never the unsent draft (text ${scale*100}%)`, async ({page,context},testInfo)=>{
     await context.grantPermissions(['clipboard-read','clipboard-write']);
     await setupTelephony(page);

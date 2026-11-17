@@ -109,6 +109,27 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		expect(await shell(page, 'window.__shell().S().msgs.length')).toBe(0);
 	});
 
+	test('a question Alpha cannot take yet stays in the list bar instead of being cleared', async ({page}) => {
+		await openNotes(page);
+		await registerBar(page, 'notes', {kind: 'list', field: 'filter'});
+		const field = page.getByRole('textbox', {name: 'Search or ask', exact: true});
+		await field.pressSequentially('maya when did we last talk');
+		await expect(page.locator('[data-alpha-bar-hint]')).toHaveText('Enter asks Alpha');
+		// The agent adapter reports that the resident has no session yet (and says why in a toast).
+		await shell(page, 'window.__shell().sendUnavailable = () => { window.__refused = (window.__refused || 0) + 1; return true; }');
+		const cleared = (await calls(page)).filter(call => call[1] === 'onText' && call[2] === '').length;
+		await field.press('Enter');
+		await expect.poll(() => shell(page, 'window.__refused')).toBe(1);
+		await expect(field).toHaveValue('maya when did we last talk');
+		expect(await shell(page, 'window.__shell().S().msgs.length')).toBe(0);
+		expect((await calls(page)).filter(call => call[1] === 'onText' && call[2] === '').length).toBe(cleared);
+		// Once Alpha can take it, the same Enter asks and clears the bar.
+		await shell(page, 'window.__shell().sendUnavailable = () => false');
+		await field.press('Enter');
+		await expect.poll(() => shell(page, 'window.__shell().S().msgs.filter(m => m.from === "user").map(m => m.text)')).toEqual(['maya when did we last talk']);
+		expect((await calls(page)).filter(call => call[1] === 'onText').at(-1)?.[2]).toBe('');
+	});
+
 	test('a list filter filters as words are typed; a sentence waits for Enter, which asks Alpha', async ({page}) => {
 		await openNotes(page);
 		await registerBar(page, 'notes', {kind: 'list', field: 'filter'});
