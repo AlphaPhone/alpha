@@ -3,7 +3,8 @@
 // Evidence class: unit test of the pure selection; not a device, image or model run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {offeredByEither, selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts';
+import {offeredByEither, selectDeviceCapabilities, TELEPHONY_VIEWS_CAPABILITY} from '../apps/app/src/runtime/phone-context.ts';
+import {TELEPHONY_VIEWS_CAPABILITY as SHARED_TELEPHONY_VIEWS} from '../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/contract.ts';
 import {readFileSync} from 'node:fs';
 
 const everything = [
@@ -51,6 +52,7 @@ test('the agent must offer a capability, and platform gates still apply', () => 
   assert.ok(selectDeviceCapabilities([...everything, 'views.telephony.v1'], {...apk, aospImage: true}).includes('views.telephony.v1'));
   assert.ok(!selectDeviceCapabilities([...everything, 'views.telephony.v1'], apk).includes('views.telephony.v1'));
   assert.ok(!image.includes('views.telephony.v1'));
+  assert.equal(TELEPHONY_VIEWS_CAPABILITY, SHARED_TELEPHONY_VIEWS);
 });
 
 // The Cloud agent's capabilities route lists no calls, contact changes or texts by name; its device

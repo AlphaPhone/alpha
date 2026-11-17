@@ -5,7 +5,6 @@ import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
 import {CAMERA_CAPTURE_CAPABILITY,CAMERA_LENS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
-import {TELEPHONY_VIEWS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
 import {CONTACT_UPDATE_VALUES_CAPABILITY,CONTACT_WRITE_CAPABILITY,SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY,telephonyActionCapabilities} from './telephony-actions-contract.ts';
@@ -139,6 +138,8 @@ export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
  * executor; `canonicalNotes`: the same resident session owns canonical app records; `previousNotes`:
  * notes saved on this phone before canonical Notes exist (or cannot be read), the only store `notes.query.v1` reads; `files`: the native
  * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
+/** The shared contract's TELEPHONY_VIEWS_CAPABILITY. Its module also loads the Node-only workflow contract, which the renderer cannot import. */
+export const TELEPHONY_VIEWS_CAPABILITY = 'views.telephony.v1';
 export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; previousNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
 /** Every capability either list offers. The Cloud agent answers two lists, its capabilities route
  * and its device registration. They are one list in the pinned agent; an older Cloud agent's route
