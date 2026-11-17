@@ -92,9 +92,11 @@ def validate(plan):
     reviewed = pin.get("reviewedTargets")
     require(isinstance(reviewed, list) and reviewed, "No reviewed target-files admission is configured")
     target_fields = TARGET_IDENTITY_FIELDS
+    target_options = {"apkSignerMappingsSha256", "otaPostTimestamp"}
     for target in reviewed:
-        require(isinstance(target, dict) and set(target) in (target_fields, target_fields | {"apkSignerMappingsSha256"}) and
+        require(isinstance(target, dict) and target_fields <= set(target) <= target_fields | target_options and
                 ("apkSignerMappingsSha256" not in target or isinstance(target["apkSignerMappingsSha256"], str) and HEX.fullmatch(target["apkSignerMappingsSha256"])) and
+                ("otaPostTimestamp" not in target or type(target["otaPostTimestamp"]) is int and target["otaPostTimestamp"] > 0) and
                 isinstance(target["targetFilesSha256"], str) and HEX.fullmatch(target["targetFilesSha256"]) and
                 isinstance(target["sourceCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", target["sourceCommit"]) and
                 isinstance(target["sdkCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", target["sdkCommit"]) and
@@ -153,6 +155,12 @@ def inspect_target(file, plan, pin):
         require(props.get("ro.build.fingerprint", props.get("ro.product.build.fingerprint")) == plan["targetFingerprint"] and
                 int(props.get("ro.build.date.utc", props.get("ro.product.build.date.utc"))) == plan["buildTimestamp"],
                 "Target build metadata differs")
+        # AOSP releasetools derives post-timestamp from the system build properties.
+        if "otaPostTimestamp" in binding:
+            system = key_values(member(archive, "SYSTEM/build.prop"))
+            require(system.get("ro.build.date.utc") == str(binding["otaPostTimestamp"]),
+                    "Target system timestamp differs from the reviewed OTA timestamp")
+        return binding.get("otaPostTimestamp", plan["buildTimestamp"])
 
 
 def extract_tools(file, destination):
@@ -219,11 +227,19 @@ def download(plan, workspace):
     extract_tools(workspace / "otatools.zip", workspace / "tools")
 
 
+def verify_ota_metadata(file, plan, expected_timestamp):
+    with zipfile.ZipFile(file) as archive:
+        meta = key_values(member(archive, "META-INF/com/android/metadata"))
+        require(meta.get("ota-type") == "AB" and meta.get("pre-device") == plan["device"] and
+                meta.get("post-build") == plan["targetFingerprint"] and meta.get("post-timestamp") == str(expected_timestamp) and
+                "ota-wipe" not in meta and "ota-downgrade" not in meta, "OTA is not the admitted preserving target")
+
+
 def sign(plan, workspace):
     pin = validate(plan)
     require(digest(workspace / "target-files.zip") == plan["targetFiles"]["sha256"] and
             digest(workspace / "otatools.zip") == plan["otaTools"]["sha256"], "Signing input drift")
-    inspect_target(workspace / "target-files.zip", plan, pin)
+    ota_timestamp = inspect_target(workspace / "target-files.zip", plan, pin)
     names = PROOF.SECRET_NAMES[:3]
     secrets = {name: os.environ.pop(name) for name in names}
     files = PROOF.archive_entries(PROOF.decode(secrets[names[0]]) + PROOF.decode(secrets[names[1]]))
@@ -254,12 +270,10 @@ def sign(plan, workspace):
                    "--payload_signer_maximum_signature_size", str(expected_bits // 8), str(workspace / "target-files.zip"), str(output)]
         with (workspace / "signing-private.log").open("xb") as log:
             subprocess.run(command, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=7200)
+    print("OTA package generated.", flush=True)
     verify_whole_file(output, expected, workspace)
-    with zipfile.ZipFile(output) as archive:
-        meta = key_values(member(archive, "META-INF/com/android/metadata"))
-        require(meta.get("ota-type") == "AB" and meta.get("pre-device") == plan["device"] and
-                meta.get("post-build") == plan["targetFingerprint"] and int(meta["post-timestamp"]) == plan["buildTimestamp"] and
-                "ota-wipe" not in meta and "ota-downgrade" not in meta, "OTA is not the admitted preserving target")
+    print("OTA whole-file signature verified.", flush=True)
+    verify_ota_metadata(output, plan, ota_timestamp)
     receipt = {"schema": "alpha-preserving-os-ota/v1", "sourceCommit": plan["sourceCommit"],
                "targetFingerprint": plan["targetFingerprint"], "otaCertificateSha256": expected,
                "sha256": digest(output), "bytes": output.stat().st_size, "platformAPEXOrAVBKeysRotated": False,
