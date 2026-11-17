@@ -853,10 +853,17 @@ html.alpha-large-text .alpha-google-copyright { flex-basis:100%; }
 .alpha-pill-voice-stop { background:var(--acc); color:var(--alpha-white); }
 .alpha-pill-voice-controls button:focus-visible { outline:2px solid var(--acct); outline-offset:2px; }
 
-/* Message actions use the same surface press color as the rest of Alpha. */
-[data-alpha-message-actions] [role="menuitem"] { border-radius:10px; transition:background-color 120ms ease-out; }
-[data-alpha-message-actions] [role="menuitem"]:active { background:var(--s3); }
-@media (hover:hover) { [data-alpha-message-actions] [role="menuitem"]:hover { background:var(--s3); } }
+/* Chat and Messages use the same inline message actions. */
+.alpha-message-action-row { display:flex;overflow-x:auto;max-width:100%;box-sizing:border-box;margin-top:8px;padding:4px;border-radius:14px;background:var(--s2); }
+.alpha-message-action-row [role="menuitem"] { display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600;flex-shrink:0;white-space:nowrap;border-radius:10px;transition:background-color 120ms ease-out; }
+.alpha-message-action-row .alpha-message-copy { width:100px; }
+[data-alpha-sms-actions] { scroll-margin-block:8px; }
+[data-alpha-sms-actions] .alpha-message-copy { width:auto;min-width:100px; }
+.alpha-message-action-row [role="menuitem"]:active { background:var(--s3); }
+@media (hover:hover) { .alpha-message-action-row [role="menuitem"]:hover { background:var(--s3); } }
+.alpha-message-action-row [role="menuitem"]:focus-visible,[data-alpha-message-id][role="button"]:focus-visible { outline:2px solid var(--acct);outline-offset:-2px; }
+[data-alpha-messages-thread] [data-alpha-message-body] a { color:var(--acct);text-decoration:underline;text-underline-offset:2px; }
+[data-alpha-sms-outgoing="true"] [data-alpha-message-body] a { color:color-mix(in srgb,#383bff 65%,var(--bg)); }
 [data-alpha-transcript] { scroll-padding-block:16px; }
 [data-alpha-transcript][data-alpha-scroll-overflow="false"] { -webkit-mask-image:none; mask-image:none; animation:none; }
 

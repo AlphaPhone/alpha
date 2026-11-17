@@ -23,17 +23,20 @@ async function draftReachable(page: Page) {
   const draft = page.locator(bubble);
   await expect(draft).toBeVisible();
   for (const block of ['start', 'end'] as const) {
-    await draft.evaluate((el, block) => el.scrollIntoView({block}), block);
-    const [box, sheet] = await Promise.all([draft.boundingBox(), page.locator('[data-alpha-layer="conversation"]').boundingBox()]);
-    if (!box || !sheet) throw Error('missing draft or sheet');
-    if (block === 'start') expect(box.y, 'the first line can be scrolled into the stage').toBeGreaterThanOrEqual(0);
-    else expect(box.y + box.height, 'the last line can be scrolled above the sheet').toBeLessThanOrEqual(sheet.y + 1);
+    // The sheet and stage can still resize after a text-size change.
+    await expect(async()=>{
+      await draft.evaluate((el, block) => el.scrollIntoView({block}), block);
+      const [box, sheet] = await Promise.all([draft.boundingBox(), page.locator('[data-alpha-layer="conversation"]').boundingBox()]);
+      if (!box || !sheet) throw Error('missing draft or sheet');
+      if (block === 'start') expect(box.y, 'the first line can be scrolled into the stage').toBeGreaterThanOrEqual(0);
+      else expect(box.y + box.height, 'the last line can be scrolled above the sheet').toBeLessThanOrEqual(sheet.y + 1);
+    }).toPass({timeout:5000});
     for (const control of ['[data-alpha-draft-edit]', '[data-alpha-draft-send]']) await expect(page.locator(control)).toBeInViewport({ratio: 1});
   }
 }
 
 test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-telephony-views.spec.ts)', () => {
-  for(const scale of [1,2])test(`long-press Copy and confirmed Delete act on one provider row, never the unsent draft (text ${scale*100}%)`, async ({page,context},testInfo)=>{
+  for(const scale of [1,2])test(`inline Copy and confirmed Delete act on one provider row, never the unsent draft (text ${scale*100}%)`, async ({page,context},testInfo)=>{
     await context.grantPermissions(['clipboard-read','clipboard-write']);
     await setupTelephony(page);
     await page.getByRole('button',{name:'Messages',exact:true}).first().click();
@@ -42,13 +45,19 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     const target=page.locator('[data-alpha-message-id="sms:4"]');
     await target.scrollIntoViewIfNeeded();
     const text=await target.locator('[data-alpha-message-body]').innerText();
-    const box=(await target.boundingBox())!;
-    await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
-    await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toBeVisible();
-    await page.mouse.up();
-    await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toBeInViewport({ratio:1});
+    const menu=page.getByRole('menu',{name:'Message actions',exact:true});
+    if(scale===1){
+      await target.click();
+    }else{
+      const box=(await target.boundingBox())!;
+      await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+      await expect(menu).toBeVisible();await page.mouse.up();
+    }
+    await expect(menu).toBeInViewport({ratio:1});
+    await expect(target.locator('..').getByRole('menu')).toBeVisible();
     if(scale===2)await testInfo.attach('message-menu-200-percent',{body:await page.screenshot(),contentType:'image/png'});
-    await page.getByRole('menuitem',{name:'Copy',exact:true}).click();
+    await menu.getByRole('menuitem',{name:'Copy',exact:true}).click();
+    await expect(menu.getByRole('menuitem',{name:'Copied!',exact:true})).toBeVisible();
     expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(text);
     expect(await inputs(page,'deleteMessage')).toEqual([]);
     await target.dispatchEvent('contextmenu');
@@ -57,7 +66,10 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await expect(dialog).toBeVisible();expect(await inputs(page,'deleteMessage')).toEqual([]);
     await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
     await expect(target).toBeVisible();expect(await inputs(page,'deleteMessage')).toEqual([]);
-    await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Copy',exact:true}).press('Escape');
+    await target.press('Enter');
+    await expect(menu.getByRole('menuitem',{name:'Copy',exact:true})).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(target).toBeFocused();
     await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toHaveCount(0);
     await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
     await dialog.getByRole('button',{name:'Delete',exact:true}).click();
@@ -66,6 +78,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(deleted[0]).toEqual({id:'sms:4',kind:'sms',threadId:'thread:101',date:expect.any(Number)});
     await expect(page.locator('[data-alpha-message-id]')).toHaveCount(3);
     expect(await sms(page,'placeAskedSmsDraft','Unsent owner review')).toBe('drafted');await openAlpha(page);
+    await expect(page.locator('[data-alpha-transcript]')).not.toContainText(/texted .*had a reply|You last texted/);
     await page.locator(bubble).dispatchEvent('contextmenu');
     await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toHaveCount(0);
     expect(await inputs(page,'deleteMessage')).toHaveLength(1);expect(await inputs(page,'sendComposedSms')).toEqual([]);
@@ -139,6 +152,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await page.getByRole('button', {name: /^Ada Okafor/}).click();
     const thread=page.locator('[data-alpha-messages-thread]');
     await expect(thread.getByRole('link')).toHaveCount(2);
+    await expect(thread.getByRole('link').first()).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
     await expect(thread).toContainText('Keep javascript:alert(1) and https://user:password@example.invalid/private as text.');
     expect(await inputs(page,'browser.navigate')).toEqual([]);
     await thread.getByRole('link',{name:'http://example.invalid/plain',exact:true}).click();
