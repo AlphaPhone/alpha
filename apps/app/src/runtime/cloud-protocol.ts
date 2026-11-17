@@ -594,7 +594,10 @@ export class CloudProtocol {
   async mapsTile(z:number,x:number,y:number,signal:AbortSignal):Promise<ArrayBuffer> {
     const path=`/api/v1/maps/tiles/${z}/${x}/${y}`;
     if(!mapsTilePath(path))throw new CloudProtocolError('invalid-response');
-    const response=object(await this.accountRequest(path,signal,undefined,{headers:{'Idempotency-Key':crypto.randomUUID()}}));
+    // One credential read per tile, not the three of accountRequest: a map view asks for about 15 tiles at once
+    // and the phone's secure store answers one read at a time (10–25 ms each on a Pixel). A tile is the same public
+    // image for every account; the Maps session that asked for it checks its account before and after (cloud-maps.ts).
+    const response=object(await this.requestData(path,signal,{authenticated:true,headers:{'Idempotency-Key':crypto.randomUUID()}}));
     if(response.encoding!=='base64'||!['image/png','image/jpeg','image/webp'].includes(String(response.contentType))||typeof response.data!=='string'||!response.data.length||response.data.length>1398104||response.data.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(response.data))throw new CloudProtocolError('invalid-response');
     let binary:string;try{binary=atob(response.data);}catch{throw new CloudProtocolError('invalid-response');}if(binary.length>1024*1024||btoa(binary)!==response.data)throw new CloudProtocolError('invalid-response');
     return Uint8Array.from(binary,char=>char.charCodeAt(0)).buffer;
