@@ -63,7 +63,7 @@ export function addressInputHarness() {
     const tabs = new BrowserTabSession({session: 'session'});
     await tabs.ensure('owned', false, async () => undefined);
     const context = {URL, Error, MAX_TABS: 8, parseBrowserAddressInput, session: 'session', disposed: false, state: () => state, isPrivate: () => false,
-      newTabId: () => 'new', restored: new Map(), tabs, restoreAttempts: new Map(), ensure: id => tabs.creation(id) ?? tabs.ensure(id, false, async () => undefined),
+      newTabId: () => 'new', agentTab: undefined, restored: new Map(), tabs, restoreAttempts: new Map(), ensure: id => tabs.creation(id) ?? tabs.ensure(id, false, async () => undefined),
       shell: {vset(_key, patch) { Object.assign(state, patch); }}, Browser: {async navigate(input) { navigations.push(input); }, async close() {}},
       refresh() {}, report(error) { reports.push(error.message); }};
     const navigate = vm.runInNewContext(region + ';navigate', context);
