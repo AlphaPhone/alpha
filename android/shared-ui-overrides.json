@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "overrides": [
+    {
+      "module": "eliza-reminders",
+      "class": "ai.eliza.plugins.reminders.ReminderStore",
+      "source": "android/shared-ui/eliza-reminders/java",
+      "reason": "posts the due-reminder notification and its actions; package-private, so Alpha's copy keeps the shared name"
+    }
+  ]
+}
