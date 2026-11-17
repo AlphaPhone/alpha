@@ -214,8 +214,8 @@ test('a plan activated in Cloud billing closes the subscription popup on return 
   // Plan selection opens the in-app plans on the current Cloud (no browser page); nothing is bought until Stripe.
   await controls(page).getByRole('button', { name: 'Choose a plan', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Review billing account', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Plans', exact: true })).toBeVisible({ timeout: 30_000 });
-  expect(await stub(page, s => s.opened)).toEqual([]);
+  await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plus',{exact:true})).toBeVisible();
+  expect(await stub(page,s=>s.opened)).toEqual([]);
   // The synthetic Cloud answer now reports an active plan, with the cash balance still zero.
   await stub(page, s => { s.accounts[0].plan = undefined; s.persist(); });
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));

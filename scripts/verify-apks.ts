@@ -133,7 +133,7 @@ const identity = androidIdentity(process.cwd());
 const callbackHost = new URL(CLOUD_DEPLOYMENT.production.web).hostname;
 // The only web VIEW filters an APK may carry: the main manifest's two returns on the production web
 // host (android/app/product.gradle supplies appLinkHost), and the Alpha Cloud billing return alias,
-// enabled only with the cutover flag and otherwise declared disabled. Add a new app link here deliberately.
+// enabled for the current Cloud checkout. Add a new app link here deliberately.
 const mainActivity = `${identity.appId}.MainActivity`;
 const webViewFiltersAllowed = [
   `${mainActivity} https://${callbackHost}/alphaphone/auth/callback`,
