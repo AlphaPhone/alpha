@@ -27,8 +27,12 @@ export async function loadWorkflowClockFixture() {
   const bundle = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `
     export {currentClockTimeZone,buildClockRequest,describeClockDays} from './${dependencyPaths[0]}';
     export {createClockHandoffHistory,clockHandoffLegacyKey,clockHandoffSlot} from './${dependencyPaths[1]}';
-    export {createInlineModal} from './${dependencyPaths[2]}';`}, bundle: true, write: false, metafile: true,
+    export {createInlineModal} from './${dependencyPaths[2]}';
+    export {clockResultText} from './${dependencyPaths[4]}';`}, bundle: true, write: false, metafile: true,
   format: 'esm', platform: 'node', plugins: [{name: 'authenticated-clock-source', setup(build) {
+    build.onResolve({filter:/^@elizaos\/plugin-assistant\/device-actions\/clock-contract$/}, () => ({
+      path: resolve(root, shared+'clock-contract.ts'),
+    }));
     const marker = '.eliza/client-features/';
     build.onResolve({filter: /\.eliza\/client-features\//}, args => {
       const path = 'vendor/eliza/' + args.path.slice(args.path.indexOf(marker) + marker.length);
