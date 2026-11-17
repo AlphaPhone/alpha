@@ -258,8 +258,16 @@ export class CanonicalNotesUi {
    return await complete(result.note);
   }catch{if(this.controller.current&&!canonicalRecordConfirmed)this.needsReview();return false;}
  }
+ /** Saves complete note text as a record and returns its identity, or null when the save is not
+  * confirmed. Identical text replays the existing record, so a repeated save never duplicates it.
+  * A failed request throws: the record may or may not exist. */
+ async createFromText(content:string):Promise<{id:string;revision:number}|null>{
+  const result=await this.controller.interact('create-note',{content});
+  if(!this.controller.current||!result.target)return null;
+  this.hooks.committed?.(result.target.id);return result.target;
+ }
  async saveCard(content:string,api:Bag):Promise<boolean>{
-  try{const result=await this.controller.interact('create-note',{content});if(!this.controller.current||!result.target)return false;this.hooks.committed?.(result.target.id);return true;}
+  try{return !!await this.createFromText(content);}
   catch{if(this.controller.current){api.toast('Save unconfirmed');this.needsReview();}return false;}
  }
  async discardDraftAndReload():Promise<void>{

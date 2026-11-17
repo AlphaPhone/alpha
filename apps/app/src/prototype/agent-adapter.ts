@@ -1349,7 +1349,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{signal.throwIfAborted();await speakAppText(operation.text,speechAbort.signal,undefined,true,currentSpeech);currentSpeech();return {status:'succeeded',summary:'Finished reading the reviewed text aloud.'};}finally{unsubscribe();signal.removeEventListener('abort',stop);window.removeEventListener('alpha:stop-workflow-speech',stop);}
       }
       if (operation.type === 'create_note') {
-        if(this.notesSourceMode==='canonical'&&expectedContext.selectedObject?.kind==='workflow-run')return {status:'failed',summary:'Saving a note from a workflow isn’t available yet.'};
+        if(this.notesSourceMode==='canonical'&&expectedContext.selectedObject?.kind==='workflow-run'){
+          // The agent's Notes: a workflow's reviewed note becomes a canonical record, the Notes the owner sees.
+          const notes=this.canonicalNotesUi,unconfirmed={status:'unknown' as const,summary:'The note save is unconfirmed. Inspect saved notes before repeating.'};
+          if(!notes?.current||notes.pending)return {status:'failed',summary:'Notes isn’t ready. Nothing was saved.'};
+          try{
+            // The saved record's identity reaches the Notes view; the shared create_note receipt carries no typed result.
+            const created=await notes.createFromText(operation.title?operation.title+(operation.body?'\n'+operation.body:''):operation.body);
+            return created&&this.canonicalNotesUi===notes?{status:'succeeded',summary:presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary}:unconfirmed;
+          }catch{return unconfirmed;}
+        }
         if (this.notesSourceMode!=='legacy'||this.notesStorageFailed) return { status: 'failed', summary: await previousNotesRefusalNow(this,'saved',signal) };
         const existing = this.vget('notes').list.find((note: Shell) => note.id === operationId);
         if (existing) return { status: 'unknown', summary: 'A note already has this action identifier; review it before resolving.' };
