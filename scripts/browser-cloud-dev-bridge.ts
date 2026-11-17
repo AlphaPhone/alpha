@@ -431,6 +431,8 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
     const create=method==='POST'&&route==='/api/auth/cli-session',poll=method==='GET'&&/^\/api\/auth\/cli-session\/[0-9a-f-]{36}$/i.test(route);
     if(create){if(input.credentialReference||Object.keys(object(JSON.parse(input.body??'{}'))).length)throw Error('Invalid login creation');send(res,200,await createCliSession(env,controller.signal));return;}
     if(poll){if(input.credentialReference||input.body!==undefined)throw Error('Invalid login poll');send(res,200,await pollCliSession(env,route.split('/').at(-1)!,controller.signal));return;}
+    // The plan catalogue is public, like the entitlement signing-key catalogue.
+    if(method==='GET'&&route==='/api/v1/subscriptions/plans'&&input.body===undefined){const response=await canonical(env,route,controller.signal);send(res,200,{status:response.status,data:await boundedServiceJson(response)});return;}
     // Public signing keys must work before/without account credentials. No bearer is attached.
     if(method==='GET'&&route==='/api/v1/subscription/entitlement-keys'&&input.body===undefined&&input.credentialReference===undefined){
      const response=await canonical(env,route,controller.signal),result=await boundedServiceJson(response);send(res,200,{status:response.status,data:result});return;
@@ -438,7 +440,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
     // Subscription redemption: exactly {code,idempotencyKey}; the code is forwarded, never logged or stored.
     const redeem=method==='POST'&&route==='/api/v1/subscription/redeem';
     if(redeem){const body=object(JSON.parse(input.body??'null'));if(Object.keys(body).sort().join()!=='code,idempotencyKey'||typeof body.code!=='string'||body.code.length>128||typeof body.idempotencyKey!=='string'||!/^[A-Za-z0-9._:-]{8,128}$/.test(body.idempotencyKey))throw Error('Invalid subscription redemption');}
-    const accountRead=method==='GET'&&input.body===undefined&&['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/maps/capabilities'].includes(route);
+    const accountRead=method==='GET'&&input.body===undefined&&['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/referrals','/api/v1/maps/capabilities'].includes(route);
     const selfRevoke=method==='DELETE'&&route==='/api/v1/api-keys/current'&&input.body===undefined;
     if(!selfRevoke&&!redeem&&!accountRead&&!mapsPost&&!mapsTile&&!managedGoogleRequest(url,method,input.body))throw Error('Unsupported Cloud route');
     const c=await admitted(env,input.credentialReference);active.get(ownedId)!.credentialId=c.credentialId;if(selfRevoke)await current(env,c,controller.signal);let requestBody=input.body;
