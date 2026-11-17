@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "df424da2a677069ccce0efe4aaad4ff29c11657e",
-  "head": "d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
+  "head": "7bc456105f5319e5c206418736a5da63adea46b5",
   "recordedAt": "2026-11-17",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...7bc456105f5319e5c206418736a5da63adea46b5",
   "status": "diverged",
-  "aheadBy": 6,
+  "aheadBy": 8,
   "behindBy": 1,
   "mergeBase": "0d775376fd23d96f39f444b1920a8fde7fbce1e8",
   "pinOnlyCommits": [
@@ -26,6 +26,14 @@
     {
       "sha": "d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
       "subject": "Verify ringing and ongoing call notification channels"
+    },
+    {
+      "sha": "c22fed56c1ba9a9faf3404e6033a87d0d75095bf",
+      "subject": "Reject whole non-speech annotations before voice response dispatch"
+    },
+    {
+      "sha": "7bc456105f5319e5c206418736a5da63adea46b5",
+      "subject": "Recognize explicit music annotations with whitespace"
     }
   ],
   "pullRequests": [

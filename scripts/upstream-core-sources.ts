@@ -1,6 +1,6 @@
 export default {
   "schema": 1,
-  "baseCommit": "d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
+  "baseCommit": "7bc456105f5319e5c206418736a5da63adea46b5",
   "files": {
     "packages/core/src/services/task.ts": "d1aed0e788fecb0dffacd15a8d8ecc7a1046d103db561915faaffa7a3f6d36bf",
     "plugins/plugin-notes/src/service.ts": "b1628e3e107bd680dd70eb40d15223257aefb3381d1aac72bee85e45bcab6619",
