@@ -166,6 +166,18 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   ["Calendar account changed. Review sync again.", "Calendar account changed. Review sync again."],
   // sync-host.ts calendarSyncSettingsSlot (the device opt-in record)
   ["Calendar sync settings changed. Review them again.", "Calendar sync settings changed. Review them again."],
+  ["Calendar sync settings need recovery. Saved events are retained.", "Calendar sync settings need recovery. Saved events are kept."],
+  // sync-controller.ts: the reviewed plan no longer matches what is there now.
+  ["The event list changed. Review sync again.", "The event list changed. Review sync again."],
+  ["An event changed. Review sync again.", "An event changed. Review sync again."],
+  // google-reader.ts
+  ["Choose a valid Calendar range.", "Choose a valid Calendar range."],
+  // google-sync-port.ts: an event Google returned that this phone cannot represent.
+  ["Google returned invalid all-day dates.", "Google returned an event this phone could not use."],
+  ["Google returned an event without its timezone.", "Google returned an event this phone could not use."],
+  ["Google returned invalid attendees.", "Google returned an event this phone could not use."],
+  ["Google returned invalid recurrence.", "Google returned an event this phone could not use."],
+  ["Google returned an invalid event state.", "Google returned an event this phone could not use."],
 ]);
 
 const DEVICE_REPLY_INVALID =

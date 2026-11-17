@@ -97,6 +97,26 @@ test('every plain refusal of the browser sync source, field mapping, checkpoint 
   }
 });
 
+// Invariants of the shared Google port that only a programming error can reach; the owner has nothing to act on.
+const SHARED_INTERNAL = new Set([
+  'An exact Calendar event reference is required.',
+  'A stable Calendar operation key is required.',
+  'An exact Google event revision is required.',
+  'Unsupported Calendar operation.',
+]);
+
+test('every plain refusal of the shared linked sync the host reaches is worded, never the Google fallback', async () => {
+  const shared = 'vendor/eliza/plugins/plugin-calendar/src/linked-sync';
+  for (const name of ['sync-host.ts', 'sync-controller.ts', 'google-sync-port.ts', 'linked-store.ts', 'google-reader.ts']) {
+    const file = `${shared}/${name}`;
+    for (const thrown of plainThrows(file)) {
+      if (SHARED_INTERNAL.has(thrown)) continue;
+      assert.notEqual(await statusFor(Error(thrown)), GENERIC, `${file}: ${JSON.stringify(thrown)} has an Alpha sentence`);
+    }
+  }
+  assert.equal(await statusFor(Error('Calendar sync settings need recovery. Saved events are retained.')), 'Calendar sync settings need recovery. Saved events are kept.');
+});
+
 test('a CalendarSyncNotice is shown as written', async () => {
   assert.equal(await statusFor(new CalendarSyncNotice('Choose a Google calendar for sync first.')), 'Choose a Google calendar for sync first.');
   assert.equal(await statusFor(new CalendarSyncNotice('Allow Calendar access to review device sync.')), 'Allow Calendar access to review device sync.');
