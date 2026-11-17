@@ -179,8 +179,8 @@ GraphHopper setup is superseded for production.
    and verify actual Google imagery, search, place details and a route. Grant
    location only when requested. Start and stop navigation on a safe walking route.
 
-   Verify visible Google branding and the viewport copyright in full on the map,
-   wrapping under the logo on small or enlarged-text layouts, never truncated. Pan, zoom,
+   Verify the visible Google Maps badge, and that tapping it opens the viewport's
+   complete copyright and the request disclosure at every text size. Pan, zoom,
    rotate, change text size, use TalkBack, and reopen the map. Verify the credit
    stays reachable above sheets and navigation controls. Confirm failures show an
    honest unavailable state. A Google result must never appear over the
@@ -188,8 +188,8 @@ GraphHopper setup is superseded for production.
 
    Alpha uses the unmodified `GoogleMaps_Logo_DarkGray.svg` from Google's
    attribution asset archive in `apps/app/src/maps/google-maps-attribution.svg`.
-   It remains visible while the complete viewport copyright is displayed beside
-   it or in **Data sources**. [Official attribution assets](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)
+   The badge is the only credit control on a Google map (owner decision,
+   2026-11-16); the complete viewport copyright opens from it. [Official attribution assets](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)
    [Attribution placement and size](https://developers.google.com/maps/documentation/tile/policies#display_google_maps_attribution)
 
    Check the content gates through the ordinary Maps controls. Google-derived
@@ -226,7 +226,7 @@ above do not qualify that path.
 
 The production browser regression uses intercepted native HTTP responses, a synthetic
 place and a generated white PNG. It exercises the production renderer, Google branding,
-complete Data sources disclosure in results and active guidance, portrait and landscape
+the badge-opened copyright and request disclosure in results and active guidance, portrait and landscape
 hit targets, 150% and 200% attribution text, missing or invalid imagery, and
 failed copyright retrieval. Record live Google and Pixel checks separately.
 [Google Maps production browser test](../../test/browser/google-maps-raster.production.spec.ts).

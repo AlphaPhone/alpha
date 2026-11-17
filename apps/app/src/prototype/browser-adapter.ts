@@ -660,7 +660,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     }).catch((error:unknown)=>{
       if(disposed||lastGeometry!==next)return;
       lastGeometry='';lastPresented=undefined;browserBackdrop();
-      if(!presentationFailed){presentationFailed=true;report(error);}
+      // Only a page the owner asked to see has something to report; a failed hide leaves nothing on screen.
+      if(payload.id&&!presentationFailed){presentationFailed=true;report(error);}
     });
   }
   // Retire page input before a host render can add controls. The next frame publishes
