@@ -127,3 +127,34 @@ test('route and near-me cards open the map with the route planned and the search
  await page.screenshot({path:info.outputPath('maps-card-nearest.png'),animations:'disabled'});
 });
 
+// "Nearest X" from the map itself, and a typed search ranked around the area the map shows.
+test('category chips search around the phone, locating first, and a typed search follows the visible map',async({page},info)=>{
+ test.setTimeout(90_000);
+ await page.setViewportSize({width:412,height:915});
+ await fixtureMaps(page);
+ // The test reads the visible map's own centre to compare with the search.
+ await page.evaluate(async()=>{const {MapPlane}=await import('/src/maps/map-plane.ts');const update=MapPlane.prototype.update;MapPlane.prototype.update=function(...args:any[]){(window as any).mapPlane=this;return update.apply(this,args as any);};});
+ await page.evaluate(()=>(window as any).mapsChat.shell.openView('maps'));
+ const plane=page.locator('[data-alpha-map-plane]'),query=page.getByRole('searchbox',{name:'Search places',exact:true});
+ await expect(plane).toHaveAttribute('data-map-ready','true');
+ // The whole world in view and no fix: the search names no area.
+ await query.fill('tea');await query.press('Enter');
+ await expect.poll(()=>page.evaluate(()=>(window as any).mapsCalls.search)).toEqual([{query:'tea',near:null}]);
+ // The chips show before the phone has a fix; a tap asks for one, then searches around it.
+ await query.fill('');await query.click();
+ for(const name of ['Coffee','Food','Gas','Pharmacy','Groceries','Gym'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
+ await page.screenshot({path:info.outputPath('maps-category-chips.png'),animations:'disabled'});
+ await page.getByRole('button',{name:'Pharmacy',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).mapsCalls.search.slice(1))).toEqual([{query:'pharmacy',near:{latitude:37.79,longitude:-122.4}}]);
+ await expect(page.getByRole('button',{name:/^Near Pharmacy/}).first()).toBeVisible();
+ // Zoomed in on another area, a typed search is ranked around the middle of the map, not the phone.
+ await query.fill('37.70, -122.48');await query.press('Enter');
+ await expect(page.getByText('Selected location',{exact:true}).first()).toBeVisible();
+ const centre=()=>page.evaluate(()=>{const map=(window as any).mapPlane.map;if(map.isMoving()||map.getZoom()<9)return null;const c=map.getCenter().wrap();return {latitude:c.lat,longitude:c.lng};});
+ await expect.poll(async()=>{const c=await centre();return !!c&&Math.abs(c.latitude-37.70)<0.2&&Math.abs(c.longitude+122.48)<0.2;},{timeout:15_000}).toBe(true);
+ await page.waitForTimeout(300);const shown=(await centre())!;
+ await query.fill('tea');await query.press('Enter');
+ await expect.poll(()=>page.evaluate(()=>(window as any).mapsCalls.search.length)).toBe(3);
+ const near=await page.evaluate(()=>(window as any).mapsCalls.search[2].near);
+ expect(Math.abs(near.latitude-shown.latitude)).toBeLessThan(0.001);expect(Math.abs(near.longitude-shown.longitude)).toBeLessThan(0.001);
+});

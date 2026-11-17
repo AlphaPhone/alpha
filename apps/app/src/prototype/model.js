@@ -2802,6 +2802,9 @@ IC.mapsMute = IC.mapsMute || "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 10l4 4M20 10l-4 
 IC.mapsCup = IC.mapsCup || "M5 9h11v4.5A4.5 4.5 0 0 1 11.5 18h-2A4.5 4.5 0 0 1 5 13.5zM16 10.5h1.5a2.3 2.3 0 0 1 0 4.6H16M8 3.5v2.5M12 3.5v2.5M4 21h13";
 IC.mapsFood = IC.mapsFood || "M7 3v7M5 3v5a2 2 0 0 0 4 0V3M7 10v11M17 3c-2.2 1.2-3.2 3.6-3.2 6.5V13H17M17 3v18";
 IC.mapsGym = IC.mapsGym || "M7 7v10M4 9.5v5M17 7v10M20 9.5v5M7 12h10";
+IC.mapsGas = IC.mapsGas || "M5 20V5.5A1.5 1.5 0 0 1 6.5 4h6A1.5 1.5 0 0 1 14 5.5V20M4 20h11M5 10h9M14 12h1.5a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 0 3 0V9l-2.5-2.5";
+IC.mapsPharmacy = IC.mapsPharmacy || "M5 5h14v14H5zM12 8.5v7M8.5 12h7";
+IC.mapsGroceries = IC.mapsGroceries || "M3 4h2.5l2 10.5h10L19.5 7H6.3M9 19.5a1 1 0 1 0 0-.01M16.5 19.5a1 1 0 1 0 0-.01";
 IC.mapsWork = IC.mapsWork || "M4 8h16v11H4zM9 8V5h6v3M4 13h16";
 IC.mapsHome = IC.mapsHome || "M4 11l8-7 8 7M6.5 9v11h11V9";
 
@@ -3087,8 +3090,8 @@ registerView("maps", {
       var p = mapsPlace(id);
       return { id: id, label: id === MAPS_FIX.work ? MAPS_FIX.workLabel || p.name : p.name, d: IC[p.icon], go: function () { api.set({ place: id, pan: null }); } };
     });
-    var cats = [["Coffee", "mapsCup", "coffee"], ["Food", "mapsFood", "food"], ["Gym", "mapsGym", "gym"]].map(function (c) {
-      return { id: c[2], label: c[0], d: IC[c[1]], go: function () { api.set({ query: c[2], sheet: "half", place: null, pan: null }); } };
+    var cats = [["Coffee", "mapsCup", "coffee"], ["Food", "mapsFood", "food"], ["Gas", "mapsGas", "gas station"], ["Pharmacy", "mapsPharmacy", "pharmacy"], ["Groceries", "mapsGroceries", "groceries"], ["Gym", "mapsGym", "gym"]].map(function (c) {
+      return { id: c[2], label: c[0], query: c[2], d: IC[c[1]], go: function () { api.set({ query: c[2], sheet: "half", place: null, pan: null }); } };
     });
 
     var row = function (p) {

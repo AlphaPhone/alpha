@@ -460,7 +460,12 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin')submitOrigin();else submitQuery();(event.target as HTMLInputElement).blur(); } },
       clearQ: () => {retireSearch();screen.clearQuery();},
       chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
-      cats: (view.map.selected||view.map.overlay.position?data.cats:[]).map((category: Bag) => ({ ...category, go: () => screen.searchFor(category.label) })),
+      // "Nearest X" from the map itself: around this phone's fix, located first when there is none yet.
+      cats: data.cats.map((category: Bag) => ({ ...category, go: () => {
+        const fix=mapsController?.snapshot().position;
+        if(fix?.phase==='ready'&&fix.value){retireSearch();screen.setViewport(fix.value.coordinate,15);screen.searchFor(category.query);}
+        else locateThenSearch({query:category.query,located:true,epoch:-1});
+      } })),
       savedRows: view.saved.map(item => ({ id: 'saved:' + item.id, name: locationText(item.label), sub: '', d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
       results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {retireSearch();screen.choose(row.key);} })),
       hasResults: queryDraft===undefined&&originDraft===undefined&&results.length > 0, noResults: queryDraft===undefined&&originDraft===undefined&&(view.noResults || view.hasResults && results.length === 0), emptyQ: view.emptyQuery,
