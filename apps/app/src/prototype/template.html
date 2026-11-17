@@ -2358,11 +2358,7 @@
         <div class="alpha-google-credit">
           <span class="alpha-google-mark"><img src="{{maps.googleMapsLogo}}" alt="Google Maps"></span>
           <sc-if value="{{maps.mapAttribution}}">
-            <span class="alpha-google-copyright">{{maps.mapAttribution}}</span>
-            <details class="alpha-google-sources" name="alpha-map-info">
-              <summary>Data sources</summary>
-              <div class="alpha-map-info">{{maps.mapAttribution}}</div>
-            </details>
+            <span class="alpha-google-copyright" title="{{maps.mapAttribution}}">{{maps.mapAttribution}}</span>
           </sc-if>
           <sc-if value="{{maps.googleMapMissing}}"><span class="alpha-google-map-missing">No imagery</span></sc-if>
         </div>
@@ -2376,6 +2372,7 @@
         <div class="alpha-map-info">
           <sc-if value="{{maps.locationDisclosure}}"><p><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.lock}}"></path></svg>{{maps.locationDisclosure}}</p></sc-if>
           <sc-if value="{{maps.globalBasemap}}"><p>Map tiles: OpenFreeMap</p></sc-if>
+          <sc-if value="{{maps.googleMaps}}"><sc-if value="{{maps.mapAttribution}}"><p data-maps-google-attribution>{{maps.mapAttribution}}</p></sc-if></sc-if>
           <sc-if value="{{maps.providerDisclosure}}"><p data-maps-disclosure>{{maps.providerDisclosure}}</p></sc-if>
           <button class="tap" aria-label="Enter coordinates" onClick="{{maps.nativeManualLocation}}">Coordinates</button>
 

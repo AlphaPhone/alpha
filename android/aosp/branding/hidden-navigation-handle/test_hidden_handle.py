@@ -111,13 +111,16 @@ public class DrawTest {
  def test_existing_alpha_flag_and_fallback_resources_keep_scope(self):
   branding=ROOT.parent
   flag=ET.parse(branding/'overlay/packages/apps/Launcher3/res/values/alpha-navigation.xml').getroot()
-  self.assertEqual([n.text for n in flag.findall('bool')if n.attrib.get('name')=='config_alpha_home_back_only'],['true'])
+  self.assertEqual([n.text for n in flag.findall('bool')if n.attrib.get('name')=='config_alpha_home_back_only'],['false'],'three-button navigation keeps Recents')
   home_patch=(branding/'home-back-keyboard.patch').read_text()
   self.assertIn('<bool name="config_alpha_home_back_only">false</bool>',home_patch)
   overlay=ET.parse(branding/'overlay/frameworks/base/packages/SystemUI/res/values/alpha-navigation.xml').getroot()
   colors={n.attrib['name']:n.text for n in overlay.findall('color')}
   self.assertEqual(colors,{'navigation_bar_home_handle_dark_color':'#00000000','navigation_bar_home_handle_light_color':'#00000000'})
-  self.assertEqual([n.text for n in overlay.findall('string')if n.attrib.get('name')=='config_navBarLayout'],['back[1WC];home;ime_switcher[1WC]'])
-  self.assertEqual(len(list(overlay)),3,'no navigation dimensions, button colors or other controls overridden')
+  self.assertEqual([n.text for n in overlay.findall('string')if n.attrib.get('name')=='config_navBarLayout'],[],'Android default Back/Home/Recents layout')
+  self.assertEqual(len(list(overlay)),2,'no navigation dimensions, button colors or other controls overridden')
+  framework=ET.parse(branding/'overlay/frameworks/base/core/res/res/values/config.xml').getroot()
+  self.assertEqual([n.text for n in framework.findall('integer')if n.attrib.get('name')=='config_navBarInteractionMode'],['0'])
+  self.assertFalse([n for n in framework.findall('dimen')if n.attrib['name'].startswith('navigation_bar')],'Android navigation-mode dimensions apply')
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -749,6 +749,10 @@ Inbox draft reviews ([eliza#39748](https://github.com/elizaOS/eliza/pull/39748))
 when its view is left ([eliza#39740](https://github.com/elizaOS/eliza/pull/39740)) and resumes fresh Cloud
 database migrations ([eliza#39754](https://github.com/elizaOS/eliza/pull/39754)). None of the recorded core,
 mobile-build or formal-sidecar targets changed; the eliza `bun.lock` is unchanged.
+The pin `0d775376fd23d96f39f444b1920a8fde7fbce1e8` keeps outgoing and connected call notices off the
+heads-up banner: only a ringing call uses the high-importance call channel, other calls post to a derived
+low-importance `-ongoing` channel ([eliza#39794](https://github.com/elizaOS/eliza/pull/39794)). Only
+`TelecomCallService.java` changed; no recorded target or `bun.lock` changed.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
