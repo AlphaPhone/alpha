@@ -278,6 +278,17 @@ test('every shared Notes refusal on the approved change path is worded by Alpha'
  assert.doesNotMatch(adapter,/'Notes outcome is uncertain\. Review history; do not repeat automatically\.':\(error as Error\)\.message/);
 });
 
+// An agent request for Previous notes that cannot run: the phone says there are none only when the
+// presence read proved it. A request reviewed on Home, before Notes read it, is not told so.
+test('a refused Previous notes request claims no earlier notes only when their absence is proven',()=>{
+ const choose='Open Notes options, choose On this phone, then ask again. ';
+ assert.equal(notes.previousNotesRefusal('canonical','absent','shared'),'There are no earlier notes on this phone. Nothing was shared.');
+ for(const availability of [null,'present','unavailable'])assert.equal(notes.previousNotesRefusal('canonical',availability,'shared'),choose+'Nothing was shared.',String(availability));
+ for(const availability of [null,'present','absent','unavailable'])assert.equal(notes.previousNotesRefusal('legacy',availability,'saved'),'Previous notes isn’t ready. Nothing was saved.',String(availability));
+ // The approved-change path shows each of these as written.
+ for(const [source,availability] of [['legacy',null],['canonical','absent'],['canonical',null]]){const text=notes.previousNotesRefusal(source,availability,'changed');assert.equal(notes.notesActionFailureText(new Error(text)),text);}
+});
+
 // --- Chat approval and action history: Clock review, validators, native journal -----------------
 const actions=await import('../apps/app/src/ui/device-actions/device-action-messages.ts');
 const clock=await import('../apps/app/src/ui/clock/clock-handoff-presentation.ts');
