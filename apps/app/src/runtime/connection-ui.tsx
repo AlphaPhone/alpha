@@ -1533,7 +1533,7 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
   const startEpoch = epoch;
   const { session, name } = await client.connect(signal).catch(error => {
     // The private preview can open before its supervised resident can answer the bootstrap reads.
-    const privateHostUnavailable = privateLocalPreviewEnabled && !isAndroid &&
+    const privateHostUnavailable = (privateLocalPreviewEnabled || browserCloudResidentEnabled) && !isAndroid &&
       error instanceof Error && 'status' in error && error.status === 503 && !localAgentRefusal(error);
     if ((isResidentRetryable(error) || privateHostUnavailable) && !signal.aborted && epoch === startEpoch) {
       residentAutoRetryEpoch = epoch;
