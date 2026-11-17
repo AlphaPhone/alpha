@@ -2,6 +2,7 @@ import {connectionController} from '../runtime/connection-ui';
 import {alphaClient} from '../runtime/alpha-client';
 import {calendarReviewText,inboxChoiceText,calendarApprovalStatus,type CalendarApproval,type CalendarApprovalResolution} from '../runtime/calendar-approval';
 import {reviewCalendarApproval} from './calendar-approval-review';
+import {calendarApprovalTarget,type CalendarApprovalLabels} from './calendar-approval-fields';
 import {CALENDAR_INVALIDATED_EVENT} from '../runtime/app-record-completion';
 type Shell=Record<string,any>;
 type CalendarReview=ReturnType<typeof calendarReviewText>;
@@ -25,14 +26,18 @@ export function installCalendarApprovalAdapter(Component:Shell){
  const states=new WeakMap<object,{abort?:AbortController;statuses:Map<string,string>;results:Map<string,CalendarApprovalResolution>}>();
  const state=(shell:Shell)=>{let value=states.get(shell);if(!value){value={statuses:new Map(),results:new Map()};states.set(shell,value);}return value;};
  const binding=()=>{const snapshot=connectionController.getSnapshot();return JSON.stringify([snapshot.session,snapshot.history?.conversationId]);};
- const labels=(shell:Shell,row:CalendarApproval)=>{
-  const port=connectionController.getAppRecordClient?.(),model=shell.agentCalendar?.state;
-  if(!port?.current()||!model||model.savedAt!==null||model.status!=='ready'||model.ownerKey!==JSON.stringify([new URL(port.identity.origin).origin,port.identity.ownerId,port.identity.agentId]))return {};
-  const p=row.payload,matches=(value:Shell)=>value.calendarId===p.calendarId&&value.side==='owner'&&String(value.grantId??'')===String(p.grantId??'')&&(!p.expectedProvider||value.provider===p.expectedProvider);
-  const sources=model.calendars.filter(matches);if(sources.length!==1)return {};
-  const events=(model.feed?.events??[]).filter((event:Shell)=>matches(event)&&(event.externalId===p.eventId||event.id===p.eventId)&&(p.expectedEventStartAtMs==null||Date.parse(event.startAt)===p.expectedEventStartAtMs));
-  const event=events.length===1?events[0]:undefined,start=Date.parse(event?.startAt??''),end=Date.parse(event?.endAt??'');
-  return {calendar:sources[0].summary||undefined,account:sources[0].accountEmail||undefined,event:event?.title,eventStartsAt:start,eventEndsAt:end,eventAllDay:event?.isAllDay===true,...(event&&Number.isFinite(start)&&Number.isFinite(end)&&end>start?{targetVerified:true as const}:{})};
+ // The loaded Calendar window verifies the reviewed event when it holds it. An event outside that window,
+ // or a window that another source left incomplete, is verified by one read of the event's own calendar
+ // at its start; a failed read leaves the target unverified, and the review can still be declined.
+ const target=async(shell:Shell,row:CalendarApproval,signal:AbortSignal):Promise<CalendarApprovalLabels>=>{
+  const port=connectionController.getAppRecordClient?.(),calendar=shell.agentCalendar,model=calendar?.state;
+  if(!port?.current()||!model)return {};
+  const p=row.payload,loaded=model.savedAt===null&&(model.status==='ready'||model.status==='partial')&&model.ownerKey===JSON.stringify([new URL(port.identity.origin).origin,port.identity.ownerId,port.identity.agentId]);
+  const labels=loaded?calendarApprovalTarget(p,model.calendars,model.status==='ready'?model.feed?.events??[]:[]):{};
+  if(row.action==='schedule_event'||labels.targetVerified||typeof p.expectedEventStartAtMs!=='number')return labels;
+  const read=await calendar.readSourceAt({grantId:typeof p.grantId==='string'?p.grantId:undefined,calendarId:String(p.calendarId)},p.expectedEventStartAtMs,signal).catch(()=>null);
+  signal.throwIfAborted();
+  return read?calendarApprovalTarget(p,read.calendars,read.events):labels;
  };
  async function review(shell:Shell,id:string){
   const value=state(shell),snapshot=connectionController.getSnapshot();
@@ -46,9 +51,9 @@ export function installCalendarApprovalAdapter(Component:Shell){
   const retire=()=>{try{current();}catch{controller.abort();}},hidden=()=>{if(document.hidden)controller.abort();},suspend=()=>controller.abort();
   const unsubscribe=connectionController.subscribe?.(retire),unobserve=alphaClient.subscribe?.(retire);
   document.addEventListener('visibilitychange',hidden);window.addEventListener('pagehide',suspend);window.addEventListener('alpha:device-state',suspend);
-  let dispatched=false;
+  let dispatched=false;const targets=new WeakMap<CalendarApproval,CalendarApprovalLabels>();
   try{
-   const result=await reviewCalendarApproval(signal=>connectionController.readCalendarApproval(id,signal),controller.signal,current,row=>{value.statuses.set(key+id,calendarApprovalStatus(row));if(shell.live)shell.setState({});},row=>labels(shell,row));
+   const result=await reviewCalendarApproval(async signal=>{const row=await connectionController.readCalendarApproval(id,signal);if(row)targets.set(row,await target(shell,row,signal));return row;},controller.signal,current,row=>{value.statuses.set(key+id,calendarApprovalStatus(row));if(shell.live)shell.setState({});},row=>targets.get(row)??{});
    if(!result)return;current();value.results.delete(key+id);value.statuses.set(key+id,'Checking…');shell.setState({});
    dispatched=true;const outcome=await connectionController.resolveCalendarApproval(result.request,result.decision,controller.signal);current();
    value.results.set(key+id,outcome);value.statuses.set(key+id,outcome.text);shell.setState({});shell.toast(outcome.text);

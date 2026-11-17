@@ -4,7 +4,7 @@ import {JSDOM} from 'jsdom';
 import {build} from 'esbuild';
 import {projectActionMessages} from '../apps/app/src/runtime/action-message-presentation.ts';
 import {calendarReviewText,inboxChoiceText,calendarApprovalFromList,calendarApprovalActionable,calendarApprovalPending,calendarApprovalStatus} from '../apps/app/src/runtime/calendar-approval.ts';
-import {calendarApprovalFields} from '../apps/app/src/prototype/calendar-approval-fields.ts';
+import {calendarApprovalFields,calendarApprovalTarget} from '../apps/app/src/prototype/calendar-approval-fields.ts';
 import {setLocalePreferences} from '../apps/app/src/prototype/locale-time.ts';
 const id='11111111-2222-4333-8444-555555555555';
 const block=`[CHOICE:approval-${id} id=${id}]\napprove ${id}=Approve\nreject ${id}=Deny\n[/CHOICE]`;
@@ -76,6 +76,21 @@ test('an all-day cancellation west of UTC names only the event\'s own day',()=>{
   const timed=calendarApprovalFields(row({payload:{...dto().payload,expectedEventStartAtMs:start}}),{event:'Call',eventStartsAt:start,eventEndsAt:start+3600000,targetVerified:true});
   assert.equal(timed.fields.filter(field=>/4:00/.test(field.value)).length,1,'a timed event states its start once');
  }finally{if(prior===undefined)delete process.env.TZ;else process.env.TZ=prior;setLocalePreferences();}
+});
+test('a review target is one event on one of the owner\'s calendars, at the reviewed start and provider version',()=>{
+ const source={provider:'google',side:'owner',grantId:'grant',calendarId:'work',summary:'Work',accountEmail:'owner@example.invalid'},start='2027-03-12T17:00:00.000Z';
+ const event={...source,id:'row',externalId:'offsite',title:'Offsite',startAt:start,endAt:'2027-03-12T18:00:00.000Z',isAllDay:false,metadata:{etag:'"v1"'}};
+ const payload={action:'modify_event',side:'owner',grantId:'grant',calendarId:'work',eventId:'offsite',expectedProvider:'google',expectedProviderVersion:'"v1"',expectedEventStartAtMs:Date.parse(start)};
+ const found=calendarApprovalTarget(payload,[source],[event]);
+ assert.deepEqual(found,{calendar:'Work',account:'owner@example.invalid',event:'Offsite',eventStartsAt:Date.parse(start),eventEndsAt:Date.parse(start)+3600000,eventAllDay:false,targetVerified:true});
+ assert.equal(calendarApprovalTarget(payload,[source],[{...event,metadata:{etag:'"v2"'}}]).targetVerified,undefined,'an event edited since the request is not the reviewed one');
+ assert.equal(calendarApprovalTarget(payload,[source],[{...event,metadata:{}}]).targetVerified,undefined);
+ assert.equal(calendarApprovalTarget({...payload,expectedProviderVersion:undefined},[source],[{...event,metadata:{}}]).targetVerified,true,'a request that names no version is matched on identity and start');
+ assert.equal(calendarApprovalTarget(payload,[source],[{...event,startAt:'2027-03-13T17:00:00.000Z',endAt:'2027-03-13T18:00:00.000Z'}]).targetVerified,undefined);
+ assert.equal(calendarApprovalTarget(payload,[source],[event,{...event,id:'copy'}]).targetVerified,undefined);
+ assert.equal(calendarApprovalTarget(payload,[source],[{...event,grantId:'other'}]).targetVerified,undefined);
+ assert.deepEqual(calendarApprovalTarget(payload,[source,{...source,summary:'Duplicate'}],[event]),{});
+ assert.deepEqual(calendarApprovalTarget(payload,[{...source,side:'agent'}],[event]),{});
 });
 const bundle=await build({entryPoints:['apps/app/src/prototype/calendar-approval-review.ts'],bundle:true,platform:'node',format:'esm',write:false});
 const {reviewCalendarApproval:mountedReview}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
@@ -161,6 +176,7 @@ test('Calendar markup projection preserves completed device receipts and their a
  }finally{shell.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;}
 });
 
+const settle=async()=>{for(let n=0;n<4;n++)await tick();};
 const invalidations=()=>{const seen=[];window.addEventListener('alpha:canonical-calendar-invalidated',event=>seen.push(event.detail));return seen;};
 test('a completed approval tells Calendar and Home to read again; a decline, refusal or unconfirmed result does not',async()=>{
  for(const [decision,reply,expected] of [['Approve',undefined,[{sessionId:'session'}]],['Decline',undefined,[]],
@@ -184,4 +200,52 @@ test('after a retryable result the same card approves again with the newly read 
   assert.deepEqual(f.resolutions,[{row:first,decision:'approve'},{row:retryable,decision:'approve'}]);assert.notEqual(retryable.revision,first.revision);
   assert.equal(shell.renderVals().msgs[0].calendarReviews[0].canOpen,true);assert.deepEqual(seen,[{sessionId:'session'}]);assert.equal(f.sent.length,0);
  }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+});
+const offsiteSource={provider:'google',side:'owner',grantId:'grant',calendarId:'work@example.invalid',summary:'Work',accountEmail:'owner@example.invalid'},offsiteStart=Date.parse('2027-03-12T17:00:00Z');
+const offsiteEvent={...offsiteSource,id:'row',externalId:'offsite',agentId:'agent',title:'Offsite',startAt:'2027-03-12T17:00:00.000Z',endAt:'2027-03-12T18:00:00.000Z',isAllDay:false,metadata:{etag:'"v1"'}};
+const offsiteRow=()=>row({action:'modify_event',payload:{action:'modify_event',side:'owner',grantId:'grant',calendarId:'work@example.invalid',eventId:'offsite',expectedProvider:'google',expectedProviderVersion:'"v1"',expectedEventStartAtMs:offsiteStart,notifyAttendees:false,patch:{title:null,startsAtMs:offsiteStart+86400000,endsAtMs:offsiteStart+90000000,location:null,description:null,attendees:null}}});
+// The loaded window holds October only; the reviewed event is in March on a linked calendar.
+function offsiteFixture(read,status='ready'){const setup=adapterFixture(),calls=[];setup.fixture.row=offsiteRow();Object.assign(setup.shell.agentCalendar.state,{status,calendars:[...setup.shell.agentCalendar.state.calendars,offsiteSource]});setup.shell.agentCalendar.readSourceAt=async(source,at,signal)=>{signal.throwIfAborted();calls.push({source,at});return read();};return {...setup,calls};}
+test('an event outside the loaded Calendar window is verified by one read of its own calendar at its start',async()=>{
+ const cleanup=dom();let shell;try{const setup=offsiteFixture(()=>({calendars:[offsiteSource],events:[offsiteEvent]}));shell=setup.shell;
+  shell.renderVals().msgs[0].calendarReviews[0].open();await settle();
+  assert.deepEqual(setup.calls,[{source:{grantId:'grant',calendarId:'work@example.invalid'},at:offsiteStart}]);
+  assert.equal(button('Approve').disabled,false);assert.match(document.querySelector('dl').textContent,/Offsite/);assert.match(document.querySelector('dl').textContent,/Work/);assert.doesNotMatch(document.body.textContent,/could not be verified/);
+  button('Approve').click();await settle();assert.equal(setup.calls.length,2,'the target is read again at the tap');assert.deepEqual(setup.fixture.resolutions,[{row:setup.fixture.row,decision:'approve'}]);
+ }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+});
+test('a Calendar another source left incomplete still verifies an event on a calendar that answers',async()=>{
+ const cleanup=dom();let shell;try{const setup=offsiteFixture(()=>({calendars:[offsiteSource],events:[offsiteEvent]}),'partial');shell=setup.shell;
+  shell.renderVals().msgs[0].calendarReviews[0].open();await settle();assert.equal(setup.calls.length,1);assert.equal(button('Approve').disabled,false);button('Close').click();await settle();
+ }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+});
+test('a missing, edited or unreadable event keeps Approve disabled and Decline available',async()=>{
+ for(const read of [()=>({calendars:[offsiteSource],events:[]}),()=>({calendars:[offsiteSource],events:[{...offsiteEvent,metadata:{etag:'"v2"'}}]}),()=>null,()=>{throw Error('Network lost');}]){
+  const cleanup=dom();let shell;try{const setup=offsiteFixture(read);shell=setup.shell;
+   shell.renderVals().msgs[0].calendarReviews[0].open();await settle();assert.equal(setup.calls.length,1);
+   assert.equal(button('Approve').hidden,false);assert.equal(button('Approve').disabled,true);assert.match(document.body.textContent,/could not be verified/);
+   button('Approve').click();await settle();assert.equal(setup.fixture.resolutions.length,0);
+   button('Decline').click();await settle();assert.deepEqual(setup.fixture.resolutions.map(item=>item.decision),['reject']);
+  }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+ }
+});
+test('an event edited since the request is not approvable from the loaded window either',async()=>{
+ const cleanup=dom();let shell;try{const setup=offsiteFixture(()=>null);shell=setup.shell;shell.agentCalendar.state.feed.events.push({...offsiteEvent,metadata:{etag:'"v2"'}});
+  shell.renderVals().msgs[0].calendarReviews[0].open();await settle();assert.equal(button('Approve').disabled,true);button('Close').click();await settle();
+ }finally{shell?.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;cleanup();}
+});
+const calendarBundle=await build({entryPoints:['apps/app/src/runtime/agent-calendar.ts'],bundle:true,platform:'node',format:'esm',write:false});
+const {AgentCalendar}=await import('data:text/javascript;base64,'+Buffer.from(calendarBundle.outputFiles[0].text).toString('base64'));
+test('the review read asks one calendar for one instant and answers only from a complete, exact reply',async()=>{
+ const complete=window=>({state:'complete',events:[offsiteEvent],timeMin:window.timeMin,timeMax:window.timeMax}),reads=[];let current=true,feed=complete;
+ const port={identity:{origin:'https://fixture.invalid',ownerId:'owner',agentId:'agent'},sessionId:'session',scope:'owner',current:()=>current};
+ const api={getLifeOpsCalendarFeed:async window=>{reads.push(window);return feed(window);},getLifeOpsCalendars:async()=>({calendars:[offsiteSource]})};
+ const calendar=new AgentCalendar(()=>port,{capture:async()=>({fingerprint:'same',present:false,readable:true,pending:false,records:[]}),retainedReadOnly:async()=>true},()=>api),before=structuredClone(calendar.state);
+ const read=signal=>calendar.readSourceAt({grantId:'grant',calendarId:'work@example.invalid'},offsiteStart,signal??new AbortController().signal);
+ assert.deepEqual(await read(),{events:[offsiteEvent],calendars:[offsiteSource]});
+ assert.deepEqual(reads,[{side:'owner',grantId:'grant',calendarId:'work@example.invalid',timeMin:'2027-03-12T16:59:59.999Z',timeMax:'2027-03-12T17:00:00.001Z',timeZone:'UTC'}]);
+ assert.deepEqual(calendar.state,before,'the read publishes nothing');
+ for(const reply of [w=>({...complete(w),state:'partial'}),w=>({...complete(w),state:'unavailable'}),w=>({...complete(w),timeMax:'2027-03-13T00:00:00.000Z'}),w=>({...complete(w),events:[{...offsiteEvent,agentId:'another-agent'}]})]){feed=reply;assert.equal(await read(),null);}
+ const abort=new AbortController();feed=w=>{abort.abort();return complete(w);};await assert.rejects(read(abort.signal));
+ feed=w=>{current=false;return complete(w);};assert.equal(await read(),null);assert.equal(await read(),null,'a retired connection is not read');assert.equal(reads.length,7);
 });

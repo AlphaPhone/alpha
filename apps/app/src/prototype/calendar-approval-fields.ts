@@ -3,6 +3,19 @@ import {localePreferences} from './locale-time.ts';
 import {calendarApprovalRequestText} from '../ui/calendar/calendar-approval-messages.ts';
 export type CalendarApprovalLabels={calendar?:string;account?:string;event?:string;eventStartsAt?:number;eventEndsAt?:number;eventAllDay?:boolean;targetVerified?:true};
 type Field={label:string;value:string};
+type Bag=Record<string,any>;
+/** The reviewed calendar and, for a change or cancellation, its current event, from one read of the
+ * owner's sources and events. The target is verified only when exactly one source and one event match
+ * the request, the event still starts when the request says, and it still has the provider version
+ * the request was made against. */
+export function calendarApprovalTarget(payload:Record<string,unknown>,calendars:readonly Bag[],events:readonly Bag[]):CalendarApprovalLabels{
+ const p=payload,matches=(value:Bag)=>value.calendarId===p.calendarId&&value.side==='owner'&&String(value.grantId??'')===String(p.grantId??'')&&(!p.expectedProvider||value.provider===p.expectedProvider);
+ const sources=calendars.filter(matches);if(sources.length!==1)return {};
+ const found=events.filter(event=>matches(event)&&(event.externalId===p.eventId||event.id===p.eventId)&&(p.expectedEventStartAtMs==null||Date.parse(event.startAt)===p.expectedEventStartAtMs));
+ const event=found.length===1?found[0]:undefined,start=Date.parse(event?.startAt??''),end=Date.parse(event?.endAt??''),etag=event?.metadata?.etag;
+ const unchanged=p.expectedProviderVersion==null||typeof etag==='string'&&etag.trim()===p.expectedProviderVersion;
+ return {calendar:sources[0].summary||undefined,account:sources[0].accountEmail||undefined,event:event?.title,eventStartsAt:start,eventEndsAt:end,eventAllDay:event?.isAllDay===true,...(event&&unchanged&&Number.isFinite(start)&&Number.isFinite(end)&&end>start?{targetVerified:true as const}:{})};
+}
 const object=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const text=(value:unknown):value is string=>typeof value==='string';
 const instant=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&Number.isFinite(new Date(value).getTime());
