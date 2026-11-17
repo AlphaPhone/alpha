@@ -430,6 +430,7 @@ export const moduleInventory = {
     "apps/app/src/prototype/comms-alpha.ts",
     "apps/app/src/prototype/composer-editor.tsx",
     "apps/app/src/prototype/contacts-adapter.ts",
+    "apps/app/src/prototype/contacts-changes.ts",
     "apps/app/src/prototype/context-selection.ts",
     "apps/app/src/prototype/data-adapter.ts",
     "apps/app/src/prototype/dc-lite.js",
