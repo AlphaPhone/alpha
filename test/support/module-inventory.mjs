@@ -661,6 +661,7 @@ export const moduleInventory = {
     "apps/app/src/runtime/notes-trash-policy.ts",
     "apps/app/src/runtime/notes-trash.ts",
     "apps/app/src/runtime/notes-view.ts",
+    "apps/app/src/runtime/ongoing-call.ts",
     "apps/app/src/runtime/owner-reminder-notification-port.ts",
     "apps/app/src/runtime/owner-reminder-notification-protocol.ts",
     "apps/app/src/runtime/owner-route-policy.ts",
