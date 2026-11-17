@@ -36,11 +36,11 @@ test('the open faint suggestion names something on screen and never a feature (A
   assert.equal(A.pickOpenSuggestion({view: null, spec: null, candidates: ['Any new texts?', 'Who called?']}), null);
 });
 
-test('the installed source is the only open suggestion source', () => {
+test('installing comms leaves automatic suggestions disabled', () => {
   assert.equal(B.openSuggestion({view: 'messages', spec: spec(), candidates: ['Ask Maya about 3:30']}), null, 'no source before install');
   const proto = {renderVals() { return {msgs: []}; }};
   A.installCommsAlpha({prototype: proto}, {});
-  assert.equal(B.openSuggestion({view: 'messages', spec: spec(), candidates: ['Check voicemail', 'Ask Maya about 3:30']}), 'Ask Maya about 3:30');
+  assert.equal(B.openSuggestion({view: 'messages', spec: spec(), candidates: ['Check voicemail', 'Ask Maya about 3:30']}), null);
 });
 
 test('a briefing is shown once per subject, only when the chat opens and something is known (AC-25)', () => {
