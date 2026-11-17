@@ -78,8 +78,21 @@ export function mailOperationRefusal(message: string): string | undefined {
   return undefined;
 }
 
-/** Alpha's sentence for a failed mail operation: the journal sentence it names, else `fallback`. */
+/**
+ * A refusal worded by Alpha's own mail review (for example a Gmail draft that changed outside
+ * Alpha). Its message is shown as written; the shared journal never throws this class.
+ */
+export class MailReviewNotice extends Error {
+  override name = "MailReviewNotice";
+}
+
+/**
+ * Alpha's sentence for a failed mail operation: Alpha's own review notice as written, else the
+ * journal sentence it names, else `fallback`. Other error text may come from shared code and is
+ * never shown.
+ */
 export function mailOperationText(error: unknown, fallback: string): string {
+  if (error instanceof MailReviewNotice && error.message.trim()) return error.message.trim();
   const message = error instanceof Error ? error.message.trim() : "";
   return mailOperationRefusal(message) ?? fallback;
 }

@@ -31,7 +31,7 @@ test('every reviewed mail-context refusal is thrown in Alpha’s words',async()=
  await assert.rejects(validateMailContext(review,{...source,revision:'changed'},destination),{message:PINNED['Message or destination changed. Review again; nothing was sent.']});
 });
 
-const {MAIL_OPERATION_REFUSALS,mailOperationRefusal,mailOperationText}=await import('../apps/app/src/ui/mailbox/mail-operation-messages.ts');
+const {MAIL_OPERATION_REFUSALS,MailReviewNotice,mailOperationRefusal,mailOperationText}=await import('../apps/app/src/ui/mailbox/mail-operation-messages.ts');
 test('every Inbox journal, read-state, retained-draft and attachment check refusal is worded by Alpha',()=>{
  const files=['operation-journal.ts','read-state.ts','retained-draft.ts','attachments.ts'].map(n=>staged('plugins/plugin-inbox/src/mailbox/'+n));
  const fixed=files.flatMap(text=>thrown(text,/(?:new Error|AttachmentRefusedError)\(\s*"([^"]+)"/g));
@@ -53,6 +53,12 @@ test('every Inbox journal, read-state, retained-draft and attachment check refus
  for(const [upstream,alpha] of PINNED)assert.equal(mailOperationText(new Error(upstream),'F'),alpha);
  for(const key of MAIL_OPERATION_REFUSALS.keys())assert.ok(files.some(text=>text.includes(JSON.stringify(key)))||/review was|review is for/.test(key),'still upstream: '+key);
  assert.equal(mailOperationText(new Error('Some new journal text'),'Mail operation unavailable'),'Mail operation unavailable');
+ // Alpha's own review notices keep their guidance; every one the controller throws is a notice.
+ const conflict='Gmail draft changed outside this app. The saved content will not overwrite it. Open Gmail to inspect the conflict.';
+ assert.equal(mailOperationText(new MailReviewNotice(conflict),'Mail operation unavailable'),conflict);
+ const controller=readFileSync(new URL('../apps/app/src/ui/mailbox/review-controller.ts',import.meta.url),'utf8');
+ assert.doesNotMatch(controller,/throw new Error\(/,'review-controller throws its own sentences as MailReviewNotice');
+ assert.match(controller,/throw new MailReviewNotice\(\s*"Gmail draft changed outside this app\./);
 });
 
 const {classifyGmailFailure}=await import('../apps/app/src/ui/mailbox/failures.ts');

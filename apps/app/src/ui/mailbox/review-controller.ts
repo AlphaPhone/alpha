@@ -36,7 +36,7 @@ import type {
   GmailMailboxAction,
 } from "@elizaos/plugin-inbox/mailbox/types";
 import { classifyGmailFailure, type GmailFailureKind } from "./failures";
-import { mailOperationText } from "./mail-operation-messages";
+import { MailReviewNotice, mailOperationText } from "./mail-operation-messages";
 import { reviewBindingRefusal } from "./review-binding-refusal";
 
 // biome-ignore lint/suspicious/noExplicitAny: proposals and reviews are validated JSON from the journal.
@@ -566,7 +566,7 @@ export function createMailReviewController(
         typeof reference.draftId !== "string" ||
         typeof reference.providerDigest !== "string"
       )
-        throw new Error("No provider draft receipt");
+        throw new MailReviewNotice("No provider draft receipt");
       const controller = new AbortController();
       draftRead = controller;
       try {
@@ -577,11 +577,11 @@ export function createMailReviewController(
         );
         check();
         if (draft.providerDigest !== reference.providerDigest)
-          throw new Error(
+          throw new MailReviewNotice(
             "Gmail draft changed outside this app. The saved content will not overwrite it. Open Gmail to inspect the conflict.",
           );
         if (!(await editor?.(record.proposal, draft, record.review)))
-          throw new Error(
+          throw new MailReviewNotice(
             "Save or discard changed local edits before opening this Gmail draft.",
           );
         check();
@@ -600,14 +600,14 @@ export function createMailReviewController(
     await run(async (owned, check) => {
       const record = owned.snapshot(),
         result = record?.receipt?.providerResult;
-      if (!record || !result) throw new Error("No confirmed provider result");
+      if (!record || !result) throw new MailReviewNotice("No confirmed provider result");
       // After a send, the Gmail draft it was opened from, as it was when opened.
       const draft =
         record.proposal.kind === "send"
           ? sentSource(record)?.providerDraft
           : result;
       if (kind === "delete-draft" && !draft)
-        throw new Error("No Gmail draft to delete");
+        throw new MailReviewNotice("No Gmail draft to delete");
       const proposal =
         kind === "delete-draft"
           ? {

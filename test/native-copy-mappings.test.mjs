@@ -29,7 +29,7 @@ const RESET=[
  ['reviewExpired','The reset review expired. Nothing was erased.'],
  ['noScreenLock','Set a screen lock in Android Settings before erasing Alpha’s data. Nothing was erased.'],
  ['authenticationUnavailable','Unlocking with your screen lock isn’t available. Nothing was erased.'],
- ['prepareFailed','Reset couldn’t be prepared. Close and reopen Alpha, then try again. Nothing was erased.'],
+ ['prepareFailed','Reset couldn’t be prepared, and the reset you confirmed may still go ahead. Close and reopen Alpha before trying again.'],
  ['listenerOff','Always-on listening is off or can’t be reached, so nothing was erased. Turn it on in Android Settings and try again.'],
 ];
 test('every reset result the native review resolves with is worded by Alpha',async()=>{
@@ -47,6 +47,11 @@ test('every reset result the native review resolves with is worded by Alpha',asy
  assert.equal(DATA_RESET_OUTCOMES.size,RESET.length);
 });
 test('an unknown, malformed or rejected reset answer reads as Alpha’s unavailable sentence',async()=>{
+ // The plugin dispatches a recorded reset in the prepareFailed branch, and an unknown answer says
+ // nothing about it: neither notice may claim that nothing was erased.
+ const plugin=source(RESET_PLUGIN),branch=plugin.slice(plugin.indexOf('text.prepareFailed'));
+ assert.match(branch.slice(0,600),/reset\.pending\(context\)[\s\S]*dispatchAfterBeforeDispatch/,'prepareFailed still may dispatch the recorded reset');
+ for(const notice of [DATA_RESET_OUTCOMES.get(resetField('prepareFailed')),DATA_RESET_UNCONFIRMED])assert.doesNotMatch(notice,/nothing was erased|nothing reset/i,notice);
  for(const plugin of [null,{review:async()=>({status:'unavailable',message:'Something upstream said'})},{review:async()=>{throw rejection('boom');}},{review:async()=>({status:'done',message:'Nothing reset.'})}])
   assert.deepEqual(await reviewDataReset(plugin),{status:'unavailable',notice:DATA_RESET_UNCONFIRMED});
 });

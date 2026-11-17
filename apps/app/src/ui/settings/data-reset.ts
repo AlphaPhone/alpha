@@ -4,15 +4,17 @@
  *
  * The renderer only asks for the native review. It carries no reset authority: the native
  * disclosure and a fresh Android device-credential confirmation decide, and a confirmed reset
- * stops the app instead of resolving. Every result that reaches the renderer therefore means
- * nothing was reset, and this module never reports a completed deletion.
+ * stops the app instead of resolving. This module never reports a completed deletion, and it
+ * claims nothing was erased only for a result the native side sends before any reset is
+ * recorded. A reset that could not be prepared after the owner confirmed it may still go ahead
+ * (the plugin dispatches a recorded reset in that branch), so that notice says so.
  *
  * The native plugin answers with the shared `DataResetCopy` sentences (built for the product
  * name "Alpha"). Each one is worded by Alpha below; the native text is never shown.
  */
 import type { DataResetPlugin } from "@elizaos/capacitor-system/reset";
 
-/** Native outcomes that reach the renderer. Neither one means data was deleted. */
+/** Native outcomes that reach the renderer. Neither one reports a completed deletion. */
 type DataResetReviewStatus = "cancelled" | "unavailable";
 
 interface DataResetReviewResult {
@@ -21,9 +23,11 @@ interface DataResetReviewResult {
   notice: string | null;
 }
 
-/** Shown when the review could not open, its result was malformed or its sentence is unknown. */
-export const DATA_RESET_UNCONFIRMED =
-  "Reset isn’t available right now. Nothing was erased.";
+/**
+ * Shown when the review could not open, its result was malformed or its sentence is unknown.
+ * Such an answer does not say whether a reset was recorded, so it makes no claim about erasure.
+ */
+export const DATA_RESET_UNCONFIRMED = "Reset isn’t available right now.";
 
 /**
  * Keyed by every `DataResetCopy` result sentence `DataResetPlugin.review` resolves with, for the
@@ -45,7 +49,7 @@ export const DATA_RESET_OUTCOMES: ReadonlyMap<string, string | null> = new Map([
   ],
   [
     "Reset could not be prepared. Close and reopen Alpha before trying again.",
-    "Reset couldn’t be prepared. Close and reopen Alpha, then try again. Nothing was erased.",
+    "Reset couldn’t be prepared, and the reset you confirmed may still go ahead. Close and reopen Alpha before trying again.",
   ],
   [
     "The listener is off or can't be reached, so nothing was reset. Turn it on in Android Settings and try again.",
