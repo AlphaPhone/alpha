@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import JSON5 from 'json5';
 import {
-  ROOT, ALLOWLIST, NO_FONT_LICENCE, UNKNOWN, UNVERIFIED, generate, collectNotices, detectLicenceFromText, loadTemplates, packageNotice,
+  ROOT, ALLOWLIST, NO_FONT_LICENCE, UNKNOWN, UNVERIFIED, generate, collectNotices, detectLicenceFromText, mergeLicences, mergeNotices, loadTemplates, packageNotice,
 } from '../scripts/generate-licenses.ts';
 import {FLAGS, classifyLicence, licenceFlagLines, licenceFlagRecords, obligationNote} from '../scripts/licence-policy.ts';
 import {releaseBlockers} from '../scripts/release-blockers.ts';
@@ -259,4 +259,34 @@ test('the Lucide icon notice comes from the copied icons, not an npm package', (
   const lucide = fresh.entries.filter(entry => /lucide/i.test(entry.name));
   assert.deepEqual(lucide.map(entry => [entry.name, entry.version, entry.license, entry.source]), [[record.package, record.version, 'ISC AND MIT', record.repository]]);
   assert.match(lucide[0].text, /^ISC License[\s\S]*derived from the Feather project[\s\S]*The MIT License/);
+});
+
+test('one notice per component and version keeps every licence term, source, text and flag', () => {
+  assert.equal(mergeLicences('ISC AND MIT', 'ISC'), 'ISC AND MIT');
+  assert.equal(mergeLicences('MIT', 'MIT'), 'MIT');
+  assert.equal(mergeLicences('MIT', 'Apache-2.0'), 'MIT AND Apache-2.0');
+  assert.equal(mergeLicences('MIT OR Apache-2.0', 'ISC'), '(MIT OR Apache-2.0) AND (ISC)');
+  const merged = mergeNotices([
+    {name: 'lucide-react', version: '1.18.0', license: 'ISC AND MIT', source: 'https://github.com/lucide-icons/lucide', text: 'ISC text\n\nMIT text'},
+    {name: 'tslib', version: '2.8.1', license: '0BSD', source: 'https://www.npmjs.com/package/tslib/v/2.8.1', text: '0BSD text'},
+    {name: 'lucide-react', version: '1.18.0', license: 'ISC', source: 'https://www.npmjs.com/package/lucide-react/v/1.18.0', text: 'ISC text', _flags: ['unverified']},
+    {name: 'tslib', version: '2.8.1', license: '0BSD', source: 'https://www.npmjs.com/package/tslib/v/2.8.1', text: '0BSD text'},
+    {name: 'tslib', version: '2.7.0', license: '0BSD', source: 'https://www.npmjs.com/package/tslib/v/2.7.0', text: '0BSD text'},
+  ]);
+  assert.deepEqual(merged.map(entry => `${entry.name}@${entry.version}`), ['lucide-react@1.18.0', 'tslib@2.8.1', 'tslib@2.7.0']);
+  const lucide = merged[0];
+  assert.equal(lucide.license, 'ISC AND MIT');
+  assert.equal(lucide.source, 'https://github.com/lucide-icons/lucide\nhttps://www.npmjs.com/package/lucide-react/v/1.18.0');
+  assert.equal(lucide.text, 'ISC text\n\nMIT text', 'a text already present is not repeated');
+  assert.deepEqual(lucide._flags, ['unverified']);
+  assert.equal(merged[1].source, 'https://www.npmjs.com/package/tslib/v/2.8.1');
+  assert.equal(merged[1].text, '0BSD text');
+});
+
+test('the committed and generated notices list each component and version once', () => {
+  for (const entries of [JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/app/public/licenses/third-party-notices.json'), 'utf8')), collectNotices(ROOT).entries]) {
+    const seen = new Set();
+    const duplicates = entries.map(entry => `${entry.name}@${entry.version}`).filter(key => seen.has(key) || !seen.add(key));
+    assert.deepEqual(duplicates, []);
+  }
 });
