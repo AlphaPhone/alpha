@@ -585,28 +585,19 @@
    </div>
   </sc-if>
   <sc-if value="{{messages.showThread}}">
-   <div data-alpha-stage-header class="alpha-stage-header" style="min-height:48px;padding:0 8px 8px">
+   <div data-alpha-navigation-header data-alpha-stage-header class="alpha-stage-header" style="min-height:48px;padding:0 8px 8px">
     <button aria-label="Back" onClick="{{messages.nativeBack}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.back}}"></path></svg></button>
     <span aria-hidden="true" data-alpha-stage-avatar style="width:36px;height:36px;border-radius:18px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">{{messages.ini}}</span>
     <h1 data-alpha-messages-title style="flex-grow:1;min-width:0;margin:0 0 0 6px;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{messages.title}}</h1>
     <sc-if value="{{messages.canCall}}"><button aria-label="{{messages.callLabel}}" onClick="{{messages.call}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.phone}}"></path></svg></button></sc-if>
    </div>
-   <sc-if value="{{messages.suggestConfirm}}">
-    <div role="group" aria-label="Turn on suggested replies" style="margin:0 16px 8px;padding:12px;border-radius:16px;background:var(--s2)">
-     <p style="margin:0;font-size:14px;line-height:1.4">Alpha uses recent messages from one-person conversations you open to draft replies. It may share those messages with your connected model provider. You can turn this off at any time.</p>
-     <div style="display:flex;justify-content:flex-end;gap:16px">
-      <button onClick="{{messages.cancelSuggest}}" style="min-height:44px">Cancel</button>
-      <button onClick="{{messages.enableSuggest}}" style="min-height:44px;font-weight:600">Turn on</button>
-     </div>
-    </div>
-   </sc-if>
    <div class="scr" data-alpha-messages-thread style="flex-grow:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px 14px;touch-action:pan-y">
     <sc-if value="{{messages.nativeMore}}"><div style="display:flex;justify-content:center"><button aria-label="Older messages" onClick="{{messages.nativeLoadMore}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M6 15l6-6 6 6"></path></svg></button></div></sc-if>
     <div style="flex-grow:1"></div>
     <sc-for list="{{messages.bubbles}}" as="m">
-     <div data-alpha-message-id="{{m.id}}" data-alpha-stage-last="{{m.stageLast}}" style="align-self:{{m.side}};max-width:280px;display:flex;flex-direction:column;gap:2px;align-items:{{m.side}};opacity:{{m.opacity}}">
+     <div data-alpha-message-id="{{m.id}}" data-alpha-stage-last="{{m.stageLast}}" tabindex="0" onPointerDown="{{m.actions.down}}" onPointerMove="{{m.actions.move}}" onPointerUp="{{m.actions.up}}" onPointerCancel="{{m.actions.up}}" onPointerLeave="{{m.actions.up}}" onContextMenu="{{m.actions.context}}" onKeyDown="{{m.actions.key}}" style="align-self:{{m.side}};max-width:280px;display:flex;flex-direction:column;gap:2px;align-items:{{m.side}};opacity:{{m.opacity}}">
       <sc-if value="{{m.picture}}"><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5"></path></svg>{{m.pictureLabel}}</span></sc-if>
-      <sc-if value="{{m.hasText}}"><div style="background:{{m.bg}};color:{{m.fg}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap">{{m.text}}</div></sc-if>
+      <sc-if value="{{m.hasText}}"><div style="background:{{m.bg}};color:{{m.fg}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap"><sc-for list="{{m.segments}}" as="part"><sc-if value="{{part.link}}"><a href="{{part.href}}" onClick="{{part.open}}" style="color:inherit;text-decoration:underline">{{part.text}}</a></sc-if><sc-if value="{{part.plain}}"><span>{{part.text}}</span></sc-if></sc-for></div></sc-if>
       <sc-if value="{{m.failed}}"><svg class="i" role="img" aria-label="Message failed" viewBox="0 0 24 24" style="width:16px;height:16px;color:var(--alpha-call-red)"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6m0 3h.01"></path></svg></sc-if>
      </div>
     </sc-for>
@@ -623,19 +614,28 @@
     </sc-if>
    </div>
   </sc-if>
+  <sc-if value="{{messages.messageMenu}}">
+   <div style="position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;background:var(--alpha-shadow-soft)" onKeyDown="{{messages.messageMenu.key}}">
+    <button aria-label="Close message actions" disabled="{{messages.messageMenu.busy}}" onClick="{{messages.messageMenu.close}}" style="position:absolute;inset:0;background:transparent"></button>
+    <sc-if value="{{messages.messageMenu.choices}}"><div role="menu" ref="{{messages.messageMenu.focus}}" aria-label="Message actions" style="position:relative;width:180px;padding:6px;border-radius:18px;background:var(--bg);box-shadow:0 4px 24px var(--alpha-shadow-soft)">
+     <button role="menuitem" onClick="{{messages.messageMenu.copy}}" style="display:block;width:100%;min-height:48px;text-align:left;padding:0 16px">Copy</button>
+     <sc-if value="{{messages.messageMenu.canDelete}}"><button role="menuitem" onClick="{{messages.messageMenu.askDelete}}" style="display:block;width:100%;min-height:48px;text-align:left;padding:0 16px;color:var(--alpha-call-red)">Delete</button></sc-if>
+    </div></sc-if>
+    <sc-if value="{{messages.messageMenu.confirm}}"><div role="dialog" ref="{{messages.messageMenu.focus}}" aria-modal="true" aria-label="Delete message?" style="position:relative;width:min(280px,90%);padding:20px;border-radius:22px;background:var(--bg);box-sizing:border-box">
+     <p style="margin:0 0 16px;font-size:17px">Delete this message from this phone?</p>
+     <div style="display:flex;justify-content:flex-end;gap:8px"><button disabled="{{messages.messageMenu.busy}}" onClick="{{messages.messageMenu.close}}" style="min-height:44px;padding:0 14px">Cancel</button><button disabled="{{messages.messageMenu.busy}}" onClick="{{messages.messageMenu.remove}}" style="min-height:44px;padding:0 14px;color:var(--alpha-call-red)">Delete</button></div>
+    </div></sc-if>
+   </div>
+  </sc-if>
   <sc-if value="{{messages.showNew}}">
-   <div style="display:flex;align-items:center;gap:4px;padding:0 16px 8px 8px;flex-shrink:0">
+   <div data-alpha-navigation-header style="display:flex;align-items:center;gap:4px;padding:0 16px 8px 8px;flex-shrink:0">
     <button aria-label="Back" onClick="{{messages.closeNew}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.back}}"></path></svg></button>
-    <input type="tel" data-alpha-messages-recipients aria-label="To" placeholder="To" disabled="{{messages.nativeBusy}}" value="{{messages.nativeRecipients}}" onChange="{{messages.nativeOnRecipients}}" maxlength="230" style="flex-grow:1;min-width:0;height:44px;padding:0 16px;border-radius:22px;background:var(--s2);font-size:16px;font-family:inherit;color:inherit;border:0;outline:0;box-sizing:border-box">
+    <input type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-alpha-messages-recipients aria-label="To" placeholder="{{messages.recipientPlaceholder}}" disabled="{{messages.nativeBusy}}" value="{{messages.recipientValue}}" onChange="{{messages.onRecipientInput}}" maxlength="230" style="flex-grow:1;min-width:0;height:44px;padding:0 16px;border-radius:22px;background:var(--s2);font-size:16px;font-family:inherit;color:inherit;border:0;outline:0;box-sizing:border-box">
     <button aria-label="{{messages.contactsLabel}}" aria-expanded="{{messages.contactsOpen}}" onClick="{{messages.toggleContacts}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.plus}}"></path></svg></button>
    </div>
    <div class="scr" data-alpha-messages-picks style="flex-grow:1;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
     <sc-if value="{{messages.contactsOpen}}">
      <section aria-label="Choose a contact" data-alpha-messages-contact-picker>
-      <div style="display:flex;gap:8px;padding:0 16px 8px;align-items:center">
-       <input type="search" aria-label="Search contacts" placeholder="Name or number" maxlength="128" value="{{messages.contacts.query}}" onChange="{{messages.contacts.onQuery}}" onKeyDown="{{messages.contacts.onKey}}" style="flex-grow:1;min-width:0;min-height:44px;padding:0 16px;border:0;border-radius:22px;background:var(--s2);font-size:16px;color:inherit;box-sizing:border-box">
-       <button onClick="{{messages.contacts.search}}" disabled="{{messages.contacts.busy}}" style="min-height:44px;padding:0 4px">Search</button>
-      </div>
       <sc-if value="{{messages.contacts.busy}}"><p role="status" style="margin:8px 16px;color:var(--mut)">Checking Contacts</p></sc-if>
       <sc-if value="{{messages.contacts.notice}}"><p role="status" style="margin:8px 16px;color:var(--mut)">{{messages.contacts.notice}}</p></sc-if>
       <sc-if value="{{messages.contacts.needsAccess}}"><button disabled="{{messages.contacts.busy}}" onClick="{{messages.contacts.allow}}" style="min-height:44px;margin:0 16px;text-decoration:underline">Allow Contacts access</button></sc-if>
@@ -665,8 +665,6 @@
    <div data-alpha-messages-accessories style="flex-shrink:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:0 12px var(--alpha-dock-reserve,108px);color:var(--mut);font-size:13px">
     <sc-if value="{{messages.hasNotice}}"><p role="status" data-alpha-messages-notice style="flex-basis:100%;margin:0 8px;font-size:13px;line-height:1.35;color:var(--mut)">{{messages.nativeNotice}}</p></sc-if>
     <sc-if value="{{messages.sendFailed}}"><svg class="i" role="img" aria-label="Message failed" viewBox="0 0 24 24" style="width:16px;height:16px;margin:0 8px;color:var(--alpha-call-red)"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6m0 3h.01"></path></svg></sc-if>
-    <sc-if value="{{messages.nativeMmsAvailable}}"><button aria-label="Add picture" onClick="{{messages.nativeAttach}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);color:var(--fg);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.plus}}"></path></svg></button></sc-if>
-    <sc-if value="{{messages.showThread}}"><sc-if value="{{messages.canSuggest}}"><button data-alpha-messages-suggest aria-label="{{messages.suggestLabel}}" aria-pressed="{{messages.suggesting}}" onClick="{{messages.toggleSuggest}}" style="width:44px;height:44px;border-radius:22px;background:{{messages.suggestBg}};display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg aria-hidden="true" viewBox="0 0 24 24" style="width:18px;height:18px;fill:{{messages.suggestFill}}"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg></button></sc-if></sc-if>
     <sc-if value="{{messages.pickSim}}"><sc-for list="{{messages.sims}}" as="s"><button aria-pressed="{{s.on}}" disabled="{{messages.nativeBusy}}" onClick="{{s.pick}}" style="min-height:44px;padding:0 14px;border-radius:22px;background:{{s.bg}};color:{{s.fg}};font-size:14px;font-weight:600">{{s.label}}</button></sc-for></sc-if>
     <sc-if value="{{messages.hasPictures}}"><sc-for list="{{messages.pictures}}" as="p"><button aria-label="Remove {{p.label}}" disabled="{{messages.nativeBusy}}" onClick="{{p.remove}}" style="display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border-radius:22px;background:var(--s2);color:var(--fg);font-size:14px">{{p.label}}<svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="{{ic.x}}"></path></svg></button></sc-for></sc-if>
     <sc-if value="{{messages.needsSendAccess}}"><button onClick="{{messages.nativeSendAccess}}" disabled="{{messages.nativeBusy}}" style="min-height:44px;text-decoration:underline">Allow SMS send access</button></sc-if>
@@ -2826,7 +2824,7 @@
     <button class="ib" data-alpha-contacts-new aria-label="New contact" onClick="{{contacts.addNew}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="{{ic.plus}}"></path></svg></button>
   </div>
   <sc-if value="{{contacts.ed.open}}">
-    <div data-alpha-contact-editor class="enter" style="position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:6;padding-top:52px;box-sizing:border-box">
+    <div data-alpha-contact-editor data-alpha-navigation-header class="enter" style="position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:6;padding-top:52px;box-sizing:border-box">
       <div style="display:flex;align-items:center;padding:0 8px 12px;flex-shrink:0">
         <button aria-label="Cancel" disabled="{{contacts.ed.busy}}" onClick="{{contacts.ed.cancel}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.x}}"></path></svg></button>
         <span style="flex-grow:1"></span>
@@ -2834,28 +2832,31 @@
       </div>
       <div class="scr" style="flex-grow:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:0 16px 130px;touch-action:pan-y">
         <sc-if value="{{contacts.ed.hasNotice}}"><p role="alert" data-alpha-contact-notice style="margin:0 8px;font-size:14px;line-height:1.35">{{contacts.ed.notice}}</p></sc-if>
-        <input data-alpha-contact-name aria-label="Name" placeholder="Name" autocomplete="off" disabled="{{contacts.ed.busy}}" value="{{contacts.ed.name}}" onChange="{{contacts.ed.onName}}" maxlength="256" style="height:56px;padding:0 18px;border-radius:22px;background:var(--s2);font-size:17px;box-sizing:border-box">
+        <input data-alpha-contact-given-name aria-label="First name" placeholder="First name" autocomplete="off" autocapitalize="words" disabled="{{contacts.ed.busy}}" value="{{contacts.ed.givenName}}" onChange="{{contacts.ed.onGivenName}}" maxlength="{{contacts.ed.maxName}}" style="min-height:56px;padding:12px 18px;border-radius:22px;background:var(--s2);font-size:17px;box-sizing:border-box">
+        <input data-alpha-contact-family-name aria-label="Last name" placeholder="Last name" autocomplete="off" autocapitalize="words" disabled="{{contacts.ed.busy}}" value="{{contacts.ed.familyName}}" onChange="{{contacts.ed.onFamilyName}}" maxlength="{{contacts.ed.maxName}}" style="min-height:56px;padding:12px 18px;border-radius:22px;background:var(--s2);font-size:17px;box-sizing:border-box">
         <sc-for list="{{contacts.ed.phones}}" as="f">
           <div style="display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:22px;padding:0 6px 0 18px;min-height:56px">
             <input type="tel" aria-label="{{f.label}}" placeholder="{{f.label}}" autocomplete="off" disabled="{{contacts.ed.busy}}" value="{{f.value}}" onChange="{{f.onChange}}" maxlength="64" style="flex-grow:1;min-width:0;height:56px;font-size:17px;background:none">
-            <button aria-label="{{f.removeLabel}}" disabled="{{contacts.ed.busy}}" onClick="{{f.remove}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5 12h14"></path></svg></button>
+            <sc-if value="{{f.canRemove}}"><button aria-label="{{f.removeLabel}}" disabled="{{contacts.ed.busy}}" onClick="{{f.remove}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5 12h14"></path></svg></button></sc-if>
           </div>
         </sc-for>
         <sc-for list="{{contacts.ed.emails}}" as="f">
           <div style="display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:22px;padding:0 6px 0 18px;min-height:56px">
             <input type="email" aria-label="{{f.label}}" placeholder="{{f.label}}" autocomplete="off" disabled="{{contacts.ed.busy}}" value="{{f.value}}" onChange="{{f.onChange}}" maxlength="320" style="flex-grow:1;min-width:0;height:56px;font-size:17px;background:none">
-            <button aria-label="{{f.removeLabel}}" disabled="{{contacts.ed.busy}}" onClick="{{f.remove}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5 12h14"></path></svg></button>
+            <sc-if value="{{f.canRemove}}"><button aria-label="{{f.removeLabel}}" disabled="{{contacts.ed.busy}}" onClick="{{f.remove}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M5 12h14"></path></svg></button></sc-if>
           </div>
         </sc-for>
-        <div style="display:flex;gap:10px">
-          <button aria-label="Add phone number" disabled="{{contacts.ed.busy}}" onClick="{{contacts.ed.addPhone}}" style="flex:1 1 0;height:52px;border-radius:26px;border:1.5px solid var(--line);box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.plus}}"></path></svg><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="{{ic.phone}}"></path></svg></button>
-          <button aria-label="Add email" disabled="{{contacts.ed.busy}}" onClick="{{contacts.ed.addEmail}}" style="flex:1 1 0;height:52px;border-radius:26px;border:1.5px solid var(--line);box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:6px"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.plus}}"></path></svg><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M3 6h18v12H3zM3 7l9 7 9-7"></path></svg></button>
+        <textarea aria-label="Notes" placeholder="Notes" autocomplete="off" disabled="{{contacts.ed.busy}}" value="{{contacts.ed.notes}}" onChange="{{contacts.ed.onNotes}}" maxlength="{{contacts.ed.maxNotes}}" rows="3" style="width:100%;min-height:96px;padding:14px 18px;border:0;border-radius:22px;background:var(--s2);color:inherit;font:inherit;font-size:17px;line-height:1.4;resize:vertical;box-sizing:border-box"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button aria-label="Add another phone" disabled="{{contacts.ed.busy}}" onClick="{{contacts.ed.addPhone}}" style="flex:1 1 140px;min-height:44px;padding:8px;border-radius:16px;color:var(--mut);font-size:14px;box-sizing:border-box">Add another phone</button>
+          <button aria-label="Add another email" disabled="{{contacts.ed.busy}}" onClick="{{contacts.ed.addEmail}}" style="flex:1 1 140px;min-height:44px;padding:8px;border-radius:16px;color:var(--mut);font-size:14px;box-sizing:border-box">Add another email</button>
         </div>
       </div>
     </div>
   </sc-if>
   <sc-if value="{{contacts.nativeManaged}}"><div data-alpha-contacts-native style="display:flex;justify-content:center;gap:8px;flex-shrink:0"><span role="status" class="sr-only">{{contacts.nativeStatus}}</span><sc-if value="{{contacts.nativeAccess}}"><button data-alpha-contacts-allow disabled="{{contacts.nativeBusy}}" onClick="{{contacts.nativeRequest}}" style="min-height:52px;margin:24px 0;padding:0 28px;border-radius:26px;background:var(--fg);color:var(--bg);font-size:17px;font-weight:600">Allow</button></sc-if><sc-if value="{{contacts.nativeMore}}"><button aria-label="More contacts" disabled="{{contacts.nativeBusy}}" onClick="{{contacts.nativeLoadMore}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M6 9l6 6 6-6"></path></svg></button></sc-if></div></sc-if>
   <div class="scr" style="flex-grow: 1; overflow-y: auto; padding-bottom: 130px; touch-action: pan-y">
+    <sc-if value="{{contacts.nativeEmpty}}"><p role="status" data-alpha-contacts-empty style="display:flex;align-items:center;justify-content:center;min-height:180px;height:100%;margin:0;padding:24px;color:var(--mut);font-size:15px;line-height:1.4;text-align:center;box-sizing:border-box">{{contacts.nativeEmptyText}}</p></sc-if>
     <sc-if value="{{contacts.hasFavs}}">
       <div class="scr" data-alpha-stage-last="{{contacts.favsLast}}" style="display: flex; gap: 6px; overflow-x: auto; padding: 8px 14px 10px; touch-action: pan-x">
         <sc-for list="{{contacts.favs}}" as="f">
@@ -2891,7 +2892,7 @@
   
   <sc-if value="{{contacts.detail}}">
     <div data-alpha-contact-detail data-alpha-compact="{{stage.on}}" class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 4">
-      <div data-alpha-stage-header class="alpha-stage-header alpha-contact-head">
+      <div data-alpha-navigation-header data-alpha-stage-header class="alpha-stage-header alpha-contact-head">
         <button class="ib" data-alpha-contact-back aria-label="Back to contacts" onClick="{{contacts.d.close}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
         <span data-alpha-stage-avatar class="serif" aria-hidden="true" style="background: var(--s2); color: var(--fg); display: flex; align-items: center; justify-content: center; white-space: nowrap; flex-shrink: 0">{{contacts.d.ini}}</span>
         <h1 class="serif">{{contacts.d.name}}</h1>
@@ -4440,7 +4441,7 @@
           <sc-if value="{{m.sentPhoto}}"><button class="sent-content-attachment" aria-label="Preview sent photo" onClick="{{m.openPhotoPreview}}"><img src="{{m.sentPhoto}}" alt="Sent photo" /></button></sc-if>
           <sc-for list="{{m.sentFiles}}" key="{{f.id}}" as="f"><sc-if value="{{f.image}}"><button class="sent-content-attachment" aria-label="{{f.previewLabel}}" onClick="{{f.open}}"><img src="{{f.image}}" alt="{{f.name}}" /></button></sc-if><sc-if value="{{f.document}}"><span class="sent-content-attachment">{{f.name}}</span></sc-if></sc-for>
 
-          <div data-alpha-message-text role="{{m.messageActionsRole}}" tabIndex="{{m.messageActionsTabIndex}}" aria-label="{{m.messageActionsLabel}}" aria-haspopup="{{m.messageActionsPopup}}" aria-expanded="{{m.messageActionsOpen}}" onClick="{{m.openMessageActions}}" onKeyDown="{{m.messageActionsKey}}" onContextMenu="{{m.messageActionsContext}}" onPointerDown="{{m.messageActionsDown}}" onPointerMove="{{m.messageActionsMove}}" onPointerUp="{{m.messageActionsCancel}}" onPointerCancel="{{m.messageActionsCancel}}" style="align-self: flex-end; max-width: 80%; background: var(--acc); color: var(--alpha-white); padding: 11px 16px; border-radius: 22px 22px 6px 22px; font-size: 15px; line-height: 1.4">{{m.text}}</div>
+          <div data-alpha-message-text role="{{m.messageActionsRole}}" tabIndex="{{m.messageActionsTabIndex}}" aria-label="{{m.messageActionsLabel}}" aria-haspopup="{{m.messageActionsPopup}}" aria-expanded="{{m.messageActionsOpen}}" onClick="{{m.openMessageActions}}" onKeyDown="{{m.messageActionsKey}}" onContextMenu="{{m.messageActionsContext}}" onPointerDown="{{m.messageActionsDown}}" onPointerMove="{{m.messageActionsMove}}" onPointerUp="{{m.messageActionsCancel}}" onPointerCancel="{{m.messageActionsCancel}}" style="align-self: flex-end; max-width: 80%; background: var(--acc); color: var(--alpha-white); padding: 11px 16px; border-radius: 22px 22px 6px 22px; font-size: 15px; line-height: 1.4"><sc-if value="{{m.replyQuote}}"><div data-alpha-reply-quote style="border-left:2px solid currentColor;padding:4px 8px;margin-bottom:8px;opacity:.8;max-height:5.6em;overflow:hidden;white-space:pre-wrap"><strong>{{m.replyAuthor}}</strong><div>{{m.replyQuote}}</div></div></sc-if>{{m.text}}</div>
         </sc-if>
         <sc-if value="{{m.isAgent}}">
           <div style="display: flex; flex-direction: column; gap: 12px">
@@ -4572,7 +4573,7 @@
           </div>
         </sc-if>
         <sc-if value="{{m.messageActionsOpen}}">
-          <div data-alpha-message-actions role="menu" aria-label="Message actions" onKeyDown="{{m.menuKey}}" style="align-self: flex-start; display: flex; flex-wrap: nowrap; overflow-x:auto; gap: 0; max-width:100%; margin-top: 8px; padding: 4px; border-radius: 14px; background: var(--s2)">
+          <div data-alpha-message-actions data-alpha-user-actions="{{m.isUser}}" role="menu" aria-label="Message actions" onKeyDown="{{m.menuKey}}" style="align-self: flex-start; display: flex; flex-wrap: nowrap; overflow-x:auto; gap: 0; max-width:100%; margin-top: 8px; padding: 4px; border-radius: 14px; background: var(--s2)">
             <sc-if value="{{m.canReplyMessage}}"><button class="tap" role="menuitem" onClick="{{m.replyMessage}}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.reply}}"></path></svg>Reply</button></sc-if>
             <button class="tap" role="menuitem" onClick="{{m.copyMessage}}" style="width:100px;flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:8px;min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{m.copyMessageIcon}}"></path></svg>{{m.copyMessageLabel}}</button>
             <sc-if value="{{m.canUseInEmail}}"><button class="tap" role="menuitem" aria-label="Use in email" onClick="{{m.useInEmail}}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.mail}}"></path></svg>Email</button></sc-if>
@@ -4607,12 +4608,11 @@
     <sc-if value="{{attachedCameraPhoto}}"><div class="note-transcript-chip" aria-label="Attached photo"><button aria-label="Preview attached photo" onClick="{{openDraftPhoto}}"><img alt="Captured photo" width="48" height="48" src="{{attachedCameraPhoto}}" style="object-fit:cover;border-radius:8px"></button><span>Photo</span><button aria-label="Remove photo" onClick="{{removeCameraPhoto}}">×</button></div></sc-if>
     <sc-if value="{{attachedMail}}"><div class="note-transcript-chip" aria-label="Attached email"><div><small>Email</small><strong>{{attachedMail}}</strong></div><button aria-label="Remove email" onClick="{{removeMail}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></div></sc-if>
     <sc-if value="{{attachedTranscript}}"><div class="note-transcript-chip" role="group" aria-label="Attached transcript"><span class="note-transcript-chip-label"><small>Transcript</small><strong>{{attachedTranscript}}</strong></span><button type="button" aria-label="Remove transcript" onClick="{{removeTranscript}}"><i aria-hidden="true" class="note-transcript-remove-icon"></i></button></div></sc-if>
-    <div class="{{panelFieldClass}}" onPointerDown="{{faintSw.down}}" onPointerUp="{{faintSw.up}}">
+    <div class="{{panelFieldClass}}">
       <sc-if value="{{barLeft}}"><button data-alpha-bar-left class="alpha-bar-left" aria-label="{{barLeft.label}}" onClick="{{barLeft.tap}}"><sc-if value="{{barLeft.avatar}}"><span class="alpha-bar-avatar" aria-hidden="true">{{barLeft.initials}}</span></sc-if><sc-if value="{{barLeft.glyph}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{barLeft.glyph}}"></path></svg></sc-if></button></sc-if>
       <button class="ib chat-attach-files" aria-label="Chat actions" aria-haspopup="dialog" aria-expanded="{{chatTools.open}}" disabled="{{chatTools.disabled}}" onPointerDown="{{composerPointer}}" onClick="{{chatTools.toggle}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
       <span class="alpha-bar-field-wrap">
       <textarea disabled="{{draftOpening}}" onPointerDown="{{composerPointer}}" data-alpha-composer="true" data-alpha-bar-field="alpha" rows="1" aria-label="{{panelLabel}}" placeholder="{{panelPlaceholder}}" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" style="flex-grow: 1; min-width: 0; height: 44px; min-height:44px; max-height:min(168px,28dvh); resize:none; overflow-y:auto; font-family:inherit; line-height:22px; padding-top:11px; padding-bottom:11px; box-sizing:border-box; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 16px"></textarea>
-      <sc-if value="{{faint}}"><button data-alpha-faint class="alpha-faint" aria-label="{{faint.label}}" onClick="{{faint.accept}}"><span class="alpha-mark-18 alpha-mark-fill" aria-hidden="true"><span class="alpha-compute-mark" aria-hidden="true"></span></span><span class="alpha-faint-text">{{faint.text}}</span></button></sc-if>
       </span>
       <sc-if value="{{canStopReply}}"><button aria-label="Stop reply" onClick="{{stopReply}}" style="width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"></rect></svg></button></sc-if>
     <sc-if value="{{sendVisible}}"><button aria-label="Send" onClick="{{sendNow}}" style="width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.send}}"></path></svg></button></sc-if>
@@ -4644,9 +4644,9 @@
     <span data-alpha-input-drag-background aria-hidden="true" style="position:absolute;inset:0;z-index:0;border-radius:inherit;touch-action:none"></span>
     <button data-alpha-input-drag-alpha class="alpha-mark-fill" aria-label="{{barAlphaLabel}}" onClick="{{openSheet}}" style="position:relative;z-index:1;touch-action:none;width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; font-family: Denton, Fraunces, Georgia, serif; font-style: italic; font-size: 24px; flex-shrink: 0"><span class="alpha-compute-mark" aria-hidden="true"></span></button>
     <sc-if value="{{barAlphaControls}}"><button class="ib chat-attach-files" aria-label="Chat actions" aria-haspopup="dialog" aria-expanded="{{chatTools.open}}" disabled="{{chatTools.disabled}}" onPointerDown="{{composerPointer}}" onClick="{{chatTools.toggle}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></sc-if>
+    <sc-if value="{{messages.showComposer}}"><sc-if value="{{messages.nativeMmsAvailable}}"><button class="ib" aria-label="Add picture" onClick="{{messages.nativeAttach}}" disabled="{{messages.nativeBusy}}" style="position:relative;z-index:1;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button></sc-if></sc-if>
     <span class="alpha-bar-field-wrap" style="position:relative;z-index:1">
     <textarea disabled="{{draftOpening}}" onPointerDown="{{inputComposerPointer}}" onFocus="{{inputComposerFocus}}" onBlur="{{inputComposerBlur}}" data-alpha-composer="true" data-alpha-bar-field="{{barTarget}}" rows="1" aria-label="{{cmpPlaceholder}}" placeholder="{{barPlaceholder}}" value="{{barValue}}" maxLength="{{barMaxLength}}" onChange="{{barOnText}}" onKeyDown="{{barOnKey}}" style="position:relative;z-index:1;touch-action:{{inputComposerTouchAction}};flex-grow: 1; min-width: 0; height: 44px; min-height:44px; max-height:min(168px,28dvh); resize:none; overflow-y:auto; font-family:inherit; line-height:22px; padding-top:11px; padding-bottom:11px; box-sizing:border-box; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 16px; padding-left: 8px"></textarea>
-    <sc-if value="{{faint}}"><button data-alpha-faint class="alpha-faint" aria-label="{{faint.label}}" onClick="{{faint.accept}}"><span class="alpha-mark-18 alpha-mark-fill" aria-hidden="true"><span class="alpha-compute-mark" aria-hidden="true"></span></span><span class="alpha-faint-text">{{faint.text}}</span></button></sc-if>
     </span>
     <sc-if value="{{barAlphaControls}}">
     <sc-if value="{{canStopReply}}"><button aria-label="Stop reply" onClick="{{stopReply}}" style="position:relative;z-index:1;width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"></rect></svg></button></sc-if>

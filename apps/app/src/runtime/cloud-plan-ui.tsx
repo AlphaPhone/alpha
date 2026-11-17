@@ -39,9 +39,9 @@ const dateLabel=(at:number)=>new Date(at).toLocaleDateString(undefined,{year:'nu
  * Stripe's page, opened from here and returning here; plan changes and cancellation first confirm
  * the account with a one-time email code (native billing authority).
  */
-export function CloudPlanManager({account,authority,serviceName,onChanged,onPaymentOpened}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void;
+export function CloudPlanManager({account,authority,serviceName,onChanged,onPaymentOpened,accountRevision}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void;
  /** A Stripe page opened: the app's next return checks the plan even before Cloud confirms it. */
- onPaymentOpened?:()=>void}){
+ onPaymentOpened?:()=>void;accountRevision?:string}){
  const [plans,setPlans]=useState<PlanOffer[]|null>(null);
  const [subscription,setSubscription]=useState<SubscriptionState|null|undefined>(undefined);
  const [referral,setReferral]=useState<ReferralState|null>(null);
@@ -92,6 +92,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
   document.addEventListener('visibilitychange',returned);
   return ()=>{document.removeEventListener('visibilitychange',returned);live.current?.abort();live.current=null;};
  },[act,confirmPending,load,credential]);
+ useEffect(()=>{if(!accountRevision||live.current)return;const controller=new AbortController();void load(controller.signal).catch(()=>{if(!controller.signal.aborted)setError('Couldn’t refresh your plan.');});return()=>controller.abort();},[accountRevision,load]);
 
  /** Plan changes and cancellation: with an account session, or after confirming one. */
  const withAuthority=useCallback(async(operation:BillingOperation,signal:AbortSignal):Promise<{status:number;body:unknown}|null>=>{
@@ -188,12 +189,14 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
  const unknownPlan=plans!==null&&subscription===undefined;
  return <section className="alpha-plans" aria-label="Plans" aria-busy={working||undefined}>
   <h2>Plans</h2>
+  {error&&<p role="alert">{error}</p>}
+  {notice&&<p role="status">{notice}</p>}
   {plans===null?<p className="alpha-plans-loading">{working?<Busy label={busy}/>:'Plans unavailable'}</p>:
   <ul className="alpha-plans-list">{plans.map(plan=>{
    const current=active&&subscription?.planKey===plan.key,pending=subscription?.pendingPlanKey===plan.key;
    return <li key={plan.key} className="alpha-plan" data-current={current||undefined}>
     <div className="alpha-plan-heading"><strong>{plan.name}</strong><span>{formatUsd(plan.amountCents)}<small>/month</small></span></div>
-    <p>${plan.allowanceUsd} of AI usage each month</p>
+    <p>{formatUsd(Math.round(Number(plan.allowanceUsd)*100))} of AI usage each month</p>
     {current?<p className="alpha-plan-state"><StatusDot tone={subscription?.cancelAtPeriodEnd||subscription?.state==='past_due'?'warn':'ok'}>{subscription?.state==='past_due'?'Payment due':subscription?.cancelAtPeriodEnd?`Ends ${dateLabel(subscription.currentPeriodEnd)}`:`Renews ${dateLabel(subscription!.currentPeriodEnd)}`}</StatusDot></p>
     :pending?<p className="alpha-plan-state"><StatusDot tone="warn">Starts {dateLabel(subscription!.currentPeriodEnd)}</StatusDot></p>
     :<button type="button" disabled={working||unknownPlan||(!!active&&(subscription?.revision===null||!!subscription?.pendingPlanKey))} onClick={()=>active?change(plan):subscribe(plan)}>{active?`Switch to ${plan.name}`:`Subscribe`}</button>}
@@ -222,7 +225,20 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
   <form className="alpha-plans-referral-entry" onSubmit={applyReferral} aria-label="Enter a referral code"><label><span className="alpha-sr">Referral code</span><input value={referralInput} onChange={event=>setReferralInput(event.target.value)} placeholder="Referral code" autoCapitalize="characters" autoCorrect="off" spellCheck={false} maxLength={64} disabled={working}/></label><button type="submit" disabled={working||!referralInput.trim()}>Apply</button></form>
 
   {working&&plans!==null&&<p role="status"><Busy label={busy}/></p>}
-  {error&&<p role="alert">{error}</p>}
-  {notice&&<p role="status">{notice}</p>}
  </section>;
+}
+
+/** A balance purchase has its own amount and checkout; choosing a plan never substitutes for it. */
+export function CloudFundsManager({client,onPaymentOpened}:{client:{startFundsCheckout(amount:number,key:string,signal:AbortSignal):Promise<void>};onPaymentOpened:()=>void}){
+ const [amount,setAmount]=useState('10'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[opened,setOpened]=useState(false);
+ const active=useRef<AbortController|null>(null),attempt=useRef<{amount:number;key:string}|null>(null);
+ useEffect(()=>()=>active.current?.abort(),[]);
+ const submit=async(event:React.FormEvent)=>{event.preventDefault();if(active.current)return;const value=Number(amount);if(!Number.isFinite(value)||value<5||value>1000||!Number.isInteger(value*100)){setError('Enter an amount from $5 to $1,000.');return;}
+  const controller=new AbortController();active.current=controller;setBusy(true);setError('');setOpened(false);
+  if(attempt.current?.amount!==value)attempt.current={amount:value,key:crypto.randomUUID()};
+  try{await client.startFundsCheckout(value,attempt.current!.key,controller.signal);if(!controller.signal.aborted){onPaymentOpened();setOpened(true);}}
+  catch{if(!controller.signal.aborted)setError('Couldn’t open checkout. Try again.');}
+  finally{if(active.current===controller){active.current=null;setBusy(false);}}
+ };
+ return <section className="alpha-plans" aria-label="Add funds"><h2>Add funds</h2><form className="alpha-plans-referral-entry" onSubmit={submit}><label><span className="alpha-sr">Amount in dollars</span><input aria-label="Amount in dollars" type="number" min="5" max="1000" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} disabled={busy}/></label><button type="submit" disabled={busy}>{busy?'Opening…':'Continue'}</button></form>{error&&<p role="alert">{error}</p>}{opened&&<p role="status">Finish payment, then return to Alpha.</p>}</section>;
 }

@@ -87,7 +87,7 @@ export function deploymentOutputs(config: CloudDeploymentConfig){
   ' }','}');
  ts.push(`export const cloudStorageNamespace = "cloud-deployment:${fingerprint}:";`,
   'export function cloudStorageSlot(name:string):string { return name.startsWith("cloud:") || name.startsWith("cloud-signin:") || name === "local-agent-provider:v1" ? cloudStorageNamespace + name : name; }');
- gradle.push(']',`// Alpha Cloud cutover: enables the billing return App Link (AndroidManifest.xml AlphaCloudBillingReturn).`,`ext.alphaCloudCutover = ${cutover}`);
+ gradle.push(']',`// Alpha Cloud cutover: which Cloud this build uses (in-app billing is on for every Cloud).`,`ext.alphaCloudCutover = ${cutover}`);
  return {
   'apps/app/src/runtime/cloud-deployment.generated.ts':ts.join('\n')+'\n',
   ['android/app/src/main/java/'+productIdentity.appId.replaceAll('.','/')+'/CloudDeployment.java']:java.join('\n')+'\n',

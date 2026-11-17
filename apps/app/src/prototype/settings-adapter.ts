@@ -1084,7 +1084,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'License details',hasTitle:true,backLabel:'Back to licenses',back:()=>api.set({page:'licenses'}),hero:{},groups:item?[group([info(item.name,item.version+' · '+item.license)]),...(item.source?[group([{kLegalText:true,label:'Source',text:item.source}])]:[]),...(licenseFlagRows(item).length?[group(licenseFlagRows(item))]:[]),group([{kLegalText:true,label:'License and notices',text:item.text||'License text missing'}])]:[group([info('Unavailable','')])]});
         }
 
-        if (owner?.props.systemShell === false) {
+        {
           const systemOnly = new Set(['Wi-Fi', 'Bluetooth', 'Mobile data', 'Battery', 'Sound & vibration']);
           page.groups = page.groups.map((g:Bag) => ({...g, rows:g.rows.filter((row:Bag) => !systemOnly.has(row.label))})).filter((g:Bag) => g.rows.length);
         }
@@ -1287,7 +1287,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       if(Capacitor.isNativePlatform())settingsTop.groups.push(group([{...nav('Android settings','system'),lucide:'settings'}]));
       if(wakeListeningStopUnconfirmed())settingsTop.groups.unshift(group([micMayBeOn()],'wake-stop-unconfirmed'));
       const appSettingsRows=detailGroups.filter((section:Bag)=>section.cap==='Apps').flatMap((section:Bag)=>section.rows);
-      const appCatalog=[['Browser','browser'],['Calendar','calendar'],['Camera','camera'],['Files','files'],['Inbox','inbox'],['Maps','maps'],['Notes','notes'],['Passwords','passwords'],['Photos','photos'],['Workflows','workflows']] as const;
+      const appCatalog=[['Browser','browser'],['Calendar','calendar'],['Camera','camera'],['Files','files'],['Inbox','inbox'],['Maps','maps'],...(aospImage?[['Messages','messages'] as const]:[]),['Notes','notes'],['Passwords','passwords'],['Photos','photos'],['Workflows','workflows']] as const;
       const existingAppRow=(id:string)=>appSettingsRows.find((row:Bag)=>row.label===(id==='calendar'?'Calendar':id==='photos'?'Photos':id==='passwords'?'Password manager':''));
       const selected=categories.find(([key])=>key===categoryPage);
       if(selected){
@@ -1305,7 +1305,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       }
     }
     if(appSettingsPage){
-      const names:Record<string,string>={browser:'Browser',calendar:'Calendar',camera:'Camera',files:'Files',inbox:'Inbox',maps:'Maps',notes:'Notes',passwords:'Passwords',photos:'Photos',workflows:'Workflows'};
+      const names:Record<string,string>={browser:'Browser',calendar:'Calendar',camera:'Camera',files:'Files',inbox:'Inbox',maps:'Maps',messages:'Messages',notes:'Notes',passwords:'Passwords',photos:'Photos',workflows:'Workflows'};
       const rows:Bag[]=[];
       if(appSettingsPage==='inbox')rows.push({kNav:true,label:'Google & email',lbl:'Google & email',chev:true,noAB:true,go:()=>googleConnectionController.open()});
       if(appSettingsPage==='inbox'){

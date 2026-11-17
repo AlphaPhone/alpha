@@ -94,7 +94,7 @@ async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
     if(method==='status')return f.signIn==='not-ready'?{active:false,inApp:false,google:false,email:false}:{active:false,inApp:true,google:true,email:true,phone:true};
     if(method==='startGoogle'){if(f.signIn==='hold')return new Promise((_,reject)=>{f.release=reject;});return store();}
     if(method==='startEmail'||method==='startPhone'){if(f.signIn==='offline')throw fail('offline');return {attemptId:'33333333-3333-4333-8333-333333333333',expiresAt:Date.now()+600000,resendAt:Date.now()+60000};}
-    if(method==='verifyEmail'||method==='verifyPhone'){if(input.code!=='123456')throw fail('invalid-code');if(f.signIn==='mfa')return {status:'mfa',method:'totp',expiresAt:Date.now()+300000};return store();}
+    if(method==='verifyEmail'||method==='verifyPhone'){if(f.verificationFailure)throw fail(f.verificationFailure);if(input.code!=='123456')throw fail('invalid-code');if(f.signIn==='mfa')return {status:'mfa',method:'totp',expiresAt:Date.now()+300000};return store();}
     if(method==='verifyMfa'){if(input.code!=='654321')throw fail('invalid-code');return store();}
    }
    if(plugin==='Agent'){

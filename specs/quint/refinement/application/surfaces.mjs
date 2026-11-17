@@ -65,9 +65,9 @@ export async function developmentDevice() {
   for (const late of [false, true]) {
     const state = {callWho: null, liveAt: null, mute: false, spk: false, recents: [], tab: 'recents'};
     let timer;
-    const context = vm.createContext({Date, PN_SCRIPT: {_:{lines: [], sum: ''}}, PEOPLE: [], person: () => null});
+    const context = vm.createContext({Date, testMocksEnabled:true, setCallPartyResolver(){}, deviceEmergencyLive:()=>false, PN_SCRIPT: {_:{lines: [], sum: ''}}, PEOPLE: [], person: () => null});
     vm.runInContext(phone + ';globalThis.operations={pnStart,pnEnd};', context);
-    const api = {get: () => state, set: patch => Object.assign(state, patch), stop() {}, stopBg() {}, laterBg(fn) {timer = fn;}, everyBg() {}, toast() {}, isActive: () => false};
+    const api = {get: () => state, set: patch => Object.assign(state, patch), stop() {}, stopBg() {}, stopRing() {}, laterBg(fn) {timer = fn;}, everyBg() {}, toast() {}, isActive: () => false};
     const observe = () => ({'s.call': state.callWho ? state.liveAt ? 'active' : 'dialing' : 'idle',
       's.microphoneMuted': state.mute, 's.speaker': state.spk});
     const t = trace(`call-timer-${late ? 'late' : 'current'}`, observe());

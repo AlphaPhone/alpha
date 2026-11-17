@@ -289,3 +289,14 @@ test('current terminal protocol attestation passes the paired bridge without wea
   attestation.turnTerminal=false;assert.equal((await f.call({path:BASE+'/health?conversationId='+conversation,method:'GET'})).status,503);
  }finally{await f.close();}
 });
+
+
+test('Cloud lease renewal remains bound to canonical stop and rotation proof',async()=>{
+ const f=await fixture(false,true,{speechRoute:'cloud',speechProvider:'cartesia',providerAdmission:'at-session-start'});
+ try{
+  f.mintMetadata(id=>({stopIntentVersion:1,stopIntentGeneration:id,rotationPreparation:'retire-before-open-v1',leaseRenewal:true}));
+  const response=await f.call(mint());assert.equal(response.status,200);assert.equal(JSON.parse(response.data.body).leaseRenewal,true);
+  for(const leaseRenewal of [false,'true',1]){f.mintMetadata(id=>({stopIntentVersion:1,stopIntentGeneration:id,rotationPreparation:'retire-before-open-v1',leaseRenewal}));assert.equal((await f.call(mint())).status,503);}
+  f.mintMetadata(()=>({leaseRenewal:true}));assert.equal((await f.call(mint())).status,503);
+ }finally{await f.close();}
+});

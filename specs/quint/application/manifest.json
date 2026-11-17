@@ -1598,7 +1598,8 @@
       "imageOwnerAndOverlayReturnTest",
       "imageFailedProgressReloadsTest",
       "imageSettingsReviewIsExplicitTest",
-      "imageTargetReviewNeverContinuesTest"
+      "imageTargetReviewNeverContinuesTest",
+      "knownChoiceSkipsWithoutTimerTest"
     ],
     "sources": [
       "apps/app/src/startup-permissions.tsx",
@@ -7353,7 +7354,7 @@
       },
       {
         "path": "apps/app/src/runtime/connection-ui.tsx",
-        "name": "manageProviderKey"
+        "name": "saveProviderKeys"
       },
       {
         "path": "apps/app/src/runtime/connection-ui.tsx",
@@ -7377,7 +7378,7 @@
       }
     ],
     "stateMapping": {
-      "operation": "the single operation controller taken by work(), manageProviderKey, a sign-in return or a rebind; every release, manageProviderKey's included, runs runQueuedResidentRebind then runQueuedSignInReturn",
+      "operation": "the single operation controller taken by work(), saveProviderKeys, a sign-in return or a rebind; every release, saveProviderKeys's included, runs runQueuedResidentRebind then runQueuedSignInReturn",
       "startupResolved": "state.startupResolved set when initialize() settles",
       "queuedReturn/returnsArrived/returnsHandled/returnsReplaced": "queuedSignInReturn single slot and signInReturned",
       "incomplete/incompleteFenced/viewChanged/notices/noticesDropped": "queuedSignInIncomplete with its captured epoch and sign-in view, and showSignInIncomplete",
@@ -7386,7 +7387,7 @@
     "abstractions": [
       "Three returns, notices and rebinds. A rebind blocked only by a turn in flight, automatic restart, plan re-checks and resident liveness are ResidentLiveness and CloudPlanRecheck.",
       "A wanted rebind claims the freed slot before the sign-in queue, except when the step that ends is itself a rebind: the queued return or notice then goes first and the wanted rebind runs at the next release. A rebind retires the connection, so a fenced notice queued before it is dropped and one that arrives during it is shown. A key-manager request releases the slot the same way whether it completed or failed.",
-      "Replayed against work, releaseOperation, manageProviderKey, the rebind request and the sign-in return and notice queue sliced from connection-ui.tsx with the shared ResidentRebindQueue and held ports (test/quint-connection-controller.test.mjs). No installed WebView or native event-delivery claim."
+      "Replayed against work, releaseOperation, saveProviderKeys, the rebind request and the sign-in return and notice queue sliced from connection-ui.tsx with the shared ResidentRebindQueue and held ports (test/quint-connection-controller.test.mjs). No installed WebView or native event-delivery claim."
     ],
     "sharedSources": [
       "packages/auth/src/auth/cloud-resident-binding.ts"
@@ -10613,7 +10614,7 @@
     "stateMapping": {
       "owner/front/session": "the mounted instance, owner.S().view === 'settings' and connectionController.getCloudClient()?.sessionId",
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
-      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization…, a grant label, Authorization not verified",
+      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization\u2026, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
       "diagnostics": "inferenceAbort, pending resident status and crash-log reads, expired deadlines, recorded failures, the module-level crashLog the Problem log renders, the Problem log tap's ordinary refresh() (its generation and the crash-log snapshot it read) and crashLogVersion",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
@@ -11258,7 +11259,7 @@
       "form": "The fields the editor shows: the event's own, a stored copy's or ones typed here",
       "stored/synced/savedCopy": "The stored draft copy, whether it equals the editor's text, and the copy a conflict offers",
       "stage": "The awaited controller.open, retry, consume or event commit",
-      "review/reviewStoreCurrent": "Outstanding BrowserReviews approval of discard or replace and the shared controller’s exact expected durable draft row",
+      "review/reviewStoreCurrent": "Outstanding BrowserReviews approval of discard or replace and the shared controller\u2019s exact expected durable draft row",
       "recovery/recoveryCurrent/recoveryReset": "The installed recovery dialog, captured browser document revision and observed reset receipt",
       "inert/disabled/canRestore/canReplace/canDiscard/canRetry": "form.inert, save.disabled and the hidden state of the four draft buttons as publish() last set them",
       "saves/saveResult": "Event commits that resolved, and how the last Save event press ended",

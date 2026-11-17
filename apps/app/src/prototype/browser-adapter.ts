@@ -534,6 +534,17 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       signal.throwIfAborted();if(disposed||shell.S().view!=='browser'||state()?.cur!==id||receipt?.session!==session||receipt?.id!==id)throw Error('Native browser result belongs to another tab or session');
       return {ok:true,data:{dispatched:true,completed:false,requiresReadback:true}};
     };
+    // An explicit link tap uses the same tab host as the address bar. It never searches.
+    this.browserNavigateFromTap = async (raw: string) => {
+      const url = new URL(raw);
+      if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return;
+      if (disposed || document.hidden || shell.S().screen !== 'home') return;
+      const owner = this;
+      owner.openView('browser', null, null, {restore: true});
+      owner.setState({}, () => {
+        if (!disposed && !document.hidden && owner.S().view === 'browser') void navigate(url.href, true);
+      });
+    };
     this.browserNavigateApproved = async (raw: string, signal: AbortSignal, deferPresentation = false) => {
       const url = new URL(raw);
       if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Only HTTPS destinations may be approved');

@@ -104,6 +104,8 @@ function productionSurface(): Plugin[] {
 
 export default defineConfig({
   root: "apps/app",
+  // Worktrees may share node_modules; one preview must not replace another preview's optimized modules.
+  cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}/`, import.meta.url)),
   plugins: [productionSurface(), localOcrAssets(), browserPdfAssets(), browserFullReload(), react(), localAgentDevBridge(), browserCloudDevBridge()],
   define: {
     'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify(flagOn ? '1' : ''),

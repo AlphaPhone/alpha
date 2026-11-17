@@ -48,7 +48,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | AC-09 | The target is always visible in three ways: place (the sheet is Alpha, the stage is the person), the left slot (AC-08) and the field. The Alpha field has a 1.5 dp `--acct` outline and reads "Ask Alpha"; the person field is plain and reads "Text <first name>". The sheet header shows the context, for example "Maya Chen · Messages". | Screenshot review of every state; TalkBack announces the target (AC-29). |
 | AC-10 | Two separate drafts per thread: the owner's text to the person and the request to Alpha (`runtime/message-draft.ts`). Swapping targets never clears or merges them. Both survive layout changes and process death (AP-05). | Type to Maya, open Alpha, type to Alpha, kill the process: both drafts return. |
 | AC-11 | The bar grows with its text up to the existing composer limit, `min(168px, 28dvh)`, then scrolls inside. The stage and sheet re-fit so the bar is never clipped. | A 1,600-character draft in the bar keeps both bar buttons visible and the text scrollable. |
-| AC-12 | The right-hand mic dictates into whichever draft the bar shows. Holding the Alpha button always starts a voice turn with Alpha (AP-06 modes). During a call the caller never hears Alpha. | Mic in "Text Maya" fills the SMS draft; holding Alpha starts voice with Alpha in every state. |
+| AC-12 | The right-hand mic dictates into whichever draft the bar shows. In Messages, stopping capture appends its transcript to the editable unsent draft, without a second review step or an agent reply; the mic remains available beside Send. Recording occupies the same dock as typing. Holding the Alpha button always starts a voice turn with Alpha (AP-06 modes). During a call the caller never hears Alpha. | Mic in "Text Maya" fills only that conversation's SMS draft; cancellation or unavailable speech preserves typed text; holding Alpha starts voice with Alpha in every state. |
 
 ### Drafts in Messages
 
@@ -80,7 +80,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | ID | Requirement | Acceptance |
 | --- | --- | --- |
 | AC-23 | Remove the suggestion chip row (`data-alpha-chat-suggestions`, `template.html` around line 4426) from the conversation sheet. Per-view suggestions feed AC-24 instead. | No chip row renders in any state. |
-| AC-24 | At most one faint suggestion, inside the bar. Closed in a thread: a suggested reply to the person, only while the existing opt-in for suggested replies is on (`sms-adapter.ts`, `alpha.messages.suggest-replies.v1`); otherwise none. Open: the single most likely next request to Alpha about what is on screen. It names something specific, never a feature ("Set a reminder"). Tapping it or swiping right on the bar puts it in the field without sending it; typing replaces it. | Accepting fills the field and sends nothing; with the opt-in off, a thread shows no faint reply. |
+| AC-24 | Automatic suggestions are deferred by owner request. Do not generate suggested replies, show suggestion chips or faint text, or expose a suggestion setting. Explicit requests for draft help remain available. | Opening a thread or chat makes no suggestion request and leaves the input editable. |
 | AC-25 | The briefing is one or two sentences of facts from actual sources about the current screen, shown as Alpha's first line when the chat opens on a new context. It isn't repeated when nothing has changed. With nothing known (production builds have no fixtures), it is absent. | Reopening the chat on an unchanged thread adds no new briefing. |
 | AC-26 | At most one open proposal at a time, with one button, executed through the existing approval path (AP-04, AP-11). An ignored proposal stays in history and is never executed later. | A second proposal replaces the first; neither executes without a tap. |
 | AC-27 | No attention ring or badge on the Alpha button. | The Alpha button looks the same in every state. |
@@ -105,7 +105,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | Screen | Closed: left / field / right | Open: left / field / right |
 | --- | --- | --- |
 | Messages list | Alpha / "Search or ask" / mic | Search icon / "Ask Alpha" / mic |
-| Thread | Alpha / "Text <name>" / send or dictate | Avatar / "Ask Alpha" / send or voice |
+| Thread | Alpha / attach picture / "Text <name>" / send and dictate | Avatar / "Ask Alpha" / send or voice |
 | Recents and keypad | Alpha / "Call or ask" / mic | Keypad icon / "Ask Alpha" / mic |
 | In call | Alpha / "Ask during call" / mic, with End beside the bar | Call icon / "Ask Alpha" / mic; End in the call card |
 | Contacts list | Alpha / "Search or ask" / mic | Search icon / "Ask Alpha" / mic |
@@ -138,6 +138,16 @@ An AP-16 implementation updates the related models and runs `bun run quint:check
 - `specs/lemma/apps/app/src/prototype/chat-overlay-motion-adapter.dfy`: height bounds (sheet minimum, stage cap).
 
 ## Verification
+
+Messages renders credential-free HTTP(S) links as text links; only an owner's tap opens the existing
+Alpha Browser tab host. Long-press (or the keyboard context-menu key) on a complete listed provider
+row offers Copy and Delete. Delete asks for confirmation, then passes that row's exact id, kind,
+thread and date to the shared client. Pending local bubbles have no delete action. Unknown,
+unavailable or mismatched results retain the row and block another delete attempt in this renderer.
+Contacts shows First name, Last name, Phone, Email and Notes immediately, and displays saved Notes
+in details. Omitted native name components, photos and unrelated provider rows remain native-owned.
+The Messages, Contacts and AOSP-views browser specs exercise these UI flows over synthetic providers;
+they do not establish real-provider or device acceptance.
 
 Keep the layers separate (AGENTS.md); none proves another:
 

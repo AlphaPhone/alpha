@@ -78,6 +78,50 @@ test.describe('dev Contacts (?mode=dev&fixture=1 dev build with ELIZA_DEV_ALLOW_
 });
 
 test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-views.spec.ts)', () => {
+  test('immediate fields save structured names and Notes while unrelated provider rows stay unchanged', async ({page}) => {
+    await setupTelephony(page);
+    await page.evaluate(()=>{
+      const w=window as any,cap=w.Capacitor,native=cap.nativePromise;
+      w.providerContact={id:'13',lookup:'lookup-13',displayName:'Carmen Middle Ruiz',givenName:'Carmen',familyName:'Ruiz',notes:'Original notes',middleName:'Middle',photo:'synthetic-photo-row',otherRows:['birthday'],starred:false,phoneNumbers:[{number:'+15550100103',type:'mobile'},{number:'+15550100999',type:'work'}],emailAddresses:[{address:'carmen@example.invalid',type:'home'},{address:'work@example.invalid',type:'work'}],version:'a'.repeat(64)};
+      cap.nativePromise=async(plugin:string,method:string,input:any)=>{
+        if(plugin==='AlphaContacts'&&method==='get'&&input.id==='13'){const {middleName,photo,otherRows,...detail}=w.providerContact;return structuredClone(detail);}
+        if(plugin==='AlphaContacts'&&method==='save'){
+          w.telephonyInputs.push(['contacts.save',input]);
+          w.providerContact={...w.providerContact,...input,version:'b'.repeat(64)};
+          return {status:'saved',id:'13',version:w.providerContact.version};
+        }
+        return native(plugin,method,input);
+      };
+    });
+    await page.getByRole('button',{name:'Contacts',exact:true}).first().click();
+    await page.getByRole('button',{name:/Carmen Ruiz/}).first().click();
+    await expect(page.getByRole('button',{name:'Back to apps',exact:true})).not.toBeVisible();
+    await expect(page.getByText('Original notes',{exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Edit contact',exact:true}).click();
+    for(const name of ['First name','Last name','Phone','Email','Notes'])await expect(page.getByRole('textbox',{name,exact:true})).toBeVisible();
+    await expect(page.getByRole('textbox',{name:'First name',exact:true})).toHaveValue('Carmen');
+    await expect(page.getByRole('textbox',{name:'Last name',exact:true})).toHaveValue('Ruiz');
+    await page.getByRole('textbox',{name:'Notes',exact:true}).fill('Owner updated notes');
+    await page.locator('[data-alpha-contact-save]').click();
+    await expect(page.getByText('Owner updated notes',{exact:true})).toBeVisible();
+    const result=await page.evaluate(()=>({saved:(window as any).telephonyInputs.filter(([method]:any)=>method==='contacts.save').map(([,input]:any)=>input),record:(window as any).providerContact}));
+    expect(result.saved).toHaveLength(1);
+    expect(result.saved[0]).toEqual({id:'13',version:'a'.repeat(64),displayName:'Carmen Middle Ruiz',notes:'Owner updated notes',phoneNumbers:result.record.phoneNumbers,emailAddresses:result.record.emailAddresses});
+    expect(result.record).toMatchObject({givenName:'Carmen',familyName:'Ruiz',middleName:'Middle',photo:'synthetic-photo-row',otherRows:['birthday']});
+    expect(result.record.phoneNumbers).toHaveLength(2);expect(result.record.emailAddresses).toHaveLength(2);
+  });
+
+  test('new contact offers all five fields immediately and submits the entered names and Notes', async ({page})=>{
+    await setupTelephony(page);
+    await page.getByRole('button',{name:'Contacts',exact:true}).first().click();
+    await page.getByRole('button',{name:'New contact',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Back to apps',exact:true})).not.toBeVisible();
+    const fields={'First name':'Review','Last name':'Person','Phone':'+15550100888','Email':'review@example.invalid','Notes':'Entered by owner'};
+    for(const [name,value] of Object.entries(fields)){await expect(page.getByRole('textbox',{name,exact:true})).toBeVisible();await page.getByRole('textbox',{name,exact:true}).fill(value);}
+    await page.locator('[data-alpha-contact-save]').click();
+    await expect.poll(()=>page.evaluate(()=>(window as any).telephonyInputs.filter(([method]:any)=>method==='contacts.save').length)).toBe(1);
+    expect(await page.evaluate(()=>(window as any).telephonyInputs.find(([method]:any)=>method==='contacts.save')[1])).toEqual({displayName:'Review Person',givenName:'Review',familyName:'Person',notes:'Entered by owner',phoneNumbers:[{number:'+15550100888',type:'mobile'}],emailAddresses:[{address:'review@example.invalid',type:'home'}]});
+  });
   test('typing reads the device address book with the query and nothing else', async ({page}) => {
     await setupTelephony(page);
     await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();

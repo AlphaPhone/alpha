@@ -8,8 +8,10 @@ type Choice={key:string;name:string;number:string};
 export function createSmsRecipientPicker(book:Reader, inFront:()=>boolean, changed:()=>void) {
   let opened=false, revision=0, query='', next:string|null=null, rows:Choice[]=[];
   let busy=false, needsAccess=false, notice='';
+  let searchTimer:ReturnType<typeof setTimeout>|undefined;
 
   function resetPage() {
+    clearTimeout(searchTimer);searchTimer=undefined;
     ++revision;
     next=null;
     rows=[];
@@ -81,6 +83,7 @@ export function createSmsRecipientPicker(book:Reader, inFront:()=>boolean, chang
       query=value;
       resetPage();
       changed();
+      searchTimer=setTimeout(()=>{searchTimer=undefined;void read(false,false);},180);
     },
     search:()=>read(false,false),
     allow:()=>read(true,false),

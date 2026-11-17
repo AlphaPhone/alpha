@@ -4,4 +4,16 @@
  * each send, conversation and owner fencing by binding, and an unknown dispatch outcome that is
  * never offered for a second send. This name is kept for the existing call sites.
  */
-export {DurableDraftController as AssistantDraftController,DEFAULT_DURABLE_DRAFT_MESSAGES} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';
+import {DurableDraftController} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';
+
+export class AssistantDraftController<Recovery=unknown> extends DurableDraftController<Recovery> {
+  override async open(key:string):Promise<void> {
+    await super.open(key);
+    // An empty saved slot has no competing text to recover. Keep the current
+    // editor through the shared compare-and-exchange path; never auto-resolve
+    // an uncertain send, storage error or a nonempty competing draft.
+    if(this.binding===key&&this.state.conflict&&!this.state.error&&!this.state.unsettled&&this.state.savedText==='')this.keepCurrent();
+  }
+}
+
+export {DEFAULT_DURABLE_DRAFT_MESSAGES} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';

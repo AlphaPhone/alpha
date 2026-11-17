@@ -1,4 +1,4 @@
-import {isIncompleteSmsRow,normalizePhoneNumber} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {isIncompleteSmsRow,normalizePhoneNumber,type MessageDeleteReference} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {createAddressBookClient,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
@@ -10,18 +10,10 @@ import {watchReturnToApp} from './native-adapter';
 import {formatDateTime,formatMonthDay,formatTime} from './locale-time';
 import {displayNumber,initials,numberKey,shortWhen,threadTitle} from './telephony-presenters';
 import {createSmsRecipientPicker} from './sms-recipient-picker';
-import {askedDraftPlaced,canSuggest,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,suggestionDismissed,suggestionReplied,suggestionRequested,threadChanged,typed,type DraftState} from '../runtime/message-draft';
+import {askedDraftPlaced,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
-/** The open thread's visible tail, handed to the reply suggester and to the agent's selected-thread read. */
+/** The open thread's visible tail, available to the agent's explicitly selected-thread read. */
 export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
-export type SmsReplySuggester=(thread:OpenThread,signal:AbortSignal)=>Promise<string|null>;
-let suggester:SmsReplySuggester|null=null;
-/** Installed only while the owner has suggested replies turned on; null turns them off. */
-export function setSmsReplySuggester(next:SmsReplySuggester|null){suggester=next;}
-/* Suggested replies are off until the owner turns them on in a conversation; the choice stays on this phone. */
-const SUGGEST_KEY='alpha.messages.suggest-replies.v1';
-const suggestOn=()=>{try{return globalThis.localStorage?.getItem(SUGGEST_KEY)==='1';}catch{return false;}};
-const setSuggest=(on:boolean)=>{try{if(on)globalThis.localStorage?.setItem(SUGGEST_KEY,'1');else globalThis.localStorage?.removeItem(SUGGEST_KEY);}catch{/* The switch then simply stays off. */}};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
 /** The selected thread identity for on-device approval checks. */
 export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
@@ -77,12 +69,69 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const native=registerPlugin<MessagesBridge>('AlphaTelephony');
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
+ let messageMenu:{target:MessageDeleteReference;text:string;confirm:boolean}|null=null,deleting=false;
+ let messageHold:ReturnType<typeof setTimeout>|undefined,holdPoint:{x:number;y:number}|null=null;
+ const uncertainDeletes=new Set<string>();
+ const cancelMessageHold=()=>{clearTimeout(messageHold);messageHold=undefined;};
+ const menuRow=()=>messageMenu&&session.state.rows.find(row=>!isIncompleteSmsRow(row)&&row.id===messageMenu!.target.id&&row.kind===messageMenu!.target.kind&&row.threadId===session.state.thread&&row.date===messageMenu!.target.date);
+ const closeMessageMenu=()=>{if(!deleting){cancelMessageHold();messageMenu=null;paint();}};
+ const showMessageMenu=(row:SmsMessage,event?:Event)=>{
+  event?.preventDefault();event?.stopPropagation();cancelMessageHold();
+  if(!inFront()||deleting||row.threadId!==session.state.thread)return;
+  messageMenu={target:{id:row.id,kind:row.kind,threadId:row.threadId,date:row.date},text:row.body||'',confirm:false};paint();
+ };
+ async function deleteSelectedMessage(){
+  if(!messageMenu?.confirm||deleting||!inFront()||!menuRow()||uncertainDeletes.has(messageMenu.target.id))return;
+  const selection=messageMenu,visit=lifecycle;deleting=true;paint();
+  try{
+   const result=await client.deleteMessage(selection.target);
+   if(result.status==='unknown')uncertainDeletes.add(selection.target.id);
+   if(visit!==lifecycle||!inFront()||messageMenu!==selection)return;
+   messageMenu=null;
+   if(result.status==='deleted')void session.refresh();
+   else if(result.status==='unknown')owner?.toast('Deletion outcome unknown. The message is kept on screen.');
+   else{owner?.toast(result.status==='stale'?'This message changed. Review it again.':'This message was not found. Refresh Messages.');void session.refresh();}
+  }catch{
+   uncertainDeletes.add(selection.target.id);
+   if(visit===lifecycle&&inFront()){messageMenu=null;owner?.toast('Deletion unavailable or unconfirmed. The message is kept on screen.');}
+  }finally{deleting=false;if(inFront())paint();}
+ }
  let receipt:SmsSendResult|null=null,selectedThread:{id:string;addresses:string[]}|null=null;
- /* Composer draft and suggested reply (MessageThreads.qnt); contact names for the visit only. */
- let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,suggestConfirm=false,suggesting:AbortController|null=null,namesLoaded=false,api:Bag|null=null;
+ /* Composer draft; contact names for the visit only. */
+ let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,namesLoaded=false,api:Bag|null=null;
  /* AC-22: the list filter, typed in the bar or applied by Alpha. AC-15: the bubble just sent, until the provider lists it. */
  let listFilter:CommsListFilter|null=null,bubbleSent:{by:'alpha'|'owner';text:string}|null=null;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
+ // Render ordinary text as text nodes, never HTML. Only credential-free HTTP(S) URLs are links.
+ const messageSegments=(text:string)=>{
+  const parts:{text:string;link:boolean;plain:boolean;href?:string;open?:(event:Event)=>void}[]=[];
+  let at=0;
+  for(const match of text.matchAll(/\bhttps?:\/\/[^\s<>"']+/gi)){
+   const raw=match[0].replace(/[.,!?;:]+$/,'').replace(/\)+$/,tail=>{
+    const opens=(match[0].match(/\(/g)||[]).length,closes=(match[0].match(/\)/g)||[]).length;
+    return tail.slice(0,Math.max(0,tail.length-Math.max(0,closes-opens)));
+   });
+   let url:URL;try{url=new URL(raw);if(!url.hostname||url.username||url.password)continue;}catch{continue;}
+   const start=match.index!;
+   if(start>at)parts.push({text:text.slice(at,start),link:false,plain:true});
+   parts.push({text:raw,link:true,plain:false,href:url.href,open:(event:Event)=>{event.preventDefault();event.stopPropagation();if(inFront())void owner?.browserNavigateFromTap?.(url.href);}});
+   at=start+raw.length;
+  }
+  if(at<text.length)parts.push({text:text.slice(at),link:false,plain:true});
+  return parts;
+ };
+ const messageActions=(id:string)=>{
+  const row=session.state.rows.find(value=>value.id===id);
+  if(!row||isIncompleteSmsRow(row))return {};
+  return {
+   // The press origin outlives a repaint (a message arriving mid-press), so a moving finger still cancels the hold.
+   down:(event:PointerEvent)=>{cancelMessageHold();if(event.button!==0||(event.target as Element).closest('a'))return;holdPoint={x:event.clientX,y:event.clientY};messageHold=setTimeout(()=>showMessageMenu(row),500);},
+   move:(event:PointerEvent)=>{if(messageHold!==undefined&&holdPoint&&Math.hypot(event.clientX-holdPoint.x,event.clientY-holdPoint.y)>10)cancelMessageHold();},
+   up:cancelMessageHold,
+   context:(event:Event)=>showMessageMenu(row,event),
+   key:(event:KeyboardEvent)=>{if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey)showMessageMenu(row,event);},
+  };
+ };
  /* The reviewed text an operation ID was assigned for: the native send and its read-back hash exactly this. */
  let smsReview:ReviewedSms|null=null;
  let composerAbort=new AbortController();
@@ -101,10 +150,10 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  /* Android's picture chooser covers the WebView and reports it hidden; the draft stays while it is open. */
  const sync=()=>{const next=!!owner&&owner.S().view==='messages'&&(!document.hidden||picking);if(next===active)return;active=next;lifecycle++;
   if(next)composerAbort=new AbortController();else composerAbort.abort();
-  session.setActive(next);if(!next){recipientPicker.close();busy=false;suggestConfirm=false;draftRevision++;
+  session.setActive(next);if(!next){cancelMessageHold();messageMenu=null;recipientPicker.close();busy=false;draftRevision++;
   // Provider rows are visit-only. The owner's draft and its operation identity are stored separately.
-  // Contact names, a suggestion in flight and an untouched automatic suggestion are for the visit only.
-  suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;bubbleSent=null;
+  // Contact names and the thread view are for the visit only.
+  if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;bubbleSent=null;
   outgoing.clear();matchedProviderRows.clear();
  }else{void reconcile();void reconcileMms();}};
  const resetMms=(pictures:boolean)=>{mmsOperationId='';mmsReview=null;if(pictures){attachments=[];pictureSeq=0;}};
@@ -225,7 +274,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  }
  const clearDraft=()=>{
   recipientPicker.close();
-  suggesting?.abort();suggesting=null;draft=emptyDraft();body='';draftRevision++;
+  draft=emptyDraft();body='';draftRevision++;
   operationId='';smsReview=null;resetMms(true);notice='';receipt=null;sent=null;mmsSent=null;
  };
  const chooseThread=(id:string,addresses:readonly string[])=>{
@@ -234,7 +283,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const normalized=normalizeRecipients(addresses);
   const switching=(shelf?draftThread!==id:!!draftThread&&draftThread!==id)||!sameRecipients(normalizeRecipients(inputRecipients()),normalized);
   if(switching||!normalized.length)clearDraft();
-  selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;suggestConfirm=false;bubbleSent=null;
+  selectedThread={id,addresses:[...addresses]};draftThread=id;recipients=normalized.join(', ');composing=false;bubbleSent=null;
   if(normalized.length&&(switching||!retained))loadDraft(id,normalized);
   session.openThread(id);
  };
@@ -243,7 +292,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const state=shell.S();
   return owner===shell&&!shell.props?.assistantSurface&&!document.hidden&&state.screen==='home'
    &&!state.typing&&!state.recording&&!state.draft&&(!state.voice||state.voice==='off')
-   &&editable()&&!picking&&!recipientPicker.snapshot()&&!suggestConfirm&&!body&&!attachments.length&&!operationId&&!mmsOperationId
+   &&editable()&&!picking&&!recipientPicker.snapshot()&&!body&&!attachments.length&&!operationId&&!mmsOperationId
    &&!(draftThread===null&&recipients&&!sent&&!mmsSent);
  };
  async function drainSmsNotice(){
@@ -294,14 +343,14 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   }
  }
  const wakeSmsNotice=()=>{noticeSignal++;noticeRequested=true;void drainSmsNotice();};
- const closeThread=()=>{if(!busy){selectedThread=null;suggestConfirm=false;session.openThread(null);}};
+ const closeThread=()=>{if(messageMenu){closeMessageMenu();return;}if(!busy&&!deleting){selectedThread=null;session.openThread(null);}};
  const compose=(prefill?:string)=>{
   if(!editable())return;
   recipientPicker.close();
   const switching=draftThread!==null;
   if(switching||(!shelf&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
   if(shelf&&prefill&&!recipients)recipients=prefill;
-  draftThread=null;composing=true;selectedThread=null;suggestConfirm=false;
+  draftThread=null;composing=true;selectedThread=null;
   if(switching||!retained)loadDraft(null);
   if(session.state.thread)session.openThread(null);else changed();
  };
@@ -362,42 +411,28 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(!ready())return 'unavailable';
   if(attachments.length||operationId||mmsOperationId)return 'occupied';
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
-  suggesting?.abort();suggesting=null;draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();return 'drafted';
+  draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();return 'drafted';
  };
  draftUndoer=()=>{
   if(!active||!editable()||!draft.undo||operationId||mmsOperationId||!openRow())return false;
-  suggesting?.abort();suggesting=null;draft=draftUndone(draft);body=draft.draft==='agent'?'':draft.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;retainDraft();paint();return true;
+  draft=draftUndone(draft);body=draft.draft==='agent'?'':draft.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;retainDraft();paint();return true;
  };
  draftReader=()=>{const thread=active?openRow():null;if(!thread||draft.draft==='none')return null;
   return {by:draft.draft==='owner'?'owner':draft.draft==='asked'?'alpha':'suggestion',text:draft.text,canUndo:!!draft.undo,threadId:thread.id};};
  function loadNames(){if(namesLoaded||!active||session.state.status?.permissions.contacts!=='granted')return;namesLoaded=true;const token=lifecycle;
   void client.searchContacts('',100).then(cards=>{if(token!==lifecycle)return;for(const card of cards)for(const number of card.phoneNumbers){const key=numberKey(number);if(!key||!card.displayName)continue;if(!names.has(key))names.set(key,card.displayName);people.push({name:card.displayName,number});}paint();}).catch(()=>{namesLoaded=false;});}
- /* Applies thread changes to the draft and asks for a suggestion when one is due. It never sends. */
+ /* Applies thread changes without automatic model requests. */
  function drive(){
   if(!active){draft=readinessLost(draft);return;}
   loadNames();
-  const latest=latestInbound(),before=draft;if(!busy&&!operationId&&!mmsOperationId)draft=threadChanged(draft,latest);
-  if(before.draft==='agent'&&draft.draft==='none'){suggesting?.abort();suggesting=null;}
-  if(!suggester||!suggestOn()||body||attachments.length||!canSuggest(draft,latest,ready()))return;
-  // Group and short-code conversations can carry data unrelated to a one-person reply.
-  const recipients=draftRecipients();
-  if(recipients.length!==1||!/^\+?\d{9,20}$/.test(recipients[0]))return;
-  const thread=openThread();if(!thread||!latest)return;
-  draft=suggestionRequested(draft,latest,true);const ticket=latest,token=lifecycle,controller=new AbortController();suggesting?.abort();suggesting=controller;
-  void suggester(thread,controller.signal).then(text=>text&&text.trim()?text.trim().slice(0,1600):null,()=>null).then(text=>{
-   if(token!==lifecycle||controller.signal.aborted)return;if(suggesting===controller)suggesting=null;
-   /* A suggestion is offered as faint text in the bar (AC-24); it is not the field's text until accepted. */
-   draft=suggestionReplied(draft,ticket,latestInbound(),ready()&&!body&&!attachments.length,text);paint();});
+  const latest=latestInbound();if(!busy&&!operationId&&!mmsOperationId)draft=threadChanged(draft,latest);
  }
  /* A confirmed review that did not fail clears the composer; nothing is ever sent again from here. */
  const finished=(status:string)=>{const result=status==='cancelled'||status==='denied'?null:status==='failed'?'failed' as const:status==='unknown'?'unknown' as const:'sent' as const;if(!result)return;draft=reviewFinished(draft,result);if(result==='sent'){body='';attachments=[];pictureSeq=0;composing=false;}};
  const accepted=(status:string)=>status==='submitted'||status==='sent'||status==='delivered';
- const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
- const dismissSuggestion=()=>{if(!editable()||!drafted()||operationId||mmsOperationId)return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;retainDraft();changed();};
  /* Text in the bar is the owner's (AC-10). */
- const ownerTyped=(value:string)=>changeDraft(()=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);bubbleSent=null;});
- /* Accepting the faint suggestion puts it in the field; nothing is sent (AC-24). */
- const acceptSuggestion=()=>{if(!editable()||draft.draft!=='agent'||body)return;ownerTyped(draft.text);};
+ const ownerTyped=(value:string)=>changeDraft(()=>{body=value;draft=typed(draft,value);bubbleSent=null;});
+
  function confirmSms(review:ReviewedSms,result:SmsSendResult,roleHeld:boolean){
   finished(result.status);
   sent={id:result.operationId,review};
@@ -530,7 +565,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(!recipientPicker.close())composing=false;
   changed();
  };
- const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){if(suggestConfirm){suggestConfirm=false;paint();}else closeThread();return true;}if(composing){closeNew();return true;}return back?back(st,api):false;};
+ const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){closeThread();return true;}if(composing){closeNew();return true;}return back?back(st,api):false;};
  views.messages.reply=()=>null;views.messages.suggestions=()=>[];
  /* AC-15: a quiet line in the chat; it is never written to the SMS provider or a thread (AC-31). */
  const noteSent=(title:string)=>api?.note?.('Sent to '+title);
@@ -586,9 +621,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const who=subject();
   if(who){
    const name=who.title,first=who.first,ini=name?initials(name):null,waits=waiting();
-   const suggestion=draft.draft==='agent'&&!body&&suggestOn()?draft.text:null;
    return {target:{kind:'thread',app:'Messages',name,first,initials:ini},
-    closed:{kind:'person',placeholder:first?'Text '+first:'Message',value:body,onText:ownerTyped,submit:(event?:SendTap)=>submit(event),canSubmit:sendable(),maxLength:1600,suggestion,acceptSuggestion:suggestion?acceptSuggestion:null},
+    closed:{kind:'person',placeholder:first?'Text '+first:'Message',value:body,onText:ownerTyped,submit:(event?:SendTap)=>submit(event),canSubmit:sendable(),maxLength:1600,suggestion:null,acceptSuggestion:null},
     left:{icon:'avatar',label:first?'Back to texting '+first:'Back to the message',initials:ini,run:null},
     context:name?name+' · Messages':'Messages',contextKey:'messages:thread:'+who.id,
     strip:{title:name||'Messages',subtitle:waits?'Messages · draft waiting':'Messages',initials:ini,live:false,actions:waits?[{id:'send',label:'Send draft',run:bubbleSend}]:[]},
@@ -644,9 +678,12 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    needsAccess:access&&!showNew,showList:!access&&!state.thread&&!composing,showThread,showNew,showComposer:showComposer&&!picker,
    showNewButton:!state.thread&&!composing,readFailed:!status&&!state.busy,showEmpty:!!status&&!state.busy&&state.threads.length===0,
    compose:()=>compose(),closeNew,
+   recipientValue:picker?picker.query:recipients,recipientPlaceholder:picker?'Recipient '+(sendingTo.length+1):'To',
+   onRecipientInput:(event:Event)=>{if(picker)recipientPicker.setQuery((event.target as HTMLInputElement).value);else if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},
    contactsOpen:!!picker,
    contactsLabel:picker?'Close contact picker':'Choose contacts',
-   toggleContacts:()=>{if(recipientPicker.close())paint();else recipientPicker.open();},
+   // Closing the picker keeps a typed number that matched no contact as a recipient instead of discarding it.
+   toggleContacts:()=>{const typed=picker?.query.trim()||'';if(recipientPicker.close()){const number=/^[+\d][\d\s().-]*$/.test(typed)?normalizePhoneNumber(typed):null;if(number)addRecipient(number);paint();}else{recipientPicker.open();owner?.setState({},()=>document.querySelector<HTMLInputElement>('[data-alpha-messages-recipients]')?.focus());}},
    contacts:picker&&{
     ...picker,onQuery:(event:Event)=>recipientPicker.setQuery((event.target as HTMLInputElement).value),
     onKey:(event:KeyboardEvent)=>{if(event.key==='Enter'){event.preventDefault();void recipientPicker.search();}},
@@ -662,18 +699,22 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    threads:listed,noMatches:!!listFilter&&!listed.length&&state.threads.length>0,
    filterChip:listFilter?.by==='alpha'?{label:listFilter.label,clearLabel:'Clear filter '+listFilter.label,clear:listFilterHandler.clear}:null,
    title,ini:initials(title),canCall:!!sole,call:()=>{if(sole)api?.open?.('phone',{prefill:sole});},callLabel:`Call ${title}`,
-   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,stageLast:index===newestIn?true as const:undefined})),
+   messageMenu:messageMenu&&menuRow()?{
+    confirm:messageMenu.confirm,choices:!messageMenu.confirm,busy:deleting,canDelete:!uncertainDeletes.has(messageMenu.target.id),close:closeMessageMenu,
+    focus:(element:HTMLElement|null)=>{if(element&&!element.contains(document.activeElement))element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});},
+    key:(event:KeyboardEvent)=>{
+     if(event.key==='Escape'){event.preventDefault();closeMessageMenu();}
+     if(event.key==='Tab'){
+      const buttons=Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="menu"] button:not(:disabled),[role="dialog"] button:not(:disabled)'));
+      if(buttons.length){event.preventDefault();const at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(event.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}
+     }
+    },
+    copy:async()=>{if(!messageMenu||!menuRow())return;const text=messageMenu.text;try{await navigator.clipboard.writeText(text);closeMessageMenu();owner?.toast('Copied');}catch{owner?.toast('Copy unavailable');}},
+    askDelete:()=>{if(messageMenu&&!uncertainDeletes.has(messageMenu.target.id)){messageMenu.confirm=true;paint();}},
+    remove:()=>void deleteSelectedMessage(),
+   }:null,
+   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,actions:messageActions(row.id),segments:messageSegments(row.text),stageLast:index===newestIn?true as const:undefined})),
    draftBubble:bubble(viewApi),picks:composing&&!picker&&!state.thread&&!local.length?picks():[],
-   canSuggest:!!suggester,suggesting:suggestOn(),suggestLabel:suggestOn()?'Suggested replies on':'Suggested replies off',suggestBg:suggestOn()?'var(--s2)':'transparent',suggestFill:suggestOn()?'var(--acct)':'var(--mut)',
-   suggestConfirm,enableSuggest:()=>{if(!suggestConfirm||!inFront()||!openRow())return;suggestConfirm=false;setSuggest(true);changed();},
-   cancelSuggest:()=>{suggestConfirm=false;paint();},
-   toggleSuggest:()=>{
-    if(!inFront()||!openRow())return;
-    if(!suggestOn()){suggestConfirm=true;paint();return;}
-    setSuggest(false);suggesting?.abort();suggesting=null;draft=readinessLost(draft);
-    if(draft.draft==='agent'&&!operationId&&!mmsOperationId)dismissSuggestion();
-    changed();
-   },
    cannotSend:!editable()||!direct||!hasDraft||!sendingTo.length,submit,
    pickSim:sims.length>1,sims:sims.map(row=>{const on=String(row.id)===sim;return {label:row.displayName||`SIM ${row.slot+1}`,on,bg:on?'var(--fg)':'var(--s2)',fg:on?'var(--bg)':'var(--fg)',
     pick:()=>{if(!editable())return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);retainDraft();changed();}};}),
@@ -724,10 +765,11 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  };
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();void drainSmsNotice();};
  p.componentWillUnmount=function(){
+  cancelMessageHold();messageMenu=null;
   this.smsSelection=undefined;this.smsReturn?.();
   document.removeEventListener('visibilitychange',this.smsHide);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
-  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;suggestConfirm=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
+  if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
   unmount?.call(this);
  };
 }

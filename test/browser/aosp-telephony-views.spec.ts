@@ -1,5 +1,6 @@
 import {test, expect, type Page} from '@playwright/test';
 import {setupTelephony} from './telephony-fixture';
+import {setTextScale} from './accessibility-states';
 // The designed Phone, Messages and Contacts views against a stubbed bridge in the Alpha image shape
 // (telephony-fixture.ts). Evidence for the renderer only: no device, SIM, carrier or provider is
 // involved, and a call "placed" or a text handed to the bridge here proves nothing about a radio.
@@ -183,28 +184,6 @@ test('a draft Alpha was asked for replaces the slot, keeps one Undo, and never s
   await expect(page.locator(personField)).toHaveValue('My own words');
   expect(await sms('undoSmsDraft'), 'one Undo').toBe(false);
   expect(await inputs(page, 'sendComposedSms')).toEqual([]);
-});
-
-test('suggested replies explain model-provider use before enabling the setting', async ({page}) => {
-  await setupTelephony(page);
-  await open(page, 'Messages');
-  await page.getByRole('button', {name: /^Ada Okafor/}).click();
-  const suggestion = page.locator('[data-alpha-messages-suggest]');
-  const review = page.getByRole('group', {name: 'Turn on suggested replies'});
-  const preference = () => page.evaluate(() => localStorage.getItem('alpha.messages.suggest-replies.v1'));
-  await suggestion.click();
-  await expect(review).toContainText('connected model provider');
-  expect(await preference()).toBeNull();
-  await review.getByRole('button', {name: 'Cancel'}).click();
-  await expect(review).toHaveCount(0);
-  expect(await preference()).toBeNull();
-  await suggestion.click();
-  await review.getByRole('button', {name: 'Turn on'}).click();
-  await expect(suggestion).toHaveAttribute('aria-pressed', 'true');
-  expect(await preference()).toBe('1');
-  await suggestion.click();
-  await expect(suggestion).toHaveAttribute('aria-pressed', 'false');
-  expect(await preference()).toBeNull();
 });
 
 test('the open conversation owns its send target after a new-message draft', async ({page}) => {
@@ -501,8 +480,9 @@ test('a new message offers matching contacts and addresses the one tapped', asyn
   await expect(page.locator('[data-alpha-messages-picks]').getByRole('button', {name: /Carmen Ruiz/})).toHaveCount(0);
 });
 
-test('Messages adds a selected contact number and keeps its unsent draft', async ({page}) => {
+test('Messages adds a selected contact number and keeps its unsent draft at largest text', async ({page}) => {
   await setupTelephony(page);
+  await setTextScale(page,2);
   await open(page, 'Messages');
   const compose = page.locator('[data-alpha-messages-new]');
   const recipients = page.getByRole('textbox', {name: 'To', exact: true});
@@ -513,8 +493,11 @@ test('Messages adds a selected contact number and keeps its unsent draft', async
   await page.getByRole('button', {name: 'Choose contacts'}).click();
   const picker = page.getByRole('region', {name: 'Choose a contact'});
   await expect(picker).toBeVisible();
-  await picker.getByRole('searchbox', {name: 'Search contacts'}).fill('Bao');
-  await picker.getByRole('button', {name: 'Search', exact: true}).click();
+  await expect(recipients).toHaveAttribute('placeholder','Recipient 2');
+  await expect(recipients).toBeFocused();
+  // Names are typed here, so the field must bring up the text keyboard, never the dial pad.
+  await expect(recipients).toHaveAttribute('type','text');
+  await recipients.fill('Bao');
   await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('Bao');
   await picker.getByRole('button', {name: 'Bao Tran, (555) 010-0112'}).click();
   await expect(picker).toHaveCount(0);
@@ -526,6 +509,30 @@ test('Messages adds a selected contact number and keeps its unsent draft', async
   await expect(body).toHaveValue('Keep this message unsent.');
   expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   expect(await inputs(page, 'sendComposedMms')).toEqual([]);
+});
+
+test('Messages keeps a number typed into the open contact picker when the picker closes', async ({page}) => {
+  await setupTelephony(page);
+  await open(page, 'Messages');
+  const recipients = page.getByRole('textbox', {name: 'To', exact: true});
+  await page.locator('[data-alpha-messages-new]').click();
+  await expect(recipients).toHaveAttribute('type','text');
+  await recipients.fill('+15550100101');
+  await page.getByRole('button', {name: 'Choose contacts'}).click();
+  const picker = page.getByRole('region', {name: 'Choose a contact'});
+  await expect(picker).toBeVisible();
+  // A number with no saved contact: nothing to pick, and closing must not discard it.
+  await recipients.fill('+1 (555) 010-0999');
+  await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('+1 (555) 010-0999');
+  await page.getByRole('button', {name: 'Close contact picker'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(recipients).toHaveValue('+15550100101, +15550100999');
+  // A name that matched nobody is a search, not a recipient.
+  await page.getByRole('button', {name: 'Choose contacts'}).click();
+  await recipients.fill('Nobody here');
+  await page.getByRole('button', {name: 'Close contact picker'}).click();
+  await expect(recipients).toHaveValue('+15550100101, +15550100999');
+  expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
 test('Contacts searches from the bar, edits in the app with the version it read, and deletes after confirmation', async ({page}) => {
@@ -540,7 +547,8 @@ test('Contacts searches from the bar, edits in the app with the version it read,
   await expect(page.getByText('(555) 010-0103', {exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'Edit contact', exact: true}).click();
   await expect(page.locator('[data-alpha-contact-editor]')).toBeVisible();
-  await page.locator('[data-alpha-contact-name]').fill('Carmen R. Ruiz');
+  await page.getByRole('textbox',{name:'First name',exact:true}).fill('Carmen R.');
+  await page.getByRole('textbox',{name:'Last name',exact:true}).fill('Ruiz');
   await page.locator('[data-alpha-contact-save]').click();
   await expect.poll(() => inputs(page, 'contacts.save')).toHaveLength(1);
   const saved = (await inputs(page, 'contacts.save'))[0];

@@ -23,8 +23,10 @@ test('Cloud browser login admits only one session and the optional fixed Alpha h
    await connection.openExternal({url,requestId:randomUUID()});
    assert.equal(opened.at(-1).url,url);assert.equal(opened.at(-1).target,'_blank');assert.equal(opened.at(-1).popup.opener,null);
   }
+  for(const url of ['https://checkout.stripe.com/c/pay/cs_test_fixture#fid=provider-fragment','https://invoice.stripe.com/i/fixture'])await connection.openExternal({url,requestId:randomUUID()});
   const count=opened.length,base=`https://eliza.app/auth/cli-login?session=${session}`;
   for(const url of [
+   'https://checkout.stripe.com.attacker.invalid/c/pay/x','http://checkout.stripe.com/c/pay/x',
    base+'&app=other',base+'&app=Alpha',base+'&app=',base+'&app=alpha&app=alpha',base+'&app=alpha&app=other',
    base+'&session='+session,base+'&app=alpha&session='+session,base+'&app=alpha&returnTo=https://attacker.invalid',
    'https://eliza.app/auth/cli-login?app=alpha',base.replace(session,'invalid')+'&app=alpha',
@@ -47,7 +49,7 @@ async function fixture(resident,environment){
   if(path==='/steward/auth/providers')return Response.json({google:false,oauth:[]});
   if(path==='/api/auth/cli-session')return Response.json({sessionId:session,expiresAt:new Date(Date.now()+60000).toISOString()});
   if(path==='/api/auth/cli-session/'+session)return pollResponse();
-  if(path==='/api/v1/subscription/entitlement-keys')return response(url,input);
+  if(path==='/api/v1/subscription/entitlement-keys'||path==='/api/v1/subscriptions/plans')return response(url,input);
   assert.equal(new Headers(input.headers).get('Authorization'),'Bearer '+secret);
   if(path==='/api/v1/user')return Response.json({success:true,data:{id:owner,organization_id:org,email:'owned@example.invalid'}});
   if(path==='/api/v1/billing/limits')return Response.json({success:true,data:{v2:{subscription:{status:'available',value:{planKey:'plus_monthly',state:'active'}}}}});
@@ -64,10 +66,34 @@ test('existing Mac credential becomes a real canonical identity/credit reference
  const f=await fixture();try{
   const stored=await f.rpc({operation:'secureRead',slot:'cloud:production'});assert.equal(stored.status,200);assert.equal(stored.data.value.includes(secret),false);const credential=JSON.parse(stored.data.value);assert.equal(credential.credentialReference,reference);assert.equal(credential.credentialId,credentialId);assert.equal(credential.token,undefined);
   const result=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/user',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(result.data.status,200);assert.equal(result.data.data.data.id,owner);assert.equal(result.data.data.data.organization_id,org);
+  const catalogue=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscriptions/plans',method:'GET',headers:{Accept:'application/json'}}});assert.equal(catalogue.status,200);
+  const referral=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/referrals',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(referral.status,200);
   const limits=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/billing/limits',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(limits.data.data.data.v2.subscription.value.state,'active');
   const redeemed=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscription/redeem',method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({code:'SYNTHETIC0000CODE',idempotencyKey:randomUUID()}),credentialReference:reference}});assert.equal(redeemed.data.data.success,true);
   for(const body of [{code:'SYNTHETIC0000CODE'},{code:'SYNTHETIC0000CODE',idempotencyKey:'short'},{code:'SYNTHETIC0000CODE',idempotencyKey:randomUUID(),extra:1}]){const refused=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscription/redeem',method:'POST',headers:{Accept:'application/json'},body:JSON.stringify(body),credentialReference:reference}});assert.ok([400,409].includes(refused.status),JSON.stringify(body));}
   assert.equal(f.calls.filter(call=>new URL(call.url).pathname==='/api/v1/subscription/redeem').length,1);assert.equal((await stat(f.profile)).mode&0o077,0);
+ }finally{await f.close();}
+});
+test('signed-in checkout reaches Cloud once and keeps foreign routes and body fields refused',async()=>{
+ const f=await fixture();try{
+  f.setResponse(async()=>Response.json({success:true,data:{status:'open',commandId:'cmd_fixture',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_fixture',sessionId:'cs_test_fixture',expiresAt:new Date(Date.now()+60000).toISOString()}}));
+  const input={url:'https://api.eliza.app/api/v1/subscriptions/checkout',method:'POST',headers:{'Content-Type':'application/json'},credentialReference:reference,body:JSON.stringify({planKey:'plus_monthly',idempotencyKey:randomUUID(),presentation:'mobile'})};
+  const call=change=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{...input,...change}});
+  assert.equal((await call({})).data.status,200);
+  const count=f.calls.length;
+  for(const change of [{url:input.url+'?x=1'},{url:'https://attacker.invalid/api/v1/subscriptions/checkout'},{body:JSON.stringify({planKey:'plus_monthly',returnUrl:'https://attacker.invalid'})},{credentialReference:'browser-cloud-reference:'+randomUUID()}])assert.notEqual((await call(change)).status,200);
+  assert.equal(f.calls.length,count);
+ }finally{await f.close();}
+});
+test('balance checkout forwards its exact idempotency header and fixed return only',async()=>{
+ const f=await fixture();try{
+  const key=randomUUID(),target='https://eliza.app/alphaphone/billing/return';
+  f.setResponse(async(_url,input)=>{assert.equal(new Headers(input.headers).get('Idempotency-Key'),key);return Response.json({url:'https://checkout.stripe.com/c/pay/fixture',sessionId:'cs_fixture'});});
+  const input={url:'https://api.eliza.app/api/v1/credits/checkout',method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},credentialReference:reference,body:JSON.stringify({amountUsd:10,success_url:target,cancel_url:target+'?cancelled=1'})};
+  const call=change=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{...input,...change}});
+  const answer=await call({});assert.equal(answer.data.status,200,JSON.stringify(answer));const count=f.calls.length;
+  for(const change of [{headers:{}},{url:input.url+'?x=1'},{body:JSON.stringify({amountUsd:10,success_url:'https://attacker.invalid',cancel_url:target})}])assert.notEqual((await call(change)).status,200);
+  assert.equal(f.calls.length,count);
  }finally{await f.close();}
 });
 test('negative origins, methods, authorities, routes, private bearer headers and wrong reference never dispatch',async()=>{

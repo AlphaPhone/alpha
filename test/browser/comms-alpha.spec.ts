@@ -125,13 +125,13 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		await expect.poll(async () => (await fixture(page)).sent).toEqual(['Thanks']);
 	});
 
-	test('accepting the faint suggestion fills the field and sends nothing (AC-24)', async ({page}) => {
+	test('automatic suggestions are absent while the composer remains editable', async ({page}) => {
 		await setup(page, {comms: true});
 		await page.evaluate(async () => { const {VIEWS} = await import('/src/prototype/model.js'); VIEWS.notes.suggestions = () => ['Set a reminder', 'Ask Maya about 3:30']; });
 		await page.evaluate(() => (window as any).commsAlpha.shell.setState({chat: 'sheet', draft: ''}));
 		const faint = page.locator('[data-alpha-faint]');
-		await expect(faint).toHaveAttribute('aria-label', 'Suggestion: Ask Maya about 3:30, double-tap to use');
-		await faint.click();
+		await expect(faint).toHaveCount(0);
+		await page.locator('[data-alpha-layer="conversation"] textarea[data-alpha-composer]').fill('Ask Maya about 3:30');
 		await expect(page.locator('[data-alpha-layer="conversation"] textarea[data-alpha-composer]')).toHaveValue('Ask Maya about 3:30');
 		expect((await fixture(page)).sent).toEqual([]);
 	});

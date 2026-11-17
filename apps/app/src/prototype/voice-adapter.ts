@@ -190,7 +190,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   let playback: AbortController | undefined, playing = false;
   // AP-16 AC-12: dictation from a comms bar fills the field that bar shows: the person's text, or a
   // list question that is sent to Alpha when the owner confirms the transcript.
-  type ChatDestination={mode?:'dictation';comms?:'person'|'filter';shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
+  type ChatDestination={mode?:'dictation';comms?:'person'|'filter';commsKey?:string;commsValue?:string;shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
   let chatDestination:ChatDestination|undefined;
   let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;turnId:string;context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
   let conversationVoice:Pick<BatchVoiceConversation<Clip>,'start'|'stop'|'recheck'|'resume'>|Awaited<ReturnType<typeof developmentCartesiaConversation>>|undefined;
@@ -306,11 +306,11 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         const live = !!ready && chat?.mode === 'dictation' && await nativeLiveVoiceReady(controller.signal).catch(() => false);
         if (token !== generation || controller.signal.aborted) return;
         preparingLocal = false;
-        if (!ready || stage !== 'ready') { if (!ready) error = Capacitor.isNativePlatform() ? 'Speech unavailable' : 'Agent needed'; refresh(); return; }
+        if (!ready || stage !== 'ready') { if (!ready) {if(chatDestination?.comms==='person'){const shell=chatDestination.shell;cleanup();shell.toast('Dictation is unavailable here. You can still type your message.');return;}error = Capacitor.isNativePlatform() ? 'Speech unavailable' : 'Agent needed';} refresh(); return; }
         onDeviceReady = true; cloudMode = false; deviceOnly = true; driver = deviceVoice;
         if (live) { liveDictation = createNativeLiveDictation({ onLatency: recordLiveVoiceTiming }); driver = liveDictation; }
         pairedReady = false; pairedAsrReady = false; refresh();maybeStartDictation();
-      }).catch(() => { if (token === generation) { preparingLocal = false; error = 'Speech unavailable'; refresh(); } });
+      }).catch(() => { if (token === generation) { preparingLocal = false;if(chatDestination?.comms==='person'){const shell=chatDestination.shell;cleanup();shell.toast('Dictation is unavailable here. You can still type your message.');return;} error = 'Speech unavailable'; refresh(); } });
     }
     if (route === 'agent' && !browserDevProfile && !cloudMode && deviceOnly) {
       pairedVoice = createPairedVoice();
@@ -443,6 +443,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if (typeof result.text !== 'string' || !result.text.trim() || result.local !== !cloudMode) throw new Error('Invalid transcript');
     draft = result.text; stage = 'review'; markVoiceTiming('transcript-ready');
     recognized = { text: result.text, provenance: transcriptProvenance(result, { onDevice: onDeviceReady, native: Capacitor.isNativePlatform(), paired: pairedAsrReady, cloud: cloudMode }) };
+    // Messages dictation fills the reviewed recipient's editable draft; it never submits a turn.
+    if(chatDestination?.comms==='person')await primary();
   }
   async function listen() {
     if (playing) { playback?.abort(); return; }
@@ -469,7 +471,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
     return chat.shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open
       &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden'||!!chat.comms&&['input','hidden'].includes(state.chat))&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
-      &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent;
+      &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent
+      &&(!chat.commsKey||chat.shell.commsSpec?.()?.contextKey===chat.commsKey&&String(chat.shell.commsSpec?.()?.closed?.value||'')===chat.commsValue);
   }
   function navigationContinuation(chat:ChatDestination,token:number,turnId:string):import('../runtime/alpha-client').VoiceNavigationContinuation{
     let held:typeof ownedNavigation,attempted=false;
@@ -493,6 +496,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   }
   function cancelChat(keyboard=false,preserveChat=false){
     const chat=chatDestination;if(!chat){if(retirement)retirement.returnChat=keyboard?'input':retirement.returnChat;return;}if(preserveChat)chat.chat=chat.shell.S().chat;if(!keyboard){chat.shell.pendingActionApproval?.abort();chat.shell.cancelReadReplyCompletions?.();}cleanup();
+    if(chat.comms==='person'&&retirement&&retirement.shell===chat.shell){
+      // Cancelling a text dictation returns to typing after media release, without opening Alpha.
+      retirement.returnChat='input';retirement.panelChat='input';chat.shell.setState({chat:'input'});return;
+    }
     if(retirement&&retirement.shell===chat.shell){retirement.returnChat=keyboard?(chat.chat==='full'?'full':'input'):chat.chat;chat.shell.setState({chat:chat.shell.S().chat==='hidden'?'hidden':chat.shell.S().chat==='full'?'full':'sheet'});return;}
     chat.shell.setState({chat:keyboard?(chat.chat==='full'?'full':'input'):chat.chat},()=>{
       if(chat.shell.live===false||connectionController.getSnapshot().open||(chat.shell.S().view||null)!==chat.view)return;
@@ -641,7 +648,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       current();
       if(browserStartup){
         browserStartup.mark('renderer-channel');
-        const direct=await developmentCartesiaConversation({binding:prepared.binding,assertCurrent:current,getUiContext:()=>{current();const context=chat.shell.voiceConversationContext(prepared.binding);const metadata=connectionController.voiceRendererMetadata(context);if(metadata.viewDelivery!=='completed-action')throw Error('The voice renderer is not bound to completed-action navigation.');return {viewDelivery:metadata.viewDelivery,uiViewPath:alphaViewPath(context.view),uiBrowserSurface:'native' as const,uiTimeZone:Intl.DateTimeFormat().resolvedOptions().timeZone};},onNavigate:async event=>{current();chat.shell.voiceSendTurnId=event.traceId;try{await chat.shell.applyRealtimeVoiceNavigation({...event,binding:prepared.binding,assertCurrent:current,navigation:navigationContinuation(chat,token,event.traceId)});current();}finally{if(chat.shell.voiceSendTurnId===event.traceId)chat.shell.voiceSendTurnId=undefined;}},onState:(phase,progressText='')=>{if(token!==generation)return;if(phase==='idle'&&['starting','error'].includes(conversationState.phase))return;if(phase==='listening'){browserStartup.finish('listening');conversationInterim='';}conversationState={phase:['connecting','ready'].includes(phase)?'starting':['complete','interrupted'].includes(phase)?'listening':['listening','transcribing','thinking','speaking'].includes(phase)?phase as 'listening'|'transcribing'|'thinking'|'speaking':'idle',progressText};refresh();},onPlaybackUnlockChange:()=>{if(token===generation)refresh();},onActionResult:summary=>{if(token===generation)chat.shell.toast(summary);},onAcceptedTurn:text=>{current();chat.shell.followVoiceTurn(prepared.binding.conversationId,text);},onTranscript:text=>{if(token===generation){if(!conversationInterim)conversationInterimKnownMessages=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));conversationLastTranscript=text;conversationInterim=text;refresh();}},onError:failure=>{if(token===generation){browserStartup.finish('failed');error=failure.message;conversationState={phase:'error',error:failure};refresh();}}});
+        const direct=await developmentCartesiaConversation({binding:prepared.binding,assertCurrent:current,getUiContext:()=>{current();const context=chat.shell.voiceConversationContext(prepared.binding);const metadata=connectionController.voiceRendererMetadata(context);if(metadata.viewDelivery!=='completed-action')throw Error('The voice renderer is not bound to completed-action navigation.');return {viewDelivery:metadata.viewDelivery,uiViewPath:alphaViewPath(context.view),uiBrowserSurface:'native' as const,uiTimeZone:Intl.DateTimeFormat().resolvedOptions().timeZone};},onNavigate:async event=>{current();chat.shell.voiceSendTurnId=event.traceId;try{await chat.shell.applyRealtimeVoiceNavigation({...event,binding:prepared.binding,assertCurrent:current,navigation:navigationContinuation(chat,token,event.traceId)});current();}finally{if(chat.shell.voiceSendTurnId===event.traceId)chat.shell.voiceSendTurnId=undefined;}},onState:(phase,progressText='')=>{if(token!==generation)return;if(phase==='idle'&&['starting','error'].includes(conversationState.phase))return;if(phase==='listening'){browserStartup.finish('listening');if(conversationState.phase!=='listening'&&conversationState.phase!=='transcribing')conversationInterim='';}conversationState={phase:['connecting','ready'].includes(phase)?'starting':['complete','interrupted'].includes(phase)?'listening':['listening','transcribing','thinking','speaking'].includes(phase)?phase as 'listening'|'transcribing'|'thinking'|'speaking':'idle',progressText};refresh();},onPlaybackUnlockChange:()=>{if(token===generation)refresh();},onActionResult:summary=>{if(token===generation)chat.shell.toast(summary);},onAcceptedTurn:text=>{current();chat.shell.followVoiceTurn(prepared.binding.conversationId,text);},onTranscript:text=>{if(token===generation){if(!conversationInterim)conversationInterimKnownMessages=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));conversationLastTranscript=text;conversationInterim=text;refresh();}},onError:failure=>{if(token===generation){browserStartup.finish('failed');error=failure.message;conversationState={phase:'error',error:failure};refresh();}}});
         current();conversationVoice=direct;browserStartup.mark('speech-session');await direct.start();current();return;
       }
       const networkSpeech = !deviceOnly&&!fellBack&&(route!=='device'||testMocksEnabled);
@@ -933,12 +940,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(mediaUnconfirmed&&!retirement){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
     if(retirement||stage!=='closed'){this.toast('Finish or discard the current recording before transcribing.');return;}
     const target=options?.commsTarget,comms=target==='person'||target==='filter'?target:undefined;
-    const state=this.S(),chat:ChatDestination={mode:'dictation',...(comms?{comms}:{}),shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
+    const state=this.S(),spec=comms==='person'?this.commsSpec?.():null,chat:ChatDestination={mode:'dictation',...(comms?{comms}:{}),...(spec?{commsKey:spec.contextKey,commsValue:String(spec.closed.value||'')} : {}),shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();enter(undefined,!Capacitor.isNativePlatform()&&connectionController.getSnapshot().residentInference==='direct'?'agent':'device',chat);
     stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
     // Dictation into a comms bar's own field records on the bar; the Alpha sheet does not open (AC-12).
     const token=generation;this.setState({chat:comms?(state.chat==='hidden'?'hidden':'input'):state.chat==='full'?'full':'sheet',voice:'off'},()=>{if(token!==generation||chatDestination!==chat)return;document.querySelector<HTMLElement>(comms?'[data-alpha-bar-recorder] button':'[data-alpha-chat-recorder] button')?.focus({preventScroll:true});maybeStartDictation();});
   };
+  let voiceStartRevision=0;
   Component.prototype.startVoice = async function () {
     // AC-12: during a call the caller never hears Alpha: a voice turn is transcribed into the request only.
     const callKind=this.commsSpec?.()?.target?.kind;
@@ -950,10 +958,19 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(mediaUnconfirmed){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
     if(stage!=='closed'){this.toast('Finish or discard the Notes recording before starting a voice conversation.');return;}
     connectionController.warmInference();
-    const state=this.S();
-    const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
+    const startRevision=++voiceStartRevision,startGeneration=generation,state=this.S(),beforeStartup=JSON.parse(composerBinding()).slice(1),reply=this.messageReplyTarget,edit=this.messageEditTarget;
+    // Home may paint while startup still replaces its provisional resident session. Await that
+    // existing startup before capturing the speech binding; an account or composer change cancels.
+    if(developmentCloudVoiceEnabled){
+      // A failed startup must not leave Talk silently doing nothing.
+      try{await connectionController.initialize();}catch{if(startRevision===voiceStartRevision&&this.live!==false)this.toast('Alpha is still connecting. Try Talk again shortly.');return;}
+      if(startRevision!==voiceStartRevision||startGeneration!==generation||this.live===false||document.hidden||this.S().view!==state.view||this.S().chat!==state.chat||String(this.S().draft||'')!==String(state.draft||'')||this.messageReplyTarget!==reply||this.messageEditTarget!==edit||connectionController.getSnapshot().open||JSON.stringify(JSON.parse(composerBinding()).slice(1))!==JSON.stringify(beforeStartup))return;
+      if(!connectionController.getBrowserSpeechAgent()){this.toast('Alpha is still connecting. Try Talk again shortly.');return;}
+    }
+    const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply,edit,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();
-    enter(undefined,'default',chat);this.beginVoiceScrollFollow();stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';quietRetries=0;const token=generation;
+    try{enter(undefined,'default',chat);}catch{cleanup();this.toast('Voice could not start. Try again, or use the keyboard.');return;}
+    this.beginVoiceScrollFollow();stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';quietRetries=0;const token=generation;
     // Cloud speech opens the voice sheet from a hidden chat; other routes stay in the Home pill.
     const networkVoice=speechRoute()==='cloud';
     await new Promise<void>(resolve=>this.setState({chat:state.chat==='hidden'&&!networkVoice?'hidden':state.chat==='full'?'full':'sheet',voice:'off'},()=>{document.querySelector<HTMLElement>(state.chat==='hidden'&&!networkVoice?'[data-alpha-pill-voice] button':'[data-alpha-chat-recorder] button')?.focus({preventScroll:true});if(chatDestination===chat&&generation===token){void beginConversation().finally(resolve);}else resolve();}));

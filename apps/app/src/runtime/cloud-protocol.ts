@@ -287,6 +287,14 @@ export class CloudProtocol {
     if (started.status === "open") { signal.throwIfAborted(); await this.openExternal(started.checkoutUrl, signal); }
     return started;
   }
+  /** Creates a balance checkout; payment remains on Stripe and account refresh confirms the result. */
+  async startFundsCheckout(amountUsd:number,idempotencyKey:string,signal:AbortSignal):Promise<void> {
+    if(!Number.isFinite(amountUsd)||amountUsd<5||amountUsd>1000||!Number.isInteger(amountUsd*100))throw Error('Enter an amount from $5 to $1,000.');
+    const target=this.authority.web+'/alphaphone/billing/return';
+    const result=object(await this.requestData('/api/v1/credits/checkout',signal,{authenticated:true,headers:{'Idempotency-Key':idempotencyKey},body:{amountUsd,success_url:target,cancel_url:target+'?cancelled=1'}}));
+    if(typeof result.url!=='string')throw new CloudProtocolError('invalid-response');
+    await this.openPaymentPage(result.url,signal);
+  }
   /** Opens a Stripe payment page Cloud answered (checkout or an upgrade's hosted invoice), and nothing else. */
   async openPaymentPage(url: string, signal: AbortSignal): Promise<void> {
     const page = new URL(url);

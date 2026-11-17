@@ -1,3 +1,4 @@
+import {parseCheckout} from '../apps/app/src/runtime/cloud-plans.ts';
 import {mapsTilePath} from '../apps/app/src/runtime/managed-service-routes.ts';
 import {productionCloud, stagingCloud, cloudStorageNamespace} from '../apps/app/src/runtime/cloud-deployment.generated.ts';
 import {createCloudResidentHost,type ProviderSelection,type ProviderKeyEdit,type ProviderKeyRequest} from './cloud-resident-host.ts';
@@ -16,6 +17,17 @@ import type {Plugin} from 'vite';
 // This development transport narrows JSON separately for each operation.
 const object = (value: unknown) => requireObject(value) as Record<string, any>;
 const boundedServiceJson = (response: Response): Promise<any> => readServiceJson(response);
+// Checkout session IDs are payment lookup references, not auth sessions. Project only
+// the exact payment response here; the ordinary service guard still rejects secrets.
+async function checkoutResponse(response:Response,funds:boolean){
+ const reader=response.body?.getReader();if(!reader)throw Error('Empty checkout response');let size=0;const parts:Uint8Array[]=[];
+ try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>16384)throw Error('Checkout response too large');parts.push(part.value);}}finally{await reader.cancel().catch(()=>{});}
+ const value=object(JSON.parse(Buffer.concat(parts).toString('utf8')));
+ if(!funds){const parsed=parseCheckout(value);return {success:true,data:{...parsed,...(parsed.status==='open'?{expiresAt:new Date(parsed.expiresAt).toISOString()}: {})}};}
+ if(Object.keys(value).some(key=>!['url','sessionId'].includes(key))||typeof value.url!=='string'||typeof value.sessionId!=='string'||!/^cs_[A-Za-z0-9_]{1,240}$/.test(value.sessionId))throw Error('Invalid balance checkout response');
+ const url=new URL(value.url);if(url.protocol!=='https:'||url.hostname!=='checkout.stripe.com'||url.username||url.password||url.port)throw Error('Invalid checkout destination');return {url:url.href,sessionId:value.sessionId};
+}
+
 
 export const BROWSER_CLOUD_BRIDGE_PATH='/__alpha-browser-cloud';
 const GOOGLE_BROWSER_START='/alphaphone/auth/browser-start';
@@ -424,13 +436,17 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
     const route=url.pathname+url.search;const method=input.method;
     const mapsPost=method==='POST'&&['/api/v1/maps/geocode','/api/v1/maps/reverse','/api/v1/maps/places/search','/api/v1/maps/places/details','/api/v1/maps/routes','/api/v1/maps/tiles/viewport'].includes(route);
     const mapsTile=method==='GET'&&input.body===undefined&&mapsTilePath(route);
+    const fundsPost=method==='POST'&&route==='/api/v1/credits/checkout';
     const headers=object(input.headers??{}),identityHeaders=Object.keys(headers).filter(k=>k.toLowerCase()==='idempotency-key');
-    if(Object.keys(headers).some(k=>!['accept','content-type',...((mapsPost||mapsTile)?['idempotency-key']:[])].includes(k.toLowerCase())))throw Error('Unsupported Cloud request header');
+    if(Object.keys(headers).some(k=>!['accept','content-type',...((mapsPost||mapsTile||fundsPost)?['idempotency-key']:[])].includes(k.toLowerCase())))throw Error('Unsupported Cloud request header');
     let mapsRequestId:string|undefined;
     if(mapsPost||mapsTile){mapsRequestId=headers[identityHeaders[0]];if(identityHeaders.length!==1||typeof mapsRequestId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(mapsRequestId)||mapsPost&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>128*1024))throw Error('Invalid Maps request');if(mapsPost)object(JSON.parse(input.body));}
+    if(fundsPost){const key=headers[identityHeaders[0]];if(identityHeaders.length!==1||typeof key!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(key))throw Error('Invalid checkout identity');const body=object(JSON.parse(input.body??'null'));const target=(env==='production'?productionCloud.web:stagingCloud.web)+'/alphaphone/billing/return';if(Object.keys(body).sort().join()!=='amountUsd,cancel_url,success_url'||typeof body.amountUsd!=='number'||body.amountUsd<5||body.amountUsd>1000||!Number.isInteger(body.amountUsd*100)||body.success_url!==target||body.cancel_url!==target+'?cancelled=1')throw Error('Invalid balance checkout');}
     const create=method==='POST'&&route==='/api/auth/cli-session',poll=method==='GET'&&/^\/api\/auth\/cli-session\/[0-9a-f-]{36}$/i.test(route);
     if(create){if(input.credentialReference||Object.keys(object(JSON.parse(input.body??'{}'))).length)throw Error('Invalid login creation');send(res,200,await createCliSession(env,controller.signal));return;}
     if(poll){if(input.credentialReference||input.body!==undefined)throw Error('Invalid login poll');send(res,200,await pollCliSession(env,route.split('/').at(-1)!,controller.signal));return;}
+    // The plan catalogue is public, like the entitlement signing-key catalogue.
+    if(method==='GET'&&route==='/api/v1/subscriptions/plans'&&input.body===undefined){const response=await canonical(env,route,controller.signal);send(res,200,{status:response.status,data:await boundedServiceJson(response)});return;}
     // Public signing keys must work before/without account credentials. No bearer is attached.
     if(method==='GET'&&route==='/api/v1/subscription/entitlement-keys'&&input.body===undefined&&input.credentialReference===undefined){
      const response=await canonical(env,route,controller.signal),result=await boundedServiceJson(response);send(res,200,{status:response.status,data:result});return;
@@ -438,9 +454,11 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
     // Subscription redemption: exactly {code,idempotencyKey}; the code is forwarded, never logged or stored.
     const redeem=method==='POST'&&route==='/api/v1/subscription/redeem';
     if(redeem){const body=object(JSON.parse(input.body??'null'));if(Object.keys(body).sort().join()!=='code,idempotencyKey'||typeof body.code!=='string'||body.code.length>128||typeof body.idempotencyKey!=='string'||!/^[A-Za-z0-9._:-]{8,128}$/.test(body.idempotencyKey))throw Error('Invalid subscription redemption');}
-    const accountRead=method==='GET'&&input.body===undefined&&['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/maps/capabilities'].includes(route);
+    const billingPost=method==='POST'&&!url.search&&typeof input.body==='string'&&['/api/v1/subscriptions/checkout','/api/v1/subscriptions/checkout/confirm','/api/v1/referrals/apply'].includes(route);
+    if(billingPost){const body=object(JSON.parse(input.body));const fields=route.endsWith('/confirm')?['sessionId']:route.endsWith('/apply')?['code']:['planKey','idempotencyKey','presentation'];if(Object.keys(body).some(key=>!fields.includes(key)))throw Error('Invalid billing request');}
+    const accountRead=method==='GET'&&input.body===undefined&&['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/referrals','/api/v1/maps/capabilities'].includes(route);
     const selfRevoke=method==='DELETE'&&route==='/api/v1/api-keys/current'&&input.body===undefined;
-    if(!selfRevoke&&!redeem&&!accountRead&&!mapsPost&&!mapsTile&&!managedGoogleRequest(url,method,input.body))throw Error('Unsupported Cloud route');
+    if(!selfRevoke&&!redeem&&!fundsPost&&!billingPost&&!accountRead&&!mapsPost&&!mapsTile&&!managedGoogleRequest(url,method,input.body))throw Error('Unsupported Cloud route');
     const c=await admitted(env,input.credentialReference);active.get(ownedId)!.credentialId=c.credentialId;if(selfRevoke)await current(env,c,controller.signal);let requestBody=input.body;
     if(method==='POST'&&route==='/api/v1/eliza/google/connect/initiate'){
      for(const [state,attempt] of workspaceReturns)if(attempt.expiresAt<=Date.now()||attempt.credentialId===c.credentialId)workspaceReturns.delete(state);
@@ -448,7 +466,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
      workspaceReturns.set(state,{environment:env,reference:c.credentialReference,credentialId:c.credentialId,origin,expiresAt:Date.now()+600000});
      requestBody=JSON.stringify({...JSON.parse(input.body),redirectUrl:`${origin}${BROWSER_CLOUD_BRIDGE_PATH}/google-return?state=${state}`});
     }
-    const response=await canonical(env,route,controller.signal,{method,headers:{...(input.body===undefined?{}:{'Content-Type':'application/json'}),...(mapsRequestId?{'Idempotency-Key':mapsRequestId}:{})},...(requestBody===undefined?{}:{body:requestBody})},c);if(selfRevoke)options.diagnostic?.({environment:env,operation:route,status:response.status});let result=await boundedServiceJson(response);await current(env,c,controller.signal);if(response.ok&&route==='/api/v1/user'&&result.success===true){const who=object(result.data);result={success:true,data:{id:who.id,organization_id:who.organization_id,...(typeof who.email==='string'?{email:who.email}:{})}};}if(selfRevoke)result={success:result.success,...(typeof result.status==='string'?{status:result.status}:{}),...(typeof result.credentialId==='string'?{credentialId:result.credentialId}:{}),...(typeof result.revokedAt==='string'?{revokedAt:result.revokedAt}:{})};send(res,200,{status:response.status,data:result});return;
+    const response=await canonical(env,route,controller.signal,{method,headers:{...(input.body===undefined?{}:{'Content-Type':'application/json'}),...((mapsRequestId||fundsPost)?{'Idempotency-Key':mapsRequestId||headers[identityHeaders[0]]}:{})},...(requestBody===undefined?{}:{body:requestBody})},c);if(selfRevoke)options.diagnostic?.({environment:env,operation:route,status:response.status});let result=await (response.ok&&(fundsPost||route==='/api/v1/subscriptions/checkout')?checkoutResponse(response,fundsPost):boundedServiceJson(response));await current(env,c,controller.signal);if(response.ok&&route==='/api/v1/user'&&result.success===true){const who=object(result.data);result={success:true,data:{id:who.id,organization_id:who.organization_id,...(typeof who.email==='string'?{email:who.email}:{})}};}if(selfRevoke)result={success:result.success,...(typeof result.status==='string'?{status:result.status}:{}),...(typeof result.credentialId==='string'?{credentialId:result.credentialId}:{}),...(typeof result.revokedAt==='string'?{revokedAt:result.revokedAt}:{})};send(res,200,{status:response.status,data:result});return;
    }
    if(data.operation==='stt'||data.operation==='tts'){
     const c=await admitted(env,data.credentialReference,data.credentialId);active.get(ownedId)!.credentialId=c.credentialId;

@@ -98,6 +98,8 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const previousEnabled = useRef(enabled);
   const key = target ?? keys[progress?.step ?? 0];
   const state = states[key];
+  // Known access is a choice, not a timed gate. Keep the deadline only for stalled reads/prompts.
+  const skipAvailable = canSkip || (!busy && state !== 'checking');
   const shown = (active || ready) && (enabled || reopened) && !connection.open && !googleOpen;
   // The image grants startup access at first boot. Read Android's current grants and
   // pass the allowed steps. Missing access, stalled checks and Settings reviews still show the panel.
@@ -253,7 +255,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   }
   useEffect(() => {if (shown && hideAccessPanel && state === 'ready' && !busy) advance('continued');}, [shown, hideAccessPanel, state, busy, key]);
   function skip() {
-    if (!canSkip || !currentInteraction()) return;
+    if (!skipAvailable || !currentInteraction()) return;
     ++sequence.current;flows[key].cancel();actionPending.current=false;setBusy(false);
     advance('skipped');
   }
@@ -327,7 +329,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       </li>)}</ul>
       {progressError && <p className="alpha-permission-status" role="alert"><StatusDot tone="warn">Not saved</StatusDot></p>}
       {checkNotice && <p className="alpha-permission-status" role="status">{checkNotice}</p>}
-      <div className="alpha-permission-actions"><button className="alpha-permission-primary" type="button" aria-disabled={!continueReady || undefined} onClick={proceed}>{target ? 'Done' : 'Continue'}</button>{canSkip && (!target || busy) && <button className="alpha-permission-skip" type="button" onClick={skip}>Skip</button>}{review && !target && <button className="alpha-permission-skip" type="button" onClick={close}>Close</button>}</div>
+      <div className="alpha-permission-actions"><button className="alpha-permission-primary" type="button" aria-disabled={!continueReady || undefined} onClick={proceed}>{target ? 'Done' : 'Continue'}</button>{skipAvailable && (!target || busy) && <button className="alpha-permission-skip" type="button" onClick={skip}>Skip</button>}{review && !target && <button className="alpha-permission-skip" type="button" onClick={close}>Close</button>}</div>
     </div>
   </dialog>;
 }

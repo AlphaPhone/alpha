@@ -1,6 +1,5 @@
 /**
  * AP-16 (docs/agentic-comms.md): what Alpha adds to the Phone, Messages and Contacts surfaces.
- * - AC-24 open state: the one faint next request, chosen from the view's own suggestions.
  * - AC-25: the briefing, the view's own facts, shown once per screen subject when the chat opens.
  * - AC-21: "Screen it" proposed for a call that rings while the chat is open.
  * - AC-30: the open proposal card and the last briefed subject survive process death; a restored
@@ -8,7 +7,7 @@
  * Everything here reads the view's `bar(st, api)` spec (runtime/comms-bar.ts) and writes only
  * through the shell's `api.note` and `api.propose`. Nothing is sent, dialed or written to a provider.
  */
-import {proposalCanAct, setOpenSuggestionSource, type CommsBarSpec, type CommsProposal, type OpenSuggestionInput} from '../runtime/comms-bar';
+import {proposalCanAct, type CommsBarSpec, type CommsProposal, type OpenSuggestionInput} from '../runtime/comms-bar';
 import {alphaProposalStore, parseProposalRecord, type AlphaProposalRecord, type StoredProposal} from '../runtime/alpha-proposal-store';
 import {isMvpView} from './mvp-features';
 import {testMocksEnabled} from '../build-flags';
@@ -79,7 +78,6 @@ export function openProposalOf(msgs: Shell[]): StoredProposal | null {
 const chatOpen = (chat: unknown) => chat === 'sheet' || chat === 'full';
 
 export function installCommsAlpha(Component: Shell, views: Shell) {
-	setOpenSuggestionSource(pickOpenSuggestion);
 	const p = Component.prototype, mount = p.componentDidMount, update = p.componentDidUpdate, unmount = p.componentWillUnmount, render = p.renderVals;
 	function persist(shell: Shell) {
 		if (!shell.commsRecord) return;

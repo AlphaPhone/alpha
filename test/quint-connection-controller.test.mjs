@@ -35,13 +35,13 @@ assert.ok(startup, 'startup settles and then runs the sign-in queue');
 const code = stripTypeScriptTypes([
   between('let residentRebindQueue: ResidentRebindQueue | null = null;', '/**'),
   between('async function work(message: string', 'const RESIDENT_AUTO_RETRY_MS'),
-  between("async function manageProviderKey(action:'reveal'", '/** P-43: a startup path'),
+  between("async function saveProviderKeys(values:", '/** P-43: a startup path'),
   between('function queueResidentRebind(', '/** A native sign-in return that arrived while'),
   between('/** A native sign-in return that arrived while', 'async function remoteIdentity('),
   `const connectionController={async signInReturned(value){${between('    if (operation) { queuedSignInReturn = value; return; }', '    if (outcome.status ===')}
      returned.push(value);await work('Finishing sign-in…',()=>hold('return'));},
    ${between('  signInIncomplete(value: unknown) {', '  /**\n   * The Cloud sign-in hand-off')}};`,
-  `Object.assign(globalThis,{work,manageProviderKey,queueResidentRebind,connectionController,startupSettles(){${startup[1]}},
+  `Object.assign(globalThis,{work,saveProviderKeys,queueResidentRebind,connectionController,startupSettles(){${startup[1]}},
      queued:()=>({returned:queuedSignInReturn!==null,notice:queuedSignInIncomplete,rebind:!!residentRebindQueue?.pending})});`,
 ].join('\n'), {mode: 'strip'});
 const RESTARTED = 'Sign in again', UNVERIFIED = 'failure:app-link-unverified';
@@ -67,7 +67,8 @@ function create() {
     retire() { box.epoch++; },
     connectResident() { rebinds++; return box.hold('rebind'); },
     anyAbortSignal: signals => AbortSignal.any(signals),
-    revealLocalProviderKey: () => box.hold('key-manager').then(() => ({key: 'text', revision: 'fixture', shown: true, hidesAfterMs: 30000})),
+    editLocalProviderKeys: () => box.hold('key-manager').then(() => ({mode:'cloud', revision:'next'})),
+    localProviderStatus: async () => ({mode:'cloud',revision:'next'}),
   };
   vm.createContext(box);
   vm.runInContext(code, box);
@@ -76,7 +77,7 @@ function create() {
     async startupSettles() { box.startupSettles(); await settle(); },
     async stepStarts() { void box.work('Working…', () => box.hold('step')); await settle(); },
     stepEnds: release,
-    async keyManagerStarts() { void box.manageProviderKey('reveal', 'text', 'fixture', new AbortController().signal); await settle(); },
+    async keyManagerStarts() { void box.saveProviderKeys({voiceKey:'replacement'}, 'fixture', new AbortController().signal); await settle(); },
     keyManagerEnds: release,
     async nativeReturn() { void box.connectionController.signInReturned({status: 'signed-in', sequence: ++returns}); await settle(); },
     async incompleteArrives() { box.connectionController.signInIncomplete({code: 'app-link-unverified'}); await settle(); },

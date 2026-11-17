@@ -156,8 +156,6 @@ test('API dictation: a comms person draft records on the bar and fills the perso
  await expect(recorder).toHaveAttribute('data-voice-state','recording');
  expect(await page.evaluate(()=>(window as any).dictationApiFixture.S().chat)).not.toMatch(/sheet|full/);
  await recorder.getByRole('button',{name:'Stop recording',exact:true}).click();
- await expect(recorder).toHaveAttribute('data-voice-state','review');
- await recorder.getByRole('button',{name:'Use in draft',exact:true}).click();
  await expect(recorder).toHaveCount(0);
  const value=await page.locator('[data-alpha-bar-field="person"]').inputValue();
  expect(value.startsWith('Running late ')&&value.length>'Running late '.length).toBe(true);

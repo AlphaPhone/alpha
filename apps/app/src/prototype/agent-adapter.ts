@@ -84,7 +84,6 @@ import { WorkflowReminderOverflow, workflowReminderRows } from '../runtime/workf
 import { getMapsSelectedObject, clearMapsSelection } from '../maps/agent-context';
 import { alphaClient, AlphaClientError, type AlphaView } from '../runtime/alpha-client';
 import { privateLocalPreviewEnabled, testMocksEnabled } from '../build-flags';
-import { alphaCloudCutover } from '../runtime/cloud-deployment.generated.ts';
 import { managePlanCardCopy } from '../runtime/cloud-plans';
 import { DailyApps } from '../daily';
 import { isAndroid } from '../native';
@@ -233,12 +232,14 @@ async function restoreAttachments(messages:Shell[],session:VerifiedSession,conve
     const transcript=attachment?.transcriptAttachment;
     const photo=attachment?.cameraAttachment;
     const mail=attachment?.mailAttachment;
+    const replyQuote=attachment?.replyQuote;
     const files=storedChatFiles(attachment?.fileAttachments);
     return {...message,
       ...(typeof attachment.displayText==='string'&&attachment.requestText===message.text?{text:attachment.displayText}:{}),
       ...(typeof transcript?.title==='string'?{transcriptAttachment:transcript}:{}),
       ...(typeof mail?.title==='string'?{mailAttachment:mail}:{}),
       ...(files.length?{fileAttachments:files}:{}),
+      ...(replyQuote&&typeof replyQuote.text==='string'&&['user','agent'].includes(replyQuote.from)?{replyQuote}:{}),
       ...(typeof photo?.image==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo.image)?{cameraAttachment:photo}:{}),
     };
   }));
@@ -1723,7 +1724,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(shownNotices!==live){const kept=new Set(shownNotices.map(item=>item.id)),hidden=new Set(live.filter(item=>item.systemNotice&&!kept.has(item.id)).map(item=>item.id));out.msgs=(out.msgs||[]).filter((m:Shell)=>!hidden.has(m.id));}
     out.msgs=(out.msgs||[]).map((m:Shell)=>{
       const sent=live.find(item=>item.id===m.id);
-      m={...m,sentMail:sent?.mailAttachment?.title||'',sentTranscript:sent?.transcriptAttachment?.title||'',sentPhoto:sent?.cameraAttachment?.image||'',sentFiles:storedChatFiles(sent?.fileAttachments).map(file=>({id:file.id,name:file.name,document:!CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType),previewLabel:'Preview sent '+file.name,image:CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:'',open:()=>{if(CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)){this.chatImagePreview=`data:${file.mimeType};base64,${file.data}`;this.setState({});}}})),openPhotoPreview:()=>{if(sent?.cameraAttachment?.image){this.chatImagePreview=sent.cameraAttachment.image;this.setState({});}}};
+      m={...m,replyQuote:sent?.replyQuote?.text||'',replyAuthor:sent?.replyQuote?.from==='user'?'You':'Alpha',sentMail:sent?.mailAttachment?.title||'',sentTranscript:sent?.transcriptAttachment?.title||'',sentPhoto:sent?.cameraAttachment?.image||'',sentFiles:storedChatFiles(sent?.fileAttachments).map(file=>({id:file.id,name:file.name,document:!CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType),previewLabel:'Preview sent '+file.name,image:CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:'',open:()=>{if(CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)){this.chatImagePreview=`data:${file.mimeType};base64,${file.data}`;this.setState({});}}})),openPhotoPreview:()=>{if(sent?.cameraAttachment?.image){this.chatImagePreview=sent.cameraAttachment.image;this.setState({});}}};
       const c=m.c||{};
       // A system notice is a status block, never a button: it carries its text once, with no
       // title repeated as the detail and no second copy printed above it.
@@ -1914,6 +1915,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       throw error;
     }finally{if(this.voiceSendTurnId===turnId&&this.live)await new Promise<void>(resolve=>this.setState(()=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{typing:false}:null,()=>{if(this.voiceSendTurnId===turnId)this.voiceSendTurnId=undefined;resolve();}));}
   };
+  /** True, with the reason shown, while the resident has no owner session to take a send. A caller
+   * that clears its own field on send (the comms bar) asks first, so the text is not lost. */
+  p.sendUnavailable = function () {
+    const readiness=connectionController.getSnapshot();
+    if(!residentAlwaysPresent||readiness.session)return false;
+    this.toast(agentPendingText(readiness),ERROR_TOAST);return true;
+  };
   p.send = async function (argument?: string, expectedSession?: {sessionId:string;agentId:string;ownerId:string;origin:string}, focusAfterCommit?:()=>void) {
     const before=this.S(),reply=this.messageReplyTarget,edit=this.messageEditTarget;
     const filesAtStart:ChatFile[]|undefined=argument===undefined?this.fileAttachments:undefined;
@@ -1932,6 +1940,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
+    // No draft identity exists until the resident has an owner session. Report readiness
+    // before asking its durable draft controller to reserve an unbound send.
+    const readiness=connectionController.getSnapshot();
+    if(residentAlwaysPresent&&!readiness.session){this.toast(agentPendingText(readiness),ERROR_TOAST);return;}
     // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
     if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
     if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
@@ -1942,7 +1954,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!connectionController.messageTargetCurrent(editTarget))return;
       this.draftSendPending=true;
       try {
-        if(!await messageReviews.confirm('edit-message-'+editTarget.messageId,'Edit and resend message','This replaces the selected message and all later messages in this conversation. It does not undo actions that already ran.\n\nOriginal: '+editTarget.text+'\n\nReplacement: '+text,'Edit and resend'))return;
+        // The owner explicitly submits the edited draft with Send; no second confirmation.
         if(!this.live||document.hidden||String(this.S().draft)!==text||!connectionController.messageTargetCurrent(editTarget))throw Error('The draft or conversation changed. Nothing was replaced.');
         await connectionController.truncateMessage(editTarget);this.messageEditTarget=undefined;s=this.S();
         if(!this.live||document.hidden||s.view!==editView||String(s.draft)!==text)throw Error('History was replaced. Your draft changed, so nothing was resent.');
@@ -1992,10 +2004,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // Everything this send later shows belongs to the agent connection it was sent on.
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
-    const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:filesAtStart as ChatFile[]|undefined,displayText:text,requestText}:null;
+    const sentAttachment=fromComposer?{mailAttachment:mail?{id:mail.id,title:mail.title,from:mail.from}:null,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:filesAtStart as ChatFile[]|undefined,displayText:text,requestText,...(replyTarget?{replyQuote:{messageId:replyTarget.messageId,text:replyTarget.text,from:replyTarget.from}}:{})}:null;
     let stagedAttachmentKey:string|undefined;
     const rememberSentAttachment=async (identity:NonNullable<AgentReply['messageBinding']>,recordedId:string)=>{
-      if(!sentAttachment||!(mail||transcript||sentAttachment.cameraAttachment||sentAttachment.fileAttachments?.length))return;
+      if(!sentAttachment||!(mail||transcript||sentAttachment.replyQuote||sentAttachment.cameraAttachment||sentAttachment.fileAttachments?.length))return;
       // First send can create the conversation after pre-dispatch storage was skipped.
       // History prefers the request ID and falls back to the recorded ID only if absent.
       if(stagedAttachmentKey!==attachmentKey(identity.session,identity.conversationId,userId)){
@@ -2027,7 +2039,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     try {
       // A refused send can settle immediately. Commit the cleared composer before
       // dispatch so its late paint cannot overwrite the restored, unsent draft.
-      await new Promise<void>(resolve=>this.setState((previous:Shell)=>({ msgs: [...previous.msgs, { id: userId, from: 'user', text, ...(fromComposer?{mailAttachment:sentAttachment?.mailAttachment,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:sentAttachment?.fileAttachments}:{} ) }], ...(fromComposer?{draft:''}:{}), typing: true, chat: previous.chat === 'full' ? 'full' : 'sheet', shade: false }),()=>{focusAfterCommit?.();resolve();}));
+      await new Promise<void>(resolve=>this.setState((previous:Shell)=>({ msgs: [...previous.msgs, { id: userId, from: 'user', text, ...(sentAttachment?.replyQuote?{replyQuote:sentAttachment.replyQuote}:{}), ...(fromComposer?{mailAttachment:sentAttachment?.mailAttachment,transcriptAttachment:transcript,cameraAttachment:this.cameraAttachment,fileAttachments:sentAttachment?.fileAttachments}:{} ) }], ...(fromComposer?{draft:''}:{}), typing: true, chat: previous.chat === 'full' ? 'full' : 'sheet', shade: false }),()=>{focusAfterCommit?.();resolve();}));
       try{
         await this.connectAgent(); context(this);
         if (alphaClient.getState().context.revision !== revision) throw new NotDispatched(fromComposer?'The active screen changed. Your message is back in the composer.':'The active screen changed. Nothing was sent.');
@@ -2153,8 +2165,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // A provider-less turn of the on-device agent (no plan, offline, signed out) carries the
           // honest in-conversation answer and its plan action (Redeem / Choose a plan, Sign in, Check again).
           const failureKind=(e as {failureKind?:unknown}).failureKind as string,limit=(e as {serviceLimit?:unknown}).serviceLimit;
-          // A plan or billing refusal offers Cloud's plan page on the same bubble; nothing is bought or upgraded here.
-          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...managePlanCardCopy(limit,alphaCloudCutover,selectedCloudName()),managePlan:true}:undefined;
+          // A plan or billing refusal offers the in-app plans on the same bubble (every Cloud); nothing is bought until Stripe.
+          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...managePlanCardCopy(limit,true,selectedCloudName()),managePlan:true}:undefined;
           const planCard=planActionCard((e as {planAction?:unknown}).planAction)??managePlan;
           // These refusals come before any model output: the streamed text is upstream's failure prose, not a reply.
           const beforeOutput=limit!==undefined||REFUSED_BEFORE_OUTPUT.has(failureKind);
