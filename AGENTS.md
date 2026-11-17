@@ -44,6 +44,10 @@ the device. This branch rebuilds it on the stack below.
   and holds no rule. A screen in `apps/app/src/<area>/` reads its machine
   through `useMachine`, offers each control exactly when `can` allows its
   event, and sends events.
+- **Node 26, no Bun.** Everything here runs on Node 26 with pnpm: the
+  application, its tests, every build, release and device script. What
+  `legacy/` runs with Bun is rebuilt for Node when its area is rebuilt; no
+  Bun command, lock file or runtime comes across.
 - **Upstream is pinned.** The agent runtime is elizaOS at the commit
   `legacy/upstream.lock.json` records, in the submodule `legacy/vendor/eliza`.
   Never edit its checkout: make shared changes upstream and advance the pin.
