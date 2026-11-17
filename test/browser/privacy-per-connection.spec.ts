@@ -150,6 +150,8 @@ for (const scenario of ['resident', 'remote', 'offline'] as const) test(`current
   // This dialog reports the phone's saved provider independently of a remote/offline selection.
   await expect(provider.getByRole('button', {name: 'Direct', exact: true})).toHaveAttribute('aria-pressed', 'true');
   await expect(provider.getByText('Voice off', {exact: true})).toHaveCount(0);
+  // Direct is in use with keys this panel cannot manage: the tab offers the key form, never an empty panel.
+  await expect(provider.getByLabel('Voice key', {exact: true})).toHaveValue('');
   await assertNoInventedActivity(page);
   await provider.getByRole('button', {name: 'Close Account', exact: true}).click();
   // The slim Settings design delegates provider state to its dialog and exposes no old pages.

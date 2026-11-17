@@ -4231,7 +4231,8 @@ function OwnProviderChoice({heading,busy,replying=false,saving,status,statusUnav
  // The panel can open before the provider status has been read. Until the owner picks a tab,
  // it shows the provider in use, not the one guessed from an absent status.
  const picked=useRef(false);
- useEffect(()=>{if(!picked.current)setTab(own?'own':'cloud');},[own]);
+ // An in-use Direct provider whose keys this panel cannot manage shows the key form, as choosing the tab does.
+ useEffect(()=>{if(picked.current)return;setTab(own?'own':'cloud');if(own&&!managed?.keys.text.configured)setEditing(true);},[own]);
  return <section aria-label="AI provider" className="alpha-provider">
   {heading&&<h3>AI connection</h3>}
   {statusUnavailable&&!busy&&<div className="alpha-provider-status"><p role="status"><StatusDot tone="off">Unavailable</StatusDot></p><button type="button" className="alpha-btn alpha-btn--text" aria-label="Try again" disabled={busy} onClick={onRetryStatus}><span aria-hidden="true" data-alpha-icon="/icons/lucide/rotate-cw.svg" style={iconStyle('rotate-cw')}/></button></div>}
