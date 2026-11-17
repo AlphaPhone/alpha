@@ -25,6 +25,7 @@ export function chatAttachmentComposerFixture() {
   const source = readFileSync(adapter, 'utf8');
   const code = stripTypeScriptTypes([
     between(source, 'class NotDispatched extends Error', '\n'),
+    between(source, 'function residentDraftOwner(', '/** One composer send.'),
     between(source, 'function createdFromSlot(', 'function selectedCloudName('),
     'const p = {};', between(source, '  p.send = async function', '  p.agentSay = function'),
     'function installSubscription(){' + between(source, '    this.connectionUnsubscribe = connectionController.subscribe', '    // Canonical is the default;') + '}',
