@@ -35,7 +35,7 @@ import static org.junit.Assert.*;
  * Run only on the owned disposable emulator admitted by the acceptance runner. */
 @RunWith(AndroidJUnit4.class)
 public final class PasswordBrowserFillInstrumentedTest {
- private static final String OFFER="Fill with a saved password";
+ private static final String OFFER=PasswordVaultFixture.text(R.string.alpha_passwords_fill_offer);
  private final BrowserFlowInstrumentedTest browser=new BrowserFlowInstrumentedTest();
  private final String token=UUID.randomUUID().toString().replace("-","").substring(0,16);
  private final String username="alpha-fill-"+token;
@@ -193,7 +193,7 @@ public final class PasswordBrowserFillInstrumentedTest {
   assertTrue("Foreground Android user must be numeric",user.matches("[0-9]{1,6}"));
   String prior=shell("settings --user "+user+" get secure autofill_service");
   assertTrue("Existing provider setting must be safely restorable",prior.isEmpty()||prior.equals("null")||prior.matches("[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+"));
-  String component=context.getPackageName()+"/ai.eliza.plugins.passwords.ElizaPasswordAutofillService";
+  String component=PasswordVaultFixture.autofillService(context);
   String priorAugmented=shell("cmd autofill get default-augmented-service-enabled "+user);
   assertTrue("Augmented provider setting must be safely restorable",priorAugmented.equals("true")||priorAugmented.equals("false"));
   ScriptHandler frameScript=null;
@@ -212,7 +212,7 @@ public final class PasswordBrowserFillInstrumentedTest {
    shell("cmd autofill set default-augmented-service-enabled "+user+" false");
    assertEquals("Augmented fallback disabled for this test", "false",shell("cmd autofill get default-augmented-service-enabled "+user));
    shell("settings --user "+user+" put secure autofill_service "+component);
-   assertEquals("Eliza password provider selected",component,shell("settings --user "+user+" get secure autofill_service"));
+   assertEquals("Alpha's password provider selected",component,shell("settings --user "+user+" get secure autofill_service"));
    for(int i=0;i<150&&!android.content.ComponentName.unflattenFromString(component).equals(manager.getAutofillServiceComponentName());i++)SystemClock.sleep(100);
    assertEquals("Framework observed the selected provider",android.content.ComponentName.unflattenFromString(component),manager.getAutofillServiceComponentName());
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
@@ -224,7 +224,7 @@ public final class PasswordBrowserFillInstrumentedTest {
     observedChild.set(visibleChild());
     WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
      Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();
-     java.lang.reflect.Field field=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("autofillCallback");field.setAccessible(true);
+     java.lang.reflect.Field field=AlphaBrowserPlugin.class.getDeclaredField("autofillCallback");field.setAccessible(true);
      original.set((android.view.autofill.AutofillManager.AutofillCallback)field.get(plugin));
      android.view.autofill.AutofillManager actual=observedChild.get().getContext().getSystemService(android.view.autofill.AutofillManager.class);
      observationManager.set(actual);actual.registerCallback(callback);
@@ -247,8 +247,8 @@ public final class PasswordBrowserFillInstrumentedTest {
     browser.child("document.getElementById('alpha-login').requestSubmit()");
     childReady("location.search==="+JSONObject.quote("?alpha_password_signed_in="+token)+" && document.readyState==='complete'");
     SystemClock.sleep(2500);
-    assertNull("No Save offer without native field origins",withText("Alpha Phone passwords",false));
-    assertNull("No provider Save sheet",withText("Save password?",false));
+    assertNull("No Save offer without native field origins",withText(PasswordVaultFixture.text(R.string.alpha_passwords_service_label),false));
+    assertNull("No provider Save sheet",withText(PasswordVaultFixture.text(R.string.alpha_passwords_save_title),false));
     }
 
     int beforeFrame=unavailable.get();

@@ -1,6 +1,11 @@
 package ai.alphacompute.alphaphone;
 
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.os.ParcelFileDescriptor;
+import android.service.autofill.AutofillService;
 import android.os.SystemClock;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
@@ -11,6 +16,7 @@ import androidx.test.uiautomator.UiObject2;
 import androidx.test.uiautomator.Until;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.regex.Pattern;
 import static org.junit.Assert.*;
 
@@ -29,6 +35,16 @@ final class PasswordVaultFixture implements AutoCloseable {
  private static final BySelector FOCUSED_PROMPT_FIELD = By.pkg(PROMPT_PACKAGES).clazz("android.widget.EditText").focused(true);
  private boolean set;
 
+ /** Alpha's own wording for a password screen (alpha_passwords.xml), as the device shows it. */
+ static String text(int resource) {
+  return InstrumentationRegistry.getInstrumentation().getTargetContext().getString(resource);
+ }
+ /** The one Autofill service the app declares, as Android's autofill_service setting names it. */
+ static String autofillService(Context context) {
+  List<ResolveInfo> services = context.getPackageManager().queryIntentServices(new Intent(AutofillService.SERVICE_INTERFACE).setPackage(context.getPackageName()), 0);
+  assertEquals("The app declares exactly one Autofill service", 1, services.size());
+  return new ComponentName(services.get(0).serviceInfo.packageName, services.get(0).serviceInfo.name).flattenToString();
+ }
  static String shell(String command) throws Exception {
   try (InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command))) {
    return new String(input.readAllBytes(), StandardCharsets.UTF_8).trim();

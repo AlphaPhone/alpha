@@ -54,7 +54,7 @@ export const loginSurfaceInventory = {
       id: "third-party-app-login",
       kind: "native-app",
       eligible: true,
-      owner: "vendor/eliza/plugins/plugin-native-passwords (ElizaPasswordAutofillService, consumed from the pinned upstream)",
+      owner: "vendor/eliza/plugins/plugin-native-passwords (ElizaPasswordAutofillService, consumed from the pinned upstream under its installed component name) with Alpha's own fill and save screens (android/app/src/main/java/ai/alphacompute/alphaphone PasswordFillActivity and PasswordSaveActivity)",
       binding: "appBinding",
       providers: {
         integrated: {
@@ -82,7 +82,7 @@ export const loginSurfaceInventory = {
       id: "eliza-cloud-sign-in-google",
       kind: "external-browser",
       eligible: false,
-      owner: "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java (startGoogle), apps/app/src/runtime/cloud-sign-in-ui.tsx",
+      owner: "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInClient.java (startGoogle), apps/app/src/runtime/cloud-sign-in-ui.tsx",
       reason: "Google sign-in opens the user's external browser (a Custom Tab when one is available, otherwise the default browser) so AOSP does not need Google Play services. Google credentials remain in that browser. Alpha's native bridge validates the returned state and exchanges the authorization code with its original PKCE verifier; no Google password or authorization code crosses the renderer bridge."
     },
     {
@@ -112,10 +112,10 @@ export const loginSurfaceInventory = {
       id: "browser-http-auth-prompt",
       kind: "alpha-owned-native",
       eligible: false,
-      file: "vendor/eliza/plugins/plugin-native-browser-surface/android/src/main/java/ai/eliza/plugins/browsersurface/BrowserHttpAuthAutofill.java",
+      file: "android/app/src/main/java/ai/alphacompute/alphaphone/browser/AlphaSignInFields.java",
       pattern: "TYPE_TEXT_VARIATION_PASSWORD|setAutofillHints|AUTOFILL_HINT_(?:PASSWORD|USERNAME)",
       count: 5,
-      owner: "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaBrowserPlugin.java (httpAuth), shared plugin-native-browser-surface BrowserHttpAuthAutofill and BrowserHttpAuthOrigin at the reviewed pin",
+      owner: "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaBrowserPlugin.java (httpAuth) and browser/AlphaSignInFields.java (Alpha's fork of the shared BrowserHttpAuthAutofill), with the shared BrowserHttpAuthOrigin binding rules at the reviewed pin",
       binding: "httpAuthBinding",
       fillRoute: "Engine-bound only (BrowserHttpAuthOrigin.bind). AlphaBrowserPlugin uses BrowserHttpAuthOrigin.STANDARD_WEBVIEW, which reports no challenge, so production refuses provider fill/save and the prompt states the reason; native fields are then IMPORTANT_FOR_AUTOFILL_NO with no hints. Manual entry remains available; every browser tab is excluded from Autofill while the prompt is open.",
       providers: {

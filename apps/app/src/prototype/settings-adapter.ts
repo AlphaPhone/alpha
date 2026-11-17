@@ -81,7 +81,7 @@ async function loadLicenses(changed: () => void) {
   } catch { licenses = { status: 'unavailable', items: [] }; }
   changed();
 }
-/** Native reset results that only echo the owner's own cancel (DataResetCopy); nothing else is hidden. */
+/** Native reset results that only echo the owner's own cancel (AlphaDataResetCopy); nothing else is hidden. */
 type RecoveryDomain = 'notifications' | 'device settings' | 'device roles' | 'alert sound history';
 const recoveryActions: Record<RecoveryDomain, { label: string; open: () => void }> = {
   notifications: { label: 'Recover notification data', open: openNotificationRecovery },
