@@ -177,7 +177,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
     const knownUsers=new Set((shell.S().msgs||[]).filter((row:Shell)=>row.from==='user').map((row:Shell)=>row.id));
     const previousSpeech=stopLocalSpeechPlayback();stop(shell);
     const retiring=shell.stopVoiceConversation?.();
-    const directReadAloud=developmentCartesiaVoiceEnabled;
+    const directReadAloud=speechRoute()==='direct'||developmentCartesiaVoiceEnabled&&!developmentCloudVoiceEnabled;
     const cloud = selectVoiceRoute() === 'cloud'||directReadAloud;
     const controller = new AbortController(), state: Reading = { id, text, controller, message: 'Waiting…' };
     let reached = false;
@@ -253,7 +253,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
   }
   p.renderVals = function () {
     const out = original.call(this), source = this.S().msgs || [], state = states.get(this);
-    const directReadAloud=developmentCartesiaVoiceEnabled;
+    const directReadAloud=speechRoute()==='direct'||developmentCartesiaVoiceEnabled&&!developmentCloudVoiceEnabled;
     const cloud = selectVoiceRoute() === 'cloud'||directReadAloud;
     const available = cloud || createOnDeviceVoice() !== null;
     const byId = new Map<unknown, Shell>(source.map((entry: Shell) => [entry.id, entry]));
