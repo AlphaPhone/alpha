@@ -190,7 +190,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   let playback: AbortController | undefined, playing = false;
   // AP-16 AC-12: dictation from a comms bar fills the field that bar shows: the person's text, or a
   // list question that is sent to Alpha when the owner confirms the transcript.
-  type ChatDestination={mode?:'dictation';comms?:'person'|'filter';shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
+  type ChatDestination={mode?:'dictation';comms?:'person'|'filter';commsKey?:string;commsValue?:string;shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
   let chatDestination:ChatDestination|undefined;
   let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;turnId:string;context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
   let conversationVoice:Pick<BatchVoiceConversation<Clip>,'start'|'stop'|'recheck'|'resume'>|Awaited<ReturnType<typeof developmentCartesiaConversation>>|undefined;
@@ -306,11 +306,11 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         const live = !!ready && chat?.mode === 'dictation' && await nativeLiveVoiceReady(controller.signal).catch(() => false);
         if (token !== generation || controller.signal.aborted) return;
         preparingLocal = false;
-        if (!ready || stage !== 'ready') { if (!ready) error = Capacitor.isNativePlatform() ? 'Speech unavailable' : 'Agent needed'; refresh(); return; }
+        if (!ready || stage !== 'ready') { if (!ready) {if(chatDestination?.comms==='person'){const shell=chatDestination.shell;cleanup();shell.toast('Dictation is unavailable here. You can still type your message.');return;}error = Capacitor.isNativePlatform() ? 'Speech unavailable' : 'Agent needed';} refresh(); return; }
         onDeviceReady = true; cloudMode = false; deviceOnly = true; driver = deviceVoice;
         if (live) { liveDictation = createNativeLiveDictation({ onLatency: recordLiveVoiceTiming }); driver = liveDictation; }
         pairedReady = false; pairedAsrReady = false; refresh();maybeStartDictation();
-      }).catch(() => { if (token === generation) { preparingLocal = false; error = 'Speech unavailable'; refresh(); } });
+      }).catch(() => { if (token === generation) { preparingLocal = false;if(chatDestination?.comms==='person'){const shell=chatDestination.shell;cleanup();shell.toast('Dictation is unavailable here. You can still type your message.');return;} error = 'Speech unavailable'; refresh(); } });
     }
     if (route === 'agent' && !browserDevProfile && !cloudMode && deviceOnly) {
       pairedVoice = createPairedVoice();
@@ -443,6 +443,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if (typeof result.text !== 'string' || !result.text.trim() || result.local !== !cloudMode) throw new Error('Invalid transcript');
     draft = result.text; stage = 'review'; markVoiceTiming('transcript-ready');
     recognized = { text: result.text, provenance: transcriptProvenance(result, { onDevice: onDeviceReady, native: Capacitor.isNativePlatform(), paired: pairedAsrReady, cloud: cloudMode }) };
+    // Messages dictation fills the reviewed recipient's editable draft; it never submits a turn.
+    if(chatDestination?.comms==='person')await primary();
   }
   async function listen() {
     if (playing) { playback?.abort(); return; }
@@ -469,7 +471,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
     return chat.shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open
       &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden'||!!chat.comms&&['input','hidden'].includes(state.chat))&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
-      &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent;
+      &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent
+      &&(!chat.commsKey||chat.shell.commsSpec?.()?.contextKey===chat.commsKey&&String(chat.shell.commsSpec?.()?.closed?.value||'')===chat.commsValue);
   }
   function navigationContinuation(chat:ChatDestination,token:number,turnId:string):import('../runtime/alpha-client').VoiceNavigationContinuation{
     let held:typeof ownedNavigation,attempted=false;
@@ -493,6 +496,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   }
   function cancelChat(keyboard=false,preserveChat=false){
     const chat=chatDestination;if(!chat){if(retirement)retirement.returnChat=keyboard?'input':retirement.returnChat;return;}if(preserveChat)chat.chat=chat.shell.S().chat;if(!keyboard){chat.shell.pendingActionApproval?.abort();chat.shell.cancelReadReplyCompletions?.();}cleanup();
+    if(chat.comms==='person'&&retirement&&retirement.shell===chat.shell){
+      // Cancelling a text dictation returns to typing after media release, without opening Alpha.
+      retirement.returnChat='input';retirement.panelChat='input';chat.shell.setState({chat:'input'});return;
+    }
     if(retirement&&retirement.shell===chat.shell){retirement.returnChat=keyboard?(chat.chat==='full'?'full':'input'):chat.chat;chat.shell.setState({chat:chat.shell.S().chat==='hidden'?'hidden':chat.shell.S().chat==='full'?'full':'sheet'});return;}
     chat.shell.setState({chat:keyboard?(chat.chat==='full'?'full':'input'):chat.chat},()=>{
       if(chat.shell.live===false||connectionController.getSnapshot().open||(chat.shell.S().view||null)!==chat.view)return;
@@ -933,7 +940,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(mediaUnconfirmed&&!retirement){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
     if(retirement||stage!=='closed'){this.toast('Finish or discard the current recording before transcribing.');return;}
     const target=options?.commsTarget,comms=target==='person'||target==='filter'?target:undefined;
-    const state=this.S(),chat:ChatDestination={mode:'dictation',...(comms?{comms}:{}),shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
+    const state=this.S(),spec=comms==='person'?this.commsSpec?.():null,chat:ChatDestination={mode:'dictation',...(comms?{comms}:{}),...(spec?{commsKey:spec.contextKey,commsValue:String(spec.closed.value||'')} : {}),shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();enter(undefined,!Capacitor.isNativePlatform()&&connectionController.getSnapshot().residentInference==='direct'?'agent':'device',chat);
     stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
     // Dictation into a comms bar's own field records on the bar; the Alpha sheet does not open (AC-12).
