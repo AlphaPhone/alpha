@@ -802,11 +802,14 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-google-mark { flex:none; display:inline-flex; align-items:center; padding:10px 10px 5px; background:var(--alpha-white); }
 .alpha-google-mark img { display:block; width:auto; height:16px; }
 .alpha-google-copyright,.alpha-google-map-missing { min-width:0; padding:6px 8px; overflow-wrap:anywhere; }
-/* Narrow or enlarged: the attribution stays visible on one line; its full text is in the map information panel. */
+/* Google's Map Tiles policy requires the viewport copyright in full, so it is never truncated. Narrow or
+   enlarged: it wraps onto its own full-width line under the Google Maps logo instead. */
 @container alpha-map-credit (max-width: 375px) {
-  .alpha-google-copyright { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; overflow-wrap:normal; }
+  .alpha-google-credit { flex-wrap:wrap; }
+  .alpha-google-copyright { flex-basis:100%; }
 }
-html.alpha-large-text .alpha-google-copyright { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; overflow-wrap:normal; }
+html.alpha-large-text .alpha-google-credit { flex-wrap:wrap; }
+html.alpha-large-text .alpha-google-copyright { flex-basis:100%; }
 .alpha-map-credits[data-google-maps="true"] > .alpha-map-privacy { flex:none; width:44px; height:44px; }
 .alpha-map-privacy > summary::-webkit-details-marker { display:none; }
 .alpha-map-privacy > summary [data-alpha-icon] { width:20px; height:20px; }

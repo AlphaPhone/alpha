@@ -179,8 +179,8 @@ GraphHopper setup is superseded for production.
    and verify actual Google imagery, search, place details and a route. Grant
    location only when requested. Start and stop navigation on a safe walking route.
 
-   Verify visible Google branding, full copyright where it fits, and the readable
-   in-map **Data sources** control on small or enlarged-text layouts. Pan, zoom,
+   Verify visible Google branding and the viewport copyright in full on the map,
+   wrapping under the logo on small or enlarged-text layouts, never truncated. Pan, zoom,
    rotate, change text size, use TalkBack, and reopen the map. Verify the credit
    stays reachable above sheets and navigation controls. Confirm failures show an
    honest unavailable state. A Google result must never appear over the
