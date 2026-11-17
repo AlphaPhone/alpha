@@ -56,7 +56,7 @@ function adapterFixture(request,storage={},options={}){
  let view=options.view===undefined?'workflows':options.view,workflowOpened='',deviceOpened='',newWorkflow=0;
  class Shell{live=true;renderVals(){return options.homeFallback||{};}componentDidMount(){}componentWillUnmount(){}S(){return {view};}vset(){}vget(){return {};}api(){return api;}openView(next){view=next;}refreshReminders(id){deviceOpened=id;}newDeviceReminderDraft(){deviceOpened='new-draft';}}
  const api={ic:{bell:'bell',spark:'sparkles',cal:'calendar',flow:'workflow'},track:()=>'',kx:()=>0,isActive:()=>true};
- const views={workflows:{render:()=>({cards:[],managementCards:[],openWorkflow:id=>workflowOpened=id,newFlow:()=>newWorkflow++,detail:false,builder:false,runOpen:false}),back:()=>false,onLeave(){},refreshManagement:options.refreshManagement}};
+ const views={workflows:{render:()=>({cards:[],managementCards:options.managementCards?.()??[],openWorkflow:id=>workflowOpened=id,newFlow:()=>newWorkflow++,detail:false,builder:false,runOpen:false}),back:()=>false,onLeave(){},refreshManagement:options.refreshManagement}};
  const windowEvents=new Map();
  const reviews={asked:[],answer:false};
  const dom=options.dom?new JSDOM('<div class="os"><button id="origin">Filters</button></div>',{pretendToBeVisual:true}):null;
@@ -83,19 +83,18 @@ function adapterFixture(request,storage={},options={}){
 const wait=async fn=>{for(let count=0;count<300;count++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('Unified automation UI did not settle.');};
 test('busy management rows refuse taps and stale callbacks until the current refresh settles',async()=>{
  let release;let held=new Promise(resolve=>release=resolve),opened=0;
- const app=adapterFixture(async path=>read({path}),{},{refreshManagement:()=>held});
- app.window.addEventListener('alpha:hosted-digests',()=>opened++);
+ const app=adapterFixture(async path=>read({path}),{},{refreshManagement:()=>held,managementCards:()=>[{id:'held-row',name:'Held row',short:'',open:()=>opened++}]});
  try{
   app.render();await wait(()=>app.render().automation.busy);
-  const pending=app.render().automation.managementCards.find(card=>card.name==='Scheduled digests');
+  const pending=app.render().automation.managementCards.find(card=>card.name==='Held row');
   assert.equal(pending.busy,true);pending.open();assert.equal(opened,0,'A row announced disabled must not open');
   release();await wait(()=>!app.render().automation.busy&&!app.render().automation.loading);
-  const ready=app.render().automation.managementCards.find(card=>card.name==='Scheduled digests');
+  const ready=app.render().automation.managementCards.find(card=>card.name==='Held row');
   assert.equal(ready.busy,false);ready.open();assert.equal(opened,1,'The settled row still opens normally');
   held=new Promise(resolve=>release=resolve);app.render().automation.refresh();
   assert.equal(app.render().automation.busy,true);ready.open();assert.equal(opened,1,'A prior render cannot bypass the new refresh');
   release();await wait(()=>!app.render().automation.busy&&!app.render().automation.loading);
-  app.render().automation.managementCards.find(card=>card.name==='Scheduled digests').open();
+  app.render().automation.managementCards.find(card=>card.name==='Held row').open();
   assert.equal(opened,2,'The new settled callback works once');
  }finally{release();app.close();}
 });
@@ -131,12 +130,12 @@ test('unified Workflows keeps browser request recovery in its management control
 
 
 
-test('unknown mutation stays locked in the existing owner request journal after adapter recreation',async()=>{let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}return read(call);});const storage={};let app=adapterFixture(f.request,storage);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();assert.equal(writes,0);app.render().automation.confirm();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}});
+test('unknown mutation stays locked in the existing owner request journal after adapter recreation',async()=>{let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}return read(call);});const storage={};let app=adapterFixture(f.request,storage);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.powerLabel,'Enable');app.render().automation.togglePower();assert.equal(writes,0);app.render().automation.confirm();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.powerDisabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}});
 test('retiring an owner while a detail read waits cannot open an editor or dispatch a late mutation',async()=>{let release;const paused=new Promise(resolve=>release=resolve);let detailStarted=false;const f=await fixture(async call=>{if(call.path==='/api/triggers/prompt'){detailStarted=true;await paused;}return read(call);});const app=adapterFixture(f.request);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Edit prompt').run();await wait(()=>detailStarted);app.retire();assert.equal(app.home().homeWorkflowHasRows,undefined);release();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(app.render().automation.editing,false);assert.equal(f.calls.filter(call=>call.method!=='GET').length,0);}finally{release();app.close();await f.close();}});
 
 
 const openPrompt=async app=>{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();};
-const reviewed=(app,label)=>{app.render().automation.actions.find(action=>action.label===label).run();app.render().automation.confirm();};
+const reviewed=(app,label)=>{const shown=app.render().automation;if(shown.powerLabel===label)shown.togglePower();else shown.actions.find(action=>action.label===label).run();app.render().automation.confirm();};
 test('an unknown enable or delete settles when the refreshed row shows it applied',async()=>{
  let enabled=false,deleted=false;const f=await fixture((call,_req,res)=>{if(call.method==='PUT'){enabled=true;return {status:408,body:{}};}if(call.method==='DELETE'){deleted=true;res.destroy();return;}if(call.path==='/api/automations')return {automations:[workflow,...(deleted?[]:[{...prompt,enabled,status:enabled?'active':'paused'}])]};return read(call);});const app=adapterFixture(f.request);
  try{await openPrompt(app);reviewed(app,'Enable');await wait(()=>enabled&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(app.render().automation.locked,false);assert.equal(Object.keys(app.storage).length,0);
@@ -179,7 +178,7 @@ test('resident prompt reviews disclose the timed window without applying it to e
  const timing='Keep this phone on. Android may delay scheduled runs. If the agent was stopped at the scheduled time, runs more than 30 minutes late are marked missed.';
  try{
   await openPrompt(app);
-  app.render().automation.actions.find(action=>action.label==='Enable').run();
+  assert.equal(app.render().automation.powerLabel,'Enable');app.render().automation.togglePower();
   assert.ok(app.render().automation.reviewDetails.endsWith(timing));
   app.render().automation.cancelReview();
   app.render().automation.createPrompt();
@@ -192,7 +191,7 @@ test('resident prompt reviews disclose the timed window without applying it to e
 
 test('a structured unknown outcome is retained even when its HTTP status normally rejects input',async()=>{
  const f=await fixture(call=>call.method==='GET'?read(call):{status:400,body:{code:'AUTOMATION_OUTCOME_UNKNOWN'}}),app=adapterFixture(f.request);
- try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='PUT')&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(app.storage).length,1);}finally{app.close();await f.close();}
+ try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.powerLabel,'Enable');app.render().automation.togglePower();app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='PUT')&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(app.storage).length,1);}finally{app.close();await f.close();}
 });
 
 test('nonexistent local DST time is rejected before either prompt or reminder mutation',async()=>{
@@ -255,7 +254,7 @@ test('Alpha reminder status text uses its English labels',async()=>{
 });
 test('a routine row offers Pause and Delete behind the owner review',async()=>{
  const f=await fixture(call=>call.method==='DELETE'?{deleted:true}:readDefinitions(call));const app=adapterFixture(f.request);
- try{app.render();await wait(()=>app.render().cards.length===7&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Stretch').open();assert.deepEqual(Array.from(app.render().automation.actions,action=>action.label),['Pause','Delete routine']);app.render().automation.actions.find(action=>action.label==='Delete routine').run();assert.equal(f.calls.some(call=>call.method!=='GET'),false);assert.equal(app.render().automation.review,true);app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='DELETE')&&!app.render().automation.busy);assert.deepEqual(f.calls.filter(call=>call.method!=='GET').map(call=>call.method+' '+call.path),['DELETE /api/lifeops/definitions/routine']);}finally{app.close();await f.close();}
+ try{app.render();await wait(()=>app.render().cards.length===7&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Stretch').open();assert.deepEqual(Array.from(app.render().automation.actions,action=>action.label),['Delete routine']);assert.deepEqual([app.render().automation.power,app.render().automation.powerOn,app.render().automation.powerLabel],[true,true,'Pause']);app.render().automation.actions.find(action=>action.label==='Delete routine').run();assert.equal(f.calls.some(call=>call.method!=='GET'),false);assert.equal(app.render().automation.review,true);app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='DELETE')&&!app.render().automation.busy);assert.deepEqual(f.calls.filter(call=>call.method!=='GET').map(call=>call.method+' '+call.path),['DELETE /api/lifeops/definitions/routine']);}finally{app.close();await f.close();}
 });
 
 
@@ -307,7 +306,7 @@ test('an in-flight automation stays protected without showing an unknown outcome
   assert.equal(app.render().automation.busy,true);
   assert.equal(app.render().automation.locked,false);
   assert.notEqual(app.render().cards.find(card=>card.name==='Owner prompt').statusLabel,'Outcome unknown');
-  assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,true);
+  assert.equal(app.render().automation.powerDisabled,true);
   assert.equal(Object.keys(app.storage).length,1);
   release();await wait(()=>!app.render().automation.busy&&!app.render().automation.loading);
   assert.equal(app.render().automation.locked,false);

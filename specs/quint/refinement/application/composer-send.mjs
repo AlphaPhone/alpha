@@ -32,6 +32,8 @@ export async function compile() {
   const adapter = readFileSync(`${repositoryRoot}/apps/app/src/prototype/agent-adapter.ts`, 'utf8');
   const between = (start, end) => { const a = adapter.indexOf(start), b = adapter.indexOf(end, a); if (a < 0 || b <= a) throw Error(`missing source anchor ${start}`); return adapter.slice(a, b); };
   const ts = source => stripTypeScriptTypes(source, {mode: 'strip'});
+  // The session-change subscription asks who owns the resident's drafts.
+  const owner = between('function residentDraftOwner(', '/** One composer send.');
   const helpers = between('function createdFromSlot(', 'function selectedCloudName(');
   const plan = between('function planActionCard(', '/** Context notices'), notices = between('function replyNotices(', '/** Decline one pending proposal');
   const send = between('  p.send = async function', '  p.agentSay = function'), say = between('  p.agentSay = function', '  p.reply = function');
@@ -40,7 +42,7 @@ export async function compile() {
   const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/apps/app/src/ui/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
   const {DurableDraftController} = await import('data:text/javascript;base64,' + Buffer.from(controller).toString('base64'));
   const {AlphaClient, AlphaClientError} = await tsImport('../../../../apps/app/src/runtime/alpha-client.ts', import.meta.url);
-  return {code, subscription: stripTypeScriptTypes(subscription, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};
+  return {code, subscription: stripTypeScriptTypes(`${owner}\n${subscription}`, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};
 }
 
 export async function createDriver({code, subscription, DurableDraftController, AlphaClient, AlphaClientError}) {

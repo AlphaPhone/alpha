@@ -2368,29 +2368,33 @@
   <sc-if value="{{maps.hasNativeMap}}">
     <div class="alpha-map-credits" data-google-maps="{{maps.googleMaps}}" style="bottom:{{maps.attributionBottom}}px">
       <sc-if value="{{maps.googleMaps}}">
-        <div class="alpha-google-credit">
-          <span class="alpha-google-mark"><img src="{{maps.googleMapsLogo}}" alt="Google Maps"></span>
-          <sc-if value="{{maps.mapAttribution}}">
-            <span class="alpha-google-copyright" title="{{maps.mapAttribution}}">{{maps.mapAttribution}}</span>
-          </sc-if>
-          <sc-if value="{{maps.googleMapMissing}}"><span class="alpha-google-map-missing">No imagery</span></sc-if>
-        </div>
+        <details class="alpha-google-credit" name="alpha-map-info">
+          <summary class="alpha-google-mark" aria-description="Data sources and map information"><img src="{{maps.googleMapsLogo}}" alt="Google Maps"></summary>
+          <div class="alpha-map-info">
+            <sc-if value="{{maps.mapAttribution}}"><p data-maps-google-attribution>{{maps.mapAttribution}}</p></sc-if>
+            <sc-if value="{{maps.locationDisclosure}}"><p><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.lock}}"></path></svg>{{maps.locationDisclosure}}</p></sc-if>
+            <sc-if value="{{maps.providerDisclosure}}"><p data-maps-disclosure>{{maps.providerDisclosure}}</p></sc-if>
+            <button class="tap" aria-label="Enter coordinates" onClick="{{maps.nativeManualLocation}}">Coordinates</button>
+          </div>
+        </details>
+        <sc-if value="{{maps.googleMapMissing}}"><span class="alpha-google-map-missing">No imagery</span></sc-if>
       </sc-if>
       <sc-if value="{{maps.globalBasemap}}">
         <span class="alpha-map-credit-links"><a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a> · <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">© OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap</a><sc-if value="{{maps.cloudCredit}}"><span data-maps-cloud-credit> · {{maps.cloudCredit}}</span></sc-if></span>
       </sc-if>
       <sc-if value="{{maps.regionalBasemap}}"><span class="alpha-map-credit-links"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">{{maps.mapAttribution}}</a></span></sc-if>
       <sc-if value="{{maps.cloudBasemap}}"><span class="alpha-map-credit-links">{{maps.mapAttribution}}</span></sc-if>
+      <sc-if value="{{maps.mapInfoControl}}">
       <details class="alpha-map-privacy" name="alpha-map-info"><summary aria-label="Map information and credits"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.info}}"></path></svg></summary>
         <div class="alpha-map-info">
           <sc-if value="{{maps.locationDisclosure}}"><p><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.lock}}"></path></svg>{{maps.locationDisclosure}}</p></sc-if>
           <sc-if value="{{maps.globalBasemap}}"><p>Map tiles: OpenFreeMap</p></sc-if>
-          <sc-if value="{{maps.googleMaps}}"><sc-if value="{{maps.mapAttribution}}"><p data-maps-google-attribution>{{maps.mapAttribution}}</p></sc-if></sc-if>
           <sc-if value="{{maps.providerDisclosure}}"><p data-maps-disclosure>{{maps.providerDisclosure}}</p></sc-if>
           <button class="tap" aria-label="Enter coordinates" onClick="{{maps.nativeManualLocation}}">Coordinates</button>
 
         </div>
       </details>
+      </sc-if>
     </div>
   </sc-if>
   <div style="position: absolute; left: 0; right: 0; top: 0; height: 58px; background: linear-gradient({{maps.C.land}}, rgba(0,0,0,0)); pointer-events: none"></div>
@@ -3706,7 +3710,7 @@
   </div>
   <sc-if value="{{workflows.automation.detail}}">
     <section ref="{{workflows.detailFocus}}" data-alpha-subview="automations-detail" class="automation-detail" aria-label="{{workflows.automation.title}}">
-      <div data-alpha-app-header="detail" class="automation-detail-header"><button class="ib" aria-label="Back to workflows" disabled="{{workflows.automation.busy}}" onClick="{{workflows.automation.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button><h2 data-alpha-app-title>{{workflows.automation.title}}</h2></div>
+      <div data-alpha-app-header="detail" class="automation-detail-header"><button class="ib" aria-label="Back to workflows" disabled="{{workflows.automation.busy}}" onClick="{{workflows.automation.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button><h2 data-alpha-app-title>{{workflows.automation.title}}</h2><sc-if value="{{workflows.automation.power}}"><button class="automation-power" aria-label="Turn {{workflows.automation.title}} on or off" aria-pressed="{{workflows.automation.powerOn}}" aria-disabled="{{workflows.automation.powerDisabled}}" onClick="{{workflows.automation.togglePower}}" style="{{workflows.automation.powerTrack}}"><span style="transform: translateX({{workflows.automation.powerKx}}px)"></span></button></sc-if></div>
       <div data-alpha-app-scroll="automation-detail" class="automation-detail-body scr">
         <sc-if value="{{workflows.automation.clockContext}}"><p role="note">{{workflows.automation.clockContext}}</p></sc-if>
         <sc-if value="{{workflows.automation.creating}}"><div class="automation-new">
@@ -4443,6 +4447,7 @@
         <sc-if value="{{chatRecorder.typeChoice}}"><button class="tap" aria-label="Type transcript instead" onClick="{{chatRecorder.typeInstead}}" style="min-height:44px;padding:8px 12px;border-radius:20px;background:var(--s2);color:var(--fg);display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px"><path d="{{ic.kbd}}"></path></svg>Type</button></sc-if>
       </div>
       <sc-if value="{{chatRecorder.canInterrupt}}"><button class="tap" aria-label="Stop speaking" onClick="{{chatRecorder.interrupt}}" style="min-height:44px;padding:8px 16px;border-radius:16px;background:var(--s2);color:var(--fg);display:flex;align-items:center;justify-content:center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.stop}}"></path></svg></button></sc-if>
+      <sc-if value="{{chatRecorder.canMuteSpeaker}}"><button class="tap" disabled="{{chatRecorder.speakerMuteDisabled}}" aria-label="{{chatRecorder.speakerLabel}}" aria-pressed="{{chatRecorder.speakerMuted}}" onClick="{{chatRecorder.toggleSpeakerMute}}" style="min-height:44px;padding:8px 16px;border-radius:16px;background:var(--s2);color:var(--fg);display:flex;align-items:center;justify-content:center"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('{{chatRecorder.speakerAsset}}');-webkit-mask-image:url('{{chatRecorder.speakerAsset}}')"></span></button></sc-if>
       <sc-if value="{{chatRecorder.canMute}}"><button class="tap" disabled="{{chatRecorder.muteDisabled}}" aria-pressed="{{chatRecorder.muted}}" onClick="{{chatRecorder.toggleMute}}" style="min-height:44px;padding:8px 16px;border-radius:16px;background:var(--s2);color:var(--fg)">{{chatRecorder.muteLabel}}</button></sc-if>
     <sc-if value="{{chatRecorder.needsPlaybackUnlock}}"><button class="tap" aria-label="Enable sound" onClick="{{chatRecorder.unlockPlayback}}" style="min-height:44px;padding:8px 16px;border-radius:16px;background:var(--s2);color:var(--fg);display:flex;align-items:center;justify-content:center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phoneSpk}}"></path></svg></button></sc-if>
       <button class="tap" aria-label="{{chatRecorder.primaryLabel}}" disabled="{{chatRecorder.primaryDisabled}}" onClick="{{chatRecorder.stop}}" style="display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;flex-shrink:0;padding:10px 16px;border-radius:28px;background:var(--acc);color:var(--alpha-white);font:inherit;font-weight:600"><svg class="i" viewBox="0 0 24 24" style="width:24px;height:24px;flex-shrink:0"><path d="{{chatRecorder.primaryIcon}}"></path></svg><span>{{chatRecorder.primaryLabel}}</span></button>
@@ -4614,6 +4619,7 @@
     <section data-alpha-chat-recorder data-voice-state="{{chatRecorder.state}}" class="alpha-chat-composer alpha-voice-composer" role="region" aria-label="Voice conversation">
       <div class="alpha-voice-input"><div role="status" aria-label="Voice conversation status" class="{{chatRecorder.statusClass}}"><sc-for list="{{chatRecorder.statusLines}}" as="line"><span>{{line.t}}</span></sc-for></div><sc-if value="{{chatRecorder.activity}}"><div class="alpha-voice-waveform" role="img" aria-label="Voice activity">{{chatRecorder.activity}}</div></sc-if></div>
       <sc-if value="{{chatRecorder.canInterrupt}}"><button class="ib" aria-label="Stop speaking" onClick="{{chatRecorder.interrupt}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/volume-x.svg');-webkit-mask-image:url('/icons/lucide/volume-x.svg')"></span></button></sc-if>
+      <sc-if value="{{chatRecorder.canMuteSpeaker}}"><button class="ib" disabled="{{chatRecorder.speakerMuteDisabled}}" aria-label="{{chatRecorder.speakerLabel}}" aria-pressed="{{chatRecorder.speakerMuted}}" onClick="{{chatRecorder.toggleSpeakerMute}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('{{chatRecorder.speakerAsset}}');-webkit-mask-image:url('{{chatRecorder.speakerAsset}}')"></span></button></sc-if>
       <sc-if value="{{chatRecorder.canMute}}"><button class="ib" aria-label="{{chatRecorder.muteLabel}}" disabled="{{chatRecorder.muteDisabled}}" aria-pressed="{{chatRecorder.muted}}" onClick="{{chatRecorder.toggleMute}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('{{chatRecorder.muteAsset}}');-webkit-mask-image:url('{{chatRecorder.muteAsset}}')"></span></button></sc-if>
       <button class="alpha-voice-primary" aria-label="{{chatRecorder.primaryLabel}}" disabled="{{chatRecorder.primaryDisabled}}" onClick="{{chatRecorder.stop}}"><svg class="i" viewBox="0 0 24 24"><path d="{{chatRecorder.primaryIcon}}"></path></svg></button>
     </section>
@@ -4692,6 +4698,7 @@
       <button class="alpha-pill-voice-synth" data-connecting="{{pillVoice.connecting}}" aria-label="Open conversation" onClick="{{openSheet}}"><span class="alpha-voice-waveform">{{pillVoice.activity}}</span></button>
       <sc-if value="{{pillVoice.readinessLabel}}"><span class="alpha-voice-startup-status" role="status">{{pillVoice.readinessLabel}}</span></sc-if>
       <sc-if value="{{pillVoice.canInterrupt}}"><button class="ib" aria-label="Stop speaking" onClick="{{pillVoice.interrupt}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/volume-x.svg');-webkit-mask-image:url('/icons/lucide/volume-x.svg')"></span></button></sc-if>
+      <sc-if value="{{pillVoice.canMuteSpeaker}}"><button class="ib" disabled="{{pillVoice.speakerMuteDisabled}}" aria-label="{{pillVoice.speakerLabel}}" aria-pressed="{{pillVoice.speakerMuted}}" onClick="{{pillVoice.toggleSpeakerMute}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('{{pillVoice.speakerAsset}}');-webkit-mask-image:url('{{pillVoice.speakerAsset}}')"></span></button></sc-if>
       <sc-if value="{{pillVoice.canMute}}"><button class="ib" aria-label="{{pillVoice.muteLabel}}" disabled="{{pillVoice.muteDisabled}}" aria-pressed="{{pillVoice.muted}}" onClick="{{pillVoice.toggleMute}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('{{pillVoice.muteAsset}}');-webkit-mask-image:url('{{pillVoice.muteAsset}}')"></span></button></sc-if>
       <button class="alpha-pill-voice-stop" aria-label="Stop voice conversation" onClick="{{pillVoice.stop}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.stop}}"></path></svg></button>
     </div></sc-if>

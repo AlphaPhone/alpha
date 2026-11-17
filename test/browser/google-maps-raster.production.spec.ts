@@ -52,14 +52,18 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
  const plane=page.locator('[data-alpha-map-plane]');await expect(plane).toBeVisible();
  const attribution=page.locator('.alpha-map-credits');
  await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
- const privacy=attribution.locator('.alpha-map-privacy');
+ // The Google Maps badge is the only credit control; it opens the copyright and the request disclosure.
+ const privacy=attribution.locator('details.alpha-google-credit'),badge=privacy.locator('summary');
+ await expect(attribution.locator('.alpha-map-privacy')).toHaveCount(0);
+ await expect(attribution.locator('summary')).toHaveCount(1);
+ await expect(attribution.locator('.alpha-google-copyright')).toHaveCount(0);
  await expect(privacy).not.toHaveAttribute('open','');
- await privacy.getByLabel('Map information and credits',{exact:true}).click();
+ await badge.click();
  await expect(privacy).toContainText('Routes share selected points');
  await expect(privacy.locator('[data-maps-disclosure]')).toContainText('Google Places for search, operated by Google');
  await expect(privacy.locator('[data-maps-disclosure]')).toContainText('Google Routes for routing, operated by Google');
  await expect(privacy).not.toContainText('Location stays on phone');
- await privacy.getByLabel('Map information and credits',{exact:true}).click();
+ await badge.click();
  await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
  await expect(page.locator('.alpha-map-credits').getByText('OpenFreeMap',{exact:true})).toHaveCount(0);
  if(tiles==='unavailable'){
@@ -83,14 +87,20 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
  await expect.poll(()=>page.evaluate(()=>(window as any).googleRaster.tiles)).toBeGreaterThan(0);
  const keys=await page.evaluate(()=>(window as any).googleRaster.tileKeys);expect(keys.every((k:string)=>/^[a-f0-9-]{36}$/.test(k))).toBe(true);
  if(tiles==='copyright-unavailable'){
-  await expect(plane).toHaveAttribute('data-map-error','copyright');
-  await expect(plane.locator('canvas')).toHaveCSS('visibility','hidden');
-  await expect(page.getByText('Loading map…',{exact:true})).toHaveCount(0);
+  // Tiles stay on screen without the viewport text; the badge shows the provider's standing attribution.
+  await expect(plane).toHaveAttribute('data-map-ready','true');
+  await expect(plane).not.toHaveAttribute('data-map-error',/./);
+  await expect(plane.locator('canvas')).toHaveCSS('visibility','visible');
+  await expect.poll(()=>page.evaluate(()=>(window as any).googleRaster.viewport)).toBeGreaterThan(0);
+  await badge.click();
+  await expect(privacy.locator('[data-maps-google-attribution]')).toHaveText('Map data © Google');
   return;
  }
  if(tiles==='malformed'){await expect(plane).toHaveAttribute('data-map-error',/./);}
  else{
   await expect(plane).toHaveAttribute('data-map-ready','true');
+  // Tiles are never hidden behind the copyright read.
+  await expect(plane.locator('canvas')).toHaveCSS('visibility','visible');
   const checkCreditLayouts=async(stage:string)=>{for(const layout of [
    {name:'portrait',width:412,height:915,scale:1},
    {name:'portrait-large',width:412,height:915,scale:2},
@@ -102,27 +112,23 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
    await page.addStyleTag({content:`[data-alpha-text-probe]{font-size:${100*layout.scale}px!important}.alpha-map-credits{font-size:${12*layout.scale}px!important}.alpha-map-info{font-size:${14*layout.scale}px!important}`});
    await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale').trim())).toBe(String(layout.scale));
    await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
-   // No separate data-source control: the Google attribution itself is always on the map.
-   await expect(attribution.getByText('Data sources',{exact:true})).toHaveCount(0);
-   // Google's Map Tiles policy: the viewport copyright is shown in full, on the map, at every size.
-   const copyright=attribution.locator('.alpha-google-copyright');
-   await expect(copyright).toHaveText('Map data © Google · synthetic viewport');
-   expect(await copyright.evaluate(el=>{const r=el.getBoundingClientRect(),style=getComputedStyle(el);
-    return {clipped:el.scrollWidth>el.clientWidth+1||el.scrollHeight>el.clientHeight+1,ellipsis:style.textOverflow==='ellipsis'&&style.overflow!=='visible',
-     inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight};})).toEqual({clipped:false,ellipsis:false,inside:true});
-   await page.screenshot({path:info.outputPath(`google-credit-${stage}-${layout.name}.png`),animations:'disabled'});
-   // The compact information control and full recipient roles remain reachable
-   // at the same enlarged/landscape sizes as the data-source attribution.
-   const informationControl=privacy.getByLabel('Map information and credits',{exact:true});
-   expect(await informationControl.evaluate(el=>{const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===el||el.contains(hit);})).toBe(true);
-   await informationControl.click();
+   await expect(async()=>{
+    expect(await badge.evaluate(el=>{const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===el||el.contains(hit);})).toBe(true);
+    // 44 CSS px before the shell's own landscape scaling.
+    expect(await badge.evaluate(el=>getComputedStyle(el).minHeight)).toBe('44px');
+   }).toPass();
+   await badge.click();
+   // The viewport's complete copyright and the full recipient roles open from the badge at every size.
+   await expect(privacy.locator('[data-maps-google-attribution]')).toHaveText('Map data © Google · synthetic viewport');
    await expect(privacy.locator('[data-maps-disclosure]')).toContainText('Google Routes for routing, operated by Google');
-   await expect(privacy.locator('[data-maps-google-attribution]')).toContainText('Map data © Google · synthetic viewport');
-   const disclosure=await privacy.locator('.alpha-map-info').boundingBox();
-   expect(disclosure!.x).toBeGreaterThanOrEqual(0);expect(disclosure!.y).toBeGreaterThanOrEqual(0);
-   expect(disclosure!.x+disclosure!.width).toBeLessThanOrEqual(layout.width);
-   expect(disclosure!.y+disclosure!.height).toBeLessThanOrEqual(layout.height);
-   await informationControl.click();
+   const panel=await privacy.locator('.alpha-map-info').boundingBox();
+   expect(panel!.x).toBeGreaterThanOrEqual(0);expect(panel!.y).toBeGreaterThanOrEqual(0);
+   expect(panel!.x+panel!.width).toBeLessThanOrEqual(layout.width);
+   expect(panel!.y+panel!.height).toBeLessThanOrEqual(layout.height);
+   // A failed hide of the in-app browser says nothing over the map.
+   await expect(page.getByText('Unavailable',{exact:true})).toHaveCount(0);
+   await page.screenshot({path:info.outputPath(`google-credit-${stage}-${layout.name}.png`),animations:'disabled'});
+   await badge.click();
   }
   };
   await checkCreditLayouts('results');
