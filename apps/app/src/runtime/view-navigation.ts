@@ -24,6 +24,44 @@ const object = (value: unknown): Record<string, unknown> => {
 		throw Error("Navigation reply was not verified");
 	return value as Record<string, unknown>;
 };
+/** A view command refused before anything ran, with a reason the agent can pass on. Its result is
+ * reported as `<code>: <reason>`; any other executor failure stays "failed or unknown". */
+export class ViewInteractionRefused extends Error {
+	constructor(readonly code: "UNSUPPORTED" | "UNAVAILABLE", message: string) {
+		super(message);
+	}
+}
+/** Alpha's agent-facing view commands: Browser back, forward and reload on the page the owner is
+ * viewing. `browser.active` is whether Browser is the view on screen; `browser.command` is the
+ * mounted Browser's history command. Everything else is refused at once, by type, so the agent is
+ * never left waiting for a renderer that will not answer. */
+export async function executeViewInteraction(
+	view: string,
+	capability: string,
+	params: unknown,
+	browser: {
+		active: boolean;
+		command?: (command: unknown, selection: unknown, signal: AbortSignal, current: () => void) => Promise<unknown>;
+	},
+	signal: AbortSignal,
+	current: () => void,
+): Promise<unknown> {
+	current();
+	if (view !== "browser")
+		throw new ViewInteractionRefused("UNSUPPORTED", "This phone has no agent command for that view.");
+	// Page text reaches the agent only through the owner's reviewed question, never a direct read.
+	if (capability === "get-text")
+		throw new ViewInteractionRefused("UNSUPPORTED", 'This phone does not read Browser pages for the agent. The owner can open the Browser menu and choose "Ask about page" to share a reviewed excerpt.');
+	if (capability !== "browser-command")
+		throw new ViewInteractionRefused("UNSUPPORTED", "Browser supports back, forward and reload from chat.");
+	// History commands answer in the Browser plugin's result envelope, which the agent decodes by code.
+	if (!browser.active)
+		return { ok: false, code: "UNAVAILABLE", message: "Open Browser first. Back, forward and reload act on the page the owner is viewing." };
+	if (!browser.command)
+		return { ok: false, code: "UNAVAILABLE", message: "Native view capability is unavailable" };
+	const frame = params && typeof params === "object" && !Array.isArray(params) ? (params as Record<string, unknown>) : {};
+	return browser.command(frame.command, frame.selection, signal, current);
+}
 export class ViewNavigationClient {
 	readonly clientId = crypto.randomUUID();
 	private disposed = false;
@@ -228,7 +266,7 @@ export class ViewNavigationClient {
   private async receiveInteraction(value:unknown){
     if(!this.executeView||this.disposed||!this.currentSession()||document.hidden||!value||typeof value!=='object'||Array.isArray(value))return;
     const frame=value as Record<string,any>,context=this.context();
-    if(frame.type!=='view:interact'||frame.viewType!=='gui'||!context||frame.viewId!==context.view||context.sensitive||typeof frame.requestId!=='string'||typeof frame.installationId!=='string'||typeof frame.capability!=='string'||this.interactions.has(frame.requestId))return;
+    if(frame.type!=='view:interact'||frame.viewType!=='gui'||!context||context.sensitive||typeof frame.viewId!=='string'||typeof frame.requestId!=='string'||typeof frame.installationId!=='string'||typeof frame.capability!=='string'||this.interactions.has(frame.requestId))return;
     this.interactions.add(frame.requestId);
     const controller=new AbortController();this.executing.add(controller);let claimId:string|undefined;
     const deadline=setTimeout(()=>controller.abort(),4500);
@@ -241,7 +279,7 @@ export class ViewNavigationClient {
       // 'Ask before Alpha acts' covers agent commands in a view; an unreadable choice counts as on.
       if(this.reviewFirst){const review=await this.reviewFirst(controller.signal).catch(()=>true);current();if(review){error='review-required: the owner reviews phone actions first';return;}}
       result=await this.executeView(frame.viewId,frame.capability,frame.params,controller.signal,current);success=true;
-    }catch{error='Native view command failed or its outcome is unknown; it was not repeated';}
+    }catch(refusal){error=refusal instanceof ViewInteractionRefused?`${refusal.code}: ${refusal.message}`:'Native view command failed or its outcome is unknown; it was not repeated';}
     finally{
       if(claimId&&!this.disposed&&this.currentSession()&&!controller.signal.aborted){
         try{await this.request('/api/views/interact-result',{...identity,claimId,success,...(success?{result}:{error})},controller.signal);}catch{/* Lost acknowledgment is unknown; never replay an effect. */}

@@ -13,6 +13,7 @@
 import {
   actionScope,
   deviceJournalContext,
+  DeviceActionNotStarted,
   type DeviceActionClientProfile,
   type CurrentDeviceActionRequest,
   type DeviceActionJournal,
@@ -43,6 +44,7 @@ import {isReminderOperation} from '../../../../.eliza/client-features/plugins/pl
 import {isReminderCreate} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-create-contract.ts';
 import {namedCalendarReadTarget} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {browserNavigationSummary} from './action-message-presentation';
+import {BrowserOpenRefused} from '../browser/browser-poll';
 import {presentDeviceRecordOperation} from './device-record-presentation';
 import {validateMapsSelectedObject} from '../maps/agent-context';
 import {isMvpView} from '../prototype/mvp-features';
@@ -75,6 +77,12 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
 };
+/** Runs an approved Browser open for the device executor. An open that Browser refused before
+ * creating or loading any tab closes the attempt as not started, with Browser's reason; any other
+ * failure may have reached the tab host and stays an unknown outcome. */
+export async function approvedBrowserOpen<T>(open:()=>Promise<T>):Promise<T>{
+  try{return await open();}catch(error){if(error instanceof BrowserOpenRefused)throw new DeviceActionNotStarted(error.message);throw error;}
+}
 export function validateDeviceOperation(value: unknown): DeviceOperation { return sharedValidateDeviceOperation(value,operations); }
 /** Every proposal operation, including foreground reviews. */
 export function validateReviewableDeviceOperation(value: unknown): ReviewableDeviceOperation { return sharedValidateReviewableDeviceOperation(value,operations); }
