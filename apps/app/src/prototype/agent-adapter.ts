@@ -1706,6 +1706,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       onDraft(event);
     };
     out.composerPointer=(event:PointerEvent)=>event.stopPropagation();
+    // A pointer press must not focus Send: that blurs the editor and closes Android's
+    // keyboard before the accepted send restores focus. Keyboard activation is unchanged.
+    out.sendPointer=(event:PointerEvent)=>{
+      event.stopPropagation();
+      if(event.button===0&&document.activeElement?.matches('textarea[data-alpha-composer]'))event.preventDefault();
+    };
     out.sendNow=()=>sendFromComposer(this);
     out.attachmentPicker=this.chatAttachmentPicker?.view(out.ic)??{open:false};
     out.attachFiles=()=>void pickChatAttachments(this);
