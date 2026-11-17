@@ -251,7 +251,6 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   }
   function cleanup(close = true,publish=true,cause?:RealtimeCancellationCause) {
     const previousConversation=conversationVoice,previousSpeaker=conversationSpeaker;
-    conversationSpeaker=undefined;
     keepReplyOnVoiceStop=undefined;
     noteRealtimeCancellation(previousConversation,cause);
     conversationState={...conversationState,progressText:''};
@@ -264,6 +263,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     conversationLive=undefined;conversationInterim='';assistantState={phase:'idle'};conversationDenied=false;
     // Stopping the assistant cancels its capture, request and playback and releases its agent session.
     const conversationStopped=previousConversation?.stop();
+    // Cleared only after stop(): its synchronous heard report still needs the muted state.
+    conversationSpeaker=undefined;
 
     ++generation; readiness?.abort(); readiness = undefined; transcription?.abort(); transcription = undefined; pairedVoice = null; onDeviceVoice = null; onDeviceReady = false; liveDictation = undefined; preparingLocal = false; preparingPaired = false; pairedReady = false; pairedAsrReady = false; busy = false; stopClock(); stopSaved(); if (quietRetry) clearTimeout(quietRetry); quietRetry = undefined;
     if (requestId) void driver.cancel({ requestId }).catch(() => {});
@@ -272,7 +273,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if (listener) void listener.remove(); listener = undefined;
     const previous = driver;
     const pendingStart=startingCapture;
-    stopping = stopping.then(async () => { await conversationStopped;await previousSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});await previousNotesSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});await previousSpeaker?.pending;if(previousSpeaker?.muted)await previousSpeaker.reset?.();if(pendingStart)try{await pendingStart;}catch{}if(hadCapture)await previous.cancelRecording(); });
+    stopping = stopping.then(async () => { await conversationStopped;await previousSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});await previousNotesSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});if(pendingStart)try{await pendingStart;}catch{}if(hadCapture)await previous.cancelRecording();
+      // Speaker gain is not capture or playback: a failed reset never reads as an unconfirmed media stop.
+      try{await previousSpeaker?.pending;if(previousSpeaker?.muted)await previousSpeaker.reset?.();}catch{} });
     stopping=stopping.catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
     if(chatShell&&(previousConversation||previousSpeech||hadCapture)){
       const held:NonNullable<typeof retirement>={shell:chatShell,phase:'stopping',returnChat:previousChat!.chat,view:previousChat!.view,binding:previousChat!.binding,panelChat:chatShell.S().chat,promise:stopping,approval:chatShell.pendingActionApproval,proposalId:chatShell.pendingActionApprovalProposalId};retirement=held;
@@ -676,6 +679,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         environment:connectionController.getCloudEnvironment()!,credentialId:connectionController.getCloudClient()!.credentialId!,assertCurrent:current,
         onInterim:text=>{if(token!==generation||chatDestination!==chat)return;conversationInterim=text;refresh();},
       }):null;
+      // Each attempt binds its own speaker: a restart or a fallback to this phone never keeps the last one.
+      conversationSpeaker=undefined;
       if(Capacitor.isNativePlatform()){
         if(streamingCloud){
           // The streaming bridge must bind gain to the same native speech session.
