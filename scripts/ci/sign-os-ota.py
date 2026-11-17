@@ -67,8 +67,12 @@ def validate(plan):
     require(pin["schema"] == 1 and pin["qualified"] is True and HEX.fullmatch(pin["sha256"]) and
             HEX.fullmatch(pin["apkSignerMappingsSha256"]) and HEX.fullmatch(pin["avbKeyConfigurationSha256"]),
             "OS producer/tool identities must be reviewed before signing")
+    # Tool bytes have their own immutable digest. Each reviewed target below
+    # binds its producer SDK independently, so a newer target does not invalidate
+    # retained older targets or require rebuilding unchanged OTA tools.
     require(plan["sourceCommit"] in pin["allowedProducerCommits"] and
-            plan["sdkCommit"] == pin["sdkCommit"] and plan["otaTools"]["sha256"] == pin["sha256"],
+            isinstance(plan["sdkCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", plan["sdkCommit"]) and
+            plan["otaTools"]["sha256"] == pin["sha256"],
             "Unreviewed OS producer or tools")
     require(plan["product"] == "alpha_stallion_phone" and plan["device"] == "stallion" and
             isinstance(plan["targetFingerprint"], str) and
