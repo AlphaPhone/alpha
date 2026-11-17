@@ -3,6 +3,7 @@ import { createBrowserFiles } from '../../../../.eliza/client-features/plugins/p
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { openSelectedDocumentViewer } from './selected-document-viewer';
 import { runFilePicker, inputFiles } from './file-picker';
+import { downloadUrl } from './download';
 import { BrowserStorageVolume } from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-volume.ts';
 /** Keep installed data and Alpha presentation; storage behavior belongs to plugin-files. */
 const SharedFiles = createBrowserFiles({
@@ -13,6 +14,7 @@ const SharedFiles = createBrowserFiles({
  openSelectedDocumentViewer,
  runFilePicker,
  inputFiles,
+ download: downloadUrl,
 });
 export class BrowserFiles extends SharedFiles {
  private readonly reviewedPhotoTrash=new Map<string,string>();

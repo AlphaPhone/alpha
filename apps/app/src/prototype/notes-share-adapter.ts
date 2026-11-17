@@ -8,7 +8,9 @@ export function installNotesShareAdapter(views:Record<string,Bag>){
  const notes=views.notes,render=notes.render;
  notes.render=(state:Bag,api:Bag)=>{
   const view=render(state,api);
-  const selected=()=>{const current=api.get('notes');if(!api.isActive()||!current.open)throw Error('Open a note first.');const note=current.list.find((row:Bag)=>row.id===current.open);if(!note)throw Error('The note is no longer available.');return noteShareText(note);};
+  const selected=()=>{const current=api.get('notes');if(!api.isActive()||!current.open)throw Error('Open a note first.');const note=current.list.find((row:Bag)=>row.id===current.open);if(!note)throw Error('The note is no longer available.');
+   // The shared text's layout is the shared Notes export format; a note it cannot export is worded here.
+   try{return noteShareText(note);}catch{throw Error('This note has no text to share.');}};
   const failure=(error:unknown)=>{if(!(error instanceof DOMException&&error.name==='AbortError')&&api.isActive())api.toast(errorNotice(error,'Sharing is unavailable.'),ERROR_TOAST);};
   const share=()=>{try{const snapshot=selected(),identity=JSON.stringify(snapshot),id=api.get('notes').open;
    void openSharePanel({title:snapshot.title,current:()=>{try{return api.isActive()&&api.get('notes').open===id&&JSON.stringify(selected())===identity;}catch{return false;}},external:()=>shareSelectedText(snapshot).catch(failure),email:()=>view.shareMail(),copy:()=>copySelectedText(snapshot.text).then(()=>api.toast('Note text copied.'),failure),save:view.canExportText?()=>view.exportText():undefined});

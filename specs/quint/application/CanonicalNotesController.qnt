@@ -1,4 +1,4 @@
-// Current CanonicalNotesController + shared NotesController / NotesSnapshotState.
+// Current CanonicalNotesController + Alpha's NotesController / NotesSnapshotState.
 // Note bodies are opaque IDs. Transport callbacks may outlive cancellation.
 module CanonicalNotesController {
   type State = { owner: bool, retired: bool, revision: int, notes: Set[int],

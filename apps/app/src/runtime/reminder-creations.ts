@@ -1,7 +1,8 @@
 import {Capacitor} from '@capacitor/core';
 import {DailyApps,type Reminder} from '../daily';
-import {createReminderCreationJournal,overdueReminders as sharedOverdue,undatedTodos as sharedTodos,reminderDueAt,isUndatedReminder,reminderRefusalMessage as sharedRefusalMessage,type ReminderCreation,type ReminderCreationStore,type ReminderRefusal} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts';
+import {createReminderCreationJournal,overdueReminders as sharedOverdue,undatedTodos as sharedTodos,reminderDueAt,isUndatedReminder,type ReminderCreation,type ReminderCreationStore,type ReminderRefusal} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts';
 import {reminderJournalStore} from './reminder-journal-store';
+import {reminderRefusalMessage as refusalMessage} from '../ui/reminders/reminder-refusal-message';
 export type {ReminderCreation,ReminderRefusal};
 export {REMINDER_REFUSALS as reminderRefusals,isReminderRefusal,reminderWallTime,reopenReminderSchedule as reopenSchedule,isUndatedReminder,reminderDueAt} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts';
 type Bag=Record<string,any>;
@@ -46,5 +47,5 @@ export function reminderUnsavedFields(form:Bag|null|undefined):string{
 }
 /** Specific, stable reason for a definite native refusal. Nothing was saved in every case. */
 export function reminderRefusalMessage(status:ReminderRefusal,native=Capacitor.isNativePlatform()):string{
-  return sharedRefusalMessage(status,{appName:'Alpha',settingsName:native?'Android settings':'Settings'});
+  return refusalMessage(status,{appName:'Alpha',settingsName:native?'Android settings':'Settings'});
 }

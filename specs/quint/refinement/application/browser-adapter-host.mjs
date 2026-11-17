@@ -3,11 +3,12 @@
  * closure, its Back handler, the page actions and the functions it gives the shell.
  *
  * Real code: browser-adapter.ts with the shared tab session, address parser, browsing session and
- * page-reading rules, browser/review.ts, browser-external-handoff.ts, browser-poll.ts and
- * browser-errors.ts. Ports, each a small stand-in the driver controls: the native Browser plugin
- * (every call is recorded and settles when the driver says, or at once for calls listed in
- * `instant`), Capacitor's platform answers, the connection controller, the reading voice, the
- * question review, the web page-text reader and the documents behind the dynamic imports.
+ * page-reading rules, Alpha's page-reading copy (ui/browser/page-reading.ts), browser/review.ts,
+ * browser-external-handoff.ts, browser-poll.ts and browser-errors.ts. Ports, each a small stand-in
+ * the driver controls: the native Browser plugin (every call is recorded and settles when the
+ * driver says, or at once for calls listed in `instant`), Capacitor's platform answers, the
+ * connection controller, the reading voice, the question review, the web page-text reader and the
+ * documents behind the dynamic imports.
  * The shell is a stand-in component holding the Browser view state and the shell state; `sync()`
  * runs the component's render pass as a state change does in the product. */
 import {installDocument, loadBundled, settle} from './browser-model-traces.mjs';

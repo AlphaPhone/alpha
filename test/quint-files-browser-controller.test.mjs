@@ -9,7 +9,7 @@ import {checkTraces, qset, qmap} from '../specs/quint/refinement/check-traces.mj
 import {root, captureSources, boundInputs, deferred, tick, call, trace, checkpoint} from '../specs/quint/refinement/application/support.mjs';
 
 const driver = fileURLToPath(import.meta.url);
-const source = '.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
+const source = 'apps/app/src/ui/files/files-browser-adapter.ts';
 const ids = Array.from({length: 6}, (_, i) => i + 1);
 const paths = {Download: 1, 'Download/Child': 2};
 const entry = (id, directory = false) => ({path: id === 1 ? 'Download/Owned.txt' : id === 2 ? 'Download/Child' : 'Download/Child/Later.txt',

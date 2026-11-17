@@ -9,7 +9,7 @@ import {boundInputs, call, captureSources, checkpoint, deferred, root, tick, tra
 import {assertBundlesLocalUi, uiStagingHelper} from './support/quint-conformance-ui-staging.mjs';
 
 const driver = fileURLToPath(import.meta.url);
-const launcherSource = '.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts';
+const launcherSource = 'apps/app/src/ui/mobile-shell/installed-launcher.ts';
 const shellSource = 'apps/app/src/ui/mobile-shell/mobile-launcher.ts';
 const productSource = 'apps/app/src/product/alpha-product.ts';
 const notes = 'alpha:notes', automations = 'alpha:automations', legacy = 'alpha:workflows';
@@ -38,14 +38,14 @@ async function compile(extraSources) {
       export {appKey} from './${launcherSource}';`},
     bundle: true, platform: 'node', format: 'cjs', write: false, metafile: true,
     define: {'import.meta.env': '{}'}, plugins: [{name: 'launcher-favorites-observer', setup(builder) {
-      builder.onLoad({filter: /\/plugin-native-system\/src\/client\/launcher\.ts$/}, ({path}) => {
+      builder.onLoad({filter: /\/ui\/mobile-shell\/installed-launcher\.ts$/}, ({path}) => {
         const source = readFileSync(path, 'utf8'), marker = '  let generation = 0;';
-        assert.equal(source.split(marker).length, 2, 'One shared launcher favorites observer seam');
+        assert.equal(source.split(marker).length, 2, 'One launcher favorites observer seam');
         return {loader: 'ts', contents: source.replace(marker,
           '  __port.inspect = () => ({rawSaved,builtins,defaultsPending,migrationPending,legacyHomeDefaultsPending});\n' + marker)};
       });
     }}]});
-  assertBundlesLocalUi(built.metafile, shellSource);
+  assertBundlesLocalUi(built.metafile, shellSource, launcherSource);
   const sources = [...Object.keys(built.metafile.inputs).filter(path => !path.startsWith('<') && path !== 'launcher-favorites-entry.ts'),
     launcherSource, shellSource, productSource, driver, uiStagingHelper, ...extraSources];
   captureSources(sources);
@@ -198,7 +198,7 @@ async function checkLauncherFavorites(extraSources = []) {
     traces.push(t);
   }
   return checkTraces(boundInputs({model: 'LauncherFavorites', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
-    'Actual Alpha MobileShellLauncher (ui/mobile-shell) over the shared launcher bridge, local favorites store, registry, and product registration execute against a synthetic Storage port and deferred installed-app reads.',
+    'Actual Alpha MobileShellLauncher (ui/mobile-shell), installed-app launcher (ui/mobile-shell/installed-launcher.ts), local favorites store, registry, and product registration execute against a synthetic Storage port and deferred installed-app reads.',
     'Two Alpha views, their legacy alias, and three installed package/activity/profile keys form the bounded identity set. A source inspection seam reads the original captured favorites and migration flags. Home visibility comes from actual homeEntries().',
     'One held inventory read and a later load or controller recreation are covered. Independent writes use an external port. Browser storage errors are represented as thrown reads or writes; OS package effects and actual browser persistence remain external.',
   ]}));

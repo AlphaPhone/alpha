@@ -1,6 +1,6 @@
 import {createElement, type CSSProperties} from 'react';
-import type {FavoritesStore, InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
-import {appKey} from '@elizaos/capacitor-system/launcher';
+import type {InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
+import {appKey, type FavoritesStore} from '../ui/mobile-shell/installed-launcher.ts';
 import {createMobileShellLauncher, type MobileHomeEntry} from '../ui/mobile-shell/mobile-launcher.ts';
 import {mobileShellIconUrl} from '../ui/mobile-shell/product-registration.ts';
 import {MobileHomeScreen, type MobileHomeTile} from '../ui/mobile-shell/MobileHomeScreen.tsx';

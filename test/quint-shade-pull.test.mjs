@@ -17,12 +17,11 @@ import {modelTraces, replay, tick} from '../specs/quint/refinement/application/s
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
 
 // ShadePull traces from the simulator, replayed on the shell's pull entry (openSystemShade) with
-// installSystemShade from source over the pinned shared shade policy. Android's answer and the
+// installSystemShade from source over Alpha's shade policy (ui/shell/notification-shade.ts). Android's answer and the
 // bounded wait are the environment: the plugin call settles, or the wait's timer runs, when the
 // model says so. What Android does with a request is device evidence.
 const bundled = await build({entryPoints: [resolve('apps/app/src/prototype/system-shade.ts')], bundle: true, format: 'esm',
   platform: 'node', write: false, plugins: [{name: 'ports', setup(b) {
-    b.onResolve({filter: /^@elizaos\/capacitor-system\/shade$/}, () => ({path: resolve('.eliza/client-features/plugins/plugin-native-system/src/client/shade.ts')}));
     b.onResolve({filter: /^\.\.\/platform-plugins$/}, a => ({path: a.path, namespace: 'stub'}));
     b.onLoad({filter: /.*/, namespace: 'stub'}, () => ({contents: 'export function registerPlugin(){return globalThis.alphaShadeDevice;}', loader: 'js'}));
   }}]});

@@ -1,7 +1,7 @@
 import React from 'react';
 import {aospImage} from '../runtime/aosp-image';
 import {createAddressBookClient,isIncompleteAddressBookContact,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
-import {literalMailAddress} from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
+import {literalMailAddress} from '../ui/mailbox/drafts-controller';
 import {MailFolderPicker} from '../ui/mailbox/MailFolderPicker.tsx';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
 import type {ServiceReadCache} from '../runtime/service-read-cache';
@@ -26,7 +26,8 @@ import { connectionController, agentPendingText } from '../runtime/connection-ui
 import { gmailGrantChange, gmailInboxAllows, gmailModifyIncomplete, gmailReadCacheKey } from '../runtime/gmail-grants';
 import { cloudServiceName, type GmailAccount, type GmailDraftContent, type GmailDraftSummary, type GmailLink, type GmailMessage } from '../runtime/cloud-protocol';
 import { linkifyMailText, linkTextMismatch } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/links.ts';
-import { MAILBOX_CHANGED_NOTICE, MAILBOX_FOLDER_QUERY, MailBodyCache, MailboxListCache, inboxAttentionFor, mailboxListStatus, mergeMailboxPage, nextMailboxCursor, readSavedInboxSummary, readSavedMailbox, type InboxAttention as SharedInboxAttention, type MailboxFolder, type SavedMailbox } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts';
+import { MAILBOX_FOLDER_QUERY, MailBodyCache, MailboxListCache, mergeMailboxPage, nextMailboxCursor, readSavedInboxSummary, readSavedMailbox, type MailboxFolder, type SavedMailbox } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts';
+import { MAILBOX_CHANGED_NOTICE, inboxAttentionFor, mailboxListStatus, type InboxAttention as SharedInboxAttention } from '../ui/mailbox/mailbox-list';
 import { reviewOpaqueAttachment } from '../runtime/inbox-operation';
 import {googleConnectionController} from '../runtime/google-connection-ui';
 import {GOOGLE_ACCOUNTS_CHANGED} from '../runtime/google-accounts';
@@ -37,8 +38,8 @@ import { BrowserReviews } from '../browser/review';
 
 type Bag = Record<string, any>;
 const MAIL_MENU_TOKENS=['--bg','--fg','--s2','--mut','--line','--acct'],MAIL_MENU_SELECTED={width:112,background:'var(--fg)',color:'var(--bg)'};
-import type { EmailTarget } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/use-in-email.ts';
-/** What Home may show about mail (@elizaos/plugin-inbox/mailbox): only counts, the account label and a time
+import type { EmailTarget } from '../ui/mailbox/use-in-email';
+/** What Home may show about mail (../ui/mailbox/mailbox-list): only counts, the account label and a time
  * leave the Inbox closure; no subject, sender or body. */
 export type InboxAttention = SharedInboxAttention;
 let attention: InboxAttention = { state: 'not-connected', unread: undefined, unreadMore: false, source: null, updatedAt: null };

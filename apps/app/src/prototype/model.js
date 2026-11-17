@@ -6037,7 +6037,7 @@ class Component extends DCLogic {
   swipe(g, dx, dy) {
     // Gesture zones are the mobile shell's (ui/mobile-shell resolveMobileShellSwipe). The top
     // edge belongs to Android; on launcher Home a pull down that starts
-    // on empty Home asks Android for its shade (#417, @elizaos/capacitor-system/shade).
+    // on empty Home asks Android for its shade (#417, ui/shell/notification-shade.ts).
     var self = this, S = this.S();
     var action = resolveMobileShellSwipe({ screen: S.screen, shade: !!S.shade, view: S.view, chat: S.chat, launcher: this.props.systemShell !== false }, { x: g.x, y: g.y, onShadeControl: false }, dx, dy, {
       pullOpensShade: function (px, py, threshold) { return emptyHomeShadePull(self.pullContext(), g.pull, g.y, px, py, threshold); },

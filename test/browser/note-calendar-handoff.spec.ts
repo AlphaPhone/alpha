@@ -279,7 +279,7 @@ test('Notes scheduling contract: double activation makes one draft; a reload mid
 });
 
 // Canonical path: an agent Notes record (closed app-record fixture, no server) hands its text to a
-// reminder draft from Alpha's note editor (canonical-notes-ui.ts, the shared noteScheduleDraft). The saved reminder keeps a version 2
+// reminder draft from Alpha's note editor (canonical-notes-ui.ts and ui/notes/note-schedule-draft.ts). The saved reminder keeps a version 2
 // record link (note id and a hash of its authored fields only) that opens that exact record.
 test('Notes scheduling contract: a canonical note opens a reminder draft whose saved reminder links back to that exact record',async({page})=>{
  const {errors}=await canonicalNotesFixture(page);

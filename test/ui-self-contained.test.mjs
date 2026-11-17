@@ -10,7 +10,9 @@
 // module (bundled with the vite.config.ts aliases) loads no upstream JSX/TSX, React, @elizaos/ui,
 // MapLibre, stylesheet or DOM-building module, whatever its path; the TypeScript program reached
 // from apps/app/src (type-only imports included) does the same; Vite asset and worker queries
-// never load upstream files; and every staged upstream file, bundled or not, builds no DOM.
+// never load upstream files; every staged upstream file, bundled or not, builds no DOM; and no
+// staged upstream file presents a screen (render or view hooks, DOM event or element parameters,
+// toasts with literal copy): Alpha owns every screen controller and its owner-facing copy.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,13 +47,14 @@ const packageName = specifier => specifier.split('/').slice(0, specifier.startsW
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 /**
  * What a module is, whatever its path: upstream logic may make offscreen helpers (a canvas, a
- * download link, a file input, a parsing template or textarea); it never builds visible elements,
- * styles them or writes markup, and never imports React, MapLibre or upstream UI.
+ * parsing template or textarea); it never builds visible elements, styles them or writes markup,
+ * and never imports React, MapLibre or upstream UI. Download links and file inputs are Alpha's
+ * (apps/app/src/browser/download.ts and file-picker.ts): a staged module takes them as host ports.
  */
 function uiShapeOffences(file, text) {
   const offences = [];
   for (const match of text.matchAll(/createElement(?:NS)?\(\s*(?:"[^"]*",\s*)?["'`]([^"'`]+)["'`]/g))
-    if (!['canvas', 'a', 'input', 'template', 'textarea'].includes(match[1])) offences.push(`${file}: creates <${match[1]}>`);
+    if (!['canvas', 'template', 'textarea'].includes(match[1])) offences.push(`${file}: creates <${match[1]}>`);
   if (/\.style\.(?:cssText|setProperty\b|[a-zA-Z]+\s*=(?!=))/.test(text)) offences.push(`${file}: sets inline styles`);
   if (/\.(?:innerHTML|outerHTML)\s*=(?!=)|insertAdjacentHTML\(/.test(text) && !/document\.createElement\(\s*["'](?:template|textarea)["']\s*\)/.test(text))
     offences.push(`${file}: writes markup`);
@@ -61,12 +64,32 @@ function uiShapeOffences(file, text) {
   }
   return offences;
 }
+// Screen presentation, whatever the path: a module that assigns a host view's `render`, declares a
+// `render()` or `view()` hook for a host to draw, takes DOM events or elements as parameters, or
+// shows a toast with literal copy is a screen controller or view-model. Alpha owns those in
+// apps/app/src/ui; the staged tree keeps only the contracts, protocols, bridges and data rules
+// they call. Comments are blanked first so documentation that names a hook does not count.
+const DOM_PARAMETER = /[(,]\s*[A-Za-z_$][\w$]*\??\s*:\s*((?:UI|Keyboard|Pointer|Mouse|Touch|Focus|Input|Wheel|Drag|Clipboard)?Event|HTML[A-Za-z]*Element|Element)\b/g;
+const SCREEN_HOOK = /^[ \t]*(?:export\s+)?(?:async\s+)?(?:function\s*\*?\s*)?(render|view)\s*(?:<[^>\n]*>)?\([^)]*\)\s*(:[^;{=\n]+)?([{;])|^[ \t]*(?:export\s+)?(?:const|let)?\s*(render|view)\s*[:=]\s*(?:async\s*)?\(/gm;
+function presentationOffences(file, text) {
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, ' ')).replace(/(^|[^:"'`\\])\/\/.*$/gm, '$1');
+  const at = index => `${file}:${code.slice(0, index).split('\n').length}`;
+  const offences = [];
+  for (const match of code.matchAll(/\.render\s*=(?!=)/g)) offences.push(`${at(match.index)}: assigns a host view's render`);
+  // A bare `render();` call is not a declaration; a declaration has a body or a return type.
+  for (const match of code.matchAll(SCREEN_HOOK)) if (match[4] || match[3] === '{' || match[2]) offences.push(`${at(match.index)}: declares a ${match[1] || match[4]}() screen hook`);
+  for (const match of code.matchAll(DOM_PARAMETER)) offences.push(`${at(match.index)}: takes a DOM ${match[1]} parameter`);
+  for (const match of code.matchAll(/\btoast\s*\(\s*["'`]/g)) offences.push(`${at(match.index)}: shows a toast with literal copy`);
+  return offences;
+}
 // Upstream files an app module loads straight from the submodule. Each is reviewed framework-free
-// logic (no DOM, no React); anything else from vendor/eliza has to be staged or copied into Alpha.
+// logic (no DOM, no React, no owner-facing copy shown as written); anything else from vendor/eliza
+// has to be staged or copied into Alpha. The Passwords screen's failure wording, website check
+// wording and list search are Alpha's (apps/app/src/ui/passwords/passwords-presentation.ts).
 const VENDOR_RUNTIME = new Map([
   ['vendor/eliza/packages/core/src/utils/uuid.ts', 'UUID validation'],
-  ['vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts', 'password binding helpers'],
-  ['vendor/eliza/plugins/plugin-native-passwords/src/client.ts', 'native passwords bridge client'],
+  ['vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts', 'password website normalization'],
+  ['vendor/eliza/plugins/plugin-native-passwords/src/client.ts', 'native passwords bridge client and failure codes'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts', 'password transfer bridge client'],
 ]);
 // Upstream submodule files the TypeScript program reaches from app modules only through type-only
@@ -199,6 +222,25 @@ test('no staged upstream file builds DOM, bundled or not', () => {
   assert.deepEqual(staged.flatMap(file => uiShapeOffences(path.join(STAGED, file), fs.readFileSync(path.join(STAGED, file), 'utf8'))), []);
 });
 
+test('no staged upstream file presents a screen, bundled or not', () => {
+  const staged = Object.keys(stamp.files).filter(file => CODE.test(file));
+  assert.ok(staged.length > 100, 'the staged code was listed');
+  assert.deepEqual(staged.flatMap(file => presentationOffences(path.join(STAGED, file), fs.readFileSync(path.join(STAGED, file), 'utf8'))), []);
+  // The rules recognise the screen controllers Alpha took over (read at the pin, unstaged).
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^GIT_(?:DIR|INDEX_FILE|WORK_TREE)$/.test(name)));
+  const pinned = file => execFileSync('git', ['-C', 'vendor/eliza', 'show', `HEAD:${file}`], {encoding: 'utf8', env, maxBuffer: 64 << 20});
+  for (const [file, rule] of [
+    ['plugins/plugin-maps/src/client/maps-screen.ts', /view\(\) screen hook|toast with literal copy/],
+    ['plugins/plugin-files/src/browser/files-browser-adapter.ts', /render|DOM KeyboardEvent parameter/],
+    ['plugins/plugin-inbox/src/mailbox/review-controller.ts', /render\(\) screen hook/],
+    ['plugins/plugin-inbox/src/mailbox/drafts-controller.ts', /toast with literal copy/],
+    ['plugins/plugin-native-system/src/client/shade.ts', /DOM TouchEvent parameter/],
+  ]) {
+    assert.equal(stamp.files[file], undefined, `${file} is Alpha's, not staged`);
+    assert.ok(presentationOffences(file, pinned(file)).some(offence => rule.test(offence)), `${file} is recognised as screen presentation`);
+  }
+});
+
 test('every runtime dependency is reached by the app graph or has a recorded use', async () => {
   const {inputs} = await appGraph();
   const imported = new Set(inputs.flatMap(input => input.imports.filter(entry => entry.external && /^[@a-z]/.test(entry.path)).map(entry => packageName(entry.path.split('?')[0]))));
@@ -308,4 +350,5 @@ test('the prepared upstream source selection names no UI', () => {
   const pinned = file => execFileSync('git', ['-C', 'vendor/eliza', 'show', `HEAD:${file}`], {encoding: 'utf8', env, maxBuffer: 64 << 20});
   const asStaged = file => stamp.files[file] && stamp.files[file] !== stamp.sourceFiles[file] ? fs.readFileSync(path.join(STAGED, file), 'utf8') : pinned(file);
   assert.deepEqual(tracked.filter(file => CODE.test(file)).flatMap(file => uiShapeOffences(path.join(STAGED, file), asStaged(file))), []);
+  assert.deepEqual(tracked.filter(file => CODE.test(file)).flatMap(file => presentationOffences(path.join(STAGED, file), asStaged(file))), []);
 });

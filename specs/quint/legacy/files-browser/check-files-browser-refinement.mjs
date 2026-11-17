@@ -308,7 +308,7 @@ async function mounted(extraSources) {
   checkClientFeatures();
   const watched = new Set([
     'apps/app/src/main.tsx', 'apps/app/src/browser/files.ts', 'apps/app/src/prototype/selection-adapter.ts',
-    '.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts',
+    'apps/app/src/ui/files/files-browser-adapter.ts', 'apps/app/src/ui/files/storage-presentation.ts',
     '.eliza/client-features/plugins/plugin-files/src/browser/storage-volume.ts',
   ].map(path => resolve(root, path)));
   const sources = [...new Set([

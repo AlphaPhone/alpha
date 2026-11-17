@@ -382,8 +382,9 @@ async function reroute(page) {
 
 export async function mountClosedMaps(extraSources, runs, holdRouteReplies = false) {
   checkClientFeatures();
-  const watched = new Set([adapter, ...['maps-screen.ts', 'state.ts', 'cloud-provider.ts', 'cloud-session.ts']
-    .map(path => resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/'+path))]);
+  const watched = new Set([adapter, ...['maps-screen.ts', 'cloud-provider.ts'].map(path => resolve(root, 'apps/app/src/ui/maps/'+path)),
+    ...['state.ts', 'cloud-provider.ts', 'cloud-session.ts']
+      .map(path => resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/'+path))]);
   if (holdRouteReplies) watched.add(resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/device-navigation.ts'));
   const sources = [...new Set([
     ...filesWithin(resolve(root, 'apps/app/src')), ...filesWithin(resolve(root, '.eliza/client-features')),

@@ -54,7 +54,6 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/contracts/src/iana-tlds.ts',
   // Import-free leaf of browser-request-grounding.
   'packages/contracts/src/strip-trailing-punctuation.ts',
-  'packages/contracts/src/stated-clock-time.ts',
   'packages/contracts/src/phone-dial.ts',
   'packages/contracts/src/device-action-execution.ts',
   'packages/contracts/src/client-turn-observation.ts',
@@ -67,13 +66,9 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/contracts/src/workflow-approval-poster.ts',
   'packages/contracts/src/workflow-intents.ts',
   'packages/contracts/src/workflow-scope.ts',
-  'plugins/plugin-notes/src/client/notes-controller.ts',
-  'plugins/plugin-notes/src/client/notes-editor.ts',
-  'plugins/plugin-notes/src/client/notes-snapshot-state.ts',
 
   'packages/core/src/chat-upload-limits.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
-  'plugins/plugin-native-system/src/client/shade.ts',
   'plugins/plugin-native-system/src/sense.ts',
   'plugins/plugin-native-system/src/sense-bridge.ts',
   'plugins/plugin-native-system/src/sense-web.ts',
@@ -81,10 +76,22 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-native-system/src/crash-log.ts',
   'plugins/plugin-native-system/src/settings.ts',
   'plugins/plugin-native-system/src/definitions.ts',
+  // Files storage, archive, attachment and scan-document logic. The Files screen adapter and the
+  // scan poster rules are Alpha's (apps/app/src/ui/files, apps/app/src/ui/documents).
+  'plugins/plugin-files/src/browser/attachment.ts',
+  'plugins/plugin-files/src/browser/file-archive.ts',
+  'plugins/plugin-files/src/browser/files.ts',
+  'plugins/plugin-files/src/browser/files-agent-contract.ts',
   'plugins/plugin-files/src/browser/storage-model.ts',
   'plugins/plugin-files/src/browser/storage-volume.ts',
-  'plugins/plugin-files/src/browser/files-agent-contract.ts',
-  'plugins/plugin-files/src/browser/files-browser-adapter.ts',
+  'plugins/plugin-files/src/documents/local-ocr.ts',
+  'plugins/plugin-files/src/documents/scan-correction.ts',
+  'plugins/plugin-files/src/documents/scan-draft.ts',
+  'plugins/plugin-files/src/documents/scan-edges.ts',
+  'plugins/plugin-files/src/documents/scan-links.ts',
+  'plugins/plugin-files/src/documents/scan-pdf.ts',
+  'plugins/plugin-files/src/documents/scan-text-layer.ts',
+  'plugins/plugin-files/src/documents/source-links.ts',
   "plugins/plugin-browser/src/native-client-command.ts",
   'plugins/plugin-native-browser-surface/src/address-input.ts',
   'plugins/plugin-native-browser-surface/src/browsing-session.ts',
@@ -166,7 +173,6 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/core/src/i18n/language.ts',
   'packages/core/src/views/view-interact-protocol.ts',
   'packages/core/src/views/view-action-handoff.ts',
-  'packages/core/src/views/completed-action-navigation.ts',
   'packages/contracts/src/native-notes-query.ts',
   'packages/contracts/src/device-reviews.ts',
   'plugins/plugin-assistant/src/services/device-actions/contract.ts',
@@ -187,7 +193,6 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-assistant/src/services/device-actions/sms-contract.ts',
   'packages/contracts/src/mms-send.ts',
   'packages/contracts/src/native-telephony.ts',
-  'packages/contracts/src/native-telephony-session.ts',
   'packages/contracts/src/telephony-actions.ts',
   'plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts',
   'packages/contracts/src/native-address-book.ts',
@@ -199,17 +204,73 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-native-reminders/src/android-definitions.ts',
   'plugins/plugin-native-reminders/src/occurrence.ts',
   'plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts',
-  'plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts',
   'plugins/plugin-assistant/src/services/device-actions/notes-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/reminder-create-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts',
-  'plugins/plugin-files',
-  'plugins/plugin-inbox/src/mailbox',
+  // Mailbox protocol, journals and data. The drafts and review controllers, Use in email and the
+  // preview are Alpha's (apps/app/src/ui/mailbox).
+  'plugins/plugin-inbox/src/mailbox/attachments.ts',
+  'plugins/plugin-inbox/src/mailbox/background-notices.ts',
+  'plugins/plugin-inbox/src/mailbox/digest.ts',
+  'plugins/plugin-inbox/src/mailbox/failures.ts',
+  'plugins/plugin-inbox/src/mailbox/grants.ts',
+  'plugins/plugin-inbox/src/mailbox/links.ts',
+  'plugins/plugin-inbox/src/mailbox/mail-context.ts',
+  'plugins/plugin-inbox/src/mailbox/mailbox-list.ts',
+  'plugins/plugin-inbox/src/mailbox/managed-gmail-client.ts',
+  'plugins/plugin-inbox/src/mailbox/operation-journal.ts',
+  'plugins/plugin-inbox/src/mailbox/read-ahead.ts',
+  'plugins/plugin-inbox/src/mailbox/read-state.ts',
+  'plugins/plugin-inbox/src/mailbox/retained-draft.ts',
+  'plugins/plugin-inbox/src/mailbox/types.ts',
   'plugins/plugin-calendar/src/linked-sync',
-  'plugins/plugin-maps/src/client',
+  // Maps routing, location, navigation and provider logic. The Maps screen, its renderer, map
+  // layout and sharing are Alpha's (apps/app/src/ui/maps, apps/app/src/maps).
+  'plugins/plugin-maps/src/client/agent-context.ts',
+  'plugins/plugin-maps/src/client/agent-navigation.ts',
+  'plugins/plugin-maps/src/client/approved-read.ts',
+  'plugins/plugin-maps/src/client/background-navigation.ts',
+  'plugins/plugin-maps/src/client/cloud-provider.ts',
+  'plugins/plugin-maps/src/client/cloud-session.ts',
+  'plugins/plugin-maps/src/client/contracts.ts',
+  'plugins/plugin-maps/src/client/device-navigation.ts',
+  'plugins/plugin-maps/src/client/guidance.ts',
+  'plugins/plugin-maps/src/client/location.ts',
+  'plugins/plugin-maps/src/client/native-location.ts',
+  'plugins/plugin-maps/src/client/navigation-fix.ts',
+  'plugins/plugin-maps/src/client/navigation-relay.ts',
+  'plugins/plugin-maps/src/client/navigation-voice.ts',
+  'plugins/plugin-maps/src/client/regional-provider.ts',
+  'plugins/plugin-maps/src/client/route-distance.ts',
+  'plugins/plugin-maps/src/client/runtime.ts',
+  'plugins/plugin-maps/src/client/saved-places.ts',
+  'plugins/plugin-maps/src/client/state.ts',
   'plugins/plugin-maps/test/navigation-client.test.mjs',
-  'plugins/plugin-notes/src/client',
+  // Notes client stores, trash, recording and query logic. The Notes controller, editor and
+  // snapshot state are Alpha's (apps/app/src/ui/notes).
+  'plugins/plugin-notes/src/client/note-dates.ts',
+  'plugins/plugin-notes/src/client/note-deleted-origins.ts',
+  'plugins/plugin-notes/src/client/note-documents.ts',
+  'plugins/plugin-notes/src/client/note-origin.ts',
+  'plugins/plugin-notes/src/client/note-schedule-draft.ts',
+  'plugins/plugin-notes/src/client/note-share-text.ts',
+  'plugins/plugin-notes/src/client/notes-api.ts',
+  'plugins/plugin-notes/src/client/notes-audio-store.ts',
+  'plugins/plugin-notes/src/client/notes-contract.ts',
+  'plugins/plugin-notes/src/client/notes-document-store.ts',
+  'plugins/plugin-notes/src/client/notes-draft.ts',
+  'plugins/plugin-notes/src/client/notes-query.ts',
+  'plugins/plugin-notes/src/client/notes-recording-deletion.ts',
+  'plugins/plugin-notes/src/client/notes-recording-effects.ts',
+  'plugins/plugin-notes/src/client/notes-recording-summary.ts',
+  'plugins/plugin-notes/src/client/notes-secure-store.ts',
+  'plugins/plugin-notes/src/client/notes-store.ts',
+  'plugins/plugin-notes/src/client/notes-trash-actions.ts',
+  'plugins/plugin-notes/src/client/notes-trash-maintenance.ts',
+  'plugins/plugin-notes/src/client/notes-trash-policy.ts',
+  'plugins/plugin-notes/src/client/notes-trash-schedule.ts',
+  'plugins/plugin-notes/src/client/notes-trash-store.ts',
   'packages/cloud/sdk/src/subscription-entitlement.ts',
   'packages/auth/src/auth/native-cloud-sign-in.ts',
   // Credential-bound account billing reader and its snapshot types (AP-03/#410).
@@ -298,25 +359,96 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     project(name, content.replace(specifier, '} from "../../../../packages/contracts/src/calendar-linked-sync.ts";'));
   }
 
-  // Upstream maps-screen.ts names the overlay type of the plugin-maps MapLibre renderer
-  // (`import type { MapOverlay } from "./map-plane.ts"`). Alpha draws the map with its own
-  // renderer (apps/app/src/maps/map-plane.ts), so map-plane.ts is staged as a type-only leaf: the
-  // upstream declarations above the renderer class, without the maplibre-gl import or the class.
+  // The shared device-action coordinator module also holds upstream's review screen: the
+  // DeviceActionCoordinator class with its context notices, review text and receipt summaries.
+  // Alpha owns that presentation (apps/app/src/ui/device-actions/client-coordinator.ts), so the
+  // staged copy keeps only the queue protocol: wire, journal and port types, operation validation,
+  // action scopes, device statuses, DeviceActionNotStarted, committed-change publication and the
+  // journal context. Without the screen it no longer imports the review date formatter.
   {
-    const name = 'plugins/plugin-maps/src/client/map-plane.ts';
-    const content = text(name), renderer = content.indexOf('\n/** Renderer only'), library = /^import \{[^}]*\} from "maplibre-gl";\n/;
-    const types = content.slice(0, renderer + 1).replace(library, '');
-    if (renderer < 0 || !library.test(content) || content.split('from "maplibre-gl"').length !== 2 || types.includes('maplibre') ||
-      /^(?![ }]|\/\*\*|import type [^;]* from "\.\/contracts\.ts";$|export (?:type|interface) |$)/m.test(types) || !/^export type MapOverlay = /m.test(types))
-      throw Error('Review changed map renderer type declarations: ' + name);
-    project(name, types);
+    const name = 'plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
+    const content = text(name);
+    const cut = (from: string, to: string) => {
+      const start = content.indexOf(from), end = to ? content.indexOf(to, start) : content.length;
+      if (start < 0 || end < 0 || content.split(from).length !== 2 || (to && content.split(to).length !== 2)) throw Error('Review changed device-action coordinator layout: ' + name);
+      return [start, end];
+    };
+    const formatter = 'import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";\n';
+    const [screen] = cut('// ── Screen binding', 'export const CAMERA_CONTEXT_NOTICE = ');
+    const [notStarted, notice] = cut('/**\n * Thrown by a device executor that refused before it started any effect', '/** A pending proposal that does not fit the current screen.');
+    const [publication, coordinator] = cut('// ── Committed-change publication', 'type ExecutionResult = ');
+    if (!(screen < notStarted && notice < publication) || content.split(formatter).length !== 2) throw Error('Review changed device-action coordinator layout: ' + name);
+    const kept = content.slice(0, screen).replace(formatter, '') + content.slice(notStarted, notice) + '\n' + content.slice(publication, coordinator).trimEnd() + '\n';
+    if (/\bformatDeviceRecordDateTime\b|\bclass DeviceActionCoordinator\b|\bContextNotice\b|\bdescribeForegroundReview\b/.test(kept)) throw Error('Review changed device-action coordinator layout: ' + name);
+    // Drop the import bindings only the screen used, keeping upstream's import formatting.
+    const statement = /^import (type )?\{([^}]*)\} from "([^"]+)";\n/gm;
+    const body = kept.replace(statement, '');
+    if (/^import /m.test(body)) throw Error('Review changed device-action coordinator imports: ' + name);
+    project(name, kept.replace(statement, (_all, type = '', names: string, from: string) => {
+      const used = names.split(',').map(entry => entry.trim()).filter(entry => entry && new RegExp('\\b' + entry.split(/\s+/).pop() + '\\b').test(body));
+      if (!used.length) return '';
+      const single = `import ${type}{ ${used.join(', ')} } from "${from}";`;
+      return (single.length <= 80 ? single : `import ${type}{\n${used.map(entry => `  ${entry},\n`).join('')}} from "${from}";`) + '\n';
+    }));
+  }
+
+  // Upstream's browser Notes document port builds a hidden file input and a download link and
+  // words its results for the owner. Alpha owns that (runtime/browser-note-documents.ts with the
+  // file picker in browser/file-picker.ts, wording in apps/app/src/ui/notes), so the staged copy
+  // keeps only the result shapes, limits, file name and the import and PDF checks.
+  {
+    const name = 'plugins/plugin-notes/src/client/note-documents.ts';
+    const content = text(name), from = '\nexport interface BrowserNoteDocumentsOptions {';
+    if (content.split(from).length !== 2 || content.indexOf(from) < content.indexOf('export function noteImportText('))
+      throw Error('Review changed Notes document layout: ' + name);
+    const header = ' * (for example Android\'s document picker); {@link createBrowserNoteDocuments} is the browser\n * implementation: a local file input for import and a download for export. Nothing is uploaded,\n * and an export is only "requested": the browser does not confirm where the bytes landed.\n';
+    if (content.split(header).length !== 2) throw Error('Review changed Notes document layout: ' + name);
+    const kept = content.slice(0, content.indexOf(from)).replace(header, ' * (for example Android\'s document picker, or a browser file input and download).\n');
+    if (/document\.|createElement|createBrowserNoteDocuments/.test(kept)) throw Error('Review changed Notes document layout: ' + name);
+    project(name, kept);
+  }
+  // Upstream's browser Files backend downloads an archive or a selected file through a hidden
+  // link. Alpha supplies that download (browser/download.ts) as one more host option, like the
+  // file picker and the document viewer it already supplies.
+  {
+    const name = 'plugins/plugin-files/src/browser/files.ts';
+    let content = text(name);
+    const replace = (before: string, after: string) => {
+      if (content.split(before).length !== 2) throw Error('Review changed Files download layout: ' + name);
+      content = content.replace(before, after);
+    };
+    replace('  inputFiles(\n    signal: AbortSignal,\n    options?: { photos?: boolean; directory?: boolean },\n  ): Promise<File[]>;\n}',
+      '  inputFiles(\n    signal: AbortSignal,\n    options?: { photos?: boolean; directory?: boolean },\n  ): Promise<File[]>;\n  download(url: string, name: string): void;\n}');
+    replace('    const file = await this.archiveMany(input.items),\n      url = URL.createObjectURL(file),\n      link = document.createElement("a");\n    link.href = url;\n    link.download = this.options.archiveName;\n    document.body.append(link);\n    link.click();\n    link.remove();\n',
+      '    const file = await this.archiveMany(input.items),\n      url = URL.createObjectURL(file);\n    this.options.download(url, this.options.archiveName);\n');
+    replace('    const row = await this.selected(input.selectionId),\n      link = document.createElement("a");\n    const url = this.urls.get(input.selectionId);\n    if (!url) throw Error("Select this file again.");\n    link.href = url;\n    link.download = row.name;\n    document.body.append(link);\n    link.click();\n    link.remove();\n',
+      '    const row = await this.selected(input.selectionId);\n    const url = this.urls.get(input.selectionId);\n    if (!url) throw Error("Select this file again.");\n    this.options.download(url, row.name);\n');
+    if (/createElement\("a"\)/.test(content)) throw Error('Review changed Files download layout: ' + name);
+    project(name, content);
+  }
+
+  // Upstream's Sense module also holds the invocation controller, which decides from the
+  // document (hidden, an open dialog) and window events when a native voice origin may open the
+  // microphone. That focus and modal policy over Alpha's markup is Alpha's
+  // (apps/app/src/ui/voice/sense-invocation.ts); the staged copy keeps the plugin interface, the
+  // parsers, the start rule, the voice entry policy and the bridge timeout.
+  {
+    const name = 'plugins/plugin-native-system/src/sense.ts';
+    const content = text(name);
+    const marks = ['export const SENSE_MODAL_SELECTOR =', 'export interface SenseInvocationHost {', '/** The native session key is an in-memory digest', 'export const SENSE_BRIDGE_TIMEOUT_MS = 10_000;\n',
+      'function serializeInvocation<T>(', '/** Voice entry is an application policy, never permission to capture. */', '/** Bind before consuming. Cold-start, changed-owner and stale async results cannot open the mic. */'];
+    const at = marks.map(mark => content.split(mark).length === 2 ? content.indexOf(mark) : -1);
+    if (at.some((index, i) => index < 0 || (i && index < at[i - 1]))) throw Error('Review changed Sense controller layout: ' + name);
+    const kept = content.slice(0, at[0]) + content.slice(at[1], at[2]) + content.slice(at[3], at[4]).trimEnd() + '\n\n' + content.slice(at[5], at[6]).trimEnd() + '\n';
+    if (/\bdocument\.|\bwindow\.|SENSE_MODAL_SELECTOR|createSenseInvocationController|invocationOperation/.test(kept)) throw Error('Review changed Sense controller layout: ' + name);
+    project(name, kept);
   }
 
   project('alpha-voice-core-protocol.ts','export {ElizaError} from "./packages/core/src/errors";\nexport {redactTrailingArgs} from "./packages/core/src/security/log-redaction";\nexport {parseViewInteractionClientId, AGENT_SURFACE_CAPABILITY_IDS} from "./packages/core/src/views/view-interact-protocol";\nexport {findViewActionHandoff, type ViewActionHandoff} from "./packages/core/src/views/view-action-handoff";\nexport type {PermissionState} from "./packages/core/src/types/permissions";\nexport * from "./packages/core/src/chat-upload-limits";\n');
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {
-    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?15:0, files,
+    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?16:0, files,
   };
   const parent = path.join(root, '.eliza'), destination = path.join(parent, 'client-features');
   regularPath(parent, true);

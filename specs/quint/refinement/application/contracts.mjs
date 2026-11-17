@@ -38,8 +38,8 @@ export async function notesLifecycle() {
     assert.ok(memory.getItem(NOTES_KEY)); traces.push(t);
   }
   {
-    const {NotesController} = await sourceModule('.eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts');
-    const {NotesEditor} = await sourceModule('.eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts');
+    const {NotesController} = await sourceModule('apps/app/src/ui/notes/notes-controller.ts');
+    const {NotesEditor} = await sourceModule('apps/app/src/ui/notes/notes-editor.ts');
     const reading = deferred(), writing = deferred();
     let phase = 'ready', content = 'original', revision = 0;
     const note = () => ({id: 'note', title: content, body: '', color: 'yellow', createdAt: '', updatedAt: ''});

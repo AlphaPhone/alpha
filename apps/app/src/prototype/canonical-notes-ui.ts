@@ -2,7 +2,7 @@ import {parseNoteFormat} from '../../../../.eliza/client-features/plugins/plugin
 import {authoredNoteText} from '../../../../.eliza/client-features/plugins/plugin-notes/src/note-authored.ts';
 import {nextDefaultNoteTitle} from '../runtime/note-default-title';
 import {projectNoteForModel,reconstructNoteContent,type NoteJson,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
-import {noteScheduleDraft,type NoteScheduleKind} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/note-schedule-draft.ts';
+import {noteScheduleDraft,type NoteScheduleKind} from '../ui/notes/note-schedule-draft.ts';
 import {noteShareText} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/note-share-text.ts';
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {agentPendingText,agentAvailabilityNotice,connectionController} from '../runtime/connection-ui';

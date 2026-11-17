@@ -1,5 +1,5 @@
-/** Alpha review and receipt copy. Canonical contracts and exact date formatting stay shared. */
-import { formatDeviceRecordDateTime } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts";
+/** Alpha review and receipt copy. Canonical contracts stay shared; exact date formatting is ui/device-actions/device-record-presentation.ts. */
+import { formatDeviceRecordDateTime } from "../ui/device-actions/device-record-presentation";
 import type { CalendarOperation } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts";
 import type { NotesOperation } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts";
 import type {

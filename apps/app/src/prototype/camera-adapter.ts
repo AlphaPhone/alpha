@@ -1,10 +1,12 @@
 import {validateCameraCaptureResult,type CameraCaptureResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
-// Shared camera host rules: explicit-denial classification and resume recovery that never re-prompts.
-import {cameraAccessDenied,restartAfterResume,type CameraAccessKind as AccessKind} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
+// Shared camera host rule: explicit-denial classification.
+import {cameraAccessDenied,type CameraAccessKind as AccessKind} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
+// Alpha's camera surface resume recovery, which never re-prompts.
+import {restartAfterResume} from '../ui/camera/host-ports';
 // The shared camera session owns the preview/capture/recording lifecycle; this adapter presents it.
 import {createCameraSession} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/session.ts';
 // A scanned page reaches Photos only through its explicit Keep, under one operation identity per capture.
-import {createScanCapture} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts';
+import {createScanCapture} from '../ui/camera/scan-document';
 import type {CameraKeepOutcome} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
 import {reviewFileEmail} from './file-email-review';
 import {connectionController} from '../runtime/connection-ui';

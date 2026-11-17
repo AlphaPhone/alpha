@@ -1,11 +1,5 @@
 /** Installed apps in a searchable grid. The host owns drawer state, icons and theme. */
-import {
-  appKey,
-  describeLauncherApps,
-  filterLauncherApps,
-  type InstalledApp,
-  type Launcher,
-} from "@elizaos/capacitor-system/launcher";
+import type { InstalledApp } from "@elizaos/capacitor-system/launcher";
 import {
   type CSSProperties,
   type HTMLAttributes,
@@ -18,6 +12,12 @@ import {
   useRef,
 } from "react";
 import { DEFAULT_HOLD_MS, LAUNCHER_PRESS_SLOP } from "../gestures/constants";
+import {
+  appKey,
+  describeLauncherApps,
+  filterLauncherApps,
+  type Launcher,
+} from "./installed-launcher";
 
 /** The drawer is a projection of the installed inventory. A resolved default handler does
  * not establish a listed launcher component and must not create a synthetic shortcut. */

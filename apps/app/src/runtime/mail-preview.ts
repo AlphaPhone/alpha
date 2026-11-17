@@ -1,2 +1,2 @@
-/** Gmail snippets are displayed as text after decoding individual references once (@elizaos/plugin-inbox/mailbox). */
-export { decodeMailPreview } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/preview.ts';
+/** Gmail snippets are displayed as text after decoding individual references once (../ui/mailbox/preview). */
+export { decodeMailPreview } from '../ui/mailbox/preview';

@@ -7,9 +7,10 @@ const checkTraces = options => check(boundInputs({...options, sources: [...optio
   'specs/quint/refinement/application/support.mjs']}));
 
 export async function filesPreview() {
-  const source = '.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts', traces = [];
+  const source = 'apps/app/src/ui/files/files-browser-adapter.ts', traces = [];
   const rules = await bundledSource('.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts');
   const contract = await bundledSource('.eliza/client-features/plugins/plugin-files/src/browser/files-agent-contract.ts');
+  const labels = await bundledSource('apps/app/src/ui/files/storage-presentation.ts');
   for (const outcome of ['current', 'retired', 'returned']) {
     let active = true, pending = false;
     const result = deferred(), accepted = [], forgotten = [], state = {};
@@ -28,7 +29,7 @@ export async function filesPreview() {
     const api = {ic: {}, get: () => state, set: patch => Object.assign(state, patch), isActive: () => active, toast() {}};
     const view = {render: () => ({}), onLeave() {}};
     const module = sourceContext([source], ['installFilesBrowserAdapter'], {
-      ...rules.exports, ...contract.exports, document, window: new EventTarget(),
+      ...rules.exports, ...contract.exports, ...labels.exports, document, window: new EventTarget(),
       queueMicrotask,
     });
     module.installFilesBrowserAdapter(view, async (_module, selected) => { accepted.push(selected.selectionId); }, () => {}, {
@@ -53,7 +54,7 @@ export async function filesPreview() {
     checkpoint(t, 'actual storage capability completion', call('previewReply'), observe());
     assert.deepEqual(forgotten, outcome === 'current' ? [] : ['owned-selected']); traces.push(t);
   }
-  return checkTraces({model: 'FilesPreview', sources: [source, ...rules.sources, ...contract.sources], traces, scope: 'bounded-component', assumptions: [
+  return checkTraces({model: 'FilesPreview', sources: [source, ...rules.sources, ...contract.sources, ...labels.sources], traces, scope: 'bounded-component', assumptions: [
     'Current installFilesBrowserAdapter listing, storageSelect completion and view-leave handlers execute. Storage and modal UI are controlled ports.',
     'The current preview request keeps the page visible. Old tree-token semantics are historical. The full current per-volume load/filter/watch/mutation state needs FilesBrowserController. Storage access and modal behavior are controlled ports.']});
 }

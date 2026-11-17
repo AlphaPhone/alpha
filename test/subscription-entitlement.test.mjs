@@ -54,9 +54,12 @@ test('the organization credit balance is read only from an exact, fresh billing 
 
 
 test('the subscription sheet leads with the plan and reports its allowance and latest Cloud limit read-only', async () => {
-  const {subscriptionSummary: sharedSummary, serviceLimitNextChange, alphaSubscriptionCopy} = await import('../apps/app/src/runtime/subscription-entitlement.ts');
-  // The sheet renders through Alpha's summary hook (apps/app/src/ui/components/settings), evaluated as shipped.
+  const {alphaSubscriptionCopy} = await import('../apps/app/src/runtime/subscription-entitlement.ts');
+  // The sheet renders through Alpha's summary hook (apps/app/src/ui/components/settings), evaluated as
+  // shipped with the summary and timing it imports from Alpha's subscription presentation.
+  const {subscriptionSummary: sharedSummary, serviceLimitNextChange} = await import('../apps/app/src/ui/cloud/subscription-presentation.ts');
   const hookSource = fs.readFileSync('apps/app/src/ui/components/settings/cloud-subscription-summary.tsx', 'utf8');
+  assert.match(hookSource, /import \{\s*type SubscriptionCopy,\s*type SubscriptionSummary,\s*serviceLimitNextChange,\s*subscriptionSummary,\s*\} from "\.\.\/\.\.\/cloud\/subscription-presentation";/, 'the hook reads Alpha\'s presentation');
   const hookCompiled = transformSync(hookSource.replace(/^import [\s\S]*?;\n/gm, '').replaceAll('export ', ''), {loader: 'tsx', jsxFactory: 'React.createElement'}).code;
   const useCloudSubscriptionSummary = new Function('React', 'useEffect', 'useState', 'subscriptionSummary', 'serviceLimitNextChange', hookCompiled + ';return useCloudSubscriptionSummary;')(React, React.useEffect, React.useState, sharedSummary, serviceLimitNextChange);
   const source = fs.readFileSync('apps/app/src/runtime/cloud-membership-ui.tsx', 'utf8');

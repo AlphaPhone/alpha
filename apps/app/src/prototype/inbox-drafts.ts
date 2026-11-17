@@ -1,4 +1,4 @@
-import { createMailDraftsController, type ComposePrefill as SharedComposePrefill, type ForwardSource as SharedForwardSource, type MailDraftsProvider, type SuggestionTarget as SharedSuggestionTarget } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
+import { createMailDraftsController, type ComposePrefill as SharedComposePrefill, type ForwardSource as SharedForwardSource, type MailDraftsProvider, type SuggestionTarget as SharedSuggestionTarget } from '../ui/mailbox/drafts-controller';
 import {inboxUnsaved} from './inbox-unsaved';
 import { registerPlugin } from '../platform-plugins';
 import {DailyApps} from '../daily';
@@ -12,7 +12,7 @@ export type ComposePrefill=SharedComposePrefill;
 export type ForwardSource=SharedForwardSource;
 /** The destination of a reviewed assistant suggestion, as shown to the user before inserting it. */
 export type SuggestionTarget=SharedSuggestionTarget;
-/** Local encrypted drafts (@elizaos/plugin-inbox/mailbox) on Alpha's encrypted slots, recovery copy and
+/** Local encrypted drafts (../ui/mailbox/drafts-controller) on Alpha's encrypted slots, recovery copy and
  * native file picker. They remain separate from explicitly reviewed provider operations. */
 export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider?:MailDraftsProvider) {
  const copies=new Set<ReturnType<typeof inboxUnsaved>>();

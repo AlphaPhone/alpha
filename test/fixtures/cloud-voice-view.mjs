@@ -2,7 +2,8 @@ import {tsImport} from '../support/ts-import.mjs';
 const {alphaViewPath}=await tsImport(new URL('../../apps/app/src/product/alpha-product.ts',import.meta.url).href,{parentURL:import.meta.url});
 const {cloudServiceName}=await tsImport(new URL('../../apps/app/src/runtime/cloud-protocol.ts',import.meta.url).href,{parentURL:import.meta.url});
 const {cloudVoiceLimitOf}=await tsImport(new URL('../../apps/app/src/runtime/cloud-voice-limit.ts',import.meta.url).href,{parentURL:import.meta.url});
-const {readServiceLimit,retryDuration}=await tsImport(new URL('../../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts',import.meta.url).href,{parentURL:import.meta.url});
+const {readServiceLimit}=await tsImport(new URL('../../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts',import.meta.url).href,{parentURL:import.meta.url});
+const {retryDuration}=await tsImport(new URL('../../apps/app/src/ui/cloud/subscription-presentation.ts',import.meta.url).href,{parentURL:import.meta.url});
 /** Loads the actual Alpha voice views with in-memory ports only.
  * No microphone, MediaRecorder, native plugin, provider, playback or account API is used. */
 import vm from 'node:vm';

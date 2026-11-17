@@ -1,5 +1,6 @@
 import {registerPlugin} from '../platform-plugins';
-import {pendingDeletionNotices,reminderDeletionRefusal as sharedRefusal,undoConfirmed,type DeferredDeletionEntry,type DeferredDeletionsBridge} from '../../../../.eliza/client-features/packages/contracts/src/deletion-window';
+import {pendingDeletionNotices,undoConfirmed,type DeferredDeletionEntry,type DeferredDeletionsBridge} from '../../../../.eliza/client-features/packages/contracts/src/deletion-window';
+import {reminderDeletionRefusal as refusal} from '../ui/deletions/deletion-notice';
 import type {DeferredDeletionIdentity} from '../ui/components/composites/deferred-deletion-notice';
 /** A pending Calendar or reminder deletion row (the shared deletion-window contract). */
 export type DeletionEntry=DeferredDeletionEntry&{kind:'calendar'|'reminder'};
@@ -13,11 +14,12 @@ export const deletions=registerPlugin<DeferredDeletionsBridge&{
 }>('AlphaDeletions');
 export function refreshDeletionViews(){window.dispatchEvent(new Event('alpha:deletions-changed'));window.dispatchEvent(new Event('alpha:calendar-document-changed'));window.dispatchEvent(new Event('alpha:reminders-document-changed'));}
 /**
- * Review statuses that prove nothing was claimed or staged, with the shared wording. A wrapper,
- * not `export {..} from`: the forwarded re-export moved development modules out of the entry
- * chunk in production builds, past the bundle audit.
+ * Review statuses that prove nothing was claimed or staged, with Alpha's reminder wording
+ * (`../ui/deletions/deletion-notice.ts`). A wrapper, not `export {..} from`: the forwarded
+ * re-export moved development modules out of the entry chunk in production builds, past the
+ * bundle audit.
  */
-export function reminderDeletionRefusal(status:string){return sharedRefusal(status);}
+export function reminderDeletionRefusal(status:string){return refusal(status);}
 /** Alpha keeps passive polling quiet until this owner has a deletion to reconcile.
  * The shared notice still owns polling, action errors and lifecycle fencing. */
 export function createDeletionNoticePolicy(bridge: DeferredDeletionsBridge, identity: DeferredDeletionIdentity) {

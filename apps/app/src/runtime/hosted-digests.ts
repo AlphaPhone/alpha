@@ -1,20 +1,53 @@
 /**
- * Scheduled digests (resident briefs). The protocol client, the client-scoped result inbox, the
- * occurrence policy and the retained-brief selection are the shared upstream client
- * (`plugins/plugin-workflow/src/client/hosted-digests.ts`); the agent schedules through the durable
- * runtime scheduler and this app never runs a digest. Alpha keeps only its retained-brief binding
- * for Home: one store for the current connection and the `alpha:retained-digest` window event.
+ * Scheduled digests (resident briefs). The wire types, the result parser, the protocol client, the
+ * client-scoped result inbox, renewal and missed-occurrence selection are the shared upstream
+ * client (`plugins/plugin-workflow/src/client/hosted-digests.ts`); the agent schedules through the
+ * durable runtime scheduler and this app never runs a digest. What the owner reads (occurrence and
+ * loop state, summaries, the zone note and the retained brief) is Alpha's own
+ * (`../ui/digests/hosted-digests.ts`). Alpha keeps its retained-brief binding for Home: one store
+ * for the current connection and the `alpha:retained-digest` window event.
  */
 import {
   RetainedBriefStore,
-  type DigestResult,
-  type DigestSpec,
   type RetainedDigestSummary,
+} from '../ui/digests/hosted-digests.ts';
+import type {
+  DigestResult,
+  DigestSpec,
 } from '../../../../.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts';
 
 import {WorkflowHttpError} from '../../../../.eliza/client-features/packages/contracts/src/workflow-client.ts';
 
-export * from '../../../../.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts';
+export {
+  DIGEST_SOURCE_MAX_HOURS,
+  DigestInbox,
+  HostedDigestProtocol,
+  HostedSourceRejected,
+  digestRan,
+  digestRenewals,
+  missedRunNowMutationId,
+  missedRunNowOffers,
+  parseDigestResult,
+  type DigestCapabilities,
+  type DigestLoop,
+  type DigestResult,
+  type DigestSource,
+  type DigestSpec,
+  type DigestStorage,
+  type DigestTemplate,
+  type HostedLiveAccount,
+  type HostedLiveCalendar,
+  type HostedLiveSelection,
+  type HostedNativeSelection,
+  type MissedRunNow,
+} from '../../../../.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts';
+export {
+  digestLoopState,
+  digestStatusLabel,
+  digestSummaryText,
+  digestZoneNote,
+  type RetainedDigestSummary,
+} from '../ui/digests/hosted-digests.ts';
 
 //@ skip
 const retained = new RetainedBriefStore();

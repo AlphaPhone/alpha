@@ -2,7 +2,8 @@ import React, {act, Component, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {openAppInfo} from '../../../../apps/app/src/native';
 import {installHomeShell} from '../../../../apps/app/src/prototype/home-shell';
-import {appKey, type InstalledApp, type LaunchTarget} from '../../../../.eliza/client-features/plugins/plugin-native-system/src/client/launcher';
+import type {InstalledApp} from '../../../../.eliza/client-features/plugins/plugin-native-system/src/client/launcher';
+import {appKey, type LaunchTarget} from '../../../../apps/app/src/ui/mobile-shell/installed-launcher';
 import {navigateMobileShell, type MobileShellNavigationAction} from '../../../../apps/app/src/ui/mobile-shell/navigation';
 
 const catalog: Record<number, InstalledApp> = {

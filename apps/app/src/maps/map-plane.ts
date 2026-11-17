@@ -1,8 +1,7 @@
 // Alpha's map renderer: MapLibre with the product palette, pins, the position puck and route
 // line. MapLibrePlane started as a copy of the elizaOS plugin-maps renderer (provenance in
-// ../ui/README.md); Alpha owns it now. The shared maps screen controller (./screen.ts) names the
-// overlay it hands this renderer through the staged type-only map-plane leaf; the compile-time
-// check below the MapOverlay declaration keeps the two overlay types identical.
+// ../ui/README.md); Alpha owns it now. It draws the overlay the Maps screen controller
+// (../ui/maps/maps-screen.ts) hands it, typed in ../ui/maps/map-plane.ts.
 import 'maplibre-gl/dist/maplibre-gl.css';
 import fontUrl from '@fontsource/public-sans/files/public-sans-latin-400-normal.woff2?url';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
@@ -18,7 +17,7 @@ import {
   setWorkerUrl,
 } from "maplibre-gl";
 import type { Coordinate, Route } from './contracts';
-import type { MapOverlay as ScreenMapOverlay } from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/map-plane.ts';
+import type { MapOverlay, MapPin, MapPosition } from '../ui/maps/map-plane';
 type RegionalMap = {
   kind?: "regional";
   base: string;
@@ -63,30 +62,6 @@ interface CloudRasterBasemap {
   ): Promise<string>;
 }
 export type MapBasemap = RegionalMap | GlobalBasemap | CloudRasterBasemap;
-/** A search result or other candidate drawn on the map; tapping reports its id. */
-type MapPin = Readonly<{
-  id: string;
-  label: string;
-  coordinate: Coordinate;
-}>;
-/** Device position from an explicit location session; heading only while moving. */
-type MapPosition = Readonly<{
-  coordinate: Coordinate;
-  accuracyMeters: number;
-  headingDegrees?: number;
-}>;
-export type MapOverlay = Readonly<{
-  pins?: readonly MapPin[];
-  position?: MapPosition | null;
-  /** Keep the camera on the position, rotated to its heading (navigation). */
-  follow?: boolean;
-}>;
-// Compile-time check: the overlay the shared screen hands over and the one this renderer draws
-// are the identical type (optional fields included), so neither side can drift without failing
-// typecheck.
-type SameType<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-type Assert<T extends true> = T;
-type MapOverlayMatchesScreen = Assert<SameType<MapOverlay, ScreenMapOverlay>>;
 interface MapPlaneOptions {
   /** Called when the user taps a result pin. */
   onPin?(id: string): void;

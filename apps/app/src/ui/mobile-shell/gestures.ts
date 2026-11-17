@@ -57,7 +57,7 @@ interface MobileShellSwipeOptions {
   homeBarTop?: number;
   /**
    * The product's empty-Home shade pull (e.g. `emptyHomeShadePull` from
-   * `@elizaos/capacitor-system/shade`), asked only for a downward pull.
+   * `ui/shell/notification-shade.ts`), asked only for a downward pull.
    */
   pullOpensShade?: (dx: number, dy: number, threshold: number) => boolean;
 }

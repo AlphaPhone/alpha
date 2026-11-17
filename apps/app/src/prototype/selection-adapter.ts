@@ -5,7 +5,7 @@ import type {Source} from './note-source-adapter';
 const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promise<MailAttachment & {sha256:string;size:number;sourceReferenceVersion?:1}>;retainSourceReference(input:{selectionId:string;sha256:string}):Promise<{reference?:string}>}>('AlphaMailAttachments');
 import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
-import { installFilesBrowserAdapter, type FilesStoragePort } from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
+import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
 import { filesIndex } from './files-index';

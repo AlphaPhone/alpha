@@ -1,7 +1,7 @@
-/** The Maps adapter with the shared Maps screen, mounted over controlled ports.
+/** The Maps adapter with its Maps screen, mounted over controlled ports.
  *
  * What runs: installPrototypeMapsAdapter of apps/app/src/prototype/maps-adapter.ts bundled with
- * the code it composes: the shared MapsScreenController, MapsController, saved places,
+ * the code it composes: the MapsScreenController, MapsController, saved places,
  * BackgroundNavigation, bindAgentNavigation and DeviceMapsNavigation, the provider runtime and
  * the Calendar return helpers. Ports: the native plugins, the location owners, the Cloud Maps
  * read, the connection controller, the map plane, the guidance voice, the share sheet, the
@@ -42,7 +42,7 @@ const ports = new Map(Object.entries({
     export const locationPermissionGranted=async()=>harness.locationGranted;`,
   'runtime/connection-ui.ts': 'export const connectionController=globalThis.mapsHarness.connection;',
   'runtime/cloud-protocol.ts': 'export const cloudServiceName="Cloud";',
-  'maps/screen.ts': `import {MapsScreenController as Shared} from ${JSON.stringify(join(repositoryRoot, '.eliza/client-features/plugins/plugin-maps/src/client/maps-screen.ts'))};
+  'maps/screen.ts': `import {MapsScreenController as Shared} from ${JSON.stringify(app('ui/maps/maps-screen.ts'))};
     const harness=globalThis.mapsHarness;
     export class MapsScreenController extends Shared{
       constructor(host){super(host);harness.screen=this;harness.host=host;}

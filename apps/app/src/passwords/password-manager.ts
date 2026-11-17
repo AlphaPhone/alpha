@@ -6,7 +6,8 @@ import { browserDevProfile } from '../browser/dev-profile';
 import { createDevelopmentVault } from './dev-vault';
 import { createPasswordsClient, passwordsError, type PasswordsClient } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/client.ts';
 import { createTransferClient, type ElizaPasswordTransferPlugin, type PasswordTransferClient } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts';
-import { filterEntries, normalizeWebsite } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts';
+import { normalizeWebsite } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts';
+import { filterEntries, passwordsFailureText, websiteInputText } from '../ui/passwords/passwords-presentation';
 import type { ElizaPasswordsPlugin, PasswordBinding, PasswordEntrySummary, PasswordsStatus } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/definitions.ts';
 
 /**
@@ -108,7 +109,7 @@ async function refresh() {
     if (!current()) return;
     const failure = passwordsError(error);
     if (failure.code === 'locked') expired('Locked.');
-    else { if (failure.code === 'key-invalidated') { damaged = true; locked(); } notice = failure.message; }
+    else { if (failure.code === 'key-invalidated') { damaged = true; locked(); } notice = passwordsFailureText(failure); }
   }
   notify();
 }
@@ -126,10 +127,10 @@ async function run(name: string, task: (vault: PasswordsClient, current: () => b
     confirmReset = null;
     const failure = passwordsError(error);
     if (failure.code === 'locked') expired('Locked.');
-    else if (failure.code === 'key-invalidated') { damaged = true; locked(failure.message); }
-    else if (draft && (name === 'save' || name === 'remove')) draft.error = failure.message;
-    else if (fail) fail(failure.message);
-    else notice = failure.message;
+    else if (failure.code === 'key-invalidated') { damaged = true; locked(passwordsFailureText(failure)); }
+    else if (draft && (name === 'save' || name === 'remove')) draft.error = passwordsFailureText(failure);
+    else if (fail) fail(passwordsFailureText(failure));
+    else notice = passwordsFailureText(failure);
     // Transfer can stop after changing the selected file or vault. Never lose
     // this warning when the generic vault mapper replaces native error text.
     if (name === 'export') notice = 'Export failed · delete file';
@@ -182,7 +183,7 @@ function save(helpers: Helpers) {
   current.error = '';
   let websites: string[];
   try { websites = current.website.split(/[\s,]+/).filter(Boolean).map(normalizeWebsite); }
-  catch (error) { current.error = (error as Error).message; notify(); return; }
+  catch (error) { current.error = websiteInputText(error); notify(); return; }
   if (!current.label.trim()) { current.error = 'Enter a name.'; notify(); return; }
   if (!websites.length && !current.keep.length) { current.error = 'Add a website'; notify(); return; }
   // An empty field after expiry dropped a typed password must not quietly keep the old one.
