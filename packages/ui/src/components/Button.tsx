@@ -5,17 +5,20 @@ import { cn, focusRing } from "../lib/cn.ts";
 import { Spinner } from "./Spinner.tsx";
 
 const buttonVariants = cva(
-  [focusRing, "inline-flex items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"],
+  [
+    focusRing,
+    "inline-flex shrink-0 items-center justify-center gap-2 rounded-full text-base font-semibold whitespace-nowrap transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5",
+  ],
   {
     variants: {
       variant: {
-        primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        primary: "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-accent active:bg-accent",
+        outline: "border border-input bg-background text-foreground hover:bg-accent active:bg-accent",
+        ghost: "text-foreground hover:bg-accent active:bg-accent",
+        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80",
       },
-      size: { sm: "h-11 px-4", md: "h-11 px-5", lg: "h-12 px-6", icon: "size-11" },
+      size: { sm: "h-11 min-w-11 px-4 text-sm", md: "h-11 min-w-11 px-5", lg: "h-13 min-w-13 px-6 text-lg", icon: "size-11" },
     },
     defaultVariants: { variant: "primary", size: "md" },
   },
@@ -33,7 +36,6 @@ export type ButtonProps = ComponentProps<"button"> &
 export function Button({ variant, size, loading = false, asChild = false, type = "button", disabled, className, children, ...props }: ButtonProps) {
   const Comp = asChild ? Slot : "button";
   const off = disabled || loading;
-  // The child of `asChild`, a link, has no `disabled`: it is marked, leaves the tab order and refuses activation.
   const state = asChild ? off && { "aria-disabled": true, tabIndex: -1, onClickCapture: (event: MouseEvent) => { event.preventDefault(); event.stopPropagation(); } } : { type, disabled: off };
   return (
     <Comp aria-busy={loading || undefined} className={cn(buttonVariants({ variant, size }), className)} {...props} {...state}>
