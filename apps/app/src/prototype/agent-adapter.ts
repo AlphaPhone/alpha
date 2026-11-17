@@ -45,7 +45,7 @@ import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
-import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../runtime/notes-organize-contract';
+import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
 import {executeCalendarAvailability,type AvailabilityProvider} from '../runtime/calendar-availability';
 import {availabilityReview} from './calendar-availability-review';
@@ -1241,11 +1241,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{return await executeNotesQuery(this.notesStore,operation,operationId,signal,current);
         }catch{return {status:'failed',summary:'Notes changed or sharing became unavailable. Review the query again; nothing was shared.'};}
       }
-      // Until the pin carries notes-organize-agent.patch the shared operation union does not name these.
+      // The device operation union does not name the organisation proposals of the shared Notes organisation contract.
       const organize:unknown=operation;
-      if(isNotesOrganizeOperation(organize)){
-        // Folders, the read-only list filter, Recently deleted restore and recording (runtime/notes-organize-contract).
-        const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||!notesOrganizeContextAllowed(expectedContext,organize.type)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes context changed');};
+      if(isNotesOrganizeOperation(organize)&&organize.type!=='notes_list_filter'){
+        // Folders, the Previous notes list filter, Recently deleted restore and recording.
+        const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||!notesOrganizeContextAllowed(expectedContext,organize)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes context changed');};
         try{return await executeNotesOrganize(notesOrganizeShellHost(this,{read:readNotesFolders,edit:editNotesFolders}),organize,current);}
         catch{return {status:'failed',summary:'Notes changed or became unavailable. Nothing was changed.'};}
       }

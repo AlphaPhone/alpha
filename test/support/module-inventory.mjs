@@ -619,7 +619,6 @@ export const moduleInventory = {
     "apps/app/src/runtime/notes-contract.ts",
     "apps/app/src/runtime/notes-folders-model.ts",
     "apps/app/src/runtime/notes-folders.ts",
-    "apps/app/src/runtime/notes-organize-contract.ts",
     "apps/app/src/runtime/notes-secure-store.ts",
     "apps/app/src/runtime/notes-store.ts",
     "apps/app/src/runtime/notes-trash-policy.ts",
