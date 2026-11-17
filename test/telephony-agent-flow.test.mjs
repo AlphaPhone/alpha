@@ -21,9 +21,9 @@ const session = {ownerId: 'owner', agentId: 'agent', origin: 'https://agent.exam
 const id = '5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20', digest = 'd'.repeat(64);
 const messageId = '77bc5ac9-0000-4000-8000-a61a04b11111';
 const proof = {messageId, text: 'Help with this conversation', current() {}};
-const ALL = ['phone.call.v1', 'contacts.write.v1', 'sms.compose.v1', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
+const ALL = ['phone.call.v1', 'contacts.write.v1', 'contacts.write.v2', 'contacts.show.v1', 'contacts.read.v1', 'sms.compose.v1', 'sms.compose.v2', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
 const callPriya = {type: 'phone_call', target: {kind: 'contact', query: 'Priya'}};
-function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId} = {}) {
+function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId, present} = {}) {
   let state = 'pending', attemptId, effects = 0, entry;
   const posts = [];
   const proposal = () => ({id, digest, state, subjectUserId: 'owner', requestedBy: 'agent', action: 'device_action', expiresAt: new Date(Date.now() + 600000).toISOString(),
@@ -41,7 +41,7 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
     get: async () => ({entry}), list: async () => ({entries: entry ? [entry] : []})};
   const seen = [];
   const client = new DeviceActions(session, {installationId: 'device', enrollmentId: 'enrollment', key: 'a'.repeat(64), capabilities}, 'c'.repeat(64), request, journal,
-    async (op, operationId) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {})}; });
+    async (op, operationId) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {}), ...(present ? {present: () => present(posts.map(post => post.path.split('/').pop()))} : {})}; });
   return {client, posts, seen, get entry() { return entry; }, get effects() { return effects; }, online() { receiptOutage = false; }};
 }
 const signal = () => new AbortController().signal;
@@ -53,6 +53,45 @@ test('the phone advertises telephony actions only on the image and only what the
   assert.deepEqual(P.selectDeviceCapabilities(offered, profile).filter(capability => ALL.includes(capability)).sort(), [...ALL].sort());
   assert.deepEqual(P.selectDeviceCapabilities(['phone.call.v1'], profile).filter(capability => ALL.includes(capability)), ['phone.call.v1']);
   assert.deepEqual(P.selectDeviceCapabilities(offered, {...profile, aospImage: false}).filter(capability => ALL.includes(capability)), [], 'a standalone install advertises none');
+  // A form that extends an action is never advertised without the action it extends.
+  assert.deepEqual(P.selectDeviceCapabilities(['sms.compose.v2', 'contacts.write.v2'], profile).filter(capability => ALL.includes(capability)), []);
+});
+test('a text to a number, a draft, a single contact value, a contact search and the open contact each need their own capability and say what they do', async () => {
+  const number = {type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'};
+  const add = {type: 'contact_update', query: 'Priya', add: {phoneNumbers: ['+14155550100']}, remove: {emailAddresses: ['p@example.com']}};
+  const without = capability => ALL.filter(other => other !== capability);
+  for (const [operation, capability] of [[number, 'sms.compose.v2'], [add, 'contacts.write.v2'], [{type: 'contact_show', query: 'Priya'}, 'contacts.show.v1']])
+    await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
+  const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
+  assert.match(await card(number), /^Review SMS\nTo: \+14155550100\n\nRunning late/);
+  const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
+  assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
+  const change = await card(add);
+  assert.match(change, /^Change contact\nContact: Priya\nAdd: \+14155550100\nRemove: p@example\.com\n/); assert.match(change, /other details stay/); assert.doesNotMatch(change, /Replaces/);
+  assert.match(await card({type: 'contact_update', query: 'Priya', set: {displayName: 'Priya N'}}), /Name: Priya N\n\nReplaces these details/);
+  assert.match(await card({type: 'contact_show', query: 'Priya'}), /^Show contact\nSearch: Priya/);
+});
+test('the view change that shows a draft or the matching contacts runs once, after the receipt, and only for a success', async () => {
+  const draft = {type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late', draft: true};
+  for (const [operation, result] of [[draft, {kind: 'sms-compose', status: 'drafted'}], [{type: 'contact_show', query: 'Priya'}, {kind: 'contact-show', status: 'shown'}]]) {
+    const shown = [], f = fixture({operation, result, present: posted => shown.push(posted)});
+    await f.client.pending(context, signal());
+    assert.equal((await f.client.approve(id, context, signal())).status, 'succeeded');
+    assert.deepEqual(shown, [['decision', 'claim', 'receipt']], operation.type);
+    assert.deepEqual(receiptOf(f).result, result);
+  }
+  const shown = [], f = fixture({operation: {type: 'contact_show', query: 'Nobody'}, result: {kind: 'contact-show', status: 'not-found'}, status: 'failed', present: posted => shown.push(posted)});
+  await f.client.pending(context, signal()); await f.client.approve(id, context, signal());
+  assert.deepEqual(shown, []); assert.equal(receiptOf(f).outcome, 'failed');
+});
+test('the open contact is returned to the agent as a read result, and a request from elsewhere is asked again from the contact', async () => {
+  const result = {kind: 'contact-read', status: 'read', contact: {displayName: 'Priya Nair', phoneNumbers: ['(415) 555-0132'], emailAddresses: ['p@example.com']}};
+  const contacts = {...context, view: 'contacts'};
+  const f = fixture({operation: {type: 'contact_read_selected'}, result, requestMessageId: messageId});
+  assert.deepEqual((await f.client.pendingReview(context, signal(), proof)).map(item => [item.proposal, item.notice]), [[null, 'Share open contact: Ask again from the open contact.']]);
+  assert.ok((await f.client.pendingReview(contacts, signal(), proof))[0].proposal);
+  assert.equal((await f.client.approve(id, contacts, signal())).status, 'succeeded');
+  assert.equal(receiptOf(f).outcome, 'applied'); assert.deepEqual(receiptOf(f).result, result);
 });
 test('each action needs its own negotiated capability', async () => {
   await assert.rejects(fixture({capabilities: []}).client.pending(context, signal()), /not negotiated/);
@@ -118,6 +157,7 @@ test('recovery cannot attach a selected telephony proposal to another item or se
   for (const [operation, view] of [
     [{type: 'messages_read_selected'}, 'messages'],
     [{type: 'sms_reply_selected', body: 'On my way'}, 'messages'],
+    [{type: 'contact_read_selected'}, 'contacts'],
     [{type: 'voicemail_read_selected'}, 'phone'],
     [{type: 'voicemail_delete_selected'}, 'phone'],
   ]) {

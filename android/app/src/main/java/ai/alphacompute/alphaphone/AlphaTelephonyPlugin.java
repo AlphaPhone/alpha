@@ -5,7 +5,6 @@ import ai.eliza.plugins.messages.SmsTelephony;
 import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
 import android.Manifest;
 import android.app.Activity;
-import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -109,16 +108,7 @@ public class AlphaTelephonyPlugin extends AlphaTelephonyBase {
   if (query == null || query.length() > 128 || limit == null || limit < 1 || limit > 100) { call.reject("Invalid contact search", "invalid"); return; }
   fencedRead(call, "contacts", "Contacts", cancel -> {
    JSObject bounded = new ContactsCatalog(getContext()).list(query, limit, cancel);
-   JSArray records = new JSArray(); org.json.JSONArray rows = bounded.getJSONArray("contacts");
-   for (int i = 0; i < rows.length(); i++) {
-    org.json.JSONObject row = rows.getJSONObject(i); JSObject item = new JSObject();
-    item.put("id", row.getString("id")); item.put("lookupKey", row.getString("lookup").length() > 512 ? "" : row.getString("lookup"));
-    item.put("displayName", clip(row.getString("name"))); item.put("starred", row.getBoolean("starred"));
-    JSArray phones = new JSArray(), emails = new JSArray();
-    for (int j = 0; j < row.getJSONArray("phones").length(); j++) phones.put(clip(row.getJSONArray("phones").getString(j)));
-    for (int j = 0; j < row.getJSONArray("emails").length(); j++) emails.put(clip(row.getJSONArray("emails").getString(j)));
-    item.put("phoneNumbers", phones); item.put("emailAddresses", emails); records.put(item);
-   }
+   org.json.JSONArray records = AlphaContactLookup.searchRows(bounded.getJSONArray("contacts"), text -> clip(text));
    JSObject value = new JSObject(); value.put("contacts", records);
    return value;
   });

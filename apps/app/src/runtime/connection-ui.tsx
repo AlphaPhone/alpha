@@ -1,11 +1,13 @@
 import {googleConnectionController} from './google-connection-ui';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import {NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
+import {CONTACT_UPDATE_VALUES_CAPABILITY} from './telephony-actions-contract';
 import {isCalendarReadFailureCode} from "../../../../.eliza/client-features/packages/contracts/src/calendar.ts";
 import {SingleFlightMemo} from "@elizaos/core/read-memo";
 import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
 import {browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall,OWN_KEYS_NOT_SET_UP} from './browser-cloud-resident';
 import {appRecordInvalidations} from './app-record-completion';
+import {findViewActionHandoff} from '../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts';
 import {normalizeEffectReceipts} from '../../../../.eliza/client-features/packages/core/src/types/effects.ts';
 import {assertAppRecordRequestAllowed,type AppRecordMethod,type AppRecordPort} from './app-record-route-policy';
 import {AUTOMATIONS_COMMITTED_EVENT,automationsCommitted} from './automation-completion';
@@ -33,6 +35,7 @@ import {developmentAgentDocument} from '../browser/development-agent-document';
 import {openDomainRecovery} from '../browser/domain-recovery';
 import {retireClockReviews} from './clock-agent-review';
 import { negotiateEnabledViews } from './device-view-profile';
+import { chatNotesFolders } from './notes-folders';
 import { registerWorkflowDevice, workflowDeviceProtocol, type WorkflowDeviceProtocol } from './workflow-presentation';
 import {ClientObservationSupportSession} from './client-observation-support';
 import {developmentIdentity,readDevelopmentIdentity,verifyDevelopmentIdentity,developmentOwnerRecovery,assertDevelopmentIdentity,developmentProfiles,type DevelopmentProfile} from '../browser/development-identity';
@@ -72,7 +75,9 @@ import { entitlementErrorText } from '../ui/cloud/subscription-presentation.ts';
 import { deviceActionRefusal } from '../ui/device-actions/device-action-messages.ts';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
-import { phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
+import { offeredByEither, phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
+import {browserPreviousNotesAvailability,devicePreviousNotesAvailability,type LegacyNotesAvailability} from '../prototype/legacy-notes-access';
+import {browserNotesPort} from './browser-notes-document';
 import {calendarSource,calendarTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import { CloudSignInPanel, SIGN_IN_SENDING } from './cloud-sign-in-ui';
 import { useCloudSignInNetwork } from './cloud-sign-in-network';
@@ -457,7 +462,7 @@ const actionReceipts = new Map<string, { sessionId: string; result: Promise<Oper
 const readReplyOwners=new Map<ReadReplyBinding,{actions:DeviceActions;proposalId:string;digest:string;cancelled:boolean}>();
 function retireReadReplies(){for(const binding of [...readReplyOwners.keys()])void connectionController.cancelReadReply(binding).catch(()=>{});}
 let navigationContext:(()=>ContextEnvelope|null)|undefined;
-let requestedCameraContinuation:{messageId:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number}|undefined;
+let requestedCameraContinuation:{messageId:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
 let deviceRecovery: DeviceRecovery | undefined;
 let deviceExecutor: DeviceExecutor = async () => ({ status: 'failed', summary: 'Device action executor is unavailable.' });
 /** Foreground local reviews (free/busy over owner-chosen calendars). The phone shell supplies the
@@ -502,6 +507,11 @@ async function calendarAgendaObservation(actions:DeviceActions,context:ContextEn
   return sourceEpoch===calendarAgendaObservationEpoch&&source.sourceId===requested.sourceId&&source.sourceRevision===requested.sourceRevision?source:undefined;
  }catch{return undefined;}
 }
+/** Whether notes saved on this phone before canonical Notes exist, read without initializing them.
+ * An unreadable store is `unavailable`, never `absent`. */
+export function readPreviousNotesAvailability(signal:AbortSignal,current:()=>boolean):Promise<LegacyNotesAvailability>{
+  return isAndroid?devicePreviousNotesAvailability(secureConnectionStore,signal,current):browserPreviousNotesAvailability(browserNotesPort,signal,current);
+}
 /** The X-Eliza-Device-Capabilities value for every runtime (remote, resident, Cloud), selected by
  * selectDeviceCapabilities for this phone's platform. */
 async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<string>{
@@ -509,6 +519,8 @@ async function deviceCapabilities(offered:unknown,canonicalNotes=false):Promise<
   return selectDeviceCapabilities(offered,{android,native:Capacitor.isNativePlatform(),
     camera:Capacitor.isPluginAvailable('ElizaCamera')||!android&&typeof navigator!=='undefined'&&typeof navigator.mediaDevices?.getUserMedia==='function',
     foregroundReview:typeof foregroundExecutor==='function',canonicalNotes,
+    // Previous notes are never created once canonical Notes is the default, so a phone without them never offers their query.
+    previousNotes:await readPreviousNotesAvailability(new AbortController().signal,()=>true)!=='absent',
     photoLibrary:Capacitor.isNativePlatform()&&Capacitor.isPluginAvailable('AlphaPhotoLibrary'),
     files:Capacitor.isPluginAvailable('AlphaFiles'),
     clockRepeatDays:android&&Array.isArray(offered)&&offered.includes('clock.handoff.v2')&&await clockRepeatDaysSupported(),
@@ -1663,6 +1675,10 @@ async function connectCloud(agentId: string, signal: AbortSignal, expectedOwner?
     if (registered.installationId!==credential.installationId || typeof registered.enrollmentId!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId)) throw new Error('Cloud device registration was not verified');
     if(registered.userTextFormatVersion===1)next.userTextFormatVersion=1;
     const profileReason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
+    // The registration answers the agent's full device capability list, as it does for the remote
+    // and resident connections. An agent from before the shared list answers only part of it on the
+    // capabilities route above (no calls, no text by name), and Cloud agents are deployed apart from this app.
+    target.headers["X-Eliza-Device-Capabilities"]=await deviceCapabilities(offeredByEither(device?.capabilities,registered.capabilities));
 
     credential.enrollmentId=registered.enrollmentId; await secureConnectionStore.write(slot,credential); signal.throwIfAborted();
     credential.capabilities=target.headers["X-Eliza-Device-Capabilities"].split(",");
@@ -2310,13 +2326,20 @@ export const connectionController = {
     const pending=requestedCameraContinuation;
     if(!pending||pending.messageId!==messageId)return [];
     requestedCameraContinuation=undefined;
-    const context=pending.client.deliveredContext(pending.attempt);
+    const shown=navigationContext?.();
+    const context=pending.client.deliveredContext(pending.attempt)??(pending.proposalOnly&&shown?structuredClone(shown):undefined);
     if(!context||context.view!=='camera'||context.sensitive||!pending.selected.actions)return [];
     const current=()=>{signal.throwIfAborted();if(document.hidden||pending.attempt.controller.signal.aborted||Date.now()>pending.expiresAt||epoch!==pending.generation||active!==pending.selected||state.session!==pending.session||conversationMemory.get(conversationKey(pending.session))!==pending.conversationId||JSON.stringify(navigationContext?.())!==JSON.stringify(context))throw Error('The camera request changed.');};
     const allowed=async()=>{current();const preferences=await readDevicePreferences(signal);current();return !preferences.askBeforeAgentActions;};
     if(!await allowed())return [];
     await pending.selected.actions.pendingReview(context,signal);current();
     return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo');
+  },
+  /** The agent proposed this message's photo without showing Camera, and the phone is still on the screen the request was sent from. */
+  requestedCameraNeedsOpening(messageId:string):boolean {
+    const pending=requestedCameraContinuation;
+    if(!pending?.proposalOnly||pending.messageId!==messageId||document.hidden||Date.now()>pending.expiresAt||epoch!==pending.generation||active!==pending.selected||state.session!==pending.session||conversationMemory.get(conversationKey(pending.session))!==pending.conversationId)return false;
+    try{pending.attempt.current();return true;}catch{return false;}
   },
   voiceRendererClientId(){return boundNavigation()?.clientId;},
   voiceRendererMetadata(context:ContextEnvelope){return boundNavigation()?.metadata(context)??{};},
@@ -2513,6 +2536,8 @@ export const connectionController = {
     };
     ownerReminderBindingCache={selected,session,generation,port};return port;
   },
+  /** The connected agent names each contact value to add or remove (`contacts.write.v2`), so a `set` it sends replaces the field. */
+  contactValuesNegotiated(){return active?.actions?.credential.capabilities?.includes(CONTACT_UPDATE_VALUES_CAPABILITY)===true;},
   canonicalNotesFilterAvailable(){return active?.kind==='resident'&&active.actions?.credential.capabilities?.includes(NOTES_LIST_FILTER_CAPABILITY)===true;},
   /** Canonical app records belong to the same resident agent as chat, on Android and in DEV. */
   getAppRecordClient():AppRecordPort|null {
@@ -3532,7 +3557,10 @@ export const connectionController = {
       requestSignal.throwIfAborted();assertCurrent();
       await boundNavigation()?.observeCommittedView(true);
       requestSignal.throwIfAborted();assertCurrent();
-      const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
+      // The agent that keeps this owner's notes is told the phone's folder names with every message.
+      const notesFolders=this.getAppRecordClient()?await chatNotesFolders():{};
+      requestSignal.throwIfAborted();assertCurrent();
+      const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
       const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');onText?.(value,frame);};
       const replyReady=(results:readonly unknown[]|undefined)=>{assertCurrent();onReplyReady?.(results);};
@@ -3579,7 +3607,7 @@ export const connectionController = {
       }
       for(const key of ['messageId','userMessageId'] as const)if(reply[key]!==undefined&&!validateUuid(reply[key]))throw Error('The agent returned an invalid message identity.');
       if (typeof reply.text !== 'string') throw new Error('The agent returned an invalid response.');
-      let proposals: ActionProposal[] | undefined, notices: string[] = [];
+      let proposals: ActionProposal[] | undefined, notices: string[] = [],cameraProposalOnly=false;
       const completedReads:NonNullable<AgentReply['completedReads']>=[];
       const completedActions:OperationReceipt[]=[];
       if (selected.actions) {
@@ -3601,6 +3629,8 @@ export const connectionController = {
           // A pending action joins the first reply after it appears; later replies do not repeat it.
           const shown=announcedProposals.get(selected.actions)??new Set<string>();announcedProposals.set(selected.actions,shown);
           const turnItems=items.filter(item=>!item.proposalId||!shown.has(item.proposalId));for(const item of items)if(item.proposalId)shown.add(item.proposalId);
+          const unreviewable=turnItems.filter(item=>!item.proposal);
+          cameraProposalOnly=typeof reply.userMessageId==='string'&&unreviewable.length===1&&unreviewable[0].cameraRequestMessageId===reply.userMessageId&&!findViewActionHandoff(reply.actionResults);
           proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []); notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
         catch { update({ message: 'Actions not checked' }); }
       }
@@ -3608,6 +3638,7 @@ export const connectionController = {
       assertCurrent();
       // These events refresh records only. A later reply failure cannot undo a recorded effect.
       for(const invalidation of appRecordInvalidations(reply.actionResults))window.dispatchEvent(new CustomEvent(invalidation.event,{detail:{sessionId:session.sessionId,...(invalidation.revision===undefined?{}:{revision:invalidation.revision})}}));
+      if(automationsCommitted(reply.actionResults))window.dispatchEvent(new CustomEvent(AUTOMATIONS_COMMITTED_EVENT,{detail:{sessionId:session.sessionId}}));
       // The agent recorded the user turn even when the reply failed: its identity rides on the
       // failure so the sent bubble adopts it, and a later conversation re-read merges onto that
       // bubble instead of adding a second copy. The failed assistant row keeps the phone's own text.
@@ -3620,10 +3651,9 @@ export const connectionController = {
         const failure=responseFailure instanceof AlphaClientError?responseFailure:new AlphaClientError('transport-failed','The agent request failed. Check connection and action history before sending another request.');
         throw Object.assign(failure,{messageBinding},recorded,notices.length?{notices}:{});
       }
-      if(!failed&&directRequestedActions&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&Array.isArray(reply.actionResults)){
-        requestedCameraContinuation={messageId:reply.userMessageId,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000};
+      if(!failed&&directRequestedActions&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&(Array.isArray(reply.actionResults)||cameraProposalOnly)){
+        requestedCameraContinuation={messageId:reply.userMessageId,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
       }
-      if(!failed&&automationsCommitted(reply.actionResults))window.dispatchEvent(new CustomEvent(AUTOMATIONS_COMMITTED_EVENT,{detail:{sessionId:session.sessionId}}));
       // A reply that got through means the last Cloud limit no longer applies.
       if(!failed&&(state.lastServiceLimit||state.fundingRefused))update({lastServiceLimit:null,fundingRefused:false});
       return { text: responseFailure

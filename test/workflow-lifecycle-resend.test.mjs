@@ -20,11 +20,11 @@ const retained=(operation='remove')=>({[lifecycleSlot()]:JSON.stringify({mutatio
 function adapterFixture(options={}){
  const storage=options.storage||{},toasts=[],sent=[];
  const agent={versionId:options.versionId||'v1',removed:!!options.removed,receipts:new Map(),applications:0,ongoing:!!options.ongoing};
- const workflow=()=>({id:'flow',name:'Digest',description:'Reads notes',versionId:agent.versionId,active:false,removed:agent.removed,triggerCleanup:agent.removed?'complete':undefined,steps:[{label:'Read',description:'Read notes'}]});
+ const workflow=()=>({id:'flow',name:'Digest',description:'Reads notes',versionId:agent.versionId,active:!!agent.active,removed:agent.removed,triggerCleanup:agent.removed?'complete':undefined,steps:[{label:'Read',description:'Read notes'}]});
  const client={
   lifecycleSupported:async()=>true,supportsSubmissionReconciliation:async()=>true,
   list:async()=>agent.removed?[]:[workflow()],removedWorkflows:async()=>agent.removed?[workflow()]:[],
-  detail:async()=>workflow(),executions:async()=>[],approvals:async()=>null,phoneReview:async()=>({steps:[]}),reconcile:async()=>null,
+  detail:async()=>{agent.detailReads=(agent.detailReads||0)+1;await agent.hold;return workflow();},executions:async()=>[],approvals:async()=>null,phoneReview:async()=>({steps:[]}),reconcile:async()=>null,
   reconcileLifecycle:async(_id,_version,mutation)=>agent.receipts.get(mutation)??null,
   lifecycle:async()=>{throw Error('A retained change must never be sent under a new identity');},
   resendLifecycle:async(id,version,mutation,operation)=>{
@@ -45,17 +45,19 @@ function adapterFixture(options={}){
  };
  const localStorage=new Proxy({getItem:key=>storage[key]??null,setItem:(key,value)=>{storage[key]=value;},removeItem:key=>{delete storage[key];}},{ownKeys:()=>Object.keys(storage),getOwnPropertyDescriptor:()=>({configurable:true,enumerable:true})});
  let view='workflows';
+ // The chat reply's committed-change event, as connection-ui dispatches it.
+ const committed=new Set(),window={addEventListener:(type,listener)=>{if(type==='alpha:automations-committed')committed.add(listener);},removeEventListener:(_type,listener)=>{committed.delete(listener);},dispatchEvent(){}};
  class Shell{live=true;renderVals(){return {};}componentDidMount(){}componentWillUnmount(){}componentDidUpdate(){}S(){return {view};}vset(){}vget(){return {};}api(){return api;}openView(next){view=next;}toast(message){toasts.push(message);}}
  const api={isActive:()=>true,track:()=>'',kx:()=>0,toast:message=>toasts.push(message),ic:{clock:'',check:''}};
  const views={workflows:{automationsManaged:true}};
  const controller={getWorkflowClient:()=>({sessionId:session.sessionId,scope:'scope',client}),getSnapshot:()=>({session,open:false,busy:false,startupResolved:true}),subscribe:()=>()=>{},open(){},workflowNoticeActions:async()=>[],getWorkflowDeviceTarget:()=>null};
  const context=workflowRendererFixture({WorkflowAdmissionRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected,resolveWorkflowTap,readyTapStep,tapRecheck,
-  Capacitor:{isNativePlatform:()=>true,getPlatform:()=>'android'},connectionController:controller,localStorage,queueMicrotask,AbortController,Date,console});
+  Capacitor:{isNativePlatform:()=>true,getPlatform:()=>'android'},connectionController:controller,localStorage,window,queueMicrotask,AbortController,Date,console});
  // Native plugins stay inert: notices and taps are not part of these cases.
  context.registerPlugin=()=>new Proxy({},{get:(_target,name)=>name==='addListener'?async()=>({remove(){}}):async()=>({})});
  vm.runInNewContext(stripTypeScriptTypes(source,{mode:'strip'}),context);
  context.install(Shell,views);const shell=new Shell();shell.componentDidMount();
- return {render:()=>views.workflows.render({},api),back:()=>views.workflows.back(),toasts,sent,storage,agent,close:()=>shell.componentWillUnmount()};
+ return {render:()=>views.workflows.render({},api),back:()=>views.workflows.back(),toasts,sent,storage,agent,commit:(sessionId=session.sessionId)=>{for(const listener of committed)listener({detail:{sessionId}});},close:()=>shell.componentWillUnmount()};
 }
 const wait=async(fn,label='Workflow adapter did not settle.')=>{for(let count=0;count<400;count++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error(label);};
 const opened=async app=>{app.render().openWorkflow('flow');await wait(()=>app.render().detail&&app.render().fd.notRunning!==undefined&&!app.render().fd.isRunning);};
@@ -191,4 +193,27 @@ test('the route client reports a refused resend as not applied and rejects an un
  await assert.rejects(client.resendLifecycle('flow','v1','not-a-uuid','remove',signal),/Invalid lifecycle reconciliation/);
  await assert.rejects(client.resendLifecycle('flow','v1',mutationId,'erase',signal),/Invalid lifecycle reconciliation/);
  assert.equal(agent.posts.length,1);
+});
+
+// The agent changed the open workflow from chat ("pause this"): the reply's committed receipt re-reads the detail.
+test('an open workflow re-reads once after a chat change, and after an operation in flight has ended',async()=>{
+ const app=adapterFixture();
+ try{
+  await opened(app);assert.equal(app.render().fd.on,false);
+  const first=app.agent.detailReads;
+  // Another agent's reply is not about this workflow's agent.
+  app.commit('another-session');await new Promise(resolve=>setTimeout(resolve,20));assert.equal(app.agent.detailReads,first);
+  app.agent.active=true;app.agent.versionId='v2';app.commit();
+  await wait(()=>app.render().fd?.on===true&&!app.render().fd.isRunning,'The open workflow kept its state from before the chat change.');
+  assert.equal(app.agent.detailReads,first+1);
+  // A read already in flight is not interrupted; the change is read again once it ends.
+  let release;app.agent.hold=new Promise(resolve=>release=resolve);
+  app.render().openWorkflow('flow');await wait(()=>app.agent.detailReads===first+2);
+  app.commit();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(app.agent.detailReads,first+2);
+  app.agent.hold=undefined;app.agent.active=false;app.agent.versionId='v3';release();
+  await wait(()=>app.agent.detailReads===first+3&&!app.render().fd.isRunning,'The change that arrived during a read was never read.');
+  assert.equal(app.render().fd.on,false);
+  // No workflow open: nothing is read.
+  app.back();app.commit();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(app.agent.detailReads,first+3);
+ }finally{app.close();}
 });

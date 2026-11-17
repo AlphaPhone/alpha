@@ -136,8 +136,9 @@ export function guardTelephonyPorts<T extends SideEffectPorts>(ports: T, allowed
 		return ok;
 	};
 	return {...ports,
-		placeCall: async (number: string) => await cleared() ? ports.placeCall(number) : {status: 'busy'},
-		sendSms: async (number: string, body: string, operationId: string, signal: AbortSignal) => await cleared(signal) ? ports.sendSms(number, body, operationId, signal) : 'cancelled',
+		// A refusal is the phone's, not another call the owner is on or the owner's dismissal.
+		placeCall: async (number: string) => await cleared() ? ports.placeCall(number) : {status: 'unavailable'},
+		sendSms: async (number: string, body: string, operationId: string, signal: AbortSignal) => await cleared(signal) ? ports.sendSms(number, body, operationId, signal) : 'unavailable',
 		saveContact: async (draft: never, target?: never) => await cleared() ? ports.saveContact(draft, target) : {status: 'failed'},
 		removeContact: async (id: string, version: string) => await cleared() ? ports.removeContact(id, version) : {status: 'failed'},
 	} as T;

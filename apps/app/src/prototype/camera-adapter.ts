@@ -37,11 +37,14 @@ import {testMocksEnabled} from '../build-flags';
 import {createPhotoViewport} from './photo-viewport';
 
 type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult};
-let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void)=>Promise<CameraCaptureAttempt>)|undefined;
-export async function captureAgentPhoto(operationId:string,signal:AbortSignal,current:()=>void):Promise<CameraCaptureAttempt>{
+let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back')=>Promise<CameraCaptureAttempt>)|undefined;
+/** `lens` names the camera the photo must be taken with; without it the current camera is used. */
+export async function captureAgentPhoto(operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back'):Promise<CameraCaptureAttempt>{
   if(!requestedPhoto)return {status:'failed',summary:'Camera unavailable'};
-  return requestedPhoto(operationId,signal,current);
+  return requestedPhoto(operationId,signal,current,lens);
 }
+/** Native capture refusals that are raised before any photo is written. */
+const PHOTO_NOT_TAKEN=new Set(['CAPTURE_ERROR','CAMERA_INACTIVE','CAMERA_NOT_READY']);
 type Bag = Record<string, any>;
 type VideoReceipt = { path: string; duration: number; width: number; height: number; fileSize: number };
 /** `thumbnail` (a JPEG of at most 256 px) replaces `base64` when a gallery capture asks for `thumbnailOnly`. */
@@ -1067,7 +1070,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     });
   }
   /** An agent capture waits for the revealed viewfinder, unless a recording starts first. */
-  const takeRequestedPhoto=async(operationId:string,signal:AbortSignal,current:()=>void):Promise<CameraCaptureAttempt>=>{
+  const takeRequestedPhoto=async(operationId:string,signal:AbortSignal,current:()=>void,wantedLens?:'front'|'back'):Promise<CameraCaptureAttempt>=>{
     const busy:CameraCaptureAttempt={status:'failed',summary:'Camera busy'};
     let dispatched=false;
     let request: AgentCaptureRequest | undefined;
@@ -1115,19 +1118,31 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // The request is checked again right before the shutter: the conversation or screen may have changed.
       signal.throwIfAborted();current();
       if(request.refused)return {status:'failed',summary:'Recording — no photo'};
-      if(!active()||session.phase!=='ready')return {status:'failed',summary:session.phase==='off'?'Camera closed':'Camera unavailable'};
+      if(!active()||session.phase!=='ready')return {status:'failed',summary:session.phase==='off'?'Camera closed':session.denied==='camera'?'Camera access is off. Allow camera access, then ask again.':'Camera unavailable'};
+      if(wantedLens&&wantedLens!==direction){
+        // The request names its camera: nothing is taken with the other one.
+        await flipLens(owner);
+        signal.throwIfAborted();current();
+        if(direction!==wantedLens||!active()||session.phase!=='ready')return {status:'failed',summary:'Couldn’t switch camera, so no photo was taken.'};
+      }
       const attempt=await session.exclusive(async():Promise<CameraCaptureAttempt>=>{
         if(chatCovers()||conversationOverViewfinder(conversationPanel())){
           return {status:'failed',summary:'Camera viewfinder is covered'};
         }
         dispatched=true;shutterFlash(owner);
-        const item=await writePhoto(owner,false);
+        let item:SavedPhoto;
+        try{item=await writePhoto(owner,false);}
+        catch(error){
+          // A refusal the camera raises before writing is a plain failure; anything else leaves the save unknown.
+          if(!PHOTO_NOT_TAKEN.has(String((error as {code?:unknown}|null)?.code)))throw error;
+          return {status:'failed',summary:cameraCaptureErrorText(error,'The photo couldn’t be taken. Try again.')};
+        }
         if(!item.id)return {status:'unknown',summary:'Saved'};
         const cameraResult=validateCameraCaptureResult({version:1,kind:'camera_capture_photo',operationId,mediaId:nativeId(item.id),width:item.width,height:item.height,mime:'image/jpeg'},operationId);
         return {status:'succeeded',summary:'Saved',cameraResult};
       });
       return attempt.status==='busy'?busy:attempt.value;
-    }catch{return {status:dispatched?'unknown':'failed',summary:dispatched?'Save unconfirmed':'Request changed'};}
+    }catch{return {status:dispatched?'unknown':'failed',summary:dispatched?'Save unconfirmed':signal.aborted?'Cancelled. No photo was taken.':'The screen changed before the photo. Ask again.'};}
     finally{
       if(request){
         request.cancelReveal?.();

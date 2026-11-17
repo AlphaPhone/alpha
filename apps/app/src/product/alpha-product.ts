@@ -32,6 +32,11 @@ export function alphaNavigation(available: (hostKey: string) => boolean) {
       const target = views.target(viewId);
       return !target ? undefined : target.kind === 'home' ? 'home' : views.hostKey(target.view);
     },
+    /** The name the owner sees for the view an accepted id lands on; the id itself when unknown. */
+    viewLabel(viewId: string): string {
+      const target = views.target(viewId);
+      return target?.kind === 'home' ? 'Home' : (target?.view ?? views.find(viewId))?.label ?? viewId;
+    },
     /** Canonical id of a renderer key, as the agent's view metadata names it. */
     canonicalViewId: (view: string): string => views.canonicalId(view) ?? view,
     /** Route paths a navigation handoff may name for a view id; none for an unknown id. A
@@ -54,6 +59,7 @@ export function alphaNavigation(available: (hostKey: string) => boolean) {
 const navigation = alphaNavigation(isMvpView);
 export const alphaViews = navigation.views;
 export const alphaViewKey = navigation.viewKey;
+export const alphaViewLabel = navigation.viewLabel;
 export const alphaCanonicalViewId = navigation.canonicalViewId;
 export const alphaViewPaths = navigation.viewPaths;
 export const alphaViewPath = navigation.viewPath;

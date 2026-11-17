@@ -106,6 +106,25 @@ test('a contact call is chosen inside the approved card, never in a separate dia
   assert.equal(R.placeTelephonyReview(msgs, R.presentTelephonyReview(null), 'p1'), msgs);
 });
 
+test('the card names an existing contact before adding it again, and says which row keeps a contact\'s other details', () => {
+  const chosen = [], settle = choice => chosen.push(choice);
+  const twin = R.presentTelephonyReview({review: {kind: 'contact-create', options: [{name: 'Sam Lee', numbers: ['+14155550132']}]}, settle});
+  assert.deepEqual(twin.rows.map(row => [row.name, row.lines.map(line => line.text), row.label]), [['Add anyway', ['Sam Lee is already in Contacts', '(415) 555-0132'], 'Add anyway: Sam Lee is already in Contacts']]);
+  twin.rows[0].choose(); twin.dismiss(); assert.deepEqual(chosen, [0, null], 'Add anyway chooses it; Not now chooses nothing');
+  const digest = R.placeTelephonyReview([{id: 1, cDigest: true, c: {proposalId: 'p'}, rows: []}], twin, 'p');
+  assert.deepEqual(digest[0].rows.map(row => row.who), ['Add anyway', 'Not now']); assert.match(digest[0].rows[0].text, /Sam Lee is already in Contacts/);
+  const before = {id: '1', version: 'a'.repeat(64), displayName: 'Sam Lee', phoneNumbers: [], emailAddresses: [{address: 'sam@work.example', type: 'work'}]};
+  const one = {address: 'sam@example.com', type: 'home'}, draft = emailAddresses => ({displayName: 'Sam Lee', phoneNumbers: [], emailAddresses});
+  const both = R.presentTelephonyReview({review: {kind: 'contact-save', options: [{before, after: draft([before.emailAddresses[0], one]), keeps: 'add'}, {before, after: draft([one]), keeps: 'replace'}]}, settle});
+  assert.deepEqual(both.rows.map(row => row.label), ['Add (keep existing): save changes to Sam Lee', 'Replace: save changes to Sam Lee']);
+  assert.deepEqual(both.rows.map(row => row.lines.map(line => [line.text, line.decoration])), [
+    [['Add (keep existing)', 'none'], ['sam@work.example', 'none'], ['sam@example.com', 'none']],
+    [['Replace', 'none'], ['sam@work.example', 'line-through'], ['sam@example.com', 'none']]], 'Replace strikes what it removes');
+  // A change that drops nothing is one row with no such line.
+  const plain = R.presentTelephonyReview({review: {kind: 'contact-save', options: [{before, after: draft([before.emailAddresses[0], one])}]}, settle});
+  assert.deepEqual(plain.rows.map(row => [row.label, row.lines.length]), [['Save changes to Sam Lee', 2]]);
+});
+
 test('the briefing is Alpha\'s first line for the opening, before rows that arrived after it (AC-25)', () => {
   const b = {id: 'b'};
   assert.deepEqual(A.briefingInserted([{id: 1}, {id: 2}, {id: 3}], b, 1).map(r => r.id), [1, 'b', 2, 3], 'after the rows that existed at open');

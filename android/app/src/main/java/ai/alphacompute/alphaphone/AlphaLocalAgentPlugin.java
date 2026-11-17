@@ -622,9 +622,11 @@ private static final class ResidentAttachDiagnostic {
     output.write(buffer,0,count);
    }
    env.put("ELIZA_NATIVE_VIEW_DECLARATIONS",output.toString(java.nio.charset.StandardCharsets.UTF_8.name()));
-   // Alpha's mounted browser handles back, forward and reload only, and serves no Chromium target.
+   // The agent's own BROWSER tool is offered only what Alpha's mounted Browser runs for it: back,
+   // forward and reload. The reviewed way to do the same from chat is the browser_history device
+   // action (browser.history.v1). The list cannot be emptied yet: the pinned plugin registers
+   // the tool even with no commands.
    env.put("ELIZA_NATIVE_BROWSER_COMMANDS","back,forward,reload");
-   env.put("ELIZA_BROWSER_NATIVE_TARGET","off");
   }
  }
  static void configureEnvironment(Context context,java.util.Map<String,String> env) throws java.io.IOException {
@@ -633,7 +635,8 @@ private static final class ResidentAttachDiagnostic {
   else env.remove("ELIZA_MOBILE_SMS_REPLY_DRAFT");
   final long epoch;
   synchronized(lifecycleLock){launchedGeneration=null;if(!accepting||stopping||credentialMutationEpoch>=0)throw new java.io.IOException("Local provider is retiring");epoch=lifecycleEpoch;}
-  configureNativeViews(context.getAssets().open("agent/native-view-declarations.json"),env);
+  // Phone, Messages and Contacts are destinations only where Alpha draws them: its verified image.
+  configureNativeViews(context.getAssets().open(AlphaImageCapability.verified(context)?"agent/image-native-view-declarations.json":"agent/native-view-declarations.json"),env);
   for(String key:new String[]{"ELIZA_NATIVE_GOOGLE_HOST_MODULE","ELIZA_NATIVE_GOOGLE_BINDING_JSON","ELIZA_NATIVE_GOOGLE_API_KEY","ELIZA_MANAGED_GMAIL_READ_BROKER","ELIZA_MANAGED_GMAIL_SEND_BROKER","ELIZA_MANAGED_GMAIL_OPERATION_BROKER","ELIZA_MANAGED_CALENDAR_READ_BROKER","ELIZA_MANAGED_CALENDAR_DELETE_ENABLED","ELIZA_NATIVE_GOOGLE_GMAIL_SEND_ENABLED","ELIZA_MANAGED_GMAIL_MAILBOX_CHANGES_ENABLED"})env.remove(key);
   env.remove("ELIZA_MOBILE_WORKFLOWS");
   java.io.File nativeHostResources=null;

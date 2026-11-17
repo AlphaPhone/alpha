@@ -1,9 +1,9 @@
 export default {
   "schema": 1,
-  "baseCommit": "58ccdf9ff49c4e401bcc30acd959f29f9a4cd0de",
+  "baseCommit": "c6db724d13f25ed39fb26c687788c03a6847e29e",
   "files": {
     "packages/core/src/services/task.ts": "d1aed0e788fecb0dffacd15a8d8ecc7a1046d103db561915faaffa7a3f6d36bf",
-    "plugins/plugin-notes/src/service.ts": "b1628e3e107bd680dd70eb40d15223257aefb3381d1aac72bee85e45bcab6619",
+    "plugins/plugin-notes/src/service.ts": "e1040c28c55a03f7d27a75ec851b1a6c2d9f0245caf607d6c24a80ca1c8748c9",
     "plugins/plugin-notes/src/store.ts": "cb2a645f9d17db5247e34592d1f03f4c7339444c0bac4d8961235dc243ee6583",
     "plugins/plugin-notes/src/types.ts": "aeba1c54daa4335b4305a07ff0c346f76ac9717527298a19ef22d80513932156",
     "plugins/plugin-notes/src/validation.ts": "1f82f920f76405a012e668ec5276213da9d215701ac6eb6a10f83dcbc42e821d",

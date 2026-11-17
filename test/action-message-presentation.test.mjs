@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
 const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -161,6 +161,62 @@ test('only a browser proposal receipt that succeeded with its exact summary name
  ])assert.equal(succeededBrowserDestination(proposal,receipt),undefined);
 });
 
+// One wording table: each telephony, dial, text and Browser control completion is one short sentence
+// that the owner reads exactly as the agent received it, and none speaks of "the owner".
+test('every phone action completion is one sentence the owner reads as the agent received it',async()=>{
+ const receipts=await build({stdin:{contents:"export * from './apps/app/src/ui/telephony/telephony-receipt-text.ts';export {actionResultText,browserControlSummary} from './apps/app/src/runtime/action-message-presentation.ts';",resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',write:false});
+ const {telephonyActionResultText,phoneDialResultText,smsSendResultText,actionResultText,browserControlSummary}=await import('data:text/javascript;base64,'+Buffer.from(receipts.outputFiles[0].text).toString('base64'));
+ const statuses={'phone-call':['placed','emergency-handoff','not-found','busy','unavailable','cancelled','failed'],'contact-write':['saved','deleted','not-found','stale','unavailable','cancelled','failed','unknown'],'contact-show':['shown','not-found','unavailable'],'contact-read':['read','none-selected','unavailable'],
+  'sms-compose':['drafted','submitted','sent','delivered','unknown','not-found','unavailable','cancelled','failed'],'sms-reply':['drafted','none-selected','occupied','unavailable'],
+  'voicemail-delete':['deleted','none-selected','unavailable','cancelled','failed'],'messages-read':['read','none-selected','unavailable'],'voicemail-read':['read','none-selected','unavailable']};
+ const controls=[{type:'browser_search',query:'weather'},{type:'browser_tab_new',private:false},{type:'browser_tab_new',private:true},{type:'browser_tab_switch',target:'news'},{type:'browser_tab_close',target:'news'},{type:'browser_find',text:'price'},...['back','forward','reload','stop'].map(action=>({type:'browser_history',action}))];
+ const summaries=[...Object.entries(statuses).flatMap(([kind,list])=>list.map(status=>telephonyActionResultText({kind,status}))),
+  ...['handed-off','cancelled','unavailable','failed'].map(status=>phoneDialResultText({kind:'phone-dial',status,handler:null,contact:false})),
+  ...['submitted','sent','delivered','cancelled','denied','failed','unknown'].map(smsSendResultText),...controls.map(browserControlSummary)];
+ for(const summary of summaries){
+  assert.match(summary,/^[^.!?;]*[.!?]$/,`one sentence: ${summary}`);
+  assert.doesNotMatch(summary,/\bowner\b/i,summary);
+  assert.equal(actionResultText(summary),summary,'shown exactly as stored and sent');
+ }
+ // The new result kinds read as their own short outcome; a draft says that nothing was sent.
+ assert.equal(telephonyActionResultText({kind:'contact-show',status:'shown'}),'Contacts shows the matching contacts.');
+ assert.equal(telephonyActionResultText({kind:'contact-read',status:'read'}),'Shared the open contact.');
+ assert.equal(telephonyActionResultText({kind:'contact-read',status:'none-selected'}),'No contact is open.');
+ assert.equal(telephonyActionResultText({kind:'sms-compose',status:'drafted'}),'Draft added to the conversation, not sent.');
+ assert.equal(telephonyActionResultText({kind:'sms-reply',status:'drafted'}),'Draft added to the open conversation, not sent.');
+ assert.equal(telephonyActionResultText({kind:'phone-call',status:'placed'}),'Call started.');
+ assert.equal(browserControlSummary({type:'browser_search',query:'weather'}),'Searching the web for “weather”.');
+ assert.equal(browserControlSummary({type:'browser_history',action:'back'}),'Went back a page.');
+ // A completed proposal card is the one completion; a lone device receipt bubble shows the same sentence.
+ const drafted=telephonyActionResultText({kind:'sms-compose',status:'drafted'}),dismissed=telephonyActionResultText({kind:'sms-compose',status:'cancelled'});
+ const done={id:'action',from:'agent',text:'Text Sam',card:{type:'proposal',proposalId:'p',title:'Completed',sub:drafted,done:true}},bubble={id:'device-receipt:q',from:'agent',text:dismissed,deviceReceipt:true};
+ const rows=[user,done,{id:'u2',from:'user',text:'text Sam'},bubble],frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
+ assert.equal(shown.find(m=>m.id==='action').hasCalendarText,false,'no quote beside the card');
+ assert.notEqual(shown.find(m=>m.id==='action').deviceReceipt,true);
+ assert.equal(shown.find(m=>m.id==='device-receipt:q').displayText,'Message cancelled.');
+ assert.deepEqual(rows,frozen);
+});
+const mapsCard=body=>mapsChatText(`Maps\n\n[MAPSCARD]\n${JSON.stringify(body)}\n[/MAPSCARD]`).cards[0];
+test('a Maps locate card takes its subject from the card fields, and from the prompt only when an older agent names none',()=>{
+ const pharmacy={name:'Corner Pharmacy',latitude:37.79,longitude:-122.4,provider:'eliza-cloud',providerPlaceId:'g:p1',categories:[]};
+ const nearPrompt='I need your precise location to search near you for “coffee”.';
+ // The card's own query wins over the prompt's wording.
+ assert.deepEqual(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt,query:'espresso bar'}),{kind:'locate',title:'“espresso bar” near you',lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:'espresso bar',nearMe:true});
+ assert.equal(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt}).mapQuery,'coffee');
+ // A resolved destination is carried whole, with the travel mode, and is never searched again by name.
+ const exact=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Corner Pharmacy.',destination:pharmacy,travelMode:'walk'});
+ assert.deepEqual(exact,{kind:'locate',title:'Directions to Corner Pharmacy',lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',place:pharmacy,directionsFromHere:true,travelMode:'walk'});
+ // A kind of place: search around the phone, then directions to the closest.
+ const nearest=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to pharmacy.',query:'pharmacy'});
+ assert.equal(nearest.mapQuery,'pharmacy');assert.equal(nearest.nearMe,true);assert.equal(nearest.directionsFromHere,true);assert.equal(nearest.place,undefined);
+ // An older agent: the destination name from the prompt, searched by name.
+ const old=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Corner Pharmacy.'});
+ assert.equal(old.mapQuery,'Corner Pharmacy');assert.equal(old.nearMe,undefined);assert.equal(old.directionsFromHere,true);
+ // An invalid optional field is dropped and the card still reads from the prompt.
+ assert.equal(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt,query:'x'.repeat(501),travelMode:'teleport'}).mapQuery,'coffee');
+ // Place and hand-off cards keep the exact place, so "Show on map" opens it under its name.
+ assert.deepEqual(mapsCard({kind:'place',place:pharmacy,attribution:null}).place,pharmacy);
+});
 // Pixel 10a, 2026-11-17 "Create a new contact - shaw 4153024399" on Contacts: the approved AC-26
 // proposal card showed "Done · Completed · The owner approved and the contact was saved on the
 // phone." and the same row also rendered that summary as a separate device-receipt quote above it.

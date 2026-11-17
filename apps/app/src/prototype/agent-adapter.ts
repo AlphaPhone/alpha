@@ -7,18 +7,20 @@ import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {actionResultText,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
+import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {CAMERA_CONTEXT_NOTICE,publishCommittedDeviceChanges,setFilesReviewIdentity} from '../runtime/device-actions';
-import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,requestCameraScan} from './camera-adapter';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setFilesReviewIdentity} from '../runtime/device-actions';
+import {executeViewInteraction} from '../runtime/view-navigation';
+import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../ui/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
 import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state';
-import {EMERGENCY_REFUSAL,imageDialHandoff,imageSmsSend,imageTelephonyAction} from './image-telephony';
+import {EMERGENCY_REFUSAL,imageContactPorts,imageDialHandoff,imageSmsPort,imageSmsSend,imageTelephonyAction} from './image-telephony';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
@@ -26,15 +28,16 @@ import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runti
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,type TelephonyPorts} from '../runtime/telephony-executor';
-import {normalizePhoneNumber,reviewSms} from '../runtime/aosp-telephony';
-import {parseContactDetail,parseContactRemove,parseContactSave} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {normalizePhoneNumber} from '../runtime/aosp-telephony';
 import {askTelephonyReview} from './telephony-review';
-import {contactsChanged} from './contacts-changes';
+import type {BrowserTabChoice} from './browser-adapter';
+import {isBrowserControl} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
-import {openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import {BrowserReviews} from '../browser/review';
@@ -45,7 +48,7 @@ import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
-import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../runtime/notes-organize-contract';
+import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
 import {executeCalendarAvailability,type AvailabilityProvider} from '../runtime/calendar-availability';
 import {availabilityReview} from './calendar-availability-review';
@@ -67,7 +70,8 @@ import {browserDevProfile} from '../browser/dev-profile';
 import {stampNoteChanges} from '../runtime/note-dates';
 import {isClockOperation,assertClockTimeZone,currentClockTimeZone,validateClockResult} from '../runtime/clock-contract';
 import {deviceActionFailureText} from '../ui/device-actions/device-action-messages';
-import {notesActionFailureText} from '../ui/notes/notes-action-messages';
+import {notesActionFailureText,previousNotesRefusal} from '../ui/notes/notes-action-messages';
+import {readPreviousNotesAvailability} from '../runtime/connection-ui';
 import {reminderDeliveryProblemText} from '../ui/reminders/reminder-result-messages';
 import {namedCalendarReadSummary} from '../ui/calendar/named-read-messages';
 import { Capacitor } from '@capacitor/core';
@@ -105,7 +109,7 @@ const elizaSystem = registerPlugin<{ setFlashlight(input: { enabled: boolean }):
 // intentionally kept intact; authenticated effects are installed at this seam.
 type Shell = any;
 /** One composer send. A message is dispatched once the transport accepted it for delivery. */
-type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>};
+type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>;stop:AbortController;capturing?:boolean}; // Stop aborts `stop`; `capturing` keeps Stop offered while a requested photo waits for its preview.
 /** Refused before any request carrying the message could leave this phone. */
 class NotDispatched extends Error {}
 // connectionController.send refuses these before creating a conversation or posting the message.
@@ -286,6 +290,11 @@ function planActionCard(action:unknown):Shell|undefined{
 function enrichSettledAssistant(message:Shell,card:Shell|undefined,binding?:{conversationId:string;session:unknown}):Shell {
   if(!card||!['plan','retry','sign-in','provider'].includes(card.planAction)||message.card!=null||message.from!=='agent'||!binding||message.messageBinding?.conversationId!==binding.conversationId||JSON.stringify(message.messageBinding?.session)!==JSON.stringify(binding.session))return message;
   return {...message,card};
+}
+/** A workflow the agent saved or changed in this reply: the settled reply carries it, and shows a card that opens it. */
+function keepWorkflowChanges(shell:Shell,reply:{messageId?:string;actionResults?:readonly unknown[]},current:()=>boolean){
+  const changes=workflowChanges(reply.actionResults),refused=workflowViewRefusal(reply.actionResults);
+  if((changes.length||refused)&&reply.messageId)shell.setState((previous:Shell)=>current()?{msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,workflowChanges:changes,workflowViewRefusal:refused}:m)}:null);
 }
 /** Failure kinds upstream raises before any model output (credits, provider access, no provider,
  * throttling). Their streamed text is upstream's own failure prose, so Alpha's message replaces it. */
@@ -709,6 +718,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const probe=isAndroid?devicePreviousNotesAvailability(secureConnectionStore,controller.signal,current):browserPreviousNotesAvailability(browserNotesPort,controller.signal,current);
     void probe.then(availability=>{if(current()){shell.previousNotesAvailability=availability;shell.setState({});}}).catch(()=>{});
   }
+  /** The refusal of an agent request for Previous notes. The Notes view reads their presence only
+   * while it is open, so a request reviewed on Home reads it here before saying there are none. */
+  async function previousNotesRefusalNow(shell:Shell,effect:'shared'|'changed'|'saved',signal:AbortSignal):Promise<string>{
+    const source=shell.notesSourceMode==='legacy'?'legacy':'canonical';
+    const availability=source==='legacy'?null:shell.previousNotesAvailability??await readPreviousNotesAvailability(signal,()=>shell.live).catch(()=>null);
+    return previousNotesRefusal(source,availability,effect);
+  }
   async function previousNotesObservation(store:Shell,current:()=>boolean):Promise<Shell>{
     const first=store.list[0],target=first?await store.target(first.id):null;
     if(!current())throw new DOMException('Notes source changed.','AbortError');
@@ -810,7 +826,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(s.shade&&shell.notificationSelection?.())providerSelection=shell.notificationSelection();
     // The owning Calendar hook checks readiness/privacy; a chat overlay does not replace its underlying view.
     const calendarDay=view==='calendar'?shell.calendarDayObservation?.():undefined;
-    const telephonySelection=view==='messages'?openSmsThreadSelection():view==='phone'?openVoicemailSelection():null;
+    const telephonySelection=view==='messages'?openSmsThreadSelection():view==='phone'?openVoicemailSelection():view==='contacts'?openContactSelection():null;
     alphaClient.setViewContext({
       timeZone:currentClockTimeZone(),
       ...(calendarDay?{calendarDay}:{}),
@@ -996,12 +1012,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const result=await DailyApps.reminderOperationReceipt({operation,operationId,bindingHash});signal.throwIfAborted();
       return result.status==='succeeded'?{status:'succeeded',reminderResult:isReminderCreate(operation)?validateReminderCreateResult(operation,result.result,operationId):validateReminderResult(operation,result.result)}:{status:'unknown'};
     });
-    connectionController.setViewInteractionExecutor(async(view,capability,params,signal,current)=>{
-      current();
-      if(view==='browser'&&capability==='browser-command'&&(!this.live||!this.browserCommand))return {ok:false,code:'UNAVAILABLE',message:'Native view capability is unavailable'};
-      if(!this.live||view!=='browser'||capability!=='browser-command'||!params||typeof params!=='object'||!this.browserCommand)throw Error('Native view capability is unavailable');
-      return this.browserCommand((params as Record<string,unknown>).command,signal,current);
-    });
+    connectionController.setViewInteractionExecutor((view,capability,params,signal,current)=>executeViewInteraction(view,capability,params,{active:!!this.live&&alphaClient.getState().context?.view==='browser',command:this.browserCommand},signal,current));
     connectionController.setNavigationContext(()=>this.live?alphaClient.getState().context:null);
     connectionController.setDeviceReadReview(async(proposal,expectedContext,signal)=>{
       if(typeof this.prepareDeviceReadReview!=='function')throw Error('Notes review is unavailable. Nothing was shared.');
@@ -1023,6 +1034,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||expectedContext.sensitive||!['home','calendar'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Availability review context changed');};
       return executeCalendarAvailability(registerPlugin<AvailabilityProvider>('AlphaCalendar'),operation,expectedContext.timeZone,signal,current,availabilityReview);
     });
+    setBrowserTabNeedsChoice(target=>!!this.browserTabNeedsChoice?.(target));
     setFilesReviewIdentity(async (paths, signal) => {
       const files=this.filesAgent as FilesAgentRunner|undefined;
       if(!files||!this.live||document.hidden)throw Error('Files is unavailable');
@@ -1067,7 +1079,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(isCameraCapture(operation)){
         const ownerSession=connectionController.getSnapshot().session;
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||expectedContext.sensitive||expectedContext.view!=='camera'||ownerSession!==connectionController.getSnapshot().session||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Camera request changed');};
-        return captureAgentPhoto(operationId,signal,current);
+        const result=await captureAgentPhoto(operationId,signal,current,operation.lens);
+        // The saved photo is offered in the composer so a question about it can follow. Only the owner's Send shares it.
+        const mediaId=result.status==='succeeded'?result.cameraResult?.mediaId:undefined;
+        if(mediaId)void photoLibrary.read({id:mediaId}).then(saved=>{current();if(saved.kind!=='video'&&!saved.trashed&&!this.cameraAttachment)this.attachCameraPhoto('native-camera-'+mediaId,saved.image,true);}).catch(()=>{/* The photo is saved; only the offer is skipped. */});
+        return result;
       }
       if(isPhoneDial(operation)){
         // Reviewed dial handoff on the verified image only: the system dial screen opens with the
@@ -1085,33 +1101,29 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Owner-approved telephony on the verified image only. A contact is resolved here, on the
         // phone; the owner confirms the exact number or the before and after before anything
         // calls, sends or writes, and the agent receives only the outcome.
-        if(!aospImage||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was done because Alpha was not open and unlocked.'};
-        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true),book=registerPlugin<any>('AlphaContacts');
+        if(!aospImage||expectedContext.sensitive||document.hidden)return refuseTelephonyAction(operation,'Nothing was done because Alpha was not open and unlocked.');
+        const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true),book=registerPlugin<any>('AlphaContacts');
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
           placeCall:number=>client.placeCall(number),
-          getContact:async id=>parseContactDetail(await book.get({id}),id),
-          // A dispatched write, whatever its answer, has the open Contacts list read the provider again.
-          saveContact:async(draft,target)=>{try{const saved=parseContactSave(await book.save(target?{id:target.id,version:target.version,...draft}:draft),target?.id);return {status:saved.status};}finally{contactsChanged();}},
-          removeContact:async(id,version)=>{try{return parseContactRemove(await book.remove({id,version}));}finally{contactsChanged();}},
-          // The same native review and journalled send as a text to a number; the review shows the resolved number and the text.
-          sendSms:async(number,body,id,sendSignal)=>{
-            const status=await client.status();current();
-            const sim=expectedContext.view==='messages'&&expectedContext.selectedObject?.kind==='sms-subscription'?expectedContext.selectedObject:null;
-            const selected=sim&&status.subscriptions?.find(row=>String(row.id)===sim.id&&smsSubscriptionRevision(row)===sim.revision);
-            if(sim&&!selected)return 'unavailable';
-            const checked=reviewSms({recipients:[number],body,subscriptionId:selected?.id},status,'direct');
-            if('problem' in checked)return 'unavailable';
-            const cancel=()=>{void plugin.cancelSmsReview({operationId:id}).catch(()=>{});};sendSignal.addEventListener('abort',cancel,{once:true});
-            try{const native=await client.sendSms(checked.review,id);return native.status==='denied'?'cancelled':native.status;}
-            finally{sendSignal.removeEventListener('abort',cancel);}
-          },
+          ...imageContactPorts(book,current),
+          sendSms:imageSmsPort(client,expectedContext,current),
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
+          // A draft for a conversation that is not open, and Contacts filtered to a search: each step
+          // changes the view, so it runs after the receipt and only while this review is still current.
+          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>{current();step();});},
+          showContacts:async query=>{
+            const step=showContactsStep(query),access=step?await book.status():null;
+            if(!step||access?.available!==true||access.readable!==true)return null;
+            const listed=await book.list({query,limit:1});current();
+            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
+          },
+          openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
         return imageTelephonyAction(operation,operationId,ports,{allowed:imageEffectAllowed},signal);
@@ -1223,23 +1235,23 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status:result.status==='unknown'?'unknown':'failed',summary:result.status==='unknown'?'The Calendar outcome is unconfirmed.':result.status==='cancelled'?'Calendar review cancelled.':'Nothing was changed because the event changed, access was denied, or the change is unsupported.'};
       }
       if(isNativeNotesQuery(operation)){
-        if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)return {status:'failed',summary:this.notesSourceMode==='legacy'?'Previous notes isn’t ready, so nothing was shared.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Nothing was shared because Notes is not set to On this phone.':'There are no earlier notes on this phone.'};
+        if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)return {status:'failed',summary:await previousNotesRefusalNow(this,'shared',signal)};
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||this.notesPending||this.notesStorageFailed||document.hidden||expectedContext.sensitive||!['home','notes'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes query or connection changed');};
         try{return await executeNotesQuery(this.notesStore,operation,operationId,signal,current);
         }catch{return {status:'failed',summary:'Nothing was shared because Notes changed or sharing became unavailable.'};}
       }
-      // Until the pin carries notes-organize-agent.patch the shared operation union does not name these.
+      // The device operation union does not name the organisation proposals of the shared Notes organisation contract.
       const organize:unknown=operation;
-      if(isNotesOrganizeOperation(organize)){
-        // Folders, the read-only list filter, Recently deleted restore and recording (runtime/notes-organize-contract).
-        const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||!notesOrganizeContextAllowed(expectedContext,organize.type)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes context changed');};
+      if(isNotesOrganizeOperation(organize)&&organize.type!=='notes_list_filter'){
+        // Folders, the Previous notes list filter, Recently deleted restore and recording.
+        const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||!notesOrganizeContextAllowed(expectedContext,organize)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes context changed');};
         try{return await executeNotesOrganize(notesOrganizeShellHost(this,{read:readNotesFolders,edit:editNotesFolders}),organize,current);}
         catch{return {status:'failed',summary:'Nothing was changed because Notes changed or became unavailable.'};}
       }
       if(isNotesOperation(operation)){
         try{
-          if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)throw Error(this.notesSourceMode==='legacy'?'Previous notes isn’t ready, so nothing was changed.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Nothing was changed because Notes is not set to On this phone.':'There are no earlier notes on this phone, so nothing was changed.');
+          if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)throw Error(await previousNotesRefusalNow(this,'changed',signal));
           this.notesAgentBusy=true;
           const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='notes')throw Error('Selected Notes context changed');};
           const execute=()=>this.notesStore.execute(operation,operationId,signal,current);
@@ -1329,8 +1341,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{signal.throwIfAborted();await speakAppText(operation.text,speechAbort.signal,undefined,true,currentSpeech);currentSpeech();return {status:'succeeded',summary:'Finished reading the reviewed text aloud.'};}finally{unsubscribe();signal.removeEventListener('abort',stop);window.removeEventListener('alpha:stop-workflow-speech',stop);}
       }
       if (operation.type === 'create_note') {
-        if(this.notesSourceMode==='canonical'&&expectedContext.selectedObject?.kind==='workflow-run')return {status:'failed',summary:'Saving a note from a workflow isn’t available yet.'};
-        if (this.notesSourceMode!=='legacy'||this.notesStorageFailed) return { status: 'failed', summary: this.notesSourceMode==='legacy'?'Previous notes isn’t ready, so nothing was saved.':(this.previousNotesAvailability==='present'||this.previousNotesAvailability==='unavailable')?'Nothing was saved because Notes is not set to On this phone.':'There are no earlier notes on this phone, so nothing was saved.' };
+        if(this.notesSourceMode==='canonical'&&expectedContext.selectedObject?.kind==='workflow-run'){
+          // The agent's Notes: a workflow's reviewed note becomes a canonical record, the Notes the owner sees.
+          const notes=this.canonicalNotesUi,unconfirmed={status:'unknown' as const,summary:'The note save is unconfirmed.'};
+          if(!notes?.current||notes.pending)return {status:'failed',summary:'Nothing was saved because Notes isn’t ready.'};
+          try{
+            // The saved record's identity reaches the Notes view; the shared create_note receipt carries no typed result.
+            const created=await notes.createFromText(operation.title?operation.title+(operation.body?'\n'+operation.body:''):operation.body);
+            return created&&this.canonicalNotesUi===notes?{status:'succeeded',summary:presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary}:unconfirmed;
+          }catch{return unconfirmed;}
+        }
+        if (this.notesSourceMode!=='legacy'||this.notesStorageFailed) return { status: 'failed', summary: await previousNotesRefusalNow(this,'saved',signal) };
         const existing = this.vget('notes').list.find((note: Shell) => note.id === operationId);
         if (existing) return { status: 'unknown', summary: 'A note already has this action identifier.' };
         const note = { id: operationId, kind: 'text', title: operation.title, body: operation.body, pinned: false, when: 'Now', createdAt:Date.now(), modifiedAt:Date.now() };
@@ -1379,13 +1400,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (operation.type === 'open_view') {
         // Navigation changes the view epoch; journal completion still runs after it.
         if(!openInternalView(this,operation.view))return {status:'failed',summary:'This view is unavailable.'};
-        return { status: 'succeeded', summary: `Opened ${operation.view} on this phone.` };
+        return { status: 'succeeded', summary: presentOpenView(operation.view).appliedSummary };
       }
-      if (operation.type !== 'browser_navigate') return {status:'failed',summary:'This device operation is unavailable.'};
-      if (!this.browserNavigateApproved) return { status: 'failed', summary: 'Browser navigation is unavailable, so no page opened.' };
+      const browserControl=isBrowserControl(operation);
+      if (!browserControl&&operation.type !== 'browser_navigate') return {status:'failed',summary:'This device operation is unavailable.'};
+      if (!this.browserNavigateApproved||!this.browserControl) return { status: 'failed', summary: 'Browser is unavailable, so nothing was done.' };
       const browserSession=connectionController.getSnapshot().session;
-      const present=await this.browserNavigateApproved(operation.url, signal, true);
-      return { status: 'succeeded', summary: browserNavigationSummary(operation.url),presentBrowser:()=>{
+      // The tab the request was made from, when it was made in Browser: page history acts on that page only.
+      const tab=expectedContext.view==='browser'?expectedContext.selectedObject:undefined,observed=tab?.kind==='browser-tab'&&tab.revision!==undefined?{id:tab.id,revision:tab.revision}:undefined;
+      // Several tabs matching the request's words are listed in this action's own card; the agent never sees them.
+      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true));
+      return { status: 'succeeded', summary: browserControl?browserControlSummary(operation):browserNavigationSummary(operation.url),presentBrowser:()=>{
         const show=()=>{
           if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
           present?.();
@@ -1565,12 +1590,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
     api.openReviewedWebSource=(url:string,signal:AbortSignal)=>this.browserNavigateApproved(url,signal);
-    api.attachCameraPhoto=(id:string,image:string)=>{
+    // `captured` marks a photo the agent took on request: its chip stays in the composer on any screen, and a full draft is left alone.
+    api.attachCameraPhoto=this.attachCameraPhoto=(id:string,image:string,captured=false)=>{
       if(this.fileAttachments?.length>=MAX_CHAT_UPLOAD_ATTACHMENTS||
         !attachmentBatchFits(this.fileAttachments??[],image)){
-        this.toast('Remove an attachment before adding another.');return;
+        if(!captured)this.toast('Remove an attachment before adding another.');return;
       }
-      this.cameraAttachment={id,image};
+      this.cameraAttachment={id,image,...(captured?{captured:true}:{})};
       this.setState({chat:'sheet',shade:false});
     };
     api.composeTranscriptQuestion=(noteId:string,title:string)=>{
@@ -1690,7 +1716,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.openDraftPhoto=()=>{if(this.cameraAttachment){this.chatImagePreview=this.cameraAttachment.image;this.setState({});}};
 
     const photo=this.cameraAttachment;
-    out.attachedCameraPhoto=photo&&!this.S().msgs.some((m:Shell)=>m.cameraAttachment===photo)&&this.S().view==='photos'&&this.vget('photos').open===photo.id?photo.image:'';
+    out.attachedCameraPhoto=photo&&!this.S().msgs.some((m:Shell)=>m.cameraAttachment===photo)&&(photo.captured||this.S().view==='photos'&&this.vget('photos').open===photo.id)?photo.image:'';
     out.removeCameraPhoto=()=>{
       this.cameraAttachment=null;
       if(photo&&this.S().view==='photos'&&this.vget('photos').open===photo.id){
@@ -1788,18 +1814,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     });
     // A chat-started workflow run replies with a [WORKFLOW] block: it shows as a card that opens the
     // run in Workflows, and a malformed block is hidden. Stored and copied text stay unchanged.
+    // A workflow the reply saved or changed shows a card that opens it, while its agent is the one connected.
+    const workflowSession=connectionController.getWorkflowClient()?.sessionId;
     out.msgs=(out.msgs||[]).map((m:Shell)=>{
-      if(!m.isAgent||typeof m.text!=='string'||m.displayText!==m.text)return m;
-      const parsed=workflowReplyText(m.text);if(parsed.text===m.text)return m;
-      return {...m,displayText:parsed.text,hasCalendarText:m.hasCalendarText!==false&&!!parsed.text,workflowRuns:parsed.runs.map(run=>({...run,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}}))};
+      if(!m.isAgent)return m;
+      const sent=workflowSession?live.find(item=>item.id===m.id):undefined,bound=sent?.messageBinding?.session?.sessionId===workflowSession,changes:WorkflowChange[]=bound&&sent?.workflowChanges||[],refused=bound&&sent?.workflowViewRefusal===true;
+      const parsed=typeof m.text==='string'&&m.displayText===m.text?workflowReplyText(m.text):null,rewritten=!!parsed&&parsed.text!==m.text;
+      if(!rewritten&&!changes.length&&!refused)return m;
+      return {...m,...(rewritten?{displayText:parsed.text,hasCalendarText:m.hasCalendarText!==false&&!!parsed.text}:{}),workflowRuns:[
+        ...(parsed?.runs||[]).map(run=>({...run,done:true,status:'Submitted',label:'Open workflow run '+run.title,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}})),
+        ...changes.map(change=>({workflowId:change.workflowId,runId:'',title:'Workflow',done:true,status:change.change,label:'Open workflow',open:()=>{if(typeof this.openWorkflow==='function')this.openWorkflow(change.workflowId);else this.openView('workflows');}})),
+        // The agent refused a change that is made in the Workflows view; the card opens that view.
+        ...(refused?[{workflowId:'',runId:'',title:'Workflows',done:false,status:'Make this change in Workflows',label:'Open Workflows',open:()=>this.openView('workflows')}]:[]),
+      ]};
     });
     out.msgs=projectActionMessages(out.msgs||[],live);
-    out.canStopReply=!!this.S().typing&&alphaClient.getState().pending;
+    out.canStopReply=!!this.S().typing&&(alphaClient.getState().pending||this.sendAttempt?.capturing===true);
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
     const turn=!!this.S().typing;
     const hasBinaryAttachment=!this.messageEditTarget&&!!(this.cameraAttachment||this.fileAttachments?.length);
     out.sendVisible=(!!out.hasDraft||hasBinaryAttachment)&&!turn;out.talkVisible=!!out.noDraft&&!hasBinaryAttachment&&!turn;out.replyIdle=!turn;
-    out.stopReply=()=>{connectionController.cancelViewNavigation();alphaClient.cancel();};
+    out.stopReply=()=>{this.sendAttempt?.stop.abort();connectionController.cancelViewNavigation();alphaClient.cancel();};
     if (isAndroid) {
       out.showStatus = false; out.showIndicator = false;
       const style = out.sbColor === 'var(--alpha-white)' ? SystemBarsStyle.Dark : SystemBarsStyle.Light;
@@ -1929,6 +1964,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(!reply.messageId||!reply.userMessageId||!identity||identity.conversationId!==binding.conversationId||JSON.stringify(identity.session)!==JSON.stringify(binding.session)||!reply.text.trim())throw Error('The voice reply could not be matched to this conversation. Check history before speaking again.');
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
+      keepWorkflowChanges(this,reply,belongs);
       const delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
       const nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
       current();
@@ -2079,7 +2115,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
     }
 
-    const attempt:SendAttempt=this.sendAttempt={transportCalled:false,preDispatch:false,streamed:false};
+    const attempt:SendAttempt=this.sendAttempt={transportCalled:false,preDispatch:false,streamed:false,stop:new AbortController()};
     const replaceStream=(value:string,streaming=true)=>this.setState((previous:Shell)=>({msgs:previous.msgs.map((message:Shell)=>message.id===streamedId?{...message,text:value,streaming}:message)}));
     let streamFrame=0,latestStream:string|undefined;
     const flushStream=()=>{if(streamFrame){cancelAnimationFrame(streamFrame);streamFrame=0;}if(latestStream!==undefined){const value=latestStream;latestStream=undefined;if(this.live)replaceStream(value);}};
@@ -2144,6 +2180,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // A conversation delivery can land the saved reply before this rename; keep its content and enrich only a missing plan control.
       if(streamed)this.setState((previous:Shell)=>settlementCurrent()?{msgs:reply.messageId&&previous.msgs.some((m:Shell)=>m.id===reply.messageId)?previous.msgs.filter((m:Shell)=>m.id!==streamedId).map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planCard,identity):m):previous.msgs.map((m:Shell)=>m.id===streamedId?{...m,id:reply.messageId||m.id,messageBinding:reply.messageId?identity:undefined,text:reply.text,streaming:false,...(planCard?{card:planCard}:{})}:m)}:null);else this.agentSay(reply.text,planCard,reply.messageId&&identity?{id:reply.messageId,messageBinding:identity}:undefined,settlementCurrent);
       if(reply.userMessageId&&identity)await new Promise<void>(resolve=>this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m)}:null,resolve));
+      keepWorkflowChanges(this,reply,settlementCurrent);
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
       let cameraOpened=false,cameraReceipts=0;
       if(sourceDraft&&sourceSession&&JSON.stringify(sourceSession)===JSON.stringify(connectionController.getSnapshot().session))this.agentSay('Review this answer before saving it with its source.',{type:'generic',icon:'note',title:'Review summary note',sub:sourceDraft.name,sourceSummary:{source:sourceDraft,text:reply.text,session:sourceSession}});
@@ -2153,18 +2190,28 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{await completeReadReply(this,completed.receipt);}catch{if(this.live&&sameChat())this.agentSay('The note was shared, but its answer is unconfirmed.');}
       }
       try{
-        const delivered=await deliverNavigation(reply.actionResults);
+        let delivered=await deliverNavigation(reply.actionResults);
+        // The agent may propose the photo without showing Camera in the same turn. When that proposal is the
+        // reply's only pending item and the agent bound it to this very message, Camera is opened here.
+        if(!delivered&&reply.userMessageId&&connectionController.requestedCameraNeedsOpening(reply.userMessageId))delivered=await new Promise<boolean>((resolve,reject)=>{
+          const chat=this.S().chat;
+          if(!openInternalView(this,'camera',chat==='sheet'||chat==='full'?chat:undefined)){resolve(false);return;}
+          this.setState({},()=>{try{context(this);resolve(this.live&&this.S().view==='camera');}catch(error){reject(error);}});
+        });
         cameraOpened=delivered&&alphaClient.getState().context.view==='camera';
-        if(delivered&&reply.userMessageId){
-          const results=await connectionController.continueRequestedCamera(reply.userMessageId,new AbortController().signal);
-          cameraReceipts=results.length;
-          for(const result of results)if(this.live)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
+        if(cameraOpened&&reply.userMessageId){
+          attempt.capturing=true;this.setState({});
+          try{
+            const results=await connectionController.continueRequestedCamera(reply.userMessageId,attempt.stop.signal);
+            cameraReceipts=results.length;
+            for(const result of results)if(this.live)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
+          }finally{attempt.capturing=false;}
         }
       }catch(error){if(this.live)this.toast(errorNotice(error,'Could not confirm the screen change. Check your screen.'),ERROR_TOAST);}
-      // The camera notice is dropped only when the photo was taken (a receipt) or its review card is shown on Camera.
-      const cameraReview=cameraOpened&&alphaClient.getState().context.view==='camera'&&this.S().msgs.some((m:Shell)=>m.card?.proposalId&&!m.card.done);
+      // "Open Camera" is dropped once the photo was taken (a receipt) or Camera was opened for this request:
+      // there the pending photo is recovered as its review card when this turn ends.
       for(const notice of replyNotices(reply)){
-        if((cameraReceipts>0||cameraReview)&&notice==='Take photo: '+CAMERA_CONTEXT_NOTICE)continue;
+        if((cameraReceipts>0||cameraOpened&&alphaClient.getState().context.view==='camera')&&notice==='Take photo: '+CAMERA_CONTEXT_NOTICE)continue;
         this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,done:true});
       }
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});

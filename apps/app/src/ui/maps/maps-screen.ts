@@ -794,6 +794,18 @@ export class MapsScreenController {
     if (place) this.showPlace(place);
   }
 
+  /** The search result closest to the phone's last fix; none without a result or a fix. */
+  closest(): Place | undefined {
+    const here = this.state?.position.value?.coordinate;
+    const items = this.state?.search.value ?? [];
+    if (!here || !items.length) return undefined;
+    return items.reduce((best, item) =>
+      greatCircle(here, item.coordinate) < greatCircle(here, best.coordinate)
+        ? item
+        : best,
+    );
+  }
+
   /** A saved place from a chip or the saved list. */
   chooseSaved(id: string): void {
     const saved = this.state?.saved.value.find((item) => item.id === id);

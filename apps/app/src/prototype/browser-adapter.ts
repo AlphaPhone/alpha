@@ -17,9 +17,12 @@ import { BrowserReviews } from '../browser/review';
 import { createExternalBrowserHandoff } from './browser-external-handoff';
 import { browserErrorMessage, PROFILE_UNSUPPORTED_NATIVE_MESSAGE, PROFILE_UNSUPPORTED_MESSAGE } from '../browser/browser-errors';
 import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-messages';
-import { surfacePollIdle } from '../browser/browser-poll';
+import { approvedOpenTab, BrowserOpenRefused, matchingTabs, observedTabCurrent, searchAddress, surfacePollIdle, tabLimitRefusal } from '../browser/browser-poll';
+import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
+/** What a chat request to switch or close a tab asks the owner when its words match several tabs. */
+export type BrowserTabChoice = {verb: 'Switch to' | 'Close'; options: {title: string; host: string; priv: boolean}[]};
 // The shared native tab host (BrowserTabHostPlugin) under Alpha's Capacitor name; the web build
 // registers its isolated-frame surface under the same name (browser/register.ts).
 const Browser = registerPlugin<any>('AlphaBrowser');
@@ -40,6 +43,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   const restoreAttempts = new Map<string, number>();
   const reviews = new BrowserReviews();
   let profileUnsupportedTab:string|undefined;
+  // The tab the last approved open loaded into, until the user navigates it from the address bar.
+  let agentTab:string|undefined;
   let shell: any, lastGeometry = '', disposed = false, sharing = false, confirming = false, clearingData = false;
   let lastPresented:Bag|undefined,presentationFrame:number|undefined,presentationFailed=false;
   // Saving waits for a successful read so a damaged saved record is never overwritten implicitly.
@@ -196,7 +201,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   function ensure(id: string, priv = isPrivate(id)) {
     return tabs.ensure(id, priv, () => Browser.create({ session, id, private: priv }).catch((error: unknown) => { if(!disposed&&Capacitor.isNativePlatform()&&state()?.cur===id&&error instanceof Error&&error.message===PROFILE_UNSUPPORTED_NATIVE_MESSAGE){profileUnsupportedTab=id;refresh();} throw error; }));
   }
-  async function navigate(raw: string, newTab = false, approvedSignal?: AbortSignal, privateTab = false, background = false) {
+  async function navigate(raw: string, newTab = false, approvedSignal?: AbortSignal, privateTab = false, background = false, target?: string) {
     let url: URL;
     try {
       // The shared address-bar classification; Alpha keeps its length bound, HTTPS default and search provider.
@@ -218,16 +223,16 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       else if (/^localhost(?:[/?#]\S*)?$/i.test(input.query)) { url = new URL('https://' + input.query); if (url.hostname !== 'localhost') throw new Error(); }
       else {
         // Submit only on Enter. No suggestions, background query traffic or agent upload.
-        url = new URL('https://www.google.com/search');
-        url.searchParams.set('q', input.query);
+        url = searchAddress(input.query);
       }
-    } catch { if (approvedSignal) throw new Error('Invalid approved browser destination'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
-    const s = state(); if (!s) { if (approvedSignal) throw new Error('Browser unavailable'); return; }
+    } catch { if (approvedSignal) throw new BrowserOpenRefused('Invalid approved browser destination'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
+    const s = state(); if (!s) { if (approvedSignal) throw new BrowserOpenRefused('Browser is unavailable.'); return; }
     // Restored rows count: an agent open past the cap fails visibly instead of being dropped.
-    if (newTab && s.tabs.length >= MAX_TABS) { const full = new Error('Tab limit'); if (approvedSignal) throw full; report(full); return; }
+    if (newTab && s.tabs.length >= MAX_TABS) { if (approvedSignal) throw tabLimitRefusal(MAX_TABS); report(new Error('Tab limit')); return; }
     profileUnsupportedTab=undefined;
     const selectedTab=s.cur;
-    const id = newTab ? newTabId() : s.cur, priv = newTab ? privateTab : isPrivate(id);
+    const id = newTab ? newTabId() : target ?? s.cur, priv = newTab ? privateTab : isPrivate(id);
+    if (!approvedSignal && id === agentTab) agentTab = undefined;
     // Keep the last committed address durable while a restored page is loading or fails.
     const saved = restored.get(id);
     if (saved) tabs.annotate(id, { savedUrl: saved.url, title: saved.title });
@@ -244,6 +249,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // A tab that opened while this one was being created can have filled the last place.
       if (newTab && current.tabs.length >= MAX_TABS) { tabs.forget([id]); void Browser.close({session,id}).catch(report); const full = new Error('Tab limit'); if (approvedSignal) throw full; report(full); return; }
       if (newTab) shell.vset('browser', { tabs: [...state().tabs, { id, hist: ['newtab'], pos: 0, ...(priv ? {priv: true} : {}) }], ...(!background ? {cur: id} : {}) });
+      else if (!background && current.cur !== id) shell.vset('browser', { cur: id });
       tabs.beginNavigation(id, url.href);
       // A background (restored-tab) load must not close a menu or switcher the
       // user opened while its native tab was being created.
@@ -261,17 +267,32 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       restoreAttempts.delete(id); report(error);
     }
   }
+  function closeTab(id: string) {
+    const rest = state().tabs.filter((tab: Bag) => tab.id !== id), fallback = newTabId();
+    if (tabs.has(id)) void Browser.close({session, id}).catch(report);
+    tabs.forget([id]); restored.delete(id);
+    shell.vset('browser', {tabs: rest.length ? rest : [{id: fallback, hist: ['newtab'], pos: 0}], cur: state().cur === id ? (rest[0]?.id || fallback) : state().cur});
+  }
+  // The open tabs a chat request names by a few words. A private tab is found only for a request
+  // made from a private tab. A switch never names the tab that is already showing.
+  const tabPage = (id: string) => { const known = tabInfo(id) || restored.get(id); return known && {title: pageTitle(known.title, known.url), url: known.url as string}; };
+  function namedTabs(target: string, closing: boolean) {
+    const s = state(), fromPrivate = shell.S?.().view === 'browser' && isPrivate(s.cur);
+    const visible: (Bag & {id: string})[] = s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv);
+    return {visible, found: matchingTabs(closing ? visible : visible.filter(tab => tab.id !== s.cur), target, tabPage)};
+  }
   async function command(command: string) {
     const id = state()?.cur; if (!id || !tabs.has(id)) return;
     try { await Browser.command({ session, id, command }); } catch (error) { report(error); }
   }
   // Find in page: native findAllAsync/findNext on the selected tab. Navigation,
   // tab switches and closing clear it natively and the renderer follows.
-  let findTimer = 0;
+  // Find in page accepts this many characters; a longer chat request is refused, not cut short.
+  let findTimer = 0; const FIND_TEXT_MAX = 200;
   const findIdle = { finding: false, findQuery: '', findCount: 0, findIndex: 0, findDone: true };
-  function openFind() {
+  function openFind(refuse: (message: string) => void = message => report(new Error(message))) {
     const id = state()?.cur, info = tabInfo(id);
-    if (!info?.committed || info.error) { report(new Error('Load a page before finding text in it.')); return; }
+    if (!info?.committed || info.error) { refuse('Load a page before finding text in it.'); return; }
     shell.vset('browser', { ...findIdle, finding: true, findTab: id, menu: false });
   }
   function closeFind() {
@@ -282,7 +303,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   }
   function findQuery(query: string) {
     const id = state()?.findTab; if (!id || id !== state()?.cur) { closeFind(); return; }
-    const value = query.replace(/[\u0000-\u0008\u000a-\u001f\u007f]/g, '').slice(0, 200);
+    const value = query.replace(/[\u0000-\u0008\u000a-\u001f\u007f]/g, '').slice(0, FIND_TEXT_MAX);
     shell.vset('browser', { findQuery: value, findDone: !value, ...(value ? {} : { findCount: 0, findIndex: 0 }) });
     window.clearTimeout(findTimer);
     // Debounced so typing does not issue a native search per keystroke.
@@ -512,7 +533,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       pageShareAvailable:Capacitor.isNativePlatform(),canCopyLink:!!info?.committed&&!info.loading&&!info.error,pageContentAvailable:Capacitor.isNativePlatform()||!!info?.committed&&!info.loading&&!info.error&&!info.externalOnly,nativeControls:true,externalBrowserAvailable:Capacitor.isNativePlatform(),openExternalBrowser:()=>void externalHandoff.open(),openPasswordProvider:()=>{api.set({menu:false});api.open('settings',{page:'password-provider'});},openDownloads:()=>{api.set({menu:false});void Browser.downloads({session}).catch(report);},copyLink:()=>void copyPageLink(),reload:()=>{api.set({menu:false});void command('reload');},stopLoading:()=>{api.set({menu:false});void command('stop');},loading:!!info?.loading,goBack:()=>void command('back'),goFwd:()=>void command('forward'),backOp:info?.canBack?1:0.3,fwdOp:info?.canForward?1:0.3,
       startEdit:()=>api.set({editing:true,addr:info?.url||'',menu:false}),onAddrKey:(e:KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();void navigate(secureTypedAddress((e.target as HTMLInputElement).value));} else if(e.key==='Escape')api.set({editing:false}); },
       toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('HTTPS only');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{id:'bookmark-recovery',title:'Recover saved bookmarks',host:'Bookmarks unavailable',ini:'!',name:'Recover saved bookmarks',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...Array.from(new Set<string>(s.lib==='history'?s.visits:s.marks)).map((u:string)=>{const address=new URL(u),site=address.hostname.replace(/^www\./,''),named=titleOf(u);return {id:u,title:u,name:named||site,host:address.host+(address.pathname==='/'?'':address.pathname)+address.search,ini:(named||site)[0],go:()=>void navigate(u),canRemove:true,removeAria:historyOpen?'Remove from history':'Remove bookmark',remove:historyOpen?()=>{const current=state(),visits=(current?.visits||[]).filter((visit:string)=>visit!==u);api.set({visits,titles:retainedTitles(current?.titles,visits,current?.marks)});}:()=>saveBookmark(u,false)};})],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!(s.lib==='history'?s.visits:s.marks).length,newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,readAloudAvailable:true,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),
-      tabCards:s.tabs.map((tab:Bag)=>{const page=known(tab.id),label=page?.title||(tab.priv?'New private tab':'New tab');return {id:tab.id,title:page?.title || page?.url || (tab.priv?'New private tab':'New tab'),host:(tab.priv?'Private · ':'')+(page?.url||''),css:tab.id===s.cur?'box-shadow:inset 0 0 0 2px var(--acc)':'',prev:tab.priv?'background:var(--fg);opacity:.85':'background:var(--s2)',aria:'Switch to '+(tab.priv?'private tab ':'')+label,closeAria:tab.priv?'Close private tab':'Close tab',pick:()=>api.set({cur:tab.id,tabsOpen:false}),close:()=>{ const rest=state().tabs.filter((t:Bag)=>t.id!==tab.id); const fallback=newTabId();if(tabs.has(tab.id))void Browser.close({session,id:tab.id}).catch(report);tabs.forget([tab.id]);restored.delete(tab.id);api.set({tabs:rest.length?rest:[{id:fallback,hist:['newtab'],pos:0}],cur:state().cur===tab.id?(rest[0]?.id||fallback):state().cur}); }};}),
+      tabCards:s.tabs.map((tab:Bag)=>{const page=known(tab.id),label=page?.title||(tab.priv?'New private tab':'New tab');return {id:tab.id,title:page?.title || page?.url || (tab.priv?'New private tab':'New tab'),host:(tab.priv?'Private · ':'')+(page?.url||''),css:tab.id===s.cur?'box-shadow:inset 0 0 0 2px var(--acc)':'',prev:tab.priv?'background:var(--fg);opacity:.85':'background:var(--s2)',aria:'Switch to '+(tab.priv?'private tab ':'')+label,closeAria:tab.priv?'Close private tab':'Close tab',pick:()=>api.set({cur:tab.id,tabsOpen:false}),close:()=>closeTab(tab.id)};}),
       rootRef:(element:HTMLElement)=>{if(!element)return; if(window.scrollX||window.scrollY)window.scrollTo(0,0); const screen=element.closest('[data-screen]'); if(screen){screen.scrollTop=0;screen.scrollLeft=0;} const viewport=element.querySelector('[data-bscroll]'); if(viewport){viewport.setAttribute('data-native-browser-viewport','true'); viewport.setAttribute('aria-label',info?.error ? browserPageErrorText(info.error) : (info?.externalOnly?'Open externally':info?.loading?'Loading website':'Browser page'));} },
     };
   };
@@ -523,14 +544,16 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     if (browserActive && !browserWasActive) void readingSupport?.check();
     if (!sessionRead && this.vget('browser')?.tabs) void restoreSession();
     browserWasActive = browserActive;
-    this.browserCommand = async (raw:unknown,signal:AbortSignal,current:()=>void) => {
+    this.browserCommand = async (raw:unknown,selection:unknown,signal:AbortSignal,current:()=>void) => {
       // Refusals before Browser.command are typed: nothing was dispatched, so the agent
       // must not report that the command may have run.
       let command:ReturnType<typeof parseNativeHistoryCommand>;
-      try{command=parseNativeHistoryCommand(raw);}catch(error){return {ok:false,code:'UNSUPPORTED',message:error instanceof Error?error.message:String(error)};}
+      try{command=parseNativeHistoryCommand(raw,selection);}catch(error){return {ok:false,code:'UNSUPPORTED',message:error instanceof Error?error.message:String(error)};}
       const id=state()?.cur,info=tabInfo(id);
       const admittedNavigation=info?.navigation;
       const bound=()=>{signal.throwIfAborted();current();if(disposed||!Capacitor.isNativePlatform()||document.hidden||shell.S().view!=='browser'||state()?.menu||state()?.tabsOpen||state()?.lib||state()?.share||state()?.editing||shell.S().shade||state()?.cur!==id||!tabs.has(id)||!info||(command.subaction==='reload'?!info.url:!info.committed||info.error||info.loading)||tabInfo(id)?.navigation!==admittedNavigation)throw Error('Current native browser tab changed');
+        // The turn asked about one page; a redirect or another tab since then is not that page.
+        if(!observedTabCurrent(command.selection,tabs.selection(id)))throw Error('The Browser page changed after the request. Nothing was done.');
         if(command.subaction==='back'&&!info.canBack)throw Error('There is no previous page in this tab.');
         if(command.subaction==='forward'&&!info.canForward)throw Error('There is no next page in this tab.');
       };
@@ -554,13 +577,16 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     };
     this.browserNavigateApproved = async (raw: string, signal: AbortSignal, deferPresentation = false) => {
       const url = new URL(raw);
-      if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Only HTTPS destinations may be approved');
+      if (url.protocol !== 'https:' || url.username || url.password) throw new BrowserOpenRefused('Only HTTPS destinations may be approved');
       signal.throwIfAborted();
       const selected = state()?.cur;
       // A request made from a private page stays in that profile. Opening a
       // destination must not silently switch to saved sign-ins and history.
       const privateTab=!!(shell.S?.().view==='browser'&&isPrivate(selected));
-      const id = await navigate(url.href, true, signal, privateTab, deferPresentation);
+      // Reuse an untouched New tab or the agent's own earlier tab, so opens do not fill the tab limit.
+      const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab) && !tabInfo(tab));
+      const id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
+      if (id) agentTab = id;
       const present = () => {
         signal.throwIfAborted();
         if (!id || disposed || document.hidden || state()?.cur !== (deferPresentation ? selected : id) || !tabs.has(id)) return;
@@ -575,6 +601,65 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       if (deferPresentation) return present;
       present();
     };
+    // Reviewed Browser controls from chat (the shared browser-contract). The words of a search, a
+    // tab's title and address and the page stay on this phone. Every refusal is thrown before any
+    // effect, as BrowserOpenRefused. What would change the tab or page the request was made from
+    // (selecting or closing the showing tab, page history) runs in the returned presentation,
+    // after the action's journal and receipt, as an approved open's selection does.
+    this.browserControl = async (operation: BrowserControlOperation, input: {signal: AbortSignal; observed?: {id: string; revision: string}; choose: (choice: BrowserTabChoice, signal: AbortSignal) => Promise<number | null>}) => {
+      const {signal} = input, refuse = (message: string): never => { throw new BrowserOpenRefused(message); };
+      signal.throwIfAborted();
+      if (operation.type === 'browser_search') return this.browserNavigateApproved(searchAddress(operation.query).href, signal, true);
+      const s = state(); if (!s || disposed) return refuse('Browser is unavailable.');
+      const selected: string = s.cur, fromPrivate = shell.S?.().view === 'browser' && isPrivate(selected);
+      const still = () => { signal.throwIfAborted(); return !disposed && !document.hidden && state()?.cur === selected; };
+      const show = (patch: Bag = {}) => { shell.vset('browser', {editing: false, tabsOpen: false, menu: false, lib: null, share: false, ...patch}); shell.openView('browser', null, null, {restore: true}); };
+      if (operation.type === 'browser_tab_new') {
+        if (s.tabs.length >= MAX_TABS) throw tabLimitRefusal(MAX_TABS);
+        const id = newTabId();
+        shell.vset('browser', {tabs: [...s.tabs, {id, hist: ['newtab'], pos: 0, ...(operation.private ? {priv: true} : {})}]});
+        return () => { if (still() && tabOf(id)) show({cur: id, editing: true, addr: ''}); };
+      }
+      if (operation.type === 'browser_tab_switch' || operation.type === 'browser_tab_close') {
+        const closing = operation.type === 'browser_tab_close', target = operation.target;
+        // A private tab is found, listed or closed only for a request made from a private tab.
+        if (target === undefined && isPrivate(selected) && !fromPrivate) refuse('The tab showing in Browser is private. Ask again from that tab.');
+        let id = selected;
+        if (target !== undefined) {
+          const {visible, found} = namedTabs(target, closing);
+          if (!found.length) refuse(!closing && matchingTabs(visible, target, tabPage).length ? 'That tab is already showing.' : `No open tab matches “${target}”.`);
+          let choice: number | null = 0;
+          if (found.length > 1) {
+            choice = await input.choose({verb: closing ? 'Close' : 'Switch to', options: found.map(tab => { const known = tabPage(tab.id); return {title: known?.title || known?.url || (tab.priv ? 'New private tab' : 'New tab'), host: known?.title && URL.canParse(known.url) ? new URL(known.url).host : '', priv: !!tab.priv}; })}, signal);
+            signal.throwIfAborted();
+          }
+          const chosen = choice === null ? undefined : found[choice]?.id;
+          if (!chosen) return refuse(`More than one tab matches “${target}”, and none was chosen.`);
+          if (disposed || state()?.cur !== selected || !tabOf(chosen)) refuse('Browser changed while you were choosing. Nothing was done.');
+          id = chosen;
+        }
+        if (!closing) return () => { if (still() && tabOf(id)) show({cur: id}); };
+        if (id !== selected) { closeTab(id); return () => { if (still()) show(); }; }
+        return () => { if (still()) { closeTab(id); show(); } };
+      }
+      const info = tabInfo(selected);
+      if (operation.type === 'browser_find') {
+        // The web build's page is a sandboxed frame this app cannot search (see openFind below).
+        if (!Capacitor.isNativePlatform()) refuse('This Browser cannot find text in a page.');
+        if (operation.text.length > FIND_TEXT_MAX) refuse(`Find in page takes up to ${FIND_TEXT_MAX} characters.`);
+        openFind(refuse); findQuery(operation.text);
+        return () => { if (still()) show(); };
+      }
+      const action = operation.action, navigation = info?.navigation;
+      // The turn asked about one page; a redirect or another tab since then is not that page.
+      if (!observedTabCurrent(input.observed, tabs.selection(selected))) refuse('The Browser page changed after the request. Nothing was done.');
+      if (!info || !tabs.has(selected) || (action === 'reload' && !info.url)) return refuse('No page is open in this tab.');
+      if (action === 'back' && !info.canBack) refuse('There is no previous page in this tab.');
+      if (action === 'forward' && !info.canForward) refuse('There is no next page in this tab.');
+      if (action === 'stop' && !info.loading) refuse('The page is not loading.');
+      return () => { if (still() && tabInfo(selected)?.navigation === navigation) { show(); void command(action); } };
+    };
+    this.browserTabNeedsChoice = (target: string) => !disposed && !!state() && namedTabs(target, false).found.length > 1;
     // Identity only: visible page content, URL and browsing history are not
     // transmitted merely by opening the agent. Navigation changes the revision
     // so a proposal for an earlier document cannot retain current authority.

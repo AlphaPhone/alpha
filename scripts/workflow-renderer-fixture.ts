@@ -15,6 +15,7 @@ import { workflowErrorText, workflowRefusalText, workflowIntentText } from '../a
 import * as workflowRunPresentation from '../apps/app/src/ui/workflows/workflow-run-presentation.ts';
 import { workflowSha, workflowBytes } from '../apps/app/src/runtime/workflow-device-contract.ts';
 import { alphaClient } from '../apps/app/src/runtime/alpha-client.ts';
+import { AUTOMATIONS_COMMITTED_EVENT } from '../apps/app/src/runtime/automation-completion.ts';
 import { formatDateTime } from '../apps/app/src/prototype/locale-time.ts';
 import { WorkflowIntentStore as SharedWorkflowIntentStore, emptyWorkflowIntentArchive, storageWorkflowIntentBackend, workflowIntentKey as sharedWorkflowIntentKey, workflowIntentOwnerPrefix } from '../.eliza/client-features/packages/contracts/src/workflow-intents.ts';
 // A controlled same-origin Web Locks port shared by these VM document contexts. Browser lock scheduling is
@@ -47,7 +48,7 @@ export function workflowRendererFixture(overrides: Record<string, unknown>) {
     navigator: {locks: workflowLockManager},
     ...overrides,
   };
-  const scope = { setTimeout,clearTimeout,setInterval,clearInterval, formatDateTime, createWorkflowApprovalPoster,definiteNoticeFailure,projectNoteForModel, NoticeOwnerCoordinator, revalidateWorkflowApprovalNotice, document:{hidden:false,addEventListener(){},removeEventListener(){}}, window:{addEventListener(){},removeEventListener(){},dispatchEvent(){}}, Event, ...context, normalizePhoneSpec, assertPhoneCapabilities, describePhoneTrigger, phoneTriggerClockChangeNote, workflowDeviceTimeZone,workflowLocalInstant,workflowClockContext,automationLocalDateInput,localDate,phoneScheduleTiming, WorkflowActivationRejected, workflowErrorText, workflowRefusalText, workflowIntentText, ...workflowRunPresentation, workflowSha, workflowBytes, alphaClient, crypto:globalThis.crypto, TextEncoder, registerPlugin:()=>new Proxy({}, {get:()=>()=>Promise.reject(Error('Unexpected native authoring operation in existing-workflow fixture'))}) };
+  const scope = { setTimeout,clearTimeout,setInterval,clearInterval, formatDateTime, createWorkflowApprovalPoster,definiteNoticeFailure,projectNoteForModel, NoticeOwnerCoordinator, revalidateWorkflowApprovalNotice, document:{hidden:false,addEventListener(){},removeEventListener(){}}, window:{addEventListener(){},removeEventListener(){},dispatchEvent(){}}, Event, ...context, normalizePhoneSpec, assertPhoneCapabilities, describePhoneTrigger, phoneTriggerClockChangeNote, workflowDeviceTimeZone,workflowLocalInstant,workflowClockContext,automationLocalDateInput,localDate,phoneScheduleTiming, WorkflowActivationRejected, workflowErrorText, workflowRefusalText, workflowIntentText, ...workflowRunPresentation, workflowSha, workflowBytes, alphaClient, AUTOMATIONS_COMMITTED_EVENT, crypto:globalThis.crypto, TextEncoder, registerPlugin:()=>new Proxy({}, {get:()=>()=>Promise.reject(Error('Unexpected native authoring operation in existing-workflow fixture'))}) };
   vm.runInNewContext('{'+stripTypeScriptTypes(source,{mode:'transform'})+'\nglobalThis.createWorkflowAuthoring=createWorkflowAuthoring;globalThis.showWorkflowAgentUnavailable=showWorkflowAgentUnavailable;}', scope);
   // Exercise the actual installed-slot adapter here; IndexedDB concurrency is
   // qualified by the owning browser suite, not this bounded HTTP fixture.
