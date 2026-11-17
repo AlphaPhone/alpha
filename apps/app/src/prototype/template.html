@@ -8,7 +8,7 @@
 <button aria-label="Side key. Tap to lock or wake" onPointerDown="{{pDown}}" onPointerUp="{{pUp}}" onPointerLeave="{{pCancel}}" style="position: absolute; right: -6px; top: 214px; width: 7px; height: 76px; border-radius: 0 5px 5px 0; background: var(--alpha-gray-2e)"></button>
 <div style="position: absolute; right: -5px; top: 316px; width: 6px; height: 118px; border-radius: 0 4px 4px 0; background: var(--alpha-gray-26)"></div>
 
-<div data-screen="1" data-alpha-chat-half="{{nonblockingChat}}" data-alpha-chat-dragging="{{chatDragging}}" onPointerDown="{{gDown}}" onPointerUp="{{gUp}}" onPointerCancel="{{gCancel}}" style="position: absolute; top: 12px; left: 14px; width: 412px; height: 915px; border-radius: 48px; overflow: hidden; background: var(--bg); color: var(--fg); user-select: none; -webkit-user-select: none; touch-action: none; font-size: 15px; --alpha-chat-clearance:{{panelH}}px; --alpha-sheet-height:{{panelH}}px">
+<div data-screen="1" data-alpha-call-bar-on="{{hasCallBar}}" data-alpha-chat-half="{{nonblockingChat}}" data-alpha-chat-dragging="{{chatDragging}}" onPointerDown="{{gDown}}" onPointerUp="{{gUp}}" onPointerCancel="{{gCancel}}" style="position: absolute; top: 12px; left: 14px; width: 412px; height: 915px; border-radius: 48px; overflow: hidden; background: var(--bg); color: var(--fg); user-select: none; -webkit-user-select: none; touch-action: none; font-size: 15px; --alpha-chat-clearance:{{panelH}}px; --alpha-sheet-height:{{panelH}}px">
 <sc-element value="{{viewRenderRecovery}}"></sc-element>
 <sc-if value="{{attachmentPicker.open}}">
   <div data-alpha-attachment-picker data-alpha-popup class="attachment-picker-backdrop" ref="{{attachmentPicker.ref}}" onClick="{{attachmentPicker.close}}">
@@ -4827,16 +4827,6 @@
 </sc-if>
 
 
-<!-- Owner issue 4: the ongoing-call bar (runtime/ongoing-call.ts) over every view but the call screen. -->
-<sc-if value="{{hasCallBar}}">
-<div data-alpha-call-bar role="region" aria-label="Ongoing call" class="alpha-call-bar">
-  <button data-alpha-call-bar-return aria-label="{{callBar.returnLabel}}" onClick="{{callBar.open}}" class="alpha-call-bar-return">
-    <svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.phone}}"></path></svg>
-    <span class="alpha-call-bar-status">{{callBar.status}}</span>
-  </button>
-  <button data-alpha-call-bar-end aria-label="{{callBar.endLabel}}" onClick="{{callBar.end}}" class="alpha-end-button"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 20px; height: 20px; transform: rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button>
-</div>
-</sc-if>
 
 <div data-alpha-toast aria-live="{{toastLive}}" aria-atomic="true">
 <sc-if value="{{toastOn}}">
@@ -4853,6 +4843,18 @@
 </sc-if>
 
 </div>
+<!-- Owner issue 4: the ongoing-call bar (runtime/ongoing-call.ts) above every view but the call screen.
+     It sits outside the screen, in the phone canvas (dc-lite.js moves data-alpha-screen-chrome there),
+     and data-alpha-call-bar-on moves the whole screen down below it (phone.css): it never covers a view. -->
+<sc-if value="{{hasCallBar}}" data-alpha-screen-chrome>
+<div data-alpha-call-bar role="region" aria-label="Ongoing call" class="alpha-call-bar">
+  <button data-alpha-call-bar-return aria-label="{{callBar.returnLabel}}" onClick="{{callBar.open}}" class="alpha-call-bar-return">
+    <svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.phone}}"></path></svg>
+    <span class="alpha-call-bar-status">{{callBar.status}}</span>
+  </button>
+  <button data-alpha-call-bar-end aria-label="{{callBar.endLabel}}" onClick="{{callBar.end}}" class="alpha-end-button"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 20px; height: 20px; transform: rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button>
+</div>
+</sc-if>
 </div>
 
 

@@ -138,9 +138,8 @@ final class AlphaCallPresentation {
      * ending, ended, or in a state the owner does not see.
      */
     static String ongoingState(int state) {
+        if (ringing(state)) return "ringing";
         switch (state) {
-            case Call.STATE_RINGING:
-            case Call.STATE_SIMULATED_RINGING: return "ringing";
             case Call.STATE_NEW:
             case Call.STATE_SELECT_PHONE_ACCOUNT:
             case Call.STATE_DIALING:
@@ -150,6 +149,15 @@ final class AlphaCallPresentation {
             case Call.STATE_HOLDING: return "held";
             default: return null;
         }
+    }
+
+    /**
+     * A call still waiting for the owner's answer: Telecom's ringing, or a call it presents as ringing
+     * after screening ({@code STATE_SIMULATED_RINGING}). The bar names both "ringing" and offers
+     * Decline for them, so its end action rejects both rather than disconnecting one.
+     */
+    static boolean ringing(int state) {
+        return state == Call.STATE_RINGING || state == Call.STATE_SIMULATED_RINGING;
     }
 
     /** A call nobody is named for: no name, and no number Telecom reports. */

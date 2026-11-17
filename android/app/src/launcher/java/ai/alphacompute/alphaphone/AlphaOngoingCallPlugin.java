@@ -71,7 +71,10 @@ public final class AlphaOngoingCallPlugin extends Plugin {
         call.resolve(out);
     }
 
-    /** Declines a ringing call and disconnects any other, as the call screen's Decline and End do. */
+    /**
+     * Declines a ringing call (including one Telecom simulates as ringing, which the bar labels
+     * ringing with Decline) and disconnects any other, as the call screen's Decline and End do.
+     */
     @PluginMethod public void endCall(PluginCall call) {
         JSObject out = new JSObject();
         out.put("ended", end(call.getString("id")));
@@ -81,7 +84,7 @@ public final class AlphaOngoingCallPlugin extends Plugin {
     static boolean end(String id) {
         Call current = id == null ? null : AlphaInCallService.call(id);
         if (current == null) return false;
-        return current.getState() == Call.STATE_RINGING
+        return AlphaCallPresentation.ringing(current.getState())
             ? AlphaInCallService.rejectCall(id, false, null)
             : AlphaInCallService.disconnectCall(id);
     }

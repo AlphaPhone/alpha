@@ -74,6 +74,83 @@ test.describe('Alpha image: ongoing call bar', () => {
   });
 });
 
+// The reviewer's finding on #1328: at the 412x915 native-phone layout the bar covered the header
+// controls of nearly every view. The bar now takes layout space: the screen starts below it. For each
+// main view, every control in the top band must sit wholly below the bar and be the element a tap at
+// its centre reaches.
+const shellInit = () => {
+  (window as any).alphaShell = () => {
+    const screen = document.querySelector('[data-screen]') as any;
+    let fiber = screen[Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!];
+    while (fiber && !(fiber.stateNode && typeof fiber.stateNode.openView === 'function')) fiber = fiber.return;
+    return fiber.stateNode;
+  };
+};
+const MAIN_VIEWS = ['home', 'phone', 'messages', 'contacts', 'settings', 'calendar', 'photos', 'workflows', 'notes', 'inbox', 'files', 'maps', 'browser'];
+
+/** The top band's controls, each with its box and whether a tap at its centre reaches it. */
+const topControls = (page: Page) => page.evaluate(() => {
+  const bar = document.querySelector('[data-alpha-call-bar]')!.getBoundingClientRect();
+  const screen = document.querySelector('[data-screen]')!;
+  const band = bar.bottom + 160;
+  return [...screen.querySelectorAll<HTMLElement>('button,a[href],input,[role="tab"],[role="button"],[role="link"],select,textarea')]
+    .filter(node => !node.closest('[inert],[aria-hidden="true"]') && node.checkVisibility({contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true}))
+    .map(node => ({node, box: node.getBoundingClientRect()}))
+    .filter(({box}) => box.width > 0 && box.height > 0 && box.top < band && box.bottom > 0)
+    .map(({node, box}) => {
+      const x = Math.min(Math.max(box.left + box.width / 2, 1), innerWidth - 1), y = Math.min(Math.max(box.top + box.height / 2, 1), innerHeight - 1);
+      const hit = document.elementFromPoint(x, y);
+      return {
+        name: (node.getAttribute('aria-label') || node.textContent || node.tagName).trim().slice(0, 40),
+        top: box.top, bottom: box.bottom, left: box.left, right: box.right,
+        reachable: !!hit && (node === hit || node.contains(hit) || hit.contains(node)),
+        hitInBar: !!hit?.closest('[data-alpha-call-bar]'),
+        hit: hit ? `${hit.tagName} ${hit.getAttribute('aria-label') || ''} ${hit.className || ''}`.slice(0, 80) : 'nothing',
+      };
+    });
+});
+const barBox = async (page: Page) => (await bar(page).boundingBox())!;
+
+test.describe('the ongoing-call bar takes layout space', () => {
+  for (const inset of [0, 40]) {
+    test(`no main view's header controls are under the bar (native top inset ${inset}px)`, async ({page}) => {
+      test.setTimeout(90_000);
+      await page.addInitScript(shellInit);
+      await setupTelephony(page);
+      if (inset) await page.evaluate(px => document.documentElement.style.setProperty('--native-top-inset', `${px}px`), inset);
+      await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 5_000}]);
+      await expect(bar(page)).toBeVisible();
+      const box = await barBox(page);
+      // Below the status bar (the native inset), and the screen starts below the bar.
+      expect(box.y).toBeGreaterThanOrEqual(inset);
+      for (const view of MAIN_VIEWS) {
+        await page.evaluate(name => name === 'home' ? (window as any).alphaShell().goHome() : (window as any).alphaShell().openView(name), view);
+        await expect(bar(page)).toBeVisible();
+        await page.waitForTimeout(500);
+        const screenTop = await page.locator('[data-screen]').evaluate(node => node.getBoundingClientRect().top);
+        expect(screenTop, `${view}: the screen starts below the bar`).toBeGreaterThanOrEqual(box.y + box.height);
+        const controls = await topControls(page);
+        expect(controls.length, `${view} has header controls to check`).toBeGreaterThan(0);
+        for (const control of controls) {
+          const label = `${view}: "${control.name}"`;
+          expect(control.top, `${label} starts below the bar`).toBeGreaterThanOrEqual(box.y + box.height);
+          expect(control.hitInBar, `${label} is not under the bar`).toBe(false);
+          expect(control.reachable, `${label} receives a tap at its centre (reached ${control.hit}; box ${control.left},${control.top}-${control.right},${control.bottom})`).toBe(true);
+        }
+      }
+      // The named controls the review found covered.
+      await page.evaluate(() => (window as any).alphaShell().openView('messages'));
+      await page.getByRole('button', {name: 'New message'}).click({trial: true});
+      await page.evaluate(() => (window as any).alphaShell().openView('settings'));
+      await page.getByRole('button', {name: /^Account/}).first().click({trial: true});
+      // Ending the call gives the screen its full height back.
+      await setCalls(page, []);
+      await expect(bar(page)).toHaveCount(0);
+      await expect.poll(() => page.locator('[data-screen]').evaluate(node => node.getBoundingClientRect().top)).toBe(0);
+    });
+  }
+});
+
 // The development phone (?fixture=1&mode=dev): its simulated call screen is the Phone view. Nothing
 // here reaches Telecom or a radio.
 test.describe('fixture dev build: ongoing call bar over the simulated phone', () => {

@@ -354,6 +354,11 @@ public class AlphaCallPresentationTest {
     @Test public void theOngoingCallBarIsToldOnlyTheStatesTheOwnerSees() {
         assertEquals("ringing", AlphaCallPresentation.ongoingState(Call.STATE_RINGING));
         assertEquals("ringing", AlphaCallPresentation.ongoingState(Call.STATE_SIMULATED_RINGING));
+        org.junit.Assert.assertTrue(AlphaCallPresentation.ringing(Call.STATE_RINGING));
+        org.junit.Assert.assertTrue(AlphaCallPresentation.ringing(Call.STATE_SIMULATED_RINGING));
+        for (int state : new int[] {Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_ACTIVE, Call.STATE_HOLDING, Call.STATE_DISCONNECTING}) {
+            org.junit.Assert.assertFalse(AlphaCallPresentation.ringing(state));
+        }
         for (int state : new int[] {Call.STATE_NEW, Call.STATE_SELECT_PHONE_ACCOUNT, Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_PULLING_CALL}) {
             assertEquals("dialing", AlphaCallPresentation.ongoingState(state));
         }
