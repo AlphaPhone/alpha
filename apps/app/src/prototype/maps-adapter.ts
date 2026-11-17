@@ -309,6 +309,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       cloudCredit:cloudCredit(directionsOpen),
       hasNativeMap:true, globalBasemap:globalMap, regionalBasemap:!!region && basemap === region,
       cloudBasemap:!!raster && basemap === raster && !googleMaps, googleMaps, googleMapsLogo,
+      mapInfoControl:!googleMaps,
       googleMapMissing:googleMaps && !basemap,
       mapLabel:googleMaps ? 'Google Maps' : globalMap ? 'World map' : basemap === region && region ? 'Regional map' : basemap ? 'Cloud map' : 'Map',
       mapAttribution:region && basemap === region ? region.attribution : raster && basemap === raster ? (planeBasemap === raster && mapCopyright || raster.attribution) : '',
