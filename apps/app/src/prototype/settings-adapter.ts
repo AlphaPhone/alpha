@@ -1,4 +1,3 @@
-import {smsSuggestedRepliesEnabled,setSmsSuggestedRepliesEnabled} from './sms-adapter';
 import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import {BrowserReviews} from '../browser/review';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
@@ -1316,7 +1315,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           toggle:async()=>{if(devicePreferencesStatus()!=='ready')return;try{await editDevicePreferences(value=>{value.autoLoadMailImages=!value.autoLoadMailImages;});changed();}catch{api.toast('Not saved');}}});
         if(preferences==='unavailable')rows.push({kNav:true,label:'Recover device settings',lbl:'Recover device settings',hasSub:true,sub:'Back up first',chev:true,noAB:true,go:()=>openDevicePreferencesRecovery()});
       }
-      if(appSettingsPage==='messages'){const on=smsSuggestedRepliesEnabled();rows.push({kTog:true,label:'Suggested replies',aria:'Suggested replies',hasSub:true,sub:'Use recent messages in open one-person conversations with your connected model provider.',on,track:on?'background:var(--acc)':'background:var(--line)',kx:on?20:0,toggle:()=>{try{setSmsSuggestedRepliesEnabled(!smsSuggestedRepliesEnabled());changed();}catch{api.toast('Not saved');}}});}
       if(appSettingsPage==='workflows'){const channel=(delivery.channels||[]).find((c:Bag)=>c.id==='reminders');if(channel&&!Capacitor.isNativePlatform())rows.push({kTog:true,label:'Alerts',aria:'Show alerts',on:!channel.blocked,track:!channel.blocked?'background:var(--acc)':'background:var(--line)',kx:!channel.blocked?20:0,toggle:()=>void run(async()=>{await notifications.setAlertPreferences({channelId:channel.id,enabled:!!channel.blocked});})});}
       const permissions:Record<string,string[]>={camera:['Camera','Microphone'],maps:['Location'],notes:['Microphone']};
       for(const label of permissions[appSettingsPage]||[]){const val=typeof facts.permissions?.[label]==='boolean'?(facts.permissions[label]?'Allowed':'Off'):'—';rows.push(Capacitor.isNativePlatform()?{...action(label,manage('privacy')),val,hasVal:true,hasDot:val!=='—',dot:permissionDot(val),hasExt:true,chev:false}:permissionInfo(label,val));}

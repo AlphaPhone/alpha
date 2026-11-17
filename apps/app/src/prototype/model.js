@@ -17,7 +17,7 @@ import {
   ATTENTION_ROWS, HOME_DEFAULTS
 } from "./fixtures.js";
 import { isMvpView, DEFERRED_MVP_VIEWS, deferredMvpPrompt } from "./mvp-features";
-import { isAskSentence, openSuggestion, proposalCanAct } from "../runtime/comms-bar";
+import { isAskSentence, proposalCanAct } from "../runtime/comms-bar";
 import { stageSessionStore } from "../runtime/stage-session-store";
 import { ALPHA_PRODUCT, alphaPaletteColor, alphaThemeVariables } from "../product/alpha-product";
 import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile-shell/core";
@@ -6318,30 +6318,6 @@ class Component extends DCLogic {
       self.barFilter = null; self.send(text); if (closed.onText) closed.onText("");
     } : barTarget === "person" ? undefined : onKey;
     var barDictate = isOn && (barTarget === "filter" || barTarget === "person");
-    // AC-24: one faint suggestion inside the bar, only while its field is empty and no reply runs.
-    var faint = null;
-    if (isOn && !voiceOn && !S.typing && !S.secure) {
-      if (panelOpen && !S.draft) {
-        var candidates = (mod && mod.suggestions ? mod.suggestions(st, this.api(v)) || [] : []).map(function (s) { return typeof s === "string" ? s : s && s.label; })
-          .filter(function (s) { return typeof s === "string" && s.trim() && !deferredMvpPrompt(s); });
-        var openText = openSuggestion({ view: v || null, spec: spec, candidates: candidates });
-        if (openText) faint = { text: openText, accept: function () { self.setState({ draft: openText }); } };
-      } else if (comms && !commsOpen && !barFilled && closed.suggestion && closed.acceptSuggestion) {
-        var accept = closed.acceptSuggestion;
-        faint = { text: closed.suggestion, accept: function () { accept(); } };
-      }
-    }
-    if (faint) faint.label = "Suggestion: " + faint.text + ", double-tap to use";
-    // A swipe right of more than 40 canvas pixels across the bar takes the suggestion; nothing is sent.
-    var faintSw = {
-      down: function (e) { self.faintPress = faint && e.isPrimary !== false ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null; },
-      up: function (e) {
-        var press = self.faintPress; self.faintPress = null;
-        if (!faint || !press || press.id !== e.pointerId) return;
-        var o = self.scale(e.currentTarget), dx = (e.clientX - press.x) / o.s, dy = (e.clientY - press.y) / o.s;
-        if (dx > 40 && Math.abs(dy) < dx) { self.swallow = Date.now(); faint.accept(); }
-      }
-    };
     var left = commsOpen ? spec.left : null;
     var LEFT_ICONS = { call: IC.phone, search: IC.search, keypad: IC.dial };
     var stageFrom = S.stageFrom || [];
@@ -6427,7 +6403,7 @@ class Component extends DCLogic {
       comms: comms, chatMode: chatMode, barTarget: barTarget, barAlphaLabel: comms ? "Open " + name : "Open conversation",
       barFieldClass: comms && barTarget === "alpha" ? "alpha-bar-field-alpha" : "",
       barValue: barValue, barOnText: barOnText, barOnKey: barOnKey, barMaxLength: barTarget === "person" && closed.maxLength ? closed.maxLength : undefined,
-      barPlaceholder: faint ? "" : comms ? closed.placeholder : (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,
+      barPlaceholder: comms ? closed.placeholder : (mod && mod.placeholder) ? mod.placeholder : "Ask " + name,
       barAskHint: barTarget === "filter" && isAskSentence(barValue) ? "Enter asks " + name : "",
       barAlphaControls: barTarget === "alpha", barPersonSend: barTarget === "person" && (barFilled || !!closed.canSubmit),
       barSendDisabled: barTarget === "person" && !closed.canSubmit, barSubmit: function (e) { if (closed && closed.submit) closed.submit(e); },
@@ -6436,9 +6412,8 @@ class Component extends DCLogic {
       barLeft: left ? { label: left.label, initials: left.initials || "", avatar: left.icon === "avatar", glyph: left.icon === "avatar" ? null : LEFT_ICONS[left.icon] || IC.back,
         // The left slot swaps the target: the chat closes onto the bar, then the view's own step runs.
         tap: function () { var run = left.run; self.setState({ chat: "input", stageFrom: [] }, function () { if (run) run(); }); } } : null,
-      panelPlaceholder: faint ? "" : comms ? "Ask " + name : "Message " + name, panelLabel: comms ? "Ask " + name : "Message " + name,
+      panelPlaceholder: comms ? "Ask " + name : "Message " + name, panelLabel: comms ? "Ask " + name : "Message " + name,
       panelFieldClass: comms ? "alpha-chat-composer alpha-bar-field-alpha" : "alpha-chat-composer",
-      faint: faint, faintSw: faintSw,
       sheetContext: comms && isOn ? spec.context : "",
       // AC-18: one End at every height. Closed: beside the bar, except over an emergency call, whose
       // full-screen card keeps its own End (AC-19). Open: the call card. Full: the strip. During a

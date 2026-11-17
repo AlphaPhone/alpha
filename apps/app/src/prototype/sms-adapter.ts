@@ -10,21 +10,10 @@ import {watchReturnToApp} from './native-adapter';
 import {formatDateTime,formatMonthDay,formatTime} from './locale-time';
 import {displayNumber,initials,numberKey,shortWhen,threadTitle} from './telephony-presenters';
 import {createSmsRecipientPicker} from './sms-recipient-picker';
-import {askedDraftPlaced,canSuggest,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,suggestionDismissed,suggestionReplied,suggestionRequested,threadChanged,typed,type DraftState} from '../runtime/message-draft';
+import {askedDraftPlaced,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
-/** The open thread's visible tail, handed to the reply suggester and to the agent's selected-thread read. */
+/** The open thread's visible tail, available to the agent's explicitly selected-thread read. */
 export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
-export type SmsReplySuggester=(thread:OpenThread,signal:AbortSignal)=>Promise<string|null>;
-let suggester:SmsReplySuggester|null=null;
-/** Installed only while the owner has suggested replies turned on; null turns them off. */
-export function setSmsReplySuggester(next:SmsReplySuggester|null){suggester=next;}
-/* Suggested replies send recent messages to the model provider, so they are off until the owner turns
- * them on in Settings. A phone that never chose, or switched them off before the Settings switch
- * existed (which left no value), stays off. The choice stays on this phone. */
-const SUGGEST_KEY='alpha.messages.suggest-replies.v1';
-export const smsSuggestedRepliesEnabled=()=>{try{return globalThis.localStorage?.getItem(SUGGEST_KEY)==='1';}catch{return false;}};
-const suggestOn=smsSuggestedRepliesEnabled;
-export const setSmsSuggestedRepliesEnabled=(on:boolean)=>{globalThis.localStorage.setItem(SUGGEST_KEY,on?'1':'0');window.dispatchEvent(new Event('alpha:sms-suggestions-changed'));};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
 /** The selected thread identity for on-device approval checks. */
 export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
@@ -108,8 +97,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   }finally{deleting=false;if(inFront())paint();}
  }
  let receipt:SmsSendResult|null=null,selectedThread:{id:string;addresses:string[]}|null=null;
- /* Composer draft and suggested reply (MessageThreads.qnt); contact names for the visit only. */
- let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,suggesting:AbortController|null=null,namesLoaded=false,api:Bag|null=null;
+ /* Composer draft; contact names for the visit only. */
+ let draft:DraftState=emptyDraft(),draftThread:string|null=null,composing=false,namesLoaded=false,api:Bag|null=null;
  /* AC-22: the list filter, typed in the bar or applied by Alpha. AC-15: the bubble just sent, until the provider lists it. */
  let listFilter:CommsListFilter|null=null,bubbleSent:{by:'alpha'|'owner';text:string}|null=null;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
@@ -163,8 +152,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(next)composerAbort=new AbortController();else composerAbort.abort();
   session.setActive(next);if(!next){cancelMessageHold();messageMenu=null;recipientPicker.close();busy=false;draftRevision++;
   // Provider rows are visit-only. The owner's draft and its operation identity are stored separately.
-  // Contact names, a suggestion in flight and an untouched automatic suggestion are for the visit only.
-  suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;bubbleSent=null;
+  // Contact names and the thread view are for the visit only.
+  if(draft.draft==='agent'&&!operationId&&!mmsOperationId)draft=emptyDraft();else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;listFilter=null;bubbleSent=null;
   outgoing.clear();matchedProviderRows.clear();
  }else{void reconcile();void reconcileMms();}};
  const resetMms=(pictures:boolean)=>{mmsOperationId='';mmsReview=null;if(pictures){attachments=[];pictureSeq=0;}};
@@ -285,7 +274,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  }
  const clearDraft=()=>{
   recipientPicker.close();
-  suggesting?.abort();suggesting=null;draft=emptyDraft();body='';draftRevision++;
+  draft=emptyDraft();body='';draftRevision++;
   operationId='';smsReview=null;resetMms(true);notice='';receipt=null;sent=null;mmsSent=null;
  };
  const chooseThread=(id:string,addresses:readonly string[])=>{
@@ -422,42 +411,28 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(!ready())return 'unavailable';
   if(attachments.length||operationId||mmsOperationId)return 'occupied';
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
-  suggesting?.abort();suggesting=null;draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();return 'drafted';
+  draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();return 'drafted';
  };
  draftUndoer=()=>{
   if(!active||!editable()||!draft.undo||operationId||mmsOperationId||!openRow())return false;
-  suggesting?.abort();suggesting=null;draft=draftUndone(draft);body=draft.draft==='agent'?'':draft.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;retainDraft();paint();return true;
+  draft=draftUndone(draft);body=draft.draft==='agent'?'':draft.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;retainDraft();paint();return true;
  };
  draftReader=()=>{const thread=active?openRow():null;if(!thread||draft.draft==='none')return null;
   return {by:draft.draft==='owner'?'owner':draft.draft==='asked'?'alpha':'suggestion',text:draft.text,canUndo:!!draft.undo,threadId:thread.id};};
  function loadNames(){if(namesLoaded||!active||session.state.status?.permissions.contacts!=='granted')return;namesLoaded=true;const token=lifecycle;
   void client.searchContacts('',100).then(cards=>{if(token!==lifecycle)return;for(const card of cards)for(const number of card.phoneNumbers){const key=numberKey(number);if(!key||!card.displayName)continue;if(!names.has(key))names.set(key,card.displayName);people.push({name:card.displayName,number});}paint();}).catch(()=>{namesLoaded=false;});}
- /* Applies thread changes to the draft and asks for a suggestion when one is due. It never sends. */
+ /* Applies thread changes without automatic model requests. */
  function drive(){
   if(!active){draft=readinessLost(draft);return;}
   loadNames();
-  const latest=latestInbound(),before=draft;if(!busy&&!operationId&&!mmsOperationId)draft=threadChanged(draft,latest);
-  if(before.draft==='agent'&&draft.draft==='none'){suggesting?.abort();suggesting=null;}
-  if(!suggester||!suggestOn()||body||attachments.length||!canSuggest(draft,latest,ready()))return;
-  // Group and short-code conversations can carry data unrelated to a one-person reply.
-  const recipients=draftRecipients();
-  if(recipients.length!==1||!/^\+?\d{9,20}$/.test(recipients[0]))return;
-  const thread=openThread();if(!thread||!latest)return;
-  draft=suggestionRequested(draft,latest,true);const ticket=latest,token=lifecycle,controller=new AbortController();suggesting?.abort();suggesting=controller;
-  void suggester(thread,controller.signal).then(text=>text&&text.trim()?text.trim().slice(0,1600):null,()=>null).then(text=>{
-   if(token!==lifecycle||controller.signal.aborted)return;if(suggesting===controller)suggesting=null;
-   /* A suggestion is offered as faint text in the bar (AC-24); it is not the field's text until accepted. */
-   draft=suggestionReplied(draft,ticket,latestInbound(),ready()&&!body&&!attachments.length,text);paint();});
+  const latest=latestInbound();if(!busy&&!operationId&&!mmsOperationId)draft=threadChanged(draft,latest);
  }
  /* A confirmed review that did not fail clears the composer; nothing is ever sent again from here. */
  const finished=(status:string)=>{const result=status==='cancelled'||status==='denied'?null:status==='failed'?'failed' as const:status==='unknown'?'unknown' as const:'sent' as const;if(!result)return;draft=reviewFinished(draft,result);if(result==='sent'){body='';attachments=[];pictureSeq=0;composing=false;}};
  const accepted=(status:string)=>status==='submitted'||status==='sent'||status==='delivered';
- const drafted=()=>draft.draft==='agent'||draft.draft==='asked';
- const dismissSuggestion=()=>{if(!editable()||!drafted()||operationId||mmsOperationId)return;draft=suggestionDismissed(draft);body='';draftRevision++;operationId='';resetMms(false);notice='';receipt=null;retainDraft();changed();};
  /* Text in the bar is the owner's (AC-10). */
- const ownerTyped=(value:string)=>changeDraft(()=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);bubbleSent=null;});
- /* Accepting the faint suggestion puts it in the field; nothing is sent (AC-24). */
- const acceptSuggestion=()=>{if(!editable()||draft.draft!=='agent'||body)return;ownerTyped(draft.text);};
+ const ownerTyped=(value:string)=>changeDraft(()=>{body=value;draft=typed(draft,value);bubbleSent=null;});
+
  function confirmSms(review:ReviewedSms,result:SmsSendResult,roleHeld:boolean){
   finished(result.status);
   sent={id:result.operationId,review};
@@ -646,9 +621,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const who=subject();
   if(who){
    const name=who.title,first=who.first,ini=name?initials(name):null,waits=waiting();
-   const suggestion=draft.draft==='agent'&&!body&&suggestOn()?draft.text:null;
    return {target:{kind:'thread',app:'Messages',name,first,initials:ini},
-    closed:{kind:'person',placeholder:first?'Text '+first:'Message',value:body,onText:ownerTyped,submit:(event?:SendTap)=>submit(event),canSubmit:sendable(),maxLength:1600,suggestion,acceptSuggestion:suggestion?acceptSuggestion:null},
+    closed:{kind:'person',placeholder:first?'Text '+first:'Message',value:body,onText:ownerTyped,submit:(event?:SendTap)=>submit(event),canSubmit:sendable(),maxLength:1600,suggestion:null,acceptSuggestion:null},
     left:{icon:'avatar',label:first?'Back to texting '+first:'Back to the message',initials:ini,run:null},
     context:name?name+' · Messages':'Messages',contextKey:'messages:thread:'+who.id,
     strip:{title:name||'Messages',subtitle:waits?'Messages · draft waiting':'Messages',initials:ini,live:false,actions:waits?[{id:'send',label:'Send draft',run:bubbleSend}]:[]},
@@ -785,9 +759,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   this.smsNoticeWake=()=>{if(owner===this)wakeSmsNotice();};
   this.smsReturn=watchReturnToApp(()=>{void session.refresh();this.smsNoticeWake();});
   this.smsHide=()=>{if(!document.hidden)picking=false;sync();};
-  this.smsSuggestionsChanged=()=>{if(!suggestOn()){suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId)dismissSuggestion();}changed();};
   document.addEventListener('visibilitychange',this.smsHide);
-  window.addEventListener('alpha:sms-suggestions-changed',this.smsSuggestionsChanged);
   window.addEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
   sync();wakeSmsNotice();
  };
@@ -796,7 +768,6 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   cancelMessageHold();messageMenu=null;
   this.smsSelection=undefined;this.smsReturn?.();
   document.removeEventListener('visibilitychange',this.smsHide);
-  window.removeEventListener('alpha:sms-suggestions-changed',this.smsSuggestionsChanged);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
   if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}
   unmount?.call(this);

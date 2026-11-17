@@ -204,56 +204,21 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
-  test('suggested replies stay off until turned on in Settings, can be turned off again, and never send automatically', async ({page}) => {
-    const suggest=()=>page.evaluate(async () => (await import('/src/prototype/sms-adapter.ts' as string)).setSmsReplySuggester(async () => 'See you at three'));
-    const openAda=async()=>{
-      await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
-      await page.getByRole('button', {name: /^Ada Okafor/}).click();
-      await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
-    };
-    const faint = page.locator('[data-alpha-faint]');
+  test('automatic suggestions and their setting are absent; requested drafts still work',async({page})=>{
     await setupTelephony(page);
-    await suggest();await openAda();
-    await expect(page.locator('[data-alpha-messages-suggest]')).toHaveCount(0);
-    await expect(page.getByRole('group', {name: 'Turn on suggested replies'})).toHaveCount(0);
-    await expect(page.getByRole('button', {name:'Back to apps',exact:true})).not.toBeVisible();
-    await expect(page.locator('[data-alpha-messages]').getByRole('button', {name:'Back',exact:true})).toBeVisible();
-    // A phone that never chose sends no thread to the model provider and shows no suggestion.
-    await page.waitForTimeout(300);
-    await expect(faint, 'never turned on: no faint reply').toHaveCount(0);
-    expect(await sms(page,'smsSuggestedRepliesEnabled')).toBe(false);
-    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
-    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
-    await page.getByRole('button', {name:'Settings',exact:true}).click();
-    const current=()=>page.locator('[data-settings-page]:not([inert])').last();
-    await current().getByRole('button', {name:'General',exact:true}).click();
-    for(const name of ['Wi-Fi','Bluetooth','Mobile data','Battery','Sound & vibration'])await expect(current().getByRole('button',{name,exact:true})).toHaveCount(0);
-    await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
-    await current().getByRole('button', {name:'Apps',exact:true}).click();
-    await current().getByRole('button', {name:'Messages',exact:true}).click();
-    await expect(current().getByRole('switch', {name:'Suggested replies',exact:true})).toHaveAttribute('aria-checked','false');
-    await current().getByRole('switch', {name:'Suggested replies',exact:true}).click();
-    await expect(current().getByRole('switch', {name:'Suggested replies',exact:true})).toHaveAttribute('aria-checked','true');
-    // The choice persists; the suggestion is faint text only and accepting it sends nothing.
-    await page.reload();
-    await suggest();await openAda();
-    await expect(faint).toHaveAttribute('aria-label', 'Suggestion: See you at three, double-tap to use');
-    await expect(page.locator(personField)).toHaveValue('');
-    // Turning it off withdraws the suggestion on screen, and that choice persists too.
-    await sms(page,'setSmsSuggestedRepliesEnabled',false);
-    await expect(faint).toHaveCount(0);
-    await page.reload();
-    await suggest();await openAda();
-    await page.waitForTimeout(300);
-    await expect(faint).toHaveCount(0);
-    expect(await sms(page,'smsSuggestedRepliesEnabled')).toBe(false);
-    await sms(page,'setSmsSuggestedRepliesEnabled',true);
-    await page.reload();
-    await suggest();await openAda();
-    await faint.click();
-    await expect(page.locator(personField)).toHaveValue('See you at three');
-    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
+    await page.getByRole('button',{name:'Messages',exact:true}).first().click();
+    await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-faint],[data-alpha-chat-suggestions]')).toHaveCount(0);
+    expect(await sms(page,'placeAskedSmsDraft','Requested help remains')).toBe('drafted');
+    await openAlpha(page);await expect(page.locator(bubble)).toContainText('Requested help remains');
+    expect(await inputs(page,'sendComposedSms')).toEqual([]);
+    await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
+    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByRole('button',{name:'Apps',exact:true}).click();
+    await page.getByRole('button',{name:'Messages',exact:true}).click();
+    await expect(page.getByRole('switch',{name:'Suggested replies',exact:true})).toHaveCount(0);
   });
+
 });
 
 test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA_DEV_ALLOW_TEST_MOCKS=1 (scripted replies, no adapters)', () => {
