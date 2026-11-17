@@ -13,6 +13,47 @@ import type {
   LauncherBridge,
 } from "@elizaos/capacitor-system/launcher";
 
+/**
+ * Alpha's reason after "<app> could not be opened.", keyed by every sentence Android's shared
+ * launcher (`SystemPlugin.launchApp`/`openDefaultApp` and `SystemLauncherApps` refusals in
+ * plugin-native-system) rejects an open with. The launcher's own text is never shown.
+ */
+export const LAUNCH_REFUSALS: ReadonlyMap<string, string> = new Map([
+  ["This app is no longer installed.", "It’s no longer installed."],
+  ["This app is disabled. Enable it in Android settings to open it.", "It’s turned off. Turn it on in Android Settings to open it."],
+  ["This app has no screen that can be opened from here.", "It has no screen Alpha can open."],
+  ["This profile is no longer on the phone.", "Its profile is no longer on this phone."],
+  ["This app is no longer available in that profile.", "It’s no longer in that profile."],
+  ["Work apps are paused or locked. Turn on work apps in Android, then try again.", "Work apps are paused or locked. Turn them on in Android, then try again."],
+  ["Private space is locked. Unlock it in Android, then try again.", "Private space is locked. Unlock it in Android, then try again."],
+  ["This profile is paused or locked. Unlock it in Android, then try again.", "Its profile is paused or locked. Unlock it in Android, then try again."],
+  ["Choose an installed app", "Choose an app that’s installed."],
+  ["App could not be opened", "Android didn’t open it. Try again."],
+  ["Default app unavailable in this product", "Alpha can’t open a default app here."],
+  ["role must be dial", "Alpha can’t open a default app here."],
+  ["No app on this device handles dial", "No phone app is set up on this device."],
+]);
+
+/** The reason by refusal code when the sentence is unknown (`LAUNCHER_REFUSAL_CODES`). */
+const LAUNCH_CODES: Readonly<Record<string, string>> = {
+  "not-installed": "It’s no longer installed.",
+  disabled: "It’s turned off. Turn it on in Android Settings to open it.",
+  "no-launcher": "It has no screen Alpha can open.",
+  "profile-locked": "Its profile is paused or locked. Unlock it in Android, then try again.",
+  "profile-unavailable": "Its profile is no longer on this phone.",
+  failed: "Android didn’t open it. Try again.",
+};
+
+/** Alpha's whole sentence for a failed open of `label`; the launcher's text is never shown. */
+export function launchFailureText(label: string, error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+  const reason =
+    LAUNCH_REFUSALS.get(message) ??
+    (typeof code === "string" && Object.hasOwn(LAUNCH_CODES, code) ? LAUNCH_CODES[code] : "Try again.");
+  return `${label} could not be opened. ${reason}`;
+}
+
 /** The default handler a launcher read reports for a role. */
 type DefaultApp = Awaited<
   ReturnType<NonNullable<LauncherBridge["resolveDefault"]>>
@@ -313,10 +354,6 @@ export function createLauncher(
     state = { ...state, ...patch };
     changed();
   };
-  const message = (error: unknown) =>
-    error instanceof Error && error.message
-      ? error.message
-      : String(error || "Unavailable");
   const saveFavorites = (favorites: string[]) => {
     if (!store) {
       update({ launchError: "Favorites cannot be saved on this device." });
@@ -505,7 +542,7 @@ export function createLauncher(
         if (currentLifetime !== lifetime) return;
         update({
           launching: null,
-          launchError: `${app.label} could not be opened. ${message(error)}`,
+          launchError: launchFailureText(app.label, error),
         });
         // The entry may be gone, disabled or locked now: show the device's current list. This is a
         // full read, so one it overtakes (the drawer was still opening) cannot strand the loading state.
@@ -525,7 +562,7 @@ export function createLauncher(
         if (currentLifetime !== lifetime) return;
         update({
           launching: null,
-          launchError: `${label} could not be opened. ${message(error)}`,
+          launchError: launchFailureText(label, error),
         });
         // The handler may have been removed or disabled: re-resolve it so a dead shortcut does not stay.
         await load({ quiet: true });

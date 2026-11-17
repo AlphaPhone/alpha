@@ -43,6 +43,16 @@ const NOTES_API = '.eliza/client-features/plugins/plugin-notes/src/client/notes-
 const STAGED = '.eliza/client-features';
 const stamp = JSON.parse(fs.readFileSync(path.join(STAGED, '.source.json'), 'utf8'));
 /** The package a bare specifier names. */
+// A worktree may share the prepared tree or the vendor checkout through a symlink; name their
+// files by the local path, whatever path a resolver or tsc reports.
+const local = file => {
+  const absolute = path.resolve(file);
+  for (const dir of [STAGED, 'vendor/eliza']) {
+    const real = fs.existsSync(dir) ? fs.realpathSync(dir) : null;
+    if (real && absolute.startsWith(real + path.sep)) return path.relative(ROOT, path.join(ROOT, dir, path.relative(real, absolute)));
+  }
+  return path.relative(ROOT, absolute);
+};
 const packageName = specifier => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 /**
@@ -125,12 +135,6 @@ async function appGraph() {
   const {config} = await loadConfigFromFile({command: 'build', mode: 'production'}, path.resolve('vite.config.ts'), undefined, 'silent');
   const alias = config.resolve.alias;
   const keys = Object.keys(alias).sort((a, b) => b.length - a.length);
-  // A worktree may share the prepared tree through a symlink; name its files by the local path.
-  const stagedReal = fs.realpathSync(STAGED);
-  const local = file => {
-    const absolute = path.resolve(file);
-    return path.relative(ROOT, absolute.startsWith(stagedReal + path.sep) ? path.join(ROOT, STAGED, path.relative(stagedReal, absolute)) : absolute);
-  };
   const queried = [];
   const result = await build({
     entryPoints: sources.filter(file => !file.endsWith('.d.ts')), bundle: true, write: false, metafile: true,
@@ -193,9 +197,9 @@ test('the TypeScript program reached from app modules loads no upstream UI, type
   let current;
   for (const line of explained.split('\n')) {
     if (!line.trim()) continue;
-    if (!/^\s/.test(line)) { current = path.relative(ROOT, path.resolve(line.trim())); importers.set(current, []); continue; }
+    if (!/^\s/.test(line)) { current = local(line.trim()); importers.set(current, []); continue; }
     const edge = line.match(/^\s+Imported via .* from file '([^']+)'/);
-    if (edge && current) importers.get(current).push(path.relative(ROOT, path.resolve(edge[1])));
+    if (edge && current) importers.get(current).push(local(edge[1]));
   }
   const reached = new Set([...importers.keys()].filter(file => file.startsWith('apps/app/src/')));
   assert.ok(reached.size > sources.length / 2, 'tsc listed the app modules');

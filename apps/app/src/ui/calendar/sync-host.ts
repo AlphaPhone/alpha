@@ -114,9 +114,15 @@ export class CalendarSyncNotice extends Error {
   override name = "CalendarSyncNotice";
 }
 
-const RETRY_REVIEW = "Something changed during sync. Review sync again.";
 const GOOGLE_INVALID =
   "Google returned a Calendar event this phone could not use. Nothing was applied.";
+/**
+ * An event Google returned that this phone cannot represent. The shared port runs the same checks
+ * on the read-back of a create or update Google already stored, so this does not claim nothing was
+ * applied.
+ */
+const GOOGLE_EVENT_UNUSABLE =
+  "Google returned an event this phone could not use.";
 const REQUEST_INVALID =
   "This Calendar change could not be sent safely. Nothing was applied.";
 
@@ -135,11 +141,11 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   ["An exact Google event revision is required.", REQUEST_INVALID],
   ["Unsupported Calendar operation.", REQUEST_INVALID],
   ["Google returned an incomplete Calendar event. Nothing was applied.", GOOGLE_INVALID],
-  ["Google returned invalid all-day dates.", GOOGLE_INVALID],
-  ["Google returned an event without its timezone.", GOOGLE_INVALID],
-  ["Google returned invalid attendees.", GOOGLE_INVALID],
-  ["Google returned invalid recurrence.", GOOGLE_INVALID],
-  ["Google returned an invalid event state.", GOOGLE_INVALID],
+  ["Google returned invalid all-day dates.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned an event without its timezone.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned invalid attendees.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned invalid recurrence.", GOOGLE_EVENT_UNUSABLE],
+  ["Google returned an invalid event state.", GOOGLE_EVENT_UNUSABLE],
   ["This Google calendar does not support safe sync.", "This Google calendar cannot be synced safely. Choose another calendar."],
   ["Google account and calendar names could not be verified. Review the connection before syncing.", "The Google account and calendar names could not be verified. Review the connection before syncing."],
   ["Calendar sync protocol is unavailable. Nothing was applied.", "Calendar sync is unavailable on this server. Nothing was applied."],
@@ -156,8 +162,9 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   ["Calendar sync supports up to 2,000 linked local events. Nothing changed.", "Calendar sync links at most 2,000 local events. Nothing changed."],
   ["Your local calendar changed. Review sync again.", "Your calendar changed. Review sync again."],
   ["The selected account or calendar changed. Review sync again.", "The selected account or calendar changed. Review sync again."],
-  ["The event list changed. Review sync again.", RETRY_REVIEW],
-  ["An event changed. Review sync again.", RETRY_REVIEW],
+  // the reviewed plan no longer matches what is there now
+  ["The event list changed. Review sync again.", "The event list changed. Review sync again."],
+  ["An event changed. Review sync again.", "An event changed. Review sync again."],
   ["Calendar sync link limit reached. No new events were linked.", "Calendar sync reached its link limit. No new events were linked."],
   ["A local event changed before sync. Retry to review its current state.", "An event changed before sync. Sync again to review it."],
   ["Calendar sync is already running.", "Calendar sync is already running."],
@@ -166,18 +173,10 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   ["Calendar account changed. Review sync again.", "Calendar account changed. Review sync again."],
   // sync-host.ts calendarSyncSettingsSlot (the device opt-in record)
   ["Calendar sync settings changed. Review them again.", "Calendar sync settings changed. Review them again."],
+  // sync-host.ts readCalendarSyncSettings (a damaged opt-in record)
   ["Calendar sync settings need recovery. Saved events are retained.", "Calendar sync settings need recovery. Saved events are kept."],
-  // sync-controller.ts: the reviewed plan no longer matches what is there now.
-  ["The event list changed. Review sync again.", "The event list changed. Review sync again."],
-  ["An event changed. Review sync again.", "An event changed. Review sync again."],
   // google-reader.ts
   ["Choose a valid Calendar range.", "Choose a valid Calendar range."],
-  // google-sync-port.ts: an event Google returned that this phone cannot represent.
-  ["Google returned invalid all-day dates.", "Google returned an event this phone could not use."],
-  ["Google returned an event without its timezone.", "Google returned an event this phone could not use."],
-  ["Google returned invalid attendees.", "Google returned an event this phone could not use."],
-  ["Google returned invalid recurrence.", "Google returned an event this phone could not use."],
-  ["Google returned an invalid event state.", "Google returned an event this phone could not use."],
 ]);
 
 const DEVICE_REPLY_INVALID =
@@ -242,9 +241,13 @@ const LOCAL_FAILURES: ReadonlyMap<string, string> = new Map([
 /**
  * Plain status text for a failed or stopped operation. Only a `CalendarSyncNotice` is shown as
  * written; every other known refusal is shown in Alpha's words, and only an unknown error falls
- * back to the generic sentence.
+ * back to `fallback` (by default the generic stopped sentence). The Calendar sync settings dialog
+ * words a failed pause with it too.
  */
-function calendarSyncFailureMessage(error: unknown): string {
+export function calendarSyncFailureMessage(
+  error: unknown,
+  fallback = "Sync stopped. Check the selected Google calendar before retrying.",
+): string {
   const e = error as { status?: number; name?: string; message?: unknown };
   if (e?.status === 404)
     return "Calendar sync is not available on this server yet. Check linked events before retrying.";
@@ -257,7 +260,7 @@ function calendarSyncFailureMessage(error: unknown): string {
   // Intl rejects an unknown event time zone with an engine-worded RangeError.
   if (e?.name === "RangeError" && /time ?zone/i.test(message))
     return "An event's time zone is not recognized. Review the event before syncing.";
-  return "Sync stopped. Check the selected Google calendar before retrying.";
+  return fallback;
 }
 
 /** Plain status text for a finished pass. Any conflict, unconfirmed or refused change asks for review. */

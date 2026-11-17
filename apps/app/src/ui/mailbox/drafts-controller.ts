@@ -99,10 +99,11 @@ export type SuggestionTarget =
 type Policy = { maximumOutgoing: number; maximumTotalBytes: number };
 
 /**
- * A refusal this controller words itself; attach() and attachReviewed() show its message as is.
+ * A refusal Alpha words itself; attach() and attachReviewed() show its message as is, and so does
+ * `attachmentRefusalText` (a Files read that checks the selection itself throws one too).
  * Anything else that stops an attachment is worded by `attachmentRefusalText`.
  */
-class AttachmentNotice extends Error {}
+export class AttachmentNotice extends Error {}
 
 const MIB = 1024 * 1024;
 const ATTACHMENT_TOO_LARGE =

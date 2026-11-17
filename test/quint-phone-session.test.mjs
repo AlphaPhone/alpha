@@ -17,8 +17,10 @@ const SCENARIOS = ['recentCallsTest', 'refreshDuringDialTest', 'leaveDuringDialT
   'emergencyCallRefusesEffectsTest'];
 const WITNESSES = ['ReadDuringHandoffWitness', 'AccessNeededWitness', 'DialNoticeWitness', 'RowsKeptWhileReadingWitness', 'StaleHandoffBesideLaterDialWitness',
   'EmergencyRefusalWitness', 'UnknownCallRefusalWitness', 'BrokenBridgeRefusalWitness'];
-const OPENED = 'Your phone app is open with the number.';
-const NOTICES = {'': 'none', 'Invalid number': 'invalid', [OPENED]: 'handed-off', 'Couldn’t open': 'failed'};
+// TelephonyPlugin.dial's sentence and Alpha's wording of it (ui/telephony/telephony-messages.ts).
+const OPENED = 'Your phone app is open with the number. Place the call there; this app does not know whether it connects.';
+const OPENED_SHOWN = 'Your phone app is open with the number. Place the call there; Alpha can’t tell whether it connects.';
+const NOTICES = {'': 'none', 'Invalid number': 'invalid', [OPENED_SHOWN]: 'handed-off', 'Couldn’t open': 'failed'};
 const status = callLog => ({version: 2, voiceCapable: true, smsCapable: true,
   permissions: {contacts: 'granted', phoneState: 'denied', sms: 'denied', sendSms: 'denied', ...(callLog ? {callLog} : {})},
   sendMode: 'handoff', roles: {dialer: {available: true, held: false, eligible: true}, sms: {available: true, held: false, eligible: true}},

@@ -43,3 +43,17 @@ export function gmailGrantLabel(accounts: readonly GmailAccount[]): string {
     ? "Read access authorized"
     : "Authorization required";
 }
+
+/**
+ * The label the shared Gmail client (`ManagedGmailMailboxClient.googleConnection` in
+ * `plugins/plugin-inbox/src/mailbox/managed-gmail-client.ts`) gives a connection that names neither
+ * an email nor a name. It is replaced by {@link UNNAMED_GOOGLE_ACCOUNT} and never shown.
+ */
+export const SHARED_UNNAMED_GOOGLE_ACCOUNT = "Google account";
+/** Alpha's label for a connected Google account with no email or name. */
+export const UNNAMED_GOOGLE_ACCOUNT = "Gmail account";
+
+/** The account with Alpha's label in place of the shared client's fallback. */
+export function withGmailAccountLabel<T extends { label: string }>(account: T): T {
+  return account.label === SHARED_UNNAMED_GOOGLE_ACCOUNT ? { ...account, label: UNNAMED_GOOGLE_ACCOUNT } : account;
+}

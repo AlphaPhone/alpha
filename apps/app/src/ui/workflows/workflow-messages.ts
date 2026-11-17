@@ -23,6 +23,8 @@ import {
   WorkflowMetadataRejected,
   WorkflowTypedRejected,
 } from "@elizaos/contracts/workflow-client";
+import { WORKFLOW_INTENT_REFUSALS } from "./workflow-intent-messages";
+export { WORKFLOW_INTENT_REFUSALS, workflowIntentText } from "./workflow-intent-messages";
 
 type ErrorClass = abstract new (...args: never[]) => Error;
 
@@ -288,6 +290,8 @@ export function workflowErrorText(
   if (Object.hasOwn(GENERATION_FAILURES, message))
     return GENERATION_FAILURES[message];
   if (Object.hasOwn(CLIENT_CHECKS, message)) return CLIENT_CHECKS[message];
+  const intent = WORKFLOW_INTENT_REFUSALS.get(message);
+  if (intent) return intent;
   if (Object.hasOwn(PHONE_CHECKS, message)) return PHONE_CHECKS[message];
   if (
     OWN_NOTICES.has(message) ||
@@ -296,4 +300,38 @@ export function workflowErrorText(
   )
     return message;
   return unknown;
+}
+
+/**
+ * Alpha's sentence for each HTTP status the agent refuses an Automations request with. The shared
+ * client raises every non-2xx reply as a `WorkflowHttpError` worded for workflow runs; Automations
+ * words it by status instead, and any other status reads as {@link AUTOMATION_REQUEST_FAILED}.
+ */
+export const AUTOMATION_HTTP_REFUSALS: ReadonlyMap<number, string> = new Map([
+  [400, "The agent refused this change. Nothing was changed."],
+  [401, "Automations need the original owner connection. Nothing was changed."],
+  [403, "Automations need the original owner connection. Nothing was changed."],
+  [404, "This item is no longer on the agent. Refresh to see the current list."],
+  [405, "The agent doesn’t support this action. Nothing was changed."],
+  [409, "This item changed on the agent. Refresh and review it again."],
+  [410, "This item is no longer on the agent. Refresh to see the current list."],
+  [413, "This change is too large for the agent. Nothing was changed."],
+  [414, "This change is too large for the agent. Nothing was changed."],
+  [415, "The agent couldn’t read this change. Nothing was changed."],
+  [422, "The agent couldn’t accept these details. Check them and try again."],
+  [429, "The agent is busy. Try again later."],
+]);
+export const AUTOMATION_REQUEST_FAILED =
+  "The agent couldn’t complete this request. Refresh to check the current status before trying again.";
+
+/**
+ * What the Automations status line shows for a failed request: a refused request worded by its
+ * status, a pending-request journal refusal in Alpha's words, else the message of Alpha's own
+ * error (the Automations protocol and connection raise those), else `fallback`.
+ */
+export function automationRequestText(error: unknown, fallback: string): string {
+  if (error instanceof WorkflowHttpError)
+    return AUTOMATION_HTTP_REFUSALS.get(error.status) ?? AUTOMATION_REQUEST_FAILED;
+  if (!(error instanceof Error)) return fallback;
+  return WORKFLOW_INTENT_REFUSALS.get(error.message.trim()) ?? (error.message.trim() || fallback);
 }

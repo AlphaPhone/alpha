@@ -8,6 +8,7 @@ import {Capacitor} from '@capacitor/core';
 import {isAndroid} from '../native';
 import {NavigationVoice} from '../maps/navigation-voice';
 import {speechCleanupNotice} from '../runtime/voice-states';
+import {speechFailureReason} from '../ui/voice/speech-bridge-messages';
 import {shareMap} from '../maps/share';
 import { MapPlane, type MapBasemap } from '../maps/map-plane';
 import { globalBasemap } from '../maps/basemap';
@@ -80,7 +81,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     );
   };
   const navigationVoice = new NavigationVoice(
-    error => screen.notify(speechCleanupNotice(error) || ((error instanceof Error ? error.message + ' ' : '') + 'Voice paused')),
+    error => { const reason = speechFailureReason(error); screen.notify(speechCleanupNotice(error) || (reason ? `${reason} Navigation voice paused.` : 'Voice paused')); },
     // Navigation speech is deferred; the assistant owns its separate speech lifecycle.
     () => false,
   );

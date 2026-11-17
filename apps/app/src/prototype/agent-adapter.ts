@@ -66,6 +66,10 @@ import {speakAppText} from '../runtime/app-speech';
 import {browserDevProfile} from '../browser/dev-profile';
 import {stampNoteChanges} from '../runtime/note-dates';
 import {isClockOperation,assertClockTimeZone,currentClockTimeZone,validateClockResult} from '../runtime/clock-contract';
+import {deviceActionFailureText} from '../ui/device-actions/device-action-messages';
+import {notesActionFailureText} from '../ui/notes/notes-action-messages';
+import {reminderDeliveryProblemText} from '../ui/reminders/reminder-result-messages';
+import {namedCalendarReadSummary} from '../ui/calendar/named-read-messages';
 import { Capacitor } from '@capacitor/core';
 import { isMapsOperation } from '../runtime/maps-contract';
 import { readMapsSelection } from '../maps/agent-context';
@@ -1000,7 +1004,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(operation.type==='calendar_named'&&operation.action==='read'){
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||expectedContext.sensitive||expectedContext.view!=='calendar'||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Calendar selection or review changed');};
-        current();return executeNamedCalendarRead(registerPlugin<NamedCalendarReadProvider>('AlphaCalendar'),operation,operationId,expectedContext,capabilities,signal,current,journalIdentity);
+        current();const result=await executeNamedCalendarRead(registerPlugin<NamedCalendarReadProvider>('AlphaCalendar'),operation,operationId,expectedContext,capabilities,signal,current,journalIdentity);
+        // The shared read words its result in its own English; Alpha's sentence replaces it.
+        return {...result,summary:namedCalendarReadSummary(result)};
       }
       if(operation.type!=='calendar_availability')return {status:'failed',summary:'This review is not available on this phone yet. Nothing was shared or changed.'};
       const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
@@ -1253,7 +1259,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           }
           // A full Trash refuses the write-ahead copy before the note is touched.
           if(!uncertain&&operation.type==='notes_delete'&&isNotesTrashFull(error))return {status:'failed',summary:'Trash is full. Empty Trash in Notes, then review this deletion again. Nothing was deleted.'};
-          return {status:uncertain?'unknown':'failed',summary:uncertain?'Notes outcome is uncertain. Review history; do not repeat automatically.':(error as Error).message};
+          return {status:uncertain?'unknown':'failed',summary:uncertain?'Notes outcome is uncertain. Review history; do not repeat automatically.':notesActionFailureText(error)};
         }finally{this.notesAgentBusy=false;}
       }
       if(operation.type==='read_calendar_range'&&agendaSource){
@@ -1327,7 +1333,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
         if(result.status!=='succeeded')return {status:'unknown',summary:'Reminder creation outcome is unknown. Check action history; it will not be repeated.'};
         const reminderResult=validateReminderCreateResult(operation,result.result,operationId);
-        return {status:'succeeded',reminderResult,summary:reminderResult.status==='permission-denied'?'Reminder saved; notifications are disabled.':reminderResult.status==='scheduling-failed'?'Reminder saved; notification scheduling failed.':presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary};
+        return {status:'succeeded',reminderResult,summary:reminderDeliveryProblemText('reminder_create',reminderResult.status)??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary};
       }
       if(isReminderOperation(operation)){
         signal.throwIfAborted();context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||document.hidden)throw Error('Reminder context changed');
@@ -1348,7 +1354,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // cancels this context-bound action before it can acknowledge the server.
         if(result.status!=='succeeded')return {status:'unknown',summary:'Reminder outcome requires review. It was not repeated.'};
         const reminderResult=validateReminderResult(operation,result.result);
-        return {status:'succeeded',summary:reminderResult.status==='permission-denied'||reminderResult.status==='scheduling-failed'?`Reminder ${reminderResult.status}.${Capacitor.isNativePlatform()?' Android delivery is approximate.':''}`:presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary,reminderResult};
+        return {status:'succeeded',summary:reminderDeliveryProblemText(operation.type,reminderResult.status,{approximate:Capacitor.isNativePlatform()})??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary,reminderResult};
       }
       if (operation.type === 'create_reminder') {
         const at = Date.parse(operation.dueAt);
@@ -2365,7 +2371,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!alphaClient.getState().pending)this.notesCommittedHandler?.();
           publishCommittedDeviceChanges(receipt,alphaClient,session);
         }});
-      } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(e instanceof Error ? e.message : 'Action could not complete.'); }
+      } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
       finally {this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
     } else if (card.go) this.openView(card.go.view, card.go.patch);
   };

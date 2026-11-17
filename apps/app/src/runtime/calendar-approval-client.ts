@@ -30,6 +30,6 @@ export class CalendarApprovalClient {
   this.reads.delete(row);
   const raw=await read.connection.request(calendarApprovalResolvePath(read.id),{decision,revision:read.revision},signal,{},'POST');
   signal.throwIfAborted();read.connection.current();
-  return parseCalendarApprovalResolution(raw,read.id,decision);
+  return parseCalendarApprovalResolution(raw,read.id,decision,row.payload);
  }
 }

@@ -14,7 +14,9 @@ const agentNames = {default: '', custom: 'Fixture agent', long: 'a'.repeat(220)}
 const agentClasses = new Map([['Your agent', 'default'], [agentNames.custom, 'custom'], ['a'.repeat(199)+'…', 'long']]);
 const text = {first: 'First retained fixture.', second: 'Second retained fixture.', tie: 'Equal-time fixture.',
   failure: 'Fixture run failed.', long: 'x'.repeat(2100)};
-const textClasses = new Map(Object.entries({...text, long: 'x'.repeat(1999)+'…'}).map(([key, value]) => [value, key]));
+// A failed run's brief is Alpha's sentence (DIGEST_RUN_FAILED), never the agent's error text.
+const textClasses = new Map(Object.entries({...text, long: 'x'.repeat(1999)+'…',
+  failure: 'This digest stopped with an error on your agent. Open execution details to see what ran.'}).map(([key, value]) => [value, key]));
 const empty = {summary: '', time: 0, agent: '', status: ''};
 
 function row(cursor, time, summary, status = 'finished') {

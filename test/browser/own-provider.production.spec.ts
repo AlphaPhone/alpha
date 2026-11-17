@@ -242,7 +242,7 @@ test('a rejected own-key check keeps Cloud selected and the entered keys for cor
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
  // The reason sits with the form it refers to.
  const alert=dialog(page).getByRole('form',{name:'Own API keys'}).getByRole('alert');
- await expect(alert).toContainText('Cerebras did not accept this key');await expect(dialog(page).getByRole('alert')).toHaveCount(1);
+ await expect(alert).toContainText('Cerebras didn’t accept this key');await expect(dialog(page).getByRole('alert')).toHaveCount(1);
  // Only the rejected key is retyped: it is focused and selected, and the Cartesia key stays.
  const rejected=dialog(page).getByLabel('Text key',{exact:true});
  await expect(rejected).toBeFocused();await expect(rejected).toHaveAttribute('aria-invalid','true');
@@ -362,14 +362,14 @@ test('welcome-page own keys: a rejected key is explained at the form, Back retur
  await page.evaluate(()=>(window as any).ownProvider.reject=true);
  await enterKeys(page,welcome,'Use my own keys');
  await welcome.getByRole('button',{name:'Save',exact:true}).click();
- await expect(welcome.getByRole('form',{name:'Own API keys'}).getByRole('alert')).toContainText('Cerebras did not accept this key');
+ await expect(welcome.getByRole('form',{name:'Own API keys'}).getByRole('alert')).toContainText('Cerebras didn’t accept this key');
  await expect(welcome.getByLabel('Text key',{exact:true})).toBeFocused();
  await expect(welcome.getByLabel('Voice key',{exact:true})).toHaveValue(VOICE_KEY);
  await page.screenshot({path:info.outputPath('welcome-own-keys-rejected.png'),animations:'disabled'});
  await welcome.getByRole('button',{name:'Back',exact:true}).click();
  // Back leaves the key form for the Cloud sign-in state it replaced (this fixture's Cloud readiness is unavailable).
  await expect(welcome.getByRole('form',{name:'Own API keys'})).toHaveCount(0);
- await expect(welcome).not.toContainText('Cerebras did not accept this key');
+ await expect(welcome).not.toContainText('Cerebras didn’t accept this key');
  await expect(welcome.getByRole('button',{name:'Use my own keys',exact:true})).toBeEnabled();
  expect(await page.evaluate(()=>(window as any).ownProvider.saved)).toBe(0);
  await noLeaks(page,observed);
@@ -411,7 +411,8 @@ test('a rejected key on the welcome screen is reported inside the own-key form, 
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.pending)).toBe(true);
  await expect(own.getByRole('button',{name:'Checking key',exact:true})).toHaveAttribute('aria-busy','true');
  await page.evaluate(()=>(window as any).ownProvider.release());
- await expect(own.getByRole('alert')).toHaveText('Cerebras did not accept this key. It was not saved.');
+ // The shared provider slot's refusal reads in Alpha's words.
+ await expect(own.getByRole('alert')).toHaveText('Cerebras didn’t accept this key. Nothing was saved.');
  // A provider message that repeats the entered key, even partly, is replaced before it is shown.
  await page.evaluate(()=>{const f=(window as any).ownProvider;f.hold=false;f.reject='echo';});
  await own.getByLabel('Text key',{exact:true}).fill(AI_KEY);await own.getByLabel('Voice key',{exact:true}).fill(VOICE_KEY);

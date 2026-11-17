@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 // wording is Alpha's own (apps/app/src/ui/browser/page-reading.ts). These probes touch no DOM;
 // the web build's menu cases stay in test/browser/reading-capability.spec.ts.
 import {createReadingSupport,SENSITIVE_PAGE} from '../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
-import {READING_UNSUPPORTED_MESSAGE,SENSITIVE_READING_MESSAGE} from '../apps/app/src/ui/browser/page-reading.ts';
+import {READING_UNSUPPORTED_MESSAGE,SENSITIVE_PAGE_MESSAGE,SENSITIVE_READING_MESSAGE} from '../apps/app/src/ui/browser/page-reading.ts';
 import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 
 const probe=async answers=>{
@@ -61,9 +61,9 @@ async function askAboutPage(answer){
 test('Ask about page refuses a sensitive released excerpt in Alpha\'s words and opens no review',async()=>{
  assert.deepEqual(await askAboutPage({value:{text:'Your verification code is 482913. Do not share it.',truncated:false}}),{messages:[SENSITIVE_READING_MESSAGE],questions:[]});
 });
-test('a native sensitive-page refusal keeps the native words',async()=>{
+test('a native sensitive-page refusal is shown in Alpha\'s words',async()=>{
  const refusal=Object.assign(new Error('Reading unavailable on a sensitive or unverified page'),{code:SENSITIVE_PAGE});
- assert.deepEqual(await askAboutPage({error:refusal}),{messages:['Reading unavailable on a sensitive or unverified page'],questions:[]});
+ assert.deepEqual(await askAboutPage({error:refusal}),{messages:[SENSITIVE_PAGE_MESSAGE],questions:[]});
 });
 test('a readable released excerpt opens the question review with that excerpt',async()=>{
  assert.deepEqual(await askAboutPage({value:{text:'Garden journal: the tomatoes ripened early.',truncated:false}}),{messages:[],questions:['Garden journal: the tomatoes ripened early.']});

@@ -90,10 +90,10 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
   pending[1].resolve({status:'denied'});await tick();await tick();
   await send();assert.notEqual(calls[2].operationId,calls[1].operationId,'after a denial and a new grant, Send reviews again');
   pending[2].reject(refusal('This text is too long to send as SMS. Shorten it and review again.','too-long'));await tick();await tick();
-  assert.equal(model().nativeNotice,'This text is too long to send as SMS. Shorten it and review again.','a definite refusal shows native\'s reason');
+  assert.equal(model().nativeNotice,'This text is too long to send as SMS. Nothing was sent.','a definite refusal shows Alpha\'s wording of its code (ui/telephony/telephony-messages.ts)');
   await send();assert.notEqual(calls[3].operationId,calls[2].operationId,'a refused request holds no record to keep');
   pending[3].reject(refusal('This request is too old to read back. Nothing was sent again.','expired'));await tick();await tick();
-  assert.equal(model().nativeNotice,'This request is too old to read back. Nothing was sent again.');
+  assert.equal(model().nativeNotice,'This send is too old to check. Nothing was sent again.');
   await send();assert.equal(calls[4].operationId,calls[3].operationId,'an expired request keeps its ID');
   pending[4].reject(Error('bridge closed'));await tick();await tick();assert.match(model().nativeNotice,/May have sent/);
   await send();assert.equal(calls[5].operationId,calls[4].operationId,'an unknown outcome keeps its ID');pending[5].resolve({status:'unknown'});await tick();await tick();

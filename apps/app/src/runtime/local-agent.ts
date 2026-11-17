@@ -5,6 +5,7 @@ import type {AppRecordMethod} from './app-record-route-policy';
 import {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
 import {isResidentRetryable,parseRecoveryReview,parseRecoveryArchive} from './resident-recovery';
 import {anyAbortSignal,runProviderConfiguration} from './abort-signal';
+import {providerKeyRefusalText} from '../ui/settings/provider-key-messages';
 import {developmentCloudVoiceEnabled} from './development-cloud-voice';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import {ownerRouteAllowed, ownerRouteGroup} from './owner-route-policy.ts';
@@ -586,7 +587,14 @@ export async function configureLocalProvider(apiKey:string,model:string=LOCAL_PR
   signal.throwIfAborted();
   if(!native.prepareProviderConfiguration||!native.configureProvider||!native.cancelProviderConfiguration)throw Error('Update Alpha');
   if(model!==LOCAL_PROVIDER_MODEL)throw Error(`${LOCAL_PROVIDER_MODEL} · Cerebras`);
-  return runProviderConfiguration(signal,{prepare:()=>native.prepareProviderConfiguration!(),configure:requestId=>native.configureProvider!({apiKey,model,requestId,...(cartesiaKey?{cartesiaKey}:{})}),cancel:requestId=>native.cancelProviderConfiguration!({requestId})});
+  try{
+    return await runProviderConfiguration(signal,{prepare:()=>native.prepareProviderConfiguration!(),configure:requestId=>native.configureProvider!({apiKey,model,requestId,...(cartesiaKey?{cartesiaKey}:{})}),cancel:requestId=>native.cancelProviderConfiguration!({requestId})});
+  }catch(error){
+    // The shared provider slot refuses a key check or save in its own English; Alpha words it.
+    const refusal=providerKeyRefusalText(error);
+    if(refusal!==undefined)throw new Error(refusal);
+    throw error;
+  }
 }
 /** Publish the saved owner switches to the on-device Google host. */
 export async function saveNativeGoogleAgentAccess(access:{gmailChanges:boolean;calendarEdits:boolean}):Promise<void> {

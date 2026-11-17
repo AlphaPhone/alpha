@@ -28,10 +28,11 @@ const STUBS = {
     export const createAospTelephony=()=>new Proxy({},{get:(_,name)=>globalThis.__smsClient[name]});`,
 };
 const adapter = await observedSmsAdapter(STUBS);
-const BUSY = 'Another text is being reviewed.', UNKNOWN = 'May have sent';
+// A busy refusal is worded by Alpha by its code (ui/telephony/telephony-messages.ts).
+const BUSY = 'Another text is being reviewed.', BUSY_SHOWN = 'Another message is waiting for your review. Nothing was sent.', UNKNOWN = 'May have sent';
 const shownOf = notice => {
   if (notice === '') return 'none';
-  if (notice === BUSY) return 'refused';
+  if (notice === BUSY_SHOWN) return 'refused';
   if (notice === UNKNOWN) return 'outcome-unknown';
   const status = ['cancelled', 'denied', 'failed', 'unknown', 'submitted', 'sent', 'delivered'].find(item => adapter.receiptLabel(item) === notice);
   assert.ok(status, `unexpected notice: ${notice}`);

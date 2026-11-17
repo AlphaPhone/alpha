@@ -1,4 +1,5 @@
 import {reviewFileEmail} from './file-email-review';
+import {AttachmentNotice} from '../ui/mailbox/drafts-controller';
 import {registerPlugin} from '../platform-plugins';
 import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
 import type {Source} from './note-source-adapter';
@@ -174,7 +175,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const email=()=>{
         closeQuestion?.();
         closeQuestion=reviewFileEmail({
-          read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw Error('Selected file changed. Select it again.');return file;},
+          read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw new AttachmentNotice('Selected file changed. Select it again.');return file;},
           current:()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
           target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>views.inbox.attachReviewedFile(file,token),
           inserted:()=>api.open('inbox'),

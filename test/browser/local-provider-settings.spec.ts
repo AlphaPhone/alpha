@@ -93,7 +93,7 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   await page.evaluate(() => { (window as any).providerFixture.reject = 'Cerebras did not accept this key. It was not saved.'; });
   await chooser.getByLabel('Cerebras API key').fill('synthetic-rejected-key');
   await chooser.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(chooser.getByRole('alert')).toContainText('Cerebras did not accept this key');
+  await expect(chooser.getByRole('alert')).toHaveText('Cerebras didn’t accept this key. Nothing was saved.');
   await expect(chooser.getByText('Not set', { exact: true })).toBeVisible();
 
   await page.evaluate(() => { (window as any).providerFixture.reject = ''; });

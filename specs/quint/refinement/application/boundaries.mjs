@@ -15,6 +15,8 @@ export async function filesAndSharing() {
   const source = 'apps/app/src/prototype/file-email-review.ts';
   const attachment = await bundledSource('apps/app/src/runtime/inbox-attachment.ts');
   const modal = await bundledSource('apps/app/src/runtime/modal-inert.ts');
+  // The review's refusals are worded by Alpha (ui/mailbox/drafts-controller.ts attachmentRefusalText).
+  const drafts = await bundledSource('apps/app/src/ui/mailbox/drafts-controller.ts', {'import.meta.env': '{}'});
   const traces = [];
   for (const changed of [false, true]) {
     const page = new JSDOM('<div class="os"></div>', {pretendToBeVisual: true});
@@ -27,7 +29,8 @@ export async function filesAndSharing() {
     const changedReview = await attachment.exports.reviewMailAttachment(second);
     const module = sourceContext([source], ['reviewFileEmail'], {window: page.window, document,
       getComputedStyle: page.window.getComputedStyle.bind(page.window),
-      reviewMailAttachment: value => (lastReview = attachment.exports.reviewMailAttachment(value)), holdPhoneInert: modal.exports.holdPhoneInert,
+      reviewSharedAttachment: value => (lastReview = attachment.exports.reviewMailAttachment(value)), attachmentRefusalText: drafts.exports.attachmentRefusalText,
+      holdPhoneInert: modal.exports.holdPhoneInert,
       describeEmailTarget: () => ({account: 'Owner', destination: 'Draft'})});
     const t = trace(`attachment-${changed ? 'changed' : 'exact'}`, {'s.inserted': !!inserted});
     const close = module.reviewFileEmail({read: async () => {
@@ -46,7 +49,7 @@ export async function filesAndSharing() {
     checkpoint(t, 'source rereads bytes before insertion', changed ? {...call('insert'), reject: true} : call('insert'), {'s.inserted': !!inserted});
     close(); page.window.close(); traces.push(t);
   }
-  return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...modal.sources], traces, scope: 'bounded-component', assumptions: [
+  return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...modal.sources, ...drafts.sources], traces, scope: 'bounded-component', assumptions: [
     'Real review dialog and upstream byte validation execute for exact and changed-byte copies. Destination description is a text-only stub.',
     'Owner/draft token changes, focus/page retirement, revoked native grants and restart need further schedules.']});
 }
