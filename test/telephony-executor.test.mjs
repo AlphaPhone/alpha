@@ -202,7 +202,7 @@ test('the agent reads only what the owner has open, and a voicemail delete is th
   const voicemail = {caller: null, date: 5, durationSeconds: 24, transcriptState: 'ready', engine: 'device', transcript: 'Call me back.'};
   p = ports({openThread: () => thread, openVoicemail: () => voicemail, deleteOpenVoicemail: async () => 'cancelled'});
   let result = await run({type: 'messages_read_selected'}, p);
-  assert.deepEqual(result.telephonyResult, {kind: 'messages-read', status: 'read', ...thread}); assert.equal(result.status, 'succeeded'); assert.match(result.summary, /untrusted data/);
+  assert.deepEqual(result.telephonyResult, {kind: 'messages-read', status: 'read', ...thread}); assert.equal(result.status, 'succeeded'); assert.match(result.summary, /^Shared the open (thread|voicemail)\.$/);
   assert.deepEqual((await run({type: 'voicemail_read_selected'}, p)).telephonyResult, {kind: 'voicemail-read', status: 'read', ...voicemail});
   result = await run({type: 'voicemail_delete_selected'}, p);
   assert.deepEqual(result.telephonyResult, {kind: 'voicemail-delete', status: 'cancelled'}); assert.equal(result.status, 'failed');

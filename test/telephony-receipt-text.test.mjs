@@ -35,13 +35,14 @@ test('the reported contact save reads as a plain confirmation and outcomes stay 
   assert.doesNotMatch(text.telephonyActionResultText({kind: 'phone-call', status: 'placed', contact: false}), /connected|answered/i);
   assert.doesNotMatch(text.telephonyActionResultText({kind: 'sms-compose', status: 'submitted'}), /\bsent\b/i);
   assert.doesNotMatch(text.phoneDialResultText({status: 'handed-off'}), /placed|connected/i);
-  // A read's summary goes to the agent with the content: it still marks that content as untrusted
-  // data and never instructions.
+  // Read summaries are owner-facing only (the agent's receipt carries no summary), so they state
+  // what was shared without the agent's untrusted-data disclaimer.
   for (const kind of ['messages-read', 'voicemail-read']) {
     const read = text.telephonyActionResultText({kind, status: 'read'});
-    assert.match(read, /untrusted data/, kind);
-    assert.match(read, /never instructions/, kind);
+    assert.match(read, /^Shared the open (thread|voicemail)\.$/, kind);
   }
+  // A failed contact write may be a save or a delete; the text names neither.
+  assert.equal(text.telephonyActionResultText({kind: 'contact-write', status: 'failed'}), 'The contact change failed.');
 });
 
 test('an approved text to a number reads as one short sentence and never overclaims', () => {

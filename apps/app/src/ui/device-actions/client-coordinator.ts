@@ -1865,7 +1865,7 @@ export class DeviceActionCoordinator<
               status: "failed",
               summary:
                 refused && error.message
-                  ? `${NOT_DISPATCHED_SUMMARY} ${error.message}`
+                  ? `Not started: ${error.message.replace(/[.!]\s*$/, "")}.`
                   : NOT_DISPATCHED_SUMMARY,
             }
           : { status: "unknown", summary: UNKNOWN_SUMMARY };
@@ -1961,7 +1961,7 @@ export class DeviceActionCoordinator<
         return {
           proposalId,
           status: result.status,
-          summary: `${result.summary} Not synced yet; open action history to retry.`,
+          summary: unsyncedSummary(result.summary),
           committedChanges,
         };
       }
@@ -3227,8 +3227,14 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
   }
 }
 const UNKNOWN_SUMMARY =
-  "Action outcome needs review. It will not be repeated automatically.";
-const NOT_DISPATCHED_SUMMARY = "Not started. Nothing was sent.";
+  "The outcome needs review and won't be repeated automatically.";
+const NOT_DISPATCHED_SUMMARY = "Not started, so nothing was sent.";
+/** The fixed summary older coordinators wrote for a no-call failure; matched only to read those records. */
+const LEGACY_NOT_DISPATCHED_SUMMARY = "Not started. Nothing was sent.";
+/** One sentence: a completed result whose server receipt has not synced yet. */
+export function unsyncedSummary(summary: string): string {
+  return `${summary.replace(/[.!]\s*$/, "")}, but it isn't synced yet.`;
+}
 const NOT_DISPATCHED_CODE = "DEVICE_NOT_DISPATCHED";
 /** A journal entry this device finished with no effect: failed, with no typed result. */
 function notDispatchedEntry(entry: DeviceJournalEntry): boolean {
@@ -3247,7 +3253,8 @@ function notDispatchedEntry(entry: DeviceJournalEntry): boolean {
   // always carry a marker; executor display copy cannot acquire this authority.
   return (
     result.dispatch === undefined &&
-    entry.summary === NOT_DISPATCHED_SUMMARY &&
+    (entry.summary === LEGACY_NOT_DISPATCHED_SUMMARY ||
+      entry.summary === NOT_DISPATCHED_SUMMARY) &&
     Object.keys(result).every((key) => key === "operationId")
   );
 }
