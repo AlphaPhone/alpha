@@ -25,7 +25,9 @@ import { NOTES_LIST_FILTER_CAPABILITY } from "@elizaos/contracts";
 import {
   browserDestinationMatches,
   directBrowserDestination,
+  directBrowserSearchQuery,
   groundBrowserDestination,
+  groundBrowserSearchQuery,
 } from "@elizaos/contracts/browser-request-grounding";
 import { createDeviceActionExecution } from "@elizaos/contracts/device-action-execution";
 import {
@@ -67,7 +69,9 @@ import {
   validateCameraCaptureResult,
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
 import {
+  BROWSER_CONTROL_DIRECT_TYPES,
   browserControlCapabilityAvailable,
+  describeBrowserControl,
   isBrowserControl,
 } from "@elizaos/plugin-assistant/device-actions/browser-contract";
 import type {
@@ -457,6 +461,8 @@ function assertProposalContext<C extends DeviceContextEnvelope>(
         ? "Unlock the phone to review this action."
         : "Open Photos to review this action.",
     );
+  if (isBrowserControl(operation) && context.sensitive)
+    throw new ContextNotice("Unlock the phone to review this action.");
   if (isReminderOperation(operation)) assertReminderContext(operation, context);
   if (isNativeNotesQuery(operation)) assertNotesQueryContext(context);
   if (isNotesOperation(operation)) assertNotesContext(operation, context);
@@ -620,6 +626,8 @@ export class DeviceActionCoordinator<
     private readonly options: {
       currentRequestBrowserPolicy?: boolean;
       currentRequestTelephonyPolicy?: boolean;
+      /** Whether a tab switch's words match several open tabs on this phone. */
+      browserTabNeedsChoice?: (target: string) => boolean;
     } = {},
   ) {
     this.ports = ports;
@@ -645,16 +653,19 @@ export class DeviceActionCoordinator<
   ): boolean {
     return this.browserRequest(proposal, proof).allowed;
   }
-  /** How the owner's current message asks for a proposed destination: `allowed`
-   * when it is a direct request that may run without review, `grounded` when
-   * the owner at least typed that address without refusing it. */
+  /** How the owner's current message asks for a proposed destination or web
+   * search: `allowed` when it is a direct request that may run without review,
+   * `grounded` when the owner at least typed that address without refusing it,
+   * or typed those search words. */
   private browserRequest(
     proposal: DeviceProposal,
     proof?: CurrentDeviceActionRequest,
   ): { allowed: boolean; grounded: boolean } {
+    const operation = proposal.operation;
     if (
       !this.options.currentRequestBrowserPolicy ||
-      proposal.operation.type !== "browser_navigate"
+      (operation.type !== "browser_navigate" &&
+        operation.type !== "browser_search")
     )
       return { allowed: true, grounded: true };
     if (!proof || proof.messageId !== proposal.requestMessageId)
@@ -668,31 +679,29 @@ export class DeviceActionCoordinator<
     ]);
     const cached = this.browserPolicy.get(proposal.id);
     if (cached?.key === key) return cached;
-    // Automatic client effects need direct intent, not merely a URL mentioned in prose.
-    // The shared grammar knows only its own assistant name, so a leading product
-    // name ("Alpha," or "Hey Alpha") is removed before the direct check.
-    const name = this.profile.appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const allowed = browserDestinationMatches(
-      proposal.operation,
-      directBrowserDestination(
-        proof.text.replace(
-          new RegExp(
-            String.raw`^(\s*(?:(?:hey|hi|ok|okay)[,.!]?\s+)?)${name}[,.!]?\s+`,
-            "i",
-          ),
-          "$1",
-        ),
-      ),
-    );
+    // Automatic client effects need direct intent, not merely a URL or search
+    // words mentioned in prose. The server reads the same grammar with the same
+    // assistant name, so both agree on what a direct request is.
+    const name = this.profile.assistantName;
+    const allowed =
+      operation.type === "browser_search"
+        ? directBrowserSearchQuery(proof.text, name)?.toLowerCase() ===
+          operation.query.toLowerCase()
+        : browserDestinationMatches(
+            operation,
+            directBrowserDestination(proof.text, name),
+          );
     const policy = {
       key,
       allowed,
       grounded:
         allowed ||
-        browserDestinationMatches(
-          proposal.operation,
-          groundBrowserDestination(proof.text, proposal.operation.url),
-        ),
+        (operation.type === "browser_search"
+          ? groundBrowserSearchQuery(proof.text, operation.query) !== undefined
+          : browserDestinationMatches(
+              operation,
+              groundBrowserDestination(proof.text, operation.url, name),
+            )),
     };
     if (this.browserPolicy.has(proposal.id) || this.browserPolicy.size < 128)
       this.browserPolicy.set(proposal.id, policy);
@@ -1036,6 +1045,7 @@ export class DeviceActionCoordinator<
     if (isFilesOperation(op)) return { ...base, ...describeFilesOperation(op) };
     if (isPhotosViewOperation(op))
       return { ...base, ...describePhotosViewOperation(op) };
+    if (isBrowserControl(op)) return { ...base, ...describeBrowserControl(op) };
     const notesDestination =
       (op.type === "notes_delete" || op.type === "notes_update") &&
       !context.sensitive &&
@@ -1324,6 +1334,7 @@ export class DeviceActionCoordinator<
       ...NOTES_ORGANIZE_DIRECT_TYPES,
       ...FILES_DIRECT_TYPES,
       ...PHOTOS_VIEW_DIRECT_TYPES,
+      ...BROWSER_CONTROL_DIRECT_TYPES,
     ];
     const results: DeviceOperationReceipt[] = [];
     for (const [proposalId, entry] of [...this.proposals]) {
@@ -1338,9 +1349,17 @@ export class DeviceActionCoordinator<
         continue;
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
+      // Words that match several tabs need the owner's pick, and only the
+      // action's review card can show it.
+      if (
+        entry.proposal.operation.type === "browser_tab_switch" &&
+        this.options.browserTabNeedsChoice?.(entry.proposal.operation.target)
+      )
+        continue;
       const browser =
         this.options.currentRequestBrowserPolicy &&
-        entry.proposal.operation.type === "browser_navigate";
+        (entry.proposal.operation.type === "browser_navigate" ||
+          entry.proposal.operation.type === "browser_search");
       const requestKey = this.requestKey(messageId);
       if (
         browser &&
@@ -1910,7 +1929,7 @@ export class DeviceActionCoordinator<
       const presentBrowser = () => {
         if (result.status !== "succeeded") return;
         try {
-          if (p.operation.type === "browser_navigate") {
+          if (p.operation.type === "browser_navigate" || isBrowserControl(p.operation)) {
             if (reviewed.currentRequest) assertCurrent();
             result.presentBrowser?.();
           } else if (isTelephonyAction(p.operation)) result.present?.();

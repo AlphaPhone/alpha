@@ -48,7 +48,7 @@ import {BrowserOpenRefused} from '../browser/browser-poll';
 import {presentDeviceRecordOperation} from './device-record-presentation';
 import {validateMapsSelectedObject} from '../maps/agent-context';
 import {isMvpView} from '../prototype/mvp-features';
-import {alphaViewLabel} from '../product/alpha-product';
+import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
@@ -69,6 +69,9 @@ export function presentOpenView(view:string){const label=alphaViewLabel(view);re
 const operations = {admitView:(view:string)=>view==='home'||view==='reminders'||isMvpView(view),parseWorkflowRead};
 export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope,WorkflowPhoneReview> = {
   appName:'Alpha',
+  // The name the owner says. The agent's character carries the same name, so the server and this
+  // phone read "Alpha, open …" as the same direct request.
+  assistantName:ALPHA_PRODUCT.identity.characterName,
   operations,
   workflow:{parseBinding:parseWorkflowBinding,parseRead:parseWorkflowRead,validateResult:validateWorkflowResult,assertOperation:assertWorkflowOperation},
   presentRecord:(operation,timeZone)=>operation.type==='open_view'?presentOpenView(operation.view):isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
@@ -77,9 +80,9 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
 };
-/** Runs an approved Browser open for the device executor. An open that Browser refused before
- * creating or loading any tab closes the attempt as not started, with Browser's reason; any other
- * failure may have reached the tab host and stays an unknown outcome. */
+/** Runs an approved Browser open or control for the device executor. One that Browser refused
+ * before any effect closes the attempt as not started, with Browser's reason; any other failure
+ * may have reached the tab host and stays an unknown outcome. */
 export async function approvedBrowserOpen<T>(open:()=>Promise<T>):Promise<T>{
   try{return await open();}catch(error){if(error instanceof BrowserOpenRefused)throw new DeviceActionNotStarted(error.message);throw error;}
 }
@@ -99,10 +102,16 @@ let filesReviewIdentity: ((paths:string[],signal:AbortSignal)=>Promise<string[]>
 export function setFilesReviewIdentity(read: (paths:string[],signal:AbortSignal)=>Promise<string[]>) {
   filesReviewIdentity=read;
 }
+/** Browser's answer to whether a tab switch's words match several open tabs. Such a switch is
+ * never run directly: its review card lists the tabs for the owner to pick. */
+let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
+export function setBrowserTabNeedsChoice(read: (target:string)=>boolean) {
+  browserTabNeedsChoice=read;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target)});
   }
 }

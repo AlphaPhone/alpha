@@ -622,9 +622,11 @@ private static final class ResidentAttachDiagnostic {
     output.write(buffer,0,count);
    }
    env.put("ELIZA_NATIVE_VIEW_DECLARATIONS",output.toString(java.nio.charset.StandardCharsets.UTF_8.name()));
-   // Alpha's mounted browser handles back, forward and reload only, and serves no Chromium target.
+   // The agent's own BROWSER tool is offered only what Alpha's mounted Browser runs for it: back,
+   // forward and reload. The reviewed way to do the same from chat is the browser_history device
+   // action (browser.history.v1). The list cannot be emptied yet: the pinned plugin registers
+   // the tool even with no commands.
    env.put("ELIZA_NATIVE_BROWSER_COMMANDS","back,forward,reload");
-   env.put("ELIZA_BROWSER_NATIVE_TARGET","off");
   }
  }
  static void configureEnvironment(Context context,java.util.Map<String,String> env) throws java.io.IOException {
