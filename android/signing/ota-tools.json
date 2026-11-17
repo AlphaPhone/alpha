@@ -40,6 +40,7 @@
       "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
       "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261117_17:userdebug/test-keys",
       "buildTimestamp": 1794947813,
+      "otaPostTimestamp": 1794904347,
       "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
     }
   ]
