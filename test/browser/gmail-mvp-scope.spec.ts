@@ -330,14 +330,22 @@ test('From switcher returns the email to its account when the other account alre
  expect((await page.evaluate(()=>(window as any).gmSlots['inbox-drafts:v1:'+JSON.stringify(['production','fixture-owner','fixture-org','grant-1'])])).subject).toBe('Second saved');
 });
 
-for(const saved of [false,true])test(`Share to email opens a new populated draft and preserves ${saved?'saved':'unsaved'} earlier email`,async({page})=>{
- await setup(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();
+for(const legacy of [false,true])test(`Share to email opens a new populated draft and preserves ${legacy?'a legacy saved copy':'an earlier draft saved on Back'}`,async({page})=>{
+ await setup(page);
+ if(legacy)await page.evaluate(()=>{
+  const owner=JSON.stringify(['production','fixture-owner','fixture-org','grant-0']);
+  (window as any).gmSlots['inbox-drafts:v1:'+owner]={version:1,id:'earlier-email',revision:'earlier-revision',owner,to:[],subject:'Earlier email',body:'Earlier exact body'};
+ });
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Compose',exact:true}).click();
- await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Earlier email');
- await page.getByRole('textbox',{name:'Message',exact:true}).fill('Earlier exact body');
- if(saved){await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByText('Saved locally on this device',{exact:true}).first()).toBeVisible();}
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);
+ if(!legacy){
+  await page.getByRole('button',{name:'Compose',exact:true}).click();
+  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Earlier email');
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Earlier exact body');
+  await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
+ }
+ await returnToApps(page);
  await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Shared selected note');
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('First line\nSecond line');

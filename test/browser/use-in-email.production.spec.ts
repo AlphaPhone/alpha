@@ -170,49 +170,31 @@ test('the Gmail account changes while the review is open: the insert is refused 
   expect(await harness(page, f => f.unexpected)).toEqual([]);
 });
 
-test('a send review left pending is discarded when a suggestion is added to its email; only the email reviewed afterwards can be sent', async ({ page }) => {
+test('two suggestions become one exact manual send only after the user taps Send', async ({ page }) => {
   test.setTimeout(150_000);
   await openEmail(page);
   await ask(page, 'Draft a short reply accepting Tuesday', first);
   await openReview(page, first);
   await review(page).getByRole('button', { name: 'Insert into draft', exact: true }).click();
   await expect(body(page)).toHaveValue(first);
+  expect(await mail(page)).toEqual({ prepares: [], dispatches: [], sent: [] });
 
-  // The user reviews the send, then closes the review without cancelling it: it stays saved.
-  await button(page, 'Send email').click();
-  const sendReview = page.getByRole('dialog', { name: 'Review mail operation' });
-  await expect(sendReview.getByRole('status')).toHaveText('Review every field before confirming. No mail has been sent.');
-  await expect(sendReview.getByText(first, { exact: true })).toBeVisible();
-  await sendReview.getByRole('button', { name: 'Close mail review', exact: true }).click();
-  await expect(sendReview).toHaveCount(0);
-  let state = await mail(page);
-  expect(state.prepares.map(row => row.bodyText)).toEqual([first]);
-  expect(state.dispatches).toEqual([]);
-
-  // A second suggestion is reviewed and added below the text that was reviewed for sending.
   await ask(page, 'Add a line about the copies', second);
   await openReview(page, second);
   await expect(review(page).locator('[data-alpha-email-use-destination]')).toHaveText('Your open reply draft · Re: Harbour schedule · to sender@example.invalid');
   await review(page).getByRole('button', { name: 'Add below existing text', exact: true }).click();
   await expect(review(page)).toHaveCount(0);
-  await expect(body(page)).toHaveValue(first + '\n\n' + second);
-  // The pending review was for other text: it is discarded, and the user is told nothing was sent.
-  await expect(page.getByText('This email was edited after this review, so the review was discarded. Nothing was sent. Review the current email before sending.', { exact: true })).toBeVisible();
-  expect((await mail(page)).dispatches).toEqual([]);
+  const text = first + '\n\n' + second;
+  await expect(body(page)).toHaveValue(text);
+  expect(await mail(page)).toEqual({ prepares: [], dispatches: [], sent: [] });
 
-  // Sending now means a new review of the current text, under a new request.
   await button(page, 'Send email').click();
-  await expect(sendReview.getByText(first + '\n\n' + second, { exact: true })).toBeVisible();
-  state = await mail(page);
-  expect(state.prepares.map(row => row.bodyText)).toEqual([first, first + '\n\n' + second]);
-  expect(state.prepares[1].requestId).not.toBe(state.prepares[0].requestId);
-  expect(state.prepares[1].digest).not.toBe(state.prepares[0].digest);
-  await sendReview.getByRole('button', { name: 'Send this email', exact: true }).click();
-  await expect(sendReview.getByRole('status')).toHaveText('Provider confirmed this operation.');
-  state = await mail(page);
-  // One dispatch, of the second request and digest. The first reviewed request was never dispatched.
-  expect(state.dispatches).toEqual([state.prepares[1]]);
-  expect(state.sent).toEqual(['Re: Harbour schedule | ' + first + '\n\n' + second]);
+  await expect(page.getByText('Sent.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Review mail operation' })).toHaveCount(0);
+  const state = await mail(page);
+  expect(state.prepares.map(row => row.bodyText)).toEqual([text]);
+  expect(state.dispatches).toEqual(state.prepares);
+  expect(state.sent).toEqual(['Re: Harbour schedule | ' + text]);
   expect(await harness(page, f => f.unexpected)).toEqual([]);
 });
 

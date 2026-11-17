@@ -74,7 +74,7 @@ test('Drafts, Archive and Trash load their lists; edited Gmail draft stays local
  expect(state.dispatches).toBe(0);
 });
 
-test('Send opens the exact review and nothing is sent until it is confirmed',async({page})=>{
+test('a failed dispatch keeps the exact draft available for receipt recovery',async({page})=>{
  await install(page,{});
  await page.getByRole('button',{name:'Compose',exact:true}).click();
  await page.getByRole('textbox',{name:'To',exact:true}).fill('friend@example.invalid');
@@ -83,14 +83,14 @@ test('Send opens the exact review and nothing is sent until it is confirmed',asy
  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Reviewed body');
  await page.getByRole('button',{name:'Send email',exact:true}).click();
  const review=page.getByRole('dialog',{name:'Review mail operation'});
- await expect(review.getByRole('button',{name:'Send this email',exact:true})).toBeVisible();
+ await expect(review.getByRole('button',{name:'Send this email',exact:true})).toHaveCount(0);
  await expect(review.getByText('Reviewed body',{exact:true})).toBeVisible();
  expect((await fixture(page)).prepared.map((p:any)=>p.kind)).toEqual(['send']);
- expect((await fixture(page)).dispatches).toBe(0);
+ expect((await fixture(page)).dispatches).toBe(1);
  await review.getByRole('button',{name:'Close mail review',exact:true}).click();
  await expect(review).toHaveCount(0);
- await page.waitForTimeout(200);
- expect((await fixture(page)).dispatches).toBe(0);
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Reviewed body');
+ expect((await fixture(page)).dispatches).toBe(1);
 });
 
 test.describe('wide Cloud Inbox layout',()=>{
