@@ -38,7 +38,7 @@ const host=http.createServer(async(req,res)=>{
   else if(url==='/api/agents')value={agents:[{id:'agent',name:'Fixture',status:'running'}]};
   else if(url==='/api/conversations'&&req.method==='POST')value={conversation:{id:'thread',title:'Contract'}};
   else if(url==='/api/conversations')value={conversations:[{id:'thread',title:'Contract'}]};
-  else if(url==='/api/conversations/thread/messages/truncate'){truncates++;assert.equal(req.method,'POST');assert.deepEqual(JSON.parse(raw),{messageId:'11111111-1111-4111-8111-111111111111',inclusive:true});value={ok:mode!=='unconfirmed',deletedCount:2};}
+  else if(url==='/api/conversations/thread/messages/truncate')truncates++;
   else if(req.method==='POST'){sends++;assert.equal(req.headers['x-eliza-device-id'],'device');value={text:'Fixture reply',agentName:'Fixture'};}
   else value={messages:[{text:'Fixture reply'}]};
  }
@@ -107,10 +107,9 @@ try{
  client.deviceHeaders={'X-Eliza-Device-Id':'device'};
  assert.equal((await client.send('thread','Hello')).text,'Fixture reply');
  assert.equal((await client.messages('thread')).messages.length,1);
- assert.equal(localAgentPathAllowed('/api/conversations/thread/messages/truncate'),true);
- assert.equal((await invoke({path:'/api/conversations/thread/messages/truncate',method:'GET',ownerId:'owner'})).status,400);
- await client.truncateMessages('thread','11111111-1111-4111-8111-111111111111',signal);assert.equal(truncates,1);
- mode='unconfirmed';await assert.rejects(client.truncateMessages('thread','11111111-1111-4111-8111-111111111111',signal),/not confirmed/);assert.equal(truncates,2);mode='ok';
+ // Edit and resend forks; the destructive history truncate route is retired and never reaches the agent.
+ assert.equal(localAgentPathAllowed('/api/conversations/thread/messages/truncate'),false);
+ assert.equal((await invoke({path:'/api/conversations/thread/messages/truncate',method:'POST',ownerId:'owner',body:JSON.stringify({messageId:'11111111-1111-4111-8111-111111111111',inclusive:true})})).status,400);assert.equal(truncates,0);
  assert.equal((await client.forkConversation('thread','11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','Hello',signal)).id,'forked-thread');assert.equal(forks,1);
  assert.equal((await invoke({path:'/api/conversations/thread/fork',method:'GET',ownerId:'owner'})).status,400);
  mode='unauthorized';await assert.rejects(client.send('thread','Do not replay'),{status:401});assert.equal(sends,2);

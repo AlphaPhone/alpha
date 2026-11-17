@@ -72,7 +72,8 @@ nativeCases.push(
  request('newline path','/api/status\n','GET','owner',false),
  request('unrecognized owner-group route','/api/triggers/entry-1/unknown','POST','owner',false),
  request('view navigation needs owner','/api/views/chat/navigate','POST',null,false,'{}'),
- request('truncate needs owner','/api/conversations/room/messages/truncate','POST',null,false,'{}'),
+ // Edit and resend forks; the irreversible history truncate is refused even for the owner.
+ request('truncate route is retired','/api/conversations/room/messages/truncate','POST','owner',false,'{}'),
  request('ordinary wrong method','/api/status','PUT','owner',false),
  request('ordinary GET body','/api/status','GET','owner',false,'{}'),
  request('delete body denied','/api/triggers/entry-1','DELETE','owner',false,'{}'),

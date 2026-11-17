@@ -448,11 +448,6 @@ export class LocalAgentProtocol {
     const value=record((await this.json('/api/conversations',{title},signal)).conversation);
     return {...value,id:identifier(value.id)};
   }
-  async truncateMessages(id:string,messageId:string,signal:AbortSignal):Promise<void> {
-    const value=await this.json(`/api/conversations/${encodeURIComponent(identifier(id))}/messages/truncate`,{messageId,inclusive:true},signal);
-    if(value.ok!==true||!Number.isSafeInteger(value.deletedCount)||Number(value.deletedCount)<1)throw Error('Message replacement was not confirmed. Reload conversation history before trying again.');
-  }
-
   async forkConversation(id:string,messageId:string,requestId:string,expectedText:string,signal:AbortSignal):Promise<RemoteConversation> {
     const value=record((await this.json(`/api/conversations/${encodeURIComponent(identifier(id))}/fork`,{messageId,requestId,expectedText},signal)).conversation);
     return {...value,id:identifier(value.id)};

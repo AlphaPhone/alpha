@@ -1979,7 +1979,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         await new Promise<void>(resolve=>this.setState({draft:''},resolve));
         await connectionController.forkMessage(editTarget,this.messageEditRequestId??=crypto.randomUUID());this.messageEditTarget=undefined;this.messageEditRequestId=undefined;if(!this.live||document.hidden||this.S().view!==editView||String(this.S().draft).trim())throw Error("The edited conversation opened. Review your draft before sending.");await new Promise<void>(resolve=>this.setState({draft:text},resolve));s=this.S();
         if(!this.live||document.hidden||s.view!==editView||String(s.draft)!==text)throw Error('The branch opened, but your draft changed. Nothing was sent.');
-      } catch(error){if(error&&typeof error==='object'&&'historyChanged' in error)this.messageEditTarget=undefined;
+      } catch(error){
         // Nothing was sent: the edited text goes back into whichever conversation is now open.
         if(this.live&&!String(this.S().draft||'').trim())this.setState({draft:text});
         this.toast(errorNotice(error,'Couldn’t open the edited conversation. Nothing was sent.'),ERROR_TOAST);return;}
