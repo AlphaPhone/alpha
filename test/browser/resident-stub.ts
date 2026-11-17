@@ -215,6 +215,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           f.unexpected.push('maps ' + route); return { status: 404, data: {} };
         }
         if (path === '/api/v1/api-keys/current' && input.method === 'DELETE') { s.order.push('revoke ' + auth); persist(); return { status: 200, data: { success: true, status: 'revoked', credentialId: null, revokedAt: new Date().toISOString() } }; }
+          if (path === '/api/v1/subscriptions/plans') return {status:200,data:{success:true,data:{plans:[{key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25'}},{key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90'}}]}}};
         if (s.accounts.length) {
           const owner = account(auth);
           if (!owner) return { status: 401, data: {} };
@@ -228,8 +229,9 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
             owner.plan = undefined; persist();
             return { status: 200, data: { success: true, replayed: false, grant: { id: 'synthetic-grant', planKey: 'plus_monthly', startsAt: '2026-10-30T00:00:00.000Z', endsAt: '2027-04-30T00:00:00.000Z', revoked: false, paidPlanTakesPrecedence: false }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'grant', effectiveUntil: '2027-04-30T00:00:00.000Z' } } };
           }
+          if (path === '/api/v1/referrals') return {status:200,data:{code:'SYNTHETIC',total_referrals:0,is_active:true}};
           if (path === '/api/v1/billing/limits') { s.order.push('plan ' + owner.email); persist(); return { status: 200, data: { success: true, data: { schemaVersion: 2, v2: {
-            subscription: owner.plan === 'credits' ? { status: 'not_applicable', reason: 'no_organization_subscription' } : { status: 'available', value: { planKey: 'plus_monthly', state: owner.plan === 'none' ? 'canceled' : 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } },
+            subscription: owner.plan === 'credits' ? { status: 'not_applicable', reason: 'no_organization_subscription' } : { status: 'available', value: { subscriptionId:'sub_synthetic',lifecycleRevision:'1',planKey: 'plus_monthly', state: owner.plan === 'none' ? 'canceled' : 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } },
             balance: { status: 'available', source: 'organizations', observedAt: new Date().toISOString(), value: { balance: { value: String(owner.balance), unit: 'usd', currency: 'USD' }, revision: '1' } } } } } }; }
           if (path === '/api/v1/eliza/google/accounts') return { status: 200, data: owner.inbox ? [{ configured: true, connected: true, reason: 'connected', connectionId: 'grant-' + owner.userId.slice(0, 8), grantedCapabilities: ['google.gmail.triage'], identity: { email: owner.inbox } }] : [] };
         }
