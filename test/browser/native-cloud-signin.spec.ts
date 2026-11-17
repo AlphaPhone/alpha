@@ -520,3 +520,45 @@ test('Google waiting: one heading, a way to reopen the Google page, and Back',as
  await dialog.getByRole('button',{name:'Back',exact:true}).click();
  await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toBeEnabled();
 });
+
+
+for (const method of ['email', 'phone'] as const) {
+ test(`${method} OTP creates a new account and binds its resident inference`, async ({page}) => {
+  await boot(page,{...await entitlements(),signIn:'created'});
+  await agent(page,'unavailable');await readySignIn(page);
+  const dialog=signInDialog(page);
+  if(method==='phone')await dialog.getByRole('button',{name:'Continue with phone number',exact:true}).click();
+  await (method==='phone'?phoneEntry(page):entry(page)).fill(method==='phone'?'+1 (415) 555-0100':'synthetic-signin@example.invalid');
+  await dialog.getByRole('button',{name:'Send code',exact:true}).click();
+  await dialog.getByLabel('Code',{exact:true}).fill('123456');
+  await dialog.getByRole('button',{name:'Verify',exact:true}).click();
+  await agent(page,'cloud');
+  await expect.poll(async()=>(await fixture(page)).bound).toBe(true);
+  await expect(page.getByRole('status').filter({hasText:/New account.*synthetic-signin@example\.invalid/})).toBeVisible();
+  expect((await fixture(page)).saved).toBe(true);
+  await noHandOff(page);
+ });
+ test(`${method} expired OTP stays unsigned-in and recovers with a resent code`, async ({page}) => {
+  await page.clock.install();
+  await boot(page,await entitlements());await agent(page,'unavailable');await readySignIn(page);
+  const dialog=signInDialog(page);
+  if(method==='phone')await dialog.getByRole('button',{name:'Continue with phone number',exact:true}).click();
+  await (method==='phone'?phoneEntry(page):entry(page)).fill(method==='phone'?'+1 (415) 555-0100':'synthetic-signin@example.invalid');
+  await dialog.getByRole('button',{name:'Send code',exact:true}).click();
+  await page.evaluate(()=>{(window as any).signInFixture.verificationFailure='expired';});
+  await dialog.getByLabel('Code',{exact:true}).fill('123456');
+  await dialog.getByRole('button',{name:'Verify',exact:true}).click();
+  await expect(dialog.getByRole('alert')).toContainText('Code expired');
+  expect(await fixture(page)).toMatchObject({saved:false,bound:false});
+  const verifyMethod=method==='phone'?'verifyPhone':'verifyEmail';
+  expect((await calls(page)).filter(c=>c.method===verifyMethod)).toHaveLength(1);
+  await page.clock.runFor(60000);
+  await page.evaluate(()=>{(window as any).signInFixture.verificationFailure=null;});
+  await dialog.getByRole('button',{name:'Resend',exact:true}).click();
+  expect((await calls(page)).filter(c=>c.method===(method==='phone'?'startPhone':'startEmail'))).toHaveLength(2);
+  await dialog.getByLabel('Code',{exact:true}).fill('123456');
+  await dialog.getByRole('button',{name:'Verify',exact:true}).click();
+  await agent(page,'cloud');expect((await fixture(page)).saved).toBe(true);
+  await noHandOff(page);
+ });
+}
