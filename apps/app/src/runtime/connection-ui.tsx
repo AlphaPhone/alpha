@@ -3163,7 +3163,7 @@ export const connectionController = {
     await ensureResident();
     }
   },
-  /** Without the Alpha Cloud cutover (alpha-cloud-cutover.ts): opens the current Cloud's hosted billing
+  /** Without the Alpha Cloud cutover (alphaCloudCutover, cloud-deployment.generated.ts): opens the current Cloud's hosted billing
    * page; no purchase or account change happens here. With it: opens the in-app plan manager
    * (cloud-plan-ui.tsx), where nothing is bought or changed until the owner acts. */
   async residentManagePlan() {
