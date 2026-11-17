@@ -944,8 +944,41 @@ export function collectNotices(root = ROOT, {packagedRuntime = false} = {}) {
     ...mapDataEntries(root),
   ];
   applyReasons(root, entries, warnings, packagedRuntime);
-  const clean = entries.map(finishEntry).sort((a, b) => a.name.localeCompare(b.name, 'en') || a.version.localeCompare(b.version, 'en'));
+  const clean = mergeNotices(entries).map(finishEntry).sort((a, b) => a.name.localeCompare(b.name, 'en') || a.version.localeCompare(b.version, 'en'));
   return {entries: clean, errors, warnings};
+}
+
+/** Combine licence expressions without losing any term: identical ones stay as they are, AND-only
+ *  expressions take the union of their terms, and anything else is conjoined in parentheses. */
+export function mergeLicences(a: string, b: string) {
+  if (a === b) return a;
+  const terms = (value: string) => value.split(/\s+AND\s+/).map(term => term.trim()).filter(Boolean);
+  if (![a, b].some(value => /\bOR\b|\bWITH\b|[()]/.test(value)))
+    return [...new Set([...terms(a), ...terms(b)])].join(' AND ');
+  return `(${a}) AND (${b})`;
+}
+
+/** One notice per component and version: a package reached through more than one source (the
+ *  app, a vendored asset, the packaged runtime) is listed once with every licence term, source,
+ *  text and flag it was found with. */
+export function mergeNotices<T extends NoticeDraft>(entries: readonly T[]): T[] {
+  const merged = new Map<string, T>();
+  for (const entry of entries) {
+    const key = `${entry.name}\0${entry.version}`;
+    const prior = merged.get(key);
+    if (!prior) { merged.set(key, {...entry}); continue; }
+    const join = (left = '', right = '', separator: string) =>
+      !left ? right : !right || left === right || left.split(separator).includes(right) ? left : `${left}${separator}${right}`;
+    merged.set(key, {
+      ...prior,
+      license: mergeLicences(prior.license, entry.license),
+      source: join(prior.source, entry.source, '\n'),
+      text: join(normalizeText(prior.text ?? ''), normalizeText(entry.text ?? ''), '\n\n'),
+      ...(prior.textSource || entry.textSource ? {textSource: join(prior.textSource, entry.textSource, '\n')} : {}),
+      ...(prior._flags || entry._flags ? {_flags: [...new Set([...(prior._flags ?? []), ...(entry._flags ?? [])])]} : {}),
+    });
+  }
+  return [...merged.values()];
 }
 
 /** Public form of an entry: classify its licence, order its flags and state what each obliges. */
