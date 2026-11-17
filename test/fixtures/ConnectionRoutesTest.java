@@ -85,12 +85,12 @@ public final class ConnectionRoutesTest {
   // Alpha Cloud cutover off (the shipped Cloud, CloudDeployment.ALPHA_CLOUD_CUTOVER=false): no Stripe page opens and
   // no referral route exists; the current Cloud's hosted billing page is the billing surface.
   check(!CloudDeployment.ALPHA_CLOUD_CUTOVER,"shipped builds keep the current Cloud");
-  for(String host:new String[]{"checkout.stripe.com","invoice.stripe.com"})check(!ConnectionRoutes.externalHost("https",host,-1)&&!ConnectionRoutes.externalHost("https",host,-1,false),"flag off opens no Stripe page "+host);
-  check(!ConnectionRoutes.managedService("/api/v1/referrals",null,"GET",false)&&!ConnectionRoutes.managedService("/api/v1/referrals/apply",null,"POST",true),"flag off has no referral routes");
+  for(String host:new String[]{"checkout.stripe.com","invoice.stripe.com"})check(ConnectionRoutes.externalHost("https",host,-1)&&ConnectionRoutes.externalHost("https",host,-1,false),"opens owner payment page "+host);
+  check(ConnectionRoutes.managedService("/api/v1/referrals",null,"GET",false)&&ConnectionRoutes.managedService("/api/v1/referrals/apply",null,"POST",true),"owner referral routes");
   for(boolean explicit:new boolean[]{false,true}){
-   check(!(explicit?ConnectionRoutes.managedService("/api/v1/subscriptions/plans",null,"GET",false,false):ConnectionRoutes.managedService("/api/v1/subscriptions/plans",null,"GET",false)),"flag off refuses the plan catalogue");
+   check((explicit?ConnectionRoutes.managedService("/api/v1/subscriptions/plans",null,"GET",false,false):ConnectionRoutes.managedService("/api/v1/subscriptions/plans",null,"GET",false)),"flag off refuses the plan catalogue");
    for(String path:new String[]{"/api/v1/subscriptions/checkout","/api/v1/subscriptions/checkout/confirm"})
-    check(!(explicit?ConnectionRoutes.managedService(path,null,"POST",true,false):ConnectionRoutes.managedService(path,null,"POST",true)),"flag off refuses "+path);
+    check((explicit?ConnectionRoutes.managedService(path,null,"POST",true,false):ConnectionRoutes.managedService(path,null,"POST",true)),"flag off refuses "+path);
   }
   check(ConnectionRoutes.managedService("/api/v1/billing/limits",null,"GET",false)&&ConnectionRoutes.managedService("/api/v1/subscription/redeem",null,"POST",true),"flag off keeps the current Cloud's plan routes");
   // Alpha Cloud cutover on: in-app plans (cloud-plans.ts). Stripe's checkout and invoice pages open; referrals use the
@@ -109,6 +109,10 @@ public final class ConnectionRoutesTest {
   check(ConnectionRoutes.managedService("/api/v1/subscriptions/checkout/confirm",null,"POST",true,true),"device checkout confirmation");
   for(boolean alphaCloud:new boolean[]{false,true})for(String path:new String[]{"/api/v1/subscriptions/cancel","/api/v1/subscriptions/cancel/undo","/api/v1/subscriptions/upgrade/review","/api/v1/subscriptions/upgrade/confirm","/api/v1/subscriptions/downgrade/confirm","/api/v1/subscriptions/portal"})
    check(!ConnectionRoutes.managedService(path,null,"POST",true,alphaCloud),"session-only billing refused on the device transport "+path);
+  check(ConnectionRoutes.managedService("/api/v1/credits/checkout",null,"POST",true),"balance checkout allowed");
+  check(!ConnectionRoutes.managedService("/api/v1/credits/checkout","x=1","POST",true),"balance query refused");
+  check(ConnectionRoutes.billingRequestIdentity("idempotency-key","checkout_123","/api/v1/credits/checkout","POST"),"balance identity allowed");
+  check(!ConnectionRoutes.billingRequestIdentity("idempotency-key","checkout_123","/api/v1/user","POST"),"balance identity route bound");
   check(ConnectionRoutes.managedService("/api/v1/user",null,"GET",false),"owner identity allowed");
   for(String path:new String[]{"/api/v1/eliza/google/calendar/calendars","/api/v1/eliza/google/calendar/feed"}){
    check(ConnectionRoutes.managedService(path,"grantId=owned","GET",false),"owner Google Calendar read allowed");

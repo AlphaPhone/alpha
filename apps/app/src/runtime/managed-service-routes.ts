@@ -28,7 +28,8 @@ export function managedServiceRequest(url:string,method:string,hasBody=false,{al
  if(mapsTilePath(path))return method==='GET'&&!parsed.search&&!hasBody;
  // Alpha Cloud cutover only, in-app plans (cloud-plans.ts): the catalogue, the device-key checkout and its
  // confirmation, and referrals. Plan changes and cancellation never use this transport (native billing authority).
- if(alphaCloud){
+ if(path==='/api/v1/credits/checkout')return method==='POST'&&!parsed.search&&hasBody;
+ {
   if(path==='/api/v1/subscriptions/plans')return method==='GET'&&!parsed.search&&!hasBody;
   if(BILLING_POSTS.has(path))return method==='POST'&&!parsed.search&&hasBody;
   if(path==='/api/v1/referrals')return method==='GET'&&!parsed.search&&!hasBody;

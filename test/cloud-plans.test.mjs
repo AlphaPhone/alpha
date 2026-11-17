@@ -107,16 +107,18 @@ test('billing operations carry only their own fields',()=>{
  assert.notEqual(plans.billingOperationProblem({operation:'portal'}),null);
 });
 
-test('without the Alpha Cloud cutover the renderer route filter admits none of the in-app plan routes (native: connection-routes.test.mjs)',()=>{
+test('the shipped renderer admits owner billing on its existing Cloud without changing deployment',()=>{
  const api=productionCloud.api;
  assert.equal(alphaCloudCutover,false,'shipped builds keep the current Cloud');
  for(const [path,method,body] of [['/api/v1/subscriptions/plans','GET',false],['/api/v1/subscriptions/checkout','POST',true],['/api/v1/subscriptions/checkout/confirm','POST',true],['/api/v1/referrals','GET',false],['/api/v1/referrals/apply','POST',true]]){
-  assert.equal(allowed(api+path,method,body),false,`default ${method} ${path}`);
-  assert.equal(allowed(api+path,method,body,{alphaCloud:false}),false,`flag off ${method} ${path}`);
+  assert.equal(allowed(api+path,method,body),true,`default ${method} ${path}`);
+  assert.equal(allowed(api+path,method,body,{alphaCloud:false}),true,`flag off ${method} ${path}`);
  }
  // The current Cloud's own routes are unchanged.
  assert.equal(allowed(api+'/api/v1/billing/limits','GET'),true);
  assert.equal(allowed(api+'/api/v1/subscription/redeem','POST',true),true);
+ assert.equal(allowed(api+'/api/v1/credits/checkout','POST',true),true);
+ assert.equal(allowed(api+'/api/v1/credits/checkout?x=1','POST',true),false);
 });
 
 test('with the Alpha Cloud cutover the device transport admits the plan catalogue, checkout and referrals, never plan changes',()=>{

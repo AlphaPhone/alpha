@@ -23,7 +23,7 @@ final class ConnectionRoutes {
   return new CloudConnectionPolicy(new CloudConnectionPolicy.Hosts(
    CloudDeployment.PRODUCTION_API_HOST,CloudDeployment.STAGING_API_HOST,CloudDeployment.PRODUCTION_WEB_HOST,CloudDeployment.STAGING_WEB_HOST,
    CloudDeployment.PRODUCTION_SERVICES_HOST,CloudDeployment.STAGING_SERVICES_HOST,
-   alphaCloud?java.util.Set.of("accounts.google.com",CloudConnectionPolicy.SUBSCRIPTION_CHECKOUT_HOST,STRIPE_INVOICE_HOST):java.util.Collections.singleton("accounts.google.com")));
+   java.util.Set.of("accounts.google.com",CloudConnectionPolicy.SUBSCRIPTION_CHECKOUT_HOST,STRIPE_INVOICE_HOST)));
  }
  private static final CloudConnectionPolicy CURRENT_CLOUD=policy(false),ALPHA_CLOUD=policy(true);
  static final CloudConnectionPolicy POLICY=CloudDeployment.ALPHA_CLOUD_CUTOVER?ALPHA_CLOUD:CURRENT_CLOUD;
@@ -50,8 +50,9 @@ final class ConnectionRoutes {
    ||"/api/v1/referrals".equals(path)||"/api/v1/referrals/apply".equals(path);
  }
  static boolean managedService(String path,String query,String method,boolean hasBody,boolean alphaCloud){
-  if(cloudSignInHandOff(path)||!alphaCloud&&inAppPlanRoute(path))return false;
-  return POLICY.managedService(path,query,method,hasBody,false)||alphaCloud&&referral(path,query,method,hasBody);
+  if(cloudSignInHandOff(path))return false;
+  if("/api/v1/credits/checkout".equals(path))return "POST".equals(method)&&query==null&&hasBody;
+  return POLICY.managedService(path,query,method,hasBody,false)||referral(path,query,method,hasBody);
  }
  static boolean calendarSync(String path,String query,String method,boolean hasBody){return CloudConnectionPolicy.calendarSync(path,query,method,hasBody);}
  static boolean externalHost(String scheme,String host,int port){return POLICY.externalHost(scheme,host,port,false);}
@@ -59,6 +60,7 @@ final class ConnectionRoutes {
  static boolean externalCliLogin(String host,String path){return POLICY.externalCliLogin(host,path,false);}
  static boolean admittedHeader(String name){return CloudConnectionPolicy.admittedHeader(name,false);}
  static boolean mapsRequestIdentity(String name,String value,String path,String method){return CloudConnectionPolicy.mapsRequestIdentity(name,value,path,method);}
+ static boolean billingRequestIdentity(String name,String value,String path,String method){return "idempotency-key".equals(name)&&"/api/v1/credits/checkout".equals(path)&&"POST".equals(method)&&value!=null&&value.matches("[A-Za-z0-9][A-Za-z0-9._:-]{7,127}");}
  /**
   * Syntax-only bound on a declared device capability list (test-mocks remote and development Cloud agents). The agent
   * validates the header itself (device-action-routes) and the value carries no authority, so any well-formed name passes,
