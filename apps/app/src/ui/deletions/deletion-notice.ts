@@ -14,7 +14,7 @@ export const DELETION_NOTICE_TEXT = {
   paused:
     "Deletion paused. Undo to keep it, then review again if you still want to delete.",
   queued: "Deletion queued for 10 seconds.",
-  uncertain: "Deletion outcome needs review. It will not be repeated.",
+  uncertain: "Deletion outcome needs review and won't be repeated.",
   verifying: "Deletion is being verified.",
   statusUnavailable:
     "Pending deletion status is unavailable. Refresh before making another change.",
