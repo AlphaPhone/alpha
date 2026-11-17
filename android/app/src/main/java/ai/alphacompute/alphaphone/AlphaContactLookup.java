@@ -17,6 +17,26 @@ import android.provider.ContactsContract;
 final class AlphaContactLookup {
  private AlphaContactLookup() {}
 
+ /**
+  * One ContactsCatalog page as contact search results. A contact the catalog could not read
+  * completely is listed there by id only ({@code incomplete}); it is left out, so one oversized
+  * contact never fails the whole search.
+  */
+ static org.json.JSONArray searchRows(org.json.JSONArray rows, java.util.function.UnaryOperator<String> clip) throws org.json.JSONException {
+  org.json.JSONArray records = new org.json.JSONArray();
+  for (int i = 0; i < rows.length(); i++) {
+   org.json.JSONObject row = rows.getJSONObject(i), item = new org.json.JSONObject();
+   if (row.optBoolean("incomplete")) continue;
+   item.put("id", row.getString("id")); item.put("lookupKey", row.getString("lookup").length() > 512 ? "" : row.getString("lookup"));
+   item.put("displayName", clip.apply(row.getString("name"))); item.put("starred", row.getBoolean("starred"));
+   org.json.JSONArray phones = new org.json.JSONArray(), emails = new org.json.JSONArray();
+   for (int j = 0; j < row.getJSONArray("phones").length(); j++) phones.put(clip.apply(row.getJSONArray("phones").getString(j)));
+   for (int j = 0; j < row.getJSONArray("emails").length(); j++) emails.put(clip.apply(row.getJSONArray("emails").getString(j)));
+   item.put("phoneNumbers", phones); item.put("emailAddresses", emails); records.put(item);
+  }
+  return records;
+ }
+
  /** The display name of the contact whose number is exactly this one, or null. */
  static String name(Context context, String number, CancellationSignal cancel) {
   Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number));
