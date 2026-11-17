@@ -199,7 +199,7 @@ final class BillingAuthorityRoutes {
 
  /** What the billing authority needs from the phone and Cloud; the plugin supplies the real ones. */
  interface Ports {
-  /** Whether this host supplies account-bound billing. */
+  /** Whether in-app billing is available; every operation refuses without contacting Cloud when it is not. */
   boolean enabled();
   /** The stored `cloud:production` slot, or null when signed out. */
   String savedCredential() throws Exception;

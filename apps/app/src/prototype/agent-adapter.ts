@@ -84,7 +84,6 @@ import { WorkflowReminderOverflow, workflowReminderRows } from '../runtime/workf
 import { getMapsSelectedObject, clearMapsSelection } from '../maps/agent-context';
 import { alphaClient, AlphaClientError, type AlphaView } from '../runtime/alpha-client';
 import { privateLocalPreviewEnabled, testMocksEnabled } from '../build-flags';
-import { alphaCloudCutover } from '../runtime/cloud-deployment.generated.ts';
 import { managePlanCardCopy } from '../runtime/cloud-plans';
 import { DailyApps } from '../daily';
 import { isAndroid } from '../native';
@@ -2166,8 +2165,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // A provider-less turn of the on-device agent (no plan, offline, signed out) carries the
           // honest in-conversation answer and its plan action (Redeem / Choose a plan, Sign in, Check again).
           const failureKind=(e as {failureKind?:unknown}).failureKind as string,limit=(e as {serviceLimit?:unknown}).serviceLimit;
-          // A plan or billing refusal offers Cloud's plan page on the same bubble; nothing is bought or upgraded here.
-          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...managePlanCardCopy(limit,alphaCloudCutover,selectedCloudName()),managePlan:true}:undefined;
+          // A plan or billing refusal offers the in-app plans on the same bubble (every Cloud); nothing is bought until Stripe.
+          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...managePlanCardCopy(limit,true,selectedCloudName()),managePlan:true}:undefined;
           const planCard=planActionCard((e as {planAction?:unknown}).planAction)??managePlan;
           // These refusals come before any model output: the streamed text is upstream's failure prose, not a reply.
           const beforeOutput=limit!==undefined||REFUSED_BEFORE_OUTPUT.has(failureKind);

@@ -143,9 +143,9 @@
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/auth/callback"/></intent-filter>
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/gmail/callback"/></intent-filter>
   </activity>
-  <!-- Cloud returns an in-app checkout to /alphaphone/billing/return (cloud-plans.ts). Opening the app
-       is the whole job; the renderer then confirms the checkout. -->
-  <activity-alias android:name=".AlphaCloudBillingReturn" android:targetActivity=".MainActivity" android:enabled="${alphaCloudBillingReturn}" android:exported="true">
+  <!-- Cloud returns an in-app checkout or balance top-up to /alphaphone/billing/return (cloud-plans.ts), on every Cloud.
+       Opening the app is the whole job; the renderer then confirms the checkout. -->
+  <activity-alias android:name=".AlphaCloudBillingReturn" android:targetActivity=".MainActivity" android:enabled="true" android:exported="true">
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/billing/return"/></intent-filter>
   </activity-alias>
  </application>

@@ -30,7 +30,8 @@ import org.json.JSONObject;
  * names) and ends after its JWT expiry (at most one hour), on {@link #clear}, when the app process
  * ends, or as soon as that credential changes: sign-out, a new key or another account.
  *
- * The current Cloud account authorizes each operation with a fresh session.
+ * In-app billing is available on every Cloud this build uses (the current Cloud, or Alpha Cloud with
+ * CloudDeployment.ALPHA_CLOUD_CUTOVER); the cutover flag chooses the Cloud, not whether billing exists.
  *
  * Every request goes to this build's production Cloud API (CloudDeployment) on one of the fixed
  * routes in {@link BillingAuthorityRoutes}.

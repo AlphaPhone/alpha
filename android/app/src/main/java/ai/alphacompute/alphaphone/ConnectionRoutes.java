@@ -15,9 +15,8 @@ final class ConnectionRoutes {
  /** The hosted invoice an upgrade that needs payment action answers (Stripe's invoice page only). */
  static final String STRIPE_INVOICE_HOST="invoice.stripe.com";
  /**
-  * The external hosts this build opens: Google consent always; with the Alpha Cloud cutover
-  * (CloudDeployment.ALPHA_CLOUD_CUTOVER) also the Stripe pages an in-app checkout or plan upgrade
-  * answers (cloud-plans.ts). Without it the current Cloud's hosted billing page is the only billing surface.
+  * The external hosts this build opens: Google consent and the Stripe pages an in-app checkout, balance
+  * top-up or plan upgrade answers (cloud-plans.ts), on whichever Cloud this build uses.
   */
  static CloudConnectionPolicy policy(boolean alphaCloud){
   return new CloudConnectionPolicy(new CloudConnectionPolicy.Hosts(
@@ -42,8 +41,8 @@ final class ConnectionRoutes {
  static boolean cloudSignInHandOff(String path){return path!=null&&("/api/auth/cli-session".equals(path)||path.startsWith("/api/auth/cli-session/"));}
  static boolean managedService(String path,String query,String method,boolean hasBody){return managedService(path,query,method,hasBody,CloudDeployment.ALPHA_CLOUD_CUTOVER);}
  /**
-  * The in-app plan routes the device key uses (the plan catalogue, checkout and its confirmation, which the shared
-  * route set admits, and referrals) exist only with the Alpha Cloud cutover. Without it they are refused here.
+  * The in-app plan routes the device key uses: the plan catalogue, checkout and its confirmation (which the shared
+  * route set admits) and referrals. They are admitted on every Cloud; plan changes use the native billing authority.
   */
  static boolean inAppPlanRoute(String path){
   return CloudConnectionPolicy.SUBSCRIPTION_PLANS_PATH.equals(path)||"/api/v1/subscriptions/checkout".equals(path)||"/api/v1/subscriptions/checkout/confirm".equals(path)

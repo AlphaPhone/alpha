@@ -54,8 +54,6 @@ android {
  }
  defaultConfig {
   manifestPlaceholders.put('appLinkHost', appLinkHost)
-  // Alpha Cloud cutover (cloud-deployment.generated.gradle): the billing return App Link alias is enabled only then.
-  manifestPlaceholders.put('alphaCloudBillingReturn', 'true')
   manifestPlaceholders.put('alphaUpdateChannel', 'public')
   manifestPlaceholders.put('alphaUpdateManifestSha256', 'sha256:' + updateManifestSha256)
   // Constant: the value the resident agent is launched with (AlphaLocalAgentPlugin).

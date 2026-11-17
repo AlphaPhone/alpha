@@ -32,7 +32,7 @@ import {renderSensePermissions} from "../vendor/eliza/packages/os/scripts/androi
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {sha256, sha256File} from "./sha256.ts";
-import { ALPHA_CLOUD_CUTOVER, CLOUD_DEPLOYMENT } from "./cloud-deployment-policy.ts";
+import { CLOUD_DEPLOYMENT } from "./cloud-deployment-policy.ts";
 import { readUpstreamPin } from "./upstream-pin.ts";
 import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';

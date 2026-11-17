@@ -432,7 +432,7 @@ test("APK verification rejects and names an extra web VIEW filter", () => {
     ["Unexpected web VIEW intent filter com.example.Viewer https://(any host) (any path); add it to the allowed set in scripts/verify-apks.ts only if it is deliberate"]);
 });
 
-test("billing return verification distinguishes disabled and enabled app links", () => {
+test("the billing return alias is an expected live App Link, and a mismatched enabled state is reported", () => {
   const alias = enabled => ["    E: activity-alias (line=30)",
     '      A: http://schemas.android.com/apk/res/android:name(0x01010003)="ai.alphacompute.alphaphone.AlphaCloudBillingReturn" (Raw: "ai.alphacompute.alphaphone.AlphaCloudBillingReturn")',
     ...(enabled ? [] : ["      A: http://schemas.android.com/apk/res/android:enabled(0x0101000e)=(type 0x12)0x0"]),
@@ -443,11 +443,11 @@ test("billing return verification distinguishes disabled and enabled app links",
     '          A: http://schemas.android.com/apk/res/android:path(0x0101002a)="/alphaphone/billing/return" (Raw: "/alphaphone/billing/return")'].join("\n");
   const off = "ai.alphacompute.alphaphone.AlphaCloudBillingReturn https://eliza.app/alphaphone/billing/return [disabled]";
   const on = "ai.alphacompute.alphaphone.AlphaCloudBillingReturn https://eliza.app/alphaphone/billing/return";
-  // Flag off (shipped builds): the alias is declared disabled, so it resolves no intent.
+  // A build that declares the alias disabled matches only a list that expects it disabled.
   assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(alias(false))), [...allowedWebFilters, off]), []);
-  // An enabled alias in a flag-off build is an unexpected live App Link.
+  // An enabled alias against a list that expects it disabled is reported both ways.
   assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(alias(true))), [...allowedWebFilters, off]),
     [`Unexpected web VIEW intent filter ${on}; add it to the allowed set in scripts/verify-apks.ts only if it is deliberate`, `Missing web VIEW intent filter ${off}`]);
-  // Flag on: the alias is enabled.
+  // Shipped builds (every Cloud, in-app billing on): the alias is enabled and expected.
   assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(alias(true))), [...allowedWebFilters, on]), []);
 });
