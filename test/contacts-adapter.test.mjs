@@ -2,15 +2,17 @@
 // or Messages is involved: this proves the detail actions only open a prefilled view and the 200 cap.
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
 const dir=mkdtempSync(join(tmpdir(),'contacts-adapter-'));
-const output=await build({stdin:{contents:"export * from './apps/app/src/prototype/contacts-adapter.ts';export {applyListFilter,clearListFilter,currentListFilter} from './apps/app/src/runtime/comms-bar.ts';",resolveDir:resolve('.'),loader:'ts'},bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':'export function registerPlugin(){return new Proxy({},{get:(_,method)=>method==="then"?undefined:options=>globalThis.contactsPlugin(method,options)});}',loader:'js'}));}}]});
+const output=await build({stdin:{contents:"export * from './apps/app/src/prototype/contacts-adapter.ts';export {applyListFilter,clearListFilter,currentListFilter} from './apps/app/src/runtime/comms-bar.ts';export {contactsChanged} from './apps/app/src/prototype/contacts-changes.ts';",resolveDir:resolve('.'),loader:'ts'},bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':'export function registerPlugin(){return new Proxy({},{get:(_,method)=>method==="then"?undefined:options=>globalThis.contactsPlugin(method,options)});}',loader:'js'}));}}]});
 writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
-const {installContactsAdapter,contactSaveProblem,applyListFilter,clearListFilter,currentListFilter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const {installContactsAdapter,contactSaveProblem,applyListFilter,clearListFilter,currentListFilter,contactsChanged}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const settle=()=>new Promise(r=>setTimeout(r,5));
+// Views earlier tests left mounted; a test of the shared change signal retires them first.
+const mounted=[];
 function mount(list,editor=async()=>({}),base={render:st=>({contactsRows:st.list,d:st.open?{}:null})}){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
  const views={contacts:{...base}};
  class Shell{view='contacts';S(){return {view:this.view};}vget(){return {q:''};}setState(){}toast(message){notices.push(message);}}
- installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();return {views,calls,shell,Shell,notices};}
+ installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();mounted.push(shell);return {views,calls,shell,Shell,notices};}
 const ada={id:'1',name:'Ada',phones:['+15555550100','+15555550101'],emails:['ada@example.com']};
 
 test('detail rows open Phone or Messages with the number and never dial or send',async()=>{
@@ -40,7 +42,7 @@ function mountBook(answers){const calls=[],sets=[],toasts=[];globalThis.mvpViews
  globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status'||method==='requestPermissions')return {available:true,readable:true,writable:answers.writable!==false};if(method==='list')return {contacts:[ada],more:false};const answer=answers[method];return typeof answer==='function'?answer(options):answer;};
  const views={contacts:{render:st=>({d:st.open?{}:null}),back:()=>false}};
  class Shell{view='contacts';S(){return {view:this.view};}vget(){return {q:''};}setState(){}toast(text){toasts.push(text);}}
- installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();const api={open(){},set:patch=>sets.push(patch)};
+ installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();mounted.push(shell);const api={open(){},set:patch=>sets.push(patch)};
  return {views,calls,sets,toasts,api,shell,Shell,model:(st={open:'1'})=>views.contacts.render(st,api)};}
 const typeInto=(handler,value)=>handler({target:{value}});
 
@@ -225,7 +227,7 @@ test('the list filter is a provider query on the device and the bar carries no b
   render:()=>({filter:{apply:f=>{local.push(['apply',f]);return true;},clear:()=>local.push(['clear']),current:()=>({query:'gra',label:'Grace',by:'alpha'})}}),
   bar:st=>{barRows.push(st.list);return {closed:{kind:'filter'},briefing:'Ada called at noon.'};}}};
  class Shell{view='contacts';S(){return {view:this.view};}vget(){return {q:''};}setState(){}toast(){}}
- installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();await settle();
+ installContactsAdapter(Shell,views);const shell=new Shell();shell.componentDidMount();mounted.push(shell);await settle();
  const api={set(){},open(){}};views.contacts.render({},api);
  const read=()=>calls.filter(([m])=>m==='list').at(-1)[1];
  assert.equal(applyListFilter('contacts',{query:'gra',label:'Grace',by:'alpha'}),true);await settle();
@@ -310,10 +312,10 @@ test('a new contact can take notes',async()=>{
  assert.deepEqual(book.calls.find(([m])=>m==='save')[1],{displayName:'',givenName:'',familyName:'',phoneNumbers:[],emailAddresses:[],notes:'Met at the library'});
 });
 
-// Alpha's own contact writes from chat (image-telephony.ts) announce alpha:contacts-committed.
+// Alpha's own contact writes from chat (image-telephony.ts) announce themselves through contacts-changes.ts.
 test('an agent contact write refreshes the open Contacts view, closes a deleted contact and holds edits after an unknown outcome',async()=>{
- const previous=globalThis.window;globalThis.window=new EventTarget();
- try{
+ for(const shell of mounted.splice(0))shell.componentWillUnmount();
+ {
   let record=detail('a1'.repeat(32)),list=[ada];
   const book=mountBook({get:()=>record});
   globalThis.contactsPlugin=(inner=>async(method,options)=>method==='list'?(book.calls.push([method,options]),{contacts:list,more:false}):inner(method,options))(globalThis.contactsPlugin);
@@ -322,18 +324,18 @@ test('an agent contact write refreshes the open Contacts view, closes a deleted 
   const reads=method=>book.calls.filter(([m])=>m===method).length,listsBefore=reads('list'),getsBefore=reads('get');
   // Alpha changed the open contact's number.
   record={...detail('b2'.repeat(32)),phoneNumbers:[{number:'+15555550148',type:'mobile'}]};
-  window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'saved'}}));await settle();await settle();
+  contactsChanged({unconfirmed:false});await settle();await settle();
   assert.equal(reads('list'),listsBefore+1,'the list is read again');assert.equal(reads('get'),getsBefore+1,'and so is the open contact');
   assert.equal(book.model().d.fields[0].v,'(555) 555-0148','the screen shows what the phone holds now');
   // Alpha deleted it: the contact closes instead of showing fields that are gone.
-  list=[];window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'deleted'}}));await settle();await settle();
+  list=[];contactsChanged({unconfirmed:false});await settle();await settle();
   assert.deepEqual(book.sets.at(-1),{open:null});
   // An unconfirmed write: the owner must read Contacts again before editing.
-  list=[ada];window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'unknown'}}));await settle();await settle();
+  list=[ada];contactsChanged({unconfirmed:true});await settle();await settle();
   assert.equal(book.model().nativeStatus,'Outcome unknown · refresh Contacts');
   book.model({}).addNew();await settle();assert.equal(book.model({}).ed.open,false);assert.deepEqual(book.toasts.at(-1),'Refresh Contacts first');
   book.model({}).nativeRefresh();await settle();assert.notEqual(book.model({}).nativeStatus,'Outcome unknown · refresh Contacts','an explicit refresh clears it');
   // After the view is gone nothing listens.
-  const lists=reads('list');book.shell.componentWillUnmount();window.dispatchEvent(new CustomEvent('alpha:contacts-committed',{detail:{status:'saved'}}));await settle();assert.equal(reads('list'),lists);
- }finally{globalThis.window=previous;}
+  const lists=reads('list');book.shell.componentWillUnmount();contactsChanged({unconfirmed:false});await settle();assert.equal(reads('list'),lists);
+ }
 });

@@ -21,7 +21,7 @@ public class CalendarAgentCrudInstrumentedTest {
  private void until(String condition)throws Exception{for(int i=0;i<150;i++){if("true".equals(eval("Boolean("+condition+")")))return;SystemClock.sleep(100);}fail("Missing Calendar native fixture condition");}
  private void nativeClick(String label)throws Exception{for(int i=0;i<120;i++){String early=eval("window.__calendarAgentResult ? JSON.stringify({status:window.__calendarAgentResult.status,error:window.__calendarAgentResult.error}) : null");if(!"null".equals(early))fail("Calendar operation settled before review control "+label+": "+early);AccessibilityNodeInfo root=InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();if(root!=null){java.util.ArrayDeque<AccessibilityNodeInfo> queue=new java.util.ArrayDeque<>();queue.add(root);while(!queue.isEmpty()){AccessibilityNodeInfo node=queue.removeFirst();if(node.getText()!=null&&label.equalsIgnoreCase(node.getText().toString())&&node.isVisibleToUser()&&node.isClickable()&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK))return;for(int child=0;child<node.getChildCount();child++){AccessibilityNodeInfo value=node.getChild(child);if(value!=null)queue.add(value);}}}SystemClock.sleep(100);}fail("Native Calendar control missing: "+label);}
  private JSONObject result()throws Exception{until("window.__calendarAgentResult");JSONObject value=new JSONObject(eval("window.__calendarAgentResult"));assertFalse(value.has("error"));if("applied".equals(value.optString("status"))||"cancelled".equals(value.optString("status")))assertReviewReleased();return value;}
- private void assertReviewReleased()throws Exception{WebViewTestDriver.withActivity(MainActivity.class,activity->{try{AlphaCalendarPlugin plugin=(AlphaCalendarPlugin)activity.getBridge().getPlugin("AlphaCalendar").getInstance();java.lang.reflect.Field busy=ai.eliza.plugins.calendar.CalendarPlugin.class.getDeclaredField("deleting"),dialog=ai.eliza.plugins.calendar.CalendarPlugin.class.getDeclaredField("deleteDialog");busy.setAccessible(true);dialog.setAccessible(true);assertFalse("Terminal receipt must release native review gate",((java.util.concurrent.atomic.AtomicBoolean)busy.get(plugin)).get());assertNull("Terminal receipt must follow dialog dismissal",dialog.get(plugin));}catch(ReflectiveOperationException error){throw new AssertionError(error);}});}
+ private void assertReviewReleased()throws Exception{WebViewTestDriver.withActivity(MainActivity.class,activity->{try{AlphaCalendarPlugin plugin=(AlphaCalendarPlugin)activity.getBridge().getPlugin("AlphaCalendar").getInstance();java.lang.reflect.Field busy=CalendarProviderPlugin.class.getDeclaredField("deleting"),dialog=CalendarProviderPlugin.class.getDeclaredField("deleteDialog");busy.setAccessible(true);dialog.setAccessible(true);assertFalse("Terminal receipt must release native review gate",((java.util.concurrent.atomic.AtomicBoolean)busy.get(plugin)).get());assertNull("Terminal receipt must follow dialog dismissal",dialog.get(plugin));}catch(ReflectiveOperationException error){throw new AssertionError(error);}});}
  // A dialog receipt confirms dismissal, but the Activity can regain focus a frame later.
  // Wait before a new reviewed request; never retry an operation that already settled.
  private void awaitReviewForeground()throws Exception{
@@ -36,7 +36,7 @@ public class CalendarAgentCrudInstrumentedTest {
  }
  private void begin(JSONObject operation)throws Exception{awaitReviewForeground();eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.executeAgent({operation:"+operation+",operationId:"+JSONObject.quote(java.util.UUID.randomUUID().toString())+"}).then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");}
  private JSONObject perform(JSONObject operation,String button)throws Exception{begin(operation);nativeClick(button);return result();}
- /** Upstream review wording (elizaOS/eliza#35913): the review names the calendar and its account and,
+ /** Alpha's review wording (CalendarProviderPlugin, from elizaOS/eliza#35913): the review names the calendar and its account and,
   * for a change, says no attendee is involved. Checked on screen before the button is pressed. */
  static final String[] CHANGE_REVIEW={"Calendar: On this phone","Account: Alpha Phone (this phone only)","No attendees are invited, changed or notified."};
  private void reviewShows(String... texts)throws Exception{
@@ -65,6 +65,23 @@ public class CalendarAgentCrudInstrumentedTest {
    target.put("revision",updated.getJSONObject("result").getString("revision"));JSONObject deletion=new JSONObject().put("type","calendar_delete").put("target",target);assertEquals("cancelled",perform(deletion,"Cancel").getString("status"));assertTrue(exists(context,id));
    JSONObject deleted=perform(deletion,"Delete event");assertEquals("applied",deleted.getString("status"));assertEquals(target.getString("revision"),deleted.getJSONObject("result").getString("revision"));assertFalse(exists(context,id));
   }finally{if(id>0)context.getContentResolver().delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,id),null,null);}
+ }
+ /** Ported from the shared Calendar consumer test (ConsumerBridgeFlowTest.workflowPermissionCallback):
+  * CalendarProviderPlugin's workflow read permission callback grants only READ_CALENDAR, then the
+  * foreground calendar listing works. Run in a disposable secondary user that has not been granted it. */
+ @Test public void workflowReadPermissionCallbackThenListing()throws Exception{
+  org.junit.Assume.assumeTrue("Explicit Calendar workflow permission gate","1".equals(InstrumentationRegistry.getArguments().getString("calendarWorkflowPermission")));
+  assertTrue("Never operate in owner user",android.os.Process.myUid()/100000>0);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  assertNotEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.READ_CALENDAR));
+  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   AppNavigation.liveMode();until("document.documentElement.dataset.activeView");
+   awaitReviewForeground();eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.requestWorkflowReadAccess().then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   nativeClick("Allow");assertEquals("granted",result().getString("status"));
+   assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.READ_CALENDAR));
+   awaitReviewForeground();eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.workflowCalendars().then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   assertEquals("ready",result().getString("status"));
+  }
  }
 
  // Patch 0041: direct save of all-day, chosen-zone and RRULE events with provider readback,

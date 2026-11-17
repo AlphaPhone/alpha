@@ -79,7 +79,7 @@ public final class BrowserContinuityInstrumentedTest {
   BrowserSnapshot result=new BrowserSnapshot();java.util.concurrent.atomic.AtomicReference<Exception> error=new java.util.concurrent.atomic.AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
    result.activity=activity;Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field namespace=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("namespace"),tabs=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs");namespace.setAccessible(true);tabs.setAccessible(true);result.namespace=(String)namespace.get(plugin);
+   java.lang.reflect.Field namespace=AlphaBrowserPlugin.class.getDeclaredField("namespace"),tabs=AlphaBrowserPlugin.class.getDeclaredField("tabs");namespace.setAccessible(true);tabs.setAccessible(true);result.namespace=(String)namespace.get(plugin);
    for(Object tab:((java.util.Map<?,?>)tabs.get(plugin)).values()){
     java.lang.reflect.Field profile=tab.getClass().getDeclaredField("profile"),frame=tab.getClass().getDeclaredField("frame");profile.setAccessible(true);frame.setAccessible(true);result.profiles.add((String)profile.get(tab));result.frames.add((android.view.View)frame.get(tab));
    }

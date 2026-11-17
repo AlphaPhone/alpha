@@ -277,7 +277,7 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await (await localDraftRow(page)).click();
   await expect(page.getByRole('textbox', {name: 'Subject', exact: true})).toHaveValue('Journey lost reply');
   await button(page, 'Send email').click();
-  await expect(review.getByRole('status')).toHaveText('Review the saved operation before starting another.');
+  await expect(review.getByRole('status')).toHaveText('Review the saved email action before starting another.');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
 
@@ -307,7 +307,7 @@ test('synthetic provider: a send reply that names another operation is not shown
   await setProvider(page, {wrongReceipt: true});
   await review.getByRole('button', {name: 'Send this email', exact: true}).click();
   // The reply is refused: no confirmation, no provider message ID from the foreign receipt, no second Send.
-  await expect(review.getByRole('status')).toHaveText('Gmail answered for a different request, so nothing was confirmed. Check the saved receipt before trying again; do not send this message again.');
+  await expect(review.getByRole('status')).toHaveText('Gmail answered for a different request, so nothing was confirmed. Check the saved receipt before trying again; don’t send this email again.');
   await expect(review).not.toContainText('"messageId"');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});

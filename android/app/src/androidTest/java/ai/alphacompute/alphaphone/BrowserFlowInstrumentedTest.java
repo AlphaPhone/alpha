@@ -85,7 +85,7 @@ public class BrowserFlowInstrumentedTest {
   AtomicReference<String> id=new AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
    Object plugin=main.getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field field=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("presentedId");field.setAccessible(true);id.set((String)field.get(plugin));
+   java.lang.reflect.Field field=AlphaBrowserPlugin.class.getDeclaredField("presentedId");field.setAccessible(true);id.set((String)field.get(plugin));
   }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
   return id.get();
  }
@@ -212,7 +212,7 @@ public class BrowserFlowInstrumentedTest {
  /** The presented native tab of AlphaBrowser, or null. Main thread only. */
  private static Object presentedTabObject(MainActivity main)throws ReflectiveOperationException{
   Object plugin=main.getBridge().getPlugin("AlphaBrowser").getInstance();
-  Class<?> host=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class;
+  Class<?> host=AlphaBrowserPlugin.class;
   Object id=field(host,plugin,"presentedId");
   return id==null?null:((Map<?,?>)field(host,plugin,"tabs")).get(id);
  }
@@ -223,7 +223,7 @@ public class BrowserFlowInstrumentedTest {
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
    Object tab=presentedTabObject(main);if(tab==null)return;Class<?> type=tab.getClass();
    WebView web=(WebView)field(type,tab,"web");
-   java.lang.reflect.Method eligible=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredMethod("canAutofill",type);eligible.setAccessible(true);
+   java.lang.reflect.Method eligible=AlphaBrowserPlugin.class.getDeclaredMethod("canAutofill",type);eligible.setAccessible(true);
    JSONObject state=new JSONObject();
    state.put("url",field(type,tab,"url"));state.put("engineUrl",String.valueOf(web.getUrl()));state.put("committed",field(type,tab,"committed"));state.put("loading",field(type,tab,"loading"));
    state.put("error",field(type,tab,"error"));state.put("shown",web.isShown());state.put("autofillEnabled",field(type,tab,"autofillEnabled"));

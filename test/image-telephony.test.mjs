@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const I = await import('../apps/app/src/prototype/image-telephony.ts');
+const C = await import('../apps/app/src/prototype/contacts-changes.ts');
 const {telephonyEffectAllowed} = await import('../apps/app/src/runtime/call-state.ts');
 
 const states = {
@@ -219,18 +220,16 @@ test('a contact write asks for write access when it is missing, and without it n
 });
 
 test('a contact write that reached the address book, or may have, is announced to the Contacts view', async () => {
-  const heard = [], previous = globalThis.window;
-  globalThis.window = new EventTarget();
-  globalThis.window.addEventListener('alpha:contacts-committed', event => heard.push(event.detail.status));
+  const heard = [], stop = C.onContactsChanged(change => heard.push(change.unconfirmed ? 'unknown' : 'written'));
   try {
     const guard = {allowed: async () => true};
     const run = (operation, ports = {}) => I.imageTelephonyAction(operation, 'op', {...bridge().ports, ...ports}, guard, signal());
     await run(operations.create); await run(operations.remove);
     await run(operations.create, {saveContact: async () => { throw Error('Reply lost after commit'); }});
-    assert.deepEqual(heard, ['saved', 'deleted', 'unknown']);
+    assert.deepEqual(heard, ['written', 'written', 'unknown']);
     // Nothing written, and other telephony actions: no announcement.
     await run(operations.remove, {ask: async () => null}); await run(operations.remove, {removeContact: async () => ({status: 'stale'})});
     await run(operations.call); await run(operations.text);
     assert.equal(heard.length, 3);
-  } finally { globalThis.window = previous; }
+  } finally { stop(); }
 });

@@ -78,7 +78,7 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  @PluginMethod public void describeSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.describe(call,()->SelectedDocumentAccess.documents(getContext())));}
  @PluginMethod public void readSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.read(call,()->SelectedDocumentAccess.documents(getContext())));}
  @PluginMethod public void openSelected(PluginCall call){Activity activity=getActivity();documents(call,()->SelectedDocumentCalls.open(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
- @PluginMethod public void shareSelected(PluginCall call){Activity activity=getActivity();documents(call,()->SelectedDocumentCalls.share(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
+ @PluginMethod public void shareSelected(PluginCall call){Activity activity=getActivity();documents(call,()->AlphaShareSheet.shareSelected(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
  @PluginMethod public void forgetSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.forget(call,()->SelectedDocumentAccess.documents(getContext())));}
  private void documents(PluginCall call,Runnable task){PluginWorkers.submit(worker,task,()->call.reject("Saved document access is unavailable"));}
  private Integer clockInteger(JSObject data,String key) {

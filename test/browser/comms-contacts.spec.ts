@@ -153,6 +153,54 @@ test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-view
     await expect.poll(()=>page.evaluate(()=>(window as any).telephonyInputs.filter(([method]:any)=>method==='contacts.save').length)).toBe(1);
     expect(await page.evaluate(()=>(window as any).telephonyInputs.find(([method]:any)=>method==='contacts.save')[1])).toEqual({displayName:'Review Person',givenName:'Review',familyName:'Person',notes:'Entered by owner',phoneNumbers:[{number:'+15550100888',type:'mobile'}],emailAddresses:[{address:'review@example.invalid',type:'home'}]});
   });
+  test('a contact saved in the in-app editor joins the open list without leaving Contacts', async ({page}) => {
+    await setupTelephony(page, {preview: true});
+    await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();
+    await expect(page.getByRole('button', {name: /Carmen Ruiz/}).first()).toBeVisible();
+    await page.getByRole('button', {name: 'New contact', exact: true}).click();
+    await page.getByRole('textbox', {name: 'First name', exact: true}).fill('Nia');
+    await page.getByRole('textbox', {name: 'Last name', exact: true}).fill('Brooks');
+    await page.getByRole('textbox', {name: 'Phone', exact: true}).fill('+15550100199');
+    await page.locator('[data-alpha-contact-save]').click();
+    await expect.poll(() => page.evaluate(() => (window as any).telephonyInputs.filter(([method]: any) => method === 'contacts.save').length)).toBe(1);
+    // Back from the new contact's detail lands on the list, which already holds it.
+    await page.locator('[data-alpha-contact-back]').click();
+    await expect(row(page, 'Nia Brooks')).toBeVisible();
+  });
+
+  test('a contact an approved Alpha action adds appears in the open list without leaving Contacts', async ({page}) => {
+    await page.route(/\/src\/runtime\/connection-ui\.tsx/, async route => {
+      const response = await route.fetch();
+      const body = (await response.text()).replace(/setDeviceExecutor\(executor\)\s*\{\s*deviceExecutor = executor;/, match => `${match} globalThis.__installedDeviceExecutor = executor;`);
+      if (!body.includes('__installedDeviceExecutor')) throw Error('setDeviceExecutor not found in connection-ui');
+      await route.fulfill({response, body});
+    });
+    await setupTelephony(page, {preview: true});
+    await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();
+    await expect(page.getByRole('button', {name: /Carmen Ruiz/}).first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__installedDeviceExecutor)).toBe('function');
+    const reads = () => page.evaluate(() => (window as any).telephonyInputs.filter(([method]: any) => method === 'contacts.list').length);
+    const before = await reads();
+    // The review fence compares the agent session and screen context; hold both steady as a live review would.
+    const status = await page.evaluate(async () => {
+      const {connectionController} = await import('/src/runtime/connection-ui.tsx' as string);
+      const {alphaClient} = await import('/src/runtime/alpha-client.ts' as string);
+      const session = {ownerId: 'owner', agentId: 'agent', origin: 'https://agent.example', sessionId: 'session'};
+      const snapshot = connectionController.getSnapshot.bind(connectionController);
+      connectionController.getSnapshot = () => ({...snapshot(), session});
+      const target = {installationId: 'device'};
+      connectionController.getWorkflowDeviceTarget = () => target;
+      const state = alphaClient.getState.bind(alphaClient), context = {...state().context, view: 'contacts', sensitive: false};
+      alphaClient.getState = () => ({...state(), context});
+      const result = await (window as any).__installedDeviceExecutor({type: 'contact_create', contact: {displayName: 'Nia Brooks', phoneNumbers: ['+15550100199'], emailAddresses: []}}, crypto.randomUUID(), context, new AbortController().signal);
+      return result.status;
+    });
+    expect(status).toBe('succeeded');
+    await expect(row(page, 'Nia Brooks')).toBeVisible();
+    // One provider read answers the write; nothing polls.
+    expect(await reads()).toBe(before + 1);
+  });
+
   test('typing reads the device address book with the query and nothing else', async ({page}) => {
     await setupTelephony(page);
     await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();

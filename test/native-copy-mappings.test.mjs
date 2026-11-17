@@ -18,10 +18,12 @@ function javaText(expr,values={}){
 /** A native rejection the way the Android bridge delivers it. */
 const rejection=(message,code)=>Object.assign(new CapacitorException(message,code),code?{code}:{});
 
-// --- Settings: Erase all data (DataResetPlugin + DataResetCopy for the product "Alpha") ---------
+// --- Settings: Erase all data (Alpha's own native review AlphaResetPlugin + AlphaDataResetCopy) ---
+// The native result sentences are Alpha's (forked from plugin-native-system reset.DataResetCopy);
+// Settings still shows its own notice for each, so this pins the two tables to each other.
 const {DATA_RESET_OUTCOMES,DATA_RESET_UNCONFIRMED,reviewDataReset}=await import('../apps/app/src/ui/settings/data-reset.ts');
-const RESET_COPY=VENDOR+'plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/reset/DataResetCopy.java';
-const RESET_PLUGIN=VENDOR+'plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/reset/DataResetPlugin.java';
+const RESET_COPY='android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDataResetCopy.java';
+const RESET_PLUGIN='android/app/src/main/java/ai/alphacompute/alphaphone/AlphaResetPlugin.java';
 const resetField=name=>{const m=new RegExp(`\\n\\s*${name} = ([^;]+);`).exec(source(RESET_COPY));assert.ok(m,name);return javaText(m[1],{p:'Alpha'});};
 const RESET=[
  ['reviewClosed',null],['nothingReset',null],['authenticationCancelled',null],
@@ -34,7 +36,7 @@ const RESET=[
 ];
 test('every reset result the native review resolves with is worded by Alpha',async()=>{
  const used=[...source(RESET_PLUGIN).matchAll(/result\(call, "(?:cancelled|unavailable)", text\.(\w+)\)/g)].map(m=>m[1]);
- assert.deepEqual([...new Set(used)].sort(),RESET.map(([f])=>f).sort(),'DataResetPlugin result fields');
+ assert.deepEqual([...new Set(used)].sort(),RESET.map(([f])=>f).sort(),'AlphaResetPlugin result fields');
  for(const [field,alpha] of RESET){
   const upstream=resetField(field);
   assert.ok(DATA_RESET_OUTCOMES.has(upstream),upstream);
@@ -56,15 +58,16 @@ test('an unknown, malformed or rejected reset answer reads as Alpha’s unavaila
   assert.deepEqual(await reviewDataReset(plugin),{status:'unavailable',notice:DATA_RESET_UNCONFIRMED});
 });
 
-// --- Settings: Listening switch subtitle (ListenerPolicy.label) ----------------------------------
+// --- Settings: Listening switch subtitle (the listener's own ListenerLabels.label) -----------------
 const {LISTENER_STATE_TEXT,listenerStateText}=await import('../apps/app/src/ui/settings/system-settings.ts');
 const {LISTENER_STATES}=await import('../.eliza/client-features/plugins/plugin-native-system/src/sense.ts');
 test('every listener state has Alpha’s subtitle and the listener’s own label is never shown',()=>{
- const policy=source(VENDOR+'packages/app/platforms/android/sense/src/main/java/ai/eliza/sense/ListenerPolicy.java');
- const body=policy.slice(policy.indexOf('public static String label(State state)'));
+ // Alpha's listener (android/sense) words each state in ListenerLabels; Settings shows its own subtitle.
+ const listener=source('android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerLabels.java');
+ const body=listener.slice(listener.indexOf('static String label(ListenerPolicy.State state)'));
  const labels=new Map([...body.slice(0,body.indexOf('\n }')).matchAll(/case (\w+):return "([^"]+)";/g)].map(m=>[m[1],m[2]]));
  labels.set('OFF',/default:return "([^"]+)";/.exec(body)[1]);
- assert.deepEqual([...labels.keys()].sort(),[...LISTENER_STATES].sort(),'ListenerPolicy states');
+ assert.deepEqual([...labels.keys()].sort(),[...LISTENER_STATES].sort(),'ListenerLabels states');
  assert.deepEqual(Object.keys(LISTENER_STATE_TEXT).sort(),[...LISTENER_STATES].sort());
  const PINNED={OFF:'Off',PERMISSION_REQUIRED:'Needs microphone permission',NOTIFICATIONS_REQUIRED:'Needs its notification to be allowed',
   STOPPED_AFTER_ERRORS:'Stopped after repeated errors',STOPPED_INDICATOR_LOST:'Stopped because the microphone indicator wasn’t shown',
@@ -107,10 +110,12 @@ test('an unknown Clock answer is worded by its status, never shown',()=>{
  assert.equal(clockResultText({status:'bogus',message:'x'}),'Alpha can’t tell whether Clock got the request. Check Clock before trying again.');
 });
 
-// --- Browser: tab host refusals, notices and page errors (BrowserTabHostPlugin for Alpha) --------
+// --- Browser: tab host refusals, notices and page errors (Alpha's own AlphaBrowserPlugin) --------
+// Alpha's fork of the shared tab host keeps the shared fixed sentences on the bridge; Browser
+// words each one here.
 const {BROWSER_REFUSALS,BROWSER_NOTICES,BROWSER_PAGE_ERRORS,browserNoticeText,browserPageErrorText}=await import('../apps/app/src/ui/browser/browser-messages.ts');
 const {browserErrorMessage}=await import('../apps/app/src/browser/browser-errors.ts');
-const BROWSER=VENDOR+'plugins/plugin-native-browser-surface/android/src/main/java/ai/eliza/plugins/browsersurface/';
+const BROWSER='android/app/src/main/java/ai/alphacompute/alphaphone/';
 const ALPHA_NAMES={'config().appName':'Alpha Phone','config().hostName':'Alpha','config().browserName':'Alpha Browser'};
 function browserSentences(file,call){
  const text=source(BROWSER+file),out=[];
@@ -122,9 +127,9 @@ function browserSentences(file,call){
  return out;
 }
 test('every tab host refusal, notice and page error has an Alpha sentence',()=>{
- const refusals=[...browserSentences('BrowserTabHostPlugin.java','reject'),...browserSentences('BrowserReviewedReading.java','reject')];
- const notices=browserSentences('BrowserTabHostPlugin.java','notice');
- const errors=[...browserSentences('BrowserTabHostPlugin.java','fail'),/"(Browser renderer stopped[^"]*)"/.exec(source(BROWSER+'BrowserTabHostPlugin.java'))[1]];
+ const refusals=[...browserSentences('AlphaBrowserPlugin.java','reject'),...browserSentences('browser/AlphaReviewedReading.java','reject')];
+ const notices=browserSentences('AlphaBrowserPlugin.java','notice');
+ const errors=[...browserSentences('AlphaBrowserPlugin.java','fail'),/"(Browser renderer stopped[^"]*)"/.exec(source(BROWSER+'AlphaBrowserPlugin.java'))[1]];
  assert.ok(refusals.length>=40&&notices.length>=18&&errors.length>=10,`${refusals.length}/${notices.length}/${errors.length}`);
  for(const sentence of refusals)assert.ok(BROWSER_REFUSALS.has(sentence),'refusal: '+sentence);
  for(const sentence of notices)assert.ok(BROWSER_NOTICES.has(sentence),'notice: '+sentence);
@@ -154,11 +159,14 @@ test('Browser shows Alpha’s pinned sentences for the host’s text',()=>{
  assert.equal(browserPageErrorText('A new upstream failure'),'The page didn’t load. Reload to try again.');
 });
 
-// --- Photos and Keep (PhotosPlugin and its stores, AlphaPhotosPlugin) ----------------------------
+// --- Photos and Keep (AlphaPhotosPlugin, forked from PhotosPlugin, and the shared stores) ----------
+// Alpha's Photos bridge and its review dialog (AlphaMediaReview) are its own; the stores stay shared.
+const ALPHA_PHOTOS='android/app/src/main/java/ai/alphacompute/alphaphone/AlphaPhotosPlugin.java';
+const ALPHA_REVIEW='android/app/src/main/java/ai/alphacompute/alphaphone/AlphaMediaReview.java';
 const {PHOTOS_MESSAGES,photosErrorText,photosResultText}=await import('../apps/app/src/ui/photos/photos-messages.ts');
 const MEDIA=VENDOR+'plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/';
-test('every fixed PhotosPlugin refusal and Keep outcome has an Alpha sentence',()=>{
- const photos=source(MEDIA+'PhotosPlugin.java');
+test('every fixed AlphaPhotos refusal and Keep outcome has an Alpha sentence',()=>{
+ const photos=source(ALPHA_PHOTOS);
  const literal=[...photos.matchAll(/call\.reject\("([^"]+)"\)/g)].map(m=>m[1]);
  const fallbacks=[...photos.matchAll(/getMessage\(\) == null\s*\?\s*"([^"]+)"/g)].map(m=>m[1]);
  const dynamic=javaText(/call\.reject\(("Select 1-" \+ OwnedMediaLibrary\.PAGE \+ " listed items\.")\)/.exec(photos)[1],{'OwnedMediaLibrary.PAGE':String(/PAGE = (\d+);/.exec(source(MEDIA+'OwnedMediaLibrary.java'))[1])});
@@ -169,7 +177,7 @@ test('every fixed PhotosPlugin refusal and Keep outcome has an Alpha sentence',(
   assert.ok(PHOTOS_MESSAGES.has(sentence),'Photos sentence: '+sentence);
  assert.ok(literal.length>=25&&captures.length>=2,`${literal.length}/${captures.length}`);
  // Every key is a sentence the bridge or Alpha's own late-launch answer can still produce.
- const all=[source(MEDIA+'PhotosPlugin.java'),...['OwnedPhotoEdits','VideoCopyEdits','VideoEditSpec','OwnedAlbums','OwnedMediaLibrary','OwnedMediaSelection','TrashDeleteRequest','OwnedCaptures','CaptureAdmission','PhotoCrop','PhotoFilter','PermittedPhotosPlugin','PermittedMediaReview'].map(n=>source(MEDIA+n+'.java')),source('android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java')].join('\n');
+ const all=[source(ALPHA_PHOTOS),source(ALPHA_REVIEW),...['OwnedPhotoEdits','VideoCopyEdits','VideoEditSpec','OwnedAlbums','OwnedMediaLibrary','OwnedMediaSelection','TrashDeleteRequest','OwnedCaptures','CaptureAdmission','PhotoCrop','PhotoFilter','PermittedPhotosPlugin'].map(n=>source(MEDIA+n+'.java')),source('android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java')].join('\n');
  const reviewed=/REVIEWED = (\d+);[\s\S]*REVIEWED_BATCH = (\d+);/.exec(source(MEDIA+'PhotoLibraryAccess.java')).slice(1).map(max=>`Select 1–${max} distinct permitted items.`);
  for(const key of PHOTOS_MESSAGES.keys())if(key!==dynamic&&!reviewed.includes(key))assert.ok(all.includes(JSON.stringify(key))||all.includes(`"${key}`),'still upstream: '+key);
 });
@@ -208,7 +216,7 @@ test('every capturePhoto rejection code is worded by Alpha and exception text is
 
 // --- Phone and Messages (TelephonyPlugin, staged native-telephony / mms-send) --------------------
 const {CALL_RESULTS,HANDOFF_RESULTS,SEND_REFUSALS,callResultText,handoffResultText,sendRefusalText}=await import('../apps/app/src/ui/telephony/telephony-messages.ts');
-const TELEPHONY=VENDOR+'plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java';
+const TELEPHONY='android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java';
 test('every call placement and handoff sentence has an Alpha sentence',()=>{
  const java=source(TELEPHONY);
  const placements=[...java.matchAll(/placement\("[a-z-]+", "([^"]+)"\)/g)].map(m=>m[1]);

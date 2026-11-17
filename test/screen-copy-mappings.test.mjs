@@ -104,7 +104,10 @@ test('a queued Calendar change is described in Alpha’s words; only the event t
  assert.doesNotMatch(fields,/reason:reasonText|row\.reason\.replace/);
 });
 
-// --- Chat attachment picker and Photos reviews: PhotosPlugin / PermittedPhotosPlugin / PermittedMediaReview ---
+// --- Chat attachment picker and Photos reviews: AlphaPhotosPlugin / PermittedPhotosPlugin / AlphaMediaReview ---
+// Alpha's Photos bridge and review dialog are forked from the shared PhotosPlugin and
+// PermittedMediaReview; PermittedPhotosPlugin stays shared.
+const ALPHA='android/app/src/main/java/ai/alphacompute/alphaphone/';
 const {PHOTOS_MESSAGES,photosErrorText}=await import('../apps/app/src/ui/photos/photos-messages.ts');
 const MEDIA='plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/';
 test('the attachment picker words a Photos bridge rejection through Alpha’s Photos table',()=>{
@@ -112,7 +115,7 @@ test('the attachment picker words a Photos bridge rejection through Alpha’s Ph
  assert.match(picker,/this\.error=this\.tab==='photos'\?photosErrorText\(error,'Photos could not load\. Try again\.'\)/);
  assert.match(picker,/this\.error=photosErrorText\(error,'The selection could not be read\. Try again\.'\)/);
  assert.doesNotMatch(picker,/this\.error=error instanceof Error\?error\.message:'The selection could not be read/);
- const permitted=vendor(MEDIA+'PermittedPhotosPlugin.java'),photos=vendor(MEDIA+'PhotosPlugin.java');
+ const permitted=vendor(MEDIA+'PermittedPhotosPlugin.java'),photos=source(ALPHA+'AlphaPhotosPlugin.java');
  const PINNED=[
   ['Unlock and reopen Photos before reading the library.','Unlock the phone, then reopen Photos.',permitted],
   ['Photo library changed or is unavailable. Refresh Photos and check its access.','Photos changed or isn’t available. Refresh Photos and check its access.',permitted],
@@ -128,8 +131,8 @@ test('the attachment picker words a Photos bridge rejection through Alpha’s Ph
  assert.equal(photosErrorText(new Error('This photo changed. Select it again.'),'F'),'This photo changed. Select it again.');
 });
 
-test('every PermittedMediaReview refusal reaches Photos in Alpha’s words',()=>{
- const java=vendor(MEDIA+'PermittedMediaReview.java');
+test('every AlphaMediaReview refusal reaches Photos in Alpha’s words',()=>{
+ const java=source(ALPHA+'AlphaMediaReview.java');
  const limits=/REVIEWED = (\d+);[\s\S]*REVIEWED_BATCH = (\d+);/.exec(vendor(MEDIA+'PhotoLibraryAccess.java')).slice(1);
  const sentences=new Set([
   ...[...java.matchAll(/reject\(\s*"([^"]+)"/g)].map(m=>m[1]).filter(s=>!s.startsWith('Android could not show')&&s!=='Select 1–'),

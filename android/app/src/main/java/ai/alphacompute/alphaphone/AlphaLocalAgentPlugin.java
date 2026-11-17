@@ -602,7 +602,7 @@ private static final class ResidentAttachDiagnostic {
     closeProviderReveal();
     final long revealAuthority=credentialAuthorityEpoch();
     providerRevealRequestId=requestId;
-    providerReveal=ai.eliza.plugins.passwords.SecretSurfaces.revealOwned(getActivity(),"text".equals(key)?"Text key":"Voice key",value,()->{
+    providerReveal=SecretSurfaces.revealOwned(getActivity(),"text".equals(key)?"Text key":"Voice key",value,()->{
      try{requireProviderOwner(false);requireCredentialIntent(intent);return surface==providerSurfaceGeneration&&revealAuthority==credentialAuthorityEpoch();}
      catch(Exception retired){return false;}
     });

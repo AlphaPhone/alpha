@@ -203,8 +203,8 @@ test('a digest result, its status and the panel’s source refusals read in Alph
  assert.match(ui,/setMessage\(sourceRejected\?HOSTED_SOURCE_REJECTED_TEXT:/);
  assert.match(ui,/setMessage\(digestCalendarErrorText\(error\)\)/);
  assert.doesNotMatch(ui,/setMessage\(\(error as Error\)\.message\)|sourceRejected\?error\.message/);
- // The native Calendar plugin's workflowCalendars refusals (CalendarPlugin.java, inherited by AlphaCalendarPlugin).
- const plugin=vendor('plugins/plugin-native-calendar/android/src/main/java/ai/eliza/plugins/calendar/CalendarPlugin.java');
+ // The native Calendar plugin's workflowCalendars refusals (CalendarProviderPlugin.java, inherited by AlphaCalendarPlugin).
+ const plugin=source('android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java');
  const body=plugin.slice(plugin.indexOf('public void workflowCalendars('),plugin.indexOf('public void readWorkflowRange('));
  const refusals=literals(body,/c\.reject\("([^"]+)"\)/g);
  assert.deepEqual(refusals,['Open Workflows before reading calendar sources','Selected calendar sources could not be read']);

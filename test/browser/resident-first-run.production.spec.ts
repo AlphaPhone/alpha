@@ -1,7 +1,7 @@
 // Flag-off Android renderer: explicit native email sign-in, permission setup, resident binding,
 // cancellation, expiry and refusal. Synthetic native outcomes do not establish real authentication.
 import { test, expect, type Page } from '@playwright/test';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, openYourAgent } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface } from './flag-off-android';
 import { residentStub, stub, setStub, enterNativeEmailCode, type StubAccount } from './resident-stub';
 import { recordStartupFrames, expectNoHomeBeforePrompt, startupLoading } from './helpers/startup-frames';
 
@@ -172,9 +172,8 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   await ask.fill('First request after sign-in'); await ask.press('Enter');
   await expect(page.getByRole('button', { name: 'Message actions: Resident reply 1', exact: true })).toHaveCount(1);
   expect(await harness(page, f => f.streams)).toBe(1);
-  const settings=await openYourAgent(page);
-  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toHaveCount(0);
-  await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();
+  await page.getByRole('button', { name: 'Chat actions', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Search chat', exact: true })).toBeVisible();
   expect(await page.locator('body').innerText()).not.toContain(account.token);
   await expectNoDevelopmentSurface(page);
   const lifecycle=await page.evaluate(()=>(window as any).firstRunLifecycle) as Array<{path:string;method:string;ownerId:string;credentialId:string|null}>;

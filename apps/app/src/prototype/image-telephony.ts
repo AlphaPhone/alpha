@@ -6,6 +6,7 @@
  * faked.
  */
 import {guardTelephonyPorts} from '../runtime/call-state';
+import {contactsChanged} from './contacts-changes';
 import {executeTelephonyAction, type TelephonyPorts} from '../runtime/telephony-executor';
 import {reviewSms, type AospTelephony} from '../runtime/aosp-telephony';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
@@ -50,8 +51,8 @@ export async function imageTelephonyAction(operation: TelephonyActionOperation, 
 	const allowed = async () => { const ok = await guard.allowed(); refused ||= !ok; return ok; };
 	const execution = await executeTelephonyAction(operation, operationId, guardTelephonyPorts(ports, allowed), signal);
 	const result = execution.telephonyResult;
-	if (result.kind === 'contact-write' && (result.status === 'saved' || result.status === 'deleted' || result.status === 'unknown') && typeof window !== 'undefined')
-		window.dispatchEvent(new CustomEvent('alpha:contacts-committed', {detail: {status: result.status}}));
+	if (result.kind === 'contact-write' && (result.status === 'saved' || result.status === 'deleted' || result.status === 'unknown'))
+		contactsChanged({unconfirmed: result.status === 'unknown'});
 	return refused ? {...execution, summary: EMERGENCY_REFUSAL} : execution;
 }
 

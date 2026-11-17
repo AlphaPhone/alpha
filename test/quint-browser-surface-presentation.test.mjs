@@ -15,7 +15,7 @@ import {checkBrowserSurfacePresentation} from '../specs/quint/refinement/applica
 
 test("partial source contract: the browser adapter page presentation follows every BrowserSurfacePresentation trace", {timeout: scaledTimeout(240000)}, async () => {
   const receipt = await checkBrowserSurfacePresentation();
-  assert.equal(receipt.traces, 49);
+  assert.equal(receipt.traces, 50);
   assert.ok(receipt.checkpoints > 1000, `checkpoints ${receipt.checkpoints}`);
   for (const action of ['poll', 'withdraw', 'answer', 'forget', 'enterBrowser', 'leaveBrowser', 'setOverlay', 'setAppHidden', 'tabCreated', 'dispose'])
     assert.ok(receipt.actions[action] > 0, `${action} is replayed`);
