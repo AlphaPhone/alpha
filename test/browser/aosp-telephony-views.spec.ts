@@ -230,7 +230,7 @@ test('an outgoing SMS bubble appears on Send and an exact provider row replaces 
     w.smsReview.addProviderRow(41, 'thread:101');
     w.smsProviderChanged();
   });
-  await expect(thread.locator('[data-alpha-message-id="sms:41"]')).toHaveText(body);
+  await expect(thread.locator('[data-alpha-message-id="sms:41"] [data-alpha-message-body]')).toHaveText(body);
   await expect(provisional).toHaveCount(0);
   await expect(text).toHaveCount(2);
   expect(await inputs(page, 'sendComposedSms')).toHaveLength(1);
@@ -294,7 +294,7 @@ test('the journal clears a sent draft after the composer reply times out', async
     await w.smsReview.finish('sent', true);
   });
   await expect(draft).toHaveValue('');
-  await expect(page.locator('[data-alpha-message-id="sms:42"]')).toHaveText(body);
+  await expect(page.locator('[data-alpha-message-id="sms:42"] [data-alpha-message-body]')).toHaveText(body);
   expect(await inputs(page, 'sendComposedSms')).toHaveLength(1);
 });
 
@@ -433,7 +433,7 @@ for (const smsRoleHeld of [true, false]) {
         w.smsReview.addProviderRow(42, 'thread:501');
         w.smsProviderChanged();
       });
-      await expect(page.locator('[data-alpha-messages-thread] [data-alpha-message-id="sms:42"]')).toHaveText(body);
+      await expect(page.locator('[data-alpha-messages-thread] [data-alpha-message-id="sms:42"] [data-alpha-message-body]')).toHaveText(body);
       await expect(bubbles).toHaveCount(1);
     } else {
       await expect(page.locator('[data-alpha-messages-threads]')).toBeVisible();

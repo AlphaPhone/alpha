@@ -3,9 +3,11 @@
 import {build} from 'esbuild';
 import {createServer,mergeConfig,type Plugin} from 'vite';
 import {fileURLToPath} from 'node:url';
-import base from '../vite.config.ts';
 
 if(process.env.ELIZA_DEV_ALLOW_TEST_MOCKS!=='1')throw Error('Native UI review requires ELIZA_DEV_ALLOW_TEST_MOCKS=1.');
+if(process.env.ALPHA_LOCAL_AGENT_TOKEN_FILE){process.env.VITE_LOCAL_AGENT='1';process.env.ALPHA_DEV_CONNECTION_TOOLS='0';}
+// vite.config computes its defines when imported, so it is imported only after the environment above is set.
+const {default:base}=await import('../vite.config.ts');
 const root=fileURLToPath(new URL('..',import.meta.url));
 const args=process.argv.slice(2),at=args.indexOf('--port');
 const port=at<0?5686:Number(args[at+1]);

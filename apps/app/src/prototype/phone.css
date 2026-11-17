@@ -994,7 +994,7 @@ dialog.alarm-page{position:fixed;inset:0 auto auto 0;margin:0;width:100vw;height
 [data-alpha-recorder-actions]{padding-bottom:calc(var(--alpha-dock-reserve,108px) + 16px)!important}
 [data-alpha-view-actions]{bottom:var(--alpha-dock-reserve,108px)!important}
 [data-alpha-photo-actions]>div{padding-bottom:12px!important}
-[data-alpha-popup] [role="dialog"],[data-alpha-album-manager]{bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet),[data-alpha-album-manager]{bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
 /* The overflow menu is anchored below its header, so a dock bottom must cap,
  * not stretch, its intrinsic height. Keep short screens scrollable. */
 [data-alpha-popup] .notes-menu[role="dialog"]{bottom:auto!important;height:auto;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
@@ -1098,7 +1098,7 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 .attachment-picker-backdrop{position:absolute;inset:0;z-index:90;background:rgba(0,0,0,.28);touch-action:none}
-.attachment-picker-sheet{position:absolute;inset:8% 0 0;display:flex;flex-direction:column;min-height:0;border-radius:28px 28px 0 0;overflow:hidden;background:var(--bg);color:var(--fg)}
+.attachment-picker-sheet{position:absolute;inset:8% 0 0;display:flex;flex-direction:column;min-height:0;box-sizing:border-box;border-radius:28px 28px 0 0;overflow:hidden;background:var(--bg);color:var(--fg)}
 .attachment-picker-sheet[role="dialog"][data-alpha-bottom-sheet]{padding-bottom:0!important}
 .attachment-picker-sheet>header{display:flex;align-items:center;gap:10px;padding:12px 16px;flex-shrink:0}
 .attachment-picker-sheet h2{margin:0;font-size:28px;font-weight:400;flex:1}
@@ -1134,7 +1134,7 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .attachment-picker-files small{font-size:12px;color:var(--mut)}
 .attachment-picker-files .attachment-picker-file-icon{grid-column:1;justify-self:start;width:26px;height:26px;margin:0}
 .attachment-picker-trailing{grid-column:3;justify-self:end}
-.attachment-picker-sheet>footer{display:flex;align-items:center;gap:12px;min-height:58px;padding:8px 20px max(14px,env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--bg);flex-shrink:0;font-size:13px}
+.attachment-picker-sheet>footer{display:flex;align-items:center;gap:12px;min-height:58px;padding:8px 20px max(14px,calc((max(var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px)) + 8px) / var(--phone-scale,1)));border-top:1px solid var(--line);background:var(--bg);flex-shrink:0;font-size:13px}
 .attachment-picker-sheet>footer>span{flex:1;color:var(--mut)}
 .attachment-picker-sheet>footer button,.attachment-picker-access button,.attachment-picker-more{min-height:44px;border:0;border-radius:22px;padding:0 14px;background:var(--s2);color:var(--fg);font:500 14px 'Public Sans',sans-serif}
 .attachment-picker-access{padding:12px 20px}
