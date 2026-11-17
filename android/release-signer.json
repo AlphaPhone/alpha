@@ -1,42 +1,28 @@
 {
   "schema": 1,
-  "description": "Private v79 combines the reviewed current runtime, retained installation identity and verified native APK. Preserve the existing signer and lineage; no public publication is enrolled.",
+  "description": "Private canonical Alpha version 80. Sign the exact verified producer with the existing signer. Preserve the legacy installation and its data; no signing-key rotation or public publication.",
   "signerSha256": "edbfcacb1da689008bf4e7d675176c302decf83161a877eb8b1de4ffae0445ed",
   "lastRelease": {
     "versionCode": null,
     "versionName": null,
     "recordedAt": null
   },
-  "apkSigningRotation": {
-    "schema": 1,
-    "approval": "approved",
-    "fromVersionCode": 49,
-    "versionCode": 79,
-    "previousSignerSha256": "0438dccb2d5e83fc2ad1ab11cbb882f837d97c4aee7cba72af9229c39b149b80",
-    "lineageSha256": "bca212509a83e8f2e60d2b9b744b1e0a4a014b780be058dcf81ff88a5d593759",
-    "apksignerSha256": "b47549e373b895ce6ca620d0c7887e674d9615ffa837a86ac601dcfd04adb0f0",
-    "verifierJarSha256": "3716d9311e55d2b0918a2fd9d54ba9e406c5f6abeea700b287f11259bc163dec",
-    "unsignedApkSHA256": {
-      "launcher": "c2ad926bc90a7331e3303ec7ecbc2a11c07adaf16d60b608fde8e02d145adb38"
-    },
-    "preserveSignaturePermissions": true
-  },
   "privateProducerApproval": {
-    "alphaCommit": "f0d1bb43f3e631b0f7459b33f0b2f70f80d660eb",
-    "sdkCommit": "aee57131613d6758dbe007e53cdb791f109bdb1c",
-    "versionCode": 79,
-    "archiveSHA256": "3a199d462e385820bfcb1f31fa622438d062f63b121b7df938f255856ec13653",
-    "archiveBytes": 1270610321,
-    "producerManifestSHA256": "f5b931829f65d560b103684391ccc15f678d7bae220a63b0a73707287fe7236b",
-    "privateProducerReceiptSHA256": "a727337b358c88f01efd6a9efe93bb3e2e5aa16144baa43a0c4619238a0139bf",
+    "alphaCommit": "7e2bafe29390b0487569444b4e8b71d07222627f",
+    "sdkCommit": "51d8e69797f65ea218bf6854f8ba137ff38fe8ef",
+    "versionCode": 80,
+    "archiveSHA256": "7a02ea9af2ce32c1467de0f2cd7fe196a09dc149936f9bd788f950de1154aea0",
+    "archiveBytes": 1270655978,
+    "producerManifestSHA256": "ab347ff5a17f25f98706600d8476beca6f22be281399f71665805a8551d58281",
+    "privateProducerReceiptSHA256": "d77e4e49874f2729939083b88985032da63fed64d34c20cf195485e65d5e3251",
     "unsignedApkSHA256": {
-      "launcher": "c2ad926bc90a7331e3303ec7ecbc2a11c07adaf16d60b608fde8e02d145adb38"
+      "launcher": "bb465cad9333d9a2d94c8fb39d6deefd8699a4400e4a76948d504cbb427fe33d"
     },
     "updateChannel": {
       "kind": "public",
-      "manifestUrlSha256": "8e54b15a945c0fe1fd18bca9b4f4389249c5260bd72c912bccb6cd98e10308db"
+      "manifestUrlSha256": "9da80c473570875d461861fa95d98613079ed4ac7db6d6f0ae2d2ce3cb4e538d"
     },
-    "applicationId": "ai.elizaresearch.alphaphone",
+    "applicationId": "ai.alphacompute.alphaphone",
     "purpose": "retained-installation-update",
     "approval": "approved"
   }
