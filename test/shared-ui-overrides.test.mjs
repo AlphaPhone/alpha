@@ -1,6 +1,7 @@
 // Alpha's copies of shared classes that present UI but must keep their shared names
 // (android/shared-ui-overrides.json): the reminder store, which posts the due-reminder notification
-// and is reached package-privately by the shared reminder engine. android/app/product.gradle
+// and is reached package-privately by the shared reminder engine, and the Autofill provider, whose
+// installed component name Android keeps for the selected provider. android/app/product.gradle
 // compiles each copy in place of the shared file inside the shared module. Below its class
 // declaration each copy must stay the pinned upstream source apart from the changes Alpha lists
 // here, so storage, scheduling, identifiers and security checks remain the ones upstream's own tests
@@ -17,10 +18,12 @@ const modules = new Map(JSON.parse(read('android/consumer-host.json')).profile.m
 /** Alpha's changes to each upstream body, applied in order as [upstream text, Alpha text]. None yet. */
 const ALPHA_CHANGES = {
   'ai.eliza.plugins.reminders.ReminderStore': [],
+  'ai.eliza.plugins.passwords.ElizaPasswordAutofillService': [],
 };
 /** Upstream tests ported to android/app/src/test unchanged below their package line. */
 const PORTED_TESTS = {
   'ai.eliza.plugins.reminders.ReminderStore': ['ReminderQuestionTest', 'ReminderStoreRetentionTest'],
+  'ai.eliza.plugins.passwords.ElizaPasswordAutofillService': [],
 };
 
 const paths = override => {

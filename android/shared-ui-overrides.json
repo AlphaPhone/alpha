@@ -6,6 +6,12 @@
       "class": "ai.eliza.plugins.reminders.ReminderStore",
       "source": "android/shared-ui/eliza-reminders/java",
       "reason": "posts the due-reminder notification and its actions; package-private, so Alpha's copy keeps the shared name"
+    },
+    {
+      "module": "eliza-passwords",
+      "class": "ai.eliza.plugins.passwords.ElizaPasswordAutofillService",
+      "source": "android/shared-ui/eliza-passwords/java",
+      "reason": "the Autofill provider other apps show; Android keeps the selected provider by this installed component name"
     }
   ]
 }
