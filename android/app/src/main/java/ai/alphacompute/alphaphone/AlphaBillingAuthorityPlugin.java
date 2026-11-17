@@ -30,8 +30,7 @@ import org.json.JSONObject;
  * names) and ends after its JWT expiry (at most one hour), on {@link #clear}, when the app process
  * ends, or as soon as that credential changes: sign-out, a new key or another account.
  *
- * Alpha Cloud cutover only: MainActivity registers this plugin only when
- * CloudDeployment.ALPHA_CLOUD_CUTOVER is on, and every call refuses otherwise.
+ * The current Cloud account authorizes each operation with a fresh session.
  *
  * Every request goes to this build's production Cloud API (CloudDeployment) on one of the fixed
  * routes in {@link BillingAuthorityRoutes}.
@@ -41,7 +40,7 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
  private static final int RESPONSE_LIMIT = 256 * 1024;
  private final ExecutorService worker = Executors.newSingleThreadExecutor();
  private final BillingAuthorityRoutes.Authority authority = new BillingAuthorityRoutes.Authority(new BillingAuthorityRoutes.Ports() {
-  @Override public boolean enabled() { return CloudDeployment.ALPHA_CLOUD_CUTOVER; }
+  @Override public boolean enabled() { return true; }
   @Override public String savedCredential() throws Exception { return new AlphaCredentialStore(getContext()).readCredentialSlot("cloud:production"); }
   @Override public JSONObject identity(String deviceToken) throws Exception { return AlphaConnectionPlugin.readCloudIdentity(deviceToken); }
   @Override public BillingAuthorityRoutes.Reply sendCode(String email, String verifier) throws Exception {
@@ -60,7 +59,6 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
  private static CloudSignInEnvironment environment() { return AlphaCloudSignInPlugin.REGISTRATION.environment("production"); }
 
  private void run(PluginCall call, Task task) {
-  if (!CloudDeployment.ALPHA_CLOUD_CUTOVER) { call.reject("Not available", "unavailable"); return; }
   try {
    worker.submit(() -> {
     try { task.run(); }

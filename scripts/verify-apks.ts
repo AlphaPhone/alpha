@@ -139,7 +139,7 @@ const webViewFiltersAllowed = [
   `${mainActivity} https://${callbackHost}/alphaphone/auth/callback`,
   `${mainActivity} https://${callbackHost}/alphaphone/gmail/callback`,
   // The in-app checkout's return (apps/app/src/runtime/cloud-plans.ts): opening the app is its whole job.
-  `${identity.appId}.AlphaCloudBillingReturn https://${callbackHost}/alphaphone/billing/return${ALPHA_CLOUD_CUTOVER ? '' : ' [disabled]'}`,
+  `${identity.appId}.AlphaCloudBillingReturn https://${callbackHost}/alphaphone/billing/return`,
 ];
 const buildRecordFile = path.join(directory, "build-config.json");
 if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run bun run android:build first.`);

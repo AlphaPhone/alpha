@@ -199,7 +199,7 @@ final class BillingAuthorityRoutes {
 
  /** What the billing authority needs from the phone and Cloud; the plugin supplies the real ones. */
  interface Ports {
-  /** The Alpha Cloud cutover flag (CloudDeployment.ALPHA_CLOUD_CUTOVER). */
+  /** Whether this host supplies account-bound billing. */
   boolean enabled();
   /** The stored `cloud:production` slot, or null when signed out. */
   String savedCredential() throws Exception;

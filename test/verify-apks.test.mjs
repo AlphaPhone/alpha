@@ -432,7 +432,7 @@ test("APK verification rejects and names an extra web VIEW filter", () => {
     ["Unexpected web VIEW intent filter com.example.Viewer https://(any host) (any path); add it to the allowed set in scripts/verify-apks.ts only if it is deliberate"]);
 });
 
-test("the Alpha Cloud billing return alias is listed as disabled unless the cutover enables it", () => {
+test("billing return verification distinguishes disabled and enabled app links", () => {
   const alias = enabled => ["    E: activity-alias (line=30)",
     '      A: http://schemas.android.com/apk/res/android:name(0x01010003)="ai.alphacompute.alphaphone.AlphaCloudBillingReturn" (Raw: "ai.alphacompute.alphaphone.AlphaCloudBillingReturn")',
     ...(enabled ? [] : ["      A: http://schemas.android.com/apk/res/android:enabled(0x0101000e)=(type 0x12)0x0"]),

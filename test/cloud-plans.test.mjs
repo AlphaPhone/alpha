@@ -218,9 +218,9 @@ test('the native billing authority refuses with the flag off, binds to Cloud\'s 
  assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),fixture('BillingAuthorityTest.java')],'ai.alphacompute.alphaphone.BillingAuthorityTest',{json:true}),/^PASS billing authority \d+/);
 });
 
-test('MainActivity registers the native billing authority only with the cutover flag',async()=>{
+test('MainActivity registers account-bound billing on the current Cloud',async()=>{
  const {readFileSync}=await import('node:fs');
  const main=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java','utf8');
  const registrations=main.split('\n').filter(line=>line.includes('AlphaBillingAuthorityPlugin'));
- assert.deepEqual(registrations.map(line=>line.trim()),['if (CloudDeployment.ALPHA_CLOUD_CUTOVER) registerPlugin(AlphaBillingAuthorityPlugin.class);']);
+ assert.deepEqual(registrations.map(line=>line.trim()),['registerPlugin(AlphaBillingAuthorityPlugin.class);']);
 });
