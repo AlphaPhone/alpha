@@ -4,7 +4,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {bui
 const dir=mkdtempSync(join(tmpdir(),'contacts-adapter-'));
 const output=await build({stdin:{contents:"export * from './apps/app/src/prototype/contacts-adapter.ts';export {applyListFilter,clearListFilter,currentListFilter} from './apps/app/src/runtime/comms-bar.ts';",resolveDir:resolve('.'),loader:'ts'},bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':'export function registerPlugin(){return new Proxy({},{get:(_,method)=>method==="then"?undefined:options=>globalThis.contactsPlugin(method,options)});}',loader:'js'}));}}]});
 writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
-const {installContactsAdapter,applyListFilter,clearListFilter,currentListFilter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const {installContactsAdapter,contactSaveProblem,applyListFilter,clearListFilter,currentListFilter}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const settle=()=>new Promise(r=>setTimeout(r,5));
 function mount(list,editor=async()=>({}),base={render:st=>({contactsRows:st.list,d:st.open?{}:null})}){const calls=[],notices=[];globalThis.contactsPlugin=async(method,options)=>{calls.push([method,options]);if(method==='status')return {available:true,readable:true};if(method==='list')return list(options);if(method==='edit'||method==='create')return editor(method,options);return {};};
@@ -278,4 +278,34 @@ test('the native list shows only the provider answer to the current query, with 
   assert.deepEqual(names(),[],'a revoked permission drops the last accepted rows');
   assert.equal(model().nativeAccess,true);assert.equal(lastList(),priorList,'a revoked permission issues no new query');
  }finally{older.resolve({contacts:[]});zoe.resolve({contacts:[]});fixture.shell.componentWillUnmount();}
+});
+
+// eliza#39805: a new contact's name comes from its structured fields alone; an edit's omitted fields keep stored values.
+test('a new contact is judged by the Android create rule, an edit by the edit rule',()=>{
+ const unnamed={displayName:'Ada',givenName:'',familyName:'',phoneNumbers:[],emailAddresses:[]};
+ assert.equal(contactSaveProblem('creating',unnamed),'empty-contact','a new contact with empty structured names stores no name');
+ assert.equal(contactSaveProblem('editing',unnamed),null,'an edit keeps the stored name');
+ assert.equal(contactSaveProblem('creating',{...unnamed,givenName:'Ada'}),null);
+});
+// eliza#39805: get omits notes it cannot edit as one value; the rest stays editable and a save never sends notes back.
+test('a contact whose notes Android omitted stays editable without notes',async()=>{
+ const book=mountBook({get:()=>detail('a1'.repeat(32)),save:{status:'saved',id:'1',version:'b2'.repeat(32)}});await settle();book.model();await settle();
+ book.model().d.edit();await settle();let ed=book.model().ed;
+ assert.equal(ed.notesEditable,false);assert.equal(ed.notesUnavailable,true,'the editor says notes are unavailable here');
+ typeInto(ed.onNotes,'Replacement note');ed=book.model().ed;assert.equal(ed.notes,'');assert.equal(ed.cannotSave,true,'typing into unavailable notes changes nothing');
+ typeInto(ed.onGivenName,'Ada L');book.model().ed.save();await settle();
+ const sent=book.calls.find(([m])=>m==='save')[1];assert.equal('notes' in sent,false,'omitted notes are never sent back');assert.equal(sent.givenName,'Ada L');
+ assert.equal(book.model().ed.open,false);
+});
+test('a contact with an editable empty note still saves the owner\'s new note',async()=>{
+ const book=mountBook({get:()=>({...detail('a1'.repeat(32)),notes:''}),save:{status:'saved',id:'1',version:'b2'.repeat(32)}});await settle();book.model();await settle();
+ book.model().d.edit();await settle();const ed=book.model().ed;assert.equal(ed.notesEditable,true);assert.equal(ed.notesUnavailable,false);
+ typeInto(ed.onNotes,'Gate code 12');book.model().ed.save();await settle();
+ assert.equal(book.calls.find(([m])=>m==='save')[1].notes,'Gate code 12');
+});
+test('a new contact can take notes',async()=>{
+ const book=mountBook({save:{status:'saved',id:'9',version:'a1'.repeat(32)},get:()=>detail('a1'.repeat(32))});await settle();
+ book.model({}).addNew();await settle();assert.equal(book.model({}).ed.notesEditable,true);
+ typeInto(book.model({}).ed.onNotes,'Met at the library');book.model({}).ed.save();await settle();
+ assert.deepEqual(book.calls.find(([m])=>m==='save')[1],{displayName:'',givenName:'',familyName:'',phoneNumbers:[],emailAddresses:[],notes:'Met at the library'});
 });
