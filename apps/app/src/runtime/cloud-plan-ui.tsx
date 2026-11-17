@@ -180,7 +180,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
    const current=active&&subscription?.planKey===plan.key,pending=subscription?.pendingPlanKey===plan.key;
    return <li key={plan.key} className="alpha-plan" data-current={current||undefined}>
     <div className="alpha-plan-heading"><strong>{plan.name}</strong><span>{formatUsd(plan.amountCents)}<small>/month</small></span></div>
-    <p>${plan.allowanceUsd} of AI usage each month</p>
+    <p>{formatUsd(Math.round(Number(plan.allowanceUsd)*100))} of AI usage each month</p>
     {current?<p className="alpha-plan-state"><StatusDot tone={subscription?.cancelAtPeriodEnd||subscription?.state==='past_due'?'warn':'ok'}>{subscription?.state==='past_due'?'Payment due':subscription?.cancelAtPeriodEnd?`Ends ${dateLabel(subscription.currentPeriodEnd)}`:`Renews ${dateLabel(subscription!.currentPeriodEnd)}`}</StatusDot></p>
     :pending?<p className="alpha-plan-state"><StatusDot tone="warn">Starts {dateLabel(subscription!.currentPeriodEnd)}</StatusDot></p>
     :<button type="button" disabled={working||unknownPlan||(!!active&&(subscription?.revision===null||!!subscription?.pendingPlanKey))} onClick={()=>active?change(plan):subscribe(plan)}>{active?`Switch to ${plan.name}`:`Subscribe`}</button>}
