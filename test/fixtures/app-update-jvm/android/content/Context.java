@@ -12,7 +12,10 @@ public class Context {
  public android.media.AudioManager audio=new android.media.AudioManager();
  public android.app.AppOpsManager appOps=new android.app.AppOpsManager();
  public boolean phoneStateGranted,privilegedPhoneStateGranted;
+ /** INSTALL_SELF_UPDATES as the Alpha image grants it to its preinstalled launcher. */
+ public boolean selfUpdateGranted;
  public int checkSelfPermission(String permission){
+  if("android.permission.INSTALL_SELF_UPDATES".equals(permission)&&selfUpdateGranted)return 0;
   if("android.permission.READ_PHONE_STATE".equals(permission)&&phoneStateGranted)return 0;
   if("android.permission.READ_PRIVILEGED_PHONE_STATE".equals(permission)&&privilegedPhoneStateGranted)return 0;
   return -1;
