@@ -212,6 +212,10 @@ function id(value: unknown): string {
 // ── Screen binding ──────────────────────────────────────────────────────────
 
 export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
+/** A camera capture that only needs Camera open also names the message that asked for it. */
+export type ReviewItem = PendingReviewItem & {
+  cameraRequestMessageId?: string;
+};
 /** A pending proposal that does not fit the current screen. Its message is shown to the owner. */
 export class ContextNotice extends Error {
   override readonly name = "ContextNotice";
@@ -1066,7 +1070,7 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     proof?: CurrentDeviceActionRequest,
-  ): Promise<{ items: PendingReviewItem[]; failures: Error[] }> {
+  ): Promise<{ items: ReviewItem[]; failures: Error[] }> {
     const sequence = ++this.reviewSequence;
     const assertCurrentReview = () => {
       signal.throwIfAborted();
@@ -1099,7 +1103,7 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
-    const items: PendingReviewItem[] = [];
+    const items: ReviewItem[] = [];
     for (const proposal of valid) {
       // An approval whose claim never arrived is shown again: deciding is
       // idempotent for it, so a second tap reaches the claim.
@@ -1140,6 +1144,11 @@ export class DeviceActionCoordinator<
           proposalId: proposal.id,
           proposal: null,
           notice: `${card.title}: ${notice}`,
+          ...(notice === CAMERA_CONTEXT_NOTICE &&
+          !context.sensitive &&
+          proposal.requestMessageId
+            ? { cameraRequestMessageId: proposal.requestMessageId }
+            : {}),
         });
         continue;
       }
@@ -1251,7 +1260,7 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     proof?: CurrentDeviceActionRequest,
-  ): Promise<PendingReviewItem[]> {
+  ): Promise<ReviewItem[]> {
     return (await this.review(context, signal, proof)).items;
   }
   /** Reviewable proposals only. An invalid proposal fails the call only when nothing else is reviewable. */
