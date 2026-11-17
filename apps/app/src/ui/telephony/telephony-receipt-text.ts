@@ -1,7 +1,8 @@
-/** Owner- and agent-facing receipt text for one telephony action: shown as the proposal card
- * subtitle, the toast and the device receipt bubble, and sent as the device result summary.
- * Alpha owns every sentence; the receipt outcomes, validators and capabilities stay in the
- * shared telephony contract. */
+/** Receipt text for one telephony action. The `...ResultText` sentences are the device result
+ * summary: they are journalled and sent to the agent, so they speak about the owner.
+ * `ownerReceiptText` is what the owner reads instead on the proposal card, the toast and the
+ * device receipt bubble. Alpha owns every sentence; the receipt outcomes, validators and
+ * capabilities stay in the shared telephony contract. */
 import type { PhoneDialResult } from "@elizaos/contracts/phone-dial";
 import type { TelephonyActionResult } from "@elizaos/plugin-assistant/device-actions/telephony-actions-contract";
 
@@ -148,4 +149,39 @@ export function telephonyActionResultText(
           ? "No voicemail is open on the phone. Nothing was read."
           : "Voicemail is not available on this phone. Nothing was read.";
   }
+}
+
+/** The owner's wording for each summary that speaks about the owner, keyed by that summary. */
+const OWNER_RECEIPTS: ReadonlyMap<string, string> = new Map(
+  (
+    [
+      [{ kind: "phone-call", status: "placed" }, "Calling. Alpha can’t tell whether it was answered."],
+      [{ kind: "phone-call", status: "emergency-handoff" }, "That is an emergency number, so the dial screen is open with it filled in. Place the call there."],
+      [{ kind: "phone-call", status: "cancelled" }, "You dismissed the call. Nothing was called."],
+      [{ kind: "contact-write", status: "saved" }, "Contact saved."],
+      [{ kind: "contact-write", status: "deleted" }, "Contact deleted."],
+      [{ kind: "contact-write", status: "cancelled" }, "You dismissed the change. Nothing was changed."],
+      [{ kind: "sms-compose", status: "drafted" }, "The message is in that conversation’s text field for you to edit and send. Nothing was sent."],
+      [{ kind: "sms-compose", status: "submitted" }, "Your message was handed to the carrier. It isn’t confirmed sent yet."],
+      [{ kind: "sms-compose", status: "sent" }, "Your carrier accepted the message."],
+      [{ kind: "sms-compose", status: "delivered" }, "Your carrier reported the message delivered."],
+      [{ kind: "sms-compose", status: "cancelled" }, "You dismissed the message. Nothing was sent."],
+      [{ kind: "sms-reply", status: "drafted" }, "The draft is in the open conversation’s text field for you to edit and send. Nothing was sent."],
+      [{ kind: "sms-reply", status: "none-selected" }, "You have no conversation open. Nothing was drafted."],
+      [{ kind: "sms-reply", status: "occupied" }, "You’re writing your own message in that conversation. Nothing was changed."],
+      [{ kind: "voicemail-delete", status: "deleted" }, "Voicemail deleted."],
+      [{ kind: "voicemail-delete", status: "cancelled" }, "You kept the voicemail. Nothing was deleted."],
+      [{ kind: "messages-read", status: "read" }, "You shared the open conversation with Alpha."],
+      [{ kind: "voicemail-read", status: "read" }, "You shared the open voicemail with Alpha."],
+    ] as [Pick<TelephonyActionResult, "kind" | "status">, string][]
+  )
+    .map(([result, text]): [string, string] => [telephonyActionResultText(result as unknown as TelephonyActionResult), text])
+    .concat([
+      [phoneDialResultText({ kind: "phone-dial", status: "handed-off", handler: null, contact: false }), "Your phone app is open with the number. Place the call there; Alpha can’t tell whether a call was placed or connected."],
+      [phoneDialResultText({ kind: "phone-dial", status: "cancelled", handler: null, contact: false }), "You cancelled the dial review. Nothing was dialed."],
+    ]),
+);
+/** A telephony receipt as the owner reads it: second person, never "the owner". Other text is unchanged. */
+export function ownerReceiptText(summary: string): string {
+  return OWNER_RECEIPTS.get(summary) ?? summary;
 }

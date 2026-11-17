@@ -1,6 +1,7 @@
 import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
+import {ownerReceiptText} from '../ui/telephony/telephony-receipt-text.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
 type Message = Record<string, any>;
 /** Only the service-authored check-in suffix is presentation markup. */
@@ -20,7 +21,7 @@ const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new br
 export function actionResultText(text: string): string {
   return text === 'The action could not reach a confirmed result.'
     || text === 'Action did not reach a confirmed result. Check action history before requesting it again.'
-    ? 'I couldn’t confirm the result. Check the app before trying again.' : text;
+    ? 'I couldn’t confirm the result. Check the app before trying again.' : ownerReceiptText(text);
 }
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);

@@ -137,6 +137,11 @@ export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
  * executor; `canonicalNotes`: the same resident session owns canonical app records; `files`: the native
  * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
 export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
+/** Every capability either list offers. The Cloud agent answers two lists, its capabilities route
+ * and its device registration, and the registration is the complete one. */
+export function offeredByEither(...offers: unknown[]): unknown[] {
+  return [...new Set(offers.flatMap(offer => Array.isArray(offer) ? offer : []))];
+}
 /** The X-Eliza-Device-Capabilities list for every runtime (remote, resident, Cloud): the base
  * local-record contracts plus each capability the agent offers that this phone supports. Clock
  * handoffs are Android-only; v2 (repeat days) also needs the native repeat-days support. */
