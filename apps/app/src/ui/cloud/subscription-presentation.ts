@@ -326,3 +326,27 @@ export function serviceLimitNextChange(
     ? Math.min(3_600_000, Math.max(1000, Math.min(...points) - now))
     : null;
 }
+
+/**
+ * Alpha's short status for a subscription entitlement Alpha could not accept, by the shared
+ * verifier's `EntitlementError` code (`packages/cloud/sdk/src/subscription-entitlement.ts`, whose
+ * own text is "Subscription entitlement <code>"). That text is never shown.
+ */
+export const ENTITLEMENT_ERROR_TEXT: Readonly<Record<string, string>> = {
+  malformed: "Plan couldn’t be checked",
+  unsupported: "Plan couldn’t be checked",
+  "unknown-key": "Plan couldn’t be checked",
+  signature: "Plan couldn’t be verified",
+  "account-mismatch": "Account mismatch",
+  audience: "Plan is for another service",
+  expired: "Plan check expired",
+  "not-yet-valid": "Check the phone’s clock",
+  lifetime: "Plan couldn’t be verified",
+};
+
+/** The status for an entitlement error code; an unknown code reads as a failed check. */
+export function entitlementErrorText(code: unknown): string {
+  return typeof code === "string" && Object.hasOwn(ENTITLEMENT_ERROR_TEXT, code)
+    ? ENTITLEMENT_ERROR_TEXT[code]
+    : "Plan couldn’t be checked";
+}

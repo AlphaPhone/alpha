@@ -67,7 +67,7 @@ test('mounted digest save settlement keeps the exact journal and refresh owner',
       await run('select', 2);
       await run('sync', 1, 1);
       const replacement = await run('observe');
-      assert.doesNotMatch(replacement.message, /Source access changed before saving/);
+      assert.doesNotMatch(replacement.message, /Your access to this source changed before it was saved|Source access changed before saving/);
       assert.deepEqual(replacement.stored.map(([id]) => id), [2]);
       await run('history', 2);
       await run('sync', 2, 2);

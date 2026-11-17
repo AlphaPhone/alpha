@@ -13,6 +13,7 @@ import type {
   parseRoleStatuses,
   SystemSwitchRow,
 } from "@elizaos/capacitor-system/settings";
+import type { ListenerState } from "@elizaos/capacitor-system/sense";
 
 /** An Android settings page a handoff opens (the shared contract's page names). */
 type SystemSettingsPage = SystemSwitchRow["page"];
@@ -179,4 +180,53 @@ export function androidRoleLabel(
   )
     ? "Another app"
     : `Not ${host.appName}`;
+}
+
+/**
+ * Alpha's subtitle for the Listening switch, one sentence per listener state. The listener
+ * (`ListenerPolicy.label` in the shared Sense module) also sends its own label; Alpha words the
+ * state here instead and never shows that label.
+ */
+export const LISTENER_STATE_TEXT: Readonly<Record<ListenerState, string>> = {
+  OFF: "Off",
+  PERMISSION_REQUIRED: "Needs microphone permission",
+  NOTIFICATIONS_REQUIRED: "Needs its notification to be allowed",
+  STOPPED_AFTER_ERRORS: "Stopped after repeated errors",
+  STOPPED_INDICATOR_LOST: "Stopped because the microphone indicator wasn’t shown",
+  PAUSED_OTHER_USER: "Paused while another user is active",
+  WAITING_FOR_UNLOCK: "Starts after you unlock the phone",
+  SPEECH_UNAVAILABLE: "Unavailable until on-device speech is ready",
+  INDICATOR_UNAVAILABLE: "Waiting for the microphone indicator",
+  PAUSED_USER: "Paused",
+  PAUSED_CALL: "Paused during a call",
+  PAUSED_MIC_IN_USE: "Paused while another app uses the microphone",
+  PAUSED_MIC_UNAVAILABLE: "Paused because the microphone is unavailable",
+  PAUSED_DISPLAY_OFF: "Paused while the screen is off without Always-on display",
+  PAUSED_FULLSCREEN: "Paused while an app is full screen",
+  PAUSED_SHADE: "Paused while notifications are open",
+  PAUSED_TRANSITION: "Paused while the screen changes",
+  LISTENING: "Listening",
+};
+
+/** The Listening switch subtitle for a reported state; an unknown state reads as off. */
+export function listenerStateText(state: string | undefined): string {
+  return Object.hasOwn(LISTENER_STATE_TEXT, state ?? "")
+    ? LISTENER_STATE_TEXT[state as ListenerState]
+    : LISTENER_STATE_TEXT.OFF;
+}
+
+/**
+ * Alpha's word for a notification history event. The shared notification mirror
+ * (`NotificationMirror.recordEvent` in plugin-native-notifications, inherited by
+ * `AlphaNotificationsPlugin`) records each event with its own English state; Alpha words the
+ * state here and never shows the mirror's word.
+ */
+export const NOTIFICATION_HISTORY_STATES: ReadonlyMap<string, string> = new Map([
+  ["Posted", "Arrived"],
+  ["Removed", "Cleared"],
+]);
+
+/** The History row's state for a recorded event; an unknown state reads as a plain notification. */
+export function notificationHistoryState(state: unknown): string {
+  return NOTIFICATION_HISTORY_STATES.get(typeof state === "string" ? state.trim() : "") ?? "Notification";
 }

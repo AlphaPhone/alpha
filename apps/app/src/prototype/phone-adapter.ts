@@ -8,6 +8,7 @@ import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {formatDateTime} from './locale-time';
 import {callKind,callRow,callsBriefing,clockLength,displayNumber,initials,matchesCallQuery,numberKey,shortWhen} from './telephony-presenters';
+import {callResultText,handoffResultText} from '../ui/telephony/telephony-messages';
 import {clearListFilter,setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 type Bag=Record<string,any>;
 type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
@@ -153,9 +154,9 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   if(busy()||!available())return;const target=normalizePhoneNumber(raw);
   if(!target){notice='Invalid number';changed();return;}
   const token=session;dialing=true;notice='';changed();
-  try{const result=await client!.placeCall(target);if(token!==session)return;if(result.status==='placed'){number='';inCall=true;vm=callStarted(vm);audio?.pause();}else notice=result.message;}
+  try{const result=await client!.placeCall(target);if(token!==session)return;if(result.status==='placed'){number='';inCall=true;vm=callStarted(vm);audio?.pause();}else notice=callResultText(result);}
   catch(error){if(token!==session)return;const code=(error as {code?:string})?.code;
-   if(code==='role-required'||code==='permission-required'){try{const handoff=await client!.dial(target);if(token===session)notice=handoff.message;}catch{if(token===session)notice='Couldn’t open';}}
+   if(code==='role-required'||code==='permission-required'){try{const handoff=await client!.dial(target);if(token===session)notice=handoffResultText(handoff);}catch{if(token===session)notice='Couldn’t open';}}
    else notice='Call unconfirmed';}
   finally{if(token===session){dialing=false;changed();}}
  }

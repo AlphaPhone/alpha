@@ -42,3 +42,30 @@ export function scanPdfErrorText(error: unknown, fallback = "PDF failed"): strin
 export function scanTextLayerErrorText(error: unknown, fallback: string): string {
   return refusal(SCAN_TEXT_LAYER_REFUSALS, error) ?? fallback;
 }
+
+/** The scan draft store (`scan-draft.ts`): saving, loading and deleting the device draft. */
+export const SCAN_DRAFT_REFUSALS: ReadonlyMap<string, string> = new Map([
+  ["Saved draft could not be read.", "The saved draft couldn’t be read."],
+  ["Saved page could not be read.", "A saved page couldn’t be read."],
+  ["Choose 1 to 20 images, up to 64 MB total.", "A draft holds 1 to 20 pages, up to 64 MB in total."],
+  ["Close another scan tab and try again.", "Close the scan open in another tab, then try again."],
+  ["Draft storage interrupted.", "Saving the draft was interrupted. Try again."],
+  ["Could not read the complete page.", "A page couldn’t be read completely."],
+  [
+    "A saved draft already exists or changed. Load the saved draft before replacing it.",
+    "A saved draft already exists or changed. Load it before replacing it.",
+  ],
+  ["Saved draft changed. Load it before deleting.", "The saved draft changed. Load it before deleting it."],
+  ...SCAN_TEXT_LAYER_REFUSALS,
+]);
+
+/**
+ * Alpha's sentence for a failed draft save, load or delete: a draft store refusal by its text;
+ * otherwise Alpha's own error keeps its message, and a storage exception reads as `fallback`.
+ */
+export function scanDraftErrorText(error: unknown, fallback: string): string {
+  const known = refusal(SCAN_DRAFT_REFUSALS, error);
+  if (known) return known;
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) return fallback;
+  return error instanceof Error && error.message ? error.message : fallback;
+}

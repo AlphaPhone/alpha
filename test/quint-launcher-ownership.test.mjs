@@ -83,7 +83,8 @@ function fixture(compiled) {
   const error = value => {
     if (!value) return '';
     if (value.endsWith('is no longer installed.')) return 'stale-app';
-    if (value.endsWith('Fixture refusal.')) return value.startsWith('Example') ? 'launch-failed' : 'dial-failed';
+    // A refusal is worded by Alpha after the app name (installed-launcher.ts LAUNCH_REFUSALS).
+    if (value.endsWith('could not be opened. Android didn’t open it. Try again.')) return value.startsWith('Example') ? 'launch-failed' : 'dial-failed';
     return assert.fail('Unexpected launcher result: ' + value);
   };
   return {
@@ -128,7 +129,7 @@ function fixture(compiled) {
       assert.ok(launch && !launch.settled);
       launch.settled = true;
       if (ok) launch.task.resolve();
-      else launch.task.reject(Error('Fixture refusal.'));
+      else launch.task.reject(Error('App could not be opened'));
     },
     cancelPending() {launcher.cancelPending();},
     clearError() {launcher.clearError();},

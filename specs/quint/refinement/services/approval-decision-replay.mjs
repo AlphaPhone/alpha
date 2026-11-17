@@ -64,7 +64,7 @@ async function subject() {
       sent: {1: posts.filter(post => post.digest === 1).length, 2: posts.filter(post => post.digest === 2).length},
       intent: stored ? Number(stored.requestDigest.slice(1)) : 0, intentApproved: stored ? stored.approved : null,
       opened, busy: opened ? view.fd.busy : false,
-      known: row ? {digest: Number(row.title.slice(-1)), status: ['approved', 'denied'].includes(row.status) ? row.status : 'pending'} : null,
+      known: row ? {digest: Number(row.title.slice(-1)), status: ({Approved: 'approved', Denied: 'denied'})[row.status] ?? 'pending'} : null,
       review: row ? (row.approveLabel === 'Confirm approve' ? 'approve' : row.denyLabel === 'Confirm deny' ? 'deny' : 'none') : 'none',
       canDecide: row ? row.canDecide : false};
   };

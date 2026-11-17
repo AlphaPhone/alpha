@@ -18,6 +18,8 @@ import {
   type DigestSource,
   digestRan,
 } from '@elizaos/plugin-workflow/client/hosted-digests';
+import {occurrenceNotRunText, workflowRunStatusLabel} from '../workflows/workflow-run-presentation';
+import {workflowErrorText} from '../workflows/workflow-messages';
 
 /** Owner-facing labels of occurrences recorded without running. */
 const DIGEST_NOT_RUN_LABEL: Readonly<Record<DigestNotRunStatus, string>> = {
@@ -25,17 +27,34 @@ const DIGEST_NOT_RUN_LABEL: Readonly<Record<DigestNotRunStatus, string>> = {
   overlap: 'Skipped — an earlier run was still active',
   unavailable: 'Not run — source unavailable',
 };
-/** Owner-facing state of one occurrence. Executed runs keep the agent's own status word. */
+/** Owner-facing state of one occurrence; an executed run's status is worded like any workflow run. */
 export function digestStatusLabel(status: string): string {
-  return isDigestNotRunStatus(status) ? DIGEST_NOT_RUN_LABEL[status] : status;
+  return isDigestNotRunStatus(status) ? DIGEST_NOT_RUN_LABEL[status] : workflowRunStatusLabel(status);
 }
-/** The final summary, never typed-step source payloads or execution metadata. */
+/** A digest the agent reports an error for; the engine's message is a diagnostic and is not shown. */
+export const DIGEST_RUN_FAILED =
+  'This digest stopped with an error on your agent. Open execution details to see what ran.';
+/**
+ * The final summary, never typed-step source payloads or execution metadata. The text the agent
+ * records for an occurrence it did not run reads in Alpha's words; a brief is the agent's own.
+ */
 export function digestSummaryText(
-  result: Pick<DigestResult, 'runId' | 'output' | 'error'>
+  result: Pick<DigestResult, 'runId' | 'output' | 'error'> & { status?: string }
 ): string {
-  if (result.error) return result.error;
+  if (result.error) return DIGEST_RUN_FAILED;
   const output = result.output;
-  if (typeof output === 'string') return output;
+  const record =
+    output && typeof output === 'object' && !Array.isArray(output)
+      ? (output as Record<string, unknown>)
+      : undefined;
+  const notRun = isDigestNotRunStatus(result.status)
+    ? result.status
+    : isDigestNotRunStatus(record?.status)
+      ? record.status
+      : undefined;
+  if (notRun)
+    return occurrenceNotRunText(notRun, typeof output === 'string' ? output : record?.text)!;
+  if (typeof output === 'string') return occurrenceNotRunText(undefined, output) ?? output;
   if (Array.isArray(output) && output.length === 1) {
     const value = output[0];
     if (
@@ -53,6 +72,28 @@ export function digestSummaryText(
     if (typeof value.text === 'string') return value.text;
   }
   return 'No readable summary was returned. Open execution details to inspect this result.';
+}
+
+/**
+ * The staged digest client's `HostedSourceRejected` (the source's access changed before the
+ * agent saved it), in Alpha's words.
+ */
+export const HOSTED_SOURCE_REJECTED_TEXT =
+  'Your access to this source changed before it was saved. Refresh your accounts and review the source again.';
+
+/** Alpha's own refusals while the digest panel lists the phone's calendars. */
+export const DIGEST_CALENDAR_PERMISSION_DENIED = 'Calendar permission was not granted.';
+export const DIGEST_CALENDARS_UNAVAILABLE = 'Calendar sources unavailable.';
+/**
+ * What the digest panel shows when listing the phone's calendars fails: Alpha's own refusal as
+ * it is, the phone Calendar plugin's reviewed refusals in Alpha's words, anything else as
+ * {@link DIGEST_CALENDARS_UNAVAILABLE}.
+ */
+export function digestCalendarErrorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (message === DIGEST_CALENDAR_PERMISSION_DENIED || message === DIGEST_CALENDARS_UNAVAILABLE)
+    return message;
+  return workflowErrorText(error, DIGEST_CALENDARS_UNAVAILABLE, DIGEST_CALENDARS_UNAVAILABLE);
 }
 
 /** Loop state shown to the owner. Only an agent that advertises pausing is described as paused. */

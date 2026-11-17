@@ -68,6 +68,8 @@ import { CloudResidentBindingController, CloudResidentBindingError, ResidentRebi
 import { cloudServiceName, cloudSignInHandOffAvailable, CloudProtocol, CloudProtocolError, type CloudAgent, type CloudEnvironment } from './cloud-protocol';
 import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSignInError, normalizeSignInCode, signInFailureMessage as formatSignInFailureMessage, signInReadiness, signInReadinessChanged, validSignInEmail, validSignInPhone, type CloudSignInAuthenticated } from './cloud-sign-in';
 import { DevelopmentCloudAgentProtocol, type CloudPhoneTarget } from './development-cloud-agents';
+import { entitlementErrorText } from '../ui/cloud/subscription-presentation.ts';
+import { deviceActionRefusal } from '../ui/device-actions/device-action-messages.ts';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
 import { phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
@@ -964,9 +966,12 @@ function errorMessage(error: unknown): string {
     if (error.code === 'credential-consumed') return 'Link used. Start again';
     if (error.code === 'login-active') return signInFailureMessage('login-active');
     if (error.code === 'credentials-missing') return 'Sign in';
+    // The shared resident binding (CloudResidentBindingError) says so in its own words; Alpha's are shorter.
+    if (error.code === 'account-changed') return ACCOUNT_CHANGED;
   }
   if (error instanceof DOMException && error.name === 'AbortError') return '';
-  if (error instanceof EntitlementError && error.code === 'account-mismatch') return 'Account mismatch';
+  // The shared verifier's text is "Subscription entitlement <code>"; Alpha words the code.
+  if (error instanceof EntitlementError) return entitlementErrorText(error.code);
   // Production phones have no pairing to fall back on: an expired session is a Cloud sign-in.
   if (error && typeof error === 'object' && 'status' in error && error.status === 401 && (error as { source?: unknown }).source !== 'local-agent') return !testMocksEnabled ? residentSignInExpired() : 'Session expired';
   if (error && typeof error === 'object' && 'status' in error && error.status === 503) return 'Agent starting';
@@ -978,6 +983,9 @@ function errorMessage(error: unknown): string {
     if (error.code === 'account-changed') return 'Account changed';
     if (error.code === 'http' || error.code === 'invalid-response') return 'Couldn’t check';
   }
+  // The native action journal and the shared operation validators refuse in their own words.
+  const deviceRefusal = deviceActionRefusal(error);
+  if (deviceRefusal) return deviceRefusal;
   return error instanceof Error ? error.message : 'Couldn’t connect';
 }
 /** A resident start that does not open the dialog: Home shows the starting state (P-43). */

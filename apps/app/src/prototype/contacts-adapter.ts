@@ -3,6 +3,7 @@ import { watchReturnToApp } from './native-adapter';
 import { isMvpView } from './mvp-features';
 import { displayNumber, initials } from './telephony-presenters';
 import { applyListFilter, clearListFilter, setListFilterHandler } from '../runtime/comms-bar';
+import {UNNAMED_CONTACT,contactEmailFieldLabel,contactEmailLabel,contactEmailRemoveLabel,contactPhoneFieldLabel,contactPhoneLabel,contactPhoneRemoveLabel} from '../ui/telephony/telephony-messages';
 import {CONTACT_MAX_NAME,CONTACT_MAX_NOTES,contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
@@ -14,7 +15,6 @@ export function contactActs(phones:readonly string[],api:Bag){
   ...(isMvpView('messages')?[{d:BUBBLE,label:`Message ${number}`,go:()=>api.open('messages',{prefill:number})}]:[])]);
 }
 const PROBLEM:Record<string,string>={'empty-contact':'Add a name, number or email.','invalid-name':'Check the name.','invalid-notes':'Check the notes.','too-many-fields':'Too many numbers or emails.','invalid-number':'Check the phone numbers.','invalid-address':'Check the email addresses.','invalid-type':'Check the phone numbers.'};
-const TYPE_LABEL=(type:string)=>type.startsWith('custom:')?type.slice(7):type.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
 /** The contact editor of the image Contacts view (specs/quint/native/ContactsBook.qnt). */
 type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:ContactDraft;givenName:string;familyName:string;notes:string;notesEditable:boolean;initialText:{givenName:string;familyName:string;notes:string};nameEdited:boolean;notesEdited:boolean;dirty:boolean;stale:boolean;notice:string};
 /** Why Android would refuse this draft. A new contact's name is judged from its structured fields
@@ -141,7 +141,7 @@ export function installContactsAdapter(Component:any,views:Bag){
  /* The rows the list and the bar show: names only, from the last read, and only while that read
     answered the query on screen. Another query shows no rows until the provider answers it. */
  const visibleRows=(st:Bag)=>String(st.q??'').trim()===rowsQuery?rows:[];
- const shown=(from:Bag[])=>from.map(row=>{const name=row.name||'Unnamed contact';return {id:row.id,name,first:name.split(/\s+/)[0],ini:initials(row.name||''),phone:'',email:'',fav:false};});
+ const shown=(from:Bag[])=>from.map(row=>{const name=row.name||UNNAMED_CONTACT;return {id:row.id,name,first:name.split(/\s+/)[0],ini:initials(row.name||''),phone:'',email:'',fav:false};});
  /* AP-16 bar: the model's Contacts bar over the rows read on the device. Alpha gets no briefing from
     the address book: its rows never enter agent context. */
  const bar=views.contacts.bar;
@@ -176,7 +176,7 @@ export function installContactsAdapter(Component:any,views:Bag){
   for(const group of model.groups||[])group.head=visible.length>=20;
   if(model.d){const selected=visible.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
    model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v}))]:[];
-   if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:TYPE_LABEL(row.type)})),...detail.emailAddresses.map(row=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v:row.address,sub:TYPE_LABEL(row.type)}))];
+   if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:contactPhoneLabel(row.type)})),...detail.emailAddresses.map(row=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v:row.address,sub:contactEmailLabel(row.type)}))];
    if(selected&&detail&&detail.id===selected.id&&detail.notes)model.d.fields.push({d:'M4 3h16v18H4zM8 7h8M8 11h8M8 15h5',v:detail.notes,sub:'Notes'});
    model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void openEditor(selected);model.d.canFav=false;
    model.d.canDelete=!pendingWrite&&!uncertain&&!!selected&&!!detail&&detail.id===selected.id&&writable;model.d.del=()=>{if(model.d.canDelete&&!saving&&!opening&&!form){confirming=true;changed();}};
@@ -186,8 +186,8 @@ export function installContactsAdapter(Component:any,views:Bag){
   model.ed={open:!!current,busy:saving,cannotSave:saving||!current?.dirty||current.stale,notice:current?.notice||'',hasNotice:!!current?.notice,
    givenName:current?.givenName||'',familyName:current?.familyName||'',notes:current?.notes||'',notesEditable:!!current?.notesEditable,notesUnavailable:!!current&&!current.notesEditable,maxName:CONTACT_MAX_NAME,maxNotes:CONTACT_MAX_NOTES,
    onGivenName:(event:Event)=>setText('givenName',event),onFamilyName:(event:Event)=>setText('familyName',event),onNotes:(event:Event)=>setText('notes',event),
-   phones:(current?.draft.phoneNumbers||[]).map((row,index)=>({value:row.number,label:index===0&&row.type==='mobile'?'Phone':`${TYPE_LABEL(row.type)} phone`,canRemove:!!row.number||(current?.draft.phoneNumbers.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.phoneNumbers[index].number=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.phoneNumbers.splice(index,1);if(!draft.phoneNumbers.length)draft.phoneNumbers.push({number:'',type:'mobile'});}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} number`})),
-   emails:(current?.draft.emailAddresses||[]).map((row,index)=>({value:row.address,label:index===0&&row.type==='home'?'Email':`${TYPE_LABEL(row.type)} email`,canRemove:!!row.address||(current?.draft.emailAddresses.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.emailAddresses[index].address=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.emailAddresses.splice(index,1);if(!draft.emailAddresses.length)draft.emailAddresses.push({address:'',type:'home'});}),removeLabel:`Remove ${TYPE_LABEL(row.type).toLowerCase()} email`})),
+   phones:(current?.draft.phoneNumbers||[]).map((row,index)=>({value:row.number,label:index===0&&row.type==='mobile'?'Phone':contactPhoneFieldLabel(row.type),canRemove:!!row.number||(current?.draft.phoneNumbers.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.phoneNumbers[index].number=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.phoneNumbers.splice(index,1);if(!draft.phoneNumbers.length)draft.phoneNumbers.push({number:'',type:'mobile'});}),removeLabel:contactPhoneRemoveLabel(row.type)})),
+   emails:(current?.draft.emailAddresses||[]).map((row,index)=>({value:row.address,label:index===0&&row.type==='home'?'Email':contactEmailFieldLabel(row.type),canRemove:!!row.address||(current?.draft.emailAddresses.length||0)>1,onChange:(event:Event)=>touch(draft=>{draft.emailAddresses[index].address=(event.target as HTMLInputElement).value;}),remove:()=>touch(draft=>{draft.emailAddresses.splice(index,1);if(!draft.emailAddresses.length)draft.emailAddresses.push({address:'',type:'home'});}),removeLabel:contactEmailRemoveLabel(row.type)})),
    addPhone:()=>touch(draft=>{if(draft.phoneNumbers.length<32)draft.phoneNumbers.push({number:'',type:'mobile'});}),addEmail:()=>touch(draft=>{if(draft.emailAddresses.length<32)draft.emailAddresses.push({address:'',type:'home'});}),
    save:()=>void save(),cancel:()=>{if(saving)return;form=null;changed();}};
   return model;

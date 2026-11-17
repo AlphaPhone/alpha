@@ -133,7 +133,7 @@ test('journey D: morning and evening digests run once each, are retained and ack
  await expect.poll(async()=>(await digests(page)).results.length).toBe(1);
  await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(panel.getByRole('article')).toHaveCount(1);
- await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · Completed',{exact:true})).toHaveCount(1);
  await expect(panel.getByRole('article').first()).toContainText(OUTPUT);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([1]);
  state=await digests(page);
@@ -160,8 +160,8 @@ test('journey D: morning and evening digests run once each, are retained and ack
  panel=await openDigests(page);
  await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(panel.getByRole('article')).toHaveCount(2);
- await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · completed',{exact:true})).toHaveCount(1);
- await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 PM · completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · Completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 PM · Completed',{exact:true})).toHaveCount(1);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([2]);
  state=await digests(page);
  expect(state.results[0]).toEqual(first);
@@ -192,7 +192,8 @@ test('journey D: morning and evening digests run once each, are retained and ack
  const missedArticle=panel.getByRole('article').filter({hasText:'Oct 4, 2026, 7:00 AM'});
  await expect(missedArticle).toHaveCount(1);
  await expect(missedArticle).toContainText('Missed — not run');
- await expect(missedArticle).toContainText(MISSED.text);
+ // The agent's recorded text (DIGEST_MISSED_TEXT) is shown in Alpha's words.
+ await expect(missedArticle).toContainText('This digest missed its scheduled time, so it didn’t run. Nothing runs late.');await expect(missedArticle).not.toContainText(MISSED.text);
  await expect(missedArticle).not.toContainText(OUTPUT);
  await expect(panel.getByRole('article').filter({hasText:'Missed — not run'})).toHaveCount(1);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([3]);
@@ -220,7 +221,7 @@ test('journey D: morning and evening digests run once each, are retained and ack
  await expect.poll(async()=>(await digests(page)).results.length).toBe(4);
  await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(panel.getByRole('article')).toHaveCount(4);
- await expect(panel.getByRole('article').getByText('Oct 4, 2026, 7:00 PM · completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 4, 2026, 7:00 PM · Completed',{exact:true})).toHaveCount(1);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([4]);
  const afterMissed=state.results;
  state=await digests(page);

@@ -14,7 +14,7 @@ import {
  * size: Gmail answered, and a retry would get the same file. `gone` is a
  * message or draft Gmail no longer has: close it and refresh the list.
  * `rejected` is Cloud refusing the request itself (HTTP 400 or 413 without a
- * known code), shown with Cloud's own reason when it is plain text.
+ * known code). Cloud's reason text is never shown.
  */
 export type GmailFailureKind =
   | "offline"
@@ -84,26 +84,6 @@ const reasonKinds: Record<string, GmailFailureKind> = {
 };
 
 /**
- * Cloud's own reason for a refused request (`data.error`), when it is short
- * plain text: printable characters only, no link and no markup.
- */
-function cloudReason(data: unknown): string | null {
-  const text =
-    data && typeof data === "object"
-      ? (data as { error?: unknown }).error
-      : undefined;
-  if (typeof text !== "string") return null;
-  const reason = text.trim();
-  return reason.length >= 1 &&
-    reason.length <= 200 &&
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
-    !/[\u0000-\u001f\u007f-\u009f<>]/.test(reason) &&
-    !/[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\]\(/i.test(reason)
-    ? reason
-    : null;
-}
-
-/**
  * Classifies a failed Gmail request. The Cloud error code decides when the
  * response has one. Without it (older Cloud), reads and reviewed operations
  * interpret HTTP 409 differently: the managed read routes use 409 for a grant
@@ -134,12 +114,8 @@ export function classifyGmailFailure(
     const status = failure.status;
     if (status === 403 || status === 404) return result("revoked");
     if (status === 409) return result(context === "read" ? "revoked" : "stale");
-    if (status === 400 || status === 413) {
-      const reason = cloudReason(failure.data);
-      return reason
-        ? { kind: "rejected", message: reason }
-        : result("rejected");
-    }
+    // Cloud's own reason text is the server's English, not Alpha's; the kind is worded here.
+    if (status === 400 || status === 413) return result("rejected");
     return result("unavailable");
   }
   // Transport failures only; a TypeError from a programming fault is not reported as offline.

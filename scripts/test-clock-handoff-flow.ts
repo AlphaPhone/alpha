@@ -5,6 +5,7 @@ import {prototypeScript} from './fixtures/prototype-script.ts';
 import {randomUUID} from 'node:crypto';
 import {createInlineModal} from '../apps/app/src/runtime/inline-modal.ts';
 import {currentClockTimeZone,buildClockRequest,describeClockDays} from '../apps/app/src/runtime/clock-contract.ts';
+import {clockResultText} from '../apps/app/src/ui/clock/clock-handoff-presentation.ts';
 import type {ClockRequest,ClockResult} from '../apps/app/src/daily.ts';
 import type {ClockHandoffEnvelope} from '../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff-history.ts';
 import {createClockHandoffHistory,clockHandoffLegacyKey,clockHandoffSlot} from '../apps/app/src/runtime/clock-handoff-history.ts';
@@ -63,7 +64,7 @@ async function fixture(simulated=false){
  }
  let active=true;
  const views: {workflows: WorkflowView}={workflows:{render:()=>({})}};
- vm.runInNewContext(source+'\ninstallClockAdapter(Shell,views,{simulated});',{testMocksEnabled,devSurfacesEnabled:testMocksEnabled,createClockHandoffHistory,clockHandoffLegacyKey,secureConnectionStore,createInlineModal,currentClockTimeZone,buildClockRequest,describeClockDays,DailyApps,Shell,views,simulated,document,window:{addEventListener(){},removeEventListener(){}},queueMicrotask,localStorage,crypto:{randomUUID},Date,Intl,console});
+ vm.runInNewContext(source+'\ninstallClockAdapter(Shell,views,{simulated});',{testMocksEnabled,devSurfacesEnabled:testMocksEnabled,createClockHandoffHistory,clockHandoffLegacyKey,secureConnectionStore,createInlineModal,currentClockTimeZone,buildClockRequest,describeClockDays,clockResultText,DailyApps,Shell,views,simulated,document,window:{addEventListener(){},removeEventListener(){}},queueMicrotask,localStorage,crypto:{randomUUID},Date,Intl,console});
  const shell=new Shell();
  shell.componentDidMount();
  const render=()=>views.workflows.render({},{isActive:()=>active});
@@ -104,8 +105,8 @@ for(const [name,action] of [['Show alarms','show'],['Snooze','snooze'],['Dismiss
 }
 const snoozed=writes[2];assert.ok(snoozed.action==='snooze');assert.equal(snoozed.snoozeMinutes,10);
 response={status:'unavailable',message:'No installed Clock app handles this action'};f.clock().prepare();await f.review().confirm();assert.match(f.clock().message,/No installed Clock/);
-for(const status of ['denied','failed'] as const){response={status,message:`Clock ${status}`};f.clock().prepare();await f.review().confirm();assert.equal(f.clock().message,`Clock ${status}`);}
-response=new Error('lost response');f.clock().prepare();await f.review().confirm();assert.match(f.clock().message,/Unknown/);const count=writes.length;
+for(const status of ['denied','failed'] as const){response={status,message:`Clock ${status}`};f.clock().prepare();await f.review().confirm();assert.equal(f.clock().message,clockResultText({status,message:`Clock ${status}`}));assert.notEqual(f.clock().message,`Clock ${status}`);}
+response=new Error('lost response');f.clock().prepare();await f.review().confirm();assert.equal(f.clock().message,clockResultText({status:'unknown',message:'Unknown'}));const count=writes.length;
 f.shell.componentWillUnmount();f=await fixture();assert.match(f.clock().message,/Unknown/);assert.equal(writes.length,count,'recreation must not dispatch or retry');
 failStorage=true;f.clock().prepare();await f.review().confirm();assert.equal(writes.length,count);assert.equal(f.clock().message,"Can’t reach Clock");failStorage=false;
 hidden=true;f.clock().prepare();await f.review().confirm();assert.equal(writes.length,count);hidden=false;

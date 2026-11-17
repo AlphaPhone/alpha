@@ -184,6 +184,7 @@ import { describeNotesOrganizeOperation } from "../notes/notes-organize-presenta
 import { describeLibraryOperation } from "../photos/library-presentation.ts";
 import { describePhotosViewOperation } from "../photos/photos-view-presentation.ts";
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
+import { sharedValidatorRefusal } from "./device-action-messages.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -1224,7 +1225,9 @@ export class DeviceActionCoordinator<
     const proposals = items.flatMap((item) =>
       item.proposal ? [item.proposal] : [],
     );
-    if (!proposals.length && failures.length) throw failures[0];
+    // The shared validator's reason stays the thrown error; the owner reads Alpha's notice for it.
+    if (!proposals.length && failures.length)
+      throw sharedValidatorRefusal(failures[0]);
     return proposals;
   }
   /** Only proposals bound by the host to this exact freshly sent user message may run.

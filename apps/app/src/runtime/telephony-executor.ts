@@ -15,6 +15,7 @@ import {
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts';
 import {contactLookupMatches} from '../../../../.eliza/client-features/packages/contracts/src/phone-dial.ts';
 import {telephonyActionResultText} from '../ui/telephony/telephony-receipt-text';
+import {contactChoiceName} from '../ui/telephony/telephony-messages';
 
 export type ContactMatch = {id: string; name: string; number: string};
 export type ContactRecord = {id: string; version: string; displayName: string; phoneNumbers: {number: string; type: string}[]; emailAddresses: {address: string; type: string}[]};
@@ -66,7 +67,14 @@ const finish = (result: TelephonyActionResult): TelephonyExecution => {
 /** Every dialable number of every matching contact, one option per number: the choices the owner
  * is shown before a call to a contact (and what the AC-20 approval card counts). */
 export function contactCallOptions(rows: {id: string; displayName: string; phoneNumbers: string[]}[], normalize: (number: string) => string | null): ContactMatch[] {
-  return contactLookupMatches(rows, normalize).flatMap(match => match.phoneNumbers.map(number => ({id: match.id, name: match.displayName, number})));
+  // Matches keep the rows' order; each name is read from its own row, so a blank one reads as Alpha's label.
+  let next = 0;
+  return contactLookupMatches(rows, normalize).flatMap(match => {
+    while (next < rows.length && rows[next].id !== match.id) next++;
+    const row = rows[next++];
+    const name = row ? contactChoiceName(row.displayName) : contactChoiceName('');
+    return match.phoneNumbers.map(number => ({id: match.id, name, number}));
+  });
 }
 async function numbers(query: string, ports: TelephonyPorts): Promise<ContactMatch[]> {
   return contactCallOptions(await ports.searchContacts(query, LOOKUP_LIMIT), value => ports.normalize(value));

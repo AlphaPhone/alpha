@@ -3,8 +3,11 @@ import {Capacitor} from '@capacitor/core';
 import {runFilePicker,inputFiles} from '../browser/file-picker';
 import {DailyApps} from '../daily';
 import {registerPlugin} from '../platform-plugins';
-import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
+import {reviewMailAttachment as reviewSharedAttachment,type MailAttachment} from '../runtime/inbox-attachment';
+import {attachmentRefusalText} from '../ui/mailbox/drafts-controller';
 import {documentSourceOf,retainedSourceReferences,type DocumentSourceLink} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
+/** The shared attachment review, refusing in Alpha's words (never the shared module's). */
+const reviewMailAttachment=(file:MailAttachment)=>reviewSharedAttachment(file).catch((error:unknown)=>{throw new Error(attachmentRefusalText(error));});
 type Bag=Record<string,any>;
 /** A note's linked source document (shared plugin-files source-link rules, J03). */
 export type Source=DocumentSourceLink;

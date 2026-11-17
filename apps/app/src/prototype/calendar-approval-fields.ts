@@ -1,5 +1,6 @@
 import type {CalendarApproval} from '../runtime/calendar-approval.ts';
 import {localePreferences} from './locale-time.ts';
+import {calendarApprovalRequestText} from '../ui/calendar/calendar-approval-messages.ts';
 export type CalendarApprovalLabels={calendar?:string;account?:string;event?:string;eventStartsAt?:number;eventEndsAt?:number;eventAllDay?:boolean;targetVerified?:true};
 type Field={label:string;value:string};
 const object=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
@@ -7,7 +8,6 @@ const text=(value:unknown):value is string=>typeof value==='string';
 const instant=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&Number.isFinite(new Date(value).getTime());
 const localTime=(value:number)=>{const date=new Date(value),preferences=localePreferences();return new Intl.DateTimeFormat(preferences.locale,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',...(date.getSeconds()?{second:'2-digit' as const}:{}),hourCycle:preferences.hourCycle,timeZoneName:'short'}).format(date);};
 const dateText=(value:string)=>{const date=new Date(value+'T12:00:00Z');if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==value)throw Error('Invalid date');return new Intl.DateTimeFormat(localePreferences().locale,{timeZone:'UTC',year:'numeric',month:'long',day:'numeric'}).format(date);};
-const reasonText=(reason:string)=>reason.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b/g,stamp=>Number.isFinite(Date.parse(stamp))?localTime(Date.parse(stamp)):stamp);
 const repeatText=(rules:unknown)=>{
  if(!Array.isArray(rules)||rules.some(rule=>typeof rule!=='string'))throw Error('Invalid repeat');
  if(!rules.length)return 'Does not repeat';
@@ -63,5 +63,5 @@ export function calendarApprovalFields(row:CalendarApproval,labels:CalendarAppro
   add('Notify guests',p.notifyAttendees===true?'Yes':'No');
   if(object(p.travelBuffer)){const buffer=p.travelBuffer;if(typeof buffer.bufferMinutes!=='number'||!Number.isFinite(buffer.bufferMinutes)||!text(buffer.method))throw Error('Invalid travel buffer');add('Travel buffer',`${buffer.bufferMinutes} minutes · ${buffer.method}`);if(text(buffer.originAddress))add('Travel from',buffer.originAddress);if(text(buffer.destinationAddress))add('Travel to',buffer.destinationAddress);}
  }catch{complete=false;}
- return {heading,reason:reasonText(row.reason),fields,complete,note:complete?'Dates and times are shown in this phone’s time zone.':'Current event details could not be verified. Decline this request or open Calendar and review the event before trying again.'};
+ return {heading,reason:calendarApprovalRequestText(row.action,p,row.reason,labels.targetVerified===true?labels.event:undefined),fields,complete,note:complete?'Dates and times are shown in this phone’s time zone.':'Current event details could not be verified. Decline this request or open Calendar and review the event before trying again.'};
 }
