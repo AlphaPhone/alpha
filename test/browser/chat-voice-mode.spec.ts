@@ -46,6 +46,37 @@ async function startWithRetainedDraft(page:Page){
  await page.evaluate(()=>(window as any).chatVoiceFixture.shell.startVoice());
 }
 async function utterance(page:Page){await page.evaluate(()=>(window as any).chatVoiceFixture.peak=.25);await page.waitForTimeout(950);await page.evaluate(()=>(window as any).chatVoiceFixture.peak=0);}
+test('stopping voice releases capture and lets the accepted reply finish in chat',async({page})=>{
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const f=(window as any).chatVoiceFixture;
+  connectionController.voiceConversationCurrent=()=>true;
+  Component.prototype.sendVoiceTurn=async function(input:any){
+   f.sends++;f.replySignal=input.signal;
+   await new Promise<void>(resolve=>f.releaseReply=resolve);
+   input.signal.throwIfAborted();input.assertCurrent();
+   const text='The full reply arrives after voice stops.';
+   this.setState((state:any)=>({msgs:[...state.msgs,{id:'finished-reply',from:'agent',text}]}));
+   return {requestId:input.turnId,conversationId:'synthetic-room',userMessageId:'voice-user',assistantMessageId:'finished-reply',text,complete:true};
+  };
+ });
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await page.getByRole('button',{name:'Talk',exact:true}).click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(1);
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ await expect(voice(page)).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).chatVoiceFixture.replySignal.aborted)).toBe(false);
+ await page.evaluate(()=>(window as any).chatVoiceFixture.releaseReply());
+ await expect(page.locator('[data-alpha-layer="conversation"]')).toContainText('The full reply arrives after voice stops.');
+ await expect(page.getByText(/Interrupted before this reply/)).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).chatVoiceFixture.speech)).toBe(0);
+ await noMedia(page);
+});
+
 // The Home pill is the hidden-chat voice surface off the Cloud route; Cloud speech opens the sheet
 // (voice-adapter startVoice). A refused Cloud request holds this account on on-device speech
 // (voice-selection noteNetworkSpeechFailure): the account stays signed in and the fixture's
