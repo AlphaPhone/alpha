@@ -167,9 +167,9 @@ test('the list shows only the agent’s workflows; detail, Run with its receipt,
   // The receipt is the agent's execution: its status and output.
   await expect(page.getByText('Synthetic agenda: two meetings before noon.', { exact: true })).toBeVisible();
   await page.locator('details[aria-label="Workflow execution details"]').filter({has:page.getByText('Finished', {exact:true})}).locator('summary').click();
-  await expect(page.getByText('Finished', { exact: true })).toBeVisible();
+  await expect(page.locator('details[aria-label="Workflow execution details"]').getByText('Finished', { exact: true })).toBeVisible();
   await button(page, 'Back to Agenda digest').click();
-  await expect(button(page, 'finished execution')).toBeVisible();
+  await expect(button(page, 'Finished execution')).toBeVisible();
 
   // Enable takes a second tap; pause is immediate and confirmed by the agent.
   const toggle = button(page, 'Turn Agenda digest on or off');
@@ -194,7 +194,7 @@ test('an approval waits for a second confirmation to approve or deny, and a runn
   test.setTimeout(150_000);
   const foreign = await start(page);
   await openFlow(page, 'Reviewed note saver');
-  await button(page, 'waiting-approval execution').click();
+  await button(page, 'Waiting for approval execution').click();
   const reviews = page.getByRole('region', { name: 'Workflow approval review' });
   await expect(reviews).toHaveCount(2);
   const save = reviews.filter({ hasText: 'Save the agenda note' }), remove = reviews.filter({ hasText: 'Delete the old note' });
@@ -204,13 +204,13 @@ test('an approval waits for a second confirmation to approve or deny, and a runn
   await expect(save.getByRole('button', { name: 'Confirm approve', exact: true })).toBeVisible();
   expect(await posts(page, '/0')).toEqual([]);
   await save.getByRole('button', { name: 'Confirm approve', exact: true }).click();
-  await expect(save).toContainText('approved');
+  await expect(save).toContainText('Approved');
   // Deny: the same second confirmation.
   await remove.getByRole('button', { name: 'Deny', exact: true }).click();
   await expect(remove.getByRole('button', { name: 'Confirm deny', exact: true })).toBeVisible();
   expect(await posts(page, '/approvals/delete-review/0')).toEqual([]);
   await remove.getByRole('button', { name: 'Confirm deny', exact: true }).click();
-  await expect(remove).toContainText('denied');
+  await expect(remove).toContainText('Denied');
   const decisions = await posts(page, '/0');
   expect(decisions.map(row => [row.path, row.body.approved])).toEqual([['/api/workflow/executions/run-approval/approvals/save-review/0', true], ['/api/workflow/executions/run-approval/approvals/delete-review/0', false]]);
   expect(decisions.map(row => row.body.requestDigest)).toEqual(['a'.repeat(64), 'd'.repeat(64)]);
@@ -220,14 +220,14 @@ test('an approval waits for a second confirmation to approve or deny, and a runn
   // Cancel: a running execution, cancelled only on the confirming tap.
   await button(page, 'Back to workflows').click();
   await openFlow(page, 'Long running watch');
-  await button(page, 'running execution').click();
+  await button(page, 'Running execution').click();
   await button(page, 'Cancel run').click();
   await expect(button(page, 'Confirm cancel')).toBeVisible();
   expect(await posts(page, '/cancel')).toEqual([]);
   await button(page, 'Confirm cancel').click();
   await expect.poll(() => posts(page, '/cancel').then(rows => rows.length)).toBe(1);
   await button(page, 'Back to Long running watch').click();
-  await expect(button(page, 'cancelled execution')).toBeVisible();
+  await expect(button(page, 'Cancelled execution')).toBeVisible();
   expect(await posts(page, '/run')).toEqual([]);
   expect(await agent(page, s => s.unexpected)).toEqual([]);
   expect(foreign).toEqual([]);
@@ -270,7 +270,7 @@ test('a lost Run request stays outcome unknown until the owner sends the same su
   await page.reload();
   await button(page, 'Workflows').click();
   await openFlow(page, 'Agenda digest');
-  await expect(button(page, 'finished execution')).toHaveCount(1);
+  await expect(button(page, 'Finished execution')).toHaveCount(1);
   await expect(runStatus(page)).toHaveText('Paused');
   expect(await agent(page, s => s.runs.agenda.length)).toBe(1);
   expect(await posts(page, '/run')).toHaveLength(2);

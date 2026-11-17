@@ -5,7 +5,7 @@
  * staged `BrowserTabSession` answer in English sentences; each one is worded by Alpha here and the
  * host's text is never shown.
  */
-import { READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE } from "./page-reading";
+import { READING_UNSUPPORTED_MESSAGE, SENSITIVE_PAGE_MESSAGE } from "./page-reading";
 
 /** Alpha's sentence when the WebView lacks isolated profiles. */
 export const PROFILE_UNSUPPORTED_MESSAGE = "Update WebView";
@@ -57,8 +57,8 @@ export const BROWSER_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["The other browser could not be opened. Your page remains in Alpha.", "The other browser didn’t open. Your page is still open in Alpha."],
   // BrowserReviewedReading and BrowserPageReading.
   ["Select an available speech route before reading", "Choose an available voice before reading."],
-  ["Reading unavailable on a sensitive or unverified page", SENSITIVE_READING_MESSAGE],
-  ["Reading unavailable on a sensitive or ambiguous page", SENSITIVE_READING_MESSAGE],
+  ["Reading unavailable on a sensitive or unverified page", SENSITIVE_PAGE_MESSAGE],
+  ["Reading unavailable on a sensitive or ambiguous page", SENSITIVE_PAGE_MESSAGE],
   [
     "This page is not ready for private reading. Reload this page, then try again.",
     "This page isn’t ready to be read privately. Reload it, then try again.",

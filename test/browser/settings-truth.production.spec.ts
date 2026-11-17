@@ -33,7 +33,7 @@ async function nativeStub(page:Page,fixture:Fixture={}){
     wifiActive:true,cellularActive:false,wifiEnabled:true,bluetoothEnabled:false,airplaneMode:false,locationEnabled:true,mobileDataEnabled:true,interruptionFilter:'all',adaptiveBrightness:true,textScalePercent:100,...snapshot} as Record<string,unknown>,
    status:{permissionGranted:true,appEnabled:true,interruption:'all',scope:'alpha-phone',channels:[{id:'c-reminders',name:'Reminders',importance:4,blocked:false,groupBlocked:false},{id:'c-results',name:'Daily briefs',importance:3,blocked:false,groupBlocked:false}]} as Record<string,any>,
    cross:{revision:'r1',enabled:false,paused:false,accessGranted:false,connected:false,history:true,apps:[]} as Record<string,unknown>,
-   history:[{appLabel:'Stub Mail',state:'posted',at:now-60_000}] as unknown[],
+   history:[{appLabel:'Stub Mail',state:'Posted',at:now-60_000}] as unknown[],
    items:[] as unknown[],openFails:false,unspecific:[] as string[],unavailable:[] as string[],torch:true,shadeOutcome:'opened' as string,provider:provider??{provider:'elizacloud',configured:false},
   };
   for(const key of drop)delete state.snapshot[key];
@@ -253,7 +253,7 @@ test('notification state is read back from Android, and local history stays avai
  await expect(state).toContainText('Some off');
  await set(page,{status:{appEnabled:false}});await resume(page);await expect(state).toContainText('Off');
  await current(page).getByRole('button',{name:'View local metadata history',exact:true}).click();
- await expect(current(page)).toContainText(/Stub Mail\s*posted/);
+ await expect(current(page)).toContainText(/Stub Mail\s*Arrived/);
  await page.evaluate(()=>{const truth=(window as any).truth,original=(window as any).Capacitor.nativePromise;(window as any).Capacitor.nativePromise=async(plugin:string,method:string,input:unknown)=>{if(plugin==='AlphaNotifications'&&method==='status'){truth.calls.push({plugin,method,input});throw Error('Notification delivery status unavailable');}return original(plugin,method,input);};});
  await resume(page);await expect(state).toContainText('Unavailable');
 });

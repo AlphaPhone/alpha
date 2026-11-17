@@ -10,3 +10,9 @@ export const READING_UNSUPPORTED_MESSAGE =
 /** The refusal for a page, or a released excerpt, that reads as credentials or a verification code. */
 export const SENSITIVE_READING_MESSAGE =
   "This page may contain credentials or verification codes. Open a different page.";
+/**
+ * The native refusal for a page the shared reader treats as sensitive or cannot verify. It names
+ * no credentials: the native check refuses pages for reasons this renderer cannot see.
+ */
+export const SENSITIVE_PAGE_MESSAGE =
+  "Alpha doesn’t read pages that may be sensitive or that it can’t verify. Open a different page.";

@@ -338,7 +338,7 @@ for (const outcome of ['opened', 'unavailable'] as const) {
     const confirm = clock.getByRole('button', { name: 'Confirm Clock request', exact: true });
     await expect(confirm).toHaveText('Open Clock');
     await confirm.click();
-    await expect(clock).toContainText(outcome === 'opened' ? 'Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.' : 'No Clock app can handle this request.');
+    await expect(clock).toContainText(outcome === 'opened' ? 'Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.' : 'Clock isn’t available for this.');
     const sent = await native(page, f => f.clock) as Array<Record<string, unknown>>;
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ action: 'set', hour: 7, minute: 15, label: 'Flag-off alarm', reviewed: true });
@@ -367,7 +367,7 @@ test('loop C on Android: snooze and dismiss are reviewed Clock requests, one han
   await expect(clock).toContainText('affect all ringing alarms');
   expect(await native(page, f => f.clock)).toEqual([]);
   await confirm.dblclick();
-  await expect(clock).toContainText('Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.');
+  await expect(clock).toContainText('Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.');
   expect(await native(page, f => f.clock)).toEqual([{ action: 'snooze', snoozeMinutes: 7, reviewed: true }]);
 
   await clock.getByRole('button', { name: 'Dismiss', exact: true }).click();
@@ -380,7 +380,7 @@ test('loop C on Android: snooze and dismiss are reviewed Clock requests, one han
   await confirm.click();
   await expect.poll(() => native(page, f => f.clock.length)).toBe(2);
   expect(await native(page, f => f.clock)).toEqual([{ action: 'snooze', snoozeMinutes: 7, reviewed: true }, { action: 'dismiss', reviewed: true }]);
-  await expect(clock).toContainText('Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.');
+  await expect(clock).toContainText('Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.');
   await expect(clock).not.toContainText(/Alarm saved|snoozed for|was dismissed|Ringing/i);
   await expectNoDevelopmentSurface(page);
 });
@@ -398,7 +398,7 @@ test('loop C on Android: a cancelled review sends nothing, and an unknown result
   expect(await native(page, f => f.clock)).toEqual([]);
   await clock.getByRole('button', { name: 'Review Clock request', exact: true }).click();
   await clock.getByRole('button', { name: 'Confirm Clock request', exact: true }).click();
-  await expect(clock).toContainText('Clock result is unknown. Check Clock before repeating the request.');
+  await expect(clock).toContainText('Alpha can’t tell whether Clock got the request. Check Clock before trying again.');
   expect(await native(page, f => f.clock.length)).toBe(1);
   // Restart: the unknown outcome is still stated before another request can be reviewed, and nothing is replayed.
   await page.reload();

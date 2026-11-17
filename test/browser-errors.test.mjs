@@ -12,7 +12,7 @@ test('Alpha’s own Browser recovery and capability instructions remain exact',(
 });
 test('the native tab host’s sentences are worded by Alpha (ui/browser/browser-messages.ts)',()=>{
  assert.equal(browserErrorMessage(new Error('This Android WebView does not support isolated browser profiles')),'Update WebView');
- assert.equal(browserErrorMessage(new Error('Reading unavailable on a sensitive or unverified page')),'This page may contain credentials or verification codes. Open a different page.');
+ assert.equal(browserErrorMessage(new Error('Reading unavailable on a sensitive or unverified page')),'Alpha doesn’t read pages that may be sensitive or that it can’t verify. Open a different page.');
  assert.equal(browserErrorMessage(new CapacitorException('Close a tab before opening another')),'Tab limit. Close a tab before opening another.');
 });
 test('an unknown native refusal reads as the fallback; lookalikes are not reclassified',()=>{
