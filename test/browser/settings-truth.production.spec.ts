@@ -319,7 +319,7 @@ for(const subscription of ['credits','active','canceled'] as const)test(`Setting
 
 
 // Rendered production Settings over the finite native and Cloud fixtures.
-for(const scenario of ['unbound','recovering','connected'] as const)test(`Settings keeps account controls and hides agent diagnostics: ${scenario}`,async({page})=>{
+for(const scenario of ['unbound','recovering','connected'] as const)test(`Agent activity and account controls in Settings: ${scenario}`,async({page})=>{
  await nativeStub(page,{subscription:scenario==='unbound'?'canceled':'active',agentStartFailure:scenario==='recovering'});
  await page.goto('/');
  await expect.poll(()=>callNames(page)).toContain('Agent.start');
@@ -334,10 +334,17 @@ for(const scenario of ['unbound','recovering','connected'] as const)test(`Settin
  }
  await current(page).getByRole('button',{name:'About',exact:true}).click();
  await expect(current(page).getByRole('button',{name:'Status',exact:true})).toHaveCount(0);
- await expect(current(page).getByRole('button',{name:'Agent activity',exact:true})).toHaveCount(0);
- await expect(current(page).getByRole('button',{name:'Refresh actions',exact:true})).toHaveCount(0);
- await expect(current(page).getByRole('button',{name:'New conversation',exact:true})).toHaveCount(0);
- if(scenario!=='recovering')expect((await callNames(page)).includes('Agent.configureCloudProvider')).toBe(scenario==='connected');
+ await current(page).getByRole('button',{name:'Agent activity',exact:true}).click();
+ const activity=current(page);
+ await expect(activity.getByRole('heading',{name:'Agent activity',exact:true})).toBeVisible();
+ await expect(activity.getByRole('button',{name:/^(Retry|Reconnect agent|Restart Alpha)$/})).toHaveCount(0);
+ if(scenario==='recovering'){
+  await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
+  await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toHaveCount(0);
+ }else{
+  await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
+  expect((await callNames(page)).includes('Agent.configureCloudProvider')).toBe(scenario==='connected');
+ }
 });
 
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
