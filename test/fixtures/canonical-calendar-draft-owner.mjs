@@ -5,7 +5,7 @@ import {build} from 'esbuild';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const adapter = 'apps/app/src/prototype/canonical-calendar-drafts.ts';
 const codec = 'apps/app/src/runtime/canonical-calendar-draft.ts';
-const durable = '.eliza/client-features/packages/ui/src/state/durable-draft.ts';
+const durable = 'apps/app/src/ui/state/durable-draft.ts';
 const own = fileURLToPath(import.meta.url);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 

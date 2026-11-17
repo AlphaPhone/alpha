@@ -1,7 +1,7 @@
 import type { CloudEnvironment } from './cloud-protocol';
+import { nativeCloudSignInFailureMessage, type NativeCloudSignInFailureCode as SignInCopyFailureCode } from '../ui/auth/native-cloud-sign-in-copy.ts';
 import {
   NativeCloudSignInError,
-  nativeCloudSignInFailureMessage,
   nativeSignInAuthenticated,
   nativeSignInCodeStarted,
   nativeSignInGoogleOutcome,
@@ -29,14 +29,20 @@ import {
  * The port's host (AlphaCloudSignInPlugin, a registration of the shared
  * `ai.eliza.auth.cloud.CloudSignInPlugin`, or the development Cloud bridge in a test-mocks browser
  * build) holds the Steward session, the PKCE verifiers and states and the authorization codes; none
- * of them crosses to the renderer. Parsing of every answer, the failure codes and the copy live
- * upstream in `@elizaos/auth/auth/native-cloud-sign-in`, projected from the pinned checkout. Alpha
- * supplies only its product name and its two deployment names.
+ * of them crosses to the renderer. Parsing of every answer and the failure codes live upstream in
+ * `@elizaos/auth/auth/native-cloud-sign-in`, projected from the pinned checkout. The owner-facing
+ * failure copy is Alpha's own (`../ui/auth/native-cloud-sign-in-copy.ts`, copied from that module),
+ * filled with Alpha's product name and its two deployment names.
  *
  * Email remains in Alpha when readiness is unknown. Google and SMS require their own
  * readiness results.
  */
 export type CloudSignInFailureCode = NativeCloudSignInFailureCode;
+// Compile-time check: the failure codes the local copy covers and the shared client's wire codes
+// are the identical type, so neither side can drift without failing typecheck.
+type SameType<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+type SignInCopyCoversFailureCodes = Assert<SameType<SignInCopyFailureCode, NativeCloudSignInFailureCode>>;
 export type CloudSignInAuthenticated = NativeCloudSignInAuthenticated<CloudEnvironment>;
 export type CloudSignInEmailStarted = NativeCloudSignInCodeStarted;
 export type CloudSignInMfaRequired = NativeCloudSignInMfaRequired;

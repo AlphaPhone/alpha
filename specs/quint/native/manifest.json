@@ -212,6 +212,7 @@
     "invariant": "safety",
     "sources": [
       "apps/app/src/runtime/always-on-listener.ts",
+      "apps/app/src/ui/voice/sense-invocation.ts",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListeningService.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ConsentActivity.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java",
@@ -253,6 +254,7 @@
     "invariant": "safety",
     "sources": [
       "apps/app/src/runtime/always-on-listener.ts",
+      "apps/app/src/ui/voice/sense-invocation.ts",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListeningService.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ConsentActivity.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java",
@@ -389,7 +391,8 @@
       "apps/app/src/runtime/note-audio-deletions.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/NativeOwnerReminderHost.java",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/deletion/DeferredDeletionCoordinator.java"
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/deletion/DeferredDeletionCoordinator.java",
+      "apps/app/src/ui/deletions/deletion-notice.ts"
     ],
     "tests": [
       "undoBeforeExpiryTest",
@@ -443,7 +446,8 @@
       "android/app/src/main/java/ai/alphacompute/alphaphone/NativeReadEpoch.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/SelectedDocumentAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaPhotoLibraryPlugin.java",
-      "apps/app/src/browser/files.ts"
+      "apps/app/src/browser/files.ts",
+      "apps/app/src/ui/photos/library-presentation.ts"
     ],
     "tests": [
       "reviewedPublicationTest",
@@ -492,7 +496,8 @@
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapabilities.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaReminders.java",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java"
+      "android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java",
+      "apps/app/src/ui/reminders/reminder-refusal-message.ts"
     ],
     "tests": [
       "smsDeliveryEvidenceTest",
@@ -540,6 +545,7 @@
       "apps/app/src/runtime/voice-assistant.ts",
       "apps/app/src/runtime/local-agent.ts",
       "apps/app/src/runtime/calendar-sync-host.ts",
+      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/inbox-operation.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDataReset.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/LocalAgentProviderAdmission.java"
@@ -631,7 +637,9 @@
       "apps/app/src/maps/agent-navigation.ts",
       "apps/app/src/maps/screen.ts",
       "apps/app/src/maps/state.ts",
-      "vendor/eliza/plugins/plugin-maps/src/client/maps-screen.ts",
+      "apps/app/src/ui/maps/maps-screen.ts",
+      "apps/app/src/ui/maps/state.ts",
+      "apps/app/src/ui/maps/guidance.ts",
       "upstream.lock.json"
     ],
     "stateMapping": {
@@ -689,8 +697,6 @@
       "plugins/plugin-maps/src/client/route-distance.ts",
       "plugins/plugin-maps/src/client/device-navigation.ts",
       "plugins/plugin-maps/src/client/agent-navigation.ts",
-      "plugins/plugin-maps/src/client/maps-screen.ts",
-      "plugins/plugin-maps/src/client/state.ts",
       "plugins/plugin-maps/src/client/saved-places.ts"
     ]
   },
@@ -1366,6 +1372,7 @@
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/cloud-protocol.ts",
       "apps/app/src/runtime/calendar-sync-host.ts",
+      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/native-calendar-sync.ts",
       "apps/app/src/runtime/calendar-linked-storage.ts",
       "apps/app/src/runtime/google-calendar-selection.ts",
@@ -4367,7 +4374,8 @@
     "invariant": "safety",
     "sources": [
       "apps/app/src/runtime/telephony-executor.ts",
-      "apps/app/src/prototype/contacts-adapter.ts"
+      "apps/app/src/prototype/contacts-adapter.ts",
+      "apps/app/src/ui/telephony/telephony-receipt-text.ts"
     ],
     "tests": [
       "ownerEditSavesTest",
@@ -4407,7 +4415,8 @@
     "sources": [
       "apps/app/src/runtime/message-draft.ts",
       "apps/app/src/prototype/sms-adapter.ts",
-      "apps/app/src/runtime/image-sms.ts"
+      "apps/app/src/runtime/image-sms.ts",
+      "apps/app/src/ui/messages/sms-session.ts"
     ],
     "tests": [
       "suggestionSentAfterTapTest",
@@ -4453,7 +4462,8 @@
     "sources": [
       "apps/app/src/runtime/telephony-executor.ts",
       "apps/app/src/prototype/phone-adapter.ts",
-      "apps/app/src/runtime/aosp-telephony.ts"
+      "apps/app/src/runtime/aosp-telephony.ts",
+      "apps/app/src/ui/telephony/telephony-receipt-text.ts"
     ],
     "tests": [
       "callByNumberTest",
@@ -4587,7 +4597,8 @@
       "SkippedRequestKeepsWarningWitness"
     ],
     "sources": [
-      "apps/app/src/runtime/always-on-listener.ts"
+      "apps/app/src/runtime/always-on-listener.ts",
+      "apps/app/src/ui/voice/sense-invocation.ts"
     ],
     "sharedSources": [
       "plugins/plugin-native-system/src/sense.ts"
@@ -4664,7 +4675,8 @@
       "QuietAfterDismissWitness"
     ],
     "sources": [
-      "apps/app/src/runtime/deletions.ts"
+      "apps/app/src/runtime/deletions.ts",
+      "apps/app/src/ui/deletions/deletion-notice.ts"
     ],
     "sharedSources": [
       "packages/contracts/src/deletion-window.ts"

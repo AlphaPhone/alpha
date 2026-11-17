@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {stripTypeScriptTypes} from '../support/strip-types.mjs';
 
 const adapter = new URL('../../apps/app/src/prototype/agent-adapter.ts', import.meta.url);
-const durableStore = new URL('../../.eliza/client-features/packages/ui/src/state/durable-draft.ts', import.meta.url);
+const durableStore = new URL('../../apps/app/src/ui/state/durable-draft.ts', import.meta.url);
 export const firstSendDraftMigrationSources = [import.meta.url, adapter, durableStore,
   new URL('../support/strip-types.mjs', import.meta.url)].map(fileURLToPath);
 

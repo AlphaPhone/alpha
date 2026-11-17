@@ -46,7 +46,7 @@ async function compile() {
   for (const owner of [entry, 'apps/app/src/browser/calendar-editor-draft.ts', 'apps/app/src/browser/review.ts',
     'apps/app/src/runtime/assistant-draft-store.ts', 'apps/app/src/browser/domain-document.ts',
     'apps/app/src/browser/domain-recovery.ts', 'apps/app/src/browser/retained-data-notice.ts',
-    '.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts']) assert.ok(sources.includes(owner), owner);
+    'apps/app/src/ui/state/durable-draft-controller.ts']) assert.ok(sources.includes(owner), owner);
   return {code: result.outputFiles[0].text, sources};
 }
 
@@ -322,7 +322,7 @@ export async function checkCalendarEditorReviewRecovery(owner) {
   return checkTraces({model: 'CalendarEditorDraft', id: 'CalendarEditorDraft-review-recovery',
     traces, sources: [...compiled.sources, driver, owner], driverHashes, scope: 'bounded-component',
     assumptions: [
-      'Whole modal editor, BrowserReviews, shared durable draft controller, actual store binding, domain capture and recovery UI are installed. Browser storage transactions, downloads, reload and event effects use closed host ports.',
+      'Whole modal editor, BrowserReviews, Alpha durable draft controller, actual store binding, domain capture and recovery UI are installed. Browser storage transactions, downloads, reload and event effects use closed host ports.',
       'Review scope is opening, denial, exact discard/replace, stale store rejection, and close with late approval. Storage scope is production Data kept and a dev-only captured reset, including identical bytes at a newer revision and parent abort.',
       'JSDOM paints dialog state and host input. It does not establish actual browser focus, native storage, or Event-provider acceptance.',
     ]});

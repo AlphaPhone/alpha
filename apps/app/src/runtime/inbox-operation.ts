@@ -13,11 +13,11 @@ export {
   composerKind,
   inboxOperationKey,
   reviewBinding,
-  reviewBindingRefusal,
   type ComposerEmail,
   type InboxOperationRecord,
   type ReviewBinding,
 } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/operation-journal.ts';
+export { reviewBindingRefusal } from '../ui/mailbox/review-binding-refusal';
 export {
   attachmentBytes,
   checkOutgoingAttachments,

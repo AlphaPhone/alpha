@@ -1,6 +1,6 @@
 export {DocumentNotesStore} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-document-store.ts';
 import {DocumentNotesStore,NotesDocumentConflict,type NotesDocumentPort,type NotesDocumentSnapshot} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-document-store.ts';
-import {BrowserDocumentConflict} from '../../../../.eliza/client-features/packages/ui/src/platform/browser-document-store';
+import {BrowserDocumentConflict} from '../ui/platform/browser-document-store';
 import {browserDocuments} from '../browser/documents';
 import type {DomainRecovery} from '../browser/domain-document';
 import {NotesStore,NOTES_KEY,LEGACY_NOTES_KEY} from './notes-store';

@@ -1,4 +1,4 @@
-import { createMailReviewController, type MailReviewClient } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/review-controller.ts';
+import { createMailReviewController, type MailReviewClient } from '../ui/mailbox/review-controller';
 import { inboxLocalStore } from '../runtime/inbox-local-store';
 import { connectionController } from '../runtime/connection-ui';
 import { reviewMailAttachment } from '../runtime/inbox-attachment';
@@ -18,7 +18,7 @@ function reviewClient(client:MailReviewClient,owner:string):MailReviewClient{
  });
  return guarded;
 }
-/** Explicit provider review (@elizaos/plugin-inbox/mailbox) on Alpha's Cloud binding and encrypted
+/** Explicit provider review (../ui/mailbox/review-controller) on Alpha's Cloud binding and encrypted
  * slots; state never enters prototype persistence or agent context. A fixture connection never
  * reaches a provider. */
 export function inboxProviderControls(publish:()=>void,toast:(message:string)=>void){

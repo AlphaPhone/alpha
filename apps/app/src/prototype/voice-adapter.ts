@@ -11,7 +11,7 @@ import {alphaViewPath} from '../product/alpha-product';
 import {VoiceActivity} from './voice-activity';
 import {testMocksEnabled} from '../build-flags';
 import {developmentCartesiaConversation,developmentCartesiaVoiceEnabled} from '../runtime/development-cartesia-conversation';
-import {BatchVoiceConversation,type BatchVoiceState} from '@elizaos/ui/voice/batch-conversation';
+import {BatchVoiceConversation,type BatchVoiceState} from '../ui/voice/batch-conversation.ts';
 import {recordingRevision} from './summary-source';
 import {noteOriginFor,voiceNoteContentRevision} from '../runtime/note-origin';
 import {recordingLevels} from '../browser/audio-levels';
@@ -38,7 +38,7 @@ import { createNativeLiveDictation, nativeAssistantListener, nativeLiveVoiceRead
 import { installNativeVoiceTurnMarks } from '../runtime/native-voice-turn';
 import { VoiceAssistantSession, type AssistantState, type AssistantTextFrame } from '../runtime/voice-assistant';
 import { shouldRespondToVoiceTurn, buildVoiceTurnSignal } from '@elizaos/voice/turn';
-import { toSpeakableText } from '@elizaos/ui/voice/voice-chat-playback';
+import { toSpeakableText } from '../ui/voice/voice-chat-playback.ts';
 import { connectionController } from '../runtime/connection-ui';
 import { workflowReplyText } from '../runtime/action-message-presentation';
 import { NoteRecorderSession, addSavedNoteTranscript, formatRecordingClock, type CanonicalNoteSaveIntent, type SavedNoteAudio } from './note-recorder';

@@ -9,7 +9,7 @@ import {
   type NotificationShadePort,
   type PullContext,
   type PullStart,
-} from '@elizaos/capacitor-system/shade';
+} from '../ui/shell/notification-shade.ts';
 
 /*
  * Android's shade is the one notification and quick-settings surface (issues #416 and #417). Alpha posts its notices as ordinary Android notifications with
@@ -25,10 +25,10 @@ import {
  *   by a production bundle or on Android.
  */
 
-// The shade and empty-Home pull policy is shared (@elizaos/capacitor-system/shade, tested
-// there); Alpha supplies its wording and the selector of its Home layer.
-export { emptyHomeShadePull, overflowPullDecision, PULL_SLOP, shadeSurface, STATUS_BAND } from '@elizaos/capacitor-system/shade';
-export type { PullContext, PullStart, ShadeSurface } from '@elizaos/capacitor-system/shade';
+// The shade and empty-Home pull policy is Alpha's ui/shell/notification-shade.ts (tested in
+// test/system-shade.test.mjs); this module supplies Alpha's wording and the selector of its Home layer.
+export { emptyHomeShadePull, overflowPullDecision, PULL_SLOP, shadeSurface, STATUS_BAND } from '../ui/shell/notification-shade.ts';
+export type { PullContext, PullStart, ShadeSurface } from '../ui/shell/notification-shade.ts';
 
 /** Alpha's words for each outcome; they never claim the shade opened. */
 export const ALPHA_SHADE_COPY = defaultShadeFallbackCopy('Alpha');
@@ -63,7 +63,7 @@ export function pullStart(target: EventTarget | null): PullStart | null { return
  * A Home whose content fits gives vertical drags to the page, so a downward pull reaches Alpha as
  * pointer events instead of being taken by the WebView for scrolling or overscroll. A Home that
  * overflows (a short screen, large text) scrolls normally; at its top a downward pull on empty
- * Home is taken over by the shared installOverflowPull instead.
+ * Home is taken over by installOverflowPull instead.
  */
 export function markHomeFits(): void {
   const home = document.querySelector<HTMLElement>(HOME.home);

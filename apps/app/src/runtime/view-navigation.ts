@@ -4,7 +4,7 @@ import {
 	NAVIGATE_VIEW_EVENT,
 	type NavigateViewDetail,
 } from "../../../../.eliza/client-features/packages/core/src/events.ts";
-import { createCompletedActionNavigationState } from "../../../../.eliza/client-features/packages/core/src/views/completed-action-navigation.ts";
+import { createCompletedActionNavigationState } from "../ui/shell/completed-action-navigation";
 import { findViewActionHandoff } from "../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts";
 import { alphaCanonicalViewId, alphaViewKey, alphaViewPaths } from "../product/alpha-product";
 import { AlphaClientError, type ContextEnvelope } from "./alpha-client";

@@ -10,7 +10,7 @@ export const committedViewSources=[
  sdk+'packages/core/src/events.ts',
  sdk+'packages/core/src/views/view-interact-protocol.ts',
  sdk+'packages/core/src/views/view-action-handoff.ts',
- sdk+'packages/core/src/views/completed-action-navigation.ts',
+ 'apps/app/src/ui/shell/completed-action-navigation.ts',
  sdk+'packages/agent/src/api/view-installations.ts',
  sdk+'packages/agent/src/api/pending-request-map.ts',
  sdk+'packages/agent/src/api/view-interaction-host.ts',

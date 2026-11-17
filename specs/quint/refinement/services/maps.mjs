@@ -25,12 +25,12 @@ function fixture({DeviceMapsNavigation, MapsController, SavedPlaces}, {granted =
   return {nav, controller, surface, calls, retire() { current = false; nav.retire(); }};
 }
 export async function mapsRefinement() {
-  const sources = ['apps/app/src/maps/device-navigation.ts', '.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts', 'apps/app/src/maps/cloud-provider.ts', '.eliza/client-features/plugins/plugin-maps/src/client/state.ts', 'specs/quint/refinement/services/maps.mjs', 'specs/quint/refinement/services/support.mjs'];
+  const sources = ['apps/app/src/maps/device-navigation.ts', '.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts', 'apps/app/src/maps/cloud-provider.ts', 'apps/app/src/ui/maps/state.ts', 'specs/quint/refinement/services/maps.mjs', 'specs/quint/refinement/services/support.mjs'];
   let driverHashes = captureInputs(sources);
   const capture = inputs => { sources.push(...inputs.filter(input => !sources.includes(input))); const next = captureInputs(sources); for (const [path, hash] of Object.entries(driverHashes)) assert.equal(next[path], hash, `Source changed before import: ${path}`); driverHashes = next; };
   const {DeviceMapsNavigation} = await sourceModule('apps/app/src/maps/device-navigation.ts', {}, capture);
   const {createCloudMaps} = await sourceModule('apps/app/src/maps/cloud-provider.ts', {}, capture);
-  const {MapsController} = await sourceModule('.eliza/client-features/plugins/plugin-maps/src/client/state.ts', {}, capture);
+  const {MapsController} = await sourceModule('apps/app/src/ui/maps/state.ts', {}, capture);
   const {SavedPlaces} = await sourceModule('.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts', {}, capture);
   const classes = {DeviceMapsNavigation, MapsController, SavedPlaces};
   const traces = [];

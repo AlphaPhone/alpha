@@ -7,7 +7,7 @@ import path from 'node:path';
 import { DeviceMapsNavigation, DeviceNavigationFailure, type ActiveGuidance, type AgentPlaceRef, type DeviceNavigationMapsCode, type MapsDeviceNavigation, type MapsNavigationSurface } from '../apps/app/src/maps/device-navigation.ts';
 import { withResidentMapsNavigation } from '../apps/app/src/maps/resident-relay.ts';
 import { bindAgentNavigation, residentMapsNavigationPort, type AgentNavigationOptions, type CloudInstallation } from '../apps/app/src/maps/agent-navigation.ts';
-import { MapsController } from '../.eliza/client-features/plugins/plugin-maps/src/client/state.ts';
+import { MapsController } from '../apps/app/src/ui/maps/state.ts';
 import { SavedPlaces } from '../.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts';
 import { MapsFailure, type Coordinate, type MapsProvider, type ProviderConfig, type TravelMode } from '../.eliza/client-features/plugins/plugin-maps/src/client/contracts.ts';
 import type { Position } from '../.eliza/client-features/plugins/plugin-maps/src/client/location.ts';

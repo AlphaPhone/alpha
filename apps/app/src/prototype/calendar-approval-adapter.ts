@@ -65,7 +65,7 @@ export function installCalendarApprovalAdapter(Component:Shell){
    // A verified device receipt may already replace the original review prose.
    // Keep that projection and never interpret its summary as Calendar commands.
    if(typeof message.displayText==='string'&&message.displayText!==source)return {...message,messageActionsLabel:message.messageActionsLabel?'Message actions: '+message.displayText:message.messageActionsLabel};
-   // Order: the Calendar projection, then inbox choices (prose only); maps-chat-adapter.ts runs after this.
+   // Order: the Calendar projection, then inbox choices (prose only); maps-adapter.ts (installMapsChatAdapter) runs after this.
    const parsed=cache.parse(String(message.id),source),displayText=inboxChoiceText(parsed.displayText);
    return {...message,displayText,hasCalendarText:message.hasCalendarText!==false&&!!displayText,messageActionsLabel:message.messageActionsLabel?'Message actions: '+(displayText||'Calendar request'):message.messageActionsLabel,calendarReviews:parsed.ids.map(id=>({id,status:value.statuses.get(key+id)||'',canOpen:value.results.get(key+id)?.kind==='succeeded',open:()=>void review(this,id),openCalendar:()=>{if(this.live&&!document.hidden&&binding()===key){this.openView('calendar');void this.refreshAgentCalendar?.();}}}))};
   });return out;

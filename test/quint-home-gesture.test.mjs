@@ -7,10 +7,11 @@ import {createRequire} from 'node:module';
 import {build} from 'esbuild';
 import {checkTraces} from '../specs/quint/refinement/check-traces.mjs';
 import {boundInputs, call, captureSources, checkpoint, root, tick, trace} from '../specs/quint/refinement/application/support.mjs';
+import {assertBundlesLocalUi, uiStagingHelper} from './support/quint-conformance-ui-staging.mjs';
 
 const driver = fileURLToPath(import.meta.url);
 const source = 'apps/app/src/prototype/home-shell.ts';
-const navigation = '.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts';
+const navigation = 'apps/app/src/ui/mobile-shell/navigation.ts';
 const notes = 'alpha:notes', inbox = 'alpha:inbox', files = 'alpha:files';
 
 async function compile(extraSources) {
@@ -28,8 +29,9 @@ async function compile(extraSources) {
           .replace(focus, 'const focusTile = (key: string) => __port.scheduleFocus(key, ')};
       });
     }}]});
+  assertBundlesLocalUi(built.metafile, navigation);
   const sources = [...Object.keys(built.metafile.inputs).filter(path => !path.startsWith('<') && path !== 'home-gesture-entry.ts'),
-    source, navigation, driver, ...extraSources];
+    source, navigation, driver, uiStagingHelper, ...extraSources];
   captureSources(sources);
   return {code: built.outputFiles[0].text, sources};
 }

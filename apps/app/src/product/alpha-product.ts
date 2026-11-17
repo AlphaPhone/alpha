@@ -1,8 +1,8 @@
 /**
- * Alpha Phone as a registered product of the shared mobile shell. Identity, theme,
+ * Alpha Phone as the registered product of its mobile shell. Identity, theme,
  * icons, view order and labels, older view ids and installed storage names are the
  * versioned Alpha product registration. The shell, view registry,
- * navigation and launcher join are upstream (@elizaos/ui/mobile-shell). This module
+ * navigation and launcher join are in ui/mobile-shell. This module
  * reads only the React-free core entry, so agent navigation and voice never load Home.
  */
 import {
@@ -13,7 +13,7 @@ import {
   mobileShellViewPaths,
   type MobileProductRegistration,
   type MobileShellAppearance,
-} from '@elizaos/ui/mobile-shell/core';
+} from '../ui/mobile-shell/core.ts';
 import {ALPHA_PRODUCT_REGISTRATION} from './alpha-product-registration';
 import {isMvpView} from '../prototype/mvp-features';
 
@@ -22,8 +22,7 @@ export const ALPHA_PRODUCT: MobileProductRegistration = defineMobileProductRegis
 /** Alpha's view registry and its navigation answers for one availability policy, given by
  * Alpha renderer key. The app uses the MVP scope and AOSP image admission (below). */
 export function alphaNavigation(available: (hostKey: string) => boolean) {
-  // Every view is drawn by Alpha's own renderer: none
-  // is contributed to the shell's MobileViewHost.
+  // Every view is drawn by Alpha's own renderer.
   const views = createMobileViewRegistry(ALPHA_PRODUCT, {available: view => available(views.hostKey(view))});
   return {
     views,

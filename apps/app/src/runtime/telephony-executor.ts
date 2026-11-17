@@ -9,11 +9,12 @@
  * Everything the phone does goes through `ports`, so the decisions here are testable without one.
  */
 import {
-  smsComposeReceiptOutcome, telephonyActionReceiptOutcome, telephonyActionResultText,
+  smsComposeReceiptOutcome, telephonyActionReceiptOutcome,
   type ContactWriteOperation, type ContactWriteResult, type PhoneCallOperation, type PhoneCallResult, type SmsComposeOperation,
   type SmsComposeResult, type TelephonyActionOperation, type TelephonyActionResult,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts';
 import {contactLookupMatches} from '../../../../.eliza/client-features/packages/contracts/src/phone-dial.ts';
+import {telephonyActionResultText} from '../ui/telephony/telephony-receipt-text';
 
 export type ContactMatch = {id: string; name: string; number: string};
 export type ContactRecord = {id: string; version: string; displayName: string; phoneNumbers: {number: string; type: string}[]; emailAddresses: {address: string; type: string}[]};

@@ -9,12 +9,13 @@ import {isAndroid} from '../native';
 import {NavigationVoice} from '../maps/navigation-voice';
 import {speechCleanupNotice} from '../runtime/voice-states';
 import {shareMap} from '../maps/share';
-import { MapPlane } from '../maps/map-plane';
-import type {MapBasemap} from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/map-plane.ts';
+import { MapPlane, type MapBasemap } from '../maps/map-plane';
 import { globalBasemap } from '../maps/basemap';
 import { initializeRegionalMaps, regionalMap, regionalDiagnostics, regionalMapsConfigured } from '../maps/regional-provider';
 import { initializeCloudMaps, cloudMapsCoverage, cloudMapsDiagnostics, cloudMapsBasemap } from '../maps/cloud-maps';
-import { describeMapsDisclosure, insideCloudCoverage, type CloudMapsDisclosure, isGoogleMapsCoverage, isGoogleMapsProvider, isLocalMapsPlace } from '../maps/cloud-provider';
+import { insideCloudCoverage, type CloudMapsDisclosure, isGoogleMapsCoverage, isGoogleMapsProvider, isLocalMapsPlace } from '../maps/cloud-provider';
+import { describeMapsDisclosure } from '../ui/maps/cloud-provider';
+import { MAPS_CONNECT_PROVIDER, MAPS_CONNECT_PROVIDER_FOR_ROUTE, mapsStartFailureText } from '../ui/maps/maps-messages';
 import googleMapsLogo from '../maps/google-maps-attribution.svg?url';
 import { SavedPlaces } from '../maps/saved-places';
 
@@ -291,7 +292,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // prompt after a service-configuration refusal; preserve other recovery messages.
     const cloudFailure = cloudMapsDiagnostics();
     const statusText = !regionalMapsConfigured && cloudFailure.error === 'unconfigured' &&
-      (status.text.startsWith('Connect a Maps provider') || status.text === cloudFailure.message)
+      [MAPS_CONNECT_PROVIDER, MAPS_CONNECT_PROVIDER_FOR_ROUTE, mapsStartFailureText(cloudFailure)].includes(status.text)
       ? 'Maps unavailable' : offRouteCopy(status.text);
     const directionsOpen = view.mode === 'directions' || view.mode === 'origin' || view.mode === 'navigation';
     const isPlace = view.mode === 'place', isResults = view.mode === 'results' || view.mode === 'origin', isNav = view.mode === 'navigation';

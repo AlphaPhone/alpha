@@ -3,7 +3,7 @@
  * Product code, evaluated from source: `p.send`, `p.agentSay`, the dispatch helpers
  * (`dispatched`, `trackDispatch`, `transportSettled`, `releaseComposerSend`) and the connection
  * subscription that clears the chat on a session change (apps/app/src/prototype/agent-adapter.ts);
- * the real AlphaClient (apps/app/src/runtime/alpha-client.ts); and the shared durable draft
+ * the real AlphaClient (apps/app/src/runtime/alpha-client.ts); and Alpha's durable draft
  * controller the composer is bound to.
  *
  * Controlled ports: the connection (session, connect step), the transport under AlphaClient, the
@@ -37,7 +37,7 @@ export async function compile() {
   const send = between('  p.send = async function', '  p.agentSay = function'), say = between('  p.agentSay = function', '  p.reply = function');
   const subscription = between('this.connectionUnsubscribe = connectionController.subscribe(() => {', '    // Canonical is the default;');
   const code = ts(`${helpers}\n${plan}\n${notices}\nfunction methods(){const p={};\n${send}\n${say}\nreturn p;}\nglobalThis.methods=methods();`);
-  const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
+  const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/apps/app/src/ui/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
   const {DurableDraftController} = await import('data:text/javascript;base64,' + Buffer.from(controller).toString('base64'));
   const {AlphaClient, AlphaClientError} = await tsImport('../../../../apps/app/src/runtime/alpha-client.ts', import.meta.url);
   return {code, subscription: stripTypeScriptTypes(subscription, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};

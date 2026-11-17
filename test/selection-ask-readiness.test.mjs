@@ -10,7 +10,7 @@ const imports=new Map([
  ['../runtime/inbox-attachment','export const reviewMailAttachment=__ports.reviewAttachment;'],
  ['../browser/content-question','export const reviewContentQuestion=__ports.review; export class SourceUnavailableError extends Error {}'],
  ['../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts','export const sensitiveReadingText=()=>false;'],
- ['../../../../.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts','export const installFilesBrowserAdapter=()=>({});'],
+ ['../ui/files/files-browser-adapter.ts','export const installFilesBrowserAdapter=()=>({});'],
  ['@capacitor/core','export const Capacitor=__ports.capacitor;'],
  ['../daily','export const DailyApps=__ports.daily;'],
  ['./files-index','export const filesIndex=__ports.index;'],

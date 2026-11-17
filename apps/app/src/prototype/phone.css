@@ -105,7 +105,7 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
  * line clamp alone, and the card widens with the measured text scale (runtime/text-scale.ts) up
  * to the width of the screen so an ordinary word of the title still fits on one line. */
 [data-alpha-home-layout] { --alpha-card-scale:clamp(1,var(--alpha-text-scale,1),1.3); }
-/* The shared mobile shell's app grid drops a column when its labels stop fitting the measured text size. */
+/* The mobile shell's app grid drops a column when its labels stop fitting the measured text size. */
 [data-alpha-layer="home"] { --mobile-shell-text-scale:var(--alpha-text-scale,1); }
 /* The app grid follows the cards at the grid's own row gap instead of being pushed down by a
  * flexible spacer; the free space collects below the grid, above the dock. */
@@ -312,7 +312,7 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .alpha-update-startup{position:fixed;inset:0;display:grid;align-content:center;justify-items:center;gap:16px;width:100%;height:100%;max-width:none;max-height:none;box-sizing:border-box;margin:0;border:0;padding:24px;background:var(--alpha-white);color:var(--alpha-black);font:16px 'Public Sans',sans-serif}
 .alpha-update-startup button{min-height:44px;padding:8px 20px;border:0;border-radius:24px;background:var(--alpha-blue);color:var(--alpha-white);font:inherit}
 
-/* Portable block-axis scroll-fade behavior from shared UI shadcn-utilities.css.
+/* Portable block-axis scroll-fade behavior adapted from elizaOS shadcn-utilities.css.
    Only timeline content is masked; Calendar headers and form controls stay clear. */
 @property --calendar-scroll-fade-top { syntax:"<length>"; inherits:false; initial-value:0px; }
 @property --calendar-scroll-fade-bottom { syntax:"<length>"; inherits:false; initial-value:0px; }

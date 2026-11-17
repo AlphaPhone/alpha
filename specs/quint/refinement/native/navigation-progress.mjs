@@ -12,8 +12,7 @@ const prepared='.eliza/client-features';
 const preparedManifest=prepared+'/.source.json';
 const maps=prepared+'/plugins/plugin-maps/src/client';
 const adapter='apps/app/src/prototype/maps-adapter.ts';
-const mapsScreen='plugins/plugin-maps/src/client/maps-screen.ts';
-const pinnedMapsScreen='vendor/eliza/'+mapsScreen;
+const mapsScreen='apps/app/src/ui/maps/maps-screen.ts';
 const position=(east,north=0)=>({latitude:north/6371000*180/Math.PI,longitude:east/6371000*180/Math.PI});
 const destination=position(500);
 const labels=['First','Second','Arrive'];
@@ -28,31 +27,29 @@ function hold(){
 }
 async function captureImplementation(additionalSources=[],{mutant}={}){
  const mutations={
-  'single-clear-fix':{file:'guidance.ts',before:'if (++cleared === 2)',after:'if (++cleared === 1)'},
-  'retain-clearance':{file:'guidance.ts',before:'} else cleared = 0;',after:'} else { /* source canary retains clearance */ }'},
-  'retired-watch-fix':{file:'maps-screen.ts',before:'if (session === this.navSession) this.onFix(fix);',after:'this.onFix(fix);'}
+  'single-clear-fix':{file:maps+'/guidance.ts',before:'if (++cleared === 2)',after:'if (++cleared === 1)'},
+  'retain-clearance':{file:maps+'/guidance.ts',before:'} else cleared = 0;',after:'} else { /* source canary retains clearance */ }'},
+  'retired-watch-fix':{file:mapsScreen,before:'if (session === this.navSession) this.onFix(fix);',after:'this.onFix(fix);'}
  };
  if(mutant&&!Object.hasOwn(mutations,mutant))throw Error('Unknown navigation source canary');
  const root=resolve('.');
  const options={absWorkingDir:root,stdin:{contents:`
   export {MapsScreenController} from './apps/app/src/maps/screen.ts';
   export {BackgroundNavigation} from './apps/app/src/maps/background-navigation.ts';
-  export {MapsController} from './${maps}/state.ts';
+  export {MapsController} from './apps/app/src/ui/maps/state.ts';
   export {SavedPlaces} from './${maps}/saved-places.ts';
   export {usableNavigationFix} from './${maps}/navigation-fix.ts';
  `,resolveDir:root,sourcefile:'quint-maps-guidance.ts'},bundle:true,write:false,platform:'node',format:'esm',metafile:true};
  const discover=await build(options);
  const inputs=Object.keys(discover.metafile.inputs).filter(path=>existsSync(resolve(path)));
  const sources=[...inputs,modelPath,adapter,'upstream.lock.json',preparedManifest,'bun.lock',
-  'scripts/prepare-client-features.ts',pinnedMapsScreen,
+  'scripts/prepare-client-features.ts',
   fileURLToPath(import.meta.url),...additionalSources];
  const driverHashes=captureInputs(sources);
  const manifest=JSON.parse(readFileSync(preparedManifest,'utf8'));
  const pin=JSON.parse(readFileSync('upstream.lock.json','utf8')).commit;
  if(manifest.baseCommit!==pin)throw Error('Maps source is from a different prepared pin');
- const digest=createHash('sha256').update(readFileSync(pinnedMapsScreen)).digest('hex');
- if(manifest.sourceFiles[mapsScreen]!==digest||manifest.files[mapsScreen]!==digest)
-  throw Error('Prepare the pinned Maps screen before checking navigation');
+ if(!inputs.includes(mapsScreen))throw Error('Navigation must run Alpha\'s Maps screen '+mapsScreen);
  for(const path of inputs.filter(path=>path.startsWith(prepared+'/'))){
   const expected=manifest.files[relative(prepared,path)];
   if(createHash('sha256').update(readFileSync(path)).digest('hex')!==expected)throw Error('Unauthenticated Maps input '+path);
@@ -61,7 +58,7 @@ async function captureImplementation(additionalSources=[],{mutant}={}){
  const compiled=await build(mutant?{...options,plugins:[{name:'navigation-source-canary',setup(builder){
   builder.onLoad({filter:/\/(guidance|maps-screen)\.ts$/},({path})=>{
    const mutation=mutations[mutant];
-   if(path!==resolve(maps,mutation.file))return;
+   if(path!==resolve(mutation.file))return;
    const original=readFileSync(path,'utf8');
    assert.equal(createHash('sha256').update(original).digest('hex'),driverHashes[path]??driverHashes[relative(root,path)],'Source canary starts with authenticated bytes');
    assert.equal(original.split(mutation.before).length,2,'One exact source canary seam');

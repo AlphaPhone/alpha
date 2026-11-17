@@ -443,6 +443,19 @@ function npmEntries(root: string, templates: Templates, errors: string[]): Notic
   return entries;
 }
 
+/**
+ * The Lucide icon geometry copied into apps/app/public/icons/lucide. It ships as SVG files, not
+ * as an npm package, so its notice comes from the copy's own provenance record and licence.
+ */
+export const LUCIDE_ICONS = 'apps/app/public/icons/lucide';
+function lucideIconEntries(root: string, errors: string[]): NoticeDraft[] {
+  const record: {package?: string; version?: string; repository?: string; licenseSha256?: string} = readJson(root, `${LUCIDE_ICONS}/source.json`);
+  const licence = fs.readFileSync(path.join(root, LUCIDE_ICONS, 'LICENSE.txt'));
+  if (sha256(licence) !== record.licenseSha256) errors.push(`${LUCIDE_ICONS}/LICENSE.txt does not match its sha256 in source.json`);
+  if (!record.package || !record.version || !record.repository) { errors.push(`${LUCIDE_ICONS}/source.json must name its package, version and repository`); return []; }
+  return [{name: record.package, version: record.version, license: 'ISC AND MIT', source: record.repository, text: normalizeText(licence.toString('utf8'))}];
+}
+
 function pdfjsEntries(root: string, errors: string[]): NoticeDraft[] {
   const dir = 'node_modules/pdfjs-dist';
   if (!exists(root, `${dir}/package.json`)) return [];
@@ -915,6 +928,7 @@ export function collectNotices(root = ROOT, {packagedRuntime = false} = {}) {
   const templates = loadTemplates(root);
   const entries = [
     ...npmEntries(root, templates, errors),
+    ...lucideIconEntries(root, errors),
     ...pdfjsEntries(root, errors),
     ...ocrDataEntries(root),
     ...tesseractCoreEntries(root, errors),

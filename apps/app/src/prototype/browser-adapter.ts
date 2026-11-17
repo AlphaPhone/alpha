@@ -8,7 +8,8 @@ import { DailyApps } from '../daily';
 import { createNativeReadingVoice } from '../runtime/native-reading-voice';
 import {reviewContentQuestion} from '../browser/content-question';
 import {readPublicPageSource as browserReadingSource} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts';
-import {createReadingSupport, pageQuestionExcerpt, READING_UNSUPPORTED_MESSAGE, sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
+import {createReadingSupport, pageQuestionExcerpt, SENSITIVE_PAGE, sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
+import {READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE} from '../ui/browser/page-reading';
 import {webSourceOf} from './summary-source';
 import {browserCalendarScope} from './agent-calendar-adapter';
 import { connectionController, agentPendingText } from '../runtime/connection-ui';
@@ -172,9 +173,16 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         // Android may be unable to read the page in its isolated world (an old System WebView) or return
         // nothing usable. Then the review opens with an empty excerpt, as the web CORS-denied path does,
         // and Continue stays disabled until the user pastes text. A sensitive page never opens a review.
-        text=await pageQuestionExcerpt(()=>Browser.reviewQuestion({session,id,url:info.url,navigation:info.navigation}));
+        // The shared rule refuses a released excerpt that reads as sensitive; Alpha refuses it first,
+        // with the same test and code, so the refusal is in Alpha's words. Native refusals pass through.
+        text=await pageQuestionExcerpt(async()=>{
+          const result=await Browser.reviewQuestion({session,id,url:info.url,navigation:info.navigation});
+          const excerpt=(result as {text?:unknown}|null|undefined)?.text;
+          if(typeof excerpt==='string'&&excerpt&&sensitiveReadingText(excerpt))throw Object.assign(new Error(SENSITIVE_READING_MESSAGE),{code:SENSITIVE_PAGE});
+          return result;
+        });
       }else{
-        const result=await browserReadingSource(source.url,controller.signal);if(result?.blocked)throw Error('This page may contain credentials or verification codes. Open a different page.');text=result?.text||'';
+        const result=await browserReadingSource(source.url,controller.signal);if(result?.blocked)throw Error(SENSITIVE_READING_MESSAGE);text=result?.text||'';
       }
       if(!current())return;questionReview=true;lastGeometry='';await update();
       // A review that fails to open must not leave the page hidden behind a dialog that is not there.

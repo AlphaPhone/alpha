@@ -24,9 +24,9 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 async function prepared(extraSources,mutant){
  const sources=[driver,'specs/quint/refinement/services/support.mjs','upstream.lock.json','.eliza/client-features/.source.json',
-  'apps/app/src/maps/screen.ts','apps/app/src/maps/device-navigation.ts',shared+'maps-screen.ts',shared+'state.ts',shared+'saved-places.ts',...extraSources];
+  'apps/app/src/maps/screen.ts','apps/app/src/maps/device-navigation.ts','apps/app/src/ui/maps/maps-screen.ts','apps/app/src/ui/maps/state.ts',shared+'saved-places.ts',...extraSources];
  let hashes=captureInputs(sources);
- const compile=()=>build({stdin:{contents:`export {MapsScreenController} from './apps/app/src/maps/screen.ts';export {DeviceMapsNavigation} from './apps/app/src/maps/device-navigation.ts';export {MapsController} from './${shared}state.ts';export {SavedPlaces} from './${shared}saved-places.ts';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,format:'esm',platform:'node',logLevel:'silent',plugins:[{name:'source-canary-only',setup(b){
+ const compile=()=>build({stdin:{contents:`export {MapsScreenController} from './apps/app/src/maps/screen.ts';export {DeviceMapsNavigation} from './apps/app/src/maps/device-navigation.ts';export {MapsController} from './apps/app/src/ui/maps/state.ts';export {SavedPlaces} from './${shared}saved-places.ts';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,format:'esm',platform:'node',logLevel:'silent',plugins:[{name:'source-canary-only',setup(b){
   if(!mutant)return;
   b.onLoad({filter:/\/maps-screen\.ts$/},args=>{
    let text=readFileSync(args.path,'utf8');

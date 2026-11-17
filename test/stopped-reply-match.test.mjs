@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {findStoppedUserTurn} from '../.eliza/client-features/packages/ui/src/api/conversation-turn-controller.ts';
+import {findStoppedUserTurn} from '../apps/app/src/ui/api/conversation-turn-controller.ts';
 const plain=text=>text;
 const at=Date.parse('2026-10-13T12:00:00Z');
 

@@ -32,9 +32,11 @@ import { exportVoiceTiming, exportRealtimeVoiceTiming, voiceStartupTiming } from
 import { readNativeVoiceTiming } from '../runtime/native-voice-turn';
 import { readNativeCloudStreamTiming } from '../runtime/cloud-voice';
 import { imageSenseAvailable, listenerStatus, openListenerSettings, pauseListener, turnOffListener, wakeListeningStopUnconfirmed, type ListenerStatus } from '../runtime/always-on-listener';
-import { reviewDataReset, type DataResetPlugin } from '@elizaos/capacitor-system/reset';
-import { androidRoleLabel, parseRoleStatuses } from '@elizaos/capacitor-system/settings';
-import {createAppUpdateScheduler} from '../../../../.eliza/client-features/packages/ui/src/state/app-update-gate';
+import type { DataResetPlugin } from '@elizaos/capacitor-system/reset';
+import { parseRoleStatuses } from '@elizaos/capacitor-system/settings';
+import { reviewDataReset } from '../ui/settings/data-reset.ts';
+import { androidRoleLabel } from '../ui/settings/system-settings.ts';
+import {createAppUpdateScheduler} from '../ui/state/app-update-gate';
 import { leavePasswordEntry, leavePasswordManager, passwordEntryPage, passwordManagerGroups, passwordManagerLifecycle, refreshPasswordManager, PASSWORD_PAGES } from '../passwords/password-manager';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 
@@ -1059,7 +1061,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Agent activity',hasTitle:true,backLabel:'Back to About',back:()=>api.set({page:'about'}),hero:{},groups});
         }
         if(native)page.groups.push(group([{kNav:true,label:'Erase all data',lbl:'Reset Alpha data',labCss:'color:#d93025',lucide:'trash-2',chev:true,noAB:true,go:async()=>{
-          // Shared native review (@elizaos/capacitor-system/reset): only cancelled or unavailable reach here.
+          // Native review (ui/settings/data-reset.ts): only cancelled or unavailable reach here.
           // A plain cancel needs no toast; an expired review or missing authentication still says so.
           const result=await reviewDataReset(registerPlugin<DataResetPlugin>('AlphaReset'));
           if(result.status!=='cancelled'||!RESET_CANCEL_TEXTS.has(result.message))api.toast(errorNotice(result.message,'Reset isn’t available right now. Nothing was erased.'),ERROR_TOAST);

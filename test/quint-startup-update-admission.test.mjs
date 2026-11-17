@@ -1,7 +1,6 @@
 import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {JSDOM} from 'jsdom';
@@ -9,12 +8,11 @@ import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {checkTraces, qset} from '../specs/quint/refinement/check-traces.mjs';
 import {checkClientFeatures} from '../scripts/prepare-client-features.ts';
 import {boundInputs, captureSources, checkpoint, deferred, read, tick, trace, call} from '../specs/quint/refinement/application/support.mjs';
+import {assertUpstreamUiNotStaged, preparedStamp, uiStagingHelper} from './support/quint-conformance-ui-staging.mjs';
 
 const model = 'StartupUpdateAdmission';
 const modelPath = 'specs/quint/application/StartupUpdateAdmission.qnt';
-const shared = 'packages/ui/src/state/app-update-gate.ts';
-const effective = '.eliza/client-features/' + shared;
-const projection = '.eliza/client-features/.source.json';
+const gatePath = 'apps/app/src/ui/state/app-update-gate.ts';
 const activations = ['', '11111111-2222-4333-8444-555555555555', '22222222-2222-4333-8444-555555555555'];
 const bridges = ['', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'];
 
@@ -131,19 +129,17 @@ function fixture(name, code) {
 }
 
 async function checkStartupUpdateAdmission() {
-  const sources = [fileURLToPath(import.meta.url), 'apps/app/src/main.tsx', 'vendor/eliza/' + shared, effective, projection,
+  const sources = [fileURLToPath(import.meta.url), 'apps/app/src/main.tsx', gatePath, preparedStamp, uiStagingHelper,
     'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java',
     'upstream.lock.json', 'scripts/prepare-client-features.ts', 'scripts/pinned-upstream-source.ts',
     'scripts/upstream-pin.ts', 'scripts/sha256.ts'];
   captureSources([...sources, modelPath]);
   checkClientFeatures();
-  const gate = read(effective);
-  const stamp = JSON.parse(read(projection));
-  const digest = createHash('sha256').update(gate).digest('hex');
-  assert.equal(stamp.files[shared], digest);
-  const pinned = createHash('sha256').update(read('vendor/eliza/' + shared)).digest('hex');
-  assert.equal(stamp.sourceFiles[shared], pinned);
-  assert.equal(digest, pinned, 'the prepared updater is the exact reviewed upstream source');
+  assertUpstreamUiNotStaged();
+  assert.match(read('apps/app/src/main.tsx'), /^import \{holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates\} from '\.\/ui\/state\/app-update-gate';$/m,
+    'startup mounts through the exact reviewed updater gate executed here');
+  const gate = read(gatePath);
+  const stamp = JSON.parse(read(preparedStamp));
   assert.equal(Object.hasOwn(stamp, 'appUpdateResumePatch'), false, 'the retired updater patch has no receipt');
   const marker = '  let pending: Activation | undefined;\n  let acknowledged: string | undefined;';
   assert.equal(gate.split(marker).length, 2);
@@ -174,7 +170,7 @@ async function checkStartupUpdateAdmission() {
   });
 
   return checkTraces(boundInputs({model, modelPath, sources, traces, scope: 'bounded-component',
-    assumptions: ['Actual prepared startup mount gate and confirmation panel execute on controlled bridge reads.',
+    assumptions: ['Alpha\'s own startup mount gate and confirmation panel execute on controlled bridge reads.',
       'Each checkpoint follows a completed or rejected bridge reply. Native replies that never settle and installed PackageInstaller delivery remain separate.']}));
 }
 

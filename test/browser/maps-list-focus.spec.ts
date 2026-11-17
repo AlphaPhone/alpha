@@ -3,7 +3,7 @@ import {writeFileSync} from 'node:fs';
 import {captureInputs} from '../../specs/quint/refinement/check-traces.mjs';
 const sources=['apps/app/src/prototype/keyed-list-focus.ts','apps/app/src/prototype/maps-adapter.ts','apps/app/src/prototype/model.js',
  'apps/app/src/prototype/template.html','apps/app/src/prototype/dc-lite.js','apps/app/src/maps/state.ts',
- '.eliza/client-features/plugins/plugin-maps/src/client/state.ts','apps/app/src/maps/saved-places.ts',
+ 'apps/app/src/ui/maps/state.ts','apps/app/src/maps/saved-places.ts',
  '.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts','test/browser/maps-list-focus.spec.ts'];
 async function observe(page:Page,intended:string|null){
  return page.evaluate(intended=>({intended,current:document.activeElement?.getAttribute('data-alpha-map-row')||null,

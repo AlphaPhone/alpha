@@ -39,7 +39,7 @@ test('accepted SDK final state binds one current voice request; raw text cannot 
     ['./development-cloud-voice', 'export const developmentCloudRealtimeVoiceEnabled=false;'],
     ['./development-cartesia-flag', 'export const developmentCartesiaVoiceEnabled=true;'],
     ['../browser/device-preferences', 'export async function readDevicePreferences(){return {askBeforeAgentActions:false};}'],
-    ['@elizaos/ui/voice/voice-session-client', 'export function createVoiceSessionClient(options){globalThis.__voiceRequestFixture.options=options;return globalThis.__voiceRequestFixture.client;}'],
+    ['../ui/voice/voice-session-client-core.ts', 'export function createVoiceSessionClient(options){globalThis.__voiceRequestFixture.options=options;return globalThis.__voiceRequestFixture.client;}'],
   ]);
   let conversation;
   const tick = async () => {for (let n=0;n<8;n++) await Promise.resolve();};
@@ -49,8 +49,8 @@ test('accepted SDK final state binds one current voice request; raw text cannot 
       b.onLoad({filter:/.*/,namespace:'closed-ports'}, a => ({contents:stubs.get(a.path),loader:'js'}));
     }}]});
     const adapterPath=path.join(directory,'adapter.cjs'); fs.writeFileSync(adapterPath,bundle.outputFiles[0].text);
-    // This is the actual pinned SDK reducer, not a rewritten acceptance predicate.
-    const reducer = await build({entryPoints:['vendor/eliza/packages/ui/src/voice/voice-session-state.ts'],bundle:true,platform:'node',format:'cjs',write:false});
+    // This is Alpha's own voice session reducer, not a rewritten acceptance predicate.
+    const reducer = await build({entryPoints:['apps/app/src/ui/voice/voice-session-state.ts'],bundle:true,platform:'node',format:'cjs',write:false});
     const reducerPath=path.join(directory,'reducer.cjs');fs.writeFileSync(reducerPath,reducer.outputFiles[0].text);
     const require=createRequire(import.meta.url);
     const {applyServerEvent,INITIAL_VOICE_SESSION_STATE}=require(reducerPath);

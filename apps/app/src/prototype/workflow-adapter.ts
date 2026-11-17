@@ -16,6 +16,7 @@ import { connectionController, agentAvailabilityNotice, residentAlwaysPresent } 
 import { testMocksEnabled } from '../build-flags';
 import { showWorkflowAgentUnavailable } from './workflow-authoring';
 import { WorkflowAdmissionRejected, WorkflowMetadataRejected, WorkflowLifecycleRejected, WorkflowActivationRejected, type RemoteWorkflow, type WorkflowRun, type WorkflowApproval, type WorkflowApprovalReceipt } from '../runtime/workflow-protocol';
+import { workflowRefusalText } from '../ui/workflows/workflow-messages';
 import { describePhoneTrigger, normalizePhoneSpec, type PhoneTimeTrigger } from '../runtime/phone-workflow-authoring';
 type Bag=Record<string,any>;
 // Run-state policy stays local to this module (its boundary fixtures evaluate it without imports).
@@ -224,7 +225,7 @@ export function installWorkflowAdapter(Component:any,views:Bag){
   // A result read for one signed-in account is never applied after another account signed in.
   const valid=()=>token===generation&&!controller.signal.aborted&&binding.sessionId===connectionController.getWorkflowClient()?.sessionId&&(!account||runAccountKey()===account);
   const session=connectionController.getSnapshot().session;if(!session){operation=null;return;}const intents=new WorkflowIntentStore(session);intentStore=intents;
-  try{await intents.load(controller.signal);if(!valid())return;await task(binding.client,controller.signal,valid,binding.sessionId,intents);}catch(error){if(valid()){if(error instanceof WorkflowRunAccountsUnavailable)runAccountsUnavailable();else{status=(error instanceof WorkflowAdmissionRejected||error instanceof WorkflowMetadataRejected||error instanceof WorkflowLifecycleRejected||error instanceof WorkflowActivationRejected)?error.message:'Unavailable';api?.toast(status);}}}finally{if(valid()){try{await intents.load(controller.signal);}catch{intents.invalidate();}}if(token===generation){operation=null;phase='ready';publish();
+  try{await intents.load(controller.signal);if(!valid())return;await task(binding.client,controller.signal,valid,binding.sessionId,intents);}catch(error){if(valid()){if(error instanceof WorkflowRunAccountsUnavailable)runAccountsUnavailable();else{status=workflowRefusalText(error)??'Unavailable';api?.toast(status);}}}finally{if(valid()){try{await intents.load(controller.signal);}catch{intents.invalidate();}}if(token===generation){operation=null;phase='ready';publish();
    // A change notice that arrived during this operation only invalidated the snapshot. Reload it now, or every
    // request on this workflow would keep reading as an unknown outcome until the workflow is reopened.
    if(intentStore===intents&&intents.stale)refreshIntents();

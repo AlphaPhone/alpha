@@ -3,7 +3,7 @@ import {chooseMailAction} from '../test/browser/helpers/mail-actions.ts';
 import assert from 'node:assert/strict';
 import type { CloudServiceSession, ConnectionSnapshot } from '../apps/app/src/runtime/connection-ui.tsx';
 import type { inboxLocalStore } from '../apps/app/src/runtime/inbox-local-store.ts';
-import type { LocalMailDraft } from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
+import type { LocalMailDraft } from '../apps/app/src/ui/mailbox/drafts-controller.ts';
 import { playwright } from './fixtures/playwright.ts';
 import { inboxMemoryStore } from './fixtures/inbox-memory.ts';
 declare global {

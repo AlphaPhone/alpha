@@ -5,9 +5,10 @@ import {inputFiles} from '../browser/file-picker';
 import type {NativeResult} from '../daily';
 import {library,libraryAvailable,type SavedPhoto} from './camera-adapter';
 import {compareFilesEntries} from './files-index';
-import {intakeAttachmentFiles} from '../../../../.eliza/client-features/packages/ui/src/utils/image-attachment.ts';
-import type {FilesStoragePort} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
-import {formatSize,parentOf,type StorageEntry,type StorageVolume} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts';
+import {intakeAttachmentFiles} from '../ui/utils/image-attachment.ts';
+import type {FilesStoragePort} from '../ui/files/files-browser-adapter.ts';
+import {parentOf,type StorageEntry,type StorageVolume} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts';
+import {formatSize} from '../ui/files/storage-presentation.ts';
 import {
   CHAT_IMAGE_MIME_TYPE_SET,CHAT_UPLOAD_MIME_TYPES,MAX_CHAT_ATTACHMENT_NAME_LENGTH,
   MAX_CHAT_IMAGE_INTAKE_BYTES,MAX_CHAT_MEDIA_RAW_BYTES,

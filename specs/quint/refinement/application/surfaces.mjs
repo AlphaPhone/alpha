@@ -13,7 +13,7 @@ export async function shellNavigation() {
   // AP-16: shellDetent consults the real comms-view predicate (a view with a bar keeps the input rest).
   const commsStart = source.indexOf('  isCommsView(k) {'), commsMember = source.slice(commsStart, source.indexOf('\n', commsStart) + 1);
   assert.ok(commsStart >= 0 && commsMember.trim().endsWith('}'), 'model.js isCommsView member');
-  const {navigateMobileShell} = await sourceModule('.eliza/client-features/packages/ui/src/mobile-shell/core.ts');
+  const {navigateMobileShell} = await sourceModule('apps/app/src/ui/mobile-shell/core.ts');
   const traces = [];
   for (const view of ['notes', 'calendar', 'files', 'browser', 'settings']) {
     const context = vm.createContext({navigateMobileShell, VIEWS: {[view]: {}}, isMvpView: value => value === view});

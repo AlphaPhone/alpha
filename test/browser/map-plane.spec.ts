@@ -7,7 +7,7 @@ import path from 'node:path';
 const locationPhase = (page: Page) => page.locator('[data-map-diagnostics]').evaluate(node =>
   (JSON.parse(node.getAttribute('data-map-diagnostics') || '{}') as {lifecycle?: {position?: string}}).lifecycle?.position);
 
-test('shared map renderer loads its real worker and draws host-styled route geometry', async ({ page }) => {
+test('the map renderer loads its real worker and draws host-styled route geometry', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   // Explicit synthetic tile transport; this does not qualify a real map provider.

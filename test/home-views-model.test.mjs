@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
 const H = await import('../apps/app/src/prototype/home-cards.ts');
+const O = await import('../apps/app/src/ui/overview/daily-overview.ts');
 
 // Values built inside a vm context have that context's prototypes: compare them as plain data.
 const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected)), message);
@@ -20,7 +21,7 @@ test('Home agenda: the shared selection, made again only when the inputs change 
   ];
   const overdue = [{id: 'o1', title: 'Pay rent', at: at(10), off: 0}];
   // The card's choice stated directly: the shared selection over freshly built candidates.
-  const fresh = (list, rows, shown, when) => { const pick = H.selectHomeAgenda(H.homeAgendaCandidates(list, rows, shown), when); return [pick.agenda?.item.id, pick.following?.item.id]; };
+  const fresh = (list, rows, shown, when) => { const pick = O.selectOverviewAgenda(H.homeAgendaCandidates(list, rows, shown), when); return [pick.agenda?.item.id, pick.following?.item.id]; };
   const ids = pick => [pick.agenda?.event.id, pick.following?.event.id];
   const agenda = H.createHomeAgenda();
   const first = agenda({events, overdue: [], calendarShown: true, now});

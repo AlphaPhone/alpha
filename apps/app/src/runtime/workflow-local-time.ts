@@ -1,5 +1,5 @@
 import {PHONE_SCHEDULE_ADMISSION_WINDOW_MS,phoneWorkflowLocalDay,zoneOffsetMinutes} from '../../../../.eliza/client-features/packages/contracts/src/phone-workflow.ts';
-import {formatSchedule} from '../../../../.eliza/client-features/packages/ui/src/utils/cron-format.ts';
+import {formatSchedule} from '../ui/utils/cron-format.ts';
 import {formatDateTime,formatTime,formatMonthDay} from '../prototype/locale-time';
 // Upstream plugin-scheduling/src/scheduled-task/trigger-tz.ts. The prepared
 // browser SDK does not export this scheduling sentinel.
