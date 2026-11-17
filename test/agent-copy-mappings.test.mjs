@@ -245,6 +245,35 @@ test('every fixed error a hosted digest run records keeps its reason in Alpha’
  assert.equal(digests.digestSummaryText({runId:'run',status:'failed',output:null,error:'constructor'}),digests.DIGEST_RUN_FAILED);
 });
 
+// --- Chat: a workflow the agent saved, changed or started (plugin-workflow WORKFLOW action) -----
+const chat=await import('../apps/app/src/runtime/action-message-presentation.ts');
+test('every WORKFLOW action sentence the agent delivers unparaphrased reads in Alpha’s words',()=>{
+ // Text bound to effect receipts is the action's canonical reply: core delivers it exactly as written.
+ assert.match(vendor('packages/core/src/runtime/action-handler-settlement.ts'),/callbackText !== expectedText/);
+ // A removal and its undo share one result, so their two sentences are the arms of one conditional.
+ const bound=[...vendor('plugins/plugin-workflow/src/actions/workflow.ts').matchAll(/text:\s*(?:op === 'remove'\s*\?\s*)?`([^`]+)`(?:\s*:\s*`([^`]+)`)?,\s*effectReceipts: (?!\[\])/g)].flatMap(m=>m.slice(1).filter(Boolean));
+ const paused=' It was on, so it is now off. Review the change, then turn it on again.',schedulePaused=' Its schedule is now paused. Turn it on again in Workflows.';
+ const values={'workflow.name':'Morning digest',label:'“Daily notes”',[`current.active ? '${paused}' : ''`]:paused,[`current.active && !workflow.active ? '${schedulePaused}' : ''`]:schedulePaused,"workflow.active ? 'active' : 'inactive'":'inactive',marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
+ const sentence=template=>template.replaceAll('\\n','\n').replace(/\$\{([^}]+)\}/g,(_whole,name)=>{assert.ok(name in values,'template value: '+name);return values[name];});
+ // Upstream words these for the owner, so Alpha shows each as written; only the run marker block becomes a card.
+ const PINNED=[
+  ['Created “${workflow.name}”. It is off until you turn it on.','Created “Morning digest”. It is off until you turn it on.'],
+  ["Updated “${workflow.name}”.${current.active ? '"+paused+"' : ''}",'Updated “Morning digest”.'+paused],
+  ["Renamed ${label} to “${workflow.name}”.${current.active && !workflow.active ? '"+schedulePaused+"' : ''}",'Renamed “Daily notes” to “Morning digest”.'+schedulePaused],
+  ["${workflow.name} is now ${workflow.active ? 'active' : 'inactive'}.",'Morning digest is now inactive.'],
+  ['Removed ${label}. It no longer runs. You can restore it later.','Removed “Daily notes”. It no longer runs. You can restore it later.'],
+  ['Restored ${label}. It is off until you turn it on.','Restored “Daily notes”. It is off until you turn it on.'],
+  ['Submitted a run of ${label}.\\n\\n[WORKFLOW]\\n${marker}\\n[/WORKFLOW]','Submitted a run of “Daily notes”.'],
+  ['Restored “${workflow.name}”.','Restored “Morning digest”.'],
+ ];
+ assert.deepEqual(bound,PINNED.map(([upstream])=>upstream));
+ for(const [upstream,alpha] of PINNED){
+  assert.equal(chat.workflowReplyText(sentence(upstream)).text,alpha,upstream);
+  // The same sentence inside a longer reply is reworded in place.
+  assert.equal(chat.workflowReplyText('Done.\n\n'+sentence(upstream)).text,'Done.\n\n'+alpha,upstream);
+ }
+});
+
 // --- Chat: an approved Notes change (staged plugin-notes) --------------------------------------
 const notes=await import('../apps/app/src/ui/notes/notes-action-messages.ts');
 test('every shared Notes refusal on the approved change path is worded by Alpha',()=>{
@@ -276,6 +305,16 @@ test('every shared Notes refusal on the approved change path is worded by Alpha'
  const adapter=source('apps/app/src/prototype/agent-adapter.ts');
  assert.match(adapter,/:notesActionFailureText\(error\)\};/);
  assert.doesNotMatch(adapter,/'The Notes outcome is uncertain\.':\(error as Error\)\.message/);
+});
+
+// An agent request for Previous notes that cannot run: the phone says there are none only when the
+// presence read proved it. A request reviewed on Home, before Notes read it, is not told so.
+test('a refused Previous notes request claims no earlier notes only when their absence is proven',()=>{
+ assert.equal(notes.previousNotesRefusal('canonical','absent','shared'),'There are no earlier notes on this phone, so nothing was shared.');
+ for(const availability of [null,'present','unavailable'])assert.equal(notes.previousNotesRefusal('canonical',availability,'shared'),'Nothing was shared because Notes is not set to On this phone.',String(availability));
+ for(const availability of [null,'present','absent','unavailable'])assert.equal(notes.previousNotesRefusal('legacy',availability,'saved'),'Previous notes isn’t ready, so nothing was saved.',String(availability));
+ // The approved-change path shows each of these as written.
+ for(const [source,availability] of [['legacy',null],['canonical','absent'],['canonical',null]]){const text=notes.previousNotesRefusal(source,availability,'changed');assert.equal(notes.notesActionFailureText(new Error(text)),text);}
 });
 
 // --- Chat approval and action history: Clock review, validators, native journal -----------------

@@ -1051,7 +1051,9 @@ export function installChatOverlayMotion(Component: Shell) {
 										? () => out.grabTap({ detail: 1 })
 										: target?.closest("[data-alpha-strip]")
 											? out.strip?.tap
-											: undefined;
+											: label === "Stop reply"
+												? out.stopReply
+												: undefined;
 				shell.swallow = 0;
 				shell.chatMotion = {
 					id: event.pointerId,

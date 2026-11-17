@@ -180,6 +180,7 @@ export default defineConfig({
       "@elizaos/contracts/phone-workflow": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/phone-workflow.ts",import.meta.url)),
       "@elizaos/contracts/workflow-client": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/workflow-client.ts",import.meta.url)),
       "@elizaos/contracts/workflow-scope": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/workflow-scope.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/browser-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/camera-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/client-coordinator": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/clock-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts",import.meta.url)),

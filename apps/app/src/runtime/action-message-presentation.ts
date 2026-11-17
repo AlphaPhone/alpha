@@ -1,6 +1,7 @@
 import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
+import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
 type Message = Record<string, any>;
 /** Only the service-authored check-in suffix is presentation markup. */
@@ -26,6 +27,17 @@ export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
   return `Created a browser tab for ${destination.host}.`;
+}
+/** The one-sentence completion of a reviewed Browser control: the owner reads it and the agent receives it. */
+export function browserControlSummary(operation: BrowserControlOperation): string {
+  switch (operation.type) {
+    case 'browser_search': return `Searching the web for “${operation.query}”.`;
+    case 'browser_tab_new': return operation.private ? 'Opened a private tab.' : 'Opened a new tab.';
+    case 'browser_tab_switch': return 'Switched tabs in Browser.';
+    case 'browser_tab_close': return 'Closed the tab.';
+    case 'browser_find': return `Finding “${operation.text}” in the page.`;
+    case 'browser_history': return {back: 'Went back a page.', forward: 'Went forward a page.', reload: 'Reloading the page.', stop: 'Stopped loading the page.'}[operation.action];
+  }
 }
 function legacyBrowserNavigationSummary(url: string): string {
   return `Opened ${new URL(url).host}.`;
@@ -200,8 +212,13 @@ export function collapseSystemNotices<T extends ChatRow>(messages: T[]): T[] {
 export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];attribution:string;mapQuery?:string;
  /** Maps reads the phone's position itself, after the user's tap, and searches around it. Chat never receives it. */
  nearMe?:boolean;
- /** Maps finds this destination and plans directions to it from the phone's own position, after the user's tap. */
+ /** Maps plans directions from the phone's own position, after the user's tap: to `place`, to the closest
+  * match of a `nearMe` search, or (an older agent's card, which names no place) to the first match of `mapQuery`. */
  directionsFromHere?:boolean;
+ /** The exact place the agent resolved. Maps selects it by its provider id and coordinates, under its own name. */
+ place?:MapsCardPlace;
+ /** How to travel on a `directionsFromHere` card, when the request named it. */
+ travelMode?:MapsCardRoute['travelMode'];
  /** A planned route for Maps to draw: both ends as `latitude, longitude`, and how to travel. */
  route?:{origin:string;destination:string;name:string;travelMode:MapsCardRoute['travelMode']}};
 type MapsCardRoute=Extract<MapsCardSpec,{kind:'route'}>;
@@ -212,22 +229,31 @@ const MODES:Record<string,string>={drive:'Driving',walk:'Walking',bicycle:'Cycli
 const placeLine=(place:MapsCardPlace)=>place.formattedAddress?`${place.name}, ${place.formattedAddress}`:place.name;
 // Alpha's agent context carries no device position, so the locate card cannot be answered here.
 const LOCATE_LINE='Name a start · Location not shared';
-// Maps can serve a location request on the phone: plugin-maps names the search or the destination in the prompt.
+// Maps can serve a location request on the phone. plugin-maps names the search or the destination in the card's
+// own fields; an older agent names it only in the prompt, which these read.
 const NEAR_PROMPT=/^I need your precise location to search near you for “([^”]{1,300})”\.$/;
 const ROUTE_PROMPT=/^I need your precise location to start the route to (.{1,300})\.$/;
 const point=(place:MapsCardPlace)=>`${place.latitude}, ${place.longitude}`;
 
 function present(card:MapsCardSpec):MapsChatCard{
  switch(card.kind){
-  case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',mapQuery:`${card.place.latitude}, ${card.place.longitude}`};
+  case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',place:card.place};
   case 'places':return {kind:card.kind,title:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query};
   case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:point(card.destination),
    route:{origin:point(card.origin),destination:point(card.destination),name:card.destination.name,travelMode:card.travelMode}};
-  case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',mapQuery:`${card.place.latitude}, ${card.place.longitude}`};
+  case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',place:card.place};
   case 'locate':{
-   const near=card.intent==='place-near'?NEAR_PROMPT.exec(card.prompt)?.[1]:undefined,to=card.intent==='route-origin'?ROUTE_PROMPT.exec(card.prompt)?.[1]:undefined;
-   if(near)return {kind:card.kind,title:`“${near}” near you`,lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:near,nearMe:true};
-   if(to)return {kind:card.kind,title:`Directions to ${to}`,lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',mapQuery:to,directionsFromHere:true};
+   const mode=card.travelMode?{travelMode:card.travelMode}:{};
+   if(card.intent==='place-near'){
+    const near=card.query??NEAR_PROMPT.exec(card.prompt)?.[1];
+    if(near)return {kind:card.kind,title:`“${near}” near you`,lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:near,nearMe:true};
+   }else if(card.destination)return {kind:card.kind,title:`Directions to ${card.destination.name}`,lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',place:card.destination,directionsFromHere:true,...mode};
+   // A kind of place, not one place: Maps finds the closest around the phone, then plans the route to it.
+   else if(card.query)return {kind:card.kind,title:`Directions to ${card.query}`,lines:['Map finds the closest around this phone · Location not shared with chat'],attribution:'',mapQuery:card.query,nearMe:true,directionsFromHere:true,...mode};
+   else{
+    const to=ROUTE_PROMPT.exec(card.prompt)?.[1];
+    if(to)return {kind:card.kind,title:`Directions to ${to}`,lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',mapQuery:to,directionsFromHere:true};
+   }
    return {kind:card.kind,title:'Location needed',lines:[card.intent==='place-near'?'Pick an area in Maps · Location not shared':LOCATE_LINE],attribution:''};
   }
  }
@@ -287,5 +313,5 @@ export function workflowReplyText(text:string){
   return lead;
  });
  // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
- return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():text,runs};
+ return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered,runs};
 }

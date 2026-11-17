@@ -194,7 +194,10 @@ installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBars>('Alpha
 // The shared agenda, mail and brief cards render the final Home values of every adapter above.
 installHomeCardVisibility(Component, () => googleConnectionController.open());
 // Messages and Phone cards exist on the verified image only; elsewhere this installs nothing.
-if(isAndroid&&!fixture){installTelephonyAttention(Component);installTelephonyReview(Component);installVoicemailTranscription();}
+if(isAndroid&&!fixture){installTelephonyAttention(Component);installVoicemailTranscription();}
+// The in-card choice of a reviewed action: a contact or number on the image, and on every
+// platform the tab a Browser request names when several are open.
+if(!fixture)installTelephonyReview(Component);
 installHomeOverviewCards(Component);
 installClockAdapter(Component, VIEWS, { simulated: testMocksEnabled && fixture, browser: !isAndroid });
 // Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer. Apps reads

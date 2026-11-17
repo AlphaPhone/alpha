@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
-import {nativeSource, fixture, runJvm} from './fixtures/jvm-tools.mjs';
+import {nativeSource, fixture, runJvm, jvmSkip} from './fixtures/jvm-tools.mjs';
 
 // AP-16 AC-19 on the Alpha image: the Telecom reading the renderer gates Alpha's actions on
 // (AlphaCallState.java), run on the JVM against stand-ins for the Android types it reads. This
@@ -28,6 +28,11 @@ test('the call-state listener registers once phone-state access exists, follows 
   assert.match(runJvm([nativeSource('AlphaCallStateWatch.java'), fixture('CallStateWatchTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.CallStateWatchTest'), /PASS call-state watch/);
 });
 
-test('AC-20: PhoneLookup names a contact on the card only for an exact number match', () => {
-  assert.match(runJvm([nativeSource('AlphaContactLookup.java'), fixture('ContactLookupTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.ContactLookupTest'), /PASS contact lookup/);
+// AlphaContactLookup also shapes contact search rows as JSON, so it compiles with the pinned org.json jar.
+test('AC-20: PhoneLookup names a contact on the card only for an exact number match', {skip: jvmSkip('json')}, () => {
+  assert.match(runJvm([nativeSource('AlphaContactLookup.java'), fixture('ContactLookupTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.ContactLookupTest', {json: true}), /PASS contact lookup/);
+});
+
+test('a contact too large to read completely is left out of a contact search instead of failing it', {skip: jvmSkip('json')}, () => {
+  assert.match(runJvm([nativeSource('AlphaContactLookup.java'), fixture('ContactSearchRowsTest.java'), ...stubs(fixture('call-state-jvm'))], 'ai.alphacompute.alphaphone.ContactSearchRowsTest', {json: true}), /PASS contact search rows/);
 });

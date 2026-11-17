@@ -13,6 +13,7 @@
 import {
   actionScope,
   deviceJournalContext,
+  DeviceActionNotStarted,
   type DeviceActionClientProfile,
   type CurrentDeviceActionRequest,
   type DeviceActionJournal,
@@ -43,9 +44,11 @@ import {isReminderOperation} from '../../../../.eliza/client-features/plugins/pl
 import {isReminderCreate} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-create-contract.ts';
 import {namedCalendarReadTarget} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {browserNavigationSummary} from './action-message-presentation';
+import {BrowserOpenRefused} from '../browser/browser-poll';
 import {presentDeviceRecordOperation} from './device-record-presentation';
 import {validateMapsSelectedObject} from '../maps/agent-context';
 import {isMvpView} from '../prototype/mvp-features';
+import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
@@ -60,18 +63,29 @@ export type DeviceExecutor = SharedDeviceExecutor<ContextEnvelope>;
 export type ForegroundReviewExecutor = SharedForegroundReviewExecutor<ContextEnvelope>;
 export type PendingReviewItem = SharedPendingReviewItem;
 
+/** Review and receipt copy for opening a view, by the name the owner sees rather than its id. */
+export function presentOpenView(view:string){const label=alphaViewLabel(view);return {title:`Open ${label}`,description:`Open ${label} on this phone`,appliedSummary:`Opened ${label} on this phone.`};}
 /** Alpha ships Home and Reminders plus the enabled MVP views. */
 const operations = {admitView:(view:string)=>view==='home'||view==='reminders'||isMvpView(view),parseWorkflowRead};
 export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope,WorkflowPhoneReview> = {
   appName:'Alpha',
+  // The name the owner says. The agent's character carries the same name, so the server and this
+  // phone read "Alpha, open …" as the same direct request.
+  assistantName:ALPHA_PRODUCT.identity.characterName,
   operations,
   workflow:{parseBinding:parseWorkflowBinding,parseRead:parseWorkflowRead,validateResult:validateWorkflowResult,assertOperation:assertWorkflowOperation},
-  presentRecord:(operation,timeZone)=>isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
+  presentRecord:(operation,timeZone)=>operation.type==='open_view'?presentOpenView(operation.view):isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
   browserNavigationSummary,
   mapsSelectionCurrent:validateMapsSelectedObject,
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
 };
+/** Runs an approved Browser open or control for the device executor. One that Browser refused
+ * before any effect closes the attempt as not started, with Browser's reason; any other failure
+ * may have reached the tab host and stays an unknown outcome. */
+export async function approvedBrowserOpen<T>(open:()=>Promise<T>):Promise<T>{
+  try{return await open();}catch(error){if(error instanceof BrowserOpenRefused)throw new DeviceActionNotStarted(error.message);throw error;}
+}
 export function validateDeviceOperation(value: unknown): DeviceOperation { return sharedValidateDeviceOperation(value,operations); }
 /** Every proposal operation, including foreground reviews. */
 export function validateReviewableDeviceOperation(value: unknown): ReviewableDeviceOperation { return sharedValidateReviewableDeviceOperation(value,operations); }
@@ -88,10 +102,16 @@ let filesReviewIdentity: ((paths:string[],signal:AbortSignal)=>Promise<string[]>
 export function setFilesReviewIdentity(read: (paths:string[],signal:AbortSignal)=>Promise<string[]>) {
   filesReviewIdentity=read;
 }
+/** Browser's answer to whether a tab switch's words match several open tabs. Such a switch is
+ * never run directly: its review card lists the tabs for the owner to pick. */
+let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
+export function setBrowserTabNeedsChoice(read: (target:string)=>boolean) {
+  browserTabNeedsChoice=read;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target)});
   }
 }

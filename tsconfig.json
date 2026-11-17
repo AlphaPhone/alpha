@@ -100,6 +100,7 @@
       "@elizaos/contracts/phone-workflow": ["./.eliza/client-features/packages/contracts/src/phone-workflow.ts"],
       "@elizaos/contracts/workflow-client": ["./.eliza/client-features/packages/contracts/src/workflow-client.ts"],
       "@elizaos/contracts/workflow-scope": ["./.eliza/client-features/packages/contracts/src/workflow-scope.ts"],
+      "@elizaos/plugin-assistant/device-actions/browser-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts"],
       "@elizaos/plugin-assistant/device-actions/camera-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts"],
       "@elizaos/plugin-assistant/device-actions/client-coordinator": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"],
       "@elizaos/plugin-assistant/device-actions/clock-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts"],

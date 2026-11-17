@@ -25,6 +25,9 @@ import { NOTES_LIST_FILTER_CAPABILITY } from "@elizaos/contracts";
 import {
   browserDestinationMatches,
   directBrowserDestination,
+  directBrowserSearchQuery,
+  groundBrowserDestination,
+  groundBrowserSearchQuery,
 } from "@elizaos/contracts/browser-request-grounding";
 import { createDeviceActionExecution } from "@elizaos/contracts/device-action-execution";
 import {
@@ -60,11 +63,17 @@ import {
   validateCalendarResult,
 } from "@elizaos/plugin-assistant/device-calendar-contract";
 import {
-  CAMERA_CAPTURE_CAPABILITY,
   type CameraCaptureResult,
+  cameraCaptureCapabilityAvailable,
   isCameraCapture,
   validateCameraCaptureResult,
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
+import {
+  BROWSER_CONTROL_DIRECT_TYPES,
+  browserControlCapabilityAvailable,
+  describeBrowserControl,
+  isBrowserControl,
+} from "@elizaos/plugin-assistant/device-actions/browser-contract";
 import type {
   ClockHandoffResult,
 } from "@elizaos/plugin-assistant/device-actions/clock-contract";
@@ -144,7 +153,9 @@ import {
   selectedTelephonyView,
   type TelephonyActionOperation,
   type TelephonyActionResult,
+  smsComposeTarget,
   telephonyActionCapabilityAvailable,
+  telephonyActionFormAvailable,
   validateTelephonyActionResult,
 } from "@elizaos/plugin-assistant/device-actions/telephony-actions-contract";
 import type {
@@ -211,6 +222,10 @@ function id(value: unknown): string {
 // ── Screen binding ──────────────────────────────────────────────────────────
 
 export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
+/** A camera capture that only needs Camera open also names the message that asked for it. */
+export type ReviewItem = PendingReviewItem & {
+  cameraRequestMessageId?: string;
+};
 /** A pending proposal that does not fit the current screen. Its message is shown to the owner. */
 export class ContextNotice extends Error {
   override readonly name = "ContextNotice";
@@ -446,6 +461,8 @@ function assertProposalContext<C extends DeviceContextEnvelope>(
         ? "Unlock the phone to review this action."
         : "Open Photos to review this action.",
     );
+  if (isBrowserControl(operation) && context.sensitive)
+    throw new ContextNotice("Unlock the phone to review this action.");
   if (isReminderOperation(operation)) assertReminderContext(operation, context);
   if (isNativeNotesQuery(operation)) assertNotesQueryContext(context);
   if (isNotesOperation(operation)) assertNotesContext(operation, context);
@@ -549,6 +566,12 @@ function describeForegroundReview(
 
 type ExecutionResult = DeviceExecutionResult & {
   foregroundResult?: ForegroundReviewResult;
+  /**
+   * The view change that shows a successful telephony outcome (the drafted
+   * conversation, the filtered Contacts list). Like `presentBrowser`, it ends
+   * the review it ran under, so it runs after the receipt attempt.
+   */
+  present?: () => void;
 };
 type CommittedReceiptResult = { result: unknown } | Record<string, never>;
 
@@ -590,7 +613,10 @@ export class DeviceActionCoordinator<
   private executing: string | undefined;
   private readonly ports: DeviceActionCoordinatorPorts<C, R>;
   private browserAttempts = new Map<string, CurrentDeviceActionRequest>();
-  private browserPolicy = new Map<string, { key: string; allowed: boolean }>();
+  private browserPolicy = new Map<
+    string,
+    { key: string; allowed: boolean; grounded: boolean }
+  >();
   private selectedTelephonyRequests = new Map<
     string,
     { context: string; expiresAt: number }
@@ -600,6 +626,8 @@ export class DeviceActionCoordinator<
     private readonly options: {
       currentRequestBrowserPolicy?: boolean;
       currentRequestTelephonyPolicy?: boolean;
+      /** Whether a tab switch's words match several open tabs on this phone. */
+      browserTabNeedsChoice?: (target: string) => boolean;
     } = {},
   ) {
     this.ports = ports;
@@ -623,12 +651,25 @@ export class DeviceActionCoordinator<
     proposal: DeviceProposal,
     proof?: CurrentDeviceActionRequest,
   ): boolean {
+    return this.browserRequest(proposal, proof).allowed;
+  }
+  /** How the owner's current message asks for a proposed destination or web
+   * search: `allowed` when it is a direct request that may run without review,
+   * `grounded` when the owner at least typed that address without refusing it,
+   * or typed those search words. */
+  private browserRequest(
+    proposal: DeviceProposal,
+    proof?: CurrentDeviceActionRequest,
+  ): { allowed: boolean; grounded: boolean } {
+    const operation = proposal.operation;
     if (
       !this.options.currentRequestBrowserPolicy ||
-      proposal.operation.type !== "browser_navigate"
+      (operation.type !== "browser_navigate" &&
+        operation.type !== "browser_search")
     )
-      return true;
-    if (!proof || proof.messageId !== proposal.requestMessageId) return false;
+      return { allowed: true, grounded: true };
+    if (!proof || proof.messageId !== proposal.requestMessageId)
+      return { allowed: false, grounded: false };
     proof.current();
     const key = JSON.stringify([
       this.requestKey(proof.messageId),
@@ -637,15 +678,34 @@ export class DeviceActionCoordinator<
       proof.text,
     ]);
     const cached = this.browserPolicy.get(proposal.id);
-    if (cached?.key === key) return cached.allowed;
-    // Automatic client effects need direct intent, not merely a URL mentioned in prose.
-    const allowed = browserDestinationMatches(
-      proposal.operation,
-      directBrowserDestination(proof.text),
-    );
+    if (cached?.key === key) return cached;
+    // Automatic client effects need direct intent, not merely a URL or search
+    // words mentioned in prose. The server reads the same grammar with the same
+    // assistant name, so both agree on what a direct request is.
+    const name = this.profile.assistantName;
+    const allowed =
+      operation.type === "browser_search"
+        ? directBrowserSearchQuery(proof.text, name)?.toLowerCase() ===
+          operation.query.toLowerCase()
+        : browserDestinationMatches(
+            operation,
+            directBrowserDestination(proof.text, name),
+          );
+    const policy = {
+      key,
+      allowed,
+      grounded:
+        allowed ||
+        (operation.type === "browser_search"
+          ? groundBrowserSearchQuery(proof.text, operation.query) !== undefined
+          : browserDestinationMatches(
+              operation,
+              groundBrowserDestination(proof.text, operation.url, name),
+            )),
+    };
     if (this.browserPolicy.has(proposal.id) || this.browserPolicy.size < 128)
-      this.browserPolicy.set(proposal.id, { key, allowed });
-    return allowed;
+      this.browserPolicy.set(proposal.id, policy);
+    return policy;
   }
   private consumeBrowserRequest(proof: CurrentDeviceActionRequest): boolean {
     for (const [key, previous] of this.browserAttempts) {
@@ -747,7 +807,10 @@ export class DeviceActionCoordinator<
         payload.operation,
         this.profile.operations,
       );
-    if (isCameraCapture(op) && !this.capability(CAMERA_CAPTURE_CAPABILITY))
+    if (
+      isCameraCapture(op) &&
+      !cameraCaptureCapabilityAvailable(op, this.credential.capabilities)
+    )
       throw Error("Camera capture was not negotiated with this agent");
     if (
       isPhoneDial(op) &&
@@ -756,7 +819,11 @@ export class DeviceActionCoordinator<
       throw Error("Dialing was not negotiated with this phone");
     if (
       isTelephonyAction(op) &&
-      !telephonyActionCapabilityAvailable(op.type, this.credential.capabilities)
+      (!telephonyActionCapabilityAvailable(
+        op.type,
+        this.credential.capabilities,
+      ) ||
+        !telephonyActionFormAvailable(op, this.credential.capabilities))
     )
       throw Error("This telephony action was not negotiated with this phone");
     if (isSmsSend(op) && !this.capability(SMS_SEND_CAPABILITY))
@@ -790,6 +857,11 @@ export class DeviceActionCoordinator<
       !photosViewCapabilityAvailable(this.credential.capabilities)
     )
       throw Error("Photos actions were not negotiated with this agent");
+    if (
+      isBrowserControl(op) &&
+      !browserControlCapabilityAvailable(op.type, this.credential.capabilities)
+    )
+      throw Error("This Browser action was not negotiated with this agent");
     if (
       isForegroundReviewOperation(op) &&
       (!foregroundReviewOperationAvailable(op, this.credential.capabilities) ||
@@ -964,8 +1036,7 @@ export class DeviceActionCoordinator<
       return {
         ...base,
         title: "Take photo",
-        description:
-          "Use the current camera and save one photo in Photos. The photo stays on this device.",
+        description: `Use the ${op.lens ?? "current"} camera and save one photo in Photos. The photo stays on this device.`,
       };
     if (isLibraryOperation(op))
       return { ...base, ...describeLibraryOperation(op, this.profile.appName) };
@@ -974,6 +1045,7 @@ export class DeviceActionCoordinator<
     if (isFilesOperation(op)) return { ...base, ...describeFilesOperation(op) };
     if (isPhotosViewOperation(op))
       return { ...base, ...describePhotosViewOperation(op) };
+    if (isBrowserControl(op)) return { ...base, ...describeBrowserControl(op) };
     const notesDestination =
       (op.type === "notes_delete" || op.type === "notes_update") &&
       !context.sensitive &&
@@ -990,7 +1062,8 @@ export class DeviceActionCoordinator<
       isNotesOperation(op) ||
       isCalendarOperation(op) ||
       op.type === "create_note" ||
-      op.type === "create_reminder"
+      op.type === "create_reminder" ||
+      op.type === "open_view"
         ? this.profile.presentRecord(op, context.timeZone)
         : undefined;
     const agenda = op.type === "read_calendar_range" && !proposal.workflow;
@@ -1030,7 +1103,7 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     proof?: CurrentDeviceActionRequest,
-  ): Promise<{ items: PendingReviewItem[]; failures: Error[] }> {
+  ): Promise<{ items: ReviewItem[]; failures: Error[] }> {
     const sequence = ++this.reviewSequence;
     const assertCurrentReview = () => {
       signal.throwIfAborted();
@@ -1063,7 +1136,7 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
-    const items: PendingReviewItem[] = [];
+    const items: ReviewItem[] = [];
     for (const proposal of valid) {
       // An approval whose claim never arrived is shown again: deciding is
       // idempotent for it, so a second tap reaches the claim.
@@ -1080,7 +1153,9 @@ export class DeviceActionCoordinator<
         this.options.currentRequestBrowserPolicy &&
         proof &&
         proposal.requestMessageId === proof.messageId &&
-        !this.browserAllowed(proposal, proof)
+        // An address the owner typed without directly asking for it is not opened
+        // automatically, but it keeps its ordinary review card below.
+        !this.browserRequest(proposal, proof).grounded
       ) {
         items.push({
           proposalId: proposal.id,
@@ -1102,6 +1177,11 @@ export class DeviceActionCoordinator<
           proposalId: proposal.id,
           proposal: null,
           notice: `${card.title}: ${notice}`,
+          ...(notice === CAMERA_CONTEXT_NOTICE &&
+          !context.sensitive &&
+          proposal.requestMessageId
+            ? { cameraRequestMessageId: proposal.requestMessageId }
+            : {}),
         });
         continue;
       }
@@ -1125,7 +1205,7 @@ export class DeviceActionCoordinator<
           items.push({
             proposalId: proposal.id,
             proposal: null,
-            notice: `${card.title}: Ask again from the open ${selectedView === "messages" ? "conversation" : "voicemail"}.`,
+            notice: `${card.title}: Ask again from the open ${selectedView === "messages" ? "conversation" : selectedView === "contacts" ? "contact" : "voicemail"}.`,
           });
           continue;
         }
@@ -1213,7 +1293,7 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     proof?: CurrentDeviceActionRequest,
-  ): Promise<PendingReviewItem[]> {
+  ): Promise<ReviewItem[]> {
     return (await this.review(context, signal, proof)).items;
   }
   /** Reviewable proposals only. An invalid proposal fails the call only when nothing else is reviewable. */
@@ -1254,6 +1334,7 @@ export class DeviceActionCoordinator<
       ...NOTES_ORGANIZE_DIRECT_TYPES,
       ...FILES_DIRECT_TYPES,
       ...PHOTOS_VIEW_DIRECT_TYPES,
+      ...BROWSER_CONTROL_DIRECT_TYPES,
     ];
     const results: DeviceOperationReceipt[] = [];
     for (const [proposalId, entry] of [...this.proposals]) {
@@ -1268,9 +1349,17 @@ export class DeviceActionCoordinator<
         continue;
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
+      // Words that match several tabs need the owner's pick, and only the
+      // action's review card can show it.
+      if (
+        entry.proposal.operation.type === "browser_tab_switch" &&
+        this.options.browserTabNeedsChoice?.(entry.proposal.operation.target)
+      )
+        continue;
       const browser =
         this.options.currentRequestBrowserPolicy &&
-        entry.proposal.operation.type === "browser_navigate";
+        (entry.proposal.operation.type === "browser_navigate" ||
+          entry.proposal.operation.type === "browser_search");
       const requestKey = this.requestKey(messageId);
       if (
         browser &&
@@ -1838,16 +1927,14 @@ export class DeviceActionCoordinator<
       // Presentation changes the foreground context and cancels its approval.
       // Run it only after this exact action's receipt attempt, never as a retry.
       const presentBrowser = () => {
-        if (
-          p.operation.type === "browser_navigate" &&
-          result.status === "succeeded"
-        ) {
-          try {
+        if (result.status !== "succeeded") return;
+        try {
+          if (p.operation.type === "browser_navigate" || isBrowserControl(p.operation)) {
             if (reviewed.currentRequest) assertCurrent();
             result.presentBrowser?.();
-          } catch {
-            /* A retired foreground must not replace a journaled outcome. */
-          }
+          } else if (isTelephonyAction(p.operation)) result.present?.();
+        } catch {
+          /* A retired foreground must not replace a journaled outcome. */
         }
       };
       let confirmed: DeviceProposal;
@@ -3059,21 +3146,62 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
         title: "Add contact",
         description: `${fields(operation.contact)}\n\nSaves this contact on your phone after you confirm.`,
       };
-    case "contact_update":
+    case "contact_update": {
+      const values = (
+        label: string,
+        change: { phoneNumbers?: string[]; emailAddresses?: string[] } = {},
+      ) =>
+        [...(change.phoneNumbers ?? []), ...(change.emailAddresses ?? [])].map(
+          (value) => `${label}: ${value}`,
+        );
+      const lines = [
+        ...(operation.set ? [fields(operation.set)] : []),
+        ...values("Add", operation.add),
+        ...values("Remove", operation.remove),
+      ].join("\n");
       return {
         title: "Change contact",
-        description: `Contact: ${operation.query}\n${fields(operation.set)}\n\nReplaces these details after you confirm. Nothing else is shared with the agent.`,
+        description: `Contact: ${operation.query}\n${lines}\n\n${
+          operation.add || operation.remove
+            ? operation.set
+              ? "Replaces the details listed whole and adds or removes only the values marked, after you confirm."
+              : "Adds or removes only these values after you confirm. The contact's other details stay."
+            : "Replaces these details after you confirm."
+        } Nothing else is shared with the agent.`,
       };
+    }
     case "contact_delete":
       return {
         title: "Delete contact",
         description: `Contact: ${operation.query}\n\nDeletes this contact from your phone after you confirm.`,
       };
-    case "sms_compose":
+    case "contact_show":
       return {
-        title: "Review SMS",
-        description: `To contact: ${operation.query}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
+        title: "Show contact",
+        description: `Search: ${operation.query}\n\nOpens Contacts on your phone with the matches. The agent learns only whether one was found.`,
       };
+    case "contact_read_selected":
+      return {
+        title: "Share open contact",
+        description:
+          "Share the name, numbers and email addresses of the open contact with the agent. Other contacts stay private.",
+      };
+    case "sms_compose": {
+      const target = smsComposeTarget(operation);
+      const to =
+        target.kind === "number"
+          ? `To: ${target.number}`
+          : `To contact: ${target.query}`;
+      return "draft" in operation
+        ? {
+            title: "Draft SMS",
+            description: `${to}\n\n${operation.body}\n\nOpens that conversation in Messages with this in its text field. Nothing is sent until you tap Send there.`,
+          }
+        : {
+            title: "Review SMS",
+            description: `${to}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
+          };
+    }
     case "sms_reply_selected":
       return {
         title: "Draft reply",

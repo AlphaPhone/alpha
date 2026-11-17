@@ -1,10 +1,10 @@
 /** Owner-facing receipt text for one telephony action: shown as the proposal card subtitle,
  * the toast and the device receipt bubble. The receipt sent to the agent carries only the
- * outcome and the typed result, never this text.
- * Alpha owns every sentence; the receipt outcomes, validators and capabilities stay in the
- * shared telephony contract. Each is one short sentence that states the outcome and nothing more
- * (owner, 2026-11-17): no approval narration, explanation or disclaimer. The structured result
- * beside it (`telephonyResult`) still tells the agent exactly what was observed. */
+ * outcome and the typed result, never this text. Alpha owns every sentence; the receipt
+ * outcomes, validators and capabilities stay in the shared telephony contract. Each is one short
+ * sentence that states the outcome and nothing more (owner, 2026-11-17): no approval narration,
+ * explanation or disclaimer, and never "the owner", since the owner reads it as written.
+ * The structured result beside it (`telephonyResult`) still tells the agent exactly what was observed. */
 import type { PhoneDialResult } from "@elizaos/contracts/phone-dial";
 import type { TelephonyActionResult } from "@elizaos/plugin-assistant/device-actions/telephony-actions-contract";
 import type { SmsSendResult } from "@elizaos/contracts/native-telephony";
@@ -60,7 +60,7 @@ export function contactWriteResultText(
 export function smsComposeResultText(result: ResultOf<"sms-compose">): string {
   switch (result.status) {
     case "drafted":
-      return "Draft added to the conversation.";
+      return "Draft added to the conversation, not sent.";
     case "submitted":
       return "Message handed to the carrier.";
     case "sent":
@@ -83,7 +83,7 @@ export function smsComposeResultText(result: ResultOf<"sms-compose">): string {
 export function smsReplyResultText(result: ResultOf<"sms-reply">): string {
   switch (result.status) {
     case "drafted":
-      return "Draft added to the open conversation.";
+      return "Draft added to the open conversation, not sent.";
     case "none-selected":
       return "No conversation is open.";
     case "occupied":
@@ -155,6 +155,18 @@ export function telephonyActionResultText(
       return phoneCallResultText(result);
     case "contact-write":
       return contactWriteResultText(result);
+    case "contact-show":
+      return result.status === "shown"
+        ? "Contacts shows the matching contacts."
+        : result.status === "not-found"
+          ? "No matching contact was found."
+          : "Contacts are unavailable right now.";
+    case "contact-read":
+      return result.status === "read"
+        ? "Shared the open contact."
+        : result.status === "none-selected"
+          ? "No contact is open."
+          : "Contacts are unavailable right now.";
     case "sms-compose":
       return smsComposeResultText(result);
     case "sms-reply":
@@ -175,3 +187,4 @@ export function telephonyActionResultText(
           : "Voicemail is unavailable right now.";
   }
 }
+

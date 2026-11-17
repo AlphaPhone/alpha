@@ -32,7 +32,7 @@ function recorder(name, observe) {
 
 /** One view frame through the real renderer client, its whole installed Browser adapter and
  * the same command port used on Android. The fixture controls the server claim and ack. */
-async function replayCommand(ViewNavigationClient, options) {
+async function replayCommand({ViewNavigationClient, executeViewInteraction}, options) {
   const {name, native = true, preference = 'off', overlay = false, stale = false, wrongReceipt = false, acknowledge = true} = options;
   const host = await browserAdapterHost({native, instant:browserCalls});
   let client, receive, recordedResult, acknowledged = 0, readyResult = false;
@@ -74,9 +74,9 @@ async function replayCommand(ViewNavigationClient, options) {
     }, () => !work.signal.aborted, context, (_id, listener) => {
       receive = listener;
       return {ready:Promise.resolve(), close() {}};
-    }, async (view, capability, params, signal, current) => {
+    }, (view, capability, params, signal, current) => {
       assert.deepEqual([view, capability], ['browser', 'browser-command']);
-      return host.component.browserCommand(params.command, signal, current);
+      return executeViewInteraction(view, capability, params, {active:host.shellState.view === 'browser', command:host.component.browserCommand}, signal, current);
     }, async () => {
       preferenceReads++;
       if (asks === 'unreadable') throw Error('The preference is unavailable');
@@ -291,7 +291,7 @@ export async function checkBrowserAgentOpen(extraSources = []) {
   const driverHashes = captureReplayClosure([self, ...extraSources]);
   const traces = [];
   const load = await loadBundled('apps/app/src/runtime/view-navigation.ts');
-  const {ViewNavigationClient} = await load();
+  const navigation = await load();
   for (const options of [
     {name:'exact native tab and lost acknowledgment', acknowledge:false},
     {name:'a receipt for another tab cannot confirm the native command', wrongReceipt:true},
@@ -300,7 +300,7 @@ export async function checkBrowserAgentOpen(extraSources = []) {
     {name:'the web Browser has no native command admission', native:false},
     {name:'a covering Browser menu prevents native dispatch', overlay:true},
     {name:'the exact navigation changes while the claim is pending', stale:true},
-  ]) traces.push(await replayCommand(ViewNavigationClient, options));
+  ]) traces.push(await replayCommand(navigation, options));
   const [{DeviceActions}, {browserNavigationSummary}] = await loadBrowserModule([
     'apps/app/src/runtime/device-actions.ts', 'apps/app/src/runtime/action-message-presentation.ts',
   ]);

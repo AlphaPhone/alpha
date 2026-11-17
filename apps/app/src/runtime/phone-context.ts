@@ -2,11 +2,12 @@ import {NOTE_ID_REGEXP} from '../../../../.eliza/client-features/plugins/plugin-
 import {canonicalNotesListContextAllowed,NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {parseClientTurnObservation,parseClientCalendarDayObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
-import {CAMERA_CAPTURE_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
+import {CAMERA_CAPTURE_CAPABILITY,CAMERA_LENS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
-import {telephonyActionCapabilities} from './telephony-actions-contract.ts';
+import {CONTACT_UPDATE_VALUES_CAPABILITY,CONTACT_WRITE_CAPABILITY,SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY,telephonyActionCapabilities} from './telephony-actions-contract.ts';
 import {reminderTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
 import {notesTarget} from './notes-contract.ts';
 import { calendarSource, calendarTarget } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
@@ -134,21 +135,33 @@ export function phoneContextMessage(text: string, input: ContextEnvelope): { tex
 export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
 /** What this phone can run, for the capability negotiation. `native`: a Capacitor app (Android or
  * iOS); `camera`: a camera it can capture with; `foregroundReview`: the shell supplied the review
- * executor; `canonicalNotes`: the same resident session owns canonical app records; `files`: the native
+ * executor; `canonicalNotes`: the same resident session owns canonical app records; `previousNotes`:
+ * notes saved on this phone before canonical Notes exist (or cannot be read), the only store `notes.query.v1` reads; `files`: the native
  * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
-export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
+/** The shared contract's TELEPHONY_VIEWS_CAPABILITY. Its module also loads the Node-only workflow contract, which the renderer cannot import. */
+export const TELEPHONY_VIEWS_CAPABILITY = 'views.telephony.v1';
+export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; previousNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
+/** Every capability either list offers. The Cloud agent answers two lists, its capabilities route
+ * and its device registration. They are one list in the pinned agent; an older Cloud agent's route
+ * left telephony out, so the registration is the complete one. */
+export function offeredByEither(...offers: unknown[]): unknown[] {
+  return [...new Set(offers.flatMap(offer => Array.isArray(offer) ? offer : []))];
+}
 /** The X-Eliza-Device-Capabilities list for every runtime (remote, resident, Cloud): the base
  * local-record contracts plus each capability the agent offers that this phone supports. Clock
  * handoffs are Android-only; v2 (repeat days) also needs the native repeat-days support. */
 export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabilityProfile): string[] {
   const agent:unknown[]=Array.isArray(offered)?offered:[],{android,native}=profile;
   const capabilities=['calendar.local-event.v1','notes.local-record.v1'];
-  if(agent.includes(CAMERA_CAPTURE_CAPABILITY)&&profile.camera)capabilities.push(CAMERA_CAPTURE_CAPABILITY);
+  // Camera always carries its front/back switch, so a capture may name its lens; a switch that does not land takes no photo.
+  if(agent.includes(CAMERA_CAPTURE_CAPABILITY)&&profile.camera)capabilities.push(CAMERA_CAPTURE_CAPABILITY,...(agent.includes(CAMERA_LENS_CAPABILITY)?[CAMERA_LENS_CAPABILITY]:[]));
   if(agent.includes('reminders.local-record.v2'))capabilities.push('reminders.local-record.v2');else if(agent.includes('reminders.local-record.v1'))capabilities.push('reminders.local-record.v1');
   // Browser chat reminders use the runtime scheduler; do not offer a second device-creation lifecycle.
   if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);
-  for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),'notes.query.v1',...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
+  for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
+  // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.
+  for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[])])if(agent.includes(capability))capabilities.push(capability);
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
   // The device photo library is offered only where the native Photos plugin exists and the agent offers it.
@@ -156,14 +169,20 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   if((android||!native)&&profile.foregroundReview&&agent.includes('calendar.named-read.v1'))capabilities.push('calendar.named-read.v1');
   // One shared external-handoff policy for every brand: never clock.alarms.v1 (P-17).
   capabilities.push(...clockHandoffCapabilities({offered:agent,handler:android,repeatDays:android&&agent.includes('clock.handoff.v2')&&profile.clockRepeatDays}));
+  // Phone, Messages and Contacts are destinations the agent may name only on the AOSP image, which draws them.
+  if(profile.aospImage&&agent.includes(TELEPHONY_VIEWS_CAPABILITY))capabilities.push(TELEPHONY_VIEWS_CAPABILITY);
   // SMS sending is negotiated only on the AOSP image, where the launcher holds SEND_SMS.
   if(profile.aospImage&&agent.includes(SMS_SEND_CAPABILITY))capabilities.push(SMS_SEND_CAPABILITY);
   // The reviewed dial handoff only with the native telephony profile (the verified image). The
   // on-device contact lookup waits for an owner number picker in the review, so it is not offered.
   capabilities.push(...telephonyDeviceCapabilities({present:profile.aospImage,dial:agent.includes(PHONE_DIAL_CAPABILITY),contactLookup:false}));
-  // Owner-approved calls, texts by name, contact changes and reads of the open thread or voicemail:
-  // the verified image only, and only what the agent offers. Each is confirmed on the phone
+  // Owner-approved calls, texts and drafts to a contact or a number, contact changes (whole fields
+  // or single values), Contacts filtered to a search, and reads of the open thread, voicemail or
+  // contact: the verified image only, and only what the agent offers. Each is confirmed on the phone
   // (telephony-executor.ts); the agent never receives the address book or a message list.
-  capabilities.push(...telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability)));
+  const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability));
+  // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
+  for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
+  capabilities.push(...telephony);
   return capabilities;
 }

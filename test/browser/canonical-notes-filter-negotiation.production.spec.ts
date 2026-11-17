@@ -44,7 +44,8 @@ for (const offered of [true, false]) {
     // The registered offer reached the real resident negotiation: the stream header and the
     // enrolled credential (read by canonicalNotesFilterAvailable) carry the same list.
     const advertised = (await stub(page, s => s.capabilities) as string).split(',');
-    expect(advertised.includes('notes.query.v1')).toBe(true);
+    // No earlier notes are saved on this phone, so their query is not advertised.
+    expect(advertised.includes('notes.query.v1')).toBe(false);
     expect(advertised.includes(CAPABILITY)).toBe(offered);
     const context = (await stub(page, s => s.bodies) as any[])[0].metadata.clientDevice.context;
     expect(context).toMatchObject({ view: 'notes', sensitive: false });
