@@ -126,21 +126,28 @@ test('an unconfirmed R2 write fails without exposing provider text and resumes o
 test('wrong authority, config collisions and missing preflight state fail before writes', async () => {
   const cases = [
     [fixture => { fixture.state.zone = {...zone, account: {id: id('2')}}; }, {}, /not uniquely owned/],
-    [fixture => { fixture.state.kv.push({...kv, id: id('1')}); }, {}, /Multiple KV/],
+    [fixture => { fixture.state.kv = [kv, {...kv, id: id('1')}]; }, {}, /Multiple KV/],
     [fixture => { fixture.state.kv = [{...kv, id: id('1')}]; }, {ids: known}, /recorded KV namespace ID/],
     [() => {}, {ids: known, accountId: id('2')}, /CLOUDFLARE_ACCOUNT_ID/],
-    [() => {}, {sibling: {...inputs.sibling, hyperdriveId: hyperId}}, /Conflicting Hyperdrive identity/],
+    // Only an existing staging Hyperdrive can collide with the sibling's before a write; a newly created
+    // one that collides is refused at its create receipt (the next test covers receipts).
+    [() => {}, {sibling: {...inputs.sibling, hyperdriveId: hyperId}}, /Conflicting Hyperdrive identity/, 'existing only'],
     [fixture => { fixture.state.hyper = [{...hyperdrive, origin: {...origin, database: 'wrong'}}]; }, {}, /Hyperdrive origin/],
     [fixture => { fixture.state.bucket = fixture.error(401, 10000); }, {}, /R2 lookup failed \(HTTP 401\)/],
     [fixture => { fixture.state.dns[0] = {...dnsRow(apiHost), proxied: false}; }, {}, /Conflicting DNS record/],
-    [fixture => { fixture.state.bucket = null; }, {create: false, ids: known}, /resources are missing/],
+    // With nothing provisioned, the recorded IDs no longer name anything: still refused before any write.
+    [fixture => { fixture.state.bucket = null; }, {create: false, ids: known}, /resources are missing/, null, /recorded KV namespace ID does not match/],
     [() => {}, {create: false}, /Record the selected account/],
   ];
-  for (const [change, options, error] of cases) {
-    const fixture = cloudflareFixture({existing: true});
+  // Each case runs with every other resource present, and again with every other resource missing:
+  // a run that would create something must still refuse before its first write.
+  for (const existing of [true, false]) for (const [change, options, expected, only, whenMissing] of cases) {
+    if (!existing && only) continue;
+    const error = !existing && whenMissing ? whenMissing : expected;
+    const fixture = cloudflareFixture({existing});
     change(fixture);
-    await assert.rejects(reconcileCloudResources({...inputs, fetcher: fixture.fetcher, create: true, ...options}), error);
-    assert.equal(fixture.writes.length, 0);
+    await assert.rejects(reconcileCloudResources({...inputs, fetcher: fixture.fetcher, create: true, ...options}), error, `${error} existing=${existing}`);
+    assert.deepEqual(fixture.writes, [], `${error} existing=${existing}`);
   }
 });
 

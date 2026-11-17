@@ -38,7 +38,8 @@ export default {
       return new Response(upstream.body, {status: upstream.status, headers: {"Content-Type": "application/json", "Cache-Control": "public, max-age=300"}});
     }
     if (route === "hosted") {
-      // The API resolves the registration by this exact public URL (origin and path, no query).
+      // The API resolves the registration by this exact public origin and path. The query (a checkout
+      // return's session_id and result) is passed through for the fallback page's app intent.
       const target = new URL("/api/v1/app-auth/mobile/hosted-route", "https://api.internal");
       target.searchParams.set("url", `${url.origin}${url.pathname}${url.search}`);
       const forwarded = new Request(target, request);
