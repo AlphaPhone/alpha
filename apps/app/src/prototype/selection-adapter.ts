@@ -7,11 +7,12 @@ import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-q
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
 import { selectedPreviewText } from '../ui/files/storage-presentation.ts';
+import { selectedDocumentText } from '../ui/files/selected-document-messages.ts';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
 import { filesIndex } from './files-index';
 import { createInlineModal } from '../runtime/inline-modal';
-import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
+import {ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
 type Selection = { result: NativeResult; status: string; text?: string; pdf?: {page:number;count:number;image:string}; epoch: number; renames?: number; mediaFailed?:boolean };
@@ -69,7 +70,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     if (!selectionId||!active()) return;
     try {
       const result=await (download?DailyApps.shareSelected({selectionId}):DailyApps.openSelected({selectionId}));
-      if(active()&&result.status!=='opened')api.toast(errorNotice(result.message,'Unavailable'),ERROR_TOAST);
+      if(active()&&result.status!=='opened')api.toast(selectedDocumentText(result,'Unavailable'),ERROR_TOAST);
     } catch { if(active())api.toast('Unavailable'); }
   };
   let sharing = false;
@@ -79,7 +80,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     sharing = true;
     try {
       const result = await DailyApps.shareSelected({ selectionId: id });
-      if (result.status !== 'opened') api.toast(errorNotice(result.message, 'Share failed'), ERROR_TOAST);
+      if (result.status !== 'opened') api.toast(selectedDocumentText(result, 'Share failed'), ERROR_TOAST);
     } catch { api.toast('Share failed'); }
     finally { sharing = false; }
   };
@@ -91,8 +92,8 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const response = await DailyApps.pdfSelected({selectionId: selected.result.selectionId!, page});
       if (current !== selected) return;
       if (response.status === 'rendered' && (response.imageUri?.startsWith('file://') || (!Capacitor.isNativePlatform() && response.imageUri?.startsWith('blob:'))) && Number.isInteger(response.pageCount) && Number.isInteger(response.page)) {
-        current = {...selected, text:response.text, pdf: {page:response.page!, count:response.pageCount!, image:response.imageUri!.startsWith('blob:') ? response.imageUri! : Capacitor.convertFileSrc(response.imageUri!) + '?page=' + page + '&v=' + Date.now()}, status: response.message || 'PDF loaded'};
-      } else { current = {...selected, pdf: undefined, status: response.message || 'PDF preview unavailable'}; }
+        current = {...selected, text:response.text, pdf: {page:response.page!, count:response.pageCount!, image:response.imageUri!.startsWith('blob:') ? response.imageUri! : Capacitor.convertFileSrc(response.imageUri!) + '?page=' + page + '&v=' + Date.now()}, status: selectedDocumentText(response, 'PDF loaded')};
+      } else { current = {...selected, pdf: undefined, status: response.status === 'rendered' ? 'PDF preview unavailable' : selectedDocumentText(response, 'PDF preview unavailable')}; }
       refresh();
     } catch { if(current === selected){current={...selected,pdf:undefined,status:'No preview'};refresh();} }
     finally { if(pdfRequest === request)pdfBusySelection = undefined; }
@@ -110,10 +111,10 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         window.dispatchEvent(new CustomEvent('alpha-selected-context', {detail:null}));
         // Native already forgot the old grant: drop its Recent row and restore marker without releasing it again.
         const old=filesIndex.list().find(row=>row.selectionId===selected.result.selectionId);if(old)filesIndex.remove(old.key);filesIndex.setOpen(null);
-        current={result:response,status:response.message || 'Reselect file',epoch:++epoch};
+        current={result:response,status:selectedDocumentText(response,'Reselect file'),epoch:++epoch};
         api.set({renaming:false});refresh();return;
       }
-      if(response.status !== 'selected'){api.toast(errorNotice(response.message, 'Rename unavailable'), ERROR_TOAST);return;}
+      if(response.status !== 'selected'){api.toast(selectedDocumentText(response, 'Rename unavailable'), ERROR_TOAST);return;}
       // A rename changes the selected object: publish it as a new revision so a turn or
       // approval prepared for the old name cannot be dispatched against the renamed file.
       // Keep Recent on the new name: same row, or the replacement capability when the provider issued one.
