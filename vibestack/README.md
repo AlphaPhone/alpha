@@ -339,9 +339,9 @@ workspace.
 | Project | What it covers | Open in Studio |
 |---|---|---|
 | [Order checkout](examples/order/README.md) | Guards, payments, cancellation and a proved event ledger | `pnpm studio vibestack/examples/order` |
-| [Team dashboard](https://github.com/lalalune/vibestack/tree/main/vibestack/examples/dashboard) | Shared spreadsheets, chat notifications and a project registry | in the vibestack repository |
-| [Shared to-do list](https://github.com/lalalune/vibestack/tree/main/vibestack/examples/fullstack) | HTTP server, browser client and two tabs over an unreliable network | in the vibestack repository |
-| [Assistant](https://github.com/lalalune/vibestack/tree/main/vibestack/examples/assistant) | Trusted senders, bounded turns, late replies, confirmation before payment and a secret card | in the vibestack repository |
+| [Team dashboard](examples/dashboard/README.md) | Shared spreadsheets, chat notifications and a project registry | `pnpm studio vibestack/examples/dashboard` |
+| [Shared to-do list](examples/fullstack/README.md) | HTTP server, browser client and two tabs over an unreliable network | `pnpm studio vibestack/examples/fullstack` |
+| [Assistant](examples/assistant/README.md) | Trusted senders, bounded turns, late replies, confirmation before payment and a secret card | `pnpm studio vibestack/examples/assistant` |
 
 ## Repository
 
