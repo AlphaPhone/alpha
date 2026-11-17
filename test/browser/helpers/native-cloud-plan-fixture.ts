@@ -32,6 +32,10 @@ type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits
  networkConnected?:boolean;
  /** Holds the next entitlement read with the answer it had when asked, until releaseEntitlement() (a slow, stale read). */
  holdEntitlement?:boolean;
+ /** The plan the held read answers (a read that started before Cloud recorded the purchase); else the plan when asked. */
+ holdEntitlementAs?:string;
+ /** Cloud has no payment evidence yet: a checkout confirm answers no subscription. */
+ confirmUnpaid?:boolean;
  /** Alpha Cloud cutover: Cloud's payment evidence confirms the pending checkout (otherwise only once the plan is active). */
  checkoutPaid?:boolean};
 export type NativePlanFixture = Fixture & {tokens?:Record<string,string>;keys?:unknown[]};
@@ -90,7 +94,7 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
    if(path==='/api/v1/referrals')return {status:200,data:{code:'ALPHA-FIXTURE',total_referrals:0,is_active:true}};
    if(path==='/api/v1/subscription/entitlement-keys')return {status:200,data:{keys:f.keys??[]}};
    if(path==='/api/v1/subscription/entitlement'){
-    if(f.holdEntitlement&&f.route==='signed'){f.holdEntitlement=false;const stale=f.tokens[f.plan];await new Promise<void>(resolve=>f.releaseEntitlement=resolve);return {status:200,data:{entitlement:stale}};}
+    if(f.holdEntitlement&&f.route==='signed'){f.holdEntitlement=false;const stale=f.tokens[f.holdEntitlementAs??f.plan];await new Promise<void>(resolve=>f.releaseEntitlement=resolve);return {status:200,data:{entitlement:stale}};}
     if(f.route==='signed')return {status:200,data:{entitlement:f.tokens[f.plan]}};
     if(f.route==='401')return {status:401,data:{}};
     if(f.route==='503')return {status:503,data:{success:false,code:'service_unavailable'}};
@@ -124,7 +128,7 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
    // (the browser opening is the recorded openExternal call; nothing is bought).
    if(path==='/api/v1/subscriptions/checkout'){f.bodies.push(JSON.parse(input.body));return {status:200,data:{success:true,data:{status:'open',commandId:'cmd_synthetic',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_synthetic',sessionId:'cs_test_synthetic',expiresAt:new Date(Date.now()+1_800_000).toISOString()}}};}
    // Cloud confirms only from its own payment evidence: here, once the synthetic plan became active (or checkoutPaid).
-   if(path==='/api/v1/subscriptions/checkout/confirm')return {status:200,data:{success:true,data:{subscriptionId:f.plan==='active'||f.checkoutPaid?'sub_synthetic':null}}};
+   if(path==='/api/v1/subscriptions/checkout/confirm')return {status:200,data:{success:true,data:{subscriptionId:(f.plan==='active'||f.checkoutPaid)&&!f.confirmUnpaid?'sub_synthetic':null}}};
    throw Error('Unexpected Cloud route '+path);
   }};
  },initial);

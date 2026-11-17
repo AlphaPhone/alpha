@@ -841,4 +841,57 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await release(page);
  });
 
+ test('on: Cloud confirming the checkout on return reads the plan again even though the return check read it stale',async({page})=>{
+  await boot(page,{...await alpha(),plan:'none',limits:'canceled'});
+  await needsPlan(page);await idle(page);await started(page);
+  await page.getByRole('button',{name:'Choose a plan',exact:true}).click();
+  // The open plan screen reads the catalogue once per opening, not on every re-render.
+  await openPlans(page);await page.waitForTimeout(1500);
+  expect((await calls(page)).filter(c=>c.path==='/api/v1/subscriptions/plans')).toHaveLength(1);
+  await subscribePlus(page);await idle(page);
+  // Cloud now has the purchase; one plan read that started before that answers the stale "no plan".
+  await fixture(page,{plan:'active',holdEntitlement:true,holdEntitlementAs:'none'});
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscriptions/checkout/confirm').length).toBe(1);
+  await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plan active',{exact:true})).toBeVisible({timeout:30_000});
+  await expect.poll(()=>page.evaluate(()=>typeof (window as any).planFixture.releaseEntitlement)).toBe('function');
+  await page.evaluate(()=>(window as any).planFixture.releaseEntitlement());
+  await admitted(page);expect(await configured(page)).toBe(1);
+  await release(page);
+ });
+
+ test('on: opening Stripe checkout lets the next return check the plan inside the once-a-minute limit',async({page})=>{
+  await boot(page,{...await alpha(),plan:'none',limits:'canceled',confirmUnpaid:true});
+  await needsPlan(page);await idle(page);await started(page);
+  await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await openPlans(page);
+  // Spend the plan manager's own return allowance with a check that finds no plan.
+  const reads=async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement').length;
+  const before=await reads();
+  await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
+  await expect.poll(reads).toBe(before+1);await idle(page);
+  await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());await idle(page);
+  expect(await reads()).toBe(before+1);
+  // Subscribe opens Stripe's page; Cloud has not confirmed the payment when the owner returns.
+  const plans=page.getByRole('region',{name:'Plans',exact:true});
+  await plans.getByRole('listitem').filter({hasText:'Plus'}).getByRole('button',{name:'Subscribe',exact:true}).click();
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').length).toBe(1);await idle(page);
+  await fixture(page,{plan:'active'});
+  await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
+  await admitted(page);expect(await configured(page)).toBe(1);
+  await release(page);
+ });
+
+ test('on: a plan change confirmed while the bound plan refresh is reading is read again, not dropped',async({page})=>{
+  await boot(page,{...await alpha(),plan:'active',limits:'active',holdProvider:false});
+  await expect.poll(()=>configured(page)).toBe(1);await idle(page);
+  await fixture(page,{holdEntitlement:true});
+  expect(await page.evaluate(()=>(window as any).planController.recheckPlanNow())).toBe('started');
+  await expect.poll(()=>page.evaluate(()=>typeof (window as any).planFixture.releaseEntitlement)).toBe('function');
+  // The change lands while that refresh is still reading the old plan.
+  await fixture(page,{plan:'past_due'});
+  await page.evaluate(()=>(window as any).planController.planChanged());
+  await page.evaluate(()=>(window as any).planFixture.releaseEntitlement());
+  await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().residentSubscription?.status),{timeout:30_000}).toBe('past_due');
+ });
+
 });

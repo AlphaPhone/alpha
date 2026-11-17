@@ -156,6 +156,15 @@ export function upgradeOutcome(confirmed: PlanCommand, payment: {status: number;
   return {kind: 'pending'};
 }
 
+/**
+ * The chat card under a plan or billing refusal. Without the Alpha Cloud cutover it opens the current
+ * Cloud's hosted billing page; with it, the in-app plans. Nothing is bought from the card.
+ */
+export function managePlanCardCopy(limit: 'billing-refused' | 'subscription-required' | 'allowance-exhausted', alphaCloud: boolean, cloudName: string): {title: string; sub: string} {
+  if (alphaCloud) return {title: limit === 'subscription-required' ? 'Choose a plan' : 'Manage plan', sub: 'Opens your plans here. Nothing is bought until you pay on Stripe’s page.'};
+  return {title: limit === 'subscription-required' ? `Manage plan in ${cloudName}` : `Manage billing in ${cloudName}`, sub: 'Opens in your browser. Nothing is purchased here.'};
+}
+
 export const formatUsd = (amountCents: number) => `$${(amountCents / 100).toLocaleString(undefined, {minimumFractionDigits: amountCents % 100 ? 2 : 0, maximumFractionDigits: 2})}`;
 
 /** Referral codes are short public tokens; whitespace is trimmed and nothing else is changed. */

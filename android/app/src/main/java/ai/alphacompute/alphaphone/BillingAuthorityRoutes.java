@@ -97,26 +97,51 @@ final class BillingAuthorityRoutes {
  }
 
  /**
-  * The signed-in account, from the phone's stored Cloud credential (`cloud:production`): its
-  * credential id, user and organization. Null when signed out or unreadable. The renderer never
-  * names it: a billing session is bound to this, and any change (sign-out, a new key, another
-  * account) ends the session.
+  * The signed-in account. The phone's stored Cloud credential (`cloud:production`, written by the
+  * native sign-in host as {credentialId, token, expiresAt, serverCredentialId}) names the key; Cloud's
+  * own answer to that key (/api/v1/user) names the user and organization. The renderer never names
+  * it. A billing session is bound to the key, and any change (sign-out, a renewed or new key,
+  * another account) ends the session.
   */
  static final class Account {
-  final String credentialId, userId, organizationId;
-  private Account(String credentialId, String userId, String organizationId) { this.credentialId = credentialId; this.userId = userId; this.organizationId = organizationId; }
+  final String credentialId, serverCredentialId, tokenDigest, userId, organizationId;
+  private Account(String credentialId, String serverCredentialId, String tokenDigest, String userId, String organizationId) {
+   this.credentialId = credentialId; this.serverCredentialId = serverCredentialId; this.tokenDigest = tokenDigest; this.userId = userId; this.organizationId = organizationId;
+  }
+  /** The stored key alone (no identity yet); null when signed out or unreadable. */
   static Account of(String savedCredential) {
-   if (savedCredential == null) return null;
+   String token = token(savedCredential);
+   if (token == null) return null;
    try {
     JSONObject credential = new JSONObject(savedCredential);
-    String credentialId = credential.optString("credentialId", ""), userId = credential.optString("userId", "");
-    if (credentialId.isEmpty() || userId.isEmpty()) return null;
-    Object organization = credential.opt("organizationId");
-    return new Account(credentialId, userId, organization instanceof String && !((String) organization).isEmpty() ? (String) organization : null);
+    String credentialId = credential.optString("credentialId", "");
+    if (credentialId.isEmpty()) return null;
+    Object server = credential.opt("serverCredentialId");
+    return new Account(credentialId, server instanceof String && !((String) server).isEmpty() ? (String) server : null, digest(token), null, null);
    } catch (Exception unreadable) { return null; }
   }
+  /** The stored key's bearer, for the identity read only; never kept. */
+  static String token(String savedCredential) {
+   if (savedCredential == null) return null;
+   try { String token = new JSONObject(savedCredential).optString("token", ""); return token.isEmpty() ? null : token; }
+   catch (Exception unreadable) { return null; }
+  }
+  /** This key with Cloud's identity for it ({userId, organizationId?}, LocalAgentProviderAdmission.verifiedCloudIdentity). */
+  Account withIdentity(JSONObject identity) {
+   String user = identity == null ? "" : identity.optString("userId", "");
+   if (user.isEmpty()) throw new SecurityException("Cloud identity unavailable");
+   Object organization = identity.opt("organizationId");
+   return new Account(credentialId, serverCredentialId, tokenDigest, user, organization instanceof String && !((String) organization).isEmpty() ? (String) organization : null);
+  }
+  /** The same stored key: metadata such as expiry may change, the key may not. */
   boolean same(Account other) {
-   return other != null && credentialId.equals(other.credentialId) && userId.equals(other.userId) && java.util.Objects.equals(organizationId, other.organizationId);
+   return other != null && credentialId.equals(other.credentialId) && java.util.Objects.equals(serverCredentialId, other.serverCredentialId) && tokenDigest.equals(other.tokenDigest);
+  }
+  private static String digest(String token) throws Exception {
+   byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+   StringBuilder hex = new StringBuilder();
+   for (byte b : hash) hex.append(String.format("%02x", b));
+   return hex.toString();
   }
  }
 
@@ -152,11 +177,16 @@ final class BillingAuthorityRoutes {
    if (pendingEmail == null || now >= pendingExpiresAt) return null;
    return new String[] {pendingEmail, pendingVerifier};
   }
-  /** Keeps a verified session only if the account is still the one the code was sent for. */
+  /** The account (with Cloud's identity) the pending code was sent for, if the same key is still stored. */
+  synchronized Account pendingAccount(Account current) {
+   retireFor(current);
+   return pendingEmail == null ? null : pendingAccount;
+  }
+  /** Keeps a verified session only if the stored key is still the one the code was sent for. */
   synchronized boolean bind(Account current, Account verifiedFor, String session, long until) {
    retireFor(current);
    if (current == null || !current.same(verifiedFor)) { clear(); return false; }
-   token = session; account = current; expiresAt = until;
+   token = session; account = verifiedFor; expiresAt = until;
    pendingEmail = null; pendingVerifier = null; pendingAccount = null; pendingExpiresAt = 0;
    return true;
   }

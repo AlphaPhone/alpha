@@ -85,6 +85,7 @@ import { getMapsSelectedObject, clearMapsSelection } from '../maps/agent-context
 import { alphaClient, AlphaClientError, type AlphaView } from '../runtime/alpha-client';
 import { privateLocalPreviewEnabled, testMocksEnabled } from '../build-flags';
 import { alphaCloudCutover } from '../runtime/cloud-deployment.generated.ts';
+import { managePlanCardCopy } from '../runtime/cloud-plans';
 import { DailyApps } from '../daily';
 import { isAndroid } from '../native';
 import { registerPlugin } from '../platform-plugins';
@@ -2119,10 +2120,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // honest in-conversation answer and its plan action (Redeem / Choose a plan, Sign in, Check again).
           const failureKind=(e as {failureKind?:unknown}).failureKind as string,limit=(e as {serviceLimit?:unknown}).serviceLimit;
           // A plan or billing refusal offers Cloud's plan page on the same bubble; nothing is bought or upgraded here.
-          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...(alphaCloudCutover
-            // Alpha Cloud cutover: the plans open inside Alpha Phone; payment is Stripe's page, opened only from there.
-            ?{title:limit==='subscription-required'?'Choose a plan':'Manage plan',sub:'Opens your plans here. Nothing is bought until you pay on Stripe’s page.'}
-            :{title:limit==='subscription-required'?`Manage plan in ${selectedCloudName()}`:`Manage billing in ${selectedCloudName()}`,sub:'Opens in your browser. Nothing is purchased here.'}),managePlan:true}:undefined;
+          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...managePlanCardCopy(limit,alphaCloudCutover,selectedCloudName()),managePlan:true}:undefined;
           const planCard=planActionCard((e as {planAction?:unknown}).planAction)??managePlan;
           // These refusals come before any model output: the streamed text is upstream's failure prose, not a reply.
           const beforeOutput=limit!==undefined||REFUSED_BEFORE_OUTPUT.has(failureKind);

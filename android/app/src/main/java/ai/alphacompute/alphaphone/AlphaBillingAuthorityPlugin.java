@@ -44,9 +44,15 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
 
  private static CloudSignInEnvironment environment() { return AlphaCloudSignInPlugin.REGISTRATION.environment("production"); }
 
- /** The account the phone is signed in to now, read from native storage on every call. */
- private BillingAuthorityRoutes.Account signedIn() throws Exception {
-  return BillingAuthorityRoutes.Account.of(new AlphaCredentialStore(getContext()).readCredentialSlot("cloud:production"));
+ /** The phone's stored Cloud key now, read from native storage on every call. */
+ private String savedCredential() throws Exception { return new AlphaCredentialStore(getContext()).readCredentialSlot("cloud:production"); }
+ private BillingAuthorityRoutes.Account signedIn() throws Exception { return BillingAuthorityRoutes.Account.of(savedCredential()); }
+ /** The stored key with Cloud's own answer for who it belongs to (the slot carries no identity). */
+ private BillingAuthorityRoutes.Account signedInWithIdentity() throws Exception {
+  String saved = savedCredential();
+  BillingAuthorityRoutes.Account account = BillingAuthorityRoutes.Account.of(saved);
+  if (account == null) return null;
+  return account.withIdentity(AlphaConnectionPlugin.readCloudIdentity(BillingAuthorityRoutes.Account.token(saved)));
  }
 
  private JSObject status(BillingAuthorityRoutes.Account account) {
@@ -79,7 +85,7 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
   String email = call.getString("email");
   if (email == null || email.length() > 254 || !email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) { call.reject("Not accepted", "invalid"); return; }
   run(call, () -> {
-   BillingAuthorityRoutes.Account account = signedIn();
+   BillingAuthorityRoutes.Account account = signedInWithIdentity();
    if (account == null) throw new SecurityException("Sign in first");
    byte[] random = new byte[48];
    new SecureRandom().nextBytes(random);
@@ -101,10 +107,13 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
   String code = call.getString("code"), claimedUserId = call.getString("userId");
   if (code == null || !code.matches("[0-9A-Za-z]{4,12}")) { call.reject("Not accepted", "invalid"); return; }
   run(call, () -> {
-   BillingAuthorityRoutes.Account account = signedIn();
-   if (account == null) { session.clear(); throw new SecurityException("Sign in first"); }
+   BillingAuthorityRoutes.Account key = signedIn();
+   if (key == null) { session.clear(); throw new SecurityException("Sign in first"); }
+   // The account the code was sent for, established from Cloud's answer to the stored key at start.
+   BillingAuthorityRoutes.Account account = session.pendingAccount(key);
+   if (account == null) throw new SecurityException("Code expired");
    if (claimedUserId != null && !claimedUserId.equals(account.userId)) { session.clear(); throw new SecurityException("A different account"); }
-   String[] pending = session.pendingFor(account, System.currentTimeMillis());
+   String[] pending = session.pendingFor(key, System.currentTimeMillis());
    if (pending == null) throw new SecurityException("Code expired");
    Answer verified = post(CloudEmailCode.VERIFY_PATH, CloudEmailCode.verifyBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), pending[0], code, pending[1]), null);
    if (verified.status == 400 || verified.status == 401) throw new SecurityException("Wrong code");

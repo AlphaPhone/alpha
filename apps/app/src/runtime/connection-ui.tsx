@@ -549,7 +549,9 @@ let residentRebindQueue: ResidentRebindQueue | null = null;
 const residentRebinds = () => residentRebindQueue ??= new ResidentRebindQueue();
 const residentRebindBlocked = () => !!operation || !!sending;
 /** Every Cloud detach ends background plan refresh, so no request goes out under a stale admission. */
-function stopEntitlementRefresh(){entitlementRefresher?.stop();entitlementRefresher=null;}
+function stopEntitlementRefresh(){entitlementRefresher?.stop();entitlementRefresher=null;entitlementRefreshing=null;entitlementRefreshAgain=false;}
+/** The refresher whose check is in flight, and whether a confirmed plan change asked for another read after it. */
+let entitlementRefreshing:EntitlementRefresher|null=null,entitlementRefreshAgain=false;
 // Entitlement keys are public and per issuer (refetched on an unknown kid): only a detach drops them.
 function detachService() { stopEntitlementRefresh();redeemedPlanEnd=null; clearEntitlementKeyCache(); retireReadReplies();for(const request of appRequests)request.abort(new DOMException('Cloud account changed','AbortError')); clearPersonalSetup(); membershipRead?.abort();membershipRead=null;service = null; update({ cloudAccount: null,membershipBalance:undefined,membershipCredits:null,membershipPlan:null,lastServiceLimit:null,planEndsAt:null,membershipDismissed:false,fundingRefused:false }); }
 async function verifyService(client: CloudProtocol, signal: AbortSignal, expected?:{credentialId:string;credentialReference?:string;userId?:string;organizationId?:string}) {
@@ -1318,7 +1320,12 @@ async function admitCloudResident(signal:AbortSignal):Promise<ResidentAdmission>
   // by Cloud immediately.
   const expected={userId:identity.userId,organizationId:identity.organizationId};
   entitlementRefresher=new EntitlementRefresher({entitlement:result.entitlement,fallbackActive:result.view.kind==='credits'||result.view.kind==='active'&&result.view.source==='billing-limits',retry:result.view.kind==='unavailable'&&result.view.reason!=='not-published',
-    check:refreshSignal=>checkEntitlement(client.entitlementSource(),expected,refreshSignal),
+    // A plan change confirmed while this read runs (planChanged) is read again once it ends: the
+    // refresher ignores refreshNow() while a check is in flight.
+    check:async refreshSignal=>{const refresher=entitlementRefresher;entitlementRefreshing=refresher;
+      try{return await checkEntitlement(client.entitlementSource(),expected,refreshSignal);}
+      finally{if(entitlementRefreshing===refresher){entitlementRefreshing=null;
+        if(entitlementRefreshAgain){entitlementRefreshAgain=false;setTimeout(()=>{if(entitlementRefresher===refresher)refresher?.refreshNow();},0);}}}},
     onView:next=>{if(service!==admitted)return;
       // The end Cloud reports with the view, else the last known one. An active plan outlives an end
       // date already past: that date is stale, and is neither shown nor stored with the offline grace.
@@ -3198,6 +3205,7 @@ export const connectionController = {
     planManagementReturn=true;
     void refreshMembershipBalance();
     if(planRecheck)planRecheckAgain=true;
+    if(entitlementRefreshing&&entitlementRefreshing===entitlementRefresher)entitlementRefreshAgain=true;
     connectionController.recheckPlanOnReturn();
   },
   /**

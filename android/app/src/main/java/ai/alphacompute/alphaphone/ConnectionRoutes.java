@@ -41,8 +41,18 @@ final class ConnectionRoutes {
   */
  static boolean cloudSignInHandOff(String path){return path!=null&&("/api/auth/cli-session".equals(path)||path.startsWith("/api/auth/cli-session/"));}
  static boolean managedService(String path,String query,String method,boolean hasBody){return managedService(path,query,method,hasBody,CloudDeployment.ALPHA_CLOUD_CUTOVER);}
- /** Referral routes exist only with the Alpha Cloud cutover; the shared route set is the same either way. */
- static boolean managedService(String path,String query,String method,boolean hasBody,boolean alphaCloud){return !cloudSignInHandOff(path)&&(POLICY.managedService(path,query,method,hasBody,false)||alphaCloud&&referral(path,query,method,hasBody));}
+ /**
+  * The in-app plan routes the device key uses (the plan catalogue, checkout and its confirmation, which the shared
+  * route set admits, and referrals) exist only with the Alpha Cloud cutover. Without it they are refused here.
+  */
+ static boolean inAppPlanRoute(String path){
+  return CloudConnectionPolicy.SUBSCRIPTION_PLANS_PATH.equals(path)||"/api/v1/subscriptions/checkout".equals(path)||"/api/v1/subscriptions/checkout/confirm".equals(path)
+   ||"/api/v1/referrals".equals(path)||"/api/v1/referrals/apply".equals(path);
+ }
+ static boolean managedService(String path,String query,String method,boolean hasBody,boolean alphaCloud){
+  if(cloudSignInHandOff(path)||!alphaCloud&&inAppPlanRoute(path))return false;
+  return POLICY.managedService(path,query,method,hasBody,false)||alphaCloud&&referral(path,query,method,hasBody);
+ }
  static boolean calendarSync(String path,String query,String method,boolean hasBody){return CloudConnectionPolicy.calendarSync(path,query,method,hasBody);}
  static boolean externalHost(String scheme,String host,int port){return POLICY.externalHost(scheme,host,port,false);}
  static boolean externalHost(String scheme,String host,int port,boolean alphaCloud){return (alphaCloud?ALPHA_CLOUD:CURRENT_CLOUD).externalHost(scheme,host,port,false);}

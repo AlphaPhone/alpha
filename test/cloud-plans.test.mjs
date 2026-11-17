@@ -79,6 +79,17 @@ test('a confirmed upgrade is reported as done only when its command is applied',
  assert.deepEqual(plans.upgradeOutcome(command('FAILED'),null),{kind:'failed'});
 });
 
+test('the chat plan card copy follows the Alpha Cloud cutover flag',()=>{
+ // Off (shipped): the current Cloud's hosted billing page.
+ assert.deepEqual(plans.managePlanCardCopy('subscription-required',false,'Eliza Cloud'),{title:'Manage plan in Eliza Cloud',sub:'Opens in your browser. Nothing is purchased here.'});
+ assert.deepEqual(plans.managePlanCardCopy('billing-refused',false,'Eliza Cloud'),{title:'Manage billing in Eliza Cloud',sub:'Opens in your browser. Nothing is purchased here.'});
+ assert.deepEqual(plans.managePlanCardCopy('allowance-exhausted',false,'Eliza Cloud').title,'Manage billing in Eliza Cloud');
+ // On: the in-app plans; never the browser copy.
+ assert.deepEqual(plans.managePlanCardCopy('subscription-required',true,'Alpha Cloud'),{title:'Choose a plan',sub:'Opens your plans here. Nothing is bought until you pay on Stripe’s page.'});
+ assert.deepEqual(plans.managePlanCardCopy('billing-refused',true,'Alpha Cloud').title,'Manage plan');
+ for(const limit of ['subscription-required','billing-refused','allowance-exhausted'])assert.doesNotMatch(plans.managePlanCardCopy(limit,true,'Alpha Cloud').sub,/browser/);
+});
+
 test('referrals: own code, and entered codes are normalized conservatively',()=>{
  assert.deepEqual(plans.parseReferral({code:'ALPHA-123',total_referrals:2,is_active:true}),{code:'ALPHA-123',totalReferrals:2,active:true});
  assert.throws(()=>plans.parseReferral({code:'',total_referrals:0,is_active:true}),plans.PlanResponseError);
@@ -96,7 +107,7 @@ test('billing operations carry only their own fields',()=>{
  assert.notEqual(plans.billingOperationProblem({operation:'portal'}),null);
 });
 
-test('without the Alpha Cloud cutover the device transport admits none of the in-app plan routes',()=>{
+test('without the Alpha Cloud cutover the renderer route filter admits none of the in-app plan routes (native: connection-routes.test.mjs)',()=>{
  const api=productionCloud.api;
  assert.equal(alphaCloudCutover,false,'shipped builds keep the current Cloud');
  for(const [path,method,body] of [['/api/v1/subscriptions/plans','GET',false],['/api/v1/subscriptions/checkout','POST',true],['/api/v1/subscriptions/checkout/confirm','POST',true],['/api/v1/referrals','GET',false],['/api/v1/referrals/apply','POST',true]]){
@@ -156,41 +167,47 @@ public class BillingRoutesTest {
   check(!BillingAuthorityRoutes.sameAccount(user,"u2","o1"));
   check(!BillingAuthorityRoutes.sameAccount(user,"u1","o2"));
   check(!BillingAuthorityRoutes.sameAccount(null,"u1","o1"));
-  // The session is bound to the phone's stored Cloud credential, never to a renderer-named account.
-  BillingAuthorityRoutes.Account a=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\",\\"userId\\":\\"u1\\",\\"organizationId\\":\\"o1\\",\\"token\\":\\"eliza_mobile_x\\"}");
-  BillingAuthorityRoutes.Account sameKey=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\",\\"userId\\":\\"u1\\",\\"organizationId\\":\\"o1\\",\\"expiresAt\\":5}");
-  BillingAuthorityRoutes.Account newKey=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c2\\",\\"userId\\":\\"u1\\",\\"organizationId\\":\\"o1\\"}");
-  BillingAuthorityRoutes.Account other=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c3\\",\\"userId\\":\\"u2\\",\\"organizationId\\":\\"o2\\"}");
-  check(a!=null&&a.userId.equals("u1")&&a.organizationId.equals("o1")&&a.same(sameKey)&&!a.same(newKey)&&!a.same(other)&&!a.same(null));
-  check(BillingAuthorityRoutes.Account.of(null)==null&&BillingAuthorityRoutes.Account.of("{}")==null&&BillingAuthorityRoutes.Account.of("not json")==null);
+  // The session is bound to the phone's stored Cloud key in the native sign-in host's real slot shape
+  // {credentialId, token, expiresAt, serverCredentialId} (no identity there); Cloud's /api/v1/user answer names the account.
+  String slot="{\\"credentialId\\":\\"c1\\",\\"token\\":\\"eliza_mobile_key1\\",\\"expiresAt\\":1900000000000,\\"serverCredentialId\\":\\"s1\\"}";
+  BillingAuthorityRoutes.Account key=BillingAuthorityRoutes.Account.of(slot);
+  check(key!=null&&key.credentialId.equals("c1")&&key.serverCredentialId.equals("s1")&&key.userId==null);
+  check("eliza_mobile_key1".equals(BillingAuthorityRoutes.Account.token(slot)));
+  BillingAuthorityRoutes.Account a=key.withIdentity(new JSONObject().put("userId","u1").put("organizationId","o1"));
+  check(a.userId.equals("u1")&&a.organizationId.equals("o1")&&a.same(key));
+  try{key.withIdentity(new JSONObject());throw new AssertionError("identity-less account");}catch(SecurityException expected){checks++;}
+  BillingAuthorityRoutes.Account renewedExpiry=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\",\\"token\\":\\"eliza_mobile_key1\\",\\"expiresAt\\":1950000000000,\\"serverCredentialId\\":\\"s1\\"}");
+  BillingAuthorityRoutes.Account newToken=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\",\\"token\\":\\"eliza_mobile_key2\\",\\"expiresAt\\":1950000000000,\\"serverCredentialId\\":\\"s2\\"}");
+  BillingAuthorityRoutes.Account other=BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c3\\",\\"token\\":\\"eliza_mobile_key3\\",\\"expiresAt\\":1950000000000,\\"serverCredentialId\\":\\"s3\\"}");
+  check(a.same(renewedExpiry)&&!a.same(newToken)&&!a.same(other)&&!a.same(null));
+  check(BillingAuthorityRoutes.Account.of(null)==null&&BillingAuthorityRoutes.Account.of("{\\"credentialId\\":\\"c1\\"}")==null&&BillingAuthorityRoutes.Account.of("not json")==null);
   BillingAuthorityRoutes.Session session=new BillingAuthorityRoutes.Session();
   try{session.pending(null,"e@example.invalid","v",now+60_000);throw new AssertionError("code sent signed out");}catch(SecurityException expected){checks++;}
   session.pending(a,"e@example.invalid","v",now+60_000);
-  check(session.pendingFor(other,now)==null);
-  check(session.pendingFor(a,now)==null);
+  check(session.pendingAccount(other)==null&&session.pendingFor(a,now)==null);
   session.pending(a,"e@example.invalid","v",now+60_000);
-  check(session.pendingFor(a,now)[0].equals("e@example.invalid"));
-  check(!session.bind(other,a,"jwt",now+600_000)&&session.current(a,now)==null);
+  check(session.pendingAccount(renewedExpiry)==a&&session.pendingFor(key,now)[0].equals("e@example.invalid"));
+  check(!session.bind(other,a,"jwt",now+600_000)&&session.current(key,now)==null);
   session.pending(a,"e@example.invalid","v",now+60_000);
-  check(session.bind(sameKey,a,"jwt",now+600_000)&&session.pendingFor(a,now)==null);
-  check("jwt".equals(session.current(a,now))&&session.expiresAt()==now+600_000);
+  check(session.bind(key,a,"jwt",now+600_000)&&session.pendingFor(key,now)==null);
+  check("jwt".equals(session.current(renewedExpiry,now))&&session.expiresAt()==now+600_000);
   // Sign-out ends it.
-  check(session.current(null,now)==null&&session.current(a,now)==null);
-  session.bind(a,a,"jwt",now+600_000);
-  // A new key for the same account, or another account, ends it.
-  check(session.current(newKey,now)==null&&session.current(a,now)==null);
-  session.bind(a,a,"jwt",now+600_000);
-  check(session.current(other,now)==null&&session.current(a,now)==null);
+  check(session.current(null,now)==null&&session.current(key,now)==null);
+  session.bind(key,a,"jwt",now+600_000);
+  // A new key (even for the same account), or another account, ends it.
+  check(session.current(newToken,now)==null&&session.current(key,now)==null);
+  session.bind(key,a,"jwt",now+600_000);
+  check(session.current(other,now)==null&&session.current(key,now)==null);
   // Expiry, a refusal and clear() end it.
-  session.bind(a,a,"jwt",now+600_000);
-  check(session.current(a,now+600_000)==null);
-  session.bind(a,a,"jwt",now+600_000);session.spent("other");check("jwt".equals(session.current(a,now)));
-  session.spent("jwt");check(session.current(a,now)==null);
-  session.bind(a,a,"jwt",now+600_000);session.clear();check(session.current(a,now)==null&&session.expiresAt()==0);
+  session.bind(key,a,"jwt",now+600_000);
+  check(session.current(key,now+600_000)==null);
+  session.bind(key,a,"jwt",now+600_000);session.spent("other");check("jwt".equals(session.current(key,now)));
+  session.spent("jwt");check(session.current(key,now)==null);
+  session.bind(key,a,"jwt",now+600_000);session.clear();check(session.current(key,now)==null&&session.expiresAt()==0);
   System.out.println("PASS billing routes "+checks);
  }
 }
 `);
-  assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),source],'ai.alphacompute.alphaphone.BillingRoutesTest',{json:true}),/^PASS billing routes 35\b/);
+  assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),source],'ai.alphacompute.alphaphone.BillingRoutesTest',{json:true}),/^PASS billing routes \d+/);
  }finally{rmSync(root,{recursive:true,force:true});}
 });

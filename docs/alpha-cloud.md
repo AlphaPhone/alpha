@@ -154,9 +154,9 @@ hosted billing page, as before.
 
 Upstream accepts plan changes and cancellation only with a fresh account session. The app asks
 "Confirm it's you" and emails a one-time code to the account's own address. The native plugin keeps
-the resulting session in memory for at most an hour. It is bound to the account in the phone's own
-stored Cloud credential (never to an account the web view names) and ends at sign-out, a new key or
-an account switch. It is never stored and never shown to the web view.
+the resulting session in memory for at most an hour. It is bound to the phone's own stored Cloud key,
+and to the account Cloud names for that key (`/api/v1/user`), never to an account the web view names.
+It ends at sign-out, a new or renewed key, or an account switch. It is never stored and never shown to the web view.
 
 Alpha Cloud has no in-app credit top-up: with the flag on, the account sheet does not offer Add
 funds (subscription allowances only). A top-up surface is a separate change.
