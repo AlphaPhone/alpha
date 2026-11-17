@@ -88,6 +88,15 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page,'deleteMessage')).toHaveLength(1);
   });
 
+  test('the synthetic review preview sends once and shows a simulated sent row',async({page})=>{
+    await setupTelephony(page,{preview:true});await page.getByRole('button',{name:'Messages',exact:true}).first().click();await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    await page.locator(personField).fill('Synthetic preview test');await barSend(page).click();
+    await expect(page.locator('[data-alpha-message-body]').filter({hasText:'Synthetic preview test'})).toHaveCount(1);
+    await expect(page.locator(personField)).toHaveValue('');await expect(page.getByText('May have sent',{exact:true})).toHaveCount(0);
+    expect(await inputs(page,'sendComposedSms')).toHaveLength(1);
+    await expect(page.locator('[data-alpha-message-id]').filter({hasText:'Synthetic preview test'}).locator('[data-alpha-message-meta]')).toContainText('Sent');
+  });
+
   test('message times and delivery labels follow provider evidence',async({page})=>{
     await setupTelephony(page);
     await page.evaluate(()=>{const rows=(window as any).messages['thread:101'];rows[1].status='delivered';rows[1].deliveryReport='complete';});
