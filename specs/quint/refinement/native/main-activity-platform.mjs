@@ -6,7 +6,7 @@ import {app, directory as refinementDirectory, root} from './java.mjs';
 
 export const navigationActionSource=app+'AlphaNavigationService.java';
 export const mainActivitySources = [
-  ...['MainActivity', 'RendererRecoveryBudget', 'NavigationOpenRequest', 'SmsNoticeOpenRequest']
+  ...['MainActivity', 'CloudDeployment', 'RendererRecoveryBudget', 'NavigationOpenRequest', 'SmsNoticeOpenRequest']
     .map(name => app + name + '.java'),
   join(refinementDirectory, 'MainActivityPorts.java'),
 ];
