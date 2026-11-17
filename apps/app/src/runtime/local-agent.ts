@@ -75,6 +75,7 @@ export const localAgentAvailable = () => Capacitor.isNativePlatform()
   ? Capacitor.isPluginAvailable('Agent') : browserLocalAgentEnabled;
 /** Packaging availability only; it does not prove startup or inference readiness. */
 export async function localAgentPackaged():Promise<boolean> {
+  if(privateLocalPreviewEnabled)return browserLocalAgentEnabled;
   if(!localAgentAvailable())return false;
   if(!Capacitor.isNativePlatform())return browserLocalAgentEnabled;
   try{return (await native.getStatus?.())?.packaged===true;}catch{return false;}
@@ -227,7 +228,7 @@ export class LocalAgentProtocol {
     return subscribeNativeViewEvents(native,session.ownerId,clientId,frame=>{if(session===this.session&&generation===this.generation)listener(frame);},ended);
   }
   deviceHeaders:Record<string,string>={};
-  constructor(private bridge:LocalAgentBridge = Capacitor.isNativePlatform() ? nativeBridge : browserBridge ?? unavailableBridge) {}
+  constructor(private bridge:LocalAgentBridge = privateLocalPreviewEnabled&&browserBridge ? browserBridge : Capacitor.isNativePlatform() ? nativeBridge : browserBridge ?? unavailableBridge) {}
   async request(path:string, body:unknown|undefined, signal:AbortSignal, headers:Record<string,string> = {}, method:LocalAgentMethod = body===undefined?'GET':'POST'):Promise<any> {
     signal.throwIfAborted();
     const group=ownerRouteGroup(path);
