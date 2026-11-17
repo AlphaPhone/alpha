@@ -154,3 +154,19 @@ test('only a browser proposal receipt that succeeded with its exact summary name
   [null,opened],[undefined,opened],
  ])assert.equal(succeededBrowserDestination(proposal,receipt),undefined);
 });
+
+// Pixel 10a, 2026-11-17 "Create a new contact - shaw 4153024399" on Contacts: the approved AC-26
+// proposal card showed "Done · Completed · The owner approved and the contact was saved on the
+// phone." and the same row also rendered that summary as a separate device-receipt quote above it.
+// The card is the one completion; its row shows no quote.
+test('a completed comms proposal card is the one completion: no receipt quote beside it',()=>{
+ const card={type:'proposal',state:'done',id:'c',proposalId:'c',kind:'other',title:'Completed',detail:'Contact saved.',sub:'Contact saved.',done:true};
+ const rows=[{id:'u',from:'user',text:'Create a new contact'},{id:'proposal',from:'agent',text:'Create contact\nName: Shaw',card},{id:'device-receipt:c',from:'agent',text:'Contact saved.',deviceReceipt:true}];
+ const frozen=structuredClone(rows);
+ const shown=projectActionMessages(rows.map(m=>({...m,c:m.card||{},cProposal:m.card?.type==='proposal',displayText:m.text,hasCalendarText:true})),rows);
+ assert.deepEqual(shown.map(m=>m.id),['u','proposal']);
+ assert.equal(shown[1].cProposal,true,'the card stays');
+ assert.equal(shown[1].hasCalendarText,false,'no quote line beside the card');
+ assert.notEqual(shown[1].deviceReceipt,true);
+ assert.deepEqual(rows,frozen);
+});

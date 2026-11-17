@@ -88,6 +88,9 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (stored.card?.proposalId && stored.card.done) {
       const rawSummary = stored.card.sub;
       if (typeof rawSummary !== 'string' || !rawSummary.trim()) return message;
+      // AC-26: a comms proposal card shows its own result ("Done · Completed · summary"); it is the
+      // one completion, so its row shows no receipt line beside it.
+      if (stored.card.type === 'proposal') return {...message, hasCalendarText:false};
       const summary = actionResultText(rawSummary);
       const displayText = destination && stored.card.title === 'Completed' ? browserReceiptDisplayText(destination, summary) : summary;
       return {...message, cGeneric:false, cDigest:false, displayText, hasCalendarText:true, deviceReceipt:true};

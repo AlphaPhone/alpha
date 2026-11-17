@@ -58,7 +58,7 @@ export const CONTACT_CALL_LOOKUP_LIMIT = LOOKUP_LIMIT;
  * means only that a message is being sent or has pictures attached. The shared contract's sentence
  * still describes the old rule until ap16-alpha-sms-reply-occupied-text lands upstream.
  */
-export const SMS_DRAFT_OCCUPIED_TEXT = 'A message is being sent or has pictures attached in that conversation. Nothing was changed.';
+export const SMS_DRAFT_OCCUPIED_TEXT = 'That conversation has a message sending or pictures attached.';
 const resultText = (result: TelephonyActionResult) => result.kind === 'sms-reply' && result.status === 'occupied' ? SMS_DRAFT_OCCUPIED_TEXT : telephonyActionResultText(result);
 const finish = (result: TelephonyActionResult): TelephonyExecution => {
   const outcome = result.kind === 'sms-compose' ? smsComposeReceiptOutcome(result) : telephonyActionReceiptOutcome(result);
