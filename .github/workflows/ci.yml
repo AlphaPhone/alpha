@@ -1,0 +1,93 @@
+name: ci
+
+# Every run is the tasks of `pnpm verify`, the tools' own self-test included,
+# split over four jobs that run side by side: the self-test of the tools in
+# three, everything else in one. Turborepo and spec skip what the change does
+# not reach, from the cache of the last run. The fixed normal profile is the
+# same locally and in CI. The self-test also installs and checks each
+# standalone example.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('sha-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: verify
+            tasks: build typecheck test test:browser check //#lint:js //#lint:css //#analyze //#selftest:docs //#selftest:examples
+          - name: selftest-a
+            tasks: //#selftest:tools:a
+          - name: selftest-b
+            tasks: //#selftest:tools:b
+          - name: selftest-rest
+            tasks: //#selftest:tools:rest
+    environment: ${{ github.event_name == 'push' && 'turbo-cache-publish' || 'turbo-cache-read' }}
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_CACHE: ${{ github.event_name == 'push' && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: setup
+        uses: ./.github/actions/setup
+        with:
+          job: ${{ matrix.name }}
+      - run: node vibestack/spec.ts tasks ${{ matrix.tasks }} --continue --summarize
+      - if: always() && steps.setup.outputs.spec-cache-key != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.setup.outputs.spec-cache-path }}
+          key: ${{ steps.setup.outputs.spec-cache-key }}
+      - if: always() && steps.setup.outputs.turbo-cache-key != ''
+        run: |
+          mkdir -p .turbo/cache
+          cat .turbo/runs/*.json 2>/dev/null | jq -r '.tasks[] | select(.cache.status == "HIT") | .hash' | while read -r hash; do find .turbo/cache -name "$hash*" -exec touch {} +; done
+          find .turbo/cache -type f -mtime +7 -delete
+      - if: always() && steps.setup.outputs.turbo-cache-key != ''
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs.turbo-cache-key }}
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: proof-${{ matrix.name }}
+          path: |
+            gen/proof/
+            vibestack/studio/gen/proof/
+          if-no-files-found: ignore
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: failures-${{ matrix.name }}
+          path: |
+            test/counterexamples/
+            test/__traces__/
+            apps/*/test/counterexamples/
+            apps/*/test/__traces__/
+            packages/*/test/counterexamples/
+            packages/*/test/__traces__/
+            apps/*/.cache/vitest/attachments/
+            packages/*/.cache/vitest/attachments/
+            vibestack/studio/test/counterexamples/
+            vibestack/studio/test/__traces__/
+            vibestack/examples/*/test/counterexamples/
+            vibestack/examples/*/test/__traces__/
+          if-no-files-found: ignore
+          include-hidden-files: true
