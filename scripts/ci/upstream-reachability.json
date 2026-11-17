@@ -2,40 +2,15 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "df424da2a677069ccce0efe4aaad4ff29c11657e",
-  "head": "7bc456105f5319e5c206418736a5da63adea46b5",
+  "baseCommit": "51d8e69797f65ea218bf6854f8ba137ff38fe8ef",
+  "head": "51d8e69797f65ea218bf6854f8ba137ff38fe8ef",
   "recordedAt": "2026-11-17",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...7bc456105f5319e5c206418736a5da63adea46b5",
-  "status": "diverged",
-  "aheadBy": 8,
-  "behindBy": 1,
-  "mergeBase": "0d775376fd23d96f39f444b1920a8fde7fbce1e8",
-  "pinOnlyCommits": [
-    {
-      "sha": "5636f8ffe7f56fd562c35423511e501809234290",
-      "subject": "Preserve structured contact names and owner notes"
-    },
-    {
-      "sha": "5d0a53689542d69192bc92a289666051dcab204e",
-      "subject": "Add owner-confirmed single-message deletion bridge"
-    },
-    {
-      "sha": "b28e12281f7897c5e12f930c33271f3513cbdb68",
-      "subject": "Declare and verify deletion progress assumptions"
-    },
-    {
-      "sha": "d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
-      "subject": "Verify ringing and ongoing call notification channels"
-    },
-    {
-      "sha": "c22fed56c1ba9a9faf3404e6033a87d0d75095bf",
-      "subject": "Reject whole non-speech annotations before voice response dispatch"
-    },
-    {
-      "sha": "7bc456105f5319e5c206418736a5da63adea46b5",
-      "subject": "Recognize explicit music annotations with whitespace"
-    }
-  ],
+  "command": "gh api repos/elizaOS/eliza/compare/develop...51d8e69797f65ea218bf6854f8ba137ff38fe8ef",
+  "status": "identical",
+  "aheadBy": 0,
+  "behindBy": 0,
+  "mergeBase": "51d8e69797f65ea218bf6854f8ba137ff38fe8ef",
+  "pinOnlyCommits": [],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
@@ -74,6 +49,8 @@
     "https://github.com/elizaOS/eliza/pull/39686",
     "https://github.com/elizaOS/eliza/pull/39690",
     "https://github.com/elizaOS/eliza/pull/39683",
-    "https://github.com/elizaOS/eliza/pull/39743"
+    "https://github.com/elizaOS/eliza/pull/39743",
+    "https://github.com/elizaOS/eliza/pull/39794",
+    "https://github.com/elizaOS/eliza/pull/39796"
   ]
 }
