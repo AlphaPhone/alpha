@@ -29,7 +29,7 @@ const HEADER_CLEARANCE_PROPERTY = '--alpha-header-clearance';
 // in-phone modal sheet (a month picker, a menu): a notice goes below it, or, when the sheet
 // leaves no room, just above the dock as before, never over the sheet's header.
 const APP_HEADERS = '[data-alpha-app-header],[data-alpha-layer="drawer"] div:has(> h1),[role="dialog"][aria-modal="true"]:not([data-alpha-layer="drawer"]),.photo-import-menu[open] > div';
-const DOCK = '[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *,.alpha-chat-composer';
+const DOCK = '[data-alpha-layer="composer"]:not([data-alpha-promoted-editor="true"]),[data-alpha-layer="pill"] > *,.alpha-chat-composer';
 
 /**
  * AP-16 stage (docs/agentic-comms.md AC-02): the height of the conversation sheet, published on the

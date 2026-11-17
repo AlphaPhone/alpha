@@ -19,7 +19,19 @@ for(const detent of ['input','sheet','full'])for(const method of ['Enter','click
  }
  const input=page.locator('textarea[data-alpha-composer]');
  await input.fill('First prompt');await input.focus();
- await input.evaluate((e:any)=>{const f=(window as any).sendFocus;f.input=e;f.blurs=0;e.addEventListener('blur',()=>f.blurs++);});
+ await input.evaluate((e:any)=>{
+  const f=(window as any).sendFocus, editorHost=e.parentElement;
+  f.input=e;f.blurs=0;f.editorDestinations=[];
+  e.addEventListener('blur',()=>f.blurs++);
+  const moves=new MutationObserver(records=>{
+   for(const record of records){
+    if(Array.from(record.addedNodes).includes(editorHost)){
+     f.editorDestinations.push((record.target as Element).closest('[data-alpha-layer]')?.getAttribute('data-alpha-layer')??null);
+    }
+   }
+  });
+  moves.observe(e.closest('[data-screen]'),{childList:true,subtree:true});
+ });
  if(method==='Enter')await input.press('Enter');
  else if(method==='tap')await page.getByRole('button',{name:'Send',exact:true}).tap();
  else await page.getByRole('button',{name:'Send',exact:true}).click();
@@ -29,6 +41,14 @@ for(const detent of ['input','sheet','full'])for(const method of ['Enter','click
  const continuity=await next.evaluate((e:any)=>({sameInput:e===(window as any).sendFocus.input,oldInputConnected:(window as any).sendFocus.input.isConnected,blurs:(window as any).sendFocus.blurs}));
  await info.attach('composer-continuity',{body:JSON.stringify({detent,method,...continuity}),contentType:'application/json'});
  expect(continuity).toEqual({sameInput:true,oldInputConnected:true,blurs:0});
+ expect(await page.evaluate(()=>(window as any).sendFocus.editorDestinations)).toEqual([]);
+ if(detent==='input'){
+  const slot=page.locator('[data-alpha-chat-editor-slot]');
+  await expect(async()=>{
+   const field=await next.boundingBox(),anchor=await slot.boundingBox();
+   expect(field&&anchor&&Math.abs(field.x-anchor.x)<1&&Math.abs(field.y-anchor.y)<1&&Math.abs(field.width-anchor.width)<1).toBe(true);
+  }).toPass({timeout:5000});
+ }
  await page.keyboard.type('Next prompt');await expect(next).toHaveValue('Next prompt');
  expect(await next.evaluate((e:any)=>e.selectionStart)).toBe(11);
  await next.press('Enter');expect(await page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);
