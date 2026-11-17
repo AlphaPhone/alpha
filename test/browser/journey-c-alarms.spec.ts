@@ -94,6 +94,8 @@ test('journey C: agent-proposed alarm is reviewed, saved once, survives reload, 
  await queue(page,{type:'clock_handoff',action:'show'});
  await ask.fill('Show my alarms');await ask.press('Enter');
  await expect(approve(page)).toHaveCount(1);
+ // Wait for the reply to settle before starting the next owner action.
+ await expect(conversation.getByRole('button',{name:/^Message actions: Development reply/})).toHaveCount(2);
  await expect(clock(page)).toHaveCount(0);
  await approve(page).click();
  dialog=clock(page);await expect(dialog).toBeVisible();
