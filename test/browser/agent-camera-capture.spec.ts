@@ -79,3 +79,60 @@ for(const mode of ['capture','lost-ack','old-message','ask-first'] as const)test
   const f=await page.evaluate(()=>(window as any).cameraRequestFixture);expect(f.captures).toBe(0);expect(f.decisions).toBe(0);
  }
 });
+
+// The real shell, Camera adapter, browser camera and photo store over a synthetic stream.
+async function openCamera(page:import('@playwright/test').Page){
+ await page.addInitScript(()=>{
+  const devices=navigator.mediaDevices;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:devices});
+  localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
+  const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;const ctx=canvas.getContext('2d')!;
+  const paint=()=>{ctx.fillStyle='#c33';ctx.fillRect(0,0,640,480);};paint();
+  (window as any).cameraDenied=false;
+  navigator.mediaDevices.getUserMedia=async()=>{if((window as any).cameraDenied)throw new DOMException('Synthetic denial','NotAllowedError');const stream=canvas.captureStream(10);setInterval(paint,100);return stream;};
+ });
+ await page.goto('/');await page.getByRole('button',{name:'Camera',exact:true}).click();
+ const video=page.locator('[data-alpha-camera="viewfinder"] video');await expect(video).toBeVisible();
+ await expect.poll(()=>video.evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
+}
+
+// The pinned operation contract carries no lens yet, so the adapter's request port is called as the executor calls it.
+test('a requested photo uses the named camera and words each failure',async({page})=>{
+ await openCamera(page);
+ const outcome=await page.evaluate(async()=>{
+  const {browserCamera}=await import('/src/prototype/browser-camera.ts');
+  const {captureAgentPhoto}=await import('/src/prototype/camera-adapter.ts');
+  const log:string[]=[],switchCamera=browserCamera.switchCamera,capturePhoto=browserCamera.capturePhoto;
+  browserCamera.switchCamera=async options=>{log.push('switch:'+options.direction);return switchCamera(options);};
+  browserCamera.capturePhoto=async options=>{log.push('capture');return capturePhoto(options);};
+  const ask=async(lens?:'front'|'back',current=()=>{},signal=new AbortController().signal)=>{const result=await captureAgentPhoto(crypto.randomUUID(),signal,current,lens);return [result.status,result.summary];};
+  const front=await ask('front'),again=await ask('front'),unnamed=await ask();
+  const taken=[...log];log.length=0;
+  browserCamera.capturePhoto=async()=>{log.push('capture');throw Object.assign(Error('Synthetic native refusal'),{code:'CAPTURE_ERROR'});};
+  const refused=await ask();
+  const changed=await ask(undefined,()=>{throw Error('Synthetic screen change');});
+  const stopped=new AbortController();stopped.abort();
+  const cancelled=await ask(undefined,()=>{},stopped.signal);
+  const before=[...log];log.length=0;
+  browserCamera.switchCamera=async()=>{log.push('switch');throw Error('Synthetic lens failure');};
+  const unswitched=await ask('back');
+  return {front,again,unnamed,taken,refused,changed,cancelled,before,unswitched,after:[...log]};
+ });
+ expect(outcome.front).toEqual(['succeeded','Saved']);expect(outcome.again).toEqual(['succeeded','Saved']);expect(outcome.unnamed).toEqual(['succeeded','Saved']);
+ // The lens changes once, before the first shutter; a request that names no lens keeps the current one.
+ expect(outcome.taken).toEqual(['switch:front','capture','capture','capture']);
+ expect(outcome.refused).toEqual(['failed','The photo couldn’t be taken. Try again.']);
+ expect(outcome.changed).toEqual(['failed','The screen changed before the photo. Ask again.']);
+ expect(outcome.cancelled).toEqual(['failed','Cancelled. No photo was taken.']);
+ expect(outcome.before).toEqual(['capture']);
+ expect(outcome.unswitched).toEqual(['failed','Couldn’t switch camera. No photo was taken.']);expect(outcome.after).toEqual(['switch']);
+
+ // Camera access is refused: the request says so instead of "Camera unavailable".
+ await page.getByRole('button',{name:'Back to apps',exact:true}).click();
+ await page.evaluate(()=>{(window as any).cameraDenied=true;});
+ await page.getByRole('button',{name:'Camera',exact:true}).click();
+ await expect(page.getByRole('alert',{name:'Camera off',exact:true})).toBeVisible();
+ expect(await page.evaluate(async()=>{
+  const {captureAgentPhoto}=await import('/src/prototype/camera-adapter.ts');
+  const result=await captureAgentPhoto(crypto.randomUUID(),new AbortController().signal,()=>{});return [result.status,result.summary];
+ })).toEqual(['failed','Camera access is off. Allow camera access, then ask again.']);
+});
