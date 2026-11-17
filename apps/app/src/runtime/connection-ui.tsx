@@ -1522,7 +1522,7 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
   // provider read below keeps the provider class.
   if(!admitted)networkLostUnder=null;
   let admission:ResidentAdmission|null=null,bound:Awaited<ReturnType<typeof applyResidentBinding>>|null=null;
-  if(isAndroid||browserCloudResidentEnabled){const status=await localProviderStatus();signal.throwIfAborted();update({providerStatus:status});}
+  if((isAndroid&&!privateLocalPreviewEnabled)||browserCloudResidentEnabled){const status=await localProviderStatus();signal.throwIfAborted();update({providerStatus:status});}
   // One that runs with no network cannot read the plan: the network's return checks it, in the scope
   // this admission runs under. A return lost earlier in it keeps its own scope while the provider read
   // keeps the class; a changed class retired it (update) and this records no replacement.
@@ -3745,7 +3745,7 @@ export function connectionChooserVisible(snapshot: Pick<ConnectionSnapshot,'open
   }
   return snapshot.open && !(snapshot.automaticRestore && snapshot.busy && !snapshot.error);
 }
-export function ConnectionChooser() {
+export function ConnectionChooser({onPresentation}:{onPresentation?:(visible:boolean)=>void}={}) {
   const snapshot = useSyncExternalStore(connectionController.subscribe, connectionController.getSnapshot);
   // Production Android always enters through sign-in while signed out.
   // Only the explicit test-mocks build retains developer bypass behavior.
@@ -3791,6 +3791,7 @@ export function ConnectionChooser() {
     void connectionController.beginSignIn(residentEnvironment(), refreshNegative, true);
   }, [signInPageShown, snapshot.busy, snapshot.signIn, snapshot.cloudAccount, snapshot.startupResolved, snapshot.automaticRestore, cloudSignInNetwork.offline, cloudSignInNetwork.unvalidated, cloudSignInNetwork.reachable, cloudSignInNetwork.checking]);
   const visible=signInEntryRequired||connectionChooserVisible(snapshot,!!sending);
+  useLayoutEffect(()=>{onPresentation?.(visible);return ()=>onPresentation?.(false);},[visible,onPresentation]);
   const [accountSection,setAccountSection]=useState<'provider'|'funds'|null>(null);
   const [signOutAccount,setSignOutAccount]=useState<ConnectionSnapshot['cloudAccount']>(null);
   useEffect(()=>{setAccountSection(null);setSignOutAccount(null);},[snapshot.purpose,visible,snapshot.cloudAccount?.environment,snapshot.cloudAccount?.userId,snapshot.cloudAccount?.organizationId,snapshot.cloudAccount?.credentialId,snapshot.cloudAccount?.sessionId]);

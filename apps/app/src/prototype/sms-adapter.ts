@@ -47,7 +47,7 @@ type MessagesBridge=AlphaTelephonyPlugin&{
 type ComposerPort=Pick<EventTarget,'addEventListener'|'removeEventListener'>&{postMessage(value:string):void};
 type Bag=Record<string,any>;
 type SentFrom={by:'alpha'|'owner';text:string;title:string};
-type OutgoingSms={id:string;threadId:string|null;review:ReviewedSms;startedAt:number;createdAt?:number;seen:Set<string>};
+type OutgoingSms={id:string;threadId:string|null;review:ReviewedSms;startedAt:number;createdAt?:number;status?:SmsSendResult['status'];seen:Set<string>};
 const quietNotices=new Set([
  receiptLabel('submitted'),receiptLabel('sent'),receiptLabel('delivered'),receiptLabel('cancelled'),receiptLabel('denied'),receiptLabel('failed'),receiptLabel('unknown'),
  mmsReceiptLabel('submitted'),mmsReceiptLabel('sent'),mmsReceiptLabel('cancelled'),mmsReceiptLabel('denied'),mmsReceiptLabel('failed'),mmsReceiptLabel('unknown'),
@@ -385,6 +385,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const outgoingResult=(result:SmsSendResult,id=result.operationId)=>{
   const entry=outgoing.get(id);
   if(!entry)return;
+  entry.status=result.status;
   if(accepted(result.status))entry.createdAt=result.createdAt;
   else if(result.status!=='unknown'||entry.createdAt===undefined)outgoing.delete(entry.id);
  };
@@ -662,15 +663,15 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    if(row){claimed.add(row.id);return false;}
    return true;
   }).map(entry=>({id:entry.id,text:entry.review.body,hasText:true,side:'flex-end',bg:'var(--fg)',fg:'var(--bg)',
-   failed:false,picture:false,opacity:entry.createdAt===undefined?0.68:1,date:entry.createdAt??entry.startedAt}));
+   failed:false,picture:false,opacity:entry.createdAt===undefined?0.68:1,date:entry.createdAt??entry.startedAt,statusText:entry.status==='delivered'?'Delivered':entry.status==='sent'?'Sent':entry.status==='unknown'?'Status unknown':'Sending…'}));
   const listed=state.threads.map((row,index)=>{const incomplete=isIncompleteSmsRow(row),full=row as any,name=incomplete?'Conversation content unavailable':threadTitle(full.addresses,names),unread=!incomplete&&full.unread===true,when=shortWhen(row.date,now);
    return {id:row.id,open:()=>opens[index]?.open(),title:name,ini:initials(name),when,snippet:incomplete?'Use the system messaging app to view this conversation.':String(full.snippet||''),unread,weight:unread?700:600,color:unread?'var(--fg)':'var(--mut)',label:`${name}, ${when}${unread?', unread':''}`,stageLast:undefined as true|undefined};})
    .filter(row=>listMatches(row.title,row.snippet));
   if(listed[0])listed[0].stageLast=true;
   const bubbles=[...state.rows.filter(row=>row.threadId===state.thread).map(row=>{
-    if(isIncompleteSmsRow(row))return {id:row.id,text:'Use the system messaging app to view this message.',hasText:true,side:'flex-start',bg:'var(--s2)',fg:'var(--mut)',failed:false,picture:false,opacity:1,date:row.date,inbound:false};
+    if(isIncompleteSmsRow(row))return {id:row.id,text:'Use the system messaging app to view this message.',hasText:true,side:'flex-start',bg:'var(--s2)',fg:'var(--mut)',failed:false,picture:false,opacity:1,date:row.date,inbound:false,statusText:''};
     const mine=row.direction!=='incoming';return {id:row.id,text:String(row.body||''),hasText:!!row.body,side:mine?'flex-end':'flex-start',bg:mine?'var(--fg)':'var(--s2)',fg:mine?'var(--bg)':'var(--fg)',
-    failed:mine&&row.status==='failed',picture:row.attachments>0,pictureLabel:row.attachments>1?`${row.attachments} pictures`:'Picture',opacity:1,date:row.date,inbound:!mine};}),
+    failed:mine&&row.status==='failed',picture:row.attachments>0,pictureLabel:row.attachments>1?`${row.attachments} pictures`:'Picture',opacity:1,date:row.date,inbound:!mine,statusText:!mine?'':row.status==='failed'?'Not sent':row.status==='pending'?'Sending…':row.kind==='sms'&&row.deliveryReport==='complete'?'Delivered':row.status==='sent'?'Sent':''};}),
     ...(showThread?local.map(entry=>({...entry,inbound:false})):[])].sort((a,b)=>a.date-b.date);
   /* The stage keeps the newest inbound message above the sheet, never the owner's own (AC-02). */
   let newestIn=-1;bubbles.forEach((row,index)=>{if(row.inbound)newestIn=index;});
@@ -713,7 +714,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
     askDelete:()=>{if(messageMenu&&!uncertainDeletes.has(messageMenu.target.id)){messageMenu.confirm=true;paint();}},
     remove:()=>void deleteSelectedMessage(),
    }:null,
-   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,actions:messageActions(row.id),segments:messageSegments(row.text),stageLast:index===newestIn?true as const:undefined})),
+   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,actions:messageActions(row.id),segments:messageSegments(row.text),timestamp:(new Date(row.date).toDateString()===new Date(now).toDateString()?'':formatMonthDay(new Date(row.date),new Date(row.date).getFullYear()!==new Date(now).getFullYear())+' · ')+formatTime(new Date(row.date)),timestampLabel:formatDateTime(new Date(row.date)),stageLast:index===newestIn?true as const:undefined})),
    draftBubble:bubble(viewApi),picks:composing&&!picker&&!state.thread&&!local.length?picks():[],
    cannotSend:!editable()||!direct||!hasDraft||!sendingTo.length,submit,
    pickSim:sims.length>1,sims:sims.map(row=>{const on=String(row.id)===sim;return {label:row.displayName||`SIM ${row.slot+1}`,on,bg:on?'var(--fg)':'var(--s2)',fg:on?'var(--bg)':'var(--fg)',
