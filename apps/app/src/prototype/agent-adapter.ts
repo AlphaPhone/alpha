@@ -200,9 +200,10 @@ function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:strin
     const key=draft.binding;
     const same=heldKey&&key?key===heldKey||createdFromSlot(heldKey,key):sameChat?sameChat():key===heldKey;
     if(!same)return 'lost';
-    // Released before the composer was cleared (an attachment that could not be saved): the text never left
-    // it, whatever the owner has typed since, so nothing is put back.
-    if(!cleared)return 'kept';
+    // Released before the composer was cleared (an attachment that could not be saved): the text is normally
+    // still there, perhaps with more typed after it, so nothing is put back. Only if something emptied or
+    // replaced the composer meanwhile (a reload of the same conversation) does it go back.
+    if(!cleared&&String(shell.S().draft||'').includes(undurableText))return 'kept';
     shell.setState((previous:Shell)=>{const now=String(previous.draft||'');return now===undurableText?null:{draft:now.trim()?`${undurableText}\n${now}`:undurableText};});
     return 'restored';
   }
