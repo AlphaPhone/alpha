@@ -260,13 +260,17 @@ const runCard=(body:string):WorkflowRunCard|null=>{
  if(typeof runId!=='string'||!runId.trim()||typeof workflowId!=='string'||!workflowId.trim())return null;
  return {workflowId,runId,title:typeof title==='string'&&title.trim()?title.trim():'Workflow run'};
 };
+/** plugin-workflow's WORKFLOW create action answers with this exact sentence, which the agent delivers
+ * unparaphrased. Its engine name and identifiers are not the owner's words; the name is kept. */
+const createdPattern=/Created “(.+?)” as an inactive Smithers workflow \([^\s(),]+, version [^\s()]+\)\./g;
+export const workflowCreatedText=(name:string)=>`Created “${name}”. It is paused until you turn it on.`;
 export function workflowReplyText(text:string){
  const runs:WorkflowRunCard[]=[];let removed=false;
- const rendered=text.replace(blockPattern,(_whole,lead:string,body:string|undefined,closed:string|undefined)=>{
+ const rendered=text.replace(createdPattern,(_whole,name:string)=>workflowCreatedText(name)).replace(blockPattern,(_whole,lead:string,body:string|undefined,closed:string|undefined)=>{
   removed=true;const card=closed&&body!==undefined?runCard(body):null;
   if(card&&!runs.some(run=>run.runId===card.runId&&run.workflowId===card.workflowId))runs.push(card);
   return lead;
  });
  // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
- return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():text,runs};
+ return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered,runs};
 }
