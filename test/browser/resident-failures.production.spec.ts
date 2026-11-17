@@ -281,3 +281,19 @@ test('a resident session refusal reconnects without changing Cloud sign-in or re
   await expect(page.locator('body')).not.toContainText(/pair/i);
   expect(await stub(page, s => s.recoveries)).toEqual([]);
 });
+
+test('a send while the resident cannot start preserves the text and reports runtime readiness, not draft storage',async({page})=>{
+  const foreign=await fenceNetwork(page);
+  await flagOffAndroid(page);
+  await residentStub(page,{accounts:[owner],rejectStart:true});
+  await page.goto('/');
+  await expect.poll(()=>harness(page,f=>f.calls.includes('Agent.start'))).toBe(true);
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
+  await composer(page).fill('Keep these words while Alpha starts');
+  await composer(page).press('Enter');
+  await expect(page.locator('[data-alpha-toast]')).toContainText(/starting|restarting|start|Restart/i);
+  await expect(page.locator('[data-alpha-toast]')).not.toContainText('draft storage');
+  await expect(composer(page)).toHaveValue('Keep these words while Alpha starts');
+  expect(await harness(page,f=>f.posts)).toEqual([]);
+  expect(foreign).toEqual([]);
+});

@@ -2,15 +2,28 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "49d8b466043ca6c3316127b616362c9d80836084",
-  "head": "49d8b466043ca6c3316127b616362c9d80836084",
-  "recordedAt": "2026-11-16",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...49d8b466043ca6c3316127b616362c9d80836084",
-  "status": "identical",
-  "aheadBy": 0,
-  "behindBy": 0,
+  "baseCommit": "0d775376fd23d96f39f444b1920a8fde7fbce1e8",
+  "head": "b28e12281f7897c5e12f930c33271f3513cbdb68",
+  "recordedAt": "2026-11-17",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...b28e12281f7897c5e12f930c33271f3513cbdb68",
+  "status": "diverged",
+  "aheadBy": 4,
+  "behindBy": 1,
   "mergeBase": "49d8b466043ca6c3316127b616362c9d80836084",
-  "pinOnlyCommits": [],
+  "pinOnlyCommits": [
+    {
+      "sha": "5636f8ffe7f56fd562c35423511e501809234290",
+      "subject": "Preserve structured contact names and owner notes"
+    },
+    {
+      "sha": "5d0a53689542d69192bc92a289666051dcab204e",
+      "subject": "Add owner-confirmed single-message deletion bridge"
+    },
+    {
+      "sha": "b28e12281f7897c5e12f930c33271f3513cbdb68",
+      "subject": "Declare and verify deletion progress assumptions"
+    }
+  ],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",

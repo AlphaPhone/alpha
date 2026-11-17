@@ -1907,6 +1907,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
+    // No draft identity exists until the resident has an owner session. Report readiness
+    // before asking its durable draft controller to reserve an unbound send.
+    const readiness=connectionController.getSnapshot();
+    if(residentAlwaysPresent&&!readiness.session){this.toast(agentPendingText(readiness),ERROR_TOAST);return;}
     // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
     if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
     if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
