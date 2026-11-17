@@ -714,29 +714,16 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-map-credits[data-google-maps="true"] {
   container:alpha-map-credit / inline-size; right:76px; width:auto; height:auto; display:flex; align-items:center; gap:4px; padding:0; border-radius:0; background:transparent; box-shadow:none;
 }
-.alpha-google-credit { flex:1; min-width:0; display:flex; align-items:center; gap:4px; }
-.alpha-google-mark,.alpha-google-copyright,.alpha-google-map-missing,.alpha-google-sources > summary,
-.alpha-map-credits[data-google-maps="true"] > .alpha-map-privacy > summary {
+/* Google Maps shows its badge alone. The badge opens the viewport's data sources and the request
+   disclosure, as Google's attribution policy allows where the full line does not fit the view. */
+.alpha-google-credit { flex:none; min-width:0; }
+.alpha-google-mark,.alpha-google-map-missing {
   border-radius:14px; background:var(--bg); color:var(--fg); box-shadow:0 2px 12px var(--shc);
 }
-.alpha-google-mark { flex:none; display:inline-flex; align-items:center; padding:10px 10px 5px; background:var(--alpha-white); }
+.alpha-google-mark { box-sizing:border-box; display:flex; align-items:center; min-height:44px; padding:10px 10px 5px; background:var(--alpha-white); cursor:pointer; list-style:none; }
+.alpha-google-mark::-webkit-details-marker { display:none; }
 .alpha-google-mark img { display:block; width:auto; height:16px; }
-.alpha-google-copyright,.alpha-google-map-missing { min-width:0; padding:6px 8px; overflow-wrap:anywhere; }
-.alpha-google-sources { display:none; min-width:0; }
-.alpha-google-sources > summary {
-  display:flex; align-items:center; min-height:44px; padding:4px 8px; cursor:pointer; list-style:none;
-}
-.alpha-google-sources > summary::-webkit-details-marker { display:none; }
-.alpha-map-credits .alpha-google-sources > .alpha-map-info {
-  top:auto; left:auto; right:0; bottom:calc(100% + 8px); box-sizing:border-box; max-height:160px; overflow:auto; overflow-wrap:anywhere;
-}
-@container alpha-map-credit (max-width: 375px) {
-  .alpha-google-copyright { display:none; }
-  .alpha-google-sources { display:block; }
-}
-html.alpha-large-text .alpha-google-copyright { display:none; }
-html.alpha-large-text .alpha-google-sources { display:block; }
-.alpha-map-credits[data-google-maps="true"] > .alpha-map-privacy { flex:none; width:44px; height:44px; }
+.alpha-google-map-missing { min-width:0; padding:6px 8px; overflow-wrap:anywhere; }
 .alpha-map-privacy > summary::-webkit-details-marker { display:none; }
 .alpha-map-privacy > summary [data-alpha-icon] { width:20px; height:20px; }
 .alpha-map-info { position:absolute; left:0; bottom:calc(100% + 10px); width:min(300px,calc(100vw - 32px)); box-sizing:border-box; display:grid; gap:10px; max-height:240px; overflow-y:auto; overflow-wrap:anywhere; padding:14px 16px; border-radius:20px; background:var(--bg); color:var(--fg); box-shadow:0 6px 24px var(--shc), 0 0 0 1px var(--line); font-size:14px; line-height:1.35; }

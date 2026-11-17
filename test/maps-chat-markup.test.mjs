@@ -19,7 +19,8 @@ test('place, search and route cards become readable cards with their attribution
  const search=mapsChatText(appendMapsCard('Two matches.',{kind:'places',query:'ferry',places:[place,{...place,name:'Pier 1',formattedAddress:undefined,providerPlaceId:'osm:n2'}],nextCursor:null,attribution}));
  assert.deepEqual(search.cards[0].lines,['Ferry Building, 1 Ferry Building, San Francisco','Pier 1']);assert.equal(search.cards[0].attribution,attribution);
  const route=mapsChatText(appendMapsCard('Here is the route.',routeCard({origin:{...ref,name:'Home'},destination:ref,travelMode:'walk',distanceMeters:1530,durationSeconds:1260,warnings:['Steep section']},attribution)));
- assert.deepEqual(route.cards[0],{kind:'route',title:'Route to Ferry Building',lines:['From Home',`Walking · ${Intl.DateTimeFormat().resolvedOptions().locale==='en-US'?'1.0 mi':'1.5 km'} · 21 min`,'Steep section'],attribution,mapQuery:'37.7955, -122.3937'});
+ assert.deepEqual(route.cards[0],{kind:'route',title:'Route to Ferry Building',lines:['From Home',`Walking · ${Intl.DateTimeFormat().resolvedOptions().locale==='en-US'?'1.0 mi':'1.5 km'} · 21 min`,'Steep section'],attribution,mapQuery:'37.7955, -122.3937',
+  route:{origin:'37.7955, -122.3937',destination:'37.7955, -122.3937',name:'Ferry Building',travelMode:'walk'}});
  assert.equal(route.displayText,'Here is the route.');
 });
 
@@ -28,6 +29,19 @@ test('a locate card says the phone does not send location; a handoff link is tex
  assert.equal(locate.cards[0].title,'Location needed');assert.match(locate.cards[0].lines[0],/^Name a start · Location not shared$/);
  const handoff=mapsChatText(appendMapsCard('Shared.',{kind:'handoff',handoffKind:'share',place,geoUri:'geo:37.7955,-122.3937',appleMapsUri:'https://maps.apple.com/?ll=37.7955,-122.3937',webUri:'https://www.openstreetmap.org/?mlat=37.7955&mlon=-122.3937'}));
  assert.deepEqual(handoff.cards[0].lines,['1 Ferry Building, San Francisco','https://www.openstreetmap.org/?mlat=37.7955&mlon=-122.3937']);
+});
+
+test('a location request the pinned plugin words is served by Maps on the phone, never answered in chat',()=>{
+ // The search text and the destination exist only in these two prompts; a reworded pin must fail here.
+ const action=fs.readFileSync('vendor/eliza/plugins/plugin-maps/src/action.ts','utf8');
+ assert.ok(action.includes('`I need your precise location to search near you for “${query}”.`'));
+ assert.ok(action.includes('`I need your precise location to start the route to ${destination.name}.`'));
+ const near=mapsChatText(appendMapsCard('Location needed.',{kind:'locate',intent:'place-near',prompt:'I need your precise location to search near you for “coffee shop”.'})).cards[0];
+ assert.deepEqual(near,{kind:'locate',title:'“coffee shop” near you',lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:'coffee shop',nearMe:true});
+ const from=mapsChatText(appendMapsCard('Location needed.',{kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Ferry Building.'})).cards[0];
+ assert.deepEqual(from,{kind:'locate',title:'Directions to Ferry Building',lines:['Map finds the place · Directions start from this phone'],attribution:'',mapQuery:'Ferry Building'});
+ // A prompt of the other intent is not read as a search or a destination.
+ assert.equal(mapsChatText(appendMapsCard('x',{kind:'locate',intent:'route-origin',prompt:'I need your precise location to search near you for “coffee shop”.'})).cards[0].title,'Location needed');
 });
 
 test('the share confirmation keeps its question as prose and offers its two exact answers',()=>{
