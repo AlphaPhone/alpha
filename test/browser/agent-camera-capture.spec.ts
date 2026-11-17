@@ -5,10 +5,11 @@ import {returnToApps} from './app-navigation';
 // Actual shell, controller, navigation acknowledgement, action journal and camera adapter.
 // HTTP provider and camera sensor are synthetic; this is not a device acceptance test.
 // proposal-only: the agent proposes the photo without showing Camera. stop: the preview never starts and the owner stops the request.
-for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only','stop'] as const)test(`Home camera request: ${mode}`,async({page})=>{
+// selfie: the proposal names the front camera, taken at once or (selfie-ask-first) after the owner approves its card.
+for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only','stop','selfie','selfie-ask-first'] as const)test(`Home camera request: ${mode}`,async({page})=>{
  await page.addInitScript(mode=>{
   const w=window as any,store=new Map(),agentId='12345678-1234-4234-8234-123456789abc',userMessageId='87654321-4321-4321-8321-cba987654321';
-  const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,receipts:[],proposal:null as any,entry:null as any};
+  const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,receipts:[],log:[] as string[],advertised:'',proposal:null as any,entry:null as any};
   const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
   w.Capacitor={PluginHeaders:[{name:'AlphaConnection',methods:methods(['request','cancel','secureRead','secureWrite','secureCompareExchange','secureRemove'])},{name:'AlphaActionJournal',methods:methods(['reserve','markApplying','finish','get','list'])}],nativePromise:async(plugin:string,method:string,input:any)=>{
    if(plugin==='AlphaActionJournal'){
@@ -29,18 +30,18 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
    if(path==='/api/auth/pair')return ok({token:'synthetic-session',identityId:'fixture-owner',access:'owner',instanceId:'camera-fixture'});
    if(path==='/api/auth/me')return ok({identity:{id:'fixture-owner',displayName:'Fixture',kind:'owner'},session:{id:'synthetic-session',kind:'machine',expiresAt:Date.now()+600000},access:{role:'OWNER',mode:'session'}});
    if(path==='/api/agents')return ok({agents:[{id:agentId,name:'Camera fixture',status:'running'}]});
-   if(path==='/api/client-devices/register'){w.cameraInstallation=input.headers['X-Eliza-Device-Id'];return ok({installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',capabilities:['camera.capture-photo.v1']});}
+   if(path==='/api/client-devices/register'){w.cameraInstallation=input.headers['X-Eliza-Device-Id'];return ok({installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',capabilities:['camera.capture-photo.v1','camera.capture-lens.v1']});}
    if(path==='/api/workflow/status')return ok({});
    if(path==='/api/conversations'&&input.method==='POST')return ok({conversation:{id:'camera-chat',title:'Fixture'}});
    if(path==='/api/conversations/camera-chat/messages'&&input.method==='POST'){
     f.posts++;
-    f.proposal={id:'camera-proposal',digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+600000).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation:{type:'camera_capture_photo'},requestMessageId:mode==='old-message'?'old-message':userMessageId}};
+    f.proposal={id:'camera-proposal',digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+600000).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation:{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},requestMessageId:mode==='old-message'?'old-message':userMessageId}};
     if(mode==='proposal-only')return ok({text:'Taking the photo.',agentName:'Camera fixture',userMessageId});
-    return ok({text:'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
+    return ok({text:mode==='selfie'?'Opening Camera to take the photo.':'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
    }
    if(path==='/api/views/interact-claim'){f.claims++;return ok({claimId:'camera-owned-claim'});}
    if(path==='/api/views/interact-result'){f.acks++;return ok({accepted:mode!=='lost-ack'});}
-   if(path==='/api/client-devices/proposals')return ok({proposals:f.proposal?[f.proposal]:[]});
+   if(path==='/api/client-devices/proposals'){f.advertised=input.headers['X-Eliza-Device-Capabilities'];return ok({proposals:f.proposal?[f.proposal]:[]});}
    if(path.startsWith('/api/client-devices/proposals/camera-proposal/')){
     if(body.digest!==f.proposal.digest)throw Error('Digest changed');
     if(path.endsWith('/decision')){f.decisions++;f.proposal.state='approved';}
@@ -67,8 +68,9 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   const saved=document.createElement('canvas');saved.width=saved.height=64;(window as any).cameraRequestFixture.saved=saved.toDataURL('image/jpeg');
   browserPhotoLibrary.read=async({id}:{id:string})=>{if(id!=='1792274767123123456789012')throw Error('Unknown photo');return{id,kind:'image',image:(window as any).cameraRequestFixture.saved,width:64,height:64,date:1,revision:'r',mutationRevision:'r',favorite:false,trashed:false} as any;};
   browserCamera.stopPreview=async()=>{};
-  browserCamera.capturePhoto=async()=>{const f=(window as any).cameraRequestFixture;f.captures++;const c=document.createElement('canvas');c.width=c.height=16;return{path:'browser-photo:///1792274767123123456789012',format:'jpeg',base64:c.toDataURL('image/jpeg').split(',')[1],width:16,height:16};};
-  if(mode==='ask-first'){const {editDevicePreferences}=await import('/src/browser/device-preferences.ts');await editDevicePreferences(state=>{state.askBeforeAgentActions=true;});}
+  browserCamera.switchCamera=async({direction})=>{(window as any).cameraRequestFixture.log.push('switch:'+direction);return{width:16,height:16,deviceId:'fixture'} as any;};
+  browserCamera.capturePhoto=async()=>{const f=(window as any).cameraRequestFixture;f.captures++;f.log.push('capture');const c=document.createElement('canvas');c.width=c.height=16;return{path:'browser-photo:///1792274767123123456789012',format:'jpeg',base64:c.toDataURL('image/jpeg').split(',')[1],width:16,height:16};};
+  if(mode.endsWith('ask-first')){const {editDevicePreferences}=await import('/src/browser/device-preferences.ts');await editDevicePreferences(state=>{state.askBeforeAgentActions=true;});}
  },mode);
  await returnToApps(page);
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Take a photo');await input.press('Enter');
@@ -85,14 +87,18 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   return;
  }
  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
- if(mode==='capture'||mode==='proposal-only'){
+ if(mode==='capture'||mode==='proposal-only'||mode==='selfie'){
   await expect.poll(async()=>(await fixture()).receipts.length).toBe(1);
   const f=await fixture();expect(f.captures).toBe(1);expect(f.receipts[0].outcome).toBe('applied');expect(f.receipts[0].result.mediaId).toBe('1792274767123123456789012');expect(JSON.stringify(f.receipts)).not.toContain('base64');
   await expect(saved).toHaveCount(1);
   await expect(notice).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
   // Camera was opened by the agent's navigation, or on this phone when the agent only proposed the photo.
-  expect(f.claims).toBe(mode==='capture'?1:0);
+  expect(f.claims).toBe(mode==='proposal-only'?0:1);
+  // A named camera is negotiated, switched to before the shutter, and never reviewed in direct mode; an unnamed one stays put.
+  expect(f.advertised.split(',')).toContain('camera.capture-lens.v1');
+  expect(f.log).toEqual(mode==='selfie'?['switch:front','capture']:['capture']);
+  if(mode==='selfie'){await expect(page.getByText('Opening Camera to take the photo.',{exact:true}).first()).toBeVisible();await expect(page.getByRole('button',{name:/Approve$/})).toHaveCount(0);}
   // The saved photo, not the capture thumbnail, waits in the composer; the owner has not sent it.
   await expect(page.getByRole('button',{name:'Preview attached photo',exact:true}).getByRole('img')).toHaveAttribute('src',f.saved);
   expect((await fixture()).posts).toBe(1);
@@ -104,10 +110,12 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   const approve=page.getByRole('button',{name:/^Take photo\b.*Approve$/s});
   await expect(approve).toHaveCount(1);
   await expect(notice).toHaveCount(0);
-  if(mode!=='ask-first')return;
+  if(!mode.endsWith('ask-first'))return;
+  // The card names the camera the request asked for.
+  await expect(approve).toContainText(mode==='selfie-ask-first'?'Use the front camera and save one photo in Photos.':'Use the current camera and save one photo in Photos.');
   await approve.click();
   await expect(saved).toHaveCount(1);
-  const done=await fixture();expect(done.captures).toBe(1);expect(done.decisions).toBe(1);expect(done.receipts.map((receipt:any)=>receipt.outcome)).toEqual(['applied']);
+  const done=await fixture();expect(done.log).toEqual(mode==='selfie-ask-first'?['switch:front','capture']:['capture']);expect(done.captures).toBe(1);expect(done.decisions).toBe(1);expect(done.receipts.map((receipt:any)=>receipt.outcome)).toEqual(['applied']);
  }
 });
 
@@ -126,7 +134,7 @@ async function openCamera(page:import('@playwright/test').Page){
  await expect.poll(()=>video.evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
 }
 
-// The pinned operation contract carries no lens yet, so the adapter's request port is called as the executor calls it.
+// The adapter's request port, called as the executor calls it, for the lens and failure cases a proposal does not reach.
 test('a requested photo uses the named camera and words each failure',async({page})=>{
  await openCamera(page);
  const outcome=await page.evaluate(async()=>{

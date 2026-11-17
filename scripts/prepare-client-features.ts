@@ -132,6 +132,7 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-notes/src/capabilities.ts',
   'plugins/plugin-notes/src/client/notes-api.ts',
   'plugins/plugin-notes/src/note-authored.ts',
+  'plugins/plugin-notes/src/note-folders.ts',
   'plugins/plugin-notes/src/note-format.ts',
   'plugins/plugin-notes/src/note-id.ts',
   'plugins/plugin-notes/src/types.ts',

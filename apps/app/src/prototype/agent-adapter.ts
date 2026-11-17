@@ -1090,9 +1090,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(isCameraCapture(operation)){
         const ownerSession=connectionController.getSnapshot().session;
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||expectedContext.sensitive||expectedContext.view!=='camera'||ownerSession!==connectionController.getSnapshot().session||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Camera request changed');};
-        // The capture operation gains an optional lens upstream; until the pinned contract carries it, it is read here only.
-        const lens=(operation as {lens?:unknown}).lens;
-        const result=await captureAgentPhoto(operationId,signal,current,lens==='front'||lens==='back'?lens:undefined);
+        const result=await captureAgentPhoto(operationId,signal,current,operation.lens);
         // The saved photo is offered in the composer so a question about it can follow. Only the owner's Send shares it.
         const mediaId=result.status==='succeeded'?result.cameraResult?.mediaId:undefined;
         if(mediaId)void photoLibrary.read({id:mediaId}).then(saved=>{current();if(saved.kind!=='video'&&!saved.trashed&&!this.cameraAttachment)this.attachCameraPhoto('native-camera-'+mediaId,saved.image,true);}).catch(()=>{/* The photo is saved; only the offer is skipped. */});

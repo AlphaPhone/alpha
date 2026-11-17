@@ -2,7 +2,7 @@ import {NOTE_ID_REGEXP} from '../../../../.eliza/client-features/plugins/plugin-
 import {canonicalNotesListContextAllowed,NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {parseClientTurnObservation,parseClientCalendarDayObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
-import {CAMERA_CAPTURE_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
+import {CAMERA_CAPTURE_CAPABILITY,CAMERA_LENS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
@@ -150,7 +150,8 @@ export function offeredByEither(...offers: unknown[]): unknown[] {
 export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabilityProfile): string[] {
   const agent:unknown[]=Array.isArray(offered)?offered:[],{android,native}=profile;
   const capabilities=['calendar.local-event.v1','notes.local-record.v1'];
-  if(agent.includes(CAMERA_CAPTURE_CAPABILITY)&&profile.camera)capabilities.push(CAMERA_CAPTURE_CAPABILITY);
+  // Camera always carries its front/back switch, so a capture may name its lens; a switch that does not land takes no photo.
+  if(agent.includes(CAMERA_CAPTURE_CAPABILITY)&&profile.camera)capabilities.push(CAMERA_CAPTURE_CAPABILITY,...(agent.includes(CAMERA_LENS_CAPABILITY)?[CAMERA_LENS_CAPABILITY]:[]));
   if(agent.includes('reminders.local-record.v2'))capabilities.push('reminders.local-record.v2');else if(agent.includes('reminders.local-record.v1'))capabilities.push('reminders.local-record.v1');
   // Browser chat reminders use the runtime scheduler; do not offer a second device-creation lifecycle.
   if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);

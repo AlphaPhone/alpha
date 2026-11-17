@@ -36,6 +36,11 @@ test('the agent must offer a capability, and platform gates still apply', () => 
   assert.deepEqual(selectDeviceCapabilities(undefined, apk), ['calendar.local-event.v1', 'notes.local-record.v1']);
   assert.deepEqual(selectDeviceCapabilities(['reminders.local-record.v1'], apk).slice(2), ['reminders.local-record.v1']);
   assert.ok(!selectDeviceCapabilities(everything, {...apk, camera: false}).includes('camera.capture-photo.v1'));
+  // A capture may name its lens only beside the capture itself, and only when the agent offers the form.
+  const withLens=[...everything,'camera.capture-lens.v1'];
+  assert.ok(selectDeviceCapabilities(withLens, apk).includes('camera.capture-lens.v1'));
+  assert.ok(!selectDeviceCapabilities(withLens, {...apk, camera: false}).includes('camera.capture-lens.v1'));
+  assert.ok(!selectDeviceCapabilities(['camera.capture-lens.v1'], apk).includes('camera.capture-lens.v1'));
   assert.ok(!selectDeviceCapabilities(everything, {...apk, foregroundReview: false}).includes('calendar.named-read.v1'), 'no named read before the shell supplies reviews');
   assert.ok(!selectDeviceCapabilities(everything, {...apk, clockRepeatDays: false}).includes('clock.handoff.v2'));
   // The Alpha system image adds SMS and the reviewed dial handoff.
