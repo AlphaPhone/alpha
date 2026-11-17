@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Private canonical Alpha version 81. Exact combined source with owner-waived broad rechecks, normal source/native/APK checks retained. Existing signer and legacy data are preserved.",
+  "description": "Private canonical Alpha version 82. Exact c80/955 source with owner-waived broad rechecks and standard source, native, archive and APK checks. Existing signer and update channel.",
   "signerSha256": "edbfcacb1da689008bf4e7d675176c302decf83161a877eb8b1de4ffae0445ed",
   "lastRelease": {
     "versionCode": null,
@@ -8,15 +8,15 @@
     "recordedAt": null
   },
   "privateProducerApproval": {
-    "alphaCommit": "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
-    "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
-    "versionCode": 81,
-    "archiveSHA256": "969ca81b95237939c2e909f59eacda7cc84824ba3fe83805b63c75019dce8aba",
-    "archiveBytes": 1251587374,
-    "producerManifestSHA256": "9df47adfbaba89021cc7e824f2074a03f704104fa8a55cfc79a9f16fa8b40937",
-    "privateProducerReceiptSHA256": "a727453a504af16499e57d83c698154b4359e030fec7900d1a8f7596c54b3d7f",
+    "alphaCommit": "c80fdf12344d448086e6f1b08f46614bba94bcfb",
+    "sdkCommit": "95532fce36ab4d253c0d848d127704d9b9ace2ac",
+    "versionCode": 82,
+    "archiveSHA256": "eb0f570bd0416cb804f4e08b5976159753fa591e0394cf968d26286bcbd5cb9a",
+    "archiveBytes": 1251636498,
+    "producerManifestSHA256": "e5ce42f761b316b4d32640544fe2eda71ca67ff89b08fbf51b141653b265e98f",
+    "privateProducerReceiptSHA256": "4ff94450637f9c18613917b2921c60142707c96a7dd91982682bcc6ef0151876",
     "unsignedApkSHA256": {
-      "launcher": "e0bd976ec0ae4601d68b1627854122a1a2c5db4a8f235a590903715dc5b49abf"
+      "launcher": "1d6191c1d360ec79a5a8ad593323ea05d4859de48c02f03f3abccd9ce10fe673"
     },
     "updateChannel": {
       "kind": "public",
