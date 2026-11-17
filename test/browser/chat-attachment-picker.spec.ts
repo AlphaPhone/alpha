@@ -72,6 +72,16 @@ test('reviewed Files and Photos send exact bytes only on explicit attachment-onl
  }
  await page.screenshot({path:testInfo.outputPath('attachment-picker-bottom.png')});
  await page.setViewportSize({width:412,height:915});
+ // Three-button navigation (48dp) in the edge-to-edge WebView reports env(safe-area-inset-bottom) as 0;
+ // the footer's controls must still clear the native bottom inset.
+ await page.evaluate(()=>document.documentElement.style.setProperty('--native-bottom-inset','48px'));
+ await expect.poll(()=>picker.evaluate(el=>{
+  const footer=el.querySelector('footer')!,screen=document.querySelector('[data-screen]')!.getBoundingClientRect();
+  const scale=parseFloat(getComputedStyle(el).getPropertyValue('--phone-scale'))||1;
+  const lowest=Math.max(...[...footer.querySelectorAll('button')].map(b=>b.getBoundingClientRect().bottom));
+  return Math.round(screen.bottom-lowest-48/scale);
+ })).toBeGreaterThanOrEqual(0);
+ await page.evaluate(()=>document.documentElement.style.removeProperty('--native-bottom-inset'));
  const effects=()=>page.evaluate(()=>{const {reads,photoReads,sends}=(window as any).attachmentFixture;return {reads,photoReads,sends};});
  await picker.getByRole('button',{name:'Photos',exact:true}).click();
  await picker.getByRole('button',{name:'Photo.jpg',exact:true}).click();

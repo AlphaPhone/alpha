@@ -55,10 +55,16 @@ def project_role_controller(original):
     assert candidate.count(start) == 1, 'Role initialization changed'
     candidate = candidate.replace(start, start + '''
 
+        // The Alpha migration never blocks the default-role pass: a refusal or failure is
+        // retried on the next pass, and newly added roles still get their default holders now.
         mAlphaRoleUpgradeRunning = true;
         try {
             if (!AlphaRoleUpgrade.run(new AlphaRoleUpgradeAndroid(
-                    mContext, mUser, mUserRoleManager, this))) return false;
+                    mContext, mUser, mUserRoleManager, this))) {
+                Log.w(LOG_TAG, "Alpha role upgrade deferred; default roles continue");
+            }
+        } catch (RuntimeException e) {
+            Log.e(LOG_TAG, "Alpha role upgrade failed; default roles continue", e);
         } finally {
             mAlphaRoleUpgradeRunning = false;
         }

@@ -46,7 +46,7 @@ final class AlphaRoleUpgradeAndroid implements AlphaRoleUpgrade.Port {
         }
         DevicePolicyManager policy = owner.getSystemService(DevicePolicyManager.class);
         UserManager users = owner.getSystemService(UserManager.class);
-        if (policy == null || users == null || policy.getDeviceOwnerComponentOnCallingUser() != null
+        if (policy == null || users == null || policy.getDeviceOwnerComponentOnAnyUser() != null
                 || users.isManagedProfile()) return false;
         try {
             ApplicationInfo app = owner.getPackageManager().getApplicationInfo(AlphaRoleUpgrade.ALPHA, 0);

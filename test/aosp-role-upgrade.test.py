@@ -16,6 +16,18 @@ SPEC.loader.exec_module(STAGE)
 
 
 class RoleUpgrade(unittest.TestCase):
+    def test_android_adapter_uses_only_system_device_owner_api(self):
+        # role-controller builds against system_current, where getDeviceOwnerComponentOnCallingUser is @hide.
+        source = (ROOT / 'android/aosp/branding/provision/AlphaRoleUpgradeAndroid.java').read_text()
+        self.assertNotIn('getDeviceOwnerComponentOnCallingUser', source)
+        self.assertIn('getDeviceOwnerComponentOnAnyUser', source)
+
+    def test_role_upgrade_never_aborts_the_default_role_pass(self):
+        stage = (ROOT / 'scripts/stage-alpha-os-branding.py').read_text()
+        injected = stage[stage.index('mAlphaRoleUpgradeRunning = true;'):stage.index('mAlphaRoleUpgradeRunning = false;')]
+        self.assertNotIn('return false', injected)
+        self.assertIn('catch (RuntimeException e)', injected)
+
     @unittest.skipUnless(CONTROLLER.is_file(), 'Pinned Android role controller input required')
     def test_complete_patched_controller_and_android_adapter(self):
         raw = CONTROLLER.read_bytes()
@@ -27,10 +39,10 @@ class RoleUpgrade(unittest.TestCase):
             'android/os/Process.java': 'package android.os; public class Process { public static UserHandle myUserHandle(){return UserHandle.SYSTEM;} }',
             'android/os/UserHandle.java': 'package android.os; public class UserHandle { public static final UserHandle SYSTEM=new UserHandle(0); private final int id; public UserHandle(int id){this.id=id;} public int getIdentifier(){return id;} }',
             'android/os/UserManager.java': 'package android.os; public class UserManager { public boolean managed; public boolean isManagedProfile(){return managed;} }',
-            'android/app/admin/DevicePolicyManager.java': 'package android.app.admin; public class DevicePolicyManager { public Object owner; public Object getDeviceOwnerComponentOnCallingUser(){return owner;} }',
+            'android/app/admin/DevicePolicyManager.java': 'package android.app.admin; public class DevicePolicyManager { public Object owner; public Object getDeviceOwnerComponentOnAnyUser(){return owner;} }',
             'android/util/ArrayMap.java': 'package android.util; public class ArrayMap<K,V> extends java.util.LinkedHashMap<K,V>{public V valueAt(int i){return new java.util.ArrayList<>(values()).get(i);} }',
             'android/util/ArraySet.java': 'package android.util; public class ArraySet<T> extends java.util.HashSet<T>{ public T valueAt(int i){return new java.util.ArrayList<>(this).get(i);} }',
-            'android/util/Log.java': 'package android.util; public class Log { public static int i(String a,String b){return 0;} public static int e(String a,String b){return 0;} public static int w(String a,String b){return 0;} }',
+            'android/util/Log.java': 'package android.util; public class Log { public static int i(String a,String b){return 0;} public static int e(String a,String b){return 0;} public static int e(String a,String b,Throwable t){return 0;} public static int w(String a,String b){return 0;} }',
             'android/content/SharedPreferences.java': '''package android.content; public class SharedPreferences {
              public java.util.Map<String,String> values=new java.util.HashMap<>(); public boolean fail;
              public String getString(String k,String v){return values.getOrDefault(k,v);} public Editor edit(){return new Editor();}
@@ -90,7 +102,7 @@ class RoleUpgrade(unittest.TestCase):
                Context c=context();RoleControllerServiceImpl p=new RoleControllerServiceImpl(UserHandle.SYSTEM,c);
                check(p.onGrantDefaultRoles());for(String r:AlphaRoleUpgrade.ROLES)check(c.roles.getRoleHolders(r).equals(List.of(AlphaRoleUpgrade.ALPHA)));
                check(p.onAddRoleHolder(AlphaRoleUpgrade.ROLES.get(0),AlphaRoleUpgrade.PREVIOUS,0));check(p.onGrantDefaultRoles());check(c.roles.getRoleHolders(AlphaRoleUpgrade.ROLES.get(0)).equals(List.of(AlphaRoleUpgrade.PREVIOUS)));
-               Context failure=context();failure.roles.failAdd=AlphaRoleUpgrade.ROLES.get(1);p=new RoleControllerServiceImpl(UserHandle.SYSTEM,failure);check(!p.onGrantDefaultRoles());check(failure.roles.getRoleHolders(AlphaRoleUpgrade.ROLES.get(1)).equals(List.of(AlphaRoleUpgrade.PREVIOUS)));check(p.onGrantDefaultRoles());
+               Context failure=context();failure.roles.failAdd=AlphaRoleUpgrade.ROLES.get(1);p=new RoleControllerServiceImpl(UserHandle.SYSTEM,failure);check(p.onGrantDefaultRoles());check(failure.roles.getRoleHolders(AlphaRoleUpgrade.ROLES.get(1)).equals(List.of(AlphaRoleUpgrade.PREVIOUS)));check(p.onGrantDefaultRoles());
                Context owner=context();p=new RoleControllerServiceImpl(UserHandle.SYSTEM,owner);check(p.onAddRoleHolder(AlphaRoleUpgrade.ROLES.get(2),"owner.sms",0));check(p.onGrantDefaultRoles());check(owner.roles.getRoleHolders(AlphaRoleUpgrade.ROLES.get(2)).equals(List.of("owner.sms")));
                Context fresh=context();fresh.complete=0;p=new RoleControllerServiceImpl(UserHandle.SYSTEM,fresh);check(p.onGrantDefaultRoles());check(fresh.roles.removes==0);
                Context data=context();data.packages.app.flags=0;p=new RoleControllerServiceImpl(UserHandle.SYSTEM,data);check(p.onGrantDefaultRoles());check(data.roles.removes==0);

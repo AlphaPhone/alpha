@@ -1960,9 +1960,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       try {
         // The owner explicitly submits the edited draft with Send; no second confirmation.
         if(!this.live||document.hidden||String(this.S().draft)!==text||!connectionController.messageTargetCurrent(editTarget))throw Error('The draft or conversation changed. Nothing was replaced.');
+        // The edited text belongs to the branch. Empty the original conversation's composer first, so its
+        // durable draft slot is saved empty and the edit does not come back when the original is reopened.
+        await new Promise<void>(resolve=>this.setState({draft:''},resolve));
         await connectionController.forkMessage(editTarget,this.messageEditRequestId??=crypto.randomUUID());this.messageEditTarget=undefined;this.messageEditRequestId=undefined;if(!this.live||document.hidden||this.S().view!==editView||String(this.S().draft).trim())throw Error("The edited conversation opened. Review your draft before sending.");await new Promise<void>(resolve=>this.setState({draft:text},resolve));s=this.S();
         if(!this.live||document.hidden||s.view!==editView||String(s.draft)!==text)throw Error('The branch opened, but your draft changed. Nothing was sent.');
-      } catch(error){if(error&&typeof error==='object'&&'historyChanged' in error)this.messageEditTarget=undefined;this.toast(errorNotice(error,'Couldn’t open the edited conversation. Nothing was sent.'),ERROR_TOAST);return;}
+      } catch(error){if(error&&typeof error==='object'&&'historyChanged' in error)this.messageEditTarget=undefined;
+        // Nothing was sent: the edited text goes back into whichever conversation is now open.
+        if(this.live&&!String(this.S().draft||'').trim())this.setState({draft:text});
+        this.toast(errorNotice(error,'Couldn’t open the edited conversation. Nothing was sent.'),ERROR_TOAST);return;}
       finally{this.draftSendPending=false;}
     }
     let sourceDraft=fromComposer&&this.reviewedSourceDraft?.draft===text?sourceOf(this.reviewedSourceDraft.source):undefined;

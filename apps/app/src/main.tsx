@@ -255,7 +255,12 @@ function Phone() {
   // The chooser can be requested before its DOM commits. Keep Home inert even
   // behind sign-in; only its layout-commit acknowledgement releases the logo.
   const [chooserCommitted,setChooserCommitted]=useState(false);
-  const startupPending = !homeShown && !(connection.session && connection.startupResolved && !connectionChooserVisible(connection)) && !connection.error && connection.residentPlanNotice !== 'offline' && !connection.residentRecoveryReason;
+  // Once the chooser has been on screen and closes (sign-in done, or the owner closed it), Home is shown
+  // even while the resident restarts behind it, as before; it is never revealed while the chooser is up.
+  const [chooserSeen,setChooserSeen]=useState(false);
+  useEffect(()=>{if(chooserCommitted)setChooserSeen(true);},[chooserCommitted]);
+  const chooserClosedAfterShown=chooserSeen&&!chooserCommitted&&!connectionChooserVisible(connection);
+  const startupPending = !homeShown && !(connection.session && connection.startupResolved && !connectionChooserVisible(connection)) && !chooserClosedAfterShown && !connection.error && connection.residentPlanNotice !== 'offline' && !connection.residentRecoveryReason;
   useEffect(() => {
     if (!startupPending) setHomeShown(true);
   }, [startupPending]);

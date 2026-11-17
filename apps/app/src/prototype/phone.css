@@ -1134,7 +1134,7 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .attachment-picker-files small{font-size:12px;color:var(--mut)}
 .attachment-picker-files .attachment-picker-file-icon{grid-column:1;justify-self:start;width:26px;height:26px;margin:0}
 .attachment-picker-trailing{grid-column:3;justify-self:end}
-.attachment-picker-sheet>footer{display:flex;align-items:center;gap:12px;min-height:58px;padding:8px 20px max(14px,env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--bg);flex-shrink:0;font-size:13px}
+.attachment-picker-sheet>footer{display:flex;align-items:center;gap:12px;min-height:58px;padding:8px 20px max(14px,calc((max(var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px)) + 8px) / var(--phone-scale,1)));border-top:1px solid var(--line);background:var(--bg);flex-shrink:0;font-size:13px}
 .attachment-picker-sheet>footer>span{flex:1;color:var(--mut)}
 .attachment-picker-sheet>footer button,.attachment-picker-access button,.attachment-picker-more{min-height:44px;border:0;border-radius:22px;padding:0 14px;background:var(--s2);color:var(--fg);font:500 14px 'Public Sans',sans-serif}
 .attachment-picker-access{padding:12px 20px}
