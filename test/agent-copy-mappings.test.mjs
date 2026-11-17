@@ -250,14 +250,20 @@ const chat=await import('../apps/app/src/runtime/action-message-presentation.ts'
 test('every WORKFLOW action sentence the agent delivers unparaphrased reads in Alpha’s words',()=>{
  // Text bound to effect receipts is the action's canonical reply: core delivers it exactly as written.
  assert.match(vendor('packages/core/src/runtime/action-handler-settlement.ts'),/callbackText !== expectedText/);
- const bound=literals(vendor('plugins/plugin-workflow/src/actions/workflow.ts'),/text:\s*`([^`]+)`,\s*effectReceipts: (?!\[\])/g);
- const values={'workflow.name':'Morning digest','workflow.id':'0b0e2f4e-6a51-4c0e-9a55-0d2f6f0f3a11','workflow.versionId':'7d1f3c2a-1b7e-4f0a-8d1c-5e2a9b6c4d33',"workflow.active ? 'active' : 'inactive'":'inactive','execution.id':'run-1',marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
+ // A removal and its undo share one result, so their two sentences are the arms of one conditional.
+ const bound=[...vendor('plugins/plugin-workflow/src/actions/workflow.ts').matchAll(/text:\s*(?:op === 'remove'\s*\?\s*)?`([^`]+)`(?:\s*:\s*`([^`]+)`)?,\s*effectReceipts: (?!\[\])/g)].flatMap(m=>m.slice(1).filter(Boolean));
+ const paused=' It was on, so it is now off. Review the change, then turn it on again.',schedulePaused=' Its schedule is now paused. Turn it on again in Workflows.';
+ const values={'workflow.name':'Morning digest',label:'“Daily notes”',[`current.active ? '${paused}' : ''`]:paused,[`current.active && !workflow.active ? '${schedulePaused}' : ''`]:schedulePaused,"workflow.active ? 'active' : 'inactive'":'inactive',marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
  const sentence=template=>template.replaceAll('\\n','\n').replace(/\$\{([^}]+)\}/g,(_whole,name)=>{assert.ok(name in values,'template value: '+name);return values[name];});
+ // Upstream words these for the owner, so Alpha shows each as written; only the run marker block becomes a card.
  const PINNED=[
-  ['Created “${workflow.name}” as an inactive Smithers workflow (${workflow.id}, version ${workflow.versionId}).','Created “Morning digest”. It is paused until you turn it on.'],
-  ['Updated “${workflow.name}”.','Updated “Morning digest”.'],
+  ['Created “${workflow.name}”. It is off until you turn it on.','Created “Morning digest”. It is off until you turn it on.'],
+  ["Updated “${workflow.name}”.${current.active ? '"+paused+"' : ''}",'Updated “Morning digest”.'+paused],
+  ["Renamed ${label} to “${workflow.name}”.${current.active && !workflow.active ? '"+schedulePaused+"' : ''}",'Renamed “Daily notes” to “Morning digest”.'+schedulePaused],
   ["${workflow.name} is now ${workflow.active ? 'active' : 'inactive'}.",'Morning digest is now inactive.'],
-  ['Submitted workflow run ${execution.id}.\\n\\n[WORKFLOW]\\n${marker}\\n[/WORKFLOW]','Submitted workflow run run-1.'],
+  ['Removed ${label}. It no longer runs. You can restore it later.','Removed “Daily notes”. It no longer runs. You can restore it later.'],
+  ['Restored ${label}. It is off until you turn it on.','Restored “Daily notes”. It is off until you turn it on.'],
+  ['Submitted a run of ${label}.\\n\\n[WORKFLOW]\\n${marker}\\n[/WORKFLOW]','Submitted a run of “Daily notes”.'],
   ['Restored “${workflow.name}”.','Restored “Morning digest”.'],
  ];
  assert.deepEqual(bound,PINNED.map(([upstream])=>upstream));

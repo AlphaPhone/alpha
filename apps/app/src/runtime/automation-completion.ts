@@ -16,11 +16,17 @@ export function automationsCommitted(results:readonly unknown[]|undefined):boole
 }
 export type WorkflowChange={workflowId:string;change:string};
 // plugin-workflow's WORKFLOW action names its definition receipts `workflow.<op>`.
-const WORKFLOW_CHANGE_WORDS:Record<string,string>={'workflow.create':'Created','workflow.modify':'Updated','workflow.activate':'Turned on','workflow.deactivate':'Paused','workflow.restore':'Restored'};
+const WORKFLOW_CHANGE_WORDS:Record<string,string>={'workflow.create':'Created','workflow.modify':'Updated','workflow.activate':'Turned on','workflow.deactivate':'Paused','workflow.restore':'Restored','workflow.rename':'Renamed','workflow.remove':'Removed','workflow.restore_removed':'Restored'};
 /** The workflows a reply saved or changed, one per workflow with its last change, for a chat card that
  * opens it. Any committed `workflow.definition` receipt counts; an operation Alpha has no word for reads "Changed". */
 export function workflowChanges(results:readonly unknown[]|undefined):WorkflowChange[] {
  const last=new Map<string,string>();
  for(const receipt of committedReceipts(results))if(receipt.resource.kind==='workflow.definition'){last.delete(receipt.resource.id);last.set(receipt.resource.id,WORKFLOW_CHANGE_WORDS[receipt.operation]??'Changed');}
  return [...last].map(([workflowId,change])=>({workflowId,change}));
+}
+// plugin-workflow refuses a chat edit or switch-on of a workflow built in the Workflows view with these codes.
+const WORKFLOW_VIEW_REFUSALS=['WORKFLOW_EDIT_IN_VIEW','WORKFLOW_ACTIVATE_IN_VIEW'];
+/** A reply whose WORKFLOW action sent the owner to the Workflows view; the reply offers to open it. */
+export function workflowViewRefusal(results:readonly unknown[]|undefined):boolean {
+ return Array.isArray(results)&&results.some(result=>!!result&&typeof result==='object'&&'success' in result&&result.success===false&&'error' in result&&WORKFLOW_VIEW_REFUSALS.includes(result.error as string));
 }

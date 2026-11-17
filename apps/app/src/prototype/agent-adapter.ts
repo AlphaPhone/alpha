@@ -8,7 +8,7 @@ import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-fea
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
 import {actionResultText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
-import {workflowChanges,type WorkflowChange} from '../runtime/automation-completion';
+import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
@@ -307,8 +307,8 @@ function enrichSettledAssistant(message:Shell,card:Shell|undefined,binding?:{con
 }
 /** A workflow the agent saved or changed in this reply: the settled reply carries it, and shows a card that opens it. */
 function keepWorkflowChanges(shell:Shell,reply:{messageId?:string;actionResults?:readonly unknown[]},current:()=>boolean){
-  const changes=workflowChanges(reply.actionResults);
-  if(changes.length&&reply.messageId)shell.setState((previous:Shell)=>current()?{msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,workflowChanges:changes}:m)}:null);
+  const changes=workflowChanges(reply.actionResults),refused=workflowViewRefusal(reply.actionResults);
+  if((changes.length||refused)&&reply.messageId)shell.setState((previous:Shell)=>current()?{msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,workflowChanges:changes,workflowViewRefusal:refused}:m)}:null);
 }
 /** Failure kinds upstream raises before any model output (credits, provider access, no provider,
  * throttling). Their streamed text is upstream's own failure prose, so Alpha's message replaces it. */
@@ -1830,12 +1830,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const workflowSession=connectionController.getWorkflowClient()?.sessionId;
     out.msgs=(out.msgs||[]).map((m:Shell)=>{
       if(!m.isAgent)return m;
-      const sent=workflowSession?live.find(item=>item.id===m.id):undefined,changes:WorkflowChange[]=sent?.workflowChanges&&sent.messageBinding?.session?.sessionId===workflowSession?sent.workflowChanges:[];
+      const sent=workflowSession?live.find(item=>item.id===m.id):undefined,bound=sent?.messageBinding?.session?.sessionId===workflowSession,changes:WorkflowChange[]=bound&&sent?.workflowChanges||[],refused=bound&&sent?.workflowViewRefusal===true;
       const parsed=typeof m.text==='string'&&m.displayText===m.text?workflowReplyText(m.text):null,rewritten=!!parsed&&parsed.text!==m.text;
-      if(!rewritten&&!changes.length)return m;
+      if(!rewritten&&!changes.length&&!refused)return m;
       return {...m,...(rewritten?{displayText:parsed.text,hasCalendarText:m.hasCalendarText!==false&&!!parsed.text}:{}),workflowRuns:[
-        ...(parsed?.runs||[]).map(run=>({...run,status:'Submitted',label:'Open workflow run '+run.title,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}})),
-        ...changes.map(change=>({workflowId:change.workflowId,runId:'',title:'Workflow',status:change.change,label:'Open workflow',open:()=>{if(typeof this.openWorkflow==='function')this.openWorkflow(change.workflowId);else this.openView('workflows');}})),
+        ...(parsed?.runs||[]).map(run=>({...run,done:true,status:'Submitted',label:'Open workflow run '+run.title,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}})),
+        ...changes.map(change=>({workflowId:change.workflowId,runId:'',title:'Workflow',done:true,status:change.change,label:'Open workflow',open:()=>{if(typeof this.openWorkflow==='function')this.openWorkflow(change.workflowId);else this.openView('workflows');}})),
+        // The agent refused a change that is made in the Workflows view; the card opens that view.
+        ...(refused?[{workflowId:'',runId:'',title:'Workflows',done:false,status:'Make this change in Workflows',label:'Open Workflows',open:()=>this.openView('workflows')}]:[]),
       ]};
     });
     out.msgs=projectActionMessages(out.msgs||[],live);

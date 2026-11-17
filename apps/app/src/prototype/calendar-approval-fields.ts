@@ -21,11 +21,24 @@ const text=(value:unknown):value is string=>typeof value==='string';
 const instant=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&Number.isFinite(new Date(value).getTime());
 const localTime=(value:number)=>{const date=new Date(value),preferences=localePreferences();return new Intl.DateTimeFormat(preferences.locale,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',...(date.getSeconds()?{second:'2-digit' as const}:{}),hourCycle:preferences.hourCycle,timeZoneName:'short'}).format(date);};
 const dateText=(value:string)=>{const date=new Date(value+'T12:00:00Z');if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==value)throw Error('Invalid date');return new Intl.DateTimeFormat(localePreferences().locale,{timeZone:'UTC',year:'numeric',month:'long',day:'numeric'}).format(date);};
+const DAY_NAMES:Record<string,string>={MO:'Monday',TU:'Tuesday',WE:'Wednesday',TH:'Thursday',FR:'Friday',SA:'Saturday',SU:'Sunday'};
+const UNITS:Record<string,string>={DAILY:'day',WEEKLY:'week',MONTHLY:'month',YEARLY:'year'};
+/** One repeat rule in plain words, or null when it has a part these words would leave out. */
+const repeatSentence=(rule:string):string|null=>{
+ const parts=new Map<string,string>();
+ for(const part of rule.replace(/^RRULE:/i,'').split(';')){const at=part.indexOf('='),key=part.slice(0,at).toUpperCase();if(at<1||parts.has(key)||!['FREQ','INTERVAL','BYDAY','COUNT','UNTIL'].includes(key))return null;parts.set(key,part.slice(at+1).toUpperCase());}
+ const unit=UNITS[parts.get('FREQ')??''],interval=parts.get('INTERVAL')??'1',days=parts.get('BYDAY')?.split(',')??[],count=parts.get('COUNT'),until=/^(\d{4})(\d{2})(\d{2})(?:T\d{6}Z?)?$/.exec(parts.get('UNTIL')??'');
+ if(!unit||!/^[1-9]\d{0,2}$/.test(interval)||days.some(day=>!DAY_NAMES[day])||new Set(days).size!==days.length||days.length&&unit!=='week'||count!==undefined&&!/^[1-9]\d{0,3}$/.test(count)||parts.has('UNTIL')&&!until||count!==undefined&&until)return null;
+ const weekdays=days.length===5&&['MO','TU','WE','TH','FR'].every(day=>days.includes(day));
+ const every=weekdays&&interval==='1'?'Every weekday':(interval==='1'?`Every ${unit}`:`Every ${interval} ${unit}s`)+(days.length?' on '+new Intl.ListFormat('en',{type:'conjunction'}).format(days.map(day=>DAY_NAMES[day])):'');
+ return every+(count?`, ${count} time${count==='1'?'':'s'}`:'')+(until?', until '+dateText(`${until[1]}-${until[2]}-${until[3]}`):'');
+};
 const repeatText=(rules:unknown)=>{
  if(!Array.isArray(rules)||rules.some(rule=>typeof rule!=='string'))throw Error('Invalid repeat');
  if(!rules.length)return 'Does not repeat';
+ // A rule with a part outside these words is shown in full, so nothing the approval would apply is hidden.
  const words:Record<string,string>={FREQ:'Frequency',DAILY:'Daily',WEEKLY:'Weekly',MONTHLY:'Monthly',YEARLY:'Yearly',INTERVAL:'Every',BYDAY:'Days',COUNT:'Occurrences',UNTIL:'Until',MO:'Mon',TU:'Tue',WE:'Wed',TH:'Thu',FR:'Fri',SA:'Sat',SU:'Sun'};
- return (rules as string[]).map(rule=>rule.replace(/^RRULE:/,'').split(';').map(part=>part.split('=').map(value=>value.split(',').map(word=>words[word]??word).join(', ')).join(': ')).join(' · ')).join('\n');
+ return (rules as string[]).map(rule=>repeatSentence(rule)??rule.replace(/^RRULE:/,'').split(';').map(part=>part.split('=').map(value=>value.split(',').map(word=>words[word]??word).join(', ')).join(': ')).join(' · ')).join('\n');
 };
 /** Only effect fields are shown. Provider versions and request IDs remain authority, not prose. */
 export function calendarApprovalFields(row:CalendarApproval,labels:CalendarApprovalLabels={}){
