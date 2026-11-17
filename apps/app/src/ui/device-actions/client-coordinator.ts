@@ -1021,8 +1021,7 @@ export class DeviceActionCoordinator<
       return {
         ...base,
         title: "Take photo",
-        description:
-          "Use the current camera and save one photo in Photos. The photo stays on this device.",
+        description: `Use the ${op.lens ?? "current"} camera and save one photo in Photos. The photo stays on this device.`,
       };
     if (isLibraryOperation(op))
       return { ...base, ...describeLibraryOperation(op, this.profile.appName) };
