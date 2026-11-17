@@ -1309,6 +1309,13 @@ export function installChatOverlayMotion(Component: Shell) {
 		out.composerDockRef = shell.composerDockRef;
 		out.composerChatRef = shell.composerChatRef;
 		const openEditor = out.panelComposer && (!out.showComposer || isOpen(s.chat));
+		const retainDock = openEditor && !out.showComposer && !out.dockHidden && s.typing &&
+			typeof Element.prototype.moveBefore === 'function' &&
+			composerSlots.dock?.contains(document.activeElement);
+		// Keep the old parent until the new one is visible. Parking the field at the
+		// screen root before the commit can interrupt Android's editing session.
+		if (retainDock) out.showComposer = true;
+
 		out.editor = {
 			target: openEditor ? 'alpha' : out.barTarget,
 			label: openEditor ? out.panelLabel : out.cmpPlaceholder,
@@ -1330,7 +1337,7 @@ export function installChatOverlayMotion(Component: Shell) {
 		out.composerEditor = createElement(ComposerEditor, {
 			slots: composerSlots,
 			surface: openEditor ? 'chat' : out.showComposer ? 'dock' : null,
-			keepFocus: openEditor && !!s.typing,
+			onDockReleased: retainDock ? () => shell.setState({}) : undefined,
 		});
 		return out;
 	};
