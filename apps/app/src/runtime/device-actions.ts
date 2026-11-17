@@ -69,6 +69,9 @@ export function presentOpenView(view:string){const label=alphaViewLabel(view);re
 const operations = {admitView:(view:string)=>view==='home'||view==='reminders'||isMvpView(view),parseWorkflowRead};
 export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope,WorkflowPhoneReview> = {
   appName:'Alpha',
+  // The name the owner says. The agent's character carries the same name, so the server and this
+  // phone read "Alpha, open …" as the same direct request.
+  assistantName:'Alpha',
   operations,
   workflow:{parseBinding:parseWorkflowBinding,parseRead:parseWorkflowRead,validateResult:validateWorkflowResult,assertOperation:assertWorkflowOperation},
   presentRecord:(operation,timeZone)=>operation.type==='open_view'?presentOpenView(operation.view):isCalendarOperation(operation)||isNotesOperation(operation)||isReminderOperation(operation)||isReminderCreate(operation)||operation.type==='create_note'||operation.type==='create_reminder'?presentDeviceRecordOperation(operation,timeZone):undefined,
