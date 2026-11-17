@@ -858,17 +858,43 @@ class CloudSigningInputTest(unittest.TestCase):
 
 
 class PrivateProducerSourceReviewTest(unittest.TestCase):
-    def test_owner_verification_exception_is_bound_to_one_exact_producer(self):
-        pin = dict(ADMISSION.PRIVATE_VERIFICATION_EXCEPTION)
-        private = {**pin, "checks": {"combinedVerification": "waived-by-owner"}}
-        self.assertTrue(ADMISSION.private_verification_admitted(private, pin))
-        for key in pin:
-            changed = {**pin, key: 82 if key == "versionCode" else "other"}
-            self.assertFalse(ADMISSION.private_verification_admitted(private, changed))
-            self.assertFalse(ADMISSION.private_verification_admitted({**private, **changed}, pin))
-        for value in ("failed", "skipped", None):
-            self.assertFalse(ADMISSION.private_verification_admitted(
-                {**private, "checks": {"combinedVerification": value}}, pin))
+    def test_owner_verification_exceptions_are_bound_to_exact_producers(self):
+        v81 = {
+            "alphaCommit": "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
+            "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+            "versionCode": 81,
+            "applicationId": "ai.alphacompute.alphaphone",
+        }
+        v82 = {
+            "alphaCommit": "6c04ce32e1f305921abc83309f830c076dd52daa",
+            "sdkCommit": "95532fce36ab4d253c0d848d127704d9b9ace2ac",
+            "versionCode": 82,
+            "applicationId": "ai.alphacompute.alphaphone",
+        }
+        checks = {"combinedVerification": "waived-by-owner"}
+        for pin, other in ((v81, v82), (v82, v81)):
+            with self.subTest(version=pin["versionCode"]):
+                private = {**pin, "checks": checks}
+                self.assertTrue(ADMISSION.private_verification_admitted(private, pin))
+                for key, value in (
+                    ("alphaCommit", other["alphaCommit"]),
+                    ("sdkCommit", other["sdkCommit"]),
+                    ("versionCode", other["versionCode"]),
+                    ("versionCode", 83),
+                    ("applicationId", "ai.elizaresearch.alphaphone"),
+                ):
+                    changed = {**pin, key: value}
+                    changed_private = {**changed, "checks": checks}
+                    with self.subTest(field=key, value=value):
+                        self.assertFalse(ADMISSION.private_verification_admitted(private, changed))
+                        self.assertFalse(ADMISSION.private_verification_admitted(changed_private, pin))
+                        self.assertFalse(ADMISSION.private_verification_admitted(changed_private, changed))
+                self.assertFalse(ADMISSION.private_verification_admitted(private, other))
+                self.assertFalse(ADMISSION.private_verification_admitted(
+                    {**other, "checks": checks}, pin))
+                for value in ("failed", "skipped", None):
+                    self.assertFalse(ADMISSION.private_verification_admitted(
+                        {**private, "checks": {"combinedVerification": value}}, pin))
         self.assertTrue(ADMISSION.private_verification_admitted(
             {"checks": {"combinedVerification": "passed"}}, {}))
 
