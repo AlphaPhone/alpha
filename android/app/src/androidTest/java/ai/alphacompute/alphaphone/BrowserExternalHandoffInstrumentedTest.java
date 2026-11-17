@@ -56,7 +56,7 @@ public final class BrowserExternalHandoffInstrumentedTest {
    AppNavigation.liveMode();
    WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
     AlphaBrowserPlugin p=(AlphaBrowserPlugin)activity.getBridge().getPlugin("AlphaBrowser").getInstance();plugin.set(p);
-    Method build=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
+    Method build=AlphaBrowserPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
     Object t=build.invoke(p,"handoff",priv,priv?AlphaBrowserPlugin.PRIVATE_PREFIX+session.replace("-",""):AlphaBrowserPlugin.PERSISTENT_PROFILE);tab.set(t);
     web.set((WebView)get(t,"web"));WebViewClient original=web.get().getWebViewClient();
     web.get().setWebViewClient(new WebViewClient(){

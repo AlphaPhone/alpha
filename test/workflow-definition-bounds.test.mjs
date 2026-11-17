@@ -191,7 +191,7 @@ const T=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/workflo
 const fs=await import('node:fs');
 const thrown=run=>{try{run();return null;}catch(error){return error;}};
 // The phone's own refusals, read from their sources so a reworded refusal fails here.
-const nativeCalendar=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-native-calendar/android/src/main/java/ai/eliza/plugins/calendar/CalendarPlugin.java'))},'utf8');
+const nativeCalendar=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java'))},'utf8');
 const listing=nativeCalendar.slice(nativeCalendar.indexOf('public void workflowCalendars('),nativeCalendar.indexOf('public void readWorkflowRange('));
 const lateLaunch=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java'))},'utf8');
 const notesDocument=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-notes/src/client/notes-document-store.ts'))},'utf8');

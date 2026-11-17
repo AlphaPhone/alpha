@@ -1,7 +1,6 @@
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.media.SelectedDocuments;
-import android.app.Activity;
 import android.content.Context;
 import android.net.Uri;
 import com.getcapacitor.JSObject;
@@ -34,7 +33,6 @@ final class SelectedDocumentAccess {
  static JSObject read(Context context,String id){return documents(context).read(id);}
  /** Only native picker callbacks may use this; no renderer-supplied URI entrypoint. */
  /** Callers must first validate a picker capability or an admitted media identity. */
- static JSObject shareUri(Activity activity,Uri uri){return SelectedDocuments.shareUri(activity,uri);}
  /** A copy of the loaded selections, for instrumentation. */
  static Map<String,Uri> selections(){SelectedDocuments registry=loaded();return registry==null?Map.of():registry.selections();}
 }

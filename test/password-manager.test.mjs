@@ -217,7 +217,7 @@ test('the generator length is checked in Alpha before the vault is asked, with t
  const {readFileSync}=await import('node:fs');
  const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
  const generator=read('vendor/eliza/plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordGenerator.java');
- const plugin=read('vendor/eliza/plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordsPlugin.java');
+ const plugin=read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaPasswordsPlugin.java');
  const client=read('vendor/eliza/plugins/plugin-native-passwords/src/client.ts');
  // Alpha's range is the generator's own.
  const [,min,max]=/MIN_LENGTH = (\d+), MAX_LENGTH = (\d+)/.exec(generator);

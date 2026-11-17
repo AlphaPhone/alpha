@@ -184,7 +184,7 @@ export function androidRoleLabel(
 
 /**
  * Alpha's subtitle for the Listening switch, one sentence per listener state. The listener
- * (`ListenerPolicy.label` in the shared Sense module) also sends its own label; Alpha words the
+ * (`ListenerLabels.label` in Alpha's android/sense listener) also sends its own label; Alpha words the
  * state here instead and never shows that label.
  */
 export const LISTENER_STATE_TEXT: Readonly<Record<ListenerState, string>> = {

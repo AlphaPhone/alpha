@@ -15,15 +15,14 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import ai.eliza.plugins.calendar.CalendarConfiguration;
-import ai.eliza.plugins.calendar.CalendarPlugin;
 import ai.eliza.plugins.calendar.write.CalendarDestinations;
 import ai.eliza.plugins.calendar.write.CalendarEventOptions;
 import ai.eliza.plugins.calendar.write.CalendarInsertHandoff;
 import ai.eliza.plugins.calendar.write.CalendarOptionCreationStore;
 
-/** Keep installed calendar/journal identity stable while sharing provider behavior. */
+/** Keep installed calendar/journal identity stable; the provider bridge and its reviews are Alpha's own {@link CalendarProviderPlugin}. */
 @CapacitorPlugin(name="AlphaCalendar", permissions={@Permission(alias="calendar",strings={Manifest.permission.READ_CALENDAR,Manifest.permission.WRITE_CALENDAR}),@Permission(alias="workflowCalendarRead",strings={Manifest.permission.READ_CALENDAR})})
-public final class AlphaCalendarPlugin extends CalendarPlugin {
+public final class AlphaCalendarPlugin extends CalendarProviderPlugin {
  /**
   * The shared list reads at most 2,000 instances per range and reports truncated when the
   * provider held more. The bound is read policy, not
@@ -85,13 +84,13 @@ public final class AlphaCalendarPlugin extends CalendarPlugin {
  private boolean granted(){return getPermissionState("calendar")==PermissionState.GRANTED;}
  /** Capacitor's own permission request launches through the activity; see {@link LateLaunch}. */
  @Override @PluginMethod public void requestPermissions(PluginCall call){LateLaunch.ask(call,()->super.requestPermissions(call));}
- /** The shared calendar plugin asks for its permissions inside these two methods; see {@link LateLaunch}. */
+ /** CalendarProviderPlugin asks for its permissions inside these two methods; see {@link LateLaunch}. */
  @Override @PluginMethod public void requestAccess(PluginCall call){LateLaunch.ask(call,()->super.requestAccess(call));}
  @Override @PluginMethod public void requestWorkflowReadAccess(PluginCall call){LateLaunch.ask(call,()->super.requestWorkflowReadAccess(call));}
  private static JSObject status(String value){JSObject out=new JSObject();out.put("status",value);return out;}
  private boolean foreground(){return getActivity()!=null&&!getActivity().isFinishing()&&!getActivity().isDestroyed()&&getActivity().hasWindowFocus();}
  /** Both journals: timed creations and option creations. Never retries. */
- @Override @PluginMethod public void pendingCreations(PluginCall c){
+ @PluginMethod public void pendingCreations(PluginCall c){
   if(!granted()){c.resolve(status("permission-required"));return;}
   try{
    JSObject timed=CalendarCreationStore.pendingCreations(getContext());JSArray all=new JSArray();

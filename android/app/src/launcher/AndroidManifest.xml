@@ -41,9 +41,9 @@
  <uses-permission android:name="android.permission.WRITE_CALL_LOG" tools:node="remove" />
  <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" tools:node="remove" />
  <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" tools:node="remove" />
- <!-- The dialer role's ringing-call notice opens the shared call screen over the lock screen and wakes
-      the display. Android drops a full-screen intent without this install-time permission. Only the
-      shared call service (AlphaInCallService) posts one. -->
+ <!-- The dialer role's ringing-call notice opens Alpha's call screen over the lock screen and wakes
+      the display. Android drops a full-screen intent without this install-time permission. Only
+      Alpha's call service (AlphaInCallService) posts one. -->
  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
  <!-- SMS permissions imply telephony hardware; keep it optional so no install is filtered by it. -->
  <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -91,9 +91,9 @@
   </service>
   <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
   <activity android:name=".AlphaSmsNoticeActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoDisplay" />
-  <!-- SMS role surfaces (shared plugin-native-messages), declared disabled and enabled only on the
-       verified image. Incoming texts and MMS are stored before their notice; quick replies and SENDTO
-       open the compose review, whose Send press is the only send. -->
+  <!-- SMS role surfaces (Alpha's forks; MmsWapPushReceiver and MmsFileProvider stay shared), declared
+       disabled and enabled only on the verified image. Incoming texts and MMS are stored before their
+       notice; quick replies and SENDTO open the compose review, whose Send press is the only send. -->
   <receiver android:name=".AlphaSmsDeliverReceiver" android:enabled="false" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
    <intent-filter><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent-filter>
   </receiver>
