@@ -138,6 +138,32 @@ async function compose(page: Page, subject: string, body: string) {
   await page.getByRole('textbox', {name: 'Subject', exact: true}).fill(subject);
   await page.getByRole('textbox', {name: 'Message', exact: true}).fill(body);
 }
+// An installed older version could leave one unsent review in the journal. Build
+// that record with the real journal and its retained composer, then reopen Inbox.
+async function prepareLegacyReview(page: Page, body: string, options: Options = {}) {
+  const retained = () => page.evaluate(async () => {
+    const {inboxUnsaved} = await import('/src/prototype/inbox-unsaved.ts');
+    const owner = JSON.stringify(['production','fixture-owner','','fixture-grant']);
+    const copy = inboxUnsaved(owner, () => {}, () => {});
+    try { await copy.ready; return copy.peek()?.draft ?? null; }
+    finally { copy.retire(); }
+  });
+  await expect.poll(async () => (await retained())?.body).toBe(body);
+  const draft = (await retained())!;
+  await page.evaluate(async draft => {
+    const {InboxOperation} = await import('/src/runtime/inbox-operation.ts');
+    const {inboxLocalStore: store} = await import('/src/runtime/inbox-local-store.ts');
+    const {connectionController} = await import('/src/runtime/connection-ui.tsx');
+    const owner = JSON.stringify(['production','fixture-owner','']);
+    const client = connectionController.getCloudClient()!.client;
+    const operation = new InboxOperation({owner, grantId:'fixture-grant', store, client, active:() => true});
+    await operation.prepare({
+      kind:'send', mode:'compose', to:draft.to, cc:draft.cc || [], bcc:draft.bcc || [],
+      subject:draft.subject, bodyText:draft.body, attachments:[],
+    }, {draftId:draft.id});
+  }, draft);
+  await openInbox(page, options, true);
+}
 const rows = (page: Page) => page.getByRole('button', {name: /^Sender m\d+, Subject m\d+$/}).evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')!.replace(/^Sender (m\d+),.*/, '$1')));
 const notOpenStatus = 'This review is for an email that is not open in the composer, so it cannot be confirmed. Nothing was sent. Open that email and choose Send to review it again, or cancel this review.';
 const editedStatus = 'This email was edited after this review, so the review was discarded. Nothing was sent. Review the current email before sending.';
@@ -217,63 +243,27 @@ for (const removeOriginal of [false, true]) test(`F-5: a forward ${removeOrigina
   else expect(proposal.forwardAttachments).toEqual({messageId: 'm1', historyId: 'h-m1', partIds: ['part-1']});
 });
 
-test('F-10: an email edited after its review is reviewed again under a new request, and the first digest is never dispatched', async ({page}) => {
-  test.setTimeout(180_000);
+test('F-10: an edited email retires the older saved review before the one-tap send', async ({page}) => {
   await openInbox(page);
   await compose(page, 'Edited after review', 'First body');
-  await button(page, 'Send email').click();
+  await prepareLegacyReview(page, 'First body');
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await expect(review.getByText('First body', {exact: true})).toBeVisible();
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
-  expect((await provider(page)).prepared).toHaveLength(1);
-
-  // Unchanged email, Send pressed again: the same review, no second prepare.
-  await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
-  await expect(review).toHaveCount(0);
-  await button(page, 'Send email').click();
-  await expect(review.getByText('First body', {exact: true})).toBeVisible();
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
-  expect((await provider(page)).prepared).toHaveLength(1);
-
-  // Close the review without cancelling it, then edit the body. The saved review is now stale.
-  await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
-  await page.getByRole('textbox', {name: 'Message', exact: true}).fill('Second body');
-  await expect(page.getByText(editedStatus, {exact: true})).toBeVisible();
-  // The stale review is gone: its chip is not offered, so its Send button cannot be reached.
-  await button(page, 'Back from draft').click();
-  await expect(button(page, 'Mail review / receipt')).toHaveCount(0);
-  expect((await provider(page)).dispatched).toEqual([]);
-
-  await (await localDraftRow(page)).click();
-  await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Second body');
-  await button(page, 'Send email').click();
-  await expect(review.getByText('Second body', {exact: true})).toBeVisible();
-  await expect(review.getByText('First body', {exact: true})).toHaveCount(0);
-  await expect(review.getByRole('status')).toHaveText('Review every field before confirming. No mail has been sent.');
-  let state = await provider(page);
-  expect(state.prepared).toHaveLength(2);
-  expect(state.prepared[1].requestId).not.toBe(state.prepared[0].requestId);
-  expect(state.prepared[1].digest).not.toBe(state.prepared[0].digest);
-  expect(JSON.parse(state.prepared[1].proposal).bodyText).toBe('Second body');
-
-  // Reload with the second review pending. The saved review reopens, but it cannot be sent while
-  // its email is not open in the composer; with the unchanged email resumed it can, and only the
-  // second request is ever dispatched.
-  await openInbox(page, {}, true);
-  await expect(review.getByText('Second body', {exact: true})).toBeVisible();
   await expect(review.getByRole('status')).toHaveText(notOpenStatus);
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
   await (await localDraftRow(page)).click();
-  await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Second body');
+  await page.getByRole('textbox', {name: 'Message', exact: true}).fill('Second body');
+  await expect(page.getByText(editedStatus, {exact: true})).toBeVisible();
+  expect((await provider(page)).dispatched).toEqual([]);
   await button(page, 'Send email').click();
-  expect((await provider(page)).prepared).toHaveLength(2);
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-  state = await provider(page);
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
+  await expect(review).toHaveCount(0);
+  const state = await provider(page);
+  expect(state.prepared).toHaveLength(2);
+  expect(state.prepared[1].requestId).not.toBe(state.prepared[0].requestId);
+  expect(state.prepared[1].digest).not.toBe(state.prepared[0].digest);
+  expect(JSON.parse(state.prepared[1].proposal).bodyText).toBe('Second body');
   expect(state.dispatched).toEqual([state.prepared[1]]);
-  expect(state.dispatched.map(d => d.digest)).not.toContain(state.prepared[0].digest);
-  expect(state.sent).toEqual(['Edited after review']);
 });
 
 test('F-10: a saved older version of a sent email is kept, labelled as such, and reopened only after a confirmation', async ({page}) => {
@@ -310,36 +300,31 @@ test('F-10: a saved older version of a sent email is kept, labelled as such, and
   expect(JSON.parse(state.dispatched[0].proposal).bodyText).toBe('Sent final text');
 });
 
-test('F-10: an edit made while the review is still being prepared cannot be sent under that review', async ({page}) => {
-  test.setTimeout(180_000);
+test('F-10: the composer holds its exact contents while a send is being prepared', async ({page}) => {
   await openInbox(page);
-  await compose(page, 'Edited during prepare', 'Body sent for review');
+  await compose(page, 'Preparing send', 'Exact body');
   await setProvider(page, {slowPrepare: 2500});
   await button(page, 'Send email').click();
-  const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
-  await page.getByRole('textbox', {name: 'Message', exact: true}).fill('Body changed while the review was loading');
-  // The slow review arrives for the old text. It is discarded, not offered.
-  await expect(page.getByText(editedStatus, {exact: true})).toBeVisible({timeout: 15_000});
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
-  await setProvider(page, {slowPrepare: 0});
-  await button(page, 'Send email').click();
-  await expect(review.getByText('Body changed while the review was loading', {exact: true})).toBeVisible();
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
+  const message = page.getByRole('textbox', {name: 'Message', exact: true});
+  await expect(message).toBeDisabled();
+  await expect(message).toHaveValue('Exact body');
+  await expect(button(page, 'Send email')).toBeDisabled();
+  expect((await provider(page)).dispatched).toEqual([]);
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
   const state = await provider(page);
-  expect(state.prepared.map(p => JSON.parse(p.proposal).bodyText)).toEqual(['Body sent for review', 'Body changed while the review was loading']);
-  expect(state.dispatched).toEqual([state.prepared[1]]);
+  expect(state.prepared.map(p => JSON.parse(p.proposal).bodyText)).toEqual(['Exact body']);
+  expect(state.dispatched).toEqual(state.prepared);
 });
 
 test('F-10: a reload between an edit and the discard of its review never lets the earlier text be sent', async ({page}) => {
   test.setTimeout(180_000);
   await openInbox(page);
   await compose(page, 'Edited then reloaded', 'First body');
-  await button(page, 'Send email').click();
+  await prepareLegacyReview(page, 'First body');
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
+  await expect(review.getByRole('status')).toHaveText(notOpenStatus);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
+  await (await localDraftRow(page)).click();
   // The provider stops answering the store, so the discard that follows the edit cannot complete:
   // the first review is still saved when the page reloads, and the edit is in the retained copy.
   await page.evaluate(async () => {
@@ -371,10 +356,8 @@ test('F-10: a reload between an edit and the discard of its review never lets th
   await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Second body');
   await expect(page.getByText(editedStatus, {exact: true})).toBeVisible();
   await button(page, 'Send email').click();
-  await expect(review.getByText('Second body', {exact: true})).toBeVisible();
-  await expect(review.getByText('First body', {exact: true})).toHaveCount(0);
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
+  await expect(review).toHaveCount(0);
   const state = await provider(page);
   expect(state.prepared.map(p => JSON.parse(p.proposal).bodyText)).toEqual(['First body', 'Second body']);
   expect(state.dispatched).toEqual([state.prepared[1]]);
@@ -385,10 +368,11 @@ test('F-10: a review made under one From account cannot be sent after the email 
   test.setTimeout(180_000);
   await openInbox(page, {accounts: 2});
   await compose(page, 'Moved between accounts', 'One body');
-  await button(page, 'Send email').click();
+  await prepareLegacyReview(page, 'One body', {accounts: 2});
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
+  await expect(review.getByRole('status')).toHaveText(notOpenStatus);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
+  await (await localDraftRow(page)).click();
   // The From switcher moves the email to the second account, where it is reviewed and sent once.
   const from = page.getByRole('combobox', {name: 'From account', exact: true});
   await expect(from).toHaveValue('fixture-grant');
@@ -396,14 +380,11 @@ test('F-10: a review made under one From account cannot be sent after the email 
   await expect(from).toHaveValue('second-grant');
   await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('One body');
   await button(page, 'Send email').click();
-  await expect(review.getByText('One body', {exact: true})).toBeVisible();
-  await expect(review.getByRole('status')).toHaveText('Review every field before confirming. No mail has been sent.');
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
+  await expect(review).toHaveCount(0);
   let state = await provider(page);
   expect(state.prepared.map(p => p.grant)).toEqual(['fixture-grant', 'second-grant']);
   expect(state.dispatched).toEqual([state.prepared[1]]);
-  await review.getByRole('button', {name: 'Close receipt', exact: true}).click();
 
   // Back on the first account its saved review of the same email reappears. It offers no Send.
   await button(page, 'Fixture mailbox').click();
