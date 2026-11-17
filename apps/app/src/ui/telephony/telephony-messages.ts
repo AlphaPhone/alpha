@@ -65,6 +65,11 @@ export const SEND_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["MMS attachment names must be distinct", "Two pictures have the same name. Remove one and try again."],
   ["MMS is too large", "These pictures are too large to send together."],
   ["Invalid MMS attachment", "A picture can’t be sent. Remove it and try again."],
+  // Alpha's own Messages composer port (sms-adapter.ts composerClient, AlphaMessagesComposerPort
+  // and AlphaTelephonyPlugin.composerGuard). These carry a code, so without a row the code's
+  // generic sentence would replace the remedy.
+  ["Open the Messages composer to send this draft.", "Open the Messages composer to send this draft. Nothing was sent."],
+  ["Invalid Messages draft.", "This draft can’t be sent from the Messages composer. Nothing was sent."],
 ]);
 
 /** What a refused send says by its code when its sentence is unknown. */

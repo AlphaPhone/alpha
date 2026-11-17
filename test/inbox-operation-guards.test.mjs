@@ -132,6 +132,9 @@ test('the review sheet keeps a confirmed receipt when Check gets a regressed ans
     provider.render().provider.check();
     await until(() => toasts.length > 0 && !provider.render().provider.busy, 'the refused check');
     const shown = provider.render().provider;
+    // The owner is told, in Alpha's words, that nothing changed and not to repeat it.
+    assert.equal(toasts.at(-1), regressedReceiptRefusal, 'the toast keeps the guard’s guidance');
+    assert.equal(shown.status, regressedReceiptRefusal, 'the review status keeps the guard’s guidance');
     assert.equal(shown.canConfirm, false, 'Confirm is not offered again');
     assert.equal(d.slot().phase, 'observed'); assert.equal(d.slot().receipt.state, 'succeeded');
     shown.confirm(); await new Promise(resolve => setTimeout(resolve, 20)); provider.render().provider.confirm();
