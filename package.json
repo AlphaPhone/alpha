@@ -36,15 +36,19 @@
     "all": "node vibestack/spec.ts tasks"
   },
   "version": "0.1.0",
-  "description": "Stories, rules and Quint in a Markdown spec tree; verified TypeScript out.",
+  "description": "Alpha, the personal agent phone by Alpha Compute, specified and built on the Vibestack toolchain.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lalalune/vibestack.git"
+    "url": "git+https://github.com/eliza-research/alpha.git"
   },
-  "homepage": "https://github.com/lalalune/vibestack#readme",
-  "bugs": "https://github.com/lalalune/vibestack/issues",
+  "homepage": "https://github.com/eliza-research/alpha#readme",
+  "bugs": "https://github.com/eliza-research/alpha/issues",
   "keywords": [
+    "alpha",
+    "agent",
+    "android",
+    "launcher",
     "formal-verification",
     "quint",
     "dafny",

@@ -1,7 +1,7 @@
 # Contributing
 
 Every contributor, person or agent, reads [AGENTS.md](AGENTS.md) in full before any work, and the skill or file its ["Where the rest is"](AGENTS.md#where-the-rest-is) names for the work at hand.
-Starting a project from the template is [README.md, "Set up a new project"](README.md#set-up-a-new-project).
+Starting a project from the template is [vibestack/README.md, "Set up a new project"](vibestack/README.md#set-up-a-new-project).
 Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang on Effect for the shell, React for every interface.
 
 ## The monorepo
@@ -105,7 +105,7 @@ tools owes it, and the sync skill, is in [AGENTS.md, "Definition of done"](AGENT
 
 Set `version` in the root `package.json`, merge to `main`, and push the tag `v<version>` from it.
 `.github/workflows/release.yml` builds, packs with `pnpm pack`, runs `pnpm selftest --concurrency=1`, which the shared cache answers for a commit CI has verified, and attaches the tarball to a GitHub release of that tag.
-A project installs it as [README.md, "Using it from another package"](README.md#using-it-from-another-package) says.
+A project installs it as [vibestack/README.md, "Using it from another package"](vibestack/README.md#using-it-from-another-package) says.
 ## Architecture
 
 The spec owns the rules and state; generated code is its runtime contract.
