@@ -3,9 +3,12 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import { greeter } from "./greeter.vibe";
+import { browserDevice } from "./platform/device.vibe";
+import { admitted, shell } from "./shell/shell.vibe";
 import "./main.css";
 
-const runtime = ManagedRuntime.make(Layer.provide(greeter, KeyValueStore.layerStorage(() => localStorage)));
+const runtime = ManagedRuntime.make(Layer.merge(Layer.provide(shell, KeyValueStore.layerStorage(() => localStorage)), browserDevice));
 
-createRoot(document.getElementById("root")!).render(<StrictMode><App runtime={runtime} search={location.search} /></StrictMode>);
+void runtime.runPromiseExit(admitted());
+
+createRoot(document.getElementById("root")!).render(<StrictMode><App runtime={runtime} /></StrictMode>);

@@ -1,0 +1,13 @@
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+export interface Capabilities {
+  readonly image: boolean
+  readonly contacts: boolean
+}
+
+export service Device {
+  capabilities(): Capabilities!!
+}
+
+export const browserDevice = Layer.succeed(Device, {
+  effect capabilities() { return { image: false, contacts: false } },
+})

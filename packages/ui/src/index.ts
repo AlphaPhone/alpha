@@ -1,5 +1,7 @@
 export * from "./lib/cn.ts";
 export * from "./components/Alert.tsx";
+export * from "./components/AppHeader.tsx";
+export * from "./components/AppTile.tsx";
 export * from "./components/Button.tsx";
 export * from "./components/Card.tsx";
 export * from "./components/Checkbox.tsx";
@@ -7,6 +9,7 @@ export * from "./components/Dialog.tsx";
 export * from "./components/EmptyState.tsx";
 export * from "./components/Input.tsx";
 export * from "./components/Label.tsx";
+export * from "./components/Mark.tsx";
 export * from "./components/Progress.tsx";
 export * from "./components/Skeleton.tsx";
 export * from "./components/Spinner.tsx";

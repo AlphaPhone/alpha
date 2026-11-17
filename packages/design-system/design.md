@@ -3,7 +3,7 @@
 Black and white with one blue. Type and space carry the hierarchy; blue marks Alpha and the one thing to
 do next.
 
-- **Identity.** `brand` is Alpha blue, the same in both themes, with `brand-foreground` on it: the Alpha
+- **Identity.** `alpha` is Alpha blue, the same in both themes, with `alpha-foreground` on it: the Alpha
   mark, the Ask Alpha button and the app icon. The marks are in `@repo/ui` (`Mark`, `Wordmark`).
 - **Surfaces.** `background` is the page: white, or true black in the dark. `card` is a raised panel,
   `popover` anything floating: a sheet, a menu, a dialog. `secondary` and `muted` are the quiet fill of a
@@ -26,7 +26,7 @@ do next.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-md` a menu or dialog, `shadow-lg` the Ask Alpha
   bar, `shadow-sheet` a bottom sheet.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
-  dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10` and `z-20` order things inside one view.
+  dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
   `animate-shimmer` work in progress. Reduced motion stops them all.
@@ -77,8 +77,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `ok` | oklch(0.509 0.134 149.4) | oklch(0.727 0.208 148.3) |
 | `warn` | oklch(0.514 0.111 70.3) | oklch(0.761 0.159 77.7) |
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
-| `brand` | oklch(0.452 0.313 264.1) | — |
-| `brand-foreground` | oklch(1 0 0) | — |
+| `alpha` | oklch(0.452 0.313 264.1) | — |
+| `alpha-foreground` | oklch(1 0 0) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
 
@@ -122,11 +122,12 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `tracking.caps` | 0.14em |
 | `z.10` | 10 |
 | `z.20` | 20 |
-| `z.dock` | 40 |
-| `z.sheet` | 50 |
-| `z.dialog` | 60 |
-| `z.toast` | 70 |
-| `z.voice` | 80 |
+| `z.50` | 50 |
+| `z.dock` | 100 |
+| `z.sheet` | 200 |
+| `z.dialog` | 300 |
+| `z.toast` | 400 |
+| `z.voice` | 500 |
 | `focus.width` | 2px |
 | `focus.offset` | 2px |
 | `shadow.sm` | 0 1px 3px oklch(0 0 0 / 0.2) |

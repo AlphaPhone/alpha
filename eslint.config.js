@@ -26,6 +26,10 @@ const imports = {
     { regex: `^(?!(?:${exported.join("|")})$)@repo/[^/]+/`, message: `Import a workspace package by a path its "exports" names: ${monorepo}.` },
   ],
 }
+// AGENTS.md, "Hard rules": an interface keeps its state in the spec's Machine and leaves effects and time to the shell.
+const noEffects = { paths: [{ name: "react", importNames: ["useEffect", "useLayoutEffect", "useInsertionEffect"], message: 'Send an event to the Machine, or run the effect in the shell: AGENTS.md, "Hard rules".' }], patterns: imports.patterns }
+const dialogs = ["alert", "confirm", "prompt"].map((name) => ({ name, message: "Use Dialog or Alert from @repo/ui." }))
+const timers = ["setTimeout", "setInterval", "requestAnimationFrame", "requestIdleCallback"].map((name) => ({ name, message: 'Time belongs to the shell, as an Effect: AGENTS.md, "Hard rules".' }))
 const noReact = { patterns: [...imports.patterns, { regex: "^react(?:-dom)?(?:/|$)", message: `Tool and domain code does not import React: ${monorepo}.` }] }
 // What no tsconfig.json includes, so the type-aware rules cannot see it.
 const untyped = ["*.{js,ts}", "**/.storybook/**", "packages/design-system/**", "vibestack/design/test/**", "vibestack/stories/test/**"]
@@ -123,8 +127,11 @@ export default defineConfig(
     files: tsx,
     ignores: ["packages/ui/**"],
     rules: {
-      "no-restricted-globals": ["error", ...["alert", "confirm", "prompt"].map((name) => ({ name, message: "Use Dialog or Alert from @repo/ui." }))],
+      "no-restricted-globals": ["error", ...dialogs],
       "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name=/^(input|textarea)$/]", message: "Use Input, Textarea or Checkbox from @repo/ui." }],
     },
   },
+  // The application and its components: no effect hooks and no timers.
+  { files: ["apps/**/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers, ...dialogs] } },
+  { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers] } },
 )

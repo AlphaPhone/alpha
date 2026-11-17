@@ -5,7 +5,7 @@ import { cn, focusRing } from "../lib/cn.ts";
 import { Spinner } from "./Spinner.tsx";
 
 const buttonVariants = cva(
-  [focusRing, "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"],
+  [focusRing, "inline-flex items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"],
   {
     variants: {
       variant: {
@@ -15,7 +15,7 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent hover:text-accent-foreground",
         destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
       },
-      size: { sm: "h-8 px-3", md: "h-9 px-4", lg: "h-10 px-6", icon: "size-9" },
+      size: { sm: "h-11 px-4", md: "h-11 px-5", lg: "h-12 px-6", icon: "size-11" },
     },
     defaultVariants: { variant: "primary", size: "md" },
   },
