@@ -9,8 +9,11 @@
 // Shared UI is recognised by what it is, whatever its name: a class that is an Activity, Dialog,
 // TileService, InCallService or AutofillService, or a member that builds an AlertDialog, a
 // notification, a toast, RemoteViews, a chooser, a biometric prompt, a popup or views. The scan
-// covers the pinned sources of every shared module android/consumer-host.json compiles into the
-// app and the shared listener sources android/sense/build.gradle compiles.
+// covers the pinned sources of every shared root the build compiles into the app (each shared
+// module's source roots, the resident runtime's shared helpers and the shared speech sources) and
+// the shared listener sources android/sense/build.gradle compiles. Beyond what Alpha's own files
+// call, it follows what Alpha inherits: every shared superclass member Alpha does not override, and
+// every super call, into the shared code those run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -22,20 +25,56 @@ const APP_ID = 'ai.alphacompute.alphaphone';
 const SENSE_VENDOR = VENDOR + 'packages/app/platforms/android/sense/src/main/java';
 const ALPHA_SOURCES = ['android/app/src/main/java', 'android/app/src/launcher/java', 'android/sense/src/main/java'];
 
-const walk = dir => !fs.existsSync(dir) ? [] : fs.readdirSync(dir, {withFileTypes: true})
+const walk = dir => !fs.existsSync(dir) ? [] : fs.statSync(dir).isFile() ? [dir] : fs.readdirSync(dir, {withFileTypes: true})
   .flatMap(entry => entry.isDirectory() ? walk(path.join(dir, entry.name)) : /\.(?:java|kt)$/.test(entry.name) ? [path.join(dir, entry.name)] : []);
-/** Comments blanked, so documentation naming a shared class or a dialog does not count. */
-const code = text => text.replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, ' ')).replace(/(^|[^:"\\])\/\/.*$/gm, '$1');
+/**
+ * Comments blanked, so documentation naming a shared class or a dialog does not count. String,
+ * text-block and character literals are kept and skipped, so a literal such as a "*\/*" MIME type
+ * or a URL never opens or closes a comment.
+ */
+function code(text) {
+  let out = '';
+  for (let at = 0; at < text.length;) {
+    const rest = text.startsWith.bind(text);
+    if (rest('//', at) || rest('/*', at)) {
+      const end = rest('//', at) ? (text.indexOf('\n', at) < 0 ? text.length : text.indexOf('\n', at)) : (text.indexOf('*/', at + 2) < 0 ? text.length : text.indexOf('*/', at + 2) + 2);
+      out += text.slice(at, end).replace(/[^\n]/g, ' ');
+      at = end;
+    } else if (rest('"""', at)) {
+      const close = text.indexOf('"""', at + 3);
+      const end = close < 0 ? text.length : close + 3;
+      out += text.slice(at, end);
+      at = end;
+    } else if (text[at] === '"' || text[at] === "'") {
+      let end = at + 1;
+      while (end < text.length && text[end] !== text[at] && text[end] !== '\n') end += text[end] === '\\' ? 2 : 1;
+      out += text.slice(at, end + 1);
+      at = end + 1;
+    } else out += text[at++];
+  }
+  return out;
+}
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const host = JSON.parse(read('android/consumer-host.json')).profile;
 const sharedModules = host.modules.filter(module => ['upstream', 'patchedNative'].includes(module.source.root));
-const SHARED_SOURCES = [
-  ...sharedModules.map(module => VENDOR + module.source.path + '/src/main/java'),
+// Every shared Java and Kotlin root the build compiles: each shared module's src/main/java and the
+// extra roots its build.gradle adds (for example plugin-native-notifications' src/capacitor/java,
+// which holds the NotificationsHostPlugin Alpha extends), the shared roots the app adds, the
+// shared listener sources, and the shared speech sources android/local-speech and
+// android/sense-speech compile through the speech consumer.gradle (which holds the
+// LocalSpeechBridgePlugin Alpha extends).
+const SPEECH_VENDOR = VENDOR + 'plugins/plugin-local-inference/native/android';
+const extraRoots = dir => !fs.existsSync(dir + '/build.gradle') ? [] : [...code(read(dir + '/build.gradle'))
+  .matchAll(/java\.srcDirs?\s*(?:\+=|=|\()\s*\[?\s*'([^']+)'/g)].map(match => dir + '/' + match[1]);
+const SHARED_SOURCES = [...new Set([
+  ...sharedModules.flatMap(module => [VENDOR + module.source.path + '/src/main/java', ...extraRoots(VENDOR + module.source.path)]),
   ...(host.sourceSets?.main?.java ?? []).filter(entry => ['upstream', 'patchedNative'].includes(entry.root)).map(entry => VENDOR + entry.path),
   SENSE_VENDOR,
-];
-
+  ...[...code(read(SPEECH_VENDOR + '/consumer.gradle')).matchAll(/new File\(paradeeSource, '([^']+\/java)'\)/g)].map(match => SPEECH_VENDOR + '/' + match[1]),
+  // Shared helpers the resident runtime staging compiles beside it in their own packages.
+  ...JSON.parse(read('android/consumer-host.json')).residentHost.helpers.map(helper => VENDOR + helper),
+])];
 /** One source class: its package, simple name and comment-free text. */
 function classes(dirs) {
   const index = new Map();
@@ -57,12 +96,14 @@ const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'try', 'catch', 'synch
 const DECLARATION = /^[ \t]*(?:(?:public|private|protected|static|final|synchronized|abstract|default|override|internal|suspend|@\w+(?:\([^)]*\))?)\s+)*(?:fun\s+(?:<[^>]+>\s*)?(\w+)\s*\(|(?:<[^>]+>\s+)?[\w<>\[\],.? ]+?\s+(\w+)\s*\([^;{]*\)\s*(?:throws [\w., ]+)?\s*\{|(\w+)\s*\([^;{]*\)\s*\{)/gm;
 
 /** How a shared class presents UI: '<class>' for a UI component class, else the presenting members. */
-function presentation({text}) {
-  const found = new Set();
+/** A source's method and constructor declarations, in order (computed once: the pattern is slow). */
+const declarationsOf = source => source.declarations ??= [...source.text.matchAll(DECLARATION)]
+  .map(match => ({at: match.index, name: match[1] ?? match[2] ?? match[3]}))
+  .filter(declaration => !KEYWORDS.has(declaration.name));
+function presentation(source) {
+  const {text} = source, found = new Set();
   if (UI_BASE.test(text)) found.add('<class>');
-  const declarations = [...text.matchAll(DECLARATION)]
-    .map(match => ({at: match.index, name: match[1] ?? match[2] ?? match[3]}))
-    .filter(declaration => !KEYWORDS.has(declaration.name));
+  const declarations = declarationsOf(source);
   for (const match of text.matchAll(UI_CALL)) {
     const owner = declarations.filter(declaration => declaration.at < match.index).pop();
     found.add(owner ? owner.name : '<class>');
@@ -76,28 +117,38 @@ function referenced(source, index) {
   const out = new Set();
   const imports = [...source.text.matchAll(/^\s*import\s+([\w.]+?)(\.\*)?\s*;/gm)];
   const body = source.text.replace(/^\s*(?:package|import)\s+[^;\n]+;?/gm, '');
+  const words = new Set(body.match(/\b\w+\b/g));
   for (const [name, target] of index) {
-    if (name === `${source.pkg}.${source.simple}`) continue;
+    if (name === `${source.pkg}.${source.simple}` || !words.has(target.simple)) continue;
     const word = new RegExp(`\\b${escape(target.simple)}\\b`);
     if (new RegExp(`\\b${escape(name)}\\b`).test(body)) out.add(name);
     else if (word.test(body) && (target.pkg === source.pkg || imports.some(([, imported, wildcard]) => wildcard ? imported === target.pkg : imported === name))) out.add(name);
   }
   return out;
 }
-/** A class's direct superclass, resolved against Alpha's and the shared sources. */
+/** A class's direct superclass, resolved against Alpha's and the shared sources, imports and java.lang. */
 function superclass(source) {
-  const match = new RegExp(`\\bclass\\s+${escape(source.simple)}(?:<[^>{]*>)?\\s+extends\\s+([\\w.]+)`).exec(source.text);
+  const match = new RegExp(`\\bclass\\s+${escape(source.simple)}(?:<[^>{]*>)?\\s+extends\\s+([\\w.]+)`).exec(source.text)
+    ?? new RegExp(`\\bclass\\s+${escape(source.simple)}\\b[^{\\n]*?\\)?\\s*:\\s*([\\w.]+)\\s*\\(`).exec(source.text);
   if (!match) return null;
   const named = match[1];
   if (named.includes('.')) return named;
-  const imported = new RegExp(`^\\s*import\\s+([\\w.]+\\.${escape(named)})\\s*;`, 'm').exec(source.text)?.[1];
+  const imported = new RegExp(`^\\s*import\\s+([\\w.]+\\.${escape(named)})\\s*;?\\s*$`, 'm').exec(source.text)?.[1];
   if (imported) return imported;
   const local = `${source.pkg}.${named}`;
-  return alpha.has(local) || shared.has(local) ? local : named;
+  if (alpha.has(local) || shared.has(local)) return local;
+  for (const [, wildcard] of source.text.matchAll(/^\s*import\s+([\w.]+)\.\*\s*;?\s*$/gm))
+    if (alpha.has(`${wildcard}.${named}`) || shared.has(`${wildcard}.${named}`) || PLATFORM.test(`${wildcard}.`)) return `${wildcard}.${named}`;
+  return JAVA_LANG.has(named) ? `java.lang.${named}` : named;
 }
+const PLATFORM = /^(?:android|androidx|java|javax|kotlin|com\.getcapacitor)\./;
+const JAVA_LANG = new Set(['Object', 'Exception', 'RuntimeException', 'IllegalStateException', 'IllegalArgumentException', 'SecurityException', 'Thread', 'Error']);
 /** Every superclass up to the first one neither Alpha nor the shared modules define. */
+const ancestry = new Map();
 function ancestors(name) {
+  if (ancestry.has(name)) return ancestry.get(name);
   const chain = [];
+  ancestry.set(name, chain);
   for (let current = alpha.get(name) ?? shared.get(name); current;) {
     const parent = superclass(current);
     if (!parent) break;
@@ -107,11 +158,58 @@ function ancestors(name) {
   return chain;
 }
 
+/** A source's members: each declaration's name and its text up to the next declaration. */
+function members(source) {
+  if (source.members) return source.members;
+  const declarations = declarationsOf(source);
+  source.members = new Map();
+  declarations.forEach((declaration, index) => {
+    const body = source.text.slice(declaration.at, declarations[index + 1]?.at ?? source.text.length);
+    source.members.set(declaration.name, (source.members.get(declaration.name) ?? '') + body);
+  });
+  return source.members;
+}
+/**
+ * The shared presenting members Alpha runs through what it inherits: starting from every member of a
+ * shared superclass that the Alpha class does not override, and from every super.m(...) it calls,
+ * follow calls into the same class chain, into a shared class named as `Class.member(` and, for a
+ * call on another receiver, into that member of any shared class the caller names (an
+ * over-approximation, so a pin advance that routes an inherited path into UI cannot go unseen).
+ */
+function inheritedUi(name) {
+  const sharedChain = ancestors(name).filter(ancestor => shared.has(ancestor));
+  if (!sharedChain.length) return new Map();
+  const own = new Set([name, ...ancestors(name)].filter(current => alpha.has(current)).flatMap(current => [...members(alpha.get(current)).keys()]));
+  const roots = [];
+  for (const ancestor of sharedChain) for (const member of members(shared.get(ancestor)).keys()) if (!own.has(member)) roots.push([ancestor, member]);
+  for (const [, member] of alpha.get(name).text.matchAll(/\bsuper\s*\.\s*(\w+)\s*\(/g))
+    for (const ancestor of sharedChain) if (members(shared.get(ancestor)).has(member)) { roots.push([ancestor, member]); break; }
+  const seen = new Set(), found = new Map();
+  for (const queue = roots.map(([owner, member]) => [owner, member, `${owner.split('.').pop()}.${member}`]); queue.length;) {
+    const [owner, member, via] = queue.shift(), key = `${owner}#${member}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (sharedUi.get(owner)?.includes(member)) { found.set(`${owner}.${member}`, via); continue; }
+    const source = shared.get(owner), body = members(source).get(member) ?? '';
+    source.named ??= new Map([...referenced(source, shared)].map(target => [shared.get(target).simple, target]));
+    const named = source.named;
+    const chain = [owner, ...ancestors(owner)].filter(ancestor => shared.has(ancestor));
+    for (const [, receiver, called] of body.matchAll(/(?:\b(\w+)\s*\.\s*|(?<![\w.]))(\w+)\s*\(/g)) {
+      if (KEYWORDS.has(called)) continue;
+      const targets = receiver && named.has(receiver) ? [named.get(receiver)]
+        : !receiver || receiver === 'this' || receiver === 'super' ? chain : [...named.values(), ...chain];
+      for (const target of targets) if (members(shared.get(target)).has(called)) queue.push([target, called, `${via} > ${shared.get(target).simple}.${called}`]);
+    }
+  }
+  return found;
+}
+
 // Shared classes Alpha reaches that present UI somewhere. Each keeps exactly the presenting members
 // the scan finds (so a pin advance that adds one fails here), and Alpha must not extend or create
 // the class nor call one of those members on it.
 const REVIEWED_SHARED_UI = new Map([
   ['ai.eliza.plugins.calendar.CalendarPlugin', {ui: ['executeAgent', 'executeNext', 'remove'], reason: 'NativeDeletionCoordinator calls only the static deleteReviewedExact, which re-reads revisions and deletes without UI; the deletion and agent reviews are Alpha\'s (CalendarProviderPlugin)'}],
+  ['ai.eliza.plugins.media.DocumentFolderTree', {ui: ['shareMany'], reason: 'AlphaFilesPlugin calls only forget() (dropping the retired folder grant) and the static result(); Files sharing is Alpha\'s (AlphaFilesPlugin.storageShare, with an untitled system chooser)'}],
   ['ai.eliza.plugins.media.SelectedDocuments', {ui: ['shareUri'], reason: 'the selected-document registry and grants; sharing is Alpha\'s (AlphaShareSheet)'}],
   ['ai.eliza.plugins.messages.MmsStore', {ui: ['notifyIncoming'], reason: 'the MMS store, read marks and notice cancellation; incoming notices are Alpha\'s (AlphaMessageNotices) with the same tag, id and receipt extra'}],
   ['ai.eliza.plugins.messages.TelephonyPlugin', {reached: true, ui: ['reviewMmsOnMain', 'reviewSmsOnMain'], reason: 'reached only through the shared MmsStore, which reads its constants; Alpha registers AlphaTelephonyPlugin over AlphaTelephonyBase and never this plugin'}],
@@ -120,7 +218,7 @@ const REVIEWED_SHARED_UI = new Map([
   ['ai.eliza.plugins.passwords.SecretSurfaces', {reached: true, ui: ['reveal'], reason: 'reached only through the shared vault custody, which would close a shared reveal on lock; Alpha reveals passwords and provider keys through its own SecretSurfaces'}],
   ['ai.eliza.plugins.notifications.HostNoticePoster', {ui: ['approval', 'redacted', 'step'], reason: 'AlphaNotificationsPlugin passes the shared NotificationsHostPlugin its CONFIG identities only; workflow notices are posted by Alpha\'s WorkflowNoticePoster through its own delivery()'}],
   ['ai.eliza.plugins.reminders.ReminderStore', {reached: true, ui: ['postNotification'], reason: 'known gap: Alpha\'s ReminderReceiver (extending the shared ReminderReceiver) and AlphaReminders run the shared ReminderEngine, which posts the due reminder itself (ReminderStore is package-private and final, and ReminderReceiver.onReceive is final); its channel names are Alpha\'s (AlphaNotificationChannels) and its action labels stay "Done" and "Snooze 10 minutes" until upstream takes a presenter hook'}],
-  ['ai.eliza.plugins.system.SystemLauncherApps', {ui: ['chooseLaunchIntent'], reason: 'AlphaSystemPlugin reads its installed-app validation and refusal codes; Alpha never asks it to open a chooser'}],
+  ['ai.eliza.plugins.system.SystemLauncherApps', {ui: ['chooseLaunchIntent'], reason: 'AlphaSystemPlugin reads its installed-app validation and refusal codes; its only chooser is the untitled system one the inherited openDefaultApp opens (REVIEWED_INHERITED)'}],
 ]);
 // Shared classes registered as Capacitor plugins: no UI of their own.
 const SHARED_PLUGINS = new Map([
@@ -140,6 +238,18 @@ const SHARED_COMPONENTS = new Map([
 const STAGED_COMPONENTS = new Map([
   [`${APP_ID}.ElizaAgentService`, 'the resident runtime service, staged with counted rewrites: its notification text, channel names and icons are Alpha\'s resources (alpha-system-entry.xml) and it offers no Stop or Restart action'],
 ]);
+test('the comment stripper keeps string, text-block and character literals', () => {
+  const sample = 'String type = "*/*"; // a // comment\nnew AlertDialog.Builder(c); /* a "quoted" */ char q = \'"\';\nString b = """\n  /* kept */\n""";\nString url = "https://example.test/a";';
+  const stripped = code(sample);
+  assert.equal(stripped.length, sample.length, 'offsets are kept');
+  assert.match(stripped, /"\*\/\*"; +\nnew AlertDialog\.Builder\(c\);/, 'a "*/*" literal opens no comment');
+  assert.match(stripped, /char q = '"';/);
+  assert.match(stripped, /\/\* kept \*\//, 'text blocks are kept');
+  assert.match(stripped, /"https:\/\/example\.test\/a"/, 'a URL is not a comment');
+  assert.doesNotMatch(stripped, /comment|quoted/);
+  assert.deepEqual(presentation({text: code('class T {\n  void share() {\n    String t = "*/*";\n    Intent.createChooser(send, "Share");\n  }\n}')}), ['share']);
+});
+
 test('the scan recognises the shared native UI Alpha forked', () => {
   assert.ok(shared.size > 200 && alpha.size > 150, 'shared and Alpha sources were read');
   for (const [name, member] of [
@@ -153,6 +263,20 @@ test('the scan recognises the shared native UI Alpha forked', () => {
     assert.ok(sharedUi.has(name), `${name} is recognised as shared UI`);
     if (member) assert.ok(sharedUi.get(name).includes(member), `${name}: ${member}`);
   }
+});
+
+test('the scan reads every shared root the build compiles, and every Alpha superclass resolves', () => {
+  assert.deepEqual(SHARED_SOURCES.filter(dir => !fs.existsSync(dir)), [], 'every shared root exists at the pin');
+  for (const name of ['ai.eliza.plugins.notifications.NotificationsHostPlugin', 'ai.eliza.voice.LocalSpeechBridgePlugin', 'ai.eliza.plugins.agent.runtime.NativeProviderAdmission'])
+    assert.ok(shared.has(name), `${name} is scanned`);
+  // A superclass chain stops only at a platform or Capacitor class, or at a scanned shared class
+  // with no superclass of its own, so nothing Alpha inherits goes unread.
+  const unresolved = [];
+  for (const name of alpha.keys()) {
+    const chain = ancestors(name), last = chain.at(-1);
+    if (last && !PLATFORM.test(last) && !shared.has(last) && !alpha.has(last)) unresolved.push(`${name} extends ${chain.join(' < ')}`);
+  }
+  assert.deepEqual(unresolved, []);
 });
 
 test('every registered Capacitor plugin is Alpha\'s, or a shared plugin with no UI', () => {
@@ -286,6 +410,37 @@ ${extra}`, badging: `package: name='${APP_ID}' versionCode='15' versionName='15'
   assert.match(assess(element('activity', 'ai.eliza.plugins.messages.SmsComposeActivity')).join(), /Shared activity ai\.eliza\.plugins\.messages\.SmsComposeActivity/);
   assert.match(assess(element('service', 'ai.eliza.plugins.system.AssistantEntryTile')).join(), /Shared service/);
 });
+
+// Shared presenting members Alpha runs through what it inherits (inheritedUi), each with the Alpha
+// code that keeps it from showing shared UI pinned, so a change on either side fails here.
+const REVIEWED_INHERITED = new Map([
+  ['ai.alphacompute.alphaphone.AlphaMmsResultReceiver ai.eliza.plugins.messages.MmsStore.notifyIncoming', {
+    pinned: /if \(intent == null \|\| !config\.mmsDownloadedAction\.equals\(intent\.getAction\(\)\)\) \{ super\.onReceive\(context, intent\); return; \}/,
+    reason: 'the shared onReceive posts the shared notice only for a finished download, and Alpha\'s onReceive takes every download first and posts through AlphaMessageNotices; the shared receiver keeps only the response results and "Mark as read"'}],
+  ['ai.alphacompute.alphaphone.AlphaNotificationsPlugin ai.eliza.plugins.notifications.HostNoticePoster.step', {
+    pinned: /@Override protected NoticeDelivery delivery\(\)\{NoticeRoutes routes=routes\(\);return new NoticeDelivery\(deliveryConfig\(\),noticeStorage\(\),new WorkflowNoticePoster\(/,
+    reason: 'an over-approximation through the shared worker\'s Handler post(Runnable); the shared poster is built only by poster(), which only the shared delivery() calls, and Alpha\'s delivery() posts through its own WorkflowNoticePoster'}],
+  ['ai.alphacompute.alphaphone.AlphaSystemPlugin ai.eliza.plugins.system.SystemLauncherApps.chooseLaunchIntent', {
+    pinned: /class AlphaSystemPlugin extends ai\.eliza\.plugins\.system\.SystemPlugin/,
+    reason: 'the inherited openDefaultApp (final in Kotlin) opens the dial handler and, only when several apps can dial, an untitled system chooser (Intent.createChooser with a null title): the chooser and its wording are Android\'s, and the refusals are the shared plugin\'s non-UI results'}],
+  ['ai.alphacompute.alphaphone.DailyAppsPlugin ai.eliza.plugins.reminders.ReminderStore.postNotification', {
+    pinned: /class DailyAppsPlugin extends ai\.eliza\.plugins\.reminders\.ReminderPlugin/,
+    reason: 'known gap: the shared reminder store posts the due reminder; listed with ReminderStore above'}],
+]);
+
+test('Alpha inherits no shared UI path beyond the reviewed ones', () => {
+  const found = new Map();
+  for (const name of alpha.keys()) for (const [member, via] of inheritedUi(name)) found.set(`${name} ${member}`, via);
+  assert.deepEqual([...found.keys()].filter(key => !REVIEWED_INHERITED.has(key)).map(key => `${key} via ${found.get(key)}`), [], 'an inherited shared UI path is reviewed');
+  assert.deepEqual([...REVIEWED_INHERITED.keys()].filter(key => !found.has(key)), [], 'a reviewed inherited path Alpha no longer runs leaves the list');
+  for (const [key, {pinned, reason}] of REVIEWED_INHERITED) {
+    assert.match(alpha.get(key.split(' ')[0]).text, pinned, `${key}: the Alpha code the review relies on is unchanged`);
+    assert.ok(reason.length > 30, `${key} has a reviewed reason`);
+  }
+  // The walk follows inherited plugin methods into another shared class.
+  assert.match(found.get('ai.alphacompute.alphaphone.AlphaSystemPlugin ai.eliza.plugins.system.SystemLauncherApps.chooseLaunchIntent'), /SystemPlugin\.openDefaultApp > SystemLauncherApps\.defaultLaunchIntent/);
+});
+
 
 // Shared entry points whose safety depends on Alpha's own UI around them. The split-package bridges
 // (AlphaTelephonyAccess, AlphaPasswordAdmission) make package-private shared members public, and the
