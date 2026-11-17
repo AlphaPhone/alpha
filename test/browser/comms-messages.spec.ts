@@ -88,9 +88,9 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page,'deleteMessage')).toHaveLength(1);
   });
 
-  test('a send that is pending or failed is refused as not settled: nothing is deleted and Delete stays offered',async({page})=>{
+  for (const status of ['pending','failed'] as const) test(`a ${status} send is refused as not settled: nothing is deleted and Delete stays offered`,async({page})=>{
     await setupTelephony(page);
-    await page.evaluate(()=>{const row=(window as any).messages['thread:101'].find((value:any)=>value.id==='sms:4');Object.assign(row,{direction:'outgoing',status:'failed',deliveryReport:'none'});});
+    await page.evaluate((status)=>{const row=(window as any).messages['thread:101'].find((value:any)=>value.id==='sms:4');Object.assign(row,{direction:'outgoing',status,deliveryReport:'none'});},status);
     await page.getByRole('button',{name:'Messages',exact:true}).first().click();await page.getByRole('button',{name:/^Ada Okafor/}).click();
     const target=page.locator('[data-alpha-message-id="sms:4"]');
     await target.dispatchEvent('contextmenu');await page.getByRole('menuitem',{name:'Delete',exact:true}).click();
