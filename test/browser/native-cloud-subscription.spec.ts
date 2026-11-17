@@ -25,7 +25,9 @@ function alphaCloudBuild(){
 async function composition(alphaCloud:boolean){
  let server!:ViteDevServer;
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
- try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:resolve(alphaCloud?'test-results/native-cloud-subscription/vite-cache-alpha-cloud':'test-results/native-cloud-subscription/vite-cache'),server:{host:'127.0.0.1',port:0},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...(alphaCloud?[alphaCloudBuild()]:[]),{name:'native-subscription-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `
+ // Parallel workers keep their optimized modules separate and do not hot-reload the fixture.
+ const cacheDir=resolve('test-results/native-cloud-subscription',`vite-cache-${process.pid}-${alphaCloud?'alpha':'eliza'}`);
+ try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir,server:{host:'127.0.0.1',port:0,hmr:false,watch:null},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...(alphaCloud?[alphaCloudBuild()]:[]),{name:'native-subscription-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `
  import React,{useSyncExternalStore} from 'react';
  import {createRoot} from 'react-dom/client';
  import '/src/prototype/prototype.css';
@@ -60,10 +62,13 @@ async function boot(page:Page,initial:NativePlanFixture&{alphaCloud?:boolean}={}
  await installNativeCloudPlanPorts(page,initial);
  const base=initial.alphaCloud?(await (alphaServer??=composition(true))).origin:origin;
  await page.goto(base+(initial.fullApp?'/':'/subscription-composition'),{waitUntil:'commit'});
- if(initial.fullApp)await page.evaluate(async()=>{
-  const w=window as any;w.planController=(await import('/src/runtime/connection-ui.tsx')).connectionController;
-  w.planFlags={native:(await import('/src/native.ts')).isAndroid?'android':'web',mocks:(await import('/src/build-flags.ts')).testMocksEnabled};
- });
+ if(initial.fullApp){
+  await expect(page.locator('.alpha-phone')).toBeVisible({timeout:90_000});
+  await page.evaluate(async()=>{
+   const w=window as any;w.planController=(await import('/src/runtime/connection-ui.tsx')).connectionController;
+   w.planFlags={native:(await import('/src/native.ts')).isAndroid?'android':'web',mocks:(await import('/src/build-flags.ts')).testMocksEnabled};
+  });
+ }
  // A cold isolated Vite composition must finish its module graph before product assertions.
  await expect.poll(()=>page.evaluate(()=>(window as any).planFlags),{timeout:90_000}).toEqual({native:'android',mocks:false});
 }
