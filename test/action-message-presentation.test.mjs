@@ -154,3 +154,25 @@ test('only a browser proposal receipt that succeeded with its exact summary name
   [null,opened],[undefined,opened],
  ])assert.equal(succeededBrowserDestination(proposal,receipt),undefined);
 });
+
+// Telephony receipts are journalled and sent to the agent in words about the owner; the owner reads their own wording.
+test('a telephony receipt reads in the second person on screen while the stored summary stays as the agent received it',async()=>{
+ const receipts=await build({stdin:{contents:"export * from './apps/app/src/ui/telephony/telephony-receipt-text.ts';export {actionResultText} from './apps/app/src/runtime/action-message-presentation.ts';",resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',write:false});
+ const {telephonyActionResultText,phoneDialResultText,actionResultText}=await import('data:text/javascript;base64,'+Buffer.from(receipts.outputFiles[0].text).toString('base64'));
+ const statuses={'phone-call':['placed','emergency-handoff','not-found','busy','unavailable','cancelled','failed'],'contact-write':['saved','deleted','not-found','stale','unavailable','cancelled','failed','unknown'],
+  'sms-compose':['drafted','submitted','sent','delivered','unknown','not-found','unavailable','cancelled','failed'],'sms-reply':['drafted','none-selected','occupied','unavailable'],
+  'voicemail-delete':['deleted','none-selected','unavailable','cancelled','failed'],'messages-read':['read','none-selected','unavailable'],'voicemail-read':['read','none-selected','unavailable']};
+ const summaries=[...Object.entries(statuses).flatMap(([kind,list])=>list.map(status=>telephonyActionResultText({kind,status}))),...['handed-off','cancelled','unavailable','failed'].map(status=>phoneDialResultText({kind:'phone-dial',status,handler:null,contact:false}))];
+ assert.equal(new Set(summaries).size,summaries.length);
+ for(const summary of summaries){const shown=actionResultText(summary);assert.doesNotMatch(shown,/\bowner\b/i,summary);assert.equal(actionResultText(shown),shown,'showing it twice changes nothing');}
+ const placed=telephonyActionResultText({kind:'phone-call',status:'placed'}),dismissed=telephonyActionResultText({kind:'sms-compose',status:'cancelled'});
+ assert.match(placed,/^The owner approved/);
+ assert.equal(actionResultText(placed),'Calling. Alpha can’t tell whether it was answered.');
+ assert.equal(actionResultText(dismissed),'You dismissed the message. Nothing was sent.');
+ // The chat card and the receipt bubble show the owner's wording; the stored rows are untouched.
+ const done={id:'action',from:'agent',text:'Call Priya',card:{proposalId:'p',title:'Completed',sub:placed,done:true}},bubble={id:'device-receipt:q',from:'agent',text:dismissed,deviceReceipt:true};
+ const rows=[user,done,{id:'u2',from:'user',text:'text Sam'},bubble],frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
+ assert.equal(shown.find(m=>m.id==='action').displayText,'Calling. Alpha can’t tell whether it was answered.');
+ assert.equal(shown.find(m=>m.id==='device-receipt:q').displayText,'You dismissed the message. Nothing was sent.');
+ assert.deepEqual(rows,frozen);
+});
