@@ -594,12 +594,30 @@
    <div class="scr" data-alpha-messages-thread style="flex-grow:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px 14px;touch-action:pan-y">
     <sc-if value="{{messages.nativeMore}}"><div style="display:flex;justify-content:center"><button aria-label="Older messages" onClick="{{messages.nativeLoadMore}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M6 15l6-6 6 6"></path></svg></button></div></sc-if>
     <div style="flex-grow:1"></div>
-    <sc-for list="{{messages.bubbles}}" as="m">
-     <div data-alpha-message-id="{{m.id}}" data-alpha-stage-last="{{m.stageLast}}" tabindex="0" onPointerDown="{{m.actions.down}}" onPointerMove="{{m.actions.move}}" onPointerUp="{{m.actions.up}}" onPointerCancel="{{m.actions.up}}" onPointerLeave="{{m.actions.up}}" onContextMenu="{{m.actions.context}}" onKeyDown="{{m.actions.key}}" style="align-self:{{m.side}};max-width:280px;display:flex;flex-direction:column;gap:2px;align-items:{{m.side}};opacity:{{m.opacity}}">
+    <sc-for list="{{messages.bubbles}}" key="{{m.id}}" as="m">
+     <div data-alpha-stage-last="{{m.stageLast}}" style="align-self:{{m.side}};max-width:min(280px,100%);display:flex;flex-direction:column;align-items:{{m.side}};opacity:{{m.opacity}}">
+      <div data-alpha-message-id="{{m.id}}" data-alpha-sms-outgoing="{{m.outgoing}}" role="{{m.actions.role}}" tabindex="{{m.actions.tabIndex}}" aria-label="{{m.actions.label}}" aria-haspopup="{{m.actions.hasPopup}}" aria-expanded="{{m.actions.expanded}}" onClick="{{m.actions.click}}" onPointerDown="{{m.actions.down}}" onPointerMove="{{m.actions.move}}" onPointerUp="{{m.actions.up}}" onPointerCancel="{{m.actions.up}}" onPointerLeave="{{m.actions.up}}" onContextMenu="{{m.actions.context}}" onKeyDown="{{m.actions.key}}" style="max-width:100%;display:flex;flex-direction:column;gap:2px;align-items:{{m.side}}">
       <sc-if value="{{m.picture}}"><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5"></path></svg>{{m.pictureLabel}}</span></sc-if>
-      <sc-if value="{{m.hasText}}"><div data-alpha-message-body style="background:{{m.bg}};color:{{m.fg}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap"><sc-for list="{{m.segments}}" as="part"><sc-if value="{{part.link}}"><a href="{{part.href}}" onClick="{{part.open}}" style="color:#0700ff;background:#e9edff;border-radius:3px;text-decoration:underline;text-underline-offset:2px">{{part.text}}</a></sc-if><sc-if value="{{part.plain}}"><span>{{part.text}}</span></sc-if></sc-for></div></sc-if>
+      <sc-if value="{{m.hasText}}"><div data-alpha-message-body style="background:{{m.bg}};color:{{m.fg}};border-radius:22px;padding:11px 16px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-wrap"><sc-for list="{{m.segments}}" as="part"><sc-if value="{{part.link}}"><a href="{{part.href}}" onClick="{{part.open}}">{{part.text}}</a></sc-if><sc-if value="{{part.plain}}"><span>{{part.text}}</span></sc-if></sc-for></div></sc-if>
       <span data-alpha-message-meta title="{{m.timestampLabel}}" style="font-size:11px;line-height:1.4;color:var(--mut);padding:0 6px">{{m.timestamp}}<sc-if value="{{m.statusText}}"> · {{m.statusText}}</sc-if></span>
       <sc-if value="{{m.failed}}"><svg class="i" role="img" aria-label="Message failed" viewBox="0 0 24 24" style="width:16px;height:16px;color:var(--alpha-call-red)"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6m0 3h.01"></path></svg></sc-if>
+      </div>
+      <sc-if value="{{m.actions.expanded}}">
+       <div data-alpha-sms-actions class="alpha-message-action-row" role="menu" aria-label="Message actions" onKeyDown="{{m.actions.menuKey}}">
+        <sc-if value="{{m.actions.canCopy}}">
+         <button class="tap alpha-message-copy" role="menuitem" onClick="{{m.actions.copy}}">
+          <svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><sc-if value="{{m.actions.copied}}"><path d="{{ic.check}}"></path></sc-if><sc-if value="{{m.actions.canShowCopyIcon}}"><path d="{{ic.copy}}"></path></sc-if></svg>{{m.actions.copyLabel}}
+         </button>
+        </sc-if>
+        <sc-if value="{{m.actions.canDelete}}">
+         <button class="tap" role="menuitem" onClick="{{m.actions.askDelete}}" style="color:var(--alpha-call-red)">
+          <svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Delete
+         </button>
+        </sc-if>
+       </div>
+       <span class="alpha-message-action-announcement" aria-live="polite">{{m.actions.announcement}}</span>
+       <sc-if value="{{m.actions.notice}}"><span role="status" style="font-size:13px;color:var(--mut)">{{m.actions.notice}}</span></sc-if>
+      </sc-if>
      </div>
     </sc-for>
     <sc-if value="{{messages.draftBubble}}">
@@ -615,17 +633,13 @@
     </sc-if>
    </div>
   </sc-if>
-  <sc-if value="{{messages.messageMenu}}">
-   <div style="position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;background:var(--alpha-shadow-soft)" onKeyDown="{{messages.messageMenu.key}}">
-    <button aria-label="Close message actions" disabled="{{messages.messageMenu.busy}}" onClick="{{messages.messageMenu.close}}" style="position:absolute;inset:0;background:transparent"></button>
-    <sc-if value="{{messages.messageMenu.choices}}"><div role="menu" ref="{{messages.messageMenu.focus}}" aria-label="Message actions" style="position:relative;width:180px;padding:6px;border-radius:18px;background:var(--bg);box-shadow:0 4px 24px var(--alpha-shadow-soft)">
-     <button role="menuitem" onClick="{{messages.messageMenu.copy}}" style="display:block;width:100%;min-height:48px;text-align:left;padding:0 16px">Copy</button>
-     <sc-if value="{{messages.messageMenu.canDelete}}"><button role="menuitem" onClick="{{messages.messageMenu.askDelete}}" style="display:block;width:100%;min-height:48px;text-align:left;padding:0 16px;color:var(--alpha-call-red)">Delete</button></sc-if>
-    </div></sc-if>
-    <sc-if value="{{messages.messageMenu.confirm}}"><div role="dialog" ref="{{messages.messageMenu.focus}}" aria-modal="true" aria-label="Delete message?" style="position:relative;width:min(280px,90%);padding:20px;border-radius:22px;background:var(--bg);box-sizing:border-box">
+  <sc-if value="{{messages.messageDelete}}">
+   <div style="position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;background:var(--alpha-shadow-soft)">
+    <button aria-label="Close delete confirmation" disabled="{{messages.messageDelete.busy}}" onClick="{{messages.messageDelete.close}}" style="position:absolute;inset:0;background:transparent"></button>
+    <div role="dialog" ref="{{messages.messageDelete.focus}}" aria-modal="true" aria-label="Delete message?" onKeyDown="{{messages.messageDelete.key}}" style="position:relative;width:min(280px,90%);padding:20px;border-radius:22px;background:var(--bg);box-sizing:border-box">
      <p style="margin:0 0 16px;font-size:17px">Delete this message from this phone?</p>
-     <div style="display:flex;justify-content:flex-end;gap:8px"><button disabled="{{messages.messageMenu.busy}}" onClick="{{messages.messageMenu.close}}" style="min-height:44px;padding:0 14px">Cancel</button><button disabled="{{messages.messageMenu.busy}}" onClick="{{messages.messageMenu.remove}}" style="min-height:44px;padding:0 14px;color:var(--alpha-call-red)">Delete</button></div>
-    </div></sc-if>
+     <div style="display:flex;justify-content:flex-end;gap:8px"><button disabled="{{messages.messageDelete.busy}}" onClick="{{messages.messageDelete.close}}" style="min-height:44px;padding:0 14px">Cancel</button><button disabled="{{messages.messageDelete.busy}}" onClick="{{messages.messageDelete.remove}}" style="min-height:44px;padding:0 14px;color:var(--alpha-call-red)">Delete</button></div>
+    </div>
    </div>
   </sc-if>
   <sc-if value="{{messages.showNew}}">
@@ -4576,9 +4590,9 @@
           </div>
         </sc-if>
         <sc-if value="{{m.messageActionsOpen}}">
-          <div data-alpha-message-actions data-alpha-user-actions="{{m.isUser}}" role="menu" aria-label="Message actions" onKeyDown="{{m.menuKey}}" style="align-self: flex-start; display: flex; flex-wrap: nowrap; overflow-x:auto; gap: 0; max-width:100%; margin-top: 8px; padding: 4px; border-radius: 14px; background: var(--s2)">
+          <div data-alpha-message-actions class="alpha-message-action-row" data-alpha-user-actions="{{m.isUser}}" role="menu" aria-label="Message actions" onKeyDown="{{m.menuKey}}" style="align-self:flex-start">
             <sc-if value="{{m.canReplyMessage}}"><button class="tap" role="menuitem" onClick="{{m.replyMessage}}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.reply}}"></path></svg>Reply</button></sc-if>
-            <button class="tap" role="menuitem" onClick="{{m.copyMessage}}" style="width:100px;flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:8px;min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{m.copyMessageIcon}}"></path></svg>{{m.copyMessageLabel}}</button>
+            <button class="tap alpha-message-copy" role="menuitem" onClick="{{m.copyMessage}}"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{m.copyMessageIcon}}"></path></svg>{{m.copyMessageLabel}}</button>
             <sc-if value="{{m.canUseInEmail}}"><button class="tap" role="menuitem" aria-label="Use in email" onClick="{{m.useInEmail}}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.mail}}"></path></svg>Email</button></sc-if>
             <sc-if value="{{m.localSpeechAvailable}}"><button class="tap" role="menuitem" aria-label="{{m.localSpeechControlLabel}}" aria-pressed="{{m.localSpeechActive}}" onClick="{{m.localSpeech}}" style="flex-shrink:0;white-space:nowrap;display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; color: var(--acct); font-size: 14px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="width: 16px; height: 16px"><path d="{{m.localSpeechIcon}}"></path></svg>{{m.localSpeechLabel}}</button></sc-if>
             <sc-if value="{{m.canEditMessage}}"><button class="tap" role="menuitem" aria-label="Edit and resend" onClick="{{m.editMessage}}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600"><svg aria-hidden="true" class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.edit}}"></path></svg>Edit</button></sc-if>

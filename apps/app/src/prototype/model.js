@@ -773,19 +773,6 @@ function msgMatches(api, st, id, q) {
   var w = msgWho(api, id, st);
   return (w.name + " " + (w.phone || "") + " " + st.threads[id].map(function (m) { return m.text || m.file || ""; }).join(" ")).toLowerCase().indexOf(q) >= 0;
 }
-function msgWhen(k) { return k < 0 ? "yesterday" : "at " + msgFmt(k); }
-/* AC-25: facts from the threads on this phone; null when there are none. */
-function msgBriefing(st, api, tp) {
-  var threads = st.threads || {};
-  if (tp) {
-    var list = threads[tp] || [], last = list[list.length - 1]; if (!last) return null;
-    var f = msgFirst(msgWho(api, tp, st));
-    return last.me ? "You last texted " + f + " " + msgWhen(last.k) + "." : f + " texted " + msgWhen(last.k) + " and hasn't had a reply.";
-  }
-  var ids = Object.keys(threads).filter(function (id) { return threads[id].length; }); if (!ids.length) return null;
-  var un = ids.filter(function (id) { return ((st.unread || {})[id] || 0) > 0; });
-  return !un.length ? "No unread conversations." : un.length === 1 ? msgWho(api, un[0], st).name + " sent an unread text." : un.length + " conversations have unread texts.";
-}
 /* AC-01: the one bottom bar. In a thread it addresses the person; on the list it filters (AC-22). */
 function msgBar(st, api) {
   var tp = msgOpen(st);
@@ -803,7 +790,7 @@ function msgBar(st, api) {
       left: { icon: "avatar", label: "Back to texting " + f, initials: w.ini, run: null },
       context: w.name + " · Messages", contextKey: "messages:thread:" + tp,
       strip: { title: w.name, subtitle: waits ? "Messages · draft waiting" : "Messages", initials: w.ini, live: false, actions: waits ? [{ id: "send", label: "Send draft", run: function () { msgBubbleSend(api, tp); } }] : [] },
-      end: null, incoming: null, emergency: false, fit: function () { return draftStageFit(); }, briefing: msgBriefing(st, api, tp)
+      end: null, incoming: null, emergency: false, fit: function () { return draftStageFit(); }, briefing: null
     };
   }
   var fl = st.filter;
@@ -817,7 +804,7 @@ function msgBar(st, api) {
     left: { icon: "search", label: "Back to search", initials: null, run: null },
     context: "Messages", contextKey: "messages:list:",
     strip: { title: "Messages", subtitle: "", initials: null, live: false, actions: [] },
-    end: null, incoming: null, emergency: false, fit: null, briefing: msgBriefing(st, api, null)
+    end: null, incoming: null, emergency: false, fit: null, briefing: null
   };
 }
 

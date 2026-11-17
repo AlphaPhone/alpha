@@ -76,17 +76,50 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const native=registerPlugin<MessagesBridge>('AlphaTelephony');
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
- let messageMenu:{target:MessageDeleteReference;text:string;confirm:boolean}|null=null,deleting=false;
+ let messageMenu: {
+  target:MessageDeleteReference;text:string;trigger:HTMLElement;confirm:boolean;copied:boolean;notice:string;
+ }|null=null;
+ let deleting=false,heldMessageId:string|undefined;
  let messageHold:ReturnType<typeof setTimeout>|undefined,holdPoint:{x:number;y:number}|null=null;
  const uncertainDeletes=new Set<string>();
  const cancelMessageHold=()=>{clearTimeout(messageHold);messageHold=undefined;};
- const menuRow=()=>messageMenu&&session.state.rows.find(row=>!isIncompleteSmsRow(row)&&row.id===messageMenu!.target.id&&row.kind===messageMenu!.target.kind&&row.threadId===session.state.thread&&row.date===messageMenu!.target.date);
- const closeMessageMenu=()=>{if(!deleting){cancelMessageHold();messageMenu=null;paint();}};
- const showMessageMenu=(row:SmsMessage,event?:Event)=>{
-  event?.preventDefault();event?.stopPropagation();cancelMessageHold();
-  if(!inFront()||deleting||row.threadId!==session.state.thread)return;
-  messageMenu={target:{id:row.id,kind:row.kind,threadId:row.threadId,date:row.date},text:row.body||'',confirm:false};paint();
+ const menuRow=()=>{
+  const selection=messageMenu;
+  return selection&&session.state.rows.find(row=>!isIncompleteSmsRow(row)&&
+   row.id===selection.target.id&&row.kind===selection.target.kind&&row.threadId===selection.target.threadId&&
+   row.threadId===session.state.thread&&row.date===selection.target.date&&(row.body||'')===selection.text);
  };
+ const closeMessageMenu=(restoreFocus=false)=>{
+  if(!messageMenu||deleting)return;
+  const trigger=messageMenu.trigger;
+  cancelMessageHold();messageMenu=null;paint();
+  if(restoreFocus)trigger.focus({preventScroll:true});
+ };
+ const showMessageMenu=(row:SmsMessage,trigger:HTMLElement,toggle=false,focus=false)=>{
+  cancelMessageHold();
+  if(!inFront()||deleting||row.threadId!==session.state.thread)return;
+  if(toggle&&messageMenu?.target.id===row.id){closeMessageMenu();return;}
+  messageMenu={target:{id:row.id,kind:row.kind,threadId:row.threadId,date:row.date},
+   text:row.body||'',trigger,confirm:false,copied:false,notice:''};
+  owner?.setState({},()=>{
+   if(messageMenu?.trigger!==trigger||messageMenu.confirm)return;
+   const actions=trigger.parentElement?.querySelector<HTMLElement>('[data-alpha-sms-actions]');
+   actions?.scrollIntoView({block:'nearest',inline:'nearest'});
+   if(focus)actions?.querySelector<HTMLElement>('button')?.focus({preventScroll:true});
+  });
+ };
+ async function copySelectedMessage(){
+  const selection=messageMenu;
+  if(!selection?.text||!inFront()||!menuRow())return;
+  try{
+   await navigator.clipboard.writeText(selection.text);
+   if(messageMenu!==selection)return;
+   selection.notice='';selection.copied=true;paint();
+   setTimeout(()=>{if(messageMenu===selection){selection.copied=false;paint();}},1400);
+  }catch{
+   if(messageMenu===selection){selection.copied=false;selection.notice='Copy failed';paint();}
+  }
+ }
  async function deleteSelectedMessage(){
   if(!messageMenu?.confirm||deleting||!inFront()||!menuRow()||uncertainDeletes.has(messageMenu.target.id))return;
   const selection=messageMenu,visit=lifecycle;deleting=true;paint();
@@ -130,13 +163,46 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const messageActions=(id:string)=>{
   const row=session.state.rows.find(value=>value.id===id);
   if(!row||isIncompleteSmsRow(row))return {};
+  const selection=messageMenu?.target.id===id&&menuRow()?messageMenu:null;
   return {
-   // The press origin outlives a repaint (a message arriving mid-press), so a moving finger still cancels the hold.
-   down:(event:PointerEvent)=>{cancelMessageHold();if(event.button!==0||(event.target as Element).closest('a'))return;holdPoint={x:event.clientX,y:event.clientY};messageHold=setTimeout(()=>showMessageMenu(row),500);},
+   role:'button',tabIndex:0,hasPopup:'menu',label:row.body?'Message actions: '+row.body:'Picture message actions',
+   expanded:!!selection&&!selection.confirm,canCopy:!!selection?.text,
+   canDelete:!!selection&&!uncertainDeletes.has(id),copied:!!selection?.copied,notice:selection?.notice,
+   canShowCopyIcon:!selection?.copied,copyLabel:selection?.copied?'Copied!':'Copy',announcement:selection?.copied?'Copied.':'',
+   click:(event:MouseEvent)=>{
+    if((event.target as Element).closest('a')||window.getSelection()?.isCollapsed===false)return;
+    event.stopPropagation();
+    if(heldMessageId===id){heldMessageId=undefined;return;}
+    showMessageMenu(row,event.currentTarget as HTMLElement,true);
+   },
+   // Keep the press across a repaint and swallow the click after a completed hold.
+   down:(event:PointerEvent)=>{
+    cancelMessageHold();heldMessageId=undefined;
+    if(event.button!==0||(event.target as Element).closest('a'))return;
+    holdPoint={x:event.clientX,y:event.clientY};
+    const trigger=event.currentTarget as HTMLElement;
+    messageHold=setTimeout(()=>{heldMessageId=id;showMessageMenu(row,trigger);},500);
+   },
    move:(event:PointerEvent)=>{if(messageHold!==undefined&&holdPoint&&Math.hypot(event.clientX-holdPoint.x,event.clientY-holdPoint.y)>10)cancelMessageHold();},
    up:cancelMessageHold,
-   context:(event:Event)=>showMessageMenu(row,event),
-   key:(event:KeyboardEvent)=>{if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey)showMessageMenu(row,event);},
+   context:(event:Event)=>{
+    if((event.target as Element).closest('a'))return;
+    event.preventDefault();event.stopPropagation();showMessageMenu(row,event.currentTarget as HTMLElement);
+   },
+   key:(event:KeyboardEvent)=>{
+    if(event.target!==event.currentTarget||!(event.key==='Enter'||event.key===' '||event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey))return;
+    event.preventDefault();event.stopPropagation();showMessageMenu(row,event.currentTarget as HTMLElement,true,true);
+   },
+   menuKey:(event:KeyboardEvent)=>{
+    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeMessageMenu(true);return;}
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+    event.preventDefault();event.stopPropagation();
+    const items=Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button'));
+    const at=items.indexOf(document.activeElement as HTMLButtonElement);
+    items[event.key==='Home'?0:event.key==='End'?items.length-1:(at+(event.key==='ArrowLeft'?-1:1)+items.length)%items.length]?.focus();
+   },
+   copy:()=>{if(selection===messageMenu)void copySelectedMessage();},
+   askDelete:()=>{if(selection===messageMenu&&selection&&!uncertainDeletes.has(id)){selection.confirm=true;paint();}},
   };
  };
  /* The reviewed text an operation ID was assigned for: the native send and its read-back hash exactly this. */
@@ -615,15 +681,6 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   return {by,alpha:by==='alpha',sent:undefined,label:by==='alpha'?`${alpha}'s draft · not sent`:'Your draft',aria:by==='alpha'?`${alpha}'s draft, not sent`:'Your draft, not sent',text:body,canUndo:!!draft.undo,canAct:true,
    edit:()=>{if(!editable())return;draft=draftAdopted(draft);retainDraft();paint();api?.toPerson?.();},send:bubbleSend,undo:()=>{undoSmsDraft();}};
  }
- const clock=(at:number)=>{const date=new Date(at);return date.toDateString()===new Date().toDateString()?'at '+formatTime(date):'on '+formatMonthDay(date);};
- /** AC-25: facts from this phone's own rows; null when nothing is known. */
- function briefing(who:{first:string|null}|null){
-  if(who){const rows=threadRows(),last=rows[rows.length-1];if(!last||!who.first)return null;
-   return last.direction==='incoming'?`${who.first} texted ${clock(last.date)} and hasn't had a reply.`:`You last texted ${who.first} ${clock(last.date)}.`;}
-  const rows=session.state.threads.filter(row=>!isIncompleteSmsRow(row)) as any[];if(!rows.length)return null;
-  const unread=rows.filter(row=>row.unread===true);
-  return !unread.length?'No unread conversations.':unread.length===1?`${threadTitle(unread[0].addresses,names)} sent an unread text.`:`${unread.length} conversations have unread texts.`;
- }
  /** AC-01: the one bottom bar. In a conversation it addresses the person; on the list it filters (AC-22). */
  views.messages.bar=(_st:Bag,_viewApi:Bag):CommsBarSpec=>{
   const who=subject();
@@ -634,13 +691,13 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
     left:{icon:'avatar',label:first?'Back to texting '+first:'Back to the message',initials:ini,run:null},
     context:name?name+' · Messages':'Messages',contextKey:'messages:thread:'+who.id,
     strip:{title:name||'Messages',subtitle:waits?'Messages · draft waiting':'Messages',initials:ini,live:false,actions:waits?[{id:'send',label:'Send draft',run:bubbleSend}]:[]},
-    end:null,incoming:null,emergency:false,fit:()=>draftStageFit(),briefing:briefing(who)};
+    end:null,incoming:null,emergency:false,fit:()=>draftStageFit(),briefing:null};
   }
   return {target:{kind:'list',app:'Messages',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Search or ask',value:listFilter?.by==='owner'?listFilter.query:'',onText:(text:string)=>{listFilter=text.trim()?{query:text,label:text.trim(),by:'owner'}:null;paint();},submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null},
    left:{icon:'search',label:'Back to search',initials:null,run:null},
    context:'Messages',contextKey:'messages:list:',strip:{title:'Messages',subtitle:'',initials:null,live:false,actions:[]},
-   end:null,incoming:null,emergency:false,fit:null,briefing:briefing(null)};
+   end:null,incoming:null,emergency:false,fit:null,briefing:null};
  };
  /* AC-22: the list filters on this phone over each conversation's title and snippet; no request is made. */
  const listMatches=(title:string,snippet:string)=>{const query=listFilter?.query.trim().toLowerCase();return !query||(title+' '+snippet).toLowerCase().includes(query);};
@@ -707,21 +764,24 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    threads:listed,noMatches:!!listFilter&&!listed.length&&state.threads.length>0,
    filterChip:listFilter?.by==='alpha'?{label:listFilter.label,clearLabel:'Clear filter '+listFilter.label,clear:listFilterHandler.clear}:null,
    title,ini:initials(title),canCall:!!sole,call:()=>{if(sole)api?.open?.('phone',{prefill:sole});},callLabel:`Call ${title}`,
-   messageMenu:messageMenu&&menuRow()?{
-    confirm:messageMenu.confirm,choices:!messageMenu.confirm,busy:deleting,canDelete:!uncertainDeletes.has(messageMenu.target.id),close:closeMessageMenu,
-    focus:(element:HTMLElement|null)=>{if(element&&!element.contains(document.activeElement))element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});},
+   messageDelete:messageMenu?.confirm&&menuRow()?{
+    busy:deleting,
+    close:()=>closeMessageMenu(true),
+    focus:(element:HTMLElement|null)=>{
+     if(!element)return;
+     element.oncancel=()=>closeMessageMenu(true);
+     if(!element.contains(document.activeElement))element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});
+    },
     key:(event:KeyboardEvent)=>{
-     if(event.key==='Escape'){event.preventDefault();closeMessageMenu();}
+     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeMessageMenu(true);}
      if(event.key==='Tab'){
-      const buttons=Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="menu"] button:not(:disabled),[role="dialog"] button:not(:disabled)'));
+      const buttons=Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
       if(buttons.length){event.preventDefault();const at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(event.shiftKey?-1:1)+buttons.length)%buttons.length].focus();}
      }
     },
-    copy:async()=>{if(!messageMenu||!menuRow())return;const text=messageMenu.text;try{await navigator.clipboard.writeText(text);closeMessageMenu();owner?.toast('Copied');}catch{owner?.toast('Copy unavailable');}},
-    askDelete:()=>{if(messageMenu&&!uncertainDeletes.has(messageMenu.target.id)){messageMenu.confirm=true;paint();}},
     remove:()=>void deleteSelectedMessage(),
    }:null,
-   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,actions:messageActions(row.id),segments:messageSegments(row.text),timestamp:(new Date(row.date).toDateString()===new Date(now).toDateString()?'':formatMonthDay(new Date(row.date),new Date(row.date).getFullYear()!==new Date(now).getFullYear())+' · ')+formatTime(new Date(row.date)),timestampLabel:formatDateTime(new Date(row.date)),stageLast:index===newestIn?true as const:undefined})),
+   newBubbles:showNew?local:[],bubbles:bubbles.map(({inbound:_inbound,...row},index)=>({...row,outgoing:row.side==='flex-end',actions:messageActions(row.id),segments:messageSegments(row.text),timestamp:(new Date(row.date).toDateString()===new Date(now).toDateString()?'':formatMonthDay(new Date(row.date),new Date(row.date).getFullYear()!==new Date(now).getFullYear())+' · ')+formatTime(new Date(row.date)),timestampLabel:formatDateTime(new Date(row.date)),stageLast:index===newestIn?true as const:undefined})),
    draftBubble:bubble(viewApi),picks:composing&&!picker&&!state.thread&&!local.length?picks():[],
    cannotSend:!editable()||!direct||!hasDraft||!sendingTo.length,submit,
    pickSim:sims.length>1,sims:sims.map(row=>{const on=String(row.id)===sim;return {label:row.displayName||`SIM ${row.slot+1}`,on,bg:on?'var(--fg)':'var(--s2)',fg:on?'var(--bg)':'var(--fg)',
@@ -767,6 +827,12 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   this.smsNoticeWake=()=>{if(owner===this)wakeSmsNotice();};
   this.smsReturn=watchReturnToApp(()=>{void session.refresh();this.smsNoticeWake();});
   this.smsHide=()=>{if(!document.hidden)picking=false;sync();};
+  this.smsOutsideActions=(event:PointerEvent)=>{
+   if(owner!==this||!messageMenu||messageMenu.confirm)return;
+   const target=event.target;
+   if(target instanceof Element&&!messageMenu.trigger.contains(target)&&!target.closest('[data-alpha-sms-actions]'))closeMessageMenu();
+  };
+  document.addEventListener('pointerdown',this.smsOutsideActions,true);
   document.addEventListener('visibilitychange',this.smsHide);
   window.addEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
   sync();wakeSmsNotice();
@@ -775,6 +841,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  p.componentWillUnmount=function(){
   cancelMessageHold();messageMenu=null;
   this.smsSelection=undefined;this.smsReturn?.();
+  document.removeEventListener('pointerdown',this.smsOutsideActions,true);
   document.removeEventListener('visibilitychange',this.smsHide);
   window.removeEventListener(SMS_NOTICE_OPEN,this.smsNoticeWake);
   if(owner===this){owner=null;active=false;busy=false;picking=false;lifecycle++;composerAbort.abort();noticeSignal++;noticeRequested=false;session.setActive(false);draftTicket++;draftLoading=false;retained=null;storageNotice='';clearDraft();recipients='';sim='';draftThread=null;listFilter=null;bubbleSent=null;composing=false;api=null;setListFilterHandler('messages',null);names.clear();people.length=0;selectedThread=null;namesLoaded=false;outgoing.clear();matchedProviderRows.clear();}

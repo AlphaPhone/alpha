@@ -18,7 +18,7 @@ function top(name) {
   return rest.slice(0, end < 0 ? rest.length : end);
 }
 const MESSAGES = ['msgPeople', 'msgWho', 'msgFind', 'msgFirst', 'msgFmt', 'msgMaxK', 'msgNowK', 'msgLastIn', 'msgOpen', 'msgPush', 'msgFiles', 'msgSend',
-  'msgDraft', 'msgDraftsPatch', 'msgSetDraft', 'msgSubmit', 'msgBubbleSend', 'msgMatches', 'msgWhen', 'msgBriefing', 'msgBar'];
+  'msgDraft', 'msgDraftsPatch', 'msgSetDraft', 'msgSubmit', 'msgBubbleSend', 'msgMatches', 'msgBar'];
 function devMessages() {
   const filters = [];
   const ctx = vm.createContext({Object, String, Math, JSON, Array, crypto, MSG_BOT: {}, formatHours: h => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`,
@@ -54,8 +54,7 @@ test('the Messages list bar filters on this phone and never sends', () => {
   M.msgBar(state(), api).closed.onText('  ');
   assert.equal(state().filter, null);
   assert.equal(log.notes.length, 0);
-  assert.equal(M.msgBriefing(seed, api, null), 'Maya Chen sent an unread text.');
-  assert.equal(M.msgBriefing({...seed, threads: {}}, api, null), null, 'nothing is known without threads');
+  assert.equal(spec.briefing, null);
 });
 
 test('a thread bar addresses the person; its Send sends once and clears the slot in the same write', () => {
@@ -66,7 +65,7 @@ test('a thread bar addresses the person; its Send sends once and clears the slot
       left: {icon: 'avatar', label: 'Back to texting Maya', initials: 'MC', run: null}, context: 'Maya Chen · Messages', contextKey: 'messages:thread:maya'});
   assert.equal(spec.closed.canSubmit, false);
   assert.equal(spec.fit(), 42);
-  assert.match(spec.briefing, /^Maya texted at 14:00 and hasn't had a reply\.$/);
+  assert.equal(spec.briefing, null);
   spec.closed.onText('On my way');
   assert.deepEqual(plain(state().drafts), {maya: {draft: 'owner', text: 'On my way', undo: null}});
   const typed = M.msgBar(state(), api);
@@ -137,7 +136,7 @@ test('on the Alpha image the thread bar, the draft slot and the bubble send only
     assert.equal(render().threads[0].stageLast, true);
     render().filterChip.clear();
     assert.equal(render().threads.length, 2);
-    assert.match(bar().briefing, /sent an unread text\.$/);
+    assert.equal(bar().briefing, null);
     // The thread: the bar is the composer; Alpha's draft replaces the owner's text with one Undo.
     render().threads[0].open(); await settle();
     const spec = bar();

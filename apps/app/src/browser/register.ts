@@ -14,6 +14,7 @@ import { registerPlugin } from '../platform-plugins';
 import { Capacitor } from '@capacitor/core';
 import { BrowserCalendar } from './calendar';
 import { BrowserSurface } from './browser-surface';
+import { devSurfacesEnabled } from '../build-flags';
 // This module must be the first import in main: Capacitor keeps the first registration.
 if (!Capacitor.isNativePlatform()) {
   registerPlugin('ElizaLocation', { web: () => new BrowserLocation() });
@@ -34,8 +35,12 @@ if (!Capacitor.isNativePlatform()) {
   registerPlugin('AlphaNotifications', { web: () => notifications });
   new BrowserClock(daily,notifications);
   registerPlugin('AlphaCalendar', { web: () => calendar });
+}
+// The native UI preview uses a simulated phone bridge and the browser's own sandboxed frames.
+const previewBrowser=devSurfacesEnabled&&document.querySelector('script[data-alpha-native-preview="simulated"]');
+if (!Capacitor.isNativePlatform() || previewBrowser) {
   // One instance: Capacitor's lazy loader calls the factory once per concurrent
   // first call, which would split listeners from the surface that emits events.
   const browserSurface = new BrowserSurface();
-  registerPlugin('AlphaBrowser', { web: () => browserSurface });
+  registerPlugin('AlphaBrowser', { [Capacitor.getPlatform()]: () => browserSurface });
 }
