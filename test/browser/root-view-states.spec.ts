@@ -21,7 +21,7 @@ const EMPTY: Record<View, RegExp> = {
   Files: /Internal storage|Storage Unavailable/,
   Workflows: /Connect your remote agent in Settings\./,
   Settings: /^General$/,
-  Reminders: /Connect/,
+  Reminders: /Not connected/,
   Notifications: /No notifications/,
 };
 // Fixture identities from the reference prototype must never appear in a live profile.
