@@ -4195,6 +4195,7 @@ function OwnProviderChoice({heading,busy,replying=false,saving,status,statusUnav
  return <section aria-label="AI provider" className="alpha-provider">
   {heading&&<h3>AI connection</h3>}
   {statusUnavailable&&!busy&&<div className="alpha-provider-status"><p role="status"><StatusDot tone="off">Unavailable</StatusDot></p><button type="button" className="alpha-btn alpha-btn--text" aria-label="Try again" disabled={busy} onClick={onRetryStatus}><span aria-hidden="true" data-alpha-icon="/icons/lucide/rotate-cw.svg" style={iconStyle('rotate-cw')}/></button></div>}
+  {busy&&<p role="status"><Busy label="Updating"/></p>}
   <div className="alpha-segmented" role="group" aria-label="Provider">
    <button type="button" disabled={busy||replying} aria-pressed={tab==='cloud'} onClick={()=>{setTab('cloud');setEditing(false);onDismissError();}}>Cloud</button>
    <button type="button" disabled={busy||replying} aria-pressed={tab==='own'} onClick={()=>{setTab('own');connectionController.cancelProviderSelection();onDismissError();setEditing(!managed?.keys.text.configured);}}>Direct</button>

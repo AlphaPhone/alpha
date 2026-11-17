@@ -107,7 +107,7 @@ async function openProvider(page:Page,pressed:'Cloud'|'Own keys'='Cloud'){
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
  await expect(dialog(page)).toBeVisible();
- await expect(dialog(page).getByRole('button',{name:pressed,exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(dialog(page).getByRole('button',{name:pressed==='Own keys'?'Direct':pressed,exact:true})).toHaveAttribute('aria-pressed','true');
 }
 /** Settings uses the Cloud / Own keys choice; the welcome page offers one "Use my own keys" entry. */
 async function enterKeys(page:Page,container=dialog(page),entry='Direct'){
@@ -136,6 +136,7 @@ test('pending provider change shows progress instead of a false failure',async({
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
  await page.evaluate(()=>(window as any).ownProvider.holdSelect=true);
  await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.selectPending)).toBe(true);
  await expect(dialog(page).getByText('Updating',{exact:true})).toBeVisible();
  await expect(dialog(page).getByText('Status unavailable.',{exact:true})).toHaveCount(0);
@@ -155,8 +156,8 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  const selectedColor=await dialog(page).getByRole('button',{name:'Cloud',exact:true}).evaluate(el=>getComputedStyle(el).backgroundColor);
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
  await enterKeys(page);
- await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');
- await expect(dialog(page)).toContainText('Prompts → Cerebras · Voice → Cartesia');await expect(dialog(page)).not.toContainText(/selected context|Android Keystore|model list|Switching is manual/);
+ await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(dialog(page)).not.toContainText('Prompts → Cerebras · Voice → Cartesia');await expect(dialog(page)).not.toContainText(/selected context|Android Keystore|model list|Switching is manual/);
  await page.screenshot({path:info.outputPath('own-provider-form.png'),animations:'disabled'});
  await dialog(page).getByRole('button',{name:'Cancel',exact:true}).click();
  expect(await page.evaluate(()=>(window as any).ownProvider.events)).toEqual([]);
@@ -167,24 +168,15 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  await expect(page.locator('dialog.alpha-startup-permissions')).toHaveCount(0);
  await expect((await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/})).toContainText('Own keys');
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
- await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');
- await expect(dialog(page).locator('.alpha-provider-own').getByText('Voice',{exact:true})).toBeVisible();
- await expect(dialog(page).getByRole('button',{name:'Keys',exact:true})).toBeEnabled();
- await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveCSS('background-color',selectedColor);
- await expect(dialog(page).getByRole('button',{name:'Cloud',exact:true})).not.toHaveCSS('background-color',selectedColor);
+ await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toHaveAttribute('type','password');
+ await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveValue('');
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toHaveValue('');
+ expect(await page.evaluate(()=>(window as any).ownProvider.revealed)).toBe(0);
  await page.screenshot({path:info.outputPath('own-provider-settings.png'),animations:'disabled'});
  expect(await page.evaluate(()=>(window as any).ownProvider.matched)).toBe(true);
- await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
- // Viewing the manager shows presence only; revealing requires a separate explicit action.
- await dialog(page).getByRole('button',{name:'Keys',exact:true}).click();
- const text=dialog(page).getByRole('region',{name:'Text key',exact:true}),voice=dialog(page).getByRole('region',{name:'Voice key',exact:true});
- await expect(text.getByText('Added',{exact:true})).toBeVisible();await expect(voice.getByText('Added',{exact:true})).toBeVisible();
- await expect(text.locator('input')).toHaveCount(0);await expect(voice.locator('input')).toHaveCount(0);
- expect(await page.evaluate(()=>(window as any).ownProvider.revealed)).toBe(0);
- await text.getByRole('button',{name:'View',exact:true}).click();
- await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.revealed)).toBe(1);
- await expect(text.locator('input'),'native reveal never sends plaintext to the DOM').toHaveCount(0);
  await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true}).click();
  await expect(dialog(page)).toHaveCount(0);
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
  await expect(dialog(page).getByRole('button',{name:'Cloud',exact:true})).toHaveAttribute('aria-pressed','true');
@@ -192,11 +184,12 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  expect(await page.evaluate(async()=>{const f=(window as any).ownProvider;return {cleared:f.cleared,saved:f.saved,selected:f.selected,status:await (window as any).Capacitor.nativePromise('Agent','providerStatus',{})};})).toMatchObject({cleared:0,saved:1,selected:1,status:{mode:'cloud',voiceConfigured:false,keys:{text:{configured:true},voice:{configured:true}}}});
  await page.screenshot({path:info.outputPath('own-provider-cloud-retained.png'),animations:'disabled'});
  // Select the already saved keys without another entry, validation or save.
- await dialog(page).getByRole('button',{name:'Own keys',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Direct',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Switch to Direct',exact:true}).click();
  await expect(dialog(page)).toHaveCount(0);
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
- await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');
- await expect(dialog(page).locator('.alpha-provider-own').getByText('Voice',{exact:true})).toBeVisible();
+ await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toBeVisible();
  await expect(dialog(page).getByRole('form',{name:'Own API keys'})).toHaveCount(0);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {saved:f.saved,selected:f.selected,cleared:f.cleared};})).toEqual({saved:1,selected:2,cleared:0});
  expect(await page.evaluate(()=>({cloud:(window as any).flagOff.slots['cloud:production'],agent:sessionStorage.getItem('flag-off-agent')}))).toEqual(account);
@@ -238,7 +231,7 @@ test('opening AI provider during a reply stops it as a sensitive screen; the swi
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
  await expect(dialog(page)).toHaveCount(0);await expect(toast(page)).toContainText('Saved');
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
- await expect(dialog(page).locator('.alpha-provider-own').getByText('Voice',{exact:true})).toBeVisible();
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;f.releaseReply?.();return {saved:f.saved,matched:f.matched};})).toEqual({saved:1,matched:true});
  await noLeaks(page,observed);
 });
@@ -334,7 +327,7 @@ test('Settings offers Cancel during a slow key check; it stops the check and a l
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
  await expect(dialog(page)).toHaveCount(0);await expect(toast(page)).toContainText('Saved');
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
- await expect(dialog(page).locator('.alpha-provider-own').getByText('Voice',{exact:true})).toBeVisible();
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {saved:f.saved,matched:f.matched};})).toEqual({saved:1,matched:true});
  await noLeaks(page,observed);
 });
@@ -390,6 +383,7 @@ test('signed-out Own selection opens Cloud sign-in without deleting keys; cancel
  await openProvider(page,'Own keys');
  const before=await page.evaluate(()=>{const f=(window as any).ownProvider;return {saved:f.saved,cleared:f.cleared,selected:f.selected};});
  await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true}).click();
  const signIn=page.locator('.alpha-cloud-sign-in');await expect(signIn).toBeVisible();
  await expect(signIn).not.toContainText(/keys will be removed/);
  expect(await page.evaluate(async()=>{const f=(window as any).ownProvider;return {saved:f.saved,cleared:f.cleared,selected:f.selected,status:await (window as any).Capacitor.nativePromise('Agent','providerStatus',{})};})).toMatchObject({...before,status:{mode:'own',configured:true,keys:{text:{configured:true},voice:{configured:true}}}});
@@ -397,8 +391,8 @@ test('signed-out Own selection opens Cloud sign-in without deleting keys; cancel
  await expect(signIn).not.toHaveAttribute('aria-busy','true');await page.keyboard.press('Escape');
  await expect(signIn).toHaveCount(0);
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
- await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');
- await expect(dialog(page).locator('.alpha-provider-own').getByText('Voice',{exact:true})).toBeVisible();
+ await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(dialog(page).getByLabel('Voice key',{exact:true})).toBeVisible();
  await expect(dialog(page).getByRole('form',{name:'Own API keys'})).toHaveCount(0);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {saved:f.saved,cleared:f.cleared,selected:f.selected};})).toEqual(before);
  expect(await page.evaluate(()=>(window as any).flagOff.slots['cloud:production']??null)).toBeNull();
@@ -451,7 +445,7 @@ test('a failed restart after a Settings key save is shown in the AI provider dia
  // The key was saved; the restart's failure comes back to the dialog that started it.
  await expect(dialog(page)).toBeVisible();
  await expect(dialog(page).getByRole('alert')).toBeVisible();
- await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
  expect(await page.evaluate(()=>(window as any).ownProvider.saved)).toBe(1);
  expect(observed.errors).toEqual([]);
 });
@@ -512,7 +506,8 @@ test('successful sign-in selects Cloud only for an explicit mode choice and reta
   await enterKeys(page,welcome,'Use my own keys');await welcome.getByRole('button',{name:'Save',exact:true}).click();
   await expect(welcome).toHaveCount(0);await ownKeySetupReady(page);
   await openProvider(page,'Own keys');
-  if(explicit)await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+  if(explicit){await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true}).click();}
   else{
    await dialog(page).getByRole('button',{name:'Close Account',exact:true}).click();
    await openCloudPlanFromSettings(page);
@@ -549,14 +544,15 @@ for(const superseding of ['Close','already-selected Own'] as const)test(`delayed
  const before=await page.evaluate(async()=>{const f=(window as any).ownProvider;return {saved:f.saved,selected:f.selected,cleared:f.cleared,status:await (window as any).Capacitor.nativePromise('Agent','providerStatus',{})};});
  await page.evaluate(()=>{(window as any).ownProvider.holdCloudRead=true;});
  await dialog(page).getByRole('button',{name:'Cloud',exact:true}).click();
+ await dialog(page).getByRole('button',{name:'Switch to Cloud',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.cloudReadPending)).toBe(true);
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
  if(superseding==='Close'){
   await dialog(page).getByRole('button',{name:'Close Account',exact:true}).click();
   await expect(dialog(page)).toHaveCount(0);
  }else{
-  await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');
-  await dialog(page).getByRole('button',{name:'Own keys',exact:true}).click();
+  await dialog(page).getByRole('button',{name:'Direct',exact:true}).click();
+  await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
  }
  await page.evaluate(()=>{(window as any).ownProvider.releaseCloudRead();});
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.cloudReadCompletions)).toBe(1);
@@ -564,7 +560,7 @@ for(const superseding of ['Close','already-selected Own'] as const)test(`delayed
  await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
  if(superseding==='Close')await expect(dialog(page)).toHaveCount(0);
- else{await expect(dialog(page)).toBeVisible();await expect(dialog(page).getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','true');await expect(dialog(page).getByRole('alert')).toHaveCount(0);}
+ else{await expect(dialog(page)).toBeVisible();await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');await expect(dialog(page).getByRole('alert')).toHaveCount(0);}
  expect(await page.evaluate(async()=>{const f=(window as any).ownProvider;return {saved:f.saved,selected:f.selected,cleared:f.cleared,status:await (window as any).Capacitor.nativePromise('Agent','providerStatus',{})};})).toEqual(before);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {emailStarts:f.emailStarts,emailVerifications:f.emailVerifications,cloud:(window as any).flagOff.slots['cloud:production']??null};})).toEqual({emailStarts:0,emailVerifications:0,cloud:null});
  await noLeaks(page,observed);
