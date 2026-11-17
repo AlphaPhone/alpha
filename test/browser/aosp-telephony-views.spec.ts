@@ -220,10 +220,12 @@ test('an outgoing SMS bubble appears on Send and an exact provider row replaces 
   await expect(send).toBeDisabled();
   const [request] = await inputs(page, 'sendComposedSms');
   const provisional = thread.locator(`[data-alpha-message-id="${request.operationId}"]`);
-  await expect(provisional).toHaveCSS('opacity', '0.68');
+  // The bubble and its inline action row share one wrapper, which carries the pending dimming.
+  const provisionalRow = provisional.locator('xpath=..');
+  await expect(provisionalRow).toHaveCSS('opacity', '0.68');
   await page.evaluate(() => (window as any).smsReview.finish('sent'));
   await expect(draft).toHaveValue('');
-  await expect(provisional).toHaveCSS('opacity', '1');
+  await expect(provisionalRow).toHaveCSS('opacity', '1');
   await expect(page.locator('[data-alpha-messages-notice]')).toHaveCount(0);
   await page.evaluate(() => {
     const w = window as any;
