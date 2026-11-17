@@ -69,7 +69,7 @@ pure def unsure(c: Chats): bool = c.make.outcome == A::Unknown and c.list.status
 pure def asked(c: Chats): A::Attempt = A::dispatch(A::record(A::plan(c.make.id + 1)))
 ```
 
-### Whether the turn and the composer are free is this area's own composition
+#### Whether the turn and the composer are free is this area's own composition
 
 The shell passes, as `replying`, whether the conversation has a turn in
 flight, and, as `holding`, whether the composer has a send in hand, an
