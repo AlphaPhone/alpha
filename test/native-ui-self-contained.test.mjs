@@ -23,7 +23,14 @@ const read = file => fs.readFileSync(file, 'utf8');
 const VENDOR = 'vendor/eliza/';
 const APP_ID = 'ai.alphacompute.alphaphone';
 const SENSE_VENDOR = VENDOR + 'packages/app/platforms/android/sense/src/main/java';
-const ALPHA_SOURCES = ['android/app/src/main/java', 'android/app/src/launcher/java', 'android/sense/src/main/java'];
+// Alpha's copies of shared classes that keep their shared names (a package-private class the shared
+// module reaches, or an installed component name) compile in place of the shared file, inside the
+// shared module (android/app/product.gradle); they are Alpha's sources and the shared file is not
+// compiled. test/shared-ui-overrides.test.mjs keeps each copy the pinned upstream source apart
+// from Alpha's listed changes.
+const OVERRIDES = JSON.parse(read('android/shared-ui-overrides.json')).overrides;
+const ALPHA_SOURCES = ['android/app/src/main/java', 'android/app/src/launcher/java', 'android/sense/src/main/java',
+  ...new Set(OVERRIDES.map(override => override.source))];
 
 const walk = dir => !fs.existsSync(dir) ? [] : fs.statSync(dir).isFile() ? [dir] : fs.readdirSync(dir, {withFileTypes: true})
   .flatMap(entry => entry.isDirectory() ? walk(path.join(dir, entry.name)) : /\.(?:java|kt)$/.test(entry.name) ? [path.join(dir, entry.name)] : []);
@@ -89,6 +96,10 @@ function classes(dirs) {
 }
 const shared = classes(SHARED_SOURCES);
 const alpha = classes(ALPHA_SOURCES);
+for (const override of OVERRIDES) {
+  assert.ok(shared.has(override.class) && alpha.has(override.class), `${override.class} is shared and has Alpha's copy`);
+  shared.delete(override.class);
+}
 
 const UI_BASE = /\bclass\s+(\w+)(?:<[^>{]*>)?\s+extends\s+(?:android\.app\.)?(?:Activity|AppCompatActivity|ComponentActivity|FragmentActivity|BridgeActivity|Dialog|DialogFragment|TileService|InCallService|AutofillService)\b|\bclass\s+(\w+)[^{\n]*:\s*(?:Activity|AppCompatActivity|ComponentActivity|Dialog|TileService)\(\)/;
 const UI_CALL = /AlertDialog\.Builder|Notification(?:Compat)?\.Builder|Toast\.makeText|setContentView\(|\bRemoteViews\(|Intent\.createChooser\(|BiometricPrompt\.Builder|PopupWindow\(|new (?:TextView|Button|EditText|LinearLayout|ScrollView)\(/g;
@@ -217,7 +228,6 @@ const REVIEWED_SHARED_UI = new Map([
   ['ai.eliza.plugins.passwords.PasswordSheet', {reached: true, ui: ['PasswordSheet', 'button', 'text'], reason: 'reached only through the shared PasswordEditor above; Alpha\'s screens use its own PasswordSheet'}],
   ['ai.eliza.plugins.passwords.SecretSurfaces', {reached: true, ui: ['reveal'], reason: 'reached only through the shared vault custody, which would close a shared reveal on lock; Alpha reveals passwords and provider keys through its own SecretSurfaces'}],
   ['ai.eliza.plugins.notifications.HostNoticePoster', {ui: ['approval', 'redacted', 'step'], reason: 'AlphaNotificationsPlugin passes the shared NotificationsHostPlugin its CONFIG identities only; workflow notices are posted by Alpha\'s WorkflowNoticePoster through its own delivery()'}],
-  ['ai.eliza.plugins.reminders.ReminderStore', {reached: true, ui: ['postNotification'], reason: 'known gap: Alpha\'s ReminderReceiver (extending the shared ReminderReceiver) and AlphaReminders run the shared ReminderEngine, which posts the due reminder itself (ReminderStore is package-private and final, and ReminderReceiver.onReceive is final); its channel names are Alpha\'s (AlphaNotificationChannels) and its action labels stay "Done" and "Snooze 10 minutes" until upstream takes a presenter hook'}],
   ['ai.eliza.plugins.system.SystemLauncherApps', {ui: ['chooseLaunchIntent'], reason: 'AlphaSystemPlugin reads its installed-app validation and refusal codes; its only chooser is the untitled system one the inherited openDefaultApp opens (REVIEWED_INHERITED)'}],
 ]);
 // Shared classes registered as Capacitor plugins: no UI of their own.
@@ -423,9 +433,6 @@ const REVIEWED_INHERITED = new Map([
   ['ai.alphacompute.alphaphone.AlphaSystemPlugin ai.eliza.plugins.system.SystemLauncherApps.chooseLaunchIntent', {
     pinned: /class AlphaSystemPlugin extends ai\.eliza\.plugins\.system\.SystemPlugin/,
     reason: 'the inherited openDefaultApp (final in Kotlin) opens the dial handler and, only when several apps can dial, an untitled system chooser (Intent.createChooser with a null title): the chooser and its wording are Android\'s, and the refusals are the shared plugin\'s non-UI results'}],
-  ['ai.alphacompute.alphaphone.DailyAppsPlugin ai.eliza.plugins.reminders.ReminderStore.postNotification', {
-    pinned: /class DailyAppsPlugin extends ai\.eliza\.plugins\.reminders\.ReminderPlugin/,
-    reason: 'known gap: the shared reminder store posts the due reminder; listed with ReminderStore above'}],
 ]);
 
 test('Alpha inherits no shared UI path beyond the reviewed ones', () => {
@@ -458,6 +465,7 @@ const GUARDED_CALLS = [
 const SPLIT_PACKAGE_SOURCES = new Map([
   ['ai.eliza.plugins.messages.AlphaTelephonyAccess', 'the reviewed SMS/MMS journal, dispatch, MMS file and read-marker glue'],
   ['ai.eliza.plugins.passwords.AlphaPasswordAdmission', 'the shared vault admission rule, read so Autofill and Alpha\'s screens share one rule'],
+  ...OVERRIDES.map(override => [override.class, `Alpha's copy under the shared name: ${override.reason}`]),
 ]);
 
 test('shared entry points behind Alpha\'s reviews and closes are called only by their owners', () => {
