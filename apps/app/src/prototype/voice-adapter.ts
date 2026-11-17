@@ -946,6 +946,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     // Dictation into a comms bar's own field records on the bar; the Alpha sheet does not open (AC-12).
     const token=generation;this.setState({chat:comms?(state.chat==='hidden'?'hidden':'input'):state.chat==='full'?'full':'sheet',voice:'off'},()=>{if(token!==generation||chatDestination!==chat)return;document.querySelector<HTMLElement>(comms?'[data-alpha-bar-recorder] button':'[data-alpha-chat-recorder] button')?.focus({preventScroll:true});maybeStartDictation();});
   };
+  let voiceStartRevision=0;
   Component.prototype.startVoice = async function () {
     // AC-12: during a call the caller never hears Alpha: a voice turn is transcribed into the request only.
     const callKind=this.commsSpec?.()?.target?.kind;
@@ -957,15 +958,15 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(mediaUnconfirmed){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
     if(stage!=='closed'){this.toast('Finish or discard the Notes recording before starting a voice conversation.');return;}
     connectionController.warmInference();
-    const state=this.S();
-    const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply:this.messageReplyTarget,edit:this.messageEditTarget,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
-    // A restored browser account can paint Home before its resident has attached.
-    // Finish that existing startup before constructing a session-bound speech driver.
-    if(developmentCloudVoiceEnabled&&!connectionController.getBrowserSpeechAgent()){
+    const startRevision=++voiceStartRevision,startGeneration=generation,state=this.S(),beforeStartup=JSON.parse(composerBinding()).slice(1),reply=this.messageReplyTarget,edit=this.messageEditTarget;
+    // Home may paint while startup still replaces its provisional resident session. Await that
+    // existing startup before capturing the speech binding; an account or composer change cancels.
+    if(developmentCloudVoiceEnabled){
       await connectionController.initialize();
-      if(this.live===false||document.hidden||this.S().view!==state.view||String(this.S().draft||'')!==chat.draft||connectionController.getSnapshot().open)return;
+      if(startRevision!==voiceStartRevision||startGeneration!==generation||this.live===false||document.hidden||this.S().view!==state.view||this.S().chat!==state.chat||String(this.S().draft||'')!==String(state.draft||'')||this.messageReplyTarget!==reply||this.messageEditTarget!==edit||connectionController.getSnapshot().open||JSON.stringify(JSON.parse(composerBinding()).slice(1))!==JSON.stringify(beforeStartup))return;
       if(!connectionController.getBrowserSpeechAgent()){this.toast('Alpha is still connecting. Try Talk again shortly.');return;}
     }
+    const chat:ChatDestination={shell:this,view:state.view||null,chat:state.chat,draft:String(state.draft||''),reply,edit,binding:composerBinding(),...(typeof HTMLElement!=='undefined'&&document.activeElement instanceof HTMLElement?{opener:document.activeElement}:{})};
     const readingStopped=stopLocalSpeechPlayback();
     try{enter(undefined,'default',chat);}catch{cleanup();this.toast('Voice could not start. Try again, or use the keyboard.');return;}
     this.beginVoiceScrollFollow();stopping=Promise.all([stopping,Promise.resolve(readingStopped)]).then(()=>{}).catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});conversationLastTranscript='';conversationLastReply='';quietRetries=0;const token=generation;
