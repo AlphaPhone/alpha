@@ -27,11 +27,10 @@ function sharedModule(path) {
 async function fixture(extraSources) {
   const shared = sharedModule('vendor/eliza/plugins/plugin-native-passwords/src/client.ts');
   const bindings = sharedModule('vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts');
-  const presentation=sharedModule('apps/app/src/ui/passwords/passwords-presentation.ts');
-  const sources = [...shared.sources,...bindings.sources,...presentation.sources,'apps/app/src/passwords/password-manager.ts',
+  const sources = [...shared.sources,...bindings.sources,'apps/app/src/ui/passwords/passwords-presentation.ts','apps/app/src/passwords/password-manager.ts',
     'specs/quint/refinement/application/support.mjs','test/support/strip-types.mjs',driver,...extraSources];
   const driverHashes = captureInputs(sources);
-  const sharedExports=shared.instantiate(), bindingExports=bindings.instantiate(), presentationExports=presentation.instantiate();
+  const sharedExports=shared.instantiate(), bindingExports=bindings.instantiate();
   const calls = [], timers = new Map(), records = [];
   const native = {locked:true,damaged:false,pending:null,cancelUnlock:false,resetCount:0};
   let timerId=0,page='password-provider';
@@ -53,11 +52,11 @@ async function fixture(extraSources) {
   };
   const document = new EventTarget(); document.hidden=false;
   const window = new EventTarget();
-  const api = sourceContext(['apps/app/src/passwords/password-manager.ts'], [
+  const api = sourceContext(['apps/app/src/ui/passwords/passwords-presentation.ts','apps/app/src/passwords/password-manager.ts'], [
     'passwordManagerGroups','passwordEntryPage','leavePasswordManager','refreshPasswordManager','passwordManagerLifecycle',
     'observe: () => ({active,generation,locked:status?.locked ?? true,entries:entries!==null,damaged,resetReviewed:confirmReset!==null,secret:!!draft?.password,draft:!!draft,busy,noticePresent:!!notice})',
   ], {
-    ...sharedExports,...bindingExports,...presentationExports,document,window,queueMicrotask,
+    ...sharedExports,...bindingExports,document,window,queueMicrotask,
     Capacitor:{isNativePlatform:()=>true,isPluginAvailable:()=>false},
     testMocksEnabled:false,devSurfacesEnabled:false,browserDevProfile:false,
     createDevelopmentVault:()=>{throw Error('Unexpected development vault');},

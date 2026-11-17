@@ -382,10 +382,8 @@ async function reroute(page) {
 
 export async function mountClosedMaps(extraSources, runs, holdRouteReplies = false) {
   checkClientFeatures();
-  // Alpha mounts its own state controller. The staged navigation module imports the SDK
-  // state only as a type, which remains hash-bound but does not load into the browser.
-  const watched = new Set([adapter, resolve(root, 'apps/app/src/maps/state.ts'),
-    ...['maps-screen.ts', 'cloud-provider.ts', 'state.ts'].map(path => resolve(root, 'apps/app/src/ui/maps/'+path)),
+  // The Maps view-model is Alpha's own module; the mounted page no longer loads the pinned client's copy.
+  const watched = new Set([adapter, ...['maps-screen.ts', 'cloud-provider.ts', 'state.ts'].map(path => resolve(root, 'apps/app/src/ui/maps/'+path)),
     ...['cloud-provider.ts', 'cloud-session.ts']
       .map(path => resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/'+path))]);
   if (holdRouteReplies) watched.add(resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/device-navigation.ts'));
