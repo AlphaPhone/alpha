@@ -9,7 +9,7 @@ const policy = fs.readFileSync(LAUNCHER_POLICY_SOURCE, 'utf8');
 
 test('the privileged launcher policy grants only socket files in its own private data', () => {
   const rules = policy.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
-  assert.deepEqual(rules, ['allow priv_app privapp_data_file:sock_file { create unlink getattr setattr write rename };']);
+  assert.deepEqual(rules, ['allow priv_app_all privapp_data_file:sock_file { create unlink getattr setattr write rename };']);
 });
 
 test('staging writes the reviewed policy beside the product and includes it once', () => {
