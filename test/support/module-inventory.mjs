@@ -34,6 +34,7 @@ export const moduleInventory = {
   reviewedHelpers: {
     "apps/app/src/prototype/attachment-picker.ts": {"owner": "apps/app/src/prototype/agent-adapter.ts", "reason": "Reviews current Files and Photos selections before attaching their exact bytes to the assistant draft.", "tests": ["test/browser/chat-attachment-picker.spec.ts"]},
     "apps/app/src/prototype/chat-attachment-files.ts": {"owner": "apps/app/src/prototype/agent-adapter.ts", "reason": "Validates attachment records when restoring the assistant draft and conversation history.", "tests": ["test/quint-chat-attachments.test.mjs"]},
+    "apps/app/src/prototype/composer-editor.tsx": {"owner": "apps/app/src/prototype/chat-overlay-motion-adapter.ts", "reason": "Keeps the same editor and its focus when Home Send opens chat.", "tests": ["test/browser/composer-send-focus.spec.ts"]},
     "apps/app/src/prototype/sms-recipient-picker.ts": {"owner": "apps/app/src/prototype/sms-adapter.ts", "reason": "Applies an explicitly selected Contacts number to the current message draft.", "tests": ["test/browser/aosp-telephony-views.spec.ts"]},
     "apps/app/src/runtime/native-sms-drafts.ts": {"owner": "apps/app/src/prototype/sms-adapter.ts", "reason": "Maintains device-bound native message drafts and preserves the reviewed dispatch identity.", "tests": ["test/browser/aosp-telephony-views.spec.ts", "test/image-sms.test.mjs"]},
     "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSenseAdmission.java": {"owner": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaAssistActivity.java", "reason": "Admits the image-qualified Sense companion and protected Power entry with exact package, signer, installation path, permission and caller UID checks.", "tests": ["test/aosp-capabilities.test.mjs", "test/always-on-listener.test.mjs", "test/power-sense-entry.test.mjs"]},
@@ -392,6 +393,7 @@ export const moduleInventory = {
     "apps/app/src/prototype/chat-tools-adapter.ts",
     "apps/app/src/prototype/clock-adapter.ts",
     "apps/app/src/prototype/comms-alpha.ts",
+    "apps/app/src/prototype/composer-editor.tsx",
     "apps/app/src/prototype/contacts-adapter.ts",
     "apps/app/src/prototype/context-selection.ts",
     "apps/app/src/prototype/data-adapter.ts",

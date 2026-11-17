@@ -1,7 +1,8 @@
 import {returnToApps} from './app-navigation';
 import {test,expect} from '@playwright/test';
+test.use({hasTouch:true});
 async function setup(page:any){
- await page.route('https://**/*',r=>r.abort());await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).sendFocus={sent:[],holdConsume:false};if(navigator.mediaDevices)navigator.mediaDevices.getUserMedia=async()=>{throw Error('No real microphone');};});await page.goto('/?connections=advanced');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeEnabled();
+ await page.route('https://**/*',r=>r.abort());await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).sendFocus={sent:[]};if(navigator.mediaDevices)navigator.mediaDevices.getUserMedia=async()=>{throw Error('No real microphone');};});await page.goto('/?connections=advanced');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeEnabled();
  await page.evaluate(async()=>{const {Component}=await import('/src/prototype/model.js'),{alphaClient}=await import('/src/runtime/alpha-client.ts');const f=(window as any).sendFocus;Component.prototype.connectAgent=async()=>{};alphaClient.send=async(text:string)=>{f.sent.push(text);await new Promise<void>(r=>f.reply=r);return {text:'Closed fixture reply'};};const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){f.shell=this;return render.call(this);};});
  // Capture the instrumented shell during an explicit render; a settled startup need not
  // produce another incidental render just to initialize this fixture.
@@ -10,12 +11,52 @@ async function setup(page:any){
  await returnToApps(page);
  await page.evaluate(()=>{(window as any).sendFocus.shell.connectAgent=async()=>{};});
 }
-for(const detent of ['input','sheet','full'])for(const method of ['Enter','click'])test(`Send preserves composer focus ${detent} ${method}`,async({page})=>{
- await setup(page);if(detent!=='input'){await page.getByRole('button',{name:'Open conversation',exact:true}).click();if(detent==='full')await page.getByRole('button',{name:'Expand chat',exact:true}).click();}
- const input=page.locator('textarea[data-alpha-composer]');await input.fill('First prompt');await input.focus();if(method==='Enter')await input.press('Enter');else await page.getByRole('button',{name:'Send',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);const next=page.getByRole('textbox',{name:'Message Alpha',exact:true});await expect(next).toBeFocused();await page.keyboard.type('Next prompt');await expect(next).toHaveValue('Next prompt');expect(await next.evaluate((e:any)=>e.selectionStart)).toBe(11);await page.evaluate(()=>(window as any).sendFocus.reply());await expect(next).toBeFocused();await expect(next).toHaveValue('Next prompt');
+for(const detent of ['input','sheet','full'])for(const method of ['Enter','click','tap'])test(`Send preserves composer focus ${detent} ${method}`,async({page},info)=>{
+ await setup(page);
+ if(detent!=='input'){
+  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+  if(detent==='full')await page.getByRole('button',{name:'Expand chat',exact:true}).click();
+ }
+ const input=page.locator('textarea[data-alpha-composer]');
+ await input.fill('First prompt');await input.focus();
+ await input.evaluate((e:any)=>{const f=(window as any).sendFocus;f.input=e;f.blurs=0;e.addEventListener('blur',()=>f.blurs++);});
+ if(method==='Enter')await input.press('Enter');
+ else if(method==='tap')await page.getByRole('button',{name:'Send',exact:true}).tap();
+ else await page.getByRole('button',{name:'Send',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);
+ const next=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await expect(next).toBeFocused();
+ const continuity=await next.evaluate((e:any)=>({sameInput:e===(window as any).sendFocus.input,oldInputConnected:(window as any).sendFocus.input.isConnected,blurs:(window as any).sendFocus.blurs}));
+ await info.attach('composer-continuity',{body:JSON.stringify({detent,method,...continuity}),contentType:'application/json'});
+ expect(continuity).toEqual({sameInput:true,oldInputConnected:true,blurs:0});
+ await page.keyboard.type('Next prompt');await expect(next).toHaveValue('Next prompt');
+ expect(await next.evaluate((e:any)=>e.selectionStart)).toBe(11);
+ await next.press('Enter');expect(await page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);
+ await page.evaluate(()=>(window as any).sendFocus.reply());
+ await expect(next).toBeFocused();await expect(next).toHaveValue('Next prompt');
 });
 test('a later provider reply never steals the user’s new focus',async({page})=>{
  await setup(page);const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('First prompt');await input.press('Enter');await expect.poll(()=>page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(1);const chosen=page.getByRole('button',{name:'Resize chat',exact:true});await chosen.focus();await page.evaluate(()=>(window as any).sendFocus.reply());await expect(chosen).toBeFocused();
+});
+test('Android keyboard dismissal while the send waits does not reopen it',async({page})=>{
+ await setup(page);
+ await page.evaluate(()=>{
+  const f=(window as any).sendFocus,c=f.shell.composerDraft,hold=c.hold.bind(c);
+  c.hold=async(...args:any[])=>{await new Promise<void>(resolve=>{f.releaseHold=resolve;});return hold(...args);};
+  window.dispatchEvent(new CustomEvent('alpha-keyboard-visibility',{detail:{visible:true}}));
+ });
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
+ await input.fill('Send then dismiss');await input.press('Enter');
+ await expect.poll(()=>page.evaluate(()=>!!(window as any).sendFocus.releaseHold)).toBe(true);
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('alpha-keyboard-visibility',{detail:{visible:false}})));
+ await expect(input).not.toBeFocused();
+ await page.evaluate(()=>(window as any).sendFocus.releaseHold());
+ await expect.poll(()=>page.evaluate(()=>(window as any).sendFocus.sent)).toEqual(['Send then dismiss']);
+ const next=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await expect(next).not.toBeFocused();
+ await page.evaluate(()=>(window as any).sendFocus.reply());
+ await expect(page.getByRole('button',{name:'Message actions: Closed fixture reply',exact:true})).toBeVisible();
+ await expect(next).not.toBeFocused();await next.tap();await expect(next).toBeFocused();
 });
 test('empty Enter, IME confirmation and multiline input preserve the draft without dispatch',async({page})=>{
  await setup(page);const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.focus();await input.press('Enter');await expect(input).toBeFocused();await input.fill('Keep this');await input.dispatchEvent('keydown',{key:'Enter',isComposing:true});await input.press('End');await input.press('Shift+Enter');await page.keyboard.type('second line');await expect(input).toHaveValue('Keep this\nsecond line');expect(await page.evaluate(()=>(window as any).sendFocus.sent.length)).toBe(0);
