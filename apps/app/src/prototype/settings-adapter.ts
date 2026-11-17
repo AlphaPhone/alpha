@@ -1017,7 +1017,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           if(recovery?.step==='review')rows.push(info('Kept items',String(recovery.review.retainedCount)));
           out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Restart details',hasTitle:true,backLabel:'Back to Agent activity',back:()=>api.set({page:'agent-activity'}),hero:{},groups:[group(rows)]});
         }
-        if(native&&developerTools&&!testMocksEnabled&&state.page==='agent-activity'){
+        if(native&&!testMocksEnabled&&state.page==='agent-activity'){
           const groups:Bag[]=[];
           const activityRows:Bag[]=[];
           if(connection.residentRecoveryReason&&!connection.session){
@@ -1037,7 +1037,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           if(connection.session){
             const historyRows:Bag[]=[];
             if(!connection.busy){
-              historyRows.push({...action('History',()=>void connectionController.listHistory()),lbl:'Load conversations',lucide:'clock'});
+              historyRows.push({...action('New',()=>void connectionController.newConversation()),lbl:'New conversation',lucide:'plus',chev:false},{...action('History',()=>void connectionController.listHistory()),lbl:'Load conversations',lucide:'clock'});
               for(const item of connection.conversations)historyRows.push({...action(item.title,()=>void connectionController.restoreHistory(item.id),`conversation:${item.id}`),lbl:`Restore conversation: ${item.title}`,lucide:'undo-2',chev:false});
             }
             if(connection.historyError){historyRows.push(info('History',connection.historyError));if(!connection.busy)historyRows.push({...action('Retry',()=>void connectionController.retrySavedHistory()),lbl:'Retry saved conversation',lucide:'rotate-cw',chev:false});}
@@ -1120,7 +1120,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       } else if (page.title === 'About') {
         const native=Capacitor.isNativePlatform();
         page.hero={kAlpha:true,version:native?versionLabel(facts.appVersion||buildVersion,facts.appVersionCode):buildVersion==='Unavailable'?'Development preview':'Version '+buildVersion};
-        page.groups=[...(native&&facts.androidRelease?[group([info('Android version',facts.androidRelease)])]:[]),group([...(native&&developerTools&&!testMocksEnabled?[{...action('Agent activity',()=>api.set({page:'agent-activity'})),lucide:'clock'}]:[]),...(testMocksEnabled?[{...action('Status',()=>connectionController.open()),val:connection.name,hasVal:true,lucide:'link'}]:[]),licensesRow()])];
+        page.groups=[...(native&&facts.androidRelease?[group([info('Android version',facts.androidRelease)])]:[]),group([...(native&&!testMocksEnabled?[{...action('Agent activity',()=>api.set({page:'agent-activity'})),lucide:'clock'}]:[]),...(testMocksEnabled?[{...action('Status',()=>connectionController.open()),val:connection.name,hasVal:true,lucide:'link'}]:[]),licensesRow()])];
       } else if (page.title === 'Wi-Fi') {
         page.hasHdrTog = false; page.hdrTog = null;
         page.hero = { ...page.hero, big: wifiValue, sub: '' };
