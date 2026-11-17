@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {build} from 'esbuild';
 import {projectActionMessages} from '../apps/app/src/runtime/action-message-presentation.ts';
-import {calendarReviewText,inboxChoiceText,calendarApprovalFromList,calendarApprovalPending,calendarApprovalStatus} from '../apps/app/src/runtime/calendar-approval.ts';
+import {calendarReviewText,inboxChoiceText,calendarApprovalFromList,calendarApprovalActionable,calendarApprovalPending,calendarApprovalStatus} from '../apps/app/src/runtime/calendar-approval.ts';
 import {calendarApprovalFields} from '../apps/app/src/prototype/calendar-approval-fields.ts';
 import {setLocalePreferences} from '../apps/app/src/prototype/locale-time.ts';
 const id='11111111-2222-4333-8444-555555555555';
@@ -36,6 +36,14 @@ test('foreign, duplicate, malformed and non-Calendar approvals do not authorize 
  for(const state of ['approved','executing','retryable','reconciliation_required','done','rejected','expired'])assert.equal(calendarApprovalPending(row({state})),false);
  assert.equal(calendarApprovalStatus(row({state:'executing'})),'Change not confirmed');assert.equal(calendarApprovalStatus(row({state:'done'})),'Review closed');
  assert.equal(calendarApprovalPending(row({expiresAt:'2020-01-01T00:00:00Z'})),false);
+});
+test('a retryable request can be approved again and says so; every other settled state stays closed',()=>{
+ assert.equal(calendarApprovalActionable(row()),true);assert.equal(calendarApprovalActionable(row({state:'retryable'})),true);
+ assert.equal(calendarApprovalStatus(row({state:'retryable'})),'Nothing changed. Approve to try again');
+ assert.notEqual(calendarApprovalStatus(row({state:'retryable'})),calendarApprovalStatus(row({state:'executing'})));
+ for(const state of ['approved','executing','reconciliation_required','done','rejected','expired'])assert.equal(calendarApprovalActionable(row({state})),false,state);
+ assert.equal(calendarApprovalActionable(row({state:'retryable',expiresAt:'2020-01-01T00:00:00Z'})),false);assert.equal(calendarApprovalStatus(row({state:'retryable',expiresAt:'2020-01-01T00:00:00Z'})),'Review expired');
+ assert.equal(calendarApprovalActionable(row({state:'retryable',subjectUserId:'another-owner'})),false);assert.equal(calendarApprovalStatus(row({state:'retryable',subjectUserId:'another-owner'})),'Approval unavailable');
 });
 test('approval fields show local time, exact effect fields and readable source labels without JSON',()=>{
  const prior=process.env.TZ;process.env.TZ='America/New_York';setLocalePreferences({locale:'en-GB',hourCycle:'h23'});
@@ -77,6 +85,18 @@ test('a foreign queue row exposes no request details or decision controls',async
 });
 test('an executing request offers no approval or decline, and Close returns no decision',async()=>{
  const cleanup=dom();try{const promise=reviewCalendarApproval(async()=>row({state:'executing',reason:'Cancel "Exact title" on 2026-10-14T18:00:00.000Z without sending attendee notifications.'}),new AbortController().signal,()=>{},()=>{});await tick();assert.equal(button('Approve').hidden,true);assert.equal(button('Decline').hidden,true);assert.equal(document.querySelector('[role=status]').textContent,'Change not confirmed');assert.equal(document.body.textContent.includes('2026-10-14T18:00:00'),false);assert.doesNotMatch(document.body.textContent,/Decline this request/);assert.match(document.body.textContent,/Exact title/);button('Close').click();assert.equal(await promise,null);}finally{cleanup();}
+});
+test('a retryable request offers Approve alone and returns the row that was read at the tap',async()=>{
+ const cleanup=dom();try{const retryable=row({state:'retryable',updatedAt:'2026-10-15T00:02:00Z'});let reads=0;const promise=reviewCalendarApproval(async()=>{reads++;return retryable;},new AbortController().signal,()=>{},()=>{});await tick();
+  assert.equal(button('Approve').hidden,false);assert.equal(button('Approve').disabled,false);assert.equal(button('Decline').hidden,true);assert.equal(document.querySelector('[role=status]').textContent,'Nothing changed. Approve to try again');
+  let result='waiting';void promise.then(value=>result=value);button('Decline').click();await tick();assert.equal(result,'waiting','a retryable request cannot be declined');
+  button('Approve').click();await promise;assert.deepEqual(result,{request:retryable,decision:'approve'});assert.equal(result.request.revision,retryable.revision);}finally{cleanup();}
+});
+test('a request that stopped being retryable before the tap returns no approval',async()=>{
+ const cleanup=dom();try{let reads=0;const promise=reviewCalendarApproval(async()=>++reads===1?row({state:'retryable'}):row({state:'executing'}),new AbortController().signal,()=>{},()=>{});await tick();button('Approve').click();await tick();assert.equal(button('Approve').hidden,true);assert.equal(document.querySelector('[role=status]').textContent,'Change not confirmed');button('Close').click();assert.equal(await promise,null);}finally{cleanup();}
+});
+for(const state of ['approved','executing','reconciliation_required','done'])test(`a ${state} request offers no decision`,async()=>{
+ const cleanup=dom();try{const promise=reviewCalendarApproval(async()=>row({state}),new AbortController().signal,()=>{},()=>{});await tick();assert.equal(button('Approve').hidden,true);assert.equal(button('Decline').hidden,true);button('Close').click();assert.equal(await promise,null);}finally{cleanup();}
 });
 test('closing during a delayed status read cannot revive a request',async()=>{
  const cleanup=dom();try{let release,updates=0;const pending=new Promise(resolve=>release=resolve);const promise=reviewCalendarApproval(()=>pending,new AbortController().signal,()=>{},()=>updates++);button('Close').click();assert.equal(await promise,null);release(row());await tick();assert.equal(document.querySelector('dialog'),null);assert.equal(updates,0);}finally{cleanup();}
@@ -130,3 +150,4 @@ test('Calendar markup projection preserves completed device receipts and their a
   assert.deepEqual(shell.st.msgs,stored);
  }finally{shell.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;}
 });
+

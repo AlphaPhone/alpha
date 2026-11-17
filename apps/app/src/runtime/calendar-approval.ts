@@ -43,10 +43,14 @@ export function calendarApprovalFromList(raw:unknown,id:string,ownerId:string):C
  return {id,ownerVerified:authority===row.subjectUserId,state:row.state,action:row.action,reason:row.reason,expiresAt:row.expiresAt,payload:row.payload,revision:JSON.stringify([row.id,row.subjectUserId,row.state,row.action,row.payload,row.reason,row.expiresAt,row.updatedAt])};
 }
 export function calendarApprovalPending(row:CalendarApproval|null,now=Date.now()){return !!row&&row.ownerVerified&&row.state==='pending'&&Date.parse(row.expiresAt)>now;}
+/** A request the owner may approve: one awaiting its first decision, or one an attempt left retryable
+ * without changing Calendar. The agent accepts a reviewed approval in either state; declining stays pending-only. */
+export function calendarApprovalActionable(row:CalendarApproval|null,now=Date.now()){return !!row&&row.ownerVerified&&(row.state==='pending'||row.state==='retryable')&&Date.parse(row.expiresAt)>now;}
 export function calendarApprovalStatus(row:CalendarApproval|null,now=Date.now()){
  if(!row)return 'Status unavailable';
- if(row.state==='expired'||row.state==='pending'&&Date.parse(row.expiresAt)<=now)return 'Review expired';
+ if(row.state==='expired'||(row.state==='pending'||row.state==='retryable')&&Date.parse(row.expiresAt)<=now)return 'Review expired';
  if(row.state==='pending')return row.ownerVerified?'Awaiting your approval':'Approval unavailable';
+ if(row.state==='retryable')return row.ownerVerified?'Nothing changed. Approve to try again':'Approval unavailable';
  if(row.state==='rejected')return 'Request declined';
  if(row.state==='done')return 'Review closed';
  return 'Change not confirmed';
