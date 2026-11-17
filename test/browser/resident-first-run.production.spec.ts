@@ -129,14 +129,15 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   const { foreign, welcome } = await firstRun(page, {}, true);
   await enterNativeEmailCode(page);
   await expect(welcome).toHaveCount(0, { timeout: 30_000 });
-  // Fresh sign-in owns the original required sequence, with no Skip or automatic requests.
+  // Fresh sign-in follows the ordered access sequence, with explicit Skip and no automatic requests.
   const access=page.locator('dialog.alpha-startup-permissions');
   await expect(access).toBeVisible();
   expect(await page.evaluate(()=>(window as any).firstRunAccess.requests)).toEqual([]);
   await expect(access.getByRole('heading',{name:'Access',exact:true})).toBeVisible();
   for(const name of ['Notifications','Microphone','Camera','Location','Calendar','Photos','Files']) {
     await expect(access.locator('[aria-current=step]',{hasText:name})).toBeVisible();
-    await expect(access.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);
+    await expect(access.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
+    await expect(access.getByRole('button',{name:/Not now|Back/})).toHaveCount(0);
     await access.getByRole('button',{name:'Allow',exact:true}).click();
   }
   await expect(access.getByRole('heading',{name:/^(All set|All set)$/})).toBeVisible();
