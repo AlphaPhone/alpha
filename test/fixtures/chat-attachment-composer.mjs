@@ -115,6 +115,7 @@ export function chatAttachmentComposerFixture() {
     syncStoppedReplyNotice() {}, syncCanonicalNotes() {}, collapseSystemNotices: rows => rows,
     mergeConversationDelivery: rows => rows, settleFirstSendSlot: forbidden,
     NO_AGENT_SEND: 'No agent', RESIDENT_STARTING_NOTICE: 'Starting', RESIDENT_RECOVERING_NOTICE: 'Recovering',
+    residentAlwaysPresent: true, agentPendingText: () => 'Starting',
     privateLocalPreviewEnabled: false, AlphaClientError: class AlphaClientError extends Error {},
     localTurnStatus: new EventTarget(), planActionCard: () => undefined,
   };
