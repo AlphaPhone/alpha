@@ -398,7 +398,7 @@ test('the web build\'s forced sign-out does not create a secret store in a brows
 // revocation and history tests remain in scripts/test-remote-protocol.ts as explicitly
 // non-product development infrastructure.
 
-test('automatic agent startup stays quiet while local apps remain usable',async({page})=>{
+test('automatic startup holds the shell until the agent is ready',async({page})=>{
   await android(page,{cloudCredential:true,balance:5});
   await page.addInitScript(()=>{
     const w=window as any,bridge=w.Capacitor,original=bridge.nativePromise;
@@ -411,9 +411,8 @@ test('automatic agent startup stays quiet while local apps remain usable',async(
   // Optional setup waits for startup to settle; local apps remain usable meanwhile.
   await expect(page.locator('.alpha-startup-permissions')).toHaveCount(0);
   await expect.poll(()=>page.evaluate(()=>(window as any).agentStartHeld)).toBe(true);
-  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
-  await expect(page.getByText('Your agent is starting…',{exact:true})).toHaveCount(0);
-  await page.getByRole('button',{name:'Notes',exact:true}).click();
+  await expect(page.getByRole('status',{name:'Loading Alpha',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toHaveCount(0);
   await expect(page.getByText('Your agent is starting…',{exact:true})).toHaveCount(0);
   await page.evaluate(()=>(window as any).releaseAgentStart());
   await completeAccessSetup(page);

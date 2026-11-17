@@ -93,7 +93,8 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       // Plan selection opens Cloud billing only after the account check; nothing is bought here.
       await membership.getByRole('button', { name: 'Choose a plan', exact: true }).click();
       // This explicit action opens the existing billing site; it does not purchase a plan.
-      await expect.poll(() => stub(page, s => s.opened)).toEqual(['https://cloud.eliza.app/cloud/billing']);
+      await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plus',{exact:true})).toBeVisible();
+      expect(await stub(page,s=>s.opened)).toEqual([]);
     } else {
       if (kind === 'no_provider') await expect(page.getByRole('button', { name: /^Check Eliza Cloud again/ })).toHaveCount(1);
       else await expect(page.getByRole('button', { name: /^(Manage (plan|billing)|Check Eliza Cloud again|Set up AI)/ })).toHaveCount(0);
