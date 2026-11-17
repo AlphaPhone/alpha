@@ -114,6 +114,11 @@ public class DrawTest {
   self.assertEqual([n.text for n in flag.findall('bool')if n.attrib.get('name')=='config_alpha_home_back_only'],['false'],'three-button navigation keeps Recents')
   home_patch=(branding/'home-back-keyboard.patch').read_text()
   self.assertIn('<bool name="config_alpha_home_back_only">false</bool>',home_patch)
+  settings=ET.parse(branding/'overlay/packages/apps/Settings/res/values/alpha-navigation.xml').getroot()
+  # Three-button mode is the default, so its Settings label and the gesture description stay AOSP's own,
+  # which describe Back, Home and Recents; Alpha names only its gesture mode.
+  self.assertEqual({n.attrib['name']:n.text for n in settings.findall('string')},
+   {'edge_to_edge_navigation_title':'Alpha gestures','gesture_settings_activity_title':'Alpha gestures'})
   overlay=ET.parse(branding/'overlay/frameworks/base/packages/SystemUI/res/values/alpha-navigation.xml').getroot()
   colors={n.attrib['name']:n.text for n in overlay.findall('color')}
   self.assertEqual(colors,{'navigation_bar_home_handle_dark_color':'#00000000','navigation_bar_home_handle_light_color':'#00000000'})
