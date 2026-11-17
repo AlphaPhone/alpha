@@ -194,7 +194,7 @@ test.describe('mail',()=>{
   await expect.poll(()=>page.evaluate(()=>document.body.textContent?.includes('NEIGHBOR_BODY_CANARY'))).toBe(true);
   await expect(page.getByLabel('Attached email',{exact:true})).toContainText('Reviewed message');
   await sharing.press('Enter');
-  await expect(page.getByText('Message or destination changed. Review again; nothing was sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The email or your agent changed. Review it again; nothing was sent.',{exact:true})).toBeVisible();
   expect(await sent(page)).toEqual([]);
   await expect(page.getByText(/Summarize the following user-selected email/)).toHaveCount(0);
  });
@@ -202,7 +202,7 @@ test.describe('mail',()=>{
   const sharing=await setup(page);
   await page.evaluate(()=>{(window as any).mailSnapshot.session={sessionId:'other-session',agentId:'agent-2',ownerId:'fixture-owner',origin:'https://agent.example.invalid'};});
   await sharing.press('Enter');
-  await expect(page.getByText('Message or destination changed. Review again; nothing was sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The email or your agent changed. Review it again; nothing was sent.',{exact:true})).toBeVisible();
   expect(await sent(page)).toEqual([]);
  });
  test('an attached email left for two minutes is refused before Send',async({page})=>{
@@ -210,7 +210,7 @@ test.describe('mail',()=>{
   const sharing=await setup(page);
   await page.clock.fastForward(121_000);
   await sharing.press('Enter');
-  await expect(page.getByText('Message or destination changed. Review again; nothing was sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The email or your agent changed. Review it again; nothing was sent.',{exact:true})).toBeVisible();
   expect(await sent(page)).toEqual([]);
  });
 });

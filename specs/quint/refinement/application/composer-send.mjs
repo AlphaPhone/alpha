@@ -17,6 +17,7 @@ import {randomUUID} from 'node:crypto';
 import {tsImport} from '../../../../test/support/ts-import.mjs';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {systemNoticeKind, systemNoticeDisplayText, collapseSystemNotices} from '../../../../apps/app/src/runtime/action-message-presentation.ts';
+import {residentDraftOwner,residentRestartDraftScope} from '../../../../apps/app/src/prototype/assistant-draft-controller.ts';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 
 export const model = {path: 'specs/quint/application/ComposerSend.qnt', module: 'ComposerSend'};
@@ -32,8 +33,6 @@ export async function compile() {
   const adapter = readFileSync(`${repositoryRoot}/apps/app/src/prototype/agent-adapter.ts`, 'utf8');
   const between = (start, end) => { const a = adapter.indexOf(start), b = adapter.indexOf(end, a); if (a < 0 || b <= a) throw Error(`missing source anchor ${start}`); return adapter.slice(a, b); };
   const ts = source => stripTypeScriptTypes(source, {mode: 'strip'});
-  // The session-change subscription asks who owns the resident's drafts.
-  const owner = between('function residentDraftOwner(', '/** One composer send.');
   const helpers = between('function createdFromSlot(', 'function selectedCloudName(');
   const plan = between('function planActionCard(', '/** Context notices'), notices = between('function replyNotices(', '/** Decline one pending proposal');
   const send = between('  p.send = async function', '  p.agentSay = function'), say = between('  p.agentSay = function', '  p.reply = function');
@@ -42,13 +41,13 @@ export async function compile() {
   const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/apps/app/src/ui/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
   const {DurableDraftController} = await import('data:text/javascript;base64,' + Buffer.from(controller).toString('base64'));
   const {AlphaClient, AlphaClientError} = await tsImport('../../../../apps/app/src/runtime/alpha-client.ts', import.meta.url);
-  return {code, subscription: stripTypeScriptTypes(`${owner}\n${subscription}`, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};
+  return {code, subscription: stripTypeScriptTypes(subscription, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};
 }
 
 export async function createDriver({code, subscription, DurableDraftController, AlphaClient, AlphaClientError}) {
   let sessionNumber = 0, changed = () => {};
   const session = () => ({sessionId: `session-${sessionNumber}`, agentId: 'agent-a', ownerId: 'owner-a', origin: 'https://agent.invalid'});
-  let snapshot = {session: session(), history: null, busy: false, open: false, startupResolved: true};
+  let snapshot = {kind:'resident',session: session(), history: null, busy: false, open: false, startupResolved: true};
   const timers = [], stores = new Map(), attempts = new Map(), decisions = new Map();
   const alphaClient = new AlphaClient();
   class NotDispatched extends Error {}
@@ -106,7 +105,7 @@ export async function createDriver({code, subscription, DurableDraftController, 
   });
   alphaClient.setViewContext({view: 'calendar'});
   attach();
-  const ports = {connectionController, alphaClient, cancelMessageContext() {}, clearMapsSelection() {}, syncStoppedReplyNotice() {}, syncCanonicalNotes() {},
+  const ports = {connectionController, alphaClient, residentDraftOwner, residentRestartDraftScope, cancelMessageContext() {}, clearMapsSelection() {}, syncStoppedReplyNotice() {}, syncCanonicalNotes() {},
     context() {}, restoreAttachments: async messages => messages, collapseSystemNotices, mergeConversationDelivery: messages => messages};
   new Function(...Object.keys(ports), subscription).call(shell, ...Object.values(ports));
   shell.refreshDraftBinding();

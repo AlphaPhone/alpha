@@ -6257,6 +6257,7 @@
     "tests": [
       "staleAnswerIgnoredTest",
       "overlayWithdrawsTest",
+      "failedWithdrawalRetriesQuietlyTest",
       "failureReportedOnceTest",
       "hiddenAppKeepsPageTest",
       "idleOffBrowserTest",

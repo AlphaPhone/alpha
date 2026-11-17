@@ -546,7 +546,7 @@ test('F-13: a lost Trash reply is an unknown outcome, handled like an unknown se
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
   await button(page, 'Sender m1, Subject m1').click();
   await messageAction(page, 'Move to Trash');
-  await expect(review.getByRole('status')).toHaveText('Review the saved operation before starting another.');
+  await expect(review.getByRole('status')).toHaveText('Review the saved email action before starting another.');
   await expect(review).toContainText('Selected message/draft: m2');
   await expect(review.getByRole('button', {name: 'Confirm this change', exact: true})).toHaveCount(0);
   let state = await provider(page);
@@ -605,13 +605,15 @@ test('F-12: a message the provider lists twice in one page is shown once', async
   await expect(button(page, 'Load newer mail')).toHaveCount(0);
 });
 
-test('F-12: a cursor the provider refuses after the mailbox changed keeps the loaded page and says how to reload', async ({page}) => {
+test('F-12: a refused cursor keeps the loaded page and leaves Refresh available', async ({page}) => {
   test.setTimeout(120_000);
   await openInbox(page, {inbox: ['m1', 'm2', 'm3', 'm4'], pageSize: 2, strictCursors: true,deferPaging:true});
   await expect.poll(() => rows(page)).toEqual(['m1', 'm2']);
   await page.waitForFunction(()=>!!(window as any).releaseMailPage);await setProvider(page, {inbox: ['m1', 'm3', 'm4'], revision: 2});await page.evaluate(()=>(window as any).releaseMailPage());
   await button(page, 'Load more').click();
-  await expect(page.getByText('Invalid Gmail page token.', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('Gmail refused this request.', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('Invalid Gmail page token.', {exact: true})).toHaveCount(0);
+  await expect(button(page, 'Refresh inbox')).toBeEnabled();
   // The loaded page stays (it is not silently mixed with a page from the new mailbox) and the
   // refused cursor is not offered again.
   expect(await rows(page)).toEqual(['m1', 'm2']);

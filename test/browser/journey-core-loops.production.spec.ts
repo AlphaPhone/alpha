@@ -19,7 +19,7 @@ import {seedCompletedAccessSetup} from './flag-off-android';
 // says the shipped renderer takes the real path or shows an honest unavailable state; it never
 // says the native side of that path works.
 import { test, expect, type Page } from '@playwright/test';
-import {completeAccessSetup,expectNoDevelopmentSurface,fenceNetwork,openYourAgent} from './flag-off-android';
+import {completeAccessSetup,expectNoDevelopmentSurface,fenceNetwork} from './flag-off-android';
 test.beforeEach(async({page})=>installNoteScheduleContract(page));
 
 const SELECTION = 'alpha.connection.selection.v1';
@@ -302,11 +302,14 @@ test('loop A on Android: the resident agent answers, the conversation follows ac
   for (const text of [...shown, 'Flag-off stopped request', 'Resident reply 4']) await expect(bubble(page, text)).toHaveCount(1, { timeout: 30_000 });
   // Restoring reads history; it posts nothing.
   expect(await native(page, f => f.streams)).toBe(0);
-  // Conversation controls stay reachable, and no credential is rendered anywhere.
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  const account = await openYourAgent(page);
-  await expect(account.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
-  await account.getByRole('button',{name:'Back to About',exact:true}).click();
+  // Chat search stays reachable after restoring the conversation.
+  await button(page, 'Chat actions').click();
+  await expect(button(page, 'Search chat')).toBeVisible();
+  await button(page, 'Search chat').click();
+  const search = page.getByRole('dialog', { name: 'Search chats', exact: true });
+  await expect(search.getByRole('textbox', { name: 'Search messages', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveCount(0);
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await button(page, 'Settings').click();
   await openCloudPlanFromSettings(page);

@@ -3,7 +3,7 @@ import { cloudStorageSlot } from '../../apps/app/src/runtime/cloud-deployment.ge
 import {seedCompletedAccessSetup} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
-import { openYourAgent, completeAccessSetup, fenceNetwork } from './flag-off-android';
+import { completeAccessSetup, fenceNetwork } from './flag-off-android';
 // Flag-off production bundle only. Android cases stub the Capacitor bridge in a desktop browser and
 // saved remote selections must never reconnect. Nothing here contacts
 // Eliza Cloud, a deployed agent, an Android device or the native AlphaConnection plugin; those
@@ -174,20 +174,21 @@ test('production Android with a Cloud sign-in starts the resident agent instead 
   expect(foreign).toEqual([]);
 });
 
-test('production Android without a packaged agent says so and does not advertise retired routes', async ({ page }) => {
-  await fenceNetwork(page);
+test('production Android without a packaged agent keeps local apps available without starting a remote agent', async ({ page }) => {
+  const foreign = await fenceNetwork(page);
   await android(page, { cloudCredential: true, balance: 5, packaged: false });
   await page.goto('/');
   await completeAccessSetup(page);
   // A developer build without the packaged runtime has no startup to retry.
   await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-  const dialog = await openYourAgent(page);
-  const alert = dialog.getByText('No on-device agent',{exact:true});
-  await expect(alert).toHaveText('No on-device agent');
-  await expect(alert).not.toContainText(/remote agent|pair/i);
-  await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
+  await expect(page.getByRole('button', { name: 'Restart Alpha', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Use local apps without AI', exact: true })).toHaveCount(0);
-  expect((await nativeCalls(page)).filter(call => call.plugin === 'Agent').map(call => call.method)).not.toContain('start');
+  const calls = await nativeCalls(page);
+  expect(calls.filter(call => call.plugin === 'Agent').map(call => call.method)).not.toContain('start');
+  expectRemoteUntouched(calls);
+  expect(foreign).toEqual([]);
 });
 
 for (const start of ['reject','starting'] as const) {
