@@ -6,7 +6,8 @@
   "exports": {
     "./tokens.json": "./tokens.json",
     "./tokens.css": "./generated/tokens.css",
-    "./theme.css": "./generated/theme.css"
+    "./theme.css": "./generated/theme.css",
+    "./fonts.css": "./fonts.css"
   },
   "scripts": {
     "build": "node ../../vibestack/design/cli.ts build",
