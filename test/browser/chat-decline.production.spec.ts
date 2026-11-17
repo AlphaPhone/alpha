@@ -1,5 +1,5 @@
 import {seedCompletedAccessSetup} from './flag-off-android';
-import { completeAccessSetup, openYourAgent } from './flag-off-android';
+import { completeAccessSetup } from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
@@ -109,14 +109,14 @@ const fixture = (page: Page) => page.evaluate(() => {
   const f = (window as any).declineFixture;
   return { decisions: f.decisions, reconciliations: f.reconciliations, effects: f.effects, journal: f.journal, states: f.proposals.map((p: any) => [p.id, p.state]), unexpected: f.unexpected };
 });
-async function connected(page: Page, options: { review?: boolean } = {}) {
+async function connected(page: Page) {
   await page.goto('/');
   // Development builds offer an explicit start; production starts the funded resident agent itself.
   const start = page.locator('.alpha-connection').getByRole('button', { name: 'Start local agent', exact: true });
   await expect.poll(async () => await start.isVisible().catch(() => false) || await page.evaluate(() => (window as any).declineFixture.installationId !== ''), { timeout: 30_000 }).toBe(true);
   if (await start.isVisible().catch(() => false)) await start.click();
   await expect.poll(() => page.evaluate(() => (window as any).declineFixture.installationId), { timeout: 30_000 }).not.toBe('');
-  // Review history is retained for Activity without opening an automatic modal.
+  // Retained proposals do not open a modal while the resident starts.
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await completeAccessSetup(page);
 }
@@ -146,22 +146,19 @@ test('a proposal is declined from its chat card and the agent records the reject
   await expect(page.getByText('Create note', { exact: true })).toHaveCount(0);
 });
 
-test('Activity reconciles a reconciliation-required entry as not applied', async ({ page }) => {
+test('a retained uncertain action stays untouched after Activity is removed from regular Settings', async ({ page }) => {
   test.setTimeout(90_000);
   await residentAgent(page, 'reconcile');
-  await connected(page, { review: true });
-  await openYourAgent(page);
-  const app = page.locator('[data-alpha-layer="app"]');
-  // Background proposal recovery stays passive. Activity loads its history only
-  // when the owner asks, before any reconciliation decision is available.
-  await app.getByRole('button', { name: 'Refresh actions', exact: true }).click();
-  await expect(app.getByRole('button', { name: 'Refresh actions', exact: true })).toBeVisible();
-  await expect(app.getByText('Review', { exact: true })).toBeVisible();
-  await expect(app.getByRole('button', { name: 'I verified it happened', exact: true })).toBeVisible();
-  await app.getByRole('button', { name: 'I verified it did not happen', exact: true }).click();
-  await expect.poll(async () => (await fixture(page)).states).toEqual([['fixture-reconcile', 'not_applied']]);
+  await connected(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'About', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agent activity', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Refresh actions', exact: true })).toHaveCount(0);
+
   const state = await fixture(page);
-  expect(state.reconciliations).toEqual([{ attemptId: 'fixture-attempt', resolution: { confirmed: true, outcome: 'not_applied' } }]);
+  expect(state.states).toEqual([['fixture-reconcile', 'reconciliation_required']]);
+  expect(state.reconciliations).toEqual([]);
   expect(state.effects).toBe(0);
   expect(state.decisions).toEqual([]);
   expect(state.journal.filter((m: string) => ['reserve', 'markApplying', 'finish'].includes(m))).toEqual([]);

@@ -1,6 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openCloudPlanFromSettings} from './helpers/cloud-plan-settings';
-import {fenceNetwork,openYourAgent,seedCompletedAccessSetup} from './flag-off-android';
+import {fenceNetwork,seedCompletedAccessSetup} from './flag-off-android';
 import {observeCloudNotices} from './helpers/cloud-connection-notices';
 import {test,expect,type Page} from '@playwright/test';
 import {CREDENTIAL,entitlements,installNativeCloudPlanPorts,USER,type NativePlanFixture} from './helpers/native-cloud-plan-fixture';
@@ -672,14 +672,17 @@ test.describe('account, plan and sign-in expiry',()=>{
  });
 });
 
-test('failed native provider binding reports unconfirmed inference and exposes the error before history',async({page})=>{
+test('failed native provider binding keeps unconfirmed inference and hides the low-level error in Settings',async({page})=>{
  const pageErrors:string[]=[];page.on('pageerror',error=>pageErrors.push(error.message));
  await boot(page,{...await entitlements(),holdProvider:false,providerFailure:'Synthetic account verification failure',fullApp:true});await started(page);await idle(page);
- const settings=await openYourAgent(page);
- const error=settings.getByText(/Synthetic account verification failure/);await expect(error).toBeVisible();
- await expect(error).toContainText('AI state unknown');
- const history=settings.getByRole('button',{name:'New conversation',exact:true});await expect(history).toBeVisible();
- expect(await error.evaluate((node,other)=>(node.compareDocumentPosition(other!)&Node.DOCUMENT_POSITION_FOLLOWING)!==0,await history.elementHandle())).toBe(true);
+ const snapshot=await page.evaluate(()=>(window as any).planController.getSnapshot());
+ expect(snapshot.error).toContain('Synthetic account verification failure');
+ expect(snapshot.error).toContain('AI state unknown');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('button',{name:'About',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'About',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Agent activity',exact:true})).toHaveCount(0);
+ await expect(page.getByText(/Synthetic account verification failure/)).toHaveCount(0);
  expect(await configured(page)).toBe(1);
  // The configure call failed before returning a binding guard. The client cannot claim the
  // old provider was removed, and must not clear it with a fresh, unscoped mutation.

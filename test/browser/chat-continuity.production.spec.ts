@@ -11,7 +11,7 @@
 // the stub in flag-off-android.ts plus resident-stub.ts; viewport changes stand in for the soft
 // keyboard. This is not the native Agent plugin, a real IME, Android Back/HOME or a device.
 import { test, expect, type Page } from '@playwright/test';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, openYourAgent } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome } from './flag-off-android';
 import { residentStub, stub, setStub } from './resident-stub';
 
 const owner = { token: 'synthetic-cloud-key', userId: '9f1dc45a-4011-4e44-947a-30d999d24fa5', email: 'owner@example.invalid', balance: 5 };
@@ -383,40 +383,45 @@ test('a refused send without a saved copy goes back ahead of text typed while it
   await expect(conversation(page).getByText('First question', { exact: true })).toHaveCount(0);
 });
 
-test('a refused send without a saved copy never restores into another conversation', async ({ page }) => {
-  await connected(page);
-  await harness(page, f => { f.draftSlotsFail = true; });
-  await setStub(page, { stream: 'busyHeld' });
-  await composer(page).fill('Keep this with the original conversation');
-  await composer(page).press('Enter');
-  await expect.poll(() => stub(page, s => typeof s.release)).toBe('function');
-  const panel=await openYourAgent(page);
-  await panel.getByRole('button',{name:'New conversation',exact:true}).click();
-  await composer(page).fill('Different conversation text');
-  await stub(page, s => s.release?.());
-  await frames(page);
-  await expect(composer(page)).toHaveValue('Different conversation text');
-  expect(await harness(page, f => f.posts)).toEqual([]);
-});
+for (const priorReply of [false, true]) {
+  test(`a refused ${priorReply ? 'existing-chat' : 'first-chat'} send without a saved copy stays out of another chat`, async ({ page }) => {
+    test.setTimeout(90_000);
+    const foreign = await connected(page);
+    const expectedPosts = priorReply ? ['Start this conversation'] : [];
+    if (priorReply) {
+      await composer(page).fill(expectedPosts[0]);
+      await composer(page).press('Enter');
+      await expect(conversation(page).getByText('Resident reply 1', { exact: true })).toBeVisible();
+    }
 
-test('a refused new-chat send without a saved copy never lands in a conversation chosen meanwhile', async ({ page }) => {
-  test.setTimeout(90_000);
-  await connected(page);
-  await harness(page, f => { f.draftSlotsFail = true; });
-  await setStub(page, { stream: 'busyHeld' });
-  await composer(page).fill('First question');
-  await composer(page).press('Enter');
-  await expect.poll(() => stub(page, s => typeof s.release), { timeout: 30_000 }).toBe('function');
-  const conversations = await conversationCount(page);
-  const panel = await openYourAgent(page);
-  await panel.getByRole('button', { name: 'New conversation', exact: true }).click();
-  await expect.poll(() => conversationCount(page), { timeout: 15_000 }).toBe(conversations + 1);
-  await stub(page, s => s.release());
-  // The new conversation's composer never receives the other chat's text, and nothing is posted.
-  await page.waitForTimeout(1_500);
-  await expect(composer(page)).toHaveValue('');
-  expect(await harness(page, f => f.posts)).toEqual([]);
-});
+    await harness(page, f => { f.draftSlotsFail = true; });
+    await setStub(page, { stream: 'busyHeld' });
+    const asked = 'Keep this with the original conversation';
+    await composer(page).fill(asked);
+    await composer(page).press('Enter');
+    await expect.poll(() => stub(page, s => typeof s.release)).toBe('function');
+    const target = await stub(page, s => s.seedConversation('retained-chat', 'Earlier conversation marker'));
+    const search = page.getByRole('dialog', { name: 'Search chats', exact: true });
+    // A second chat cannot be selected while the native send is awaiting its response.
+    await expect(button(page, 'Chat actions')).toBeDisabled();
+    await stub(page, s => s.release?.());
+    await expect(composer(page)).toHaveValue(asked);
+
+    await button(page, 'Chat actions').click();
+    await button(page, 'Search chat').click();
+    await search.getByRole('textbox', { name: 'Search messages', exact: true }).fill('conversation marker');
+    await search.getByRole('button', { name: /Earlier conversation marker/ }).click();
+    await expect(search).toHaveCount(0);
+    await expect(conversation(page).getByText('Earlier conversation marker', { exact: true })).toBeVisible();
+    await expect(composer(page)).toHaveValue('');
+    await composer(page).fill('Different conversation text');
+    await frames(page);
+    await expect(composer(page)).toHaveValue('Different conversation text');
+    expect(await stub(page, s => s.chatSearchWindows)).toEqual([{ conversationId: 'retained-chat', messageId: target }]);
+    expect(await harness(page, f => f.posts)).toEqual(expectedPosts);
+    await noResend(page, foreign, priorReply ? 2 : 1);
+  });
+}
 
 test('pressing Send twice dispatches one message', async ({ page }) => {
   test.setTimeout(90_000);
@@ -545,16 +550,22 @@ test('a check overtaken by another connection operation says so instead of promi
   await setStub(page, { holdReads: true });
   await pastStopCheck(page);
   await expect.poll(() => stub(page, s => s.reads), { timeout: 15_000 }).toBe(reads + 1);
-  // The person loads the conversation list while that read is still in flight.
-  const lists = await stub(page, s => s.lists);
-  const panel = await openYourAgent(page);
-  await panel.getByRole('button', { name: 'Load conversations', exact: true }).click();
-  await expect.poll(() => stub(page, s => s.lists), { timeout: 15_000 }).toBeGreaterThan(lists);
-  await stub(page, s => { s.holdReads = false; s.heldRead(); });
-  await frames(page);
-  await stub(page, s => s.heldList?.());
-  await home(page);
-  await button(page, 'Open conversation').click();
+  // Opening an earlier search result starts a restore while the stopped read is still held.
+  await stub(page, s => s.seedConversation('retained-chat', 'Earlier conversation marker'));
+  await button(page, 'Chat actions').click();
+  await button(page, 'Search chat').click();
+  const search = page.getByRole('dialog', { name: 'Search chats', exact: true });
+  await search.getByRole('textbox', { name: 'Search messages', exact: true }).fill('conversation marker');
+  await search.getByRole('button', { name: /Earlier conversation marker/ }).click();
+  await expect.poll(() => stub(page, s => typeof s.heldList)).toBe('function');
+  await stub(page, s => s.heldRead?.());
+  await expect(conversation(page).getByText(LOAD_TO_SEE, { exact: true })).toHaveCount(1);
+  // Closing Search before the restore finishes keeps the original conversation selected.
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveCount(0);
+  await stub(page, s => { s.holdReads = false; s.heldList?.(); });
+  await expect(conversation(page).getByText('Overtaken check', { exact: true })).toHaveCount(1);
+  expect(await stub(page, s => s.chatSearchWindows)).toEqual([]);
   await expect(conversation(page).getByText(LOAD_TO_SEE, { exact: true })).toHaveCount(1, { timeout: 15_000 });
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toHaveCount(0);
   expect(await stub(page, s => s.reads)).toBe(reads + 1);
