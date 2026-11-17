@@ -387,7 +387,8 @@ test('Brief appears for retained owner results with their run time',async({page}
   const {whenLabel}=await import('/src/prototype/home-cards.ts');return whenLabel(at.getTime(),Date.now());
  });
  await expect(card).toHaveAttribute('data-alpha-home-brief-failed','true');
- await expect(card).toContainText('Synthetic source expired');
+ await expect(card).toContainText('This digest stopped with an error on your agent. Open execution details to see what ran.');
+ await expect(card).not.toContainText('Synthetic source expired');
  await expect(card).toContainText(`Synthetic agent · Failed ${failedAt}`);
  // Opening it shows the retained results list; nothing is run.
  await card.click();
