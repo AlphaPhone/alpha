@@ -79,12 +79,12 @@ test('a confirmed upgrade is reported as done only when its command is applied',
  assert.deepEqual(plans.upgradeOutcome(command('FAILED'),null),{kind:'failed'});
 });
 
-test('the chat plan card copy follows the Alpha Cloud cutover flag',()=>{
- // Off (shipped): the current Cloud's hosted billing page.
+test('the chat plan card copy: in-app plans (every Cloud), with the hosted-page copy kept for reference',()=>{
+ // The hosted-page copy (no longer offered by the chat card, which always opens the in-app plans).
  assert.deepEqual(plans.managePlanCardCopy('subscription-required',false,'Eliza Cloud'),{title:'Manage plan in Eliza Cloud',sub:'Opens in your browser. Nothing is purchased here.'});
  assert.deepEqual(plans.managePlanCardCopy('billing-refused',false,'Eliza Cloud'),{title:'Manage billing in Eliza Cloud',sub:'Opens in your browser. Nothing is purchased here.'});
  assert.deepEqual(plans.managePlanCardCopy('allowance-exhausted',false,'Eliza Cloud').title,'Manage billing in Eliza Cloud');
- // On: the in-app plans; never the browser copy.
+ // The in-app plans, which the chat card uses on every Cloud: never the browser copy.
  assert.deepEqual(plans.managePlanCardCopy('subscription-required',true,'Alpha Cloud'),{title:'Choose a plan',sub:'Opens your plans here. Nothing is bought until you pay on Stripe’s page.'});
  assert.deepEqual(plans.managePlanCardCopy('billing-refused',true,'Alpha Cloud').title,'Manage plan');
  for(const limit of ['subscription-required','billing-refused','allowance-exhausted'])assert.doesNotMatch(plans.managePlanCardCopy(limit,true,'Alpha Cloud').sub,/browser/);
@@ -112,7 +112,7 @@ test('the shipped renderer admits owner billing on its existing Cloud without ch
  assert.equal(alphaCloudCutover,false,'shipped builds keep the current Cloud');
  for(const [path,method,body] of [['/api/v1/subscriptions/plans','GET',false],['/api/v1/subscriptions/checkout','POST',true],['/api/v1/subscriptions/checkout/confirm','POST',true],['/api/v1/referrals','GET',false],['/api/v1/referrals/apply','POST',true]]){
   assert.equal(allowed(api+path,method,body),true,`default ${method} ${path}`);
-  assert.equal(allowed(api+path,method,body,{alphaCloud:false}),true,`flag off ${method} ${path}`);
+  assert.equal(allowed(api+path,method,body,{alphaCloud:false}),true,`current Cloud (cutover off) admits ${method} ${path}`);
  }
  // The current Cloud's own routes are unchanged.
  assert.equal(allowed(api+'/api/v1/billing/limits','GET'),true);
@@ -214,13 +214,16 @@ public class BillingRoutesTest {
  }finally{rmSync(root,{recursive:true,force:true});}
 });
 
-test('the native billing authority refuses with the flag off, binds to Cloud\'s identity for the stored key, and refuses claimed or switched accounts',{skip:jsonJarSkip},()=>{
+test('the native billing authority refuses when disabled, binds to Cloud\'s identity for the stored key, and refuses claimed or switched accounts',{skip:jsonJarSkip},()=>{
  assert.match(runJvm([nativeSource('BillingAuthorityRoutes.java'),fixture('BillingAuthorityTest.java')],'ai.alphacompute.alphaphone.BillingAuthorityTest',{json:true}),/^PASS billing authority \d+/);
 });
 
-test('MainActivity registers the native billing authority only with the cutover flag',async()=>{
+test('MainActivity registers the native billing authority on every Cloud, and the plugin is always enabled',async()=>{
  const {readFileSync}=await import('node:fs');
  const main=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java','utf8');
  const registrations=main.split('\n').filter(line=>line.includes('AlphaBillingAuthorityPlugin'));
- assert.deepEqual(registrations.map(line=>line.trim()),['if (CloudDeployment.ALPHA_CLOUD_CUTOVER) registerPlugin(AlphaBillingAuthorityPlugin.class);']);
+ assert.deepEqual(registrations.map(line=>line.trim()),['registerPlugin(AlphaBillingAuthorityPlugin.class);']);
+ const plugin=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaBillingAuthorityPlugin.java','utf8');
+ assert.match(plugin,/@Override public boolean enabled\(\) \{ return true; \}/);
+ assert.doesNotMatch(plugin,/ALPHA_CLOUD_CUTOVER\)\s*\{\s*call\.reject/,'no cutover refusal');
 });
