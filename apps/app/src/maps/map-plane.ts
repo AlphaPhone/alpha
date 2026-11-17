@@ -67,6 +67,8 @@ interface MapPlaneOptions {
   onPin?(id: string): void;
   /** Only direct map gestures interrupt camera following. */
   onInteraction?(): void;
+  /** The centre and zoom of the visible map, each time the map settles. */
+  onViewport?(center: Coordinate, zoom: number): void;
   fontUrl: string;
   workerUrl: string;
   accent: string;
@@ -367,6 +369,14 @@ class MapLibrePlane {
     this.map.on("idle", () => {
       if (this.destroyed) return;
       container.dataset.mapZoom = String(this.map.getZoom());
+      if (options.onViewport) {
+        // MapLibre keeps unwrapped longitudes while panning world copies.
+        const center = this.map.getCenter().wrap();
+        options.onViewport(
+          { latitude: center.lat, longitude: center.lng },
+          this.map.getZoom(),
+        );
+      }
       container.dataset.mapFeatureCount = String(
         this.map.queryRenderedFeatures(
           worldwide ? undefined : { layers: ["roads"] },
@@ -395,12 +405,15 @@ class MapLibrePlane {
       onError();
     });
     if (raster?.copyright) {
+      // Tiles draw as they arrive and the provider copyright follows. An earlier
+      // version hid the canvas until this read answered, on every zoom step and
+      // long pan: on a phone that read took 3.7 s with the loaded tiles invisible.
       const copyright = raster.copyright.bind(raster);
       type Viewport = Parameters<typeof copyright>[0];
       let pending: AbortController | undefined;
-      let attributed: { view: Viewport; text: string } | undefined;
-      const canvas = this.map.getCanvas();
-      const visibility = canvas.style.visibility;
+      let attributed: Viewport | undefined;
+      /** The area of the read in flight: a camera that stays inside it waits for that answer. */
+      let asked: Viewport | undefined;
       const viewport = (): Viewport => {
         const bounds = this.map.getBounds();
         const west = bounds.getWest(),
@@ -421,40 +434,23 @@ class MapLibrePlane {
         area.south <= view.south &&
         area.east >= view.east &&
         area.west <= view.west;
-      const hide = () => {
-        canvas.style.visibility = "hidden";
-        delete container.dataset.mapCopyright;
-        delete container.dataset.mapReady;
-        this.options.onCopyright?.("");
-      };
-      const show = (text: string) => {
-        container.dataset.mapCopyright = text;
-        canvas.style.visibility = visibility;
-        if (container.dataset.mapError === "copyright")
-          delete container.dataset.mapError;
-        if (this.styleReady && !container.dataset.mapError)
-          container.dataset.mapReady = "true";
+      /** An empty text returns the host to the provider's standing tile attribution. */
+      const report = (text: string) => {
+        if (text) container.dataset.mapCopyright = text;
+        else delete container.dataset.mapCopyright;
         this.options.onCopyright?.(text);
       };
-      const updateVisibility = () => {
-        if (this.destroyed) return;
-        if (attributed && covers(attributed.view, viewport()))
-          show(attributed.text);
-        else hide();
-      };
-      hide();
       const refresh = () => {
         if (this.destroyed) return;
         const view = viewport();
-        if (attributed && covers(attributed.view, view)) {
-          show(attributed.text);
-          return;
-        }
+        if (covers(attributed, view) || covers(asked, view)) return;
         pending?.abort();
-        hide();
+        // The text of another area is not shown over this one.
+        attributed = undefined;
+        report("");
         const controller = new AbortController();
         pending = controller;
-        // One viewport of margin keeps GPS follow animations inside already attributed imagery.
+        // One viewport of margin, so short pans and GPS follow animations ask nothing.
         const latitudeMargin = view.north - view.south;
         const longitudeMargin = view.east - view.west;
         const requested = {
@@ -464,29 +460,24 @@ class MapLibrePlane {
           east: Math.min(180, view.east + longitudeMargin),
           west: Math.max(-180, view.west - longitudeMargin),
         };
+        asked = requested;
         copyright(requested, controller.signal).then(
           (text) => {
             if (this.destroyed || controller.signal.aborted) return;
+            asked = undefined;
             if (!covers(requested, viewport())) {
               refresh();
               return;
             }
-            attributed = { view: requested, text };
-            show(text);
+            attributed = requested;
+            report(text);
           },
           () => {
-            if (this.destroyed || controller.signal.aborted) return;
-            if (attributed && covers(attributed.view, viewport())) {
-              show(attributed.text);
-              return;
-            }
-            if (!container.dataset.mapError)
-              container.dataset.mapError = "copyright";
-            onError();
+            // The area keeps the standing attribution; the next settled camera asks again.
+            if (pending === controller) asked = undefined;
           },
         );
       };
-      this.map.on("move", updateVisibility);
       this.map.on("moveend", refresh);
       this.refreshCopyright = refresh;
       this.disposeCopyright = () => pending?.abort();
@@ -494,8 +485,7 @@ class MapLibrePlane {
     this.map.on("load", () => {
       if (this.destroyed) return;
       this.styleReady = true;
-      if (!this.refreshCopyright && !container.dataset.mapError)
-        container.dataset.mapReady = "true";
+      if (!container.dataset.mapError) container.dataset.mapReady = "true";
       this.refreshCopyright?.();
       this.update(this.requested, this.requestedRoute, this.requestedOverlay);
     });
@@ -775,9 +765,9 @@ export function resolveMapColors(container: HTMLElement, colors: Record<string, 
 /** Product palette, typography and space reserved for the Alpha route sheets. The plane
  * reflows the selected place when these sheets move. */
 export class MapPlane extends MapLibrePlane {
- constructor(container:HTMLElement,region:MapBasemap,onError:()=>void,colors:Record<string,string>,onPin?:(id:string)=>void,onCopyright?:(text:string)=>void,onInteraction?:()=>void) {
+ constructor(container:HTMLElement,region:MapBasemap,onError:()=>void,colors:Record<string,string>,onPin?:(id:string)=>void,onCopyright?:(text:string)=>void,onInteraction?:()=>void,onViewport?:(center:Coordinate,zoom:number)=>void) {
   const worldwide=region.kind==='global'||region.kind==='cloud-raster';
-  super(container,region,onError,region.kind==='global'?colors:resolveMapColors(container,colors),{fontUrl,workerUrl,accent:'#1616d8',protocol:'alpha-region',routePadding:{top:220,bottom:280,left:30,right:30},nativeRegion,nativeRequest:nativeRegionRequest,onCopyright,onInteraction,selectionPadding:worldwide?()=>{
+  super(container,region,onError,region.kind==='global'?colors:resolveMapColors(container,colors),{fontUrl,workerUrl,accent:'#1616d8',protocol:'alpha-region',routePadding:{top:220,bottom:280,left:30,right:30},nativeRegion,nativeRequest:nativeRegionRequest,onCopyright,onInteraction,onViewport,selectionPadding:worldwide?()=>{
    const bounds=container.getBoundingClientRect();
    const credits=container.parentElement?.querySelector('.alpha-map-credits')?.getBoundingClientRect();
    const header=container.parentElement?.querySelector('[data-alpha-app-header="main"]')?.getBoundingClientRect();
