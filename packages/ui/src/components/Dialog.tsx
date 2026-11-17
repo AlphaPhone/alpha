@@ -1,13 +1,17 @@
 import type { ComponentProps } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { cn, focusRing } from "../lib/cn.ts";
+import { X } from "lucide-react";
+import { cn } from "../lib/cn.ts";
+import { Button } from "./Button.tsx";
 
 export type DialogProps = ComponentProps<typeof DialogPrimitive.Root>;
+export type DialogOverlayProps = ComponentProps<typeof DialogPrimitive.Overlay>;
 export type DialogContentProps = ComponentProps<typeof DialogPrimitive.Content> & {
-  /** The accessible name of the close button. */
+  /** Names a close button in the corner; leave out where the dialog's own actions close it. */
   closeLabel?: string;
 };
 export type DialogTitleProps = ComponentProps<typeof DialogPrimitive.Title>;
+export type DialogDescriptionProps = ComponentProps<typeof DialogPrimitive.Description>;
 
 /** A modal task: holds a `DialogTrigger` and a `DialogContent`. */
 export function Dialog(props: DialogProps) {
@@ -20,22 +24,28 @@ export const DialogTrigger = DialogPrimitive.Trigger;
 /** Closes the dialog; pass `asChild` to use a `Button`. */
 export const DialogClose = DialogPrimitive.Close;
 
-/** The panel over a dimmed page. Needs a `DialogTitle`; Escape and the close button dismiss it. */
-export function DialogContent({ closeLabel = "Close", className, children, ...props }: DialogContentProps) {
+/** The dimmed page behind a dialog or a sheet; a press on it dismisses. */
+export function DialogOverlay({ className, ...props }: DialogOverlayProps) {
+  return <DialogPrimitive.Overlay className={cn("fixed inset-0 z-dialog bg-foreground/20 motion-safe:animate-fade dark:bg-background/60", className)} {...props} />;
+}
+
+/** The panel in the middle of a dimmed page. Needs a `DialogTitle`; without a `DialogDescription`, pass `aria-describedby={undefined}`. Escape and a press outside dismiss it. */
+export function DialogContent({ closeLabel, className, children, ...props }: DialogContentProps) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 bg-foreground/50" />
+      <DialogOverlay />
       <DialogPrimitive.Content
-        aria-describedby={undefined}
-        className={cn("fixed top-1/2 left-1/2 flex w-full max-w-md -translate-1/2 flex-col gap-4 rounded-lg border border-border bg-popover p-6 text-popover-foreground shadow-lg outline-none", className)}
+        className={cn("fixed inset-x-4 top-1/2 z-dialog mx-auto flex max-w-sm -translate-y-1/2 flex-col gap-4 rounded-tile bg-popover p-5 text-popover-foreground shadow-md outline-none motion-safe:animate-rise", closeLabel && "[&>h2]:pr-8", className)}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close aria-label={closeLabel} className={cn(focusRing, "absolute top-4 right-4 rounded-sm text-muted-foreground hover:text-foreground")}>
-          <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="size-4">
-            <path d="m3 3 10 10M13 3 3 13" />
-          </svg>
-        </DialogPrimitive.Close>
+        {closeLabel ? (
+          <DialogPrimitive.Close asChild>
+            <Button variant="ghost" size="icon" aria-label={closeLabel} className="absolute top-1.5 right-1.5 text-muted-foreground">
+              <X />
+            </Button>
+          </DialogPrimitive.Close>
+        ) : null}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );
@@ -43,5 +53,10 @@ export function DialogContent({ closeLabel = "Close", className, children, ...pr
 
 /** The dialog's heading and accessible name. */
 export function DialogTitle({ className, ...props }: DialogTitleProps) {
-  return <DialogPrimitive.Title className={cn("text-base leading-none font-semibold", className)} {...props} />;
+  return <DialogPrimitive.Title className={cn("text-lg leading-snug font-semibold", className)} {...props} />;
+}
+
+/** What the dialog asks or says, under its title, and its accessible description. */
+export function DialogDescription({ className, ...props }: DialogDescriptionProps) {
+  return <DialogPrimitive.Description className={cn("-mt-2 text-base text-muted-foreground", className)} {...props} />;
 }

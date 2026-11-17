@@ -4,7 +4,7 @@ import type { ButtonProps } from "./Button.tsx";
 
 const link = () => {
   const onClick = fn();
-  return { asChild: true, onClick, children: <a href="#orders" onClick={onClick}>Orders</a> };
+  return { asChild: true, onClick, children: <a href="#notes" onClick={onClick}>Notes</a> };
 };
 const disabledLink = link();
 const loadingLink = link();
