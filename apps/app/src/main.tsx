@@ -248,16 +248,13 @@ function Phone() {
     onCancel:()=>shell?.cancelChatMotion(),
   });
   const connection = useSyncExternalStore(connectionController.subscribe, connectionController.getSnapshot);
-  // Startup decides whether sign-in or access setup opens first: a verified account, a saved one
-  // that is offline (neither prompt), the sign-in itself or a settled start. Until then a neutral
-  // screen hides an already-mounted, inert shell so its local caches can restore
-  // before Home is revealed. Once shown, Home stays; a start that has not decided in 60 s (a first boot takes about 27 s) shows it as before.
+  // Keep the mounted shell inert until the resident can accept a request. A saved
+  // Cloud account alone is not readiness. Account/recovery controls and explicit
+  // offline use remain available if startup cannot complete.
   const [homeShown, setHomeShown] = useState(fixture || !residentAlwaysPresent);
-  const startupPending = !homeShown && !connection.startupResolved && !connection.cloudAccount && connection.residentPlanNotice !== 'offline' && !connectionChooserVisible(connection);
+  const startupPending = !homeShown && !connection.session && !connection.error && connection.residentPlanNotice !== 'offline' && !connection.residentRecoveryReason && !connectionChooserVisible(connection);
   useEffect(() => {
-    if (!startupPending) { setHomeShown(true); return; }
-    const timer = setTimeout(() => setHomeShown(true), 60_000);
-    return () => clearTimeout(timer);
+    if (!startupPending) setHomeShown(true);
   }, [startupPending]);
   useEffect(() => {
     if (isAndroid) void DailyApps.surfaceInfo().then(info => {

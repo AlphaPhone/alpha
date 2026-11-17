@@ -297,3 +297,16 @@ test('a send while the resident cannot start preserves the text and reports runt
   expect(await harness(page,f=>f.posts)).toEqual([]);
   expect(foreign).toEqual([]);
 });
+
+test('cold startup keeps the logo and hides Send until the saved-account resident is ready',async({page})=>{
+  await flagOffAndroid(page);
+  await residentStub(page,{accounts:[owner]});
+  await page.addInitScript(()=>{const w=window as any,native=w.Capacitor.nativePromise;w.Capacitor.nativePromise=async(plugin:string,method:string,input:any)=>{if(plugin==='Agent'&&method==='start')await new Promise<void>(resolve=>w.releaseStartup=resolve);return native(plugin,method,input);};});
+  await page.goto('/');
+  await expect(page.getByRole('status',{name:'Loading Alpha',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).not.toBeVisible();
+  await expect(composer(page)).not.toBeVisible();
+  await page.evaluate(()=>(window as any).releaseStartup());
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible({timeout:30000});
+  await expect(page.getByRole('status',{name:'Loading Alpha',exact:true})).toHaveCount(0);
+});
