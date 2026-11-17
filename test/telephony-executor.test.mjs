@@ -33,6 +33,9 @@ function ports(overrides = {}) {
     sendSms: async (number, body, operationId) => { log.push(['sms', number, body, operationId]); return 'submitted'; },
     openThread: () => null, openVoicemail: () => null, deleteOpenVoicemail: async () => 'none-selected',
     draftInOpenThread: (body, number) => { log.push(['draft', body, number]); return 'none-selected'; },
+    draftFor: async (number, body) => { log.push(['draft-for', number, body]); return () => { log.push(['opened-draft', number, body]); }; },
+    showContacts: async query => { log.push(['list', query]); return () => { log.push(['shown', query]); }; },
+    openContact: () => null, contactValues: false,
   };
   return {log, ports: {...base, ...overrides}};
 }
@@ -275,18 +278,99 @@ test('an action refused before it ran carries the typed unavailable result of it
     assert.deepEqual(refused.telephonyResult, kind === 'phone-call' ? {kind, status: 'unavailable', contact: false} : {kind, status: 'unavailable'});
   }
 });
-test('a form this phone does not advertise is reported unavailable and nothing on the phone is touched', async () => {
-  for (const [operation, kind] of [
-    [{type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'}, 'sms-compose'],
-    [{type: 'sms_compose', target: {kind: 'contact', query: 'Priya'}, body: 'Running late', draft: true}, 'sms-compose'],
-    [{type: 'contact_update', query: 'Priya', add: {phoneNumbers: ['+14155550100']}}, 'contact-write'],
-    [{type: 'contact_update', query: 'Priya', set: {displayName: 'Priya N'}, remove: {emailAddresses: ['p@example.com']}}, 'contact-write'],
-    [{type: 'contact_show', query: 'Priya'}, 'contact-show'],
-    [{type: 'contact_read_selected'}, 'contact-read'],
-  ]) {
-    const p = ports(), result = await run(operation, p);
-    assert.deepEqual(result.telephonyResult, {kind, status: 'unavailable'}, JSON.stringify(operation));
-    assert.equal(result.status, 'failed');
-    assert.deepEqual(p.log.filter(([what]) => what !== 'search' && what !== 'get'), [], 'nothing was asked, sent, drafted or written');
+test('a text to an exact number goes straight to the native review; a named contact is still chosen on the phone', async () => {
+  let p = ports();
+  let result = await run({type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'}, p, 'proposal-4');
+  assert.deepEqual(did(p, 'sms'), [['sms', '+14155550100', 'Running late', 'proposal-4']]);
+  assert.equal(did(p, 'ask').length + did(p, 'search').length, 0, 'the approval card already showed the number');
+  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'submitted'}); assert.equal(result.present, undefined);
+  // That number's conversation is open: the text goes into its field, as it does for a contact.
+  p = ports({draftInOpenThread: (body, number) => { p.log.push(['draft', body, number]); return 'drafted'; }});
+  result = await run({type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'}, p);
+  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'drafted'}); assert.equal(did(p, 'sms').length, 0);
+  p = ports();
+  result = await run({type: 'sms_compose', target: {kind: 'contact', query: 'Priya'}, body: 'Running late'}, p);
+  assert.deepEqual(did(p, 'ask')[0][1], {kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'Running late'});
+  assert.deepEqual(did(p, 'sms')[0].slice(1, 3), ['+14155550132', 'Running late']);
+});
+test('a draft-only text opens that conversation with the text in its field and never sends', async () => {
+  const draft = target => ({type: 'sms_compose', target, body: 'See you at 7', draft: true});
+  let p = ports();
+  let result = await run(draft({kind: 'number', number: '+14155550100'}), p);
+  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'drafted'}); assert.equal(result.status, 'succeeded');
+  assert.deepEqual(did(p, 'draft-for'), [['draft-for', '+14155550100', 'See you at 7']]);
+  assert.equal(did(p, 'opened-draft').length, 0, 'opening Messages waits for the receipt');
+  result.present();
+  assert.deepEqual(did(p, 'opened-draft'), [['opened-draft', '+14155550100', 'See you at 7']]);
+  assert.equal(did(p, 'sms').length + did(p, 'ask').length, 0);
+  // A contact is chosen on the phone first; a dismissal drafts nothing.
+  p = ports();
+  result = await run(draft({kind: 'contact', query: 'Priya'}), p);
+  assert.equal(did(p, 'ask').length, 1); assert.deepEqual(did(p, 'draft-for'), [['draft-for', '+14155550132', 'See you at 7']]); assert.equal(did(p, 'sms').length, 0);
+  p = ports({ask: async () => null});
+  result = await run(draft({kind: 'contact', query: 'Priya'}), p);
+  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'cancelled'}); assert.equal(did(p, 'draft-for').length, 0); assert.equal(result.present, undefined);
+  // The open conversation takes the draft at once; one that is busy is left alone and nothing is sent instead.
+  p = ports({draftInOpenThread: () => 'drafted'});
+  result = await run(draft({kind: 'number', number: '+14155550100'}), p);
+  assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'drafted'}); assert.equal(did(p, 'draft-for').length, 0); assert.equal(result.present, undefined);
+  for (const overrides of [{draftInOpenThread: () => 'occupied'}, {draftFor: async () => null}, {draftFor: async () => { throw Error('Messages closed'); }}]) {
+    p = ports(overrides);
+    result = await run(draft({kind: 'number', number: '+14155550100'}), p);
+    assert.deepEqual(result.telephonyResult, {kind: 'sms-compose', status: 'unavailable'}); assert.equal(result.present, undefined);
+    assert.equal(did(p, 'sms').length + did(p, 'opened-draft').length, 0);
+  }
+});
+test('adding or removing one value keeps every other value of the contact as the phone holds it now', async () => {
+  const sam = {...record('1'), displayName: 'Sam Lee', phoneNumbers: [{number: '(415) 555-0132', type: 'home'}, {number: '+14155550199', type: 'work'}], emailAddresses: [{address: 'Sam@Work.example', type: 'work'}]};
+  const change = async operation => { const p = ports({getContact: async () => sam}); const result = await run({type: 'contact_update', query: 'Sam', ...operation}, p); return {p, result}; };
+  let {p, result} = await change({add: {phoneNumbers: ['+16285550148', '4155550132'], emailAddresses: ['sam@example.com']}});
+  assert.deepEqual(did(p, 'ask')[0][1].options.map(option => option.keeps), [undefined], 'one row: the request says what it adds');
+  assert.equal(did(p, 'ask')[0][1].options[0].before, sam, 'the review shows the contact before');
+  assert.deepEqual(did(p, 'save')[0], ['save', {displayName: 'Sam Lee',
+    phoneNumbers: [...sam.phoneNumbers, {number: '+16285550148', type: 'mobile'}], emailAddresses: [...sam.emailAddresses, {address: 'sam@example.com', type: 'home'}]}, {id: '1', version: sam.version}]);
+  assert.equal(did(p, 'ask')[0][1].options[0].after, did(p, 'save')[0][1], 'and exactly what is saved after');
+  assert.equal(result.telephonyResult.status, 'saved');
+  // Remove matches a number in its dialable form and an address without case; then add; a rename rides along.
+  ({p} = await change({set: {displayName: 'Samuel Lee'}, remove: {phoneNumbers: ['4155550132'], emailAddresses: ['sam@work.example']}, add: {emailAddresses: ['sam@example.com']}}));
+  assert.deepEqual(did(p, 'save')[0][1], {displayName: 'Samuel Lee', phoneNumbers: [{number: '+14155550199', type: 'work'}], emailAddresses: [{address: 'sam@example.com', type: 'home'}]});
+  // A value to remove that the contact does not have changes nothing.
+  ({p} = await change({remove: {phoneNumbers: ['+19995550100']}}));
+  assert.deepEqual(did(p, 'save')[0][1], {displayName: 'Sam Lee', phoneNumbers: sam.phoneNumbers, emailAddresses: sam.emailAddresses});
+  // A contact that changed since it was shown is stale, as for a whole-field change.
+  p = ports({getContact: async () => sam, saveContact: async () => ({status: 'stale'})});
+  assert.equal((await run({type: 'contact_update', query: 'Sam', add: {phoneNumbers: ['+16285550148']}}, p)).telephonyResult.status, 'stale');
+  // An agent that can name single values means "replace" when it sends a whole field: one row, no second choice.
+  p = ports({getContact: async () => sam, contactValues: true});
+  await run({type: 'contact_update', query: 'Sam', set: {emailAddresses: ['sam@example.com']}}, p);
+  assert.deepEqual(did(p, 'ask')[0][1].options.map(option => [option.keeps, option.after.emailAddresses]), [[undefined, [{address: 'sam@example.com', type: 'home'}]]]);
+});
+test('showing a contact opens Contacts on the matches and tells the agent only whether there was one', async () => {
+  let p = ports();
+  let result = await run({type: 'contact_show', query: 'Priya'}, p);
+  assert.deepEqual(result.telephonyResult, {kind: 'contact-show', status: 'shown'}); assert.equal(result.status, 'succeeded');
+  assert.deepEqual(did(p, 'list'), [['list', 'Priya']]); assert.equal(did(p, 'shown').length, 0, 'Contacts opens after the receipt');
+  result.present();
+  assert.deepEqual(did(p, 'shown'), [['shown', 'Priya']]);
+  assert.doesNotMatch(JSON.stringify([result.telephonyResult, result.summary]), /Nair|4155550132/);
+  for (const [overrides, status] of [[{showContacts: async () => 'not-found'}, 'not-found'], [{showContacts: async () => { throw Error('Contacts closed'); }}, 'unavailable'], [{showContacts: async () => null}, 'unavailable']]) {
+    p = ports(overrides);
+    result = await run({type: 'contact_show', query: 'Priya'}, p);
+    assert.deepEqual(result.telephonyResult, {kind: 'contact-show', status}); assert.equal(result.status, 'failed'); assert.equal(result.present, undefined);
+  }
+});
+test('the agent reads the open contact whole and within the contract bounds, or not at all', async () => {
+  const open = {displayName: 'Priya Nair', phoneNumbers: [{number: '(415) 555-0132', type: 'work'}], emailAddresses: [{address: 'p@example.com', type: 'work'}], notes: 'Gate code 4410'};
+  let p = ports({openContact: () => open});
+  let result = await run({type: 'contact_read_selected'}, p);
+  assert.deepEqual(result.telephonyResult, {kind: 'contact-read', status: 'read', contact: {displayName: 'Priya Nair', phoneNumbers: ['(415) 555-0132'], emailAddresses: ['p@example.com']}});
+  assert.equal(result.status, 'succeeded'); assert.match(result.summary, /untrusted data/);
+  assert.equal(did(p, 'search').length + did(p, 'get').length, 0, 'only the contact on screen: the address book is not searched');
+  assert.deepEqual((await run({type: 'contact_read_selected'}, ports({openContact: () => ({...open, displayName: ''})}))).telephonyResult.contact.displayName, null);
+  assert.deepEqual((await run({type: 'contact_read_selected'}, ports())).telephonyResult, {kind: 'contact-read', status: 'none-selected'});
+  const many = Array.from({length: 33}, (_, index) => ({number: `+1415555${String(index).padStart(4, '0')}`, type: 'mobile'}));
+  for (const contact of ['unavailable', {...open, phoneNumbers: many}, {...open, displayName: 'x'.repeat(129)}, {...open, emailAddresses: [{address: 'a\u0000@example.com', type: 'home'}]}]) {
+    result = await run({type: 'contact_read_selected'}, ports({openContact: () => contact}));
+    assert.deepEqual(result.telephonyResult, {kind: 'contact-read', status: 'unavailable'}, 'nothing is truncated or shared in part'); assert.equal(result.status, 'failed');
   }
 });

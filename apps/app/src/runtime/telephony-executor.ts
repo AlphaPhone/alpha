@@ -9,9 +9,9 @@
  * Everything the phone does goes through `ports`, so the decisions here are testable without one.
  */
 import {
-  smsComposeReceiptOutcome, smsComposeTarget, telephonyActionReceiptOutcome,
-  type ContactWriteOperation, type ContactWriteResult, type PhoneCallOperation, type PhoneCallResult, type SmsComposeOperation,
-  type SmsComposeResult, type TelephonyActionOperation, type TelephonyActionResult,
+  smsComposeReceiptOutcome, smsComposeTarget, telephonyActionReceiptOutcome, validateContactReadResult,
+  type ContactReadResult, type ContactShowOperation, type ContactShowResult, type ContactWriteOperation, type ContactWriteResult, type PhoneCallOperation, type PhoneCallResult,
+  type SmsComposeOperation, type SmsComposeResult, type TelephonyActionOperation, type TelephonyActionResult,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts';
 import {contactLookupMatches} from '../../../../.eliza/client-features/packages/contracts/src/phone-dial.ts';
 import {telephonyActionResultText} from '../ui/telephony/telephony-receipt-text';
@@ -26,7 +26,7 @@ export type TelephonyReview =
   | {kind: 'message'; options: ContactMatch[]; body: string}
   /** A new contact whose name or number is already in Contacts: the one option adds it anyway. */
   | {kind: 'contact-create'; options: {name: string; numbers: string[]}[]}
-  /** `keeps`: the same request shown twice for one contact, adding to its numbers and addresses or replacing them. */
+  /** `keeps`: one whole-field request shown twice for one contact, adding to its numbers and addresses or replacing them. */
   | {kind: 'contact-save'; options: {before: ContactRecord; after: ContactDraft; keeps?: 'add' | 'replace'}[]}
   | {kind: 'contact-delete'; options: ContactRecord[]};
 export type TelephonyPorts = {
@@ -48,11 +48,30 @@ export type TelephonyPorts = {
    * message is being sent or has pictures attached there. Nothing is sent: Send stays the owner's tap.
    */
   draftInOpenThread(body: string, number?: string): 'drafted' | 'none-selected' | 'occupied' | 'unavailable';
+  /**
+   * The step that opens the conversation with exactly `number` in Messages (a new message when
+   * there is none) and puts `body` in its text field; null when Messages cannot take a draft now.
+   * Nothing is sent. Opening another view ends the review an action runs under, so the executor
+   * hands the step back as `present` and the coordinator runs it once the receipt is recorded.
+   */
+  draftFor(number: string, body: string): Promise<(() => void) | null>;
+  /**
+   * Looks `query` up as the Contacts list will: the step that brings Contacts in front filtered by
+   * it (handed back like `draftFor`'s), 'not-found' when the list would be empty, null when
+   * Contacts cannot be read or opened.
+   */
+  showContacts(query: string): Promise<(() => void) | 'not-found' | null>;
+  /** The contact open in Contacts as the phone holds it now; 'unavailable' when it cannot be read whole; null when none is open. */
+  openContact(): Pick<ContactDraft, 'displayName' | 'phoneNumbers' | 'emailAddresses'> | 'unavailable' | null;
+  /** The agent negotiated `contacts.write.v2`: it names each value to add or remove, so a `set` it sends replaces the field. */
+  contactValues: boolean;
   openThread(): {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean} | null;
   openVoicemail(): {caller: string | null; date: number; durationSeconds: number; transcriptState: 'ready' | 'pending' | 'unavailable' | 'failed'; engine: 'device' | 'cloud' | 'carrier' | null; transcript: string | null} | null;
   deleteOpenVoicemail(current: () => void, signal: AbortSignal): Promise<'deleted' | 'none-selected' | 'cancelled' | 'failed'>;
 };
-export type TelephonyExecution = {status: 'succeeded' | 'failed' | 'unknown'; summary: string; telephonyResult: TelephonyActionResult};
+/** `present`: the view change that shows a successful outcome (the drafted conversation, the filtered Contacts list), run by the coordinator after the receipt. */
+export type TelephonyExecution = {status: 'succeeded' | 'failed' | 'unknown'; summary: string; telephonyResult: TelephonyActionResult; present?: () => void};
+type Present = (step: () => void) => void;
 
 const LOOKUP_LIMIT = 10;
 export const CONTACT_CALL_LOOKUP_LIMIT = LOOKUP_LIMIT;
@@ -123,42 +142,63 @@ async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal
   catch (error) { if (!refusalCode(error)) throw error; return {kind: 'phone-call', status: 'unavailable', contact}; }
 }
 
-async function compose(operation: SmsComposeOperation, operationId: string, ports: TelephonyPorts, signal: AbortSignal): Promise<SmsComposeResult> {
-  // Only the contact search of `sms.compose.v1` runs here: an exact number or a draft-only request
-  // (`sms.compose.v2`, which this phone does not advertise) is not carried out.
-  const target = smsComposeTarget(operation);
-  if (target.kind !== 'contact' || 'draft' in operation) return {kind: 'sms-compose', status: 'unavailable'};
-  let options: ContactMatch[];
-  try { options = await numbers(target.query, ports); } catch { return {kind: 'sms-compose', status: 'unavailable'}; }
-  ports.current();
-  if (!options.length) return {kind: 'sms-compose', status: 'not-found'};
+async function compose(operation: SmsComposeOperation, operationId: string, ports: TelephonyPorts, signal: AbortSignal, present: Present): Promise<SmsComposeResult> {
+  const result = (status: SmsComposeResult['status']): SmsComposeResult => ({kind: 'sms-compose', status});
+  const target = smsComposeTarget(operation), draftOnly = 'draft' in operation && operation.draft === true;
   // When that person's conversation is already open, the draft goes into its text field, where the
   // owner can edit it; the separate review is for a conversation that is not on screen.
-  const drafted = (index: number) => ports.draftInOpenThread(operation.body, options[index].number) === 'drafted';
-  if (options.length === 1 && drafted(0)) return {kind: 'sms-compose', status: 'drafted'};
-  // A name is never texted unseen: the lookup is a fuzzy filter and the native review shows only the
-  // number, so the owner confirms or chooses the matched name and number here, even for one match.
-  const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
-  if (choice === null || !options[choice]) return {kind: 'sms-compose', status: 'cancelled'};
-  ports.current();
-  if (options.length > 1 && drafted(choice)) return {kind: 'sms-compose', status: 'drafted'};
+  const inOpenThread = (number: string) => ports.draftInOpenThread(operation.body, number);
+  let number: string, placed: ReturnType<typeof inOpenThread>;
+  if (target.kind === 'number') {
+    // The approval card showed this exact number (`sms.compose.v2`), so nothing is asked again here.
+    number = target.number; placed = inOpenThread(number);
+  } else {
+    let options: ContactMatch[];
+    try { options = await numbers(target.query, ports); } catch { return result('unavailable'); }
+    ports.current();
+    if (!options.length) return result('not-found');
+    const only = options.length === 1 ? inOpenThread(options[0].number) : null;
+    if (only === 'drafted') return result('drafted');
+    // A name is never texted unseen: the lookup is a fuzzy filter and the native review shows only the
+    // number, so the owner confirms or chooses the matched name and number here, even for one match.
+    const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
+    if (choice === null || !options[choice]) return result('cancelled');
+    ports.current();
+    number = options[choice].number; placed = only ?? inOpenThread(number);
+  }
+  if (placed === 'drafted') return result('drafted');
+  if (draftOnly) {
+    // A draft-only request never reaches the send review. That conversation is opened with the text
+    // in its field; one that is open but busy (a send in flight, pictures attached) is left alone.
+    if (placed !== 'none-selected') return result('unavailable');
+    let step: (() => void) | null;
+    try { step = await ports.draftFor(number, operation.body); } catch { return result('unavailable'); }
+    ports.current();
+    if (!step) return result('unavailable');
+    present(step);
+    return result('drafted');
+  }
   // The port answers every outcome it observed, including a refusal before anything was sent. It
   // throws only when the native review's answer was lost: the radio may have taken the message.
-  try { return {kind: 'sms-compose', status: await ports.sendSms(options[choice].number, operation.body, operationId, signal)}; }
-  catch { return {kind: 'sms-compose', status: 'unknown'}; }
+  // Outside Messages it sends from Android's default SMS SIM, which the native review names.
+  try { return result(await ports.sendSms(number, operation.body, operationId, signal)); }
+  catch { return result('unknown'); }
 }
 
-type ContactSet = NonNullable<Extract<ContactWriteOperation, {type: 'contact_update'}>['set']>;
-/** Numbers and addresses to put on a contact beside the ones it has. */
-export type ContactAdditions = Pick<ContactSet, 'phoneNumbers' | 'emailAddresses'>;
+type ContactUpdate = Extract<ContactWriteOperation, {type: 'contact_update'}>;
+type ContactSet = NonNullable<ContactUpdate['set']>;
+/** Numbers and addresses to put on a contact beside the ones it has, or to take off it. */
+export type ContactValues = Pick<ContactSet, 'phoneNumbers' | 'emailAddresses'>;
 /**
- * `set` replaces a named field whole; `add` keeps the field and appends what it does not hold yet.
- * A number or address already on the contact keeps its type.
+ * `set` replaces a named field whole. Then the `remove` values are taken away and the `add` values
+ * the contact does not hold yet are appended; every other value stays. Numbers match in their
+ * dialable form and addresses without case, and a value already on the contact keeps its type.
  */
-export function appliedContactChange(before: ContactRecord, set: ContactSet, normalize: (number: string) => string | null, add: ContactAdditions = {}): ContactDraft {
+export function appliedContactChange(before: ContactRecord, set: ContactSet, normalize: (number: string) => string | null, add: ContactValues = {}, remove: ContactValues = {}): ContactDraft {
   const key = (number: string) => normalize(number) || number, mail = (address: string) => address.toLowerCase();
-  const phoneNumbers = set.phoneNumbers ? set.phoneNumbers.map(number => ({number, type: before.phoneNumbers.find(row => key(row.number) === key(number))?.type || 'mobile'})) : before.phoneNumbers;
-  const emailAddresses = set.emailAddresses ? set.emailAddresses.map(address => ({address, type: before.emailAddresses.find(row => mail(row.address) === mail(address))?.type || 'home'})) : before.emailAddresses;
+  const gone = (values: string[] | undefined, same: (value: string) => string, value: string) => !!values?.some(other => same(other) === same(value));
+  const phoneNumbers = (set.phoneNumbers ? set.phoneNumbers.map(number => ({number, type: before.phoneNumbers.find(row => key(row.number) === key(number))?.type || 'mobile'})) : before.phoneNumbers).filter(row => !gone(remove.phoneNumbers, key, row.number));
+  const emailAddresses = (set.emailAddresses ? set.emailAddresses.map(address => ({address, type: before.emailAddresses.find(row => mail(row.address) === mail(address))?.type || 'home'})) : before.emailAddresses).filter(row => !gone(remove.emailAddresses, mail, row.address));
   return {
     displayName: set.displayName ?? before.displayName,
     phoneNumbers: [...phoneNumbers, ...(add.phoneNumbers || []).filter((number, index, all) => !phoneNumbers.some(row => key(row.number) === key(number)) && all.findIndex(other => key(other) === key(number)) === index).map(number => ({number, type: 'mobile'}))],
@@ -166,15 +206,17 @@ export function appliedContactChange(before: ContactRecord, set: ContactSet, nor
   };
 }
 /**
- * What the owner is offered for one matching contact. The agent cannot read a contact, so "add this
- * number" reaches the phone as a whole-field `set`: when that would drop a number or address the
- * contact has, the owner chooses between adding to them and replacing them.
+ * What the owner is offered for one matching contact: its fields before and after the change.
+ * `values`: the agent negotiated `contacts.write.v2` and names each value to add or remove. An agent
+ * without it cannot, so "add this number" reaches the phone as a whole-field `set`: when that would
+ * drop a number or address the contact has, the owner chooses between adding to them and replacing them.
  */
-export function contactChangeOptions(before: ContactRecord, set: ContactSet, normalize: (number: string) => string | null): Extract<TelephonyReview, {kind: 'contact-save'}>['options'] {
-  const replace = appliedContactChange(before, set, normalize);
-  const add = appliedContactChange(before, set.displayName === undefined ? {} : {displayName: set.displayName}, normalize, set);
+export function contactChangeOptions(before: ContactRecord, operation: Pick<ContactUpdate, 'set' | 'add' | 'remove'>, normalize: (number: string) => string | null, values: boolean): Extract<TelephonyReview, {kind: 'contact-save'}>['options'] {
+  const {set = {}, add, remove} = operation, change = appliedContactChange(before, set, normalize, add, remove);
+  if (values || add || remove) return [{before, after: change}];
+  const kept = appliedContactChange(before, set.displayName === undefined ? {} : {displayName: set.displayName}, normalize, set);
   const fields = (draft: ContactDraft) => draft.phoneNumbers.length + draft.emailAddresses.length;
-  return fields(add) === fields(replace) ? [{before, after: replace}] : [{before, after: add, keeps: 'add'}, {before, after: replace, keeps: 'replace'}];
+  return fields(kept) === fields(change) ? [{before, after: change}] : [{before, after: kept, keeps: 'add'}, {before, after: change, keeps: 'replace'}];
 }
 /** The matching contacts the editor can read completely; null when some matched but none can be offered. */
 async function records(query: string, ports: TelephonyPorts): Promise<ContactRecord[] | null> {
@@ -212,11 +254,8 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
     if (!found) return result('unavailable');
     if (!found.length) return result('not-found');
     if (operation.type === 'contact_update') {
-      // Only a whole-field `set` (`contacts.write.v1`) is applied: `add` and `remove` belong to
-      // `contacts.write.v2`, which this phone does not advertise, so such a change is not made.
-      const {set} = operation;
-      if (!set || operation.add || operation.remove) return result('unavailable');
-      const options = found.flatMap(before => contactChangeOptions(before, set, ports.normalize));
+      // Each change is worked out against the contact as the phone holds it now, and shown before and after.
+      const options = found.flatMap(before => contactChangeOptions(before, operation, ports.normalize, ports.contactValues));
       const choice = await ports.ask({kind: 'contact-save', options}, signal);
       if (choice === null || !options[choice]) return result('cancelled');
       ports.current();
@@ -240,24 +279,51 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
   }
 }
 
+/** Contacts filtered to the matches on the phone. The agent learns only whether there was one. */
+async function show(operation: ContactShowOperation, ports: TelephonyPorts, present: Present): Promise<ContactShowResult> {
+  const result = (status: ContactShowResult['status']): ContactShowResult => ({kind: 'contact-show', status});
+  let step: Awaited<ReturnType<TelephonyPorts['showContacts']>>;
+  try { step = await ports.showContacts(operation.query); } catch { return result('unavailable'); }
+  ports.current();
+  if (step === 'not-found') return result('not-found');
+  if (!step) return result('unavailable');
+  present(step);
+  return result('shown');
+}
+/** The open contact's name, numbers and addresses, whole and within the contract's bounds, or not at all. */
+function readOpenContact(ports: TelephonyPorts): ContactReadResult {
+  const open = ports.openContact();
+  if (!open) return {kind: 'contact-read', status: 'none-selected'};
+  if (open === 'unavailable') return {kind: 'contact-read', status: 'unavailable'};
+  try {
+    return validateContactReadResult({kind: 'contact-read', status: 'read', contact: {displayName: open.displayName.trim() ? open.displayName : null,
+      phoneNumbers: open.phoneNumbers.map(row => row.number), emailAddresses: open.emailAddresses.map(row => row.address)}});
+  } catch { return {kind: 'contact-read', status: 'unavailable'}; }
+}
+
 export async function executeTelephonyAction(operation: TelephonyActionOperation, operationId: string, ports: TelephonyPorts, signal: AbortSignal): Promise<TelephonyExecution> {
   signal.throwIfAborted(); ports.current();
+  let step: (() => void) | undefined;
+  const present: Present = next => { step = next; };
+  const execution = finish(await observed(operation, operationId, ports, signal, present));
+  return step && execution.status === 'succeeded' ? {...execution, present: step} : execution;
+}
+async function observed(operation: TelephonyActionOperation, operationId: string, ports: TelephonyPorts, signal: AbortSignal, present: Present): Promise<TelephonyActionResult> {
   switch (operation.type) {
-    case 'phone_call': return finish(await call(operation, ports, signal));
-    case 'sms_compose': return finish(await compose(operation, operationId, ports, signal));
-    case 'sms_reply_selected': return finish({kind: 'sms-reply', status: ports.draftInOpenThread(operation.body)});
-    case 'contact_create': case 'contact_update': case 'contact_delete': return finish(await write(operation, ports, signal));
-    // Showing a contact and sharing the open contact are not carried out on this phone yet.
-    case 'contact_show': return finish({kind: 'contact-show', status: 'unavailable'});
-    case 'contact_read_selected': return finish({kind: 'contact-read', status: 'unavailable'});
+    case 'phone_call': return call(operation, ports, signal);
+    case 'sms_compose': return compose(operation, operationId, ports, signal, present);
+    case 'sms_reply_selected': return {kind: 'sms-reply', status: ports.draftInOpenThread(operation.body)};
+    case 'contact_create': case 'contact_update': case 'contact_delete': return write(operation, ports, signal);
+    case 'contact_show': return show(operation, ports, present);
+    case 'contact_read_selected': return readOpenContact(ports);
     case 'messages_read_selected': {
       const thread = ports.openThread();
-      return finish(thread ? {kind: 'messages-read', status: 'read', ...thread} : {kind: 'messages-read', status: 'none-selected'});
+      return thread ? {kind: 'messages-read', status: 'read', ...thread} : {kind: 'messages-read', status: 'none-selected'};
     }
     case 'voicemail_read_selected': {
       const voicemail = ports.openVoicemail();
-      return finish(voicemail ? {kind: 'voicemail-read', status: 'read', ...voicemail} : {kind: 'voicemail-read', status: 'none-selected'});
+      return voicemail ? {kind: 'voicemail-read', status: 'read', ...voicemail} : {kind: 'voicemail-read', status: 'none-selected'};
     }
-    case 'voicemail_delete_selected': return finish({kind: 'voicemail-delete', status: await ports.deleteOpenVoicemail(() => ports.current(), signal)});
+    case 'voicemail_delete_selected': return {kind: 'voicemail-delete', status: await ports.deleteOpenVoicemail(() => ports.current(), signal)};
   }
 }

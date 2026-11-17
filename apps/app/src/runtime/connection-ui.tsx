@@ -1,6 +1,7 @@
 import {googleConnectionController} from './google-connection-ui';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import {NOTES_LIST_FILTER_CAPABILITY} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
+import {CONTACT_UPDATE_VALUES_CAPABILITY} from './telephony-actions-contract';
 import {isCalendarReadFailureCode} from "../../../../.eliza/client-features/packages/contracts/src/calendar.ts";
 import {SingleFlightMemo} from "@elizaos/core/read-memo";
 import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
@@ -1674,7 +1675,8 @@ async function connectCloud(agentId: string, signal: AbortSignal, expectedOwner?
     if(registered.userTextFormatVersion===1)next.userTextFormatVersion=1;
     const profileReason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
     // The registration answers the agent's full device capability list, as it does for the remote
-    // and resident connections; the capabilities route above lists only part of it (no calls, no text by name).
+    // and resident connections. An agent from before the shared list answers only part of it on the
+    // capabilities route above (no calls, no text by name), and Cloud agents are deployed apart from this app.
     target.headers["X-Eliza-Device-Capabilities"]=await deviceCapabilities(offeredByEither(device?.capabilities,registered.capabilities));
 
     credential.enrollmentId=registered.enrollmentId; await secureConnectionStore.write(slot,credential); signal.throwIfAborted();
@@ -2533,6 +2535,8 @@ export const connectionController = {
     };
     ownerReminderBindingCache={selected,session,generation,port};return port;
   },
+  /** The connected agent names each contact value to add or remove (`contacts.write.v2`), so a `set` it sends replaces the field. */
+  contactValuesNegotiated(){return active?.actions?.credential.capabilities?.includes(CONTACT_UPDATE_VALUES_CAPABILITY)===true;},
   canonicalNotesFilterAvailable(){return active?.kind==='resident'&&active.actions?.credential.capabilities?.includes(NOTES_LIST_FILTER_CAPABILITY)===true;},
   /** Canonical app records belong to the same resident agent as chat, on Android and in DEV. */
   getAppRecordClient():AppRecordPort|null {

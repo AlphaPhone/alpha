@@ -20,6 +20,13 @@ type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:
 /** Why Android would refuse this draft. A new contact's name is judged from its structured fields
     alone, as Android stores it; an edit's omitted fields keep their stored values. */
 export const contactSaveProblem=(mode:Editor['mode'],draft:ContactDraft)=>contactDraftProblem(draft,{create:mode==='creating'});
+let openSelection:(()=>string|null)|null=null,openReader:(()=>ContactDetail|'unavailable'|null)|null=null,listShower:((query:string)=>(()=>void)|null)|null=null;
+/** The open contact's identity and version, for on-device approval checks only: never agent context. */
+export const openContactSelection=()=>openSelection?.()??null;
+/** The contact the owner has open in Contacts, for `contact_read_selected`: 'unavailable' when the phone cannot read it whole; null when none is open. */
+export const openContactRead=()=>openReader?.()??null;
+/** The step that brings Contacts in front with its list filtered by `query` (`contact_show`); null where Contacts is not offered. */
+export const showContactsStep=(query:string)=>listShower?.(query)??null;
 /** Native address-book rows stay in memory, never in prototype persistence or agent context. */
 export function installContactsAdapter(Component:any,views:Bag){
  const render=views.contacts.render,p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
@@ -32,6 +39,20 @@ export function installContactsAdapter(Component:any,views:Bag){
  const setApi=(next:Bag)=>{api=next;};
  const clear=()=>{epoch++;visit++;rows=[];rowsQuery='';readable=false;writable=false;more=false;loading=false;loaded=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
  const available=()=>!!owner&&owner.S().view==='contacts'&&isMvpView('contacts')&&!document.hidden;
+ const opened=()=>available()?String(owner.vget('contacts').open||''):'';
+ openSelection=()=>{const id=opened();return id?JSON.stringify([id,detail?.id===id?detail.version:null]):null;};
+ openReader=()=>{const id=opened();return !id?null:readable&&detail?.id===id?detail:'unavailable';};
+ listShower=query=>{
+  const shell=owner;
+  if(!shell||!isMvpView('contacts'))return null;
+  return ()=>{
+   if(owner!==shell||document.hidden)return;
+   const chat=shell.S().chat;
+   if(shell.S().view!=='contacts')shell.openView('contacts',undefined,chat==='sheet'||chat==='full'?chat:undefined);
+   // The list registers its filter when it renders (AC-22); the filter closes an open contact.
+   shell.setState({},()=>{if(owner===shell&&available())applyListFilter('contacts',{query,label:query,by:'alpha'});});
+  };
+ };
  const sync=()=>{const next=available();if(next===active)return;active=next;if(next)void refresh();else clear();};
  async function refresh(request=false,queryOverride?:string,confirmUnknown=false){
   const target=owner,token=++epoch,writeAtStart=writeEpoch,pendingAtStart=pendingWrite;if(!available()){return;}
