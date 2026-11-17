@@ -46,3 +46,41 @@ test('an open that fails after reaching the tab host keeps an unknown outcome',a
 test('an open that Browser accepted succeeds',async()=>{
  const {result}=await approve(async()=>()=>{});assert.equal(result.status,'succeeded');
 });
+
+// The installed Browser adapter itself, over a recorded native tab host.
+import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
+async function browser(run){
+ const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command']});
+ const loads=()=>host.calls.filter(call=>call.name==='navigate').map(call=>[call.input.id,call.input.url]);
+ const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
+ const approved=async address=>{const present=await host.component.browserNavigateApproved(address,signal(),true);await host.sync();return present;};
+ try{host.shellState.view='home';await host.sync();await run({host,loads,type,approved});}finally{await host.teardown();}
+}
+test('approved opens load into the untouched New tab and then the agent\'s own tab',async()=>{
+ await browser(async({host,loads,approved})=>{
+  const blank=host.state().cur;
+  await approved('https://example.com/');await approved('https://example.org/');
+  assert.deepEqual(loads(),[[blank,'https://example.com/'],[blank,'https://example.org/']]);assert.equal(host.state().tabs.length,1);
+ });
+});
+test('an approved open never replaces a page the owner opened, including one typed into the agent\'s tab',async()=>{
+ await browser(async({host,loads,type,approved})=>{
+  const mine=await type('https://owner.example/');
+  const present=await approved('https://example.com/');
+  assert.equal(host.state().tabs.length,2);const agent=loads().at(-1)[0];assert.notEqual(agent,mine);assert.equal(host.state().cur,mine,'the open does not select its tab before it is presented');
+  host.shellState.view='browser';present();await host.sync();assert.equal(host.state().cur,agent);
+  await type('https://owner.example/second');
+  await approved('https://example.org/');
+  assert.equal(host.state().tabs.length,3);assert.ok(![mine,agent].includes(loads().at(-1)[0]));
+  assert.deepEqual(loads().filter(([id])=>id===mine),[[mine,'https://owner.example/']]);
+ });
+});
+test('with every tab in use an approved open is refused before any tab is created',async()=>{
+ await browser(async({host,loads,type,approved})=>{
+  await type('https://owner.example/1');
+  for(let tab=2;tab<=8;tab++){host.rendered().newTab();await host.sync();await type('https://owner.example/'+tab);}
+  assert.equal(host.state().tabs.length,8);const before=host.calls.length,opened=loads();
+  await assert.rejects(approved('https://example.com/'),error=>error.name==='BrowserOpenRefused'&&/8 tabs open/.test(error.message));
+  assert.equal(host.calls.length,before,'no native call was made');assert.deepEqual(loads(),opened);assert.equal(host.state().tabs.length,8);
+ });
+});

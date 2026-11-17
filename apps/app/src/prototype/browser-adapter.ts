@@ -223,7 +223,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         url = new URL('https://www.google.com/search');
         url.searchParams.set('q', input.query);
       }
-    } catch { if (approvedSignal) throw new BrowserOpenRefused('Browser cannot open that address.'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
+    } catch { if (approvedSignal) throw new BrowserOpenRefused('Invalid approved browser destination'); report(new Error('Enter search words or a valid HTTP or HTTPS address without credentials.')); return; }
     const s = state(); if (!s) { if (approvedSignal) throw new BrowserOpenRefused('Browser is unavailable.'); return; }
     // Restored rows count: an agent open past the cap fails visibly instead of being dropped.
     if (newTab && s.tabs.length >= MAX_TABS) { if (approvedSignal) throw new BrowserOpenRefused(`Browser already has ${MAX_TABS} tabs open. Close one, then ask again.`); report(new Error('Tab limit')); return; }
@@ -558,7 +558,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     };
     this.browserNavigateApproved = async (raw: string, signal: AbortSignal, deferPresentation = false) => {
       const url = new URL(raw);
-      if (url.protocol !== 'https:' || url.username || url.password) throw new BrowserOpenRefused('Browser opens only HTTPS addresses without sign-in details.');
+      if (url.protocol !== 'https:' || url.username || url.password) throw new BrowserOpenRefused('Only HTTPS destinations may be approved');
       signal.throwIfAborted();
       const selected = state()?.cur;
       // A request made from a private page stays in that profile. Opening a

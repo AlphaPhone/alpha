@@ -14,7 +14,9 @@ export function approvedOpenTab(tabs: ReadonlyArray<{id: string; priv?: boolean}
 /** An approved open refused before any tab was created or loaded: nothing happened, and the
  * message says why in words the owner can act on. Any other failure of an approved open may
  * have reached the native tab host, so its outcome stays unknown. */
-export class BrowserOpenRefused extends Error {}
+export class BrowserOpenRefused extends Error {
+  name = 'BrowserOpenRefused';
+}
 
 /** Off the Browser view with the native surface already hidden, there is no geometry to measure or send. */
 export const surfacePollIdle = (view: unknown, lastGeometry: string, hiddenGeometry: string): boolean =>
