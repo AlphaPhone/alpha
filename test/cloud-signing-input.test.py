@@ -340,7 +340,8 @@ class CloudSigningInputTest(unittest.TestCase):
             self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER), 4096)
             self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.HOSTED_DISPATCH), 4096)
             self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "runtimeProfile": "cloud"}), 4096)
-            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "packageName": PRODUCER.CANDIDATE_PACKAGE}), 4096)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "packageName": PRODUCER.CANDIDATE_PACKAGE}), PRODUCER.MAX_ARCHIVE_BYTES)
+            self.assertEqual(PRODUCER.apk_member_limit(PRODUCER.PRIVATE_RUNNER, {**contract, "packageName": "another.application"}), 4096)
         extras["launcher-debug.apk"] = b"changed debug input"
         self.pin["privateProducerReceiptSHA256"] = ADMISSION.digest(json.dumps(private).encode())
         self.write_archive({**extras, "private-producer.json": json.dumps(private).encode()})
