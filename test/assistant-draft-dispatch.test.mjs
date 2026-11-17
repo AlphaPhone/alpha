@@ -1,10 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {stripTypeScriptTypes} from './support/strip-types.mjs';
 // Alpha's composer contract, run against Alpha's own durable draft controller (apps/app/src/ui)
-// (apps/app/src/prototype/assistant-draft-controller.ts only re-exports it under Alpha's name).
+// (apps/app/src/prototype/assistant-draft-controller.ts subclasses it under Alpha's name).
 const code=stripTypeScriptTypes(readFileSync(new URL('../apps/app/src/ui/state/durable-draft-controller.ts',import.meta.url),'utf8'),{mode:'strip'});
 const {DurableDraftController:AssistantDraftController}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 test('Alpha binds its draft controller name to its local durable draft implementation',()=>{
- assert.match(readFileSync(new URL('../apps/app/src/prototype/assistant-draft-controller.ts',import.meta.url),'utf8'),/export \{DurableDraftController as AssistantDraftController\} from '\.\.\/ui\/state\/durable-draft-controller\.ts';/);
+ const source=readFileSync(new URL('../apps/app/src/prototype/assistant-draft-controller.ts',import.meta.url),'utf8');
+ assert.match(source,/import \{DurableDraftController\} from '\.\.\/ui\/state\/durable-draft-controller\.ts';/);
+ assert.match(source,/export class AssistantDraftController<Recovery=unknown> extends DurableDraftController<Recovery>/);
 });
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const record=(text,revision='1')=>({version:1,binding:'test',revision,text});
