@@ -185,7 +185,7 @@ test('a signed-in start opens access setup directly, with no Home while the acco
  await expectNoHomeBeforePrompt(page);
 });
 
-test('a start that has not decided in 60 s shows Home as before, and the sign-in still follows',async({page})=>{
+test('a start that has not decided in 60 s keeps Home unavailable until sign-in',async({page})=>{
  const host=await hosts(page);host.hold=true;
  const time=new Date('2026-10-06T12:00:00Z');await page.clock.install({time});
  // Count from the mounted guard, not from elapsed module loading on the test host.
@@ -195,8 +195,8 @@ test('a start that has not decided in 60 s shows Home as before, and the sign-in
  await page.clock.fastForward(59_000);
  await expect(startupLoading(page)).toBeVisible();
  await page.clock.fastForward(2_000);
- await expect(page.getByRole('region',{name:'Home',exact:true})).toBeVisible();
- await expect(startupLoading(page)).toHaveCount(0);await expect(page.locator('.alpha-connection')).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'Home',exact:true})).toHaveCount(0);
+ await expect(startupLoading(page)).toBeVisible();await expect(page.locator('.alpha-connection')).toHaveCount(0);
  host.release!();
  await expect(page.getByRole('main',{name:'Alpha',exact:true})).toBeVisible({timeout:30_000});
 });
