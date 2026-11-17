@@ -385,7 +385,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaCloudSignInPlugin.class);
-  registerPlugin(AlphaBillingAuthorityPlugin.class);
+  // Alpha Cloud cutover only (CloudDeployment.ALPHA_CLOUD_CUTOVER): plan changes need its in-memory account session.
+  if (CloudDeployment.ALPHA_CLOUD_CUTOVER) registerPlugin(AlphaBillingAuthorityPlugin.class);
   registerPlugin(AlphaLocalAgentPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaVoiceCloudPlugin.class);

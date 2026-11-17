@@ -353,6 +353,20 @@ test('Stop says the agent may still finish, discards the late reply and reconcil
   await noResend(page, foreign, 1);
 });
 
+test('a message is sent even when the local draft copy cannot be saved', async ({ page }) => {
+  test.setTimeout(90_000);
+  const foreign = await connected(page);
+  await harness(page, f => { f.draftSlotsFail = true; });
+  const asked = 'Send without a saved copy';
+  await composer(page).fill(asked);
+  await composer(page).press('Enter');
+  await expect.poll(() => harness(page, f => f.posts), { timeout: 30_000 }).toEqual([asked]);
+  await expect(conversation(page).getByText(asked, { exact: true })).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.getByText('Review local draft storage before sending.', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Nothing was sent/)).toHaveCount(0);
+  await noResend(page, foreign, 1);
+});
+
 test('pressing Send twice dispatches one message', async ({ page }) => {
   test.setTimeout(90_000);
   const foreign = await connected(page);

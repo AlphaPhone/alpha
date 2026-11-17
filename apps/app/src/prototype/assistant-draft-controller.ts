@@ -4,4 +4,4 @@
  * each send, conversation and owner fencing by binding, and an unknown dispatch outcome that is
  * never offered for a second send. This name is kept for the existing call sites.
  */
-export {DurableDraftController as AssistantDraftController} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';
+export {DurableDraftController as AssistantDraftController,DEFAULT_DURABLE_DRAFT_MESSAGES} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts';

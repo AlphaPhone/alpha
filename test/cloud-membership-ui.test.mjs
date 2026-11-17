@@ -6,13 +6,15 @@ const code=buildSync({entryPoints:['apps/app/src/runtime/cloud-membership-ui.tsx
 const module={exports:{}};
 new Function('require','module','exports',code)(createRequire(import.meta.url),module,module.exports);
 const{CloudMembershipControls}=module.exports;
-const calls=[];const base={email:'example@alpha.test',busy:false,balance:'funded',plan:{kind:'credits'},onRedeem:async()=>{calls.push('redeem');return false;},onManagePlan:()=>calls.push('plan'),onRefresh:()=>calls.push('refresh')};
+const calls=[];const base={email:'example@alpha.test',busy:false,balance:'funded',plan:{kind:'credits'},onRedeem:async()=>{calls.push('redeem');return false;},onManagePlan:()=>calls.push('plan'),onAddFunds:()=>calls.push('funds'),onRefresh:()=>calls.push('refresh')};
 const render=(extra={})=>renderToStaticMarkup(React.createElement(CloudMembershipControls,{...base,...extra}));
 test('subscription entry offers a monthly plan and keeps code redemption secondary without acting on render',()=>{const s=render();assert.match(s,/aria-label="Balance and membership"/);assert.match(s,/Choose plan/);assert.match(s,/>Code</);assert.doesNotMatch(s,/<details|Have a membership code|<input/);assert.deepEqual(calls,[]);});
 test('the account sheet shows a returned balance once without inferring it from a plan',()=>{
  const html=render({credits:{usd:'9.911418',observedAt:0}});
  assert.match(html,/\$9\.91/);assert.equal((html.match(/<dt>Balance<\/dt>/g)||[]).length,1);
  assert.match(html,/Add funds/);
+ // Without an add-funds surface (Alpha Cloud's in-app plans manage subscriptions only) the button is not offered.
+ assert.doesNotMatch(render({credits:{usd:'9.911418',observedAt:0},onAddFunds:undefined}),/Add funds/);
  assert.match(render({credits:null,balance:'unavailable'}),/Not available/);
  assert.doesNotMatch(render({credits:null,balance:'unavailable'}),/\$0\.00/);
 });

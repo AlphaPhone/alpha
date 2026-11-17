@@ -9,19 +9,7 @@
     <integer name="config_keyChordPowerVolumeUp">2</integer>
     <color name="config_defaultNotificationColor">#FF0000FF</color>
     <integer name="config_defaultNightMode">2</integer>
-    <integer name="config_navBarInteractionMode">2</integer>
-    <bool name="config_navBarCanMove">false</bool>
-    <bool name="config_navBarTapThrough">true</bool>
-    <bool name="config_imeDrawsImeNavBar">true</bool>
-    <dimen name="config_backGestureInset">30dp</dimen>
-    <bool name="config_navBarNeedsScrim">false</bool>
-    <integer name="config_navBarOpacityMode">2</integer>
-    <bool name="config_allowSeamlessRotationDespiteNavBarMoving">true</bool>
-    <bool name="config_navBarAlwaysShowOnSideEdgeGesture">true</bool>
-    <bool name="config_attachNavBarToAppDuringTransition">true</bool>
-    <dimen name="navigation_bar_height">24dp</dimen>
-    <dimen name="navigation_bar_height_landscape">24dp</dimen>
-    <dimen name="navigation_bar_width">24dp</dimen>
-    <dimen name="navigation_bar_frame_height">48dp</dimen>
-    <dimen name="navigation_bar_gesture_height">32dp</dimen>
+    <!-- Three-button navigation (Back, Home, Recents) by default. Android's own navigation-mode
+         overlays and dimensions apply; the owner can still choose gestures in Settings. -->
+    <integer name="config_navBarInteractionMode">0</integer>
 </resources>

@@ -3,3 +3,5 @@ ext.alphaCloudWebHosts = [
  production: "eliza.app",
  staging: "staging.eliza.app",
 ]
+// Alpha Cloud cutover: enables the billing return App Link (AndroidManifest.xml AlphaCloudBillingReturn).
+ext.alphaCloudCutover = false

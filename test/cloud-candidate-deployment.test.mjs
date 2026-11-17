@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {checkCloudDeployment,deploymentOutputs,storageFingerprint,STORAGE_NAMESPACES} from '../scripts/cloud-deployment.ts';
-import {CLOUD_DEPLOYMENT,CLOUD_DEPLOYMENT_IS_CANDIDATE,SHIPPED_CLOUD_DEPLOYMENT} from '../scripts/cloud-deployment-policy.ts';
+import {ALPHA_CLOUD_CUTOVER,ALPHA_CLOUD_POLICY_FILE,CLOUD_DEPLOYMENT,CLOUD_DEPLOYMENT_IS_CANDIDATE,SHIPPED_CLOUD_DEPLOYMENT,isAlphaCloudDeployment} from '../scripts/cloud-deployment-policy.ts';
 import {cloudSdkBases} from '../scripts/cloud-sdk-authority.ts';
 import {auditWebBundle,STAGING_CLOUD_TEXT,DENYLIST} from '../scripts/audit-production-bundle.ts';
 import {checkLocalCloud,leakedElizaHost,localChildEnvironment,localRegistration,LOCAL_CLOUD} from '../scripts/local-cloud.ts';
@@ -81,6 +81,48 @@ test('the production bundle audit refuses a candidate Cloud build and derives st
  assert.ok(auditWebBundle(temp,{testMocks:true}).ok);
  assert.deepEqual([...STAGING_CLOUD_TEXT],[new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.api).host,new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.services).host,new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.web).host+'/alphaphone',SHIPPED_CLOUD_DEPLOYMENT.staging.tenant]);
  for(const entry of STAGING_CLOUD_TEXT)assert.ok(DENYLIST.includes(entry),entry);
+}));
+
+test('the Alpha Cloud cutover flag is off by default: shipped builds keep the current Cloud and generate no Alpha surface',()=>{
+ assert.equal(ALPHA_CLOUD_CUTOVER,false);
+ assert.equal(isAlphaCloudDeployment(SHIPPED_CLOUD_DEPLOYMENT),false);
+ const outputs=deploymentOutputs(SHIPPED_CLOUD_DEPLOYMENT);
+ assert.match(outputs['apps/app/src/runtime/cloud-deployment.generated.ts'],/export const alphaCloudCutover: boolean = false;/);
+ assert.match(outputs['android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java'],/static final boolean ALPHA_CLOUD_CUTOVER = false;/);
+ assert.match(outputs['android/app/cloud-deployment.generated.gradle'],/ext\.alphaCloudCutover = false/);
+ assert.ok(!Object.values(outputs).join('\n').includes('alphacompute.ai'),'no Alpha Cloud host in a shipped build');
+ // The committed outputs are the flag-off ones.
+ for(const [file,contents] of Object.entries(outputs))assert.equal(fs.readFileSync(file,'utf8'),contents,file);
+});
+
+test('ALPHA_CLOUD_CUTOVER=1 selects Alpha Cloud as a candidate deployment and turns the generated flag on',()=>withTemp(temp=>{
+ const alpha=JSON.parse(fs.readFileSync(ALPHA_CLOUD_POLICY_FILE,'utf8'));
+ assert.equal(isAlphaCloudDeployment(alpha),true);
+ const outputs=deploymentOutputs(alpha);
+ assert.match(outputs['apps/app/src/runtime/cloud-deployment.generated.ts'],/export const alphaCloudCutover: boolean = true;/);
+ assert.match(outputs['android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java'],/PRODUCTION_API_HOST = "api\.alphacompute\.ai";[\s\S]*static final boolean ALPHA_CLOUD_CUTOVER = true;/);
+ assert.match(outputs['android/app/cloud-deployment.generated.gradle'],/ext\.alphaCloudCutover = true/);
+ // A candidate: its own credential namespace, so it cannot read a shipped build's sign-ins.
+ write(temp,outputs);
+ checkCloudDeployment(temp,{config:alpha,sdkBases:cloudSdkBases(alpha),candidate:true});
+ const probe=`import('./scripts/cloud-deployment-policy.ts').then(m=>console.log(JSON.stringify([m.ALPHA_CLOUD_CUTOVER,m.CLOUD_DEPLOYMENT_IS_CANDIDATE,m.CLOUD_DEPLOYMENT.production.api])))`;
+ const on=spawnSync(process.execPath,['--input-type=module','-e',probe],{encoding:'utf8',env:{...process.env,ALPHA_CLOUD_CUTOVER:'1',ALPHA_CLOUD_DEPLOYMENT_FILE:''}});
+ assert.equal(on.status,0,on.stderr);
+ assert.deepEqual(JSON.parse(on.stdout),[true,true,'https://api.alphacompute.ai']);
+ // Any other value is off.
+ const off=spawnSync(process.execPath,['--input-type=module','-e',probe],{encoding:'utf8',env:{...process.env,ALPHA_CLOUD_CUTOVER:'true',ALPHA_CLOUD_DEPLOYMENT_FILE:''}});
+ assert.deepEqual(JSON.parse(off.stdout),[false,false,SHIPPED_CLOUD_DEPLOYMENT.production.api]);
+ // The flag with a non-Alpha deployment file, or a half-marked deployment, is refused.
+ const file=path.join(temp,'candidate.json');fs.writeFileSync(file,JSON.stringify(candidate));
+ const mismatched=spawnSync(process.execPath,['--input-type=module','-e',probe],{encoding:'utf8',env:{...process.env,ALPHA_CLOUD_CUTOVER:'1',ALPHA_CLOUD_DEPLOYMENT_FILE:file}});
+ assert.notEqual(mismatched.status,0);assert.match(mismatched.stderr,/needs an Alpha Cloud deployment file/);
+ assert.throws(()=>deploymentOutputs({...alpha,staging:{...alpha.staging,alphaCloud:false}}),/both production and staging/);
+ assert.throws(()=>deploymentOutputs({...alpha,staging:{...alpha.staging,alphaCloud:'yes'}}),/Invalid Alpha Cloud marker/);
+ // The production bundle audit refuses the Alpha Cloud candidate's generated authorities.
+ fs.writeFileSync(path.join(temp,'index.html'),'<!doctype html><title>Alpha Phone</title>');
+ fs.writeFileSync(path.join(temp,'build-flags.json'),JSON.stringify({testMocks:false}));
+ fs.writeFileSync(path.join(temp,'index.js'),outputs['apps/app/src/runtime/cloud-deployment.generated.ts']);
+ assert.ok(auditWebBundle(temp).findings.some(finding=>finding.rule.includes('candidate Cloud deployment')));
 }));
 
 test('the local standalone Cloud carries its own identity and detects a leaked Eliza host',()=>{

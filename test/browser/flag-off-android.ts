@@ -402,6 +402,8 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
           return {};
         }
         if (plugin === 'AlphaConnection') {
+          // A test can make the composer's draft slots unavailable, as a failing Keystore would.
+          if ((f as any).draftSlotsFail && String(input?.slot ?? '').startsWith('assistant-draft:') && method.startsWith('secure')) throw new Error('Synthetic draft storage failure');
           if (method === 'secureRead') return { value: slots[input.slot] ?? null };
           if (method === 'secureWrite') { slots[input.slot] = input.value; persist(); return {}; }
           if (method === 'secureRemove') { delete slots[input.slot]; persist(); return {}; }

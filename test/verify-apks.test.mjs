@@ -431,3 +431,23 @@ test("APK verification rejects and names an extra web VIEW filter", () => {
   assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(library)), allowedWebFilters),
     ["Unexpected web VIEW intent filter com.example.Viewer https://(any host) (any path); add it to the allowed set in scripts/verify-apks.ts only if it is deliberate"]);
 });
+
+test("the Alpha Cloud billing return alias is listed as disabled unless the cutover enables it", () => {
+  const alias = enabled => ["    E: activity-alias (line=30)",
+    '      A: http://schemas.android.com/apk/res/android:name(0x01010003)="ai.alphacompute.alphaphone.AlphaCloudBillingReturn" (Raw: "ai.alphacompute.alphaphone.AlphaCloudBillingReturn")',
+    ...(enabled ? [] : ["      A: http://schemas.android.com/apk/res/android:enabled(0x0101000e)=(type 0x12)0x0"]),
+    "      E: intent-filter (line=31)", "        A: http://schemas.android.com/apk/res/android:autoVerify(0x010104ee)=(type 0x12)0xffffffff",
+    "        E: action (line=32)", '          A: http://schemas.android.com/apk/res/android:name(0x01010003)="android.intent.action.VIEW" (Raw: "android.intent.action.VIEW")',
+    "        E: data (line=33)", '          A: http://schemas.android.com/apk/res/android:scheme(0x01010027)="https" (Raw: "https")',
+    '          A: http://schemas.android.com/apk/res/android:host(0x01010028)="eliza.app" (Raw: "eliza.app")',
+    '          A: http://schemas.android.com/apk/res/android:path(0x0101002a)="/alphaphone/billing/return" (Raw: "/alphaphone/billing/return")'].join("\n");
+  const off = "ai.alphacompute.alphaphone.AlphaCloudBillingReturn https://eliza.app/alphaphone/billing/return [disabled]";
+  const on = "ai.alphacompute.alphaphone.AlphaCloudBillingReturn https://eliza.app/alphaphone/billing/return";
+  // Flag off (shipped builds): the alias is declared disabled, so it resolves no intent.
+  assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(alias(false))), [...allowedWebFilters, off]), []);
+  // An enabled alias in a flag-off build is an unexpected live App Link.
+  assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(alias(true))), [...allowedWebFilters, off]),
+    [`Unexpected web VIEW intent filter ${on}; add it to the allowed set in scripts/verify-apks.ts only if it is deliberate`, `Missing web VIEW intent filter ${off}`]);
+  // Flag on: the alias is enabled.
+  assert.deepEqual(webViewFilterProblems(parseXmlTree(webFilterTree(alias(true))), [...allowedWebFilters, on]), []);
+});

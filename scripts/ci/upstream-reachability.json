@@ -2,14 +2,14 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "0d775376fd23d96f39f444b1920a8fde7fbce1e8",
-  "head": "b28e12281f7897c5e12f930c33271f3513cbdb68",
+  "baseCommit": "df424da2a677069ccce0efe4aaad4ff29c11657e",
+  "head": "d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
   "recordedAt": "2026-11-17",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...b28e12281f7897c5e12f930c33271f3513cbdb68",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
   "status": "diverged",
-  "aheadBy": 4,
+  "aheadBy": 6,
   "behindBy": 1,
-  "mergeBase": "49d8b466043ca6c3316127b616362c9d80836084",
+  "mergeBase": "0d775376fd23d96f39f444b1920a8fde7fbce1e8",
   "pinOnlyCommits": [
     {
       "sha": "5636f8ffe7f56fd562c35423511e501809234290",
@@ -22,6 +22,10 @@
     {
       "sha": "b28e12281f7897c5e12f930c33271f3513cbdb68",
       "subject": "Declare and verify deletion progress assumptions"
+    },
+    {
+      "sha": "d1cd3cba38c239095bdaaf2fa76cab5f5726fdcf",
+      "subject": "Verify ringing and ongoing call notification channels"
     }
   ],
   "pullRequests": [

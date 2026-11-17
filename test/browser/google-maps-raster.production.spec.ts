@@ -91,7 +91,6 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
  if(tiles==='malformed'){await expect(plane).toHaveAttribute('data-map-error',/./);}
  else{
   await expect(plane).toHaveAttribute('data-map-ready','true');
-  const dataSources=attribution.getByText('Data sources',{exact:true});
   const checkCreditLayouts=async(stage:string)=>{for(const layout of [
    {name:'portrait',width:412,height:915,scale:1},
    {name:'portrait-large',width:412,height:915,scale:2},
@@ -103,28 +102,17 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
    await page.addStyleTag({content:`[data-alpha-text-probe]{font-size:${100*layout.scale}px!important}.alpha-map-credits{font-size:${12*layout.scale}px!important}.alpha-map-info{font-size:${14*layout.scale}px!important}`});
    await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale').trim())).toBe(String(layout.scale));
    await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
-   if(await dataSources.isVisible()){
-    await expect(async()=>{
-     expect(await dataSources.evaluate(el=>{const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===el||el.contains(hit);})).toBe(true);
-    }).toPass();
-    await dataSources.click();
-    const sources=attribution.locator('details[open]');
-    await expect(sources).toContainText('Map data © Google · synthetic viewport');
-    const panel=await sources.locator('.alpha-map-info').boundingBox();
-    expect(panel!.x).toBeGreaterThanOrEqual(0);expect(panel!.y).toBeGreaterThanOrEqual(0);
-    expect(panel!.x+panel!.width).toBeLessThanOrEqual(layout.width);
-    expect(panel!.y+panel!.height).toBeLessThanOrEqual(layout.height);
-    await page.screenshot({path:info.outputPath(`google-credit-${stage}-${layout.name}.png`),animations:'disabled'});
-    await dataSources.click();
-   }else{
-    await expect(attribution.locator('.alpha-google-copyright')).toBeVisible();
-   }
+   // No separate data-source control: the Google attribution itself is always on the map.
+   await expect(attribution.getByText('Data sources',{exact:true})).toHaveCount(0);
+   await expect(attribution.locator('.alpha-google-copyright')).toBeVisible();
+   await page.screenshot({path:info.outputPath(`google-credit-${stage}-${layout.name}.png`),animations:'disabled'});
    // The compact information control and full recipient roles remain reachable
    // at the same enlarged/landscape sizes as the data-source attribution.
    const informationControl=privacy.getByLabel('Map information and credits',{exact:true});
    expect(await informationControl.evaluate(el=>{const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===el||el.contains(hit);})).toBe(true);
    await informationControl.click();
    await expect(privacy.locator('[data-maps-disclosure]')).toContainText('Google Routes for routing, operated by Google');
+   await expect(privacy.locator('[data-maps-google-attribution]')).toContainText('Map data © Google · synthetic viewport');
    const disclosure=await privacy.locator('.alpha-map-info').boundingBox();
    expect(disclosure!.x).toBeGreaterThanOrEqual(0);expect(disclosure!.y).toBeGreaterThanOrEqual(0);
    expect(disclosure!.x+disclosure!.width).toBeLessThanOrEqual(layout.width);

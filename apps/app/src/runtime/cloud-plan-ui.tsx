@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import './cloud-plan-ui.css';
 import {Busy,StatusDot} from './status-ui';
-import {billingOperationProblem,formatUsd,normalizeReferralCode,parseCommand,parseQuote,parseUpgradePayment,
+import {billingOperationProblem,formatUsd,normalizeReferralCode,parseCommand,parseQuote,upgradeOutcome,
  type BillingAuthorityPort,type BillingAuthorityStatus,type BillingOperation,type CheckoutStart,type PlanChangeQuote,
  type PlanKey,type PlanOffer,type ReferralState,type SubscriptionState} from './cloud-plans';
 
@@ -39,7 +39,9 @@ const dateLabel=(at:number)=>new Date(at).toLocaleDateString(undefined,{year:'nu
  * Stripe's page, opened from here and returning here; plan changes and cancellation first confirm
  * the account with a one-time email code (native billing authority).
  */
-export function CloudPlanManager({account,authority,serviceName,onChanged}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void}){
+export function CloudPlanManager({account,authority,serviceName,onChanged,onPaymentOpened}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void;
+ /** A Stripe page opened: the app's next return checks the plan even before Cloud confirms it. */
+ onPaymentOpened?:()=>void}){
  const [plans,setPlans]=useState<PlanOffer[]|null>(null);
  const [subscription,setSubscription]=useState<SubscriptionState|null|undefined>(undefined);
  const [referral,setReferral]=useState<ReferralState|null>(null);
@@ -53,6 +55,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
  // The caller passes a fresh callback each render; reading it through a ref keeps the effects below stable.
  const changed=useRef(onChanged);changed.current=onChanged;
  const notifyChanged=useCallback(()=>changed.current(),[]);
+ const opened=useRef(onPaymentOpened);opened.current=onPaymentOpened;
  const credential=account.identity.credentialId;
  // service.client is one object per signed-in key (the component is keyed by credential); the wrapper is not.
  const client=account.client;
@@ -107,31 +110,41 @@ export function CloudPlanManager({account,authority,serviceName,onChanged}:{acco
   if(!answer)return;
   if(answer.status===409)throw Error('Your plan changed. Check it again.');
   if(answer.status<200||answer.status>=300)throw Error('Not accepted');
-  switch(operation.operation){
-   case 'upgrade-review':case 'downgrade-review':
-    setStep({kind:'quote',quote:parseQuote(answer.body,operation.operation==='upgrade-review'?'upgrade':'downgrade')});return;
-   case 'upgrade-confirm':{
-    const command=parseCommand(answer.body);
-    if(command.status==='FAILED')throw Error('The upgrade was not made');
-    // A payment that needs action (3-D Secure, a new card) continues on Stripe's invoice page.
-    const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId});
-    const continuation=payment.status>=200&&payment.status<300?parseUpgradePayment(payment.body):null;
-    if(continuation?.invoiceUrl){await client.openPaymentPage(continuation.invoiceUrl,signal);setNotice('Finish payment, then come back');}
-    else setNotice('Plan upgraded');
-    break;
-   }
-   case 'downgrade-confirm':{const command=parseCommand(answer.body);if(command.status==='FAILED')throw Error('The change was not made');setNotice('Plan changes at renewal');break;}
-   case 'cancel':setNotice('Plan ends at the end of this period');break;
-   case 'undo-cancel':setNotice('Plan continues');break;
+  if(operation.operation==='upgrade-review'||operation.operation==='downgrade-review'){
+   setStep({kind:'quote',quote:parseQuote(answer.body,operation.operation==='upgrade-review'?'upgrade':'downgrade')});return;
   }
-  setStep({kind:'idle'});notifyChanged();await load(signal);
+  // Cloud accepted a change: its quote is spent and is never offered for another confirm, and the plan
+  // is read again whatever happens next.
+  setStep({kind:'idle'});
+  // A Stripe invoice page opened for the upgrade: the plan is read now, and the owner's return from
+  // that page still checks inside the once-a-minute limit (re-armed after the immediate check).
+  let paying=false;
+  try{
+   switch(operation.operation){
+    case 'upgrade-confirm':{
+     const command=parseCommand(answer.body);
+     if(command.status==='FAILED')throw Error('The upgrade was not made');
+     // A payment that needs action (3-D Secure, a new card) continues on Stripe's invoice page.
+     const payment=await authority.perform({operation:'upgrade-payment',commandId:command.commandId}).catch(()=>null);
+     const outcome=upgradeOutcome(command,payment);
+     if(outcome.kind==='failed')throw Error('The upgrade was not made');
+     if(outcome.kind==='pay'){paying=true;opened.current?.();await client.openPaymentPage(outcome.invoiceUrl,signal);setNotice('Finish payment, then come back');}
+     else setNotice(outcome.kind==='applied'?'Plan upgraded':'Upgrade not finished yet. Check your plan again shortly.');
+     break;
+    }
+    case 'downgrade-confirm':{const command=parseCommand(answer.body);if(command.status==='FAILED')throw Error('The change was not made');setNotice('Plan changes at renewal');break;}
+    case 'cancel':setNotice('Plan ends at the end of this period');break;
+    case 'undo-cancel':setNotice('Plan continues');break;
+   }
+  }finally{notifyChanged();if(paying)opened.current?.();}
+  await load(signal);
  },[client,authority,load,notifyChanged,withAuthority]);
 
  const subscribe=(plan:PlanOffer)=>void act('Opening checkout',async signal=>{
   const previous=pendingCheckouts.get(credential);
   const idempotencyKey=previous&&previous.planKey===plan.key&&Date.now()<previous.expiresAt?previous.idempotencyKey:crypto.randomUUID();
   const started=await client.startSubscriptionCheckout(plan.key,idempotencyKey,signal);
-  if(started.status==='open'){pendingCheckouts.set(credential,{sessionId:started.sessionId,planKey:plan.key,idempotencyKey,expiresAt:started.expiresAt});setNotice('Finish payment, then come back');}
+  if(started.status==='open'){opened.current?.();pendingCheckouts.set(credential,{sessionId:started.sessionId,planKey:plan.key,idempotencyKey,expiresAt:started.expiresAt});setNotice('Finish payment, then come back');}
   else if(started.status==='completed'){pendingCheckouts.delete(credential);setNotice('Plan active');notifyChanged();await load(signal);}
   else {pendingCheckouts.delete(credential);throw Error('Checkout expired. Try again.');}
  });

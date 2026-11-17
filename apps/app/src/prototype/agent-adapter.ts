@@ -50,7 +50,7 @@ import {executeCalendarAvailability,type AvailabilityProvider} from '../runtime/
 import {availabilityReview} from './calendar-availability-review';
 import {presentDeviceRecordOperation} from '../runtime/device-record-presentation';
 import { passwordSurfaceOpen } from '../passwords/password-manager';
-import {AssistantDraftController} from './assistant-draft-controller';
+import {AssistantDraftController,DEFAULT_DURABLE_DRAFT_MESSAGES} from './assistant-draft-controller';
 import {assistantDraftStore} from '../runtime/assistant-draft-store';
 import {browserNotesPort,browserNotesRecovery} from '../runtime/browser-notes-document';
 import {audioDeletionRecovery} from '../runtime/note-audio-deletions';
@@ -84,6 +84,8 @@ import { WorkflowReminderOverflow, workflowReminderRows } from '../runtime/workf
 import { getMapsSelectedObject, clearMapsSelection } from '../maps/agent-context';
 import { alphaClient, AlphaClientError, type AlphaView } from '../runtime/alpha-client';
 import { privateLocalPreviewEnabled, testMocksEnabled } from '../build-flags';
+import { alphaCloudCutover } from '../runtime/cloud-deployment.generated.ts';
+import { managePlanCardCopy } from '../runtime/cloud-plans';
 import { DailyApps } from '../daily';
 import { isAndroid } from '../native';
 import { registerPlugin } from '../platform-plugins';
@@ -183,8 +185,10 @@ function createdFromSlot(slot:string,key:string){
     return Array.isArray(from)&&Array.isArray(to)&&from.length===4&&to.length===4&&from[3]===null&&typeof to[3]==='string'&&!!to[3]&&JSON.stringify(from.slice(0,3))===JSON.stringify(to.slice(0,3));
   }catch{return false;}
 }
-function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string){
+function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string){
   const draft=shell.composerDraft;draft.release();
+  // A send made without a durable copy has no saved text to restore, so the composer gets it back directly.
+  if(undurableText!==undefined){if(shell.live&&undurableText.trim())shell.setState((previous:Shell)=>String(previous.draft||'').trim()?null:{draft:undurableText});return;}
   const key=draft.binding;
   if(!heldKey||!key||key===heldKey||!heldText.trim()||String(shell.S().draft||'').trim()||!createdFromSlot(heldKey,key))return;
   shell.setState((previous:Shell)=>draft.binding!==key||String(previous.draft||'').trim()?null:{draft:heldText},()=>{
@@ -1950,11 +1954,19 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     }
     const revision=alphaClient.getState().context.revision,connection=connectionController.getSnapshot(),sessionId=connection.session?.sessionId,conversationId=connection.history?.conversationId;
     const current=()=>{const selected=connectionController.getSnapshot();return this.live&&!document.hidden&&(!selected.busy||selected.backgroundWork===true)&&!selected.open&&!document.querySelector('[data-alpha-chat-recorder],[data-alpha-pill-voice]')&&selected.session?.sessionId===sessionId&&selected.history?.conversationId===conversationId&&alphaClient.getState().context.revision===revision&&filesCurrent();};
-    const heldText=String(s.draft||'');let heldKey:string|undefined;
+    const heldText=String(s.draft||'');let heldKey:string|undefined,undurableText:string|undefined;
     if(fromComposer){
       this.draftSendPending=true;
       // The durable draft keeps this text until the message is known to have been dispatched.
-      try{await this.draftBindingTask;heldKey=this.composerDraft.binding;await this.composerDraft.hold(heldText,current);}catch(error){this.toast(errorNotice(error,'Draft could not be prepared. Nothing was sent.'),ERROR_TOAST);return;}finally{this.draftSendPending=false;}
+      try{await this.draftBindingTask;heldKey=this.composerDraft.binding;await this.composerDraft.hold(heldText,current);}
+      catch(error){
+        // Only a real change to the editor or chat, or a possibly-sent message awaiting its own review, stops the send.
+        // Local draft storage is a recovery aid, never a gate:
+        // when it is unavailable the message is sent without a durable copy and restored to the composer if not dispatched.
+        if(!current()||String(this.S().draft||'')!==heldText||(error instanceof Error&&(error.message===DEFAULT_DURABLE_DRAFT_MESSAGES.changed||error.message===DEFAULT_DURABLE_DRAFT_MESSAGES.reviewUnsettled))){this.toast(errorNotice(error,'Draft could not be prepared. Nothing was sent.'),ERROR_TOAST);return;}
+        undurableText=heldText;
+      }
+      finally{this.draftSendPending=false;}
     }
     const reviewedSource=fromComposer?this.reviewedSourceDraft:null;if(fromComposer)this.reviewedSourceDraft=null;
     // Everything this send later shows belongs to the agent connection it was sent on.
@@ -1976,10 +1988,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         await saveAttachment(connection.session,conversationId,userId,sentAttachment);
         stagedAttachmentKey=attachmentKey(connection.session,conversationId,userId);
       }
-      catch{if(fromComposer)releaseComposerSend(this,heldKey,heldText);this.toast('Attachment could not be saved. Try again.');return;}
+      catch{if(fromComposer)releaseComposerSend(this,heldKey,heldText,undurableText);this.toast('Attachment could not be saved. Try again.');return;}
       // The local write may settle after the composer, attachment or conversation has been replaced.
       if(!current()||this.composerDraft.binding!==heldKey||!transcriptCurrent()||(this.mailAttachment??null)!==mail||this.cameraAttachment!==sentAttachment.cameraAttachment||this.fileAttachments!==sentAttachment.fileAttachments){
-        if(this.live)releaseComposerSend(this,heldKey,heldText);else this.composerDraft?.release();
+        if(this.live)releaseComposerSend(this,heldKey,heldText,undurableText);else this.composerDraft?.release();
         return;
       }
     }
@@ -2084,7 +2096,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Nothing reached the agent: put the text back and drop the unsent bubble. Never resend.
         // The text back in the composer says it was not sent; only a refusal with its own reason is
         // shown, and the private local preview keeps a held composer send's refusal out of toasts as before.
-        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));if(fromComposer)releaseComposerSend(this,heldKey,heldText);if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(!fromComposer)this.toast('Not sent.');}}
+        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));if(fromComposer)releaseComposerSend(this,heldKey,heldText,undurableText);if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(!fromComposer)this.toast('Not sent.');}}
         else if(fromComposer)this.composerDraft?.release();
       }else{
         const sessionRetired=attempt.residentSessionRetired===true;
@@ -2122,7 +2134,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // honest in-conversation answer and its plan action (Redeem / Choose a plan, Sign in, Check again).
           const failureKind=(e as {failureKind?:unknown}).failureKind as string,limit=(e as {serviceLimit?:unknown}).serviceLimit;
           // A plan or billing refusal offers Cloud's plan page on the same bubble; nothing is bought or upgraded here.
-          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',title:limit==='subscription-required'?`Manage plan in ${selectedCloudName()}`:`Manage billing in ${selectedCloudName()}`,sub:'Opens in your browser. Nothing is purchased here.',managePlan:true}:undefined;
+          const managePlan=(limit==='billing-refused'||limit==='subscription-required'||limit==='allowance-exhausted')&&connectionController.getSnapshot().kind==='resident'?{type:'generic',icon:'info',...managePlanCardCopy(limit,alphaCloudCutover,selectedCloudName()),managePlan:true}:undefined;
           const planCard=planActionCard((e as {planAction?:unknown}).planAction)??managePlan;
           // These refusals come before any model output: the streamed text is upstream's failure prose, not a reply.
           const beforeOutput=limit!==undefined||REFUSED_BEFORE_OUTPUT.has(failureKind);
