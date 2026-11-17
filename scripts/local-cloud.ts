@@ -34,13 +34,12 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
-import {once} from 'node:events';
-import {pipeline} from 'node:stream/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {CLOUD_SIGN_IN_REGISTRATION} from './cloud-deployment-policy.ts';
 import {readUpstreamPin} from './upstream-pin.ts';
+import {registrationFor, seedRegistration} from './cloud-registration.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const vendorDir = path.join(root, 'vendor/eliza');
@@ -116,10 +115,9 @@ async function prepare({dir, exportDir, source}: Layout) {
     say(`exporting ${source === vendorDir ? 'the pinned vendor/eliza' : source + ' at ' + commit.slice(0, 10)} (git archive; the checkout is not written)`);
     const staging = fs.mkdtempSync(path.join(dir, 'export-'));
     try {
-      const archive = spawn('git', ['-C', source, 'archive', '--format=tar', commit], {stdio: ['ignore', 'pipe', 'inherit']});
-      const extract = spawn('tar', ['-x', '-C', staging], {stdio: ['pipe', 'inherit', 'inherit']});
-      const [[archived], [extracted]] = await Promise.all([once(archive, 'close'), once(extract, 'close'), pipeline(archive.stdout, extract.stdin)]);
-      if (archived !== 0 || extracted !== 0) throw new Error('Export failed');
+      // One shell pipe: Bun's stream.pipeline between two child processes ends with "Premature close".
+      const exported = spawnSync('bash', ['-o', 'pipefail', '-c', 'git -C "$1" archive --format=tar "$2" | tar -x -C "$3"', 'export', source, commit, staging], {stdio: 'inherit'});
+      if (exported.status !== 0) throw new Error('Export failed');
       fs.writeFileSync(path.join(staging, '.alpha-export'), commit + '\n');
       if (current !== null) fs.rmSync(exportDir, {recursive: true});
       fs.renameSync(staging, exportDir);
@@ -172,7 +170,7 @@ function secrets(dir: string): Record<string, string> {
   if (saved) { const value = {...saved, entitlementKey: entitlementKey()}; writePrivate(file, JSON.stringify(value)); return value; }
   const random = () => crypto.randomBytes(32).toString('hex');
   const value = {entitlementKey: entitlementKey(), stewardMaster: random(), stewardJwt: random(), stewardKdf: random(), stewardAudit: random(), platformKey: `stw_platform_${random()}`, sessionSecret: random(),
-    cronSecret: random(), reservedAppId: crypto.randomUUID(), alphaAppId: crypto.randomUUID(), localRootKey: crypto.randomBytes(32).toString('base64')};
+    cronSecret: random(), localRootKey: crypto.randomBytes(32).toString('base64')};
   writePrivate(file, JSON.stringify(value));
   return value;
 }
@@ -223,7 +221,6 @@ async function start({dir, exportDir, front, ports, deploymentId}: Layout) {
   say(`Steward up (tenant ${LOCAL_CLOUD.tenant})`);
 
   // 2. Cloud API: wrangler --local with PGlite, Alpha's client registered, every public origin this Cloud's own.
-  const clients = JSON.stringify([{clientId: registration.clientId, appId: s.alphaAppId, redirectUri: registration.redirectUri, enabled: true}]);
   const vars: Record<string, string> = {
     ENVIRONMENT: 'staging', NODE_ENV: 'development',
     NEXT_PUBLIC_APP_URL: front, NEXT_PUBLIC_API_URL: front, ELIZA_CLOUD_URL: front, LOGIN_APP_URL: front, LOGIN_API_URL: `${front}/steward`,
@@ -231,7 +228,7 @@ async function start({dir, exportDir, front, ports, deploymentId}: Layout) {
     R2_PUBLIC_HOST: new URL(front).host, NEXT_PUBLIC_ASSETS_CDN_URL: front,
     STEWARD_API_URL: steward, STEWARD_TENANT_ID: LOCAL_CLOUD.tenant, STEWARD_DEFAULT_TENANT_ID: LOCAL_CLOUD.tenant, NEXT_PUBLIC_STEWARD_TENANT_ID: LOCAL_CLOUD.tenant,
     STEWARD_JWT_SECRET: s.stewardJwt, STEWARD_SESSION_SECRET: s.sessionSecret, CRON_SECRET: s.cronSecret, ELIZA_LOCAL_ROOT_KEY: s.localRootKey,
-    ELIZA_MOBILE_APP_AUTH_ENABLED: 'true', ELIZA_MOBILE_APP_AUTH_APP_ID: s.reservedAppId, ELIZA_MOBILE_APP_AUTH_CLIENTS_JSON: clients,
+    ELIZA_MOBILE_APP_AUTH_ENABLED: 'true',
     CLOUD_PUBLIC_SERVICE_NAME: LOCAL_CLOUD.name, CLOUD_PUBLIC_SERVICE_TERMS_JSON: legal('Terms'), CLOUD_PUBLIC_SERVICE_PRIVACY_JSON: legal('Privacy'),
     ELIZA_ENTITLEMENT_ISSUER: front, ELIZA_ENTITLEMENT_AUDIENCE: 'alpha-phone-local', ELIZA_ENTITLEMENT_SIGNING_KEY: s.entitlementKey, ELIZA_ENTITLEMENT_SIGNING_KEY_ID: 'alpha-local-1',
   };
@@ -250,7 +247,6 @@ async function start({dir, exportDir, front, ports, deploymentId}: Layout) {
   const override = ['ENVIRONMENT:staging', 'APP_BILLING_ENVIRONMENT:test', 'ELIZA_KMS_BACKEND:local', 'MOCK_REDIS:1', 'REDIS_RATE_LIMITING:true', 'NODE_ENV:development',
     `NEXT_PUBLIC_APP_URL:${front}`, `NEXT_PUBLIC_API_URL:${front}`, `ELIZA_CLOUD_URL:${front}`, `STEWARD_TENANT_ID:${LOCAL_CLOUD.tenant}`, `R2_PUBLIC_HOST:${new URL(front).host}`, `NEXT_PUBLIC_ASSETS_CDN_URL:${front}`,
     `ELIZA_ENTITLEMENT_ISSUER:${front}`, `ELIZA_ENTITLEMENT_AUDIENCE:${vars.ELIZA_ENTITLEMENT_AUDIENCE}`, `CLOUD_PUBLIC_SERVICE_NAME:${LOCAL_CLOUD.name}`,
-    `ELIZA_MOBILE_APP_AUTH_APP_ID:${s.reservedAppId}`, `ELIZA_MOBILE_APP_AUTH_CLIENTS_JSON:${clients}`,
     `CLOUD_PUBLIC_SERVICE_TERMS_JSON:${vars.CLOUD_PUBLIC_SERVICE_TERMS_JSON}`, `CLOUD_PUBLIC_SERVICE_PRIVACY_JSON:${vars.CLOUD_PUBLIC_SERVICE_PRIVACY_JSON}`,
     'ELIZA_ENTITLEMENT_SIGNING_KEY_ID:alpha-local-1', ...Object.entries(product).map(([name, value]) => `${name}:${value}`)];
   const wranglerArgs = ['dev', '--ip', '127.0.0.1', '--port', String(ports.api), '--local', '--env-file', devVars, '--persist-to', path.join(dir, 'wrangler'), ...override.flatMap(value => ['--var', value])];
@@ -261,7 +257,7 @@ async function start({dir, exportDir, front, ports, deploymentId}: Layout) {
     DEV_CLOUD_PGLITE_DATA_DIR: path.join(dir, 'pgdata'), DEV_CLOUD_WRANGLER_PERSIST_TO: path.join(dir, 'wrangler'), DATABASE_URL: '', TEST_DATABASE_URL: ''}});
   started.push(apiProcess);
   await waitFor(`${api}/api/health`, {child: apiProcess, timeoutMs: 600000});
-  seed({dir, exportDir, ports}, s, registration.redirectUri);
+  seed({exportDir, ports, front});
   say(`Cloud API up (client ${registration.clientId} registered)`);
 
   // 3. The TLS front door.
@@ -280,43 +276,11 @@ async function start({dir, exportDir, front, ports, deploymentId}: Layout) {
   say('Ctrl-C stops the local Cloud.');
 }
 
-/** The rows Cloud's mobile App Auth requires: an owner organization and user, and an approved app per registered client. */
-function seed({dir, exportDir, ports}: Pick<Layout, 'dir' | 'exportDir' | 'ports'>, s: Record<string, string>, redirect: string) {
-  const script = path.join(dir, 'seed.ts');
-  fs.writeFileSync(script, `
-import {createRequire} from "node:module";
-const {Client} = createRequire(process.env.SEED_PACKAGE_JSON)("pg");
-const database = new Client({connectionString: process.env.SEED_DATABASE_URL});
-await database.connect();
-const sql = async (text, values = []) => (await database.query(text, values)).rows;
-const cols = async table => new Set((await sql("select column_name from information_schema.columns where table_schema = 'public' and table_name = $1", [table])).map(r => r.column_name));
-const insert = async (table, row, suffix = "") => {
-  const keys = Object.keys(row);
-  return sql('insert into "' + table + '" (' + keys.map(key => '"' + key + '"').join(', ') + ') values (' + keys.map((_, index) => '$' + (index + 1)).join(', ') + ') ' + suffix, Object.values(row));
-};
-const apps = await cols("apps");
-if (!apps.size) throw new Error("apps table missing (migrations not applied)");
-const users = await cols("users");
-const email = 'owner@alpha-local-cloud.invalid';
-let [user] = await sql("select id, organization_id from users where email = $1 limit 1", [email]);
-if (!user) {
-  const [org] = await sql("insert into organizations (name, slug) values ('Local apps', 'local-apps-' || substr(md5(random()::text), 1, 8)) returning id");
-  [user] = await insert("users", {email, organization_id: org.id, role: 'owner', ...(users.has("steward_user_id") ? {steward_user_id: 'local-apps-owner-' + org.id} : {})}, "returning id, organization_id");
-}
-for (const [id, name, uri] of JSON.parse(process.env.SEED_APPS)) {
-  await insert("apps", {id, name, organization_id: user.organization_id, ...(apps.has("created_by_user_id") ? {created_by_user_id: user.id} : {}),
-    ...(apps.has("slug") ? {slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + id.slice(0, 8)} : {}),
-    ...(apps.has("app_url") ? {app_url: new URL(uri).origin} : {}), ...(apps.has("allowed_origins") ? {allowed_origins: JSON.stringify([uri])} : {}),
-    ...(apps.has("redirect_uris") ? {redirect_uris: [uri]} : {}), ...(apps.has("is_active") ? {is_active: true} : {}), ...(apps.has("is_approved") ? {is_approved: true} : {}),
-    ...(apps.has("approval_status") ? {approval_status: "approved"} : {})}, "on conflict (id) do nothing");
-}
-await database.end();
-`);
-  // Upstream reserves its own first-party client and callback; its app row must exist for the registry to load.
-  const apps = [[s.reservedAppId, 'Reserved upstream client (local)', 'https://reserved-upstream-client.invalid/auth/callback'], [s.alphaAppId, `${identity.appName} (local)`, redirect]];
-  const result = spawnSync(resolveBun(), [script], {cwd: path.join(exportDir, 'packages/cloud/shared'), stdio: ['ignore', 'inherit', 'inherit'], env: {...localChildEnvironment(dir),
-    SEED_PACKAGE_JSON: path.join(exportDir, 'package.json'), SEED_DATABASE_URL: `postgresql://postgres@127.0.0.1:${ports.pglite}/postgres`, SEED_APPS: JSON.stringify(apps)}});
-  if (result.status !== 0) throw new Error('Seeding the local app rows failed');
+/** Alpha's native client, registered as upstream reads it: database rows (scripts/cloud-registration.ts). */
+function seed({exportDir, ports, front}: Pick<Layout, 'exportDir' | 'ports' | 'front'>) {
+  const rows = registrationFor({api: front, web: front, tenant: LOCAL_CLOUD.tenant, name: LOCAL_CLOUD.name}, 'staging');
+  const report = seedRegistration({tree: exportDir, databaseUrl: `postgresql://postgres@127.0.0.1:${ports.pglite}/postgres`, rows: [rows], bun: resolveBun()});
+  say(`registered ${rows.client.client_id}: ${JSON.stringify(report.seeded?.[0] ?? {})}`);
 }
 
 export interface CheckRow { gate: string; passed: boolean; detail: string }
@@ -391,6 +355,26 @@ export async function checkLocalCloud(cloud: {api: string; steward: string; tena
   const entitlement = await call('/api/v1/subscription/entitlement', {bearer: secret});
   const token = entitlement.data?.entitlement;
   row('entitlement route', entitlement.status === 200 && typeof token === 'string' && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token), `HTTP ${entitlement.status} (a new account has no plan)`);
+
+  // In-app subscription management (docs/alpha-cloud.md): the phone's key reads the subscription
+  // snapshot and handles referrals; plan changes and cancellation need a fresh Steward session
+  // (the email-code token above) and refuse the phone's key.
+  const limits = await call('/api/v1/billing/limits', {bearer: secret});
+  row('subscription snapshot', limits.status === 200 && typeof (limits.data?.data ?? limits.data) === 'object', `GET /api/v1/billing/limits with the phone key: HTTP ${limits.status}`);
+  const referrals = await call('/api/v1/referrals', {bearer: secret});
+  row('referral read', referrals.status === 200, `GET /api/v1/referrals with the phone key: HTTP ${referrals.status}`);
+  const applied = await call('/api/v1/referrals/apply', {method: 'POST', bearer: secret, body: {code: 'NOSUCHCODE1'}});
+  row('referral apply admitted', applied.status >= 400 && applied.status < 500 && applied.status !== 401 && applied.status !== 403, `unknown code with the phone key: HTTP ${applied.status} (refused as a code, not as a caller)`);
+  const commandsBySession = await call('/api/v1/subscriptions/commands?limit=5', {bearer: session});
+  row('billing session', commandsBySession.status === 200, `GET /api/v1/subscriptions/commands with the Steward session: HTTP ${commandsBySession.status}`);
+  const commandsByKey = await call('/api/v1/subscriptions/commands?limit=5', {bearer: secret});
+  row('billing session required', commandsByKey.status === 401 || commandsByKey.status === 403, `the same route with the phone key: HTTP ${commandsByKey.status}`);
+  const links = await call('/.well-known/assetlinks.json');
+  row('asset links', links.status === 200 && Array.isArray(links.data) && links.data.some((statement: any) => statement?.target?.package_name === clientId), `HTTP ${links.status}, ${Array.isArray(links.data) ? links.data.length : 0} statement(s)`);
+  // The web host's edge Worker (cloud/edge/worker.ts) forwards the public callback URL exactly like this.
+  const fallback = await call(`/api/v1/app-auth/mobile/hosted-route?${new URLSearchParams({url: `${redirectUri}?code=x&state=y`})}`);
+  const unregistered = await call(`/api/v1/app-auth/mobile/hosted-route?${new URLSearchParams({url: `${front.origin}/other-app/auth/callback?code=x&state=y`})}`);
+  row('hosted callback', fallback.status === 200 && unregistered.status === 404, `edge forwarding of ${new URL(redirectUri).pathname}: HTTP ${fallback.status}; an unregistered path: HTTP ${unregistered.status}`);
   const revoked = await call('/api/v1/api-keys/current', {method: 'DELETE', bearer: secret});
   row('credential revoked', revoked.status === 200 || revoked.status === 204, `DELETE /api/v1/api-keys/current: HTTP ${revoked.status}`);
   const after = await call('/api/v1/user', {bearer: secret});

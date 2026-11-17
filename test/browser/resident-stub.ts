@@ -213,6 +213,9 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           f.unexpected.push('maps ' + route); return { status: 404, data: {} };
         }
         if (path === '/api/v1/api-keys/current' && input.method === 'DELETE') { s.order.push('revoke ' + auth); persist(); return { status: 200, data: { success: true, status: 'revoked', credentialId: null, revokedAt: new Date().toISOString() } }; }
+        // In-app plans (cloud-plans.ts): the public catalogue, then the device-key checkout and referral routes below.
+        if (path === '/api/v1/subscriptions/plans') { s.planReads = (s.planReads ?? 0) + 1; } if (path === '/api/v1/subscriptions/plans') return { status: 200, data: { success: true, data: { catalogVersion: 'v1', plans: [
+          { key: 'plus_monthly', name: 'Plus', amountCents: 3000, allowance: { amountUsd: '25.00' } }, { key: 'pro_monthly', name: 'Pro', amountCents: 10000, allowance: { amountUsd: '90.00' } }] } } };
         if (s.accounts.length) {
           const owner = account(auth);
           if (!owner) return { status: 401, data: {} };
@@ -226,8 +229,20 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
             owner.plan = undefined; persist();
             return { status: 200, data: { success: true, replayed: false, grant: { id: 'synthetic-grant', planKey: 'plus_monthly', startsAt: '2026-10-30T00:00:00.000Z', endsAt: '2027-04-30T00:00:00.000Z', revoked: false, paidPlanTakesPrecedence: false }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'grant', effectiveUntil: '2027-04-30T00:00:00.000Z' } } };
           }
+          if (path === '/api/v1/subscriptions/checkout' && input.method === 'POST') {
+            const body = JSON.parse(input.body); s.order.push('checkout ' + body.planKey + ' ' + body.presentation); persist();
+            return { status: 200, data: { success: true, data: { status: 'open', presentation: 'mobile', commandId: 'cmd_fixture', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_fixture', sessionId: 'cs_test_fixture', expiresAt: new Date(Date.now() + 1_800_000).toISOString() } } };
+          }
+          // Cloud confirms from its own payment evidence; this synthetic Cloud treats the session as paid.
+          if (path === '/api/v1/subscriptions/checkout/confirm' && input.method === 'POST') {
+            s.order.push('confirm ' + JSON.parse(input.body).sessionId); owner.plan = undefined; persist();
+            return { status: 200, data: { success: true, data: { subscriptionId: 'sub_fixture', replayed: false }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'subscription', effectiveUntil: '2099-01-01T00:00:00.000Z' } } };
+          }
+          if (path === '/api/v1/referrals') return { status: 200, data: { code: 'ALPHA-FIXTURE', total_referrals: 0, is_active: true } };
+          if (path === '/api/v1/referrals/apply' && input.method === 'POST') { s.order.push('referral ' + JSON.parse(input.body).code); persist(); return { status: 404, data: { error: 'Invalid referral code' } }; }
           if (path === '/api/v1/billing/limits') { s.order.push('plan ' + owner.email); persist(); return { status: 200, data: { success: true, data: { schemaVersion: 2, v2: {
-            subscription: owner.plan === 'credits' ? { status: 'not_applicable', reason: 'no_organization_subscription' } : { status: 'available', value: { planKey: 'plus_monthly', state: owner.plan === 'none' ? 'canceled' : 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } },
+            subscription: owner.plan === 'credits' ? { status: 'not_applicable', reason: 'no_organization_subscription' } : { status: 'available', value: { subscriptionId: 'sub_fixture', planKey: 'plus_monthly', lifecycleRevision: '1', state: owner.plan === 'none' ? 'canceled' : 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z', cancelAtPeriodEnd: false, pendingPlanKey: null,
+              cancellationControl: { action: 'cancel', method: 'POST', endpoint: '/api/v1/subscriptions/cancel', subscriptionId: 'sub_fixture', expectedSubscriptionRevision: 1, eligible: owner.plan !== 'none', blockers: [] } } },
             balance: { status: 'available', source: 'organizations', observedAt: new Date().toISOString(), value: { balance: { value: String(owner.balance), unit: 'usd', currency: 'USD' }, revision: '1' } } } } } }; }
           if (path === '/api/v1/eliza/google/accounts') return { status: 200, data: owner.inbox ? [{ configured: true, connected: true, reason: 'connected', connectionId: 'grant-' + owner.userId.slice(0, 8), grantedCapabilities: ['google.gmail.triage'], identity: { email: owner.inbox } }] : [] };
         }

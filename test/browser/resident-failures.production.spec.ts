@@ -90,10 +90,10 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await expect(account.getByRole('textbox',{name:'Membership code'})).toBeVisible();
       await page.screenshot({path:info.outputPath('membership-code-wide.png'),animations:'disabled'});
       await page.setViewportSize({width:412,height:915});
-      // Plan selection opens Cloud billing only after the account check; nothing is bought here.
+      // Plan selection opens the in-app plans; nothing is opened or bought until the owner subscribes.
       await membership.getByRole('button', { name: 'Choose a plan', exact: true }).click();
-      // This explicit action opens the existing billing site; it does not purchase a plan.
-      await expect.poll(() => stub(page, s => s.opened)).toEqual(['https://cloud.eliza.app/cloud/billing']);
+      await expect(account.getByRole('region', { name: 'Plans' }).getByText('Plus', { exact: true })).toBeVisible({ timeout: 30_000 });
+      expect(await stub(page, s => s.opened)).toEqual([]);
     } else {
       if (kind === 'no_provider') await expect(page.getByRole('button', { name: /^Check Eliza Cloud again/ })).toHaveCount(1);
       else await expect(page.getByRole('button', { name: /^(Manage (plan|billing)|Check Eliza Cloud again|Set up AI)/ })).toHaveCount(0);
