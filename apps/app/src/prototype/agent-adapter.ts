@@ -640,6 +640,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
   }
+  /** Opens Camera for a photo the agent proposed without showing Camera: the same navigation as the Camera app icon. */
+  function openRequestedCamera(shell:Shell):Promise<boolean>{
+    return new Promise<boolean>((resolve,reject)=>{
+      const chat=shell.S().chat;
+      if(!openInternalView(shell,'camera',chat==='sheet'||chat==='full'?chat:undefined)){resolve(false);return;}
+      shell.setState({},()=>{try{context(shell);resolve(shell.live&&shell.S().view==='camera'&&!alphaClient.getState().context.sensitive);}catch(error){reject(error);}});
+    });
+  }
   async function deliverChatNavigation(shell:Shell,navigation:ReturnType<typeof connectionController.captureViewNavigation>,results:readonly unknown[]|undefined,current?:()=>void,continuation?:import('../runtime/alpha-client').VoiceNavigationContinuation){
     if(!navigation||!results?.length)return false;
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
@@ -1965,9 +1973,19 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!reply.messageId||!reply.userMessageId||!identity||identity.conversationId!==binding.conversationId||JSON.stringify(identity.session)!==JSON.stringify(binding.session)||!reply.text.trim())throw Error('The voice reply could not be matched to this conversation. Check history before speaking again.');
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
       keepWorkflowChanges(this,reply,belongs);
-      const delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
-      const nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
+      let delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
+      let nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
       current();
+      // A spoken photo request the agent answered without showing Camera opens Camera here first,
+      // through the voice session's own navigation hold, so the photo is taken on the visible viewfinder.
+      if(!delivered&&reply.userMessageId&&input.navigation&&connectionController.requestedCameraNeedsOpening(reply.userMessageId)){
+        const live=()=>{signal.throwIfAborted();input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');};
+        try{
+          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat)){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
+        }catch{delivered=false;}finally{nextContext=input.navigation.finish(delivered);}
+        if(!nextContext)delivered=false;else acceptedContext=nextContext;
+        current();
+      }
       if(delivered&&reply.userMessageId){
         const results=await connectionController.continueRequestedCamera(reply.userMessageId,signal);
         for(const result of results)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
@@ -2193,11 +2211,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         let delivered=await deliverNavigation(reply.actionResults);
         // The agent may propose the photo without showing Camera in the same turn. When that proposal is the
         // reply's only pending item and the agent bound it to this very message, Camera is opened here.
-        if(!delivered&&reply.userMessageId&&connectionController.requestedCameraNeedsOpening(reply.userMessageId))delivered=await new Promise<boolean>((resolve,reject)=>{
-          const chat=this.S().chat;
-          if(!openInternalView(this,'camera',chat==='sheet'||chat==='full'?chat:undefined)){resolve(false);return;}
-          this.setState({},()=>{try{context(this);resolve(this.live&&this.S().view==='camera');}catch(error){reject(error);}});
-        });
+        if(!delivered&&reply.userMessageId&&connectionController.requestedCameraNeedsOpening(reply.userMessageId))delivered=await openRequestedCamera(this);
         cameraOpened=delivered&&alphaClient.getState().context.view==='camera';
         if(cameraOpened&&reply.userMessageId){
           attempt.capturing=true;this.setState({});

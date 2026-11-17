@@ -62,7 +62,7 @@ import { AlphaClientError } from './alpha-client';
 import { WorkflowProtocol, WorkflowHttpError } from './workflow-protocol';
 import { registerPlugin } from '../platform-plugins';
 import { DailyApps } from '../daily';
-import { DeviceActions, actionScope, type DeviceCredential, type DeviceExecutor, type ForegroundReviewExecutor, type ActionJournal } from './device-actions';
+import { DeviceActions, actionScope, requestedCameraNeedsCameraView, type DeviceCredential, type DeviceExecutor, type ForegroundReviewExecutor, type ActionJournal } from './device-actions';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isAndroid, System } from '../native';
 import { readNativeNetwork } from './native-network';
@@ -3629,8 +3629,8 @@ export const connectionController = {
           // A pending action joins the first reply after it appears; later replies do not repeat it.
           const shown=announcedProposals.get(selected.actions)??new Set<string>();announcedProposals.set(selected.actions,shown);
           const turnItems=items.filter(item=>!item.proposalId||!shown.has(item.proposalId));for(const item of items)if(item.proposalId)shown.add(item.proposalId);
-          const unreviewable=turnItems.filter(item=>!item.proposal);
-          cameraProposalOnly=typeof reply.userMessageId==='string'&&unreviewable.length===1&&unreviewable[0].cameraRequestMessageId===reply.userMessageId&&!findViewActionHandoff(reply.actionResults);
+          // A photo this message asked for is taken only on the visible Camera: when the agent did not show Camera, this phone opens it first.
+          cameraProposalOnly=requestedCameraNeedsCameraView(turnItems,typeof reply.userMessageId==='string'?reply.userMessageId:undefined,!!findViewActionHandoff(reply.actionResults));
           proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []); notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
         catch { update({ message: 'Actions not checked' }); }
       }
@@ -3651,7 +3651,8 @@ export const connectionController = {
         const failure=responseFailure instanceof AlphaClientError?responseFailure:new AlphaClientError('transport-failed','The agent request failed. Check connection and action history before sending another request.');
         throw Object.assign(failure,{messageBinding},recorded,notices.length?{notices}:{});
       }
-      if(!failed&&directRequestedActions&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&(Array.isArray(reply.actionResults)||cameraProposalOnly)){
+      // Ask-first phones also open Camera for the requested photo; there it waits as its review card (continueRequestedCamera takes nothing).
+      if(!failed&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&(Array.isArray(reply.actionResults)||cameraProposalOnly)){
         requestedCameraContinuation={messageId:reply.userMessageId,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
       }
       // A reply that got through means the last Cloud limit no longer applies.

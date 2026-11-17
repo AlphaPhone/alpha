@@ -226,6 +226,24 @@ export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
 export type ReviewItem = PendingReviewItem & {
   cameraRequestMessageId?: string;
 };
+/**
+ * Whether a reply must open Camera on this phone for the photo its own message asked for.
+ * A photo is only ever taken on the visible Camera viewfinder, so a photo waiting only on
+ * Camera is shown there first. Camera is not opened when the agent already navigates
+ * (`viewHandoff`), when the request was not this message's, or when another action of
+ * this turn is reviewable on the current screen and leaving it would drop that review.
+ */
+export function requestedCameraNeedsCameraView(
+  items: readonly ReviewItem[],
+  messageId: string | undefined,
+  viewHandoff: boolean,
+): boolean {
+  if (!messageId || viewHandoff) return false;
+  return (
+    items.some((item) => item.cameraRequestMessageId === messageId) &&
+    !items.some((item) => item.proposal)
+  );
+}
 /** A pending proposal that does not fit the current screen. Its message is shown to the owner. */
 export class ContextNotice extends Error {
   override readonly name = "ContextNotice";
