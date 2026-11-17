@@ -677,7 +677,7 @@ test.describe('account, plan and sign-in expiry',()=>{
  });
 });
 
-test('failed native provider binding keeps unconfirmed inference and hides the low-level error in Settings',async({page})=>{
+test('failed native provider binding keeps inference unconfirmed and keeps the low-level error out of About',async({page})=>{
  const pageErrors:string[]=[];page.on('pageerror',error=>pageErrors.push(error.message));
  await boot(page,{...await entitlements(),holdProvider:false,providerFailure:'Synthetic account verification failure',fullApp:true});await started(page);await idle(page);
  const snapshot=await page.evaluate(()=>(window as any).planController.getSnapshot());
@@ -686,7 +686,7 @@ test('failed native provider binding keeps unconfirmed inference and hides the l
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.getByRole('button',{name:'About',exact:true}).click();
  await expect(page.getByRole('heading',{name:'About',exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'Agent activity',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Agent activity',exact:true})).toBeVisible();
  await expect(page.getByText(/Synthetic account verification failure/)).toHaveCount(0);
  expect(await configured(page)).toBe(1);
  // The configure call failed before returning a binding guard. The client cannot claim the

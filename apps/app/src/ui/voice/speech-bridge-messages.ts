@@ -11,6 +11,8 @@ import { isNativeRejection } from "../utils/native-refusal";
 export const SPEECH_BRIDGE_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Speaker is in use", "Another app is using the speaker."],
   ["Another app is using the speaker", "Another app is using the speaker."],
+  ["Speaker mute was missing", "Could not change the speaker volume."],
+  ["Voice is closed", "Voice stopped."],
   ["Voice request already active or unavailable", "Voice is busy or unavailable."],
   ["Voice request cancelled", "Voice stopped."],
   ["Voice cancelled", "Voice stopped."],
