@@ -10,7 +10,7 @@ import {webcrypto} from 'node:crypto';
 export async function startNativeCloudSignInFixture(cacheDir=resolve('test-results/native-cloud-signin/vite-cache'), plugins:Plugin[]=[]){
  let server:ViteDevServer;
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
- try{server=await createServer({configFile:resolve('vite.config.ts'),cacheDir,server:{host:'127.0.0.1',port:0,hmr:false,watch:null},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...plugins,{name:'native-signin-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `
+ try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir,server:{host:'127.0.0.1',port:0,hmr:false,watch:null},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...plugins,{name:'native-signin-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `
  import React,{useSyncExternalStore} from 'react';
  import {createRoot} from 'react-dom/client';
  import '/src/prototype/prototype.css';
