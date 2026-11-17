@@ -13,7 +13,7 @@ import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,Legac
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
 import {CAMERA_CONTEXT_NOTICE,publishCommittedDeviceChanges,setFilesReviewIdentity} from '../runtime/device-actions';
-import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,requestCameraScan} from './camera-adapter';
+import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {dismissMailFolderMenu} from '../ui/mailbox/MailFolderPicker.tsx';
 import {aospImage} from '../runtime/aosp-image';
@@ -118,7 +118,7 @@ function residentDraftOwner(snapshot: ReturnType<typeof connectionController.get
     return JSON.stringify([session.origin, session.ownerId, session.agentId]);
 }
 /** One composer send. A message is dispatched once the transport accepted it for delivery. */
-type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>};
+type SendAttempt={transportCalled:boolean;preDispatch:boolean;streamed:boolean;residentSessionRetired?:boolean;settled?:Promise<unknown>;stop:AbortController;capturing?:boolean}; // Stop aborts `stop`; `capturing` keeps Stop offered while a requested photo waits for its preview.
 /** Refused before any request carrying the message could leave this phone. */
 class NotDispatched extends Error {}
 // connectionController.send refuses these before creating a conversation or posting the message.
@@ -1080,7 +1080,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(isCameraCapture(operation)){
         const ownerSession=connectionController.getSnapshot().session;
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||expectedContext.sensitive||expectedContext.view!=='camera'||ownerSession!==connectionController.getSnapshot().session||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Camera request changed');};
-        return captureAgentPhoto(operationId,signal,current);
+        // The capture operation gains an optional lens upstream; until the pinned contract carries it, it is read here only.
+        const lens=(operation as {lens?:unknown}).lens;
+        const result=await captureAgentPhoto(operationId,signal,current,lens==='front'||lens==='back'?lens:undefined);
+        // The saved photo is offered in the composer so a question about it can follow. Only the owner's Send shares it.
+        const mediaId=result.status==='succeeded'?result.cameraResult?.mediaId:undefined;
+        if(mediaId)void photoLibrary.read({id:mediaId}).then(saved=>{current();if(saved.kind!=='video'&&!saved.trashed&&!this.cameraAttachment)this.attachCameraPhoto('native-camera-'+mediaId,saved.image,true);}).catch(()=>{/* The photo is saved; only the offer is skipped. */});
+        return result;
       }
       if(isPhoneDial(operation)){
         // Reviewed dial handoff on the verified image only: the system dial screen opens with the
@@ -1577,12 +1583,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
     api.openReviewedWebSource=(url:string,signal:AbortSignal)=>this.browserNavigateApproved(url,signal);
-    api.attachCameraPhoto=(id:string,image:string)=>{
+    // `captured` marks a photo the agent took on request: its chip stays in the composer on any screen, and a full draft is left alone.
+    api.attachCameraPhoto=this.attachCameraPhoto=(id:string,image:string,captured=false)=>{
       if(this.fileAttachments?.length>=MAX_CHAT_UPLOAD_ATTACHMENTS||
         !attachmentBatchFits(this.fileAttachments??[],image)){
-        this.toast('Remove an attachment before adding another.');return;
+        if(!captured)this.toast('Remove an attachment before adding another.');return;
       }
-      this.cameraAttachment={id,image};
+      this.cameraAttachment={id,image,...(captured?{captured:true}:{})};
       this.setState({chat:'sheet',shade:false});
     };
     api.composeTranscriptQuestion=(noteId:string,title:string)=>{
@@ -1702,7 +1709,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.openDraftPhoto=()=>{if(this.cameraAttachment){this.chatImagePreview=this.cameraAttachment.image;this.setState({});}};
 
     const photo=this.cameraAttachment;
-    out.attachedCameraPhoto=photo&&!this.S().msgs.some((m:Shell)=>m.cameraAttachment===photo)&&this.S().view==='photos'&&this.vget('photos').open===photo.id?photo.image:'';
+    out.attachedCameraPhoto=photo&&!this.S().msgs.some((m:Shell)=>m.cameraAttachment===photo)&&(photo.captured||this.S().view==='photos'&&this.vget('photos').open===photo.id)?photo.image:'';
     out.removeCameraPhoto=()=>{
       this.cameraAttachment=null;
       if(photo&&this.S().view==='photos'&&this.vget('photos').open===photo.id){
@@ -1804,12 +1811,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       return {...m,displayText:parsed.text,hasCalendarText:m.hasCalendarText!==false&&!!parsed.text,workflowRuns:parsed.runs.map(run=>({...run,open:()=>{if(typeof this.openWorkflowRun==='function')this.openWorkflowRun(run.workflowId,run.runId);else this.openView('workflows');}}))};
     });
     out.msgs=projectActionMessages(out.msgs||[],live);
-    out.canStopReply=!!this.S().typing&&alphaClient.getState().pending;
+    out.canStopReply=!!this.S().typing&&(alphaClient.getState().pending||this.sendAttempt?.capturing===true);
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
     const turn=!!this.S().typing;
     const hasBinaryAttachment=!this.messageEditTarget&&!!(this.cameraAttachment||this.fileAttachments?.length);
     out.sendVisible=(!!out.hasDraft||hasBinaryAttachment)&&!turn;out.talkVisible=!!out.noDraft&&!hasBinaryAttachment&&!turn;out.replyIdle=!turn;
-    out.stopReply=()=>{connectionController.cancelViewNavigation();alphaClient.cancel();};
+    out.stopReply=()=>{this.sendAttempt?.stop.abort();connectionController.cancelViewNavigation();alphaClient.cancel();};
     if (isAndroid) {
       out.showStatus = false; out.showIndicator = false;
       const style = out.sbColor === 'var(--alpha-white)' ? SystemBarsStyle.Dark : SystemBarsStyle.Light;
@@ -2089,7 +2096,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
     }
 
-    const attempt:SendAttempt=this.sendAttempt={transportCalled:false,preDispatch:false,streamed:false};
+    const attempt:SendAttempt=this.sendAttempt={transportCalled:false,preDispatch:false,streamed:false,stop:new AbortController()};
     const replaceStream=(value:string,streaming=true)=>this.setState((previous:Shell)=>({msgs:previous.msgs.map((message:Shell)=>message.id===streamedId?{...message,text:value,streaming}:message)}));
     let streamFrame=0,latestStream:string|undefined;
     const flushStream=()=>{if(streamFrame){cancelAnimationFrame(streamFrame);streamFrame=0;}if(latestStream!==undefined){const value=latestStream;latestStream=undefined;if(this.live)replaceStream(value);}};
@@ -2163,18 +2170,28 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{await completeReadReply(this,completed.receipt);}catch{if(this.live&&sameChat())this.agentSay('The note was shared, but its answer is unconfirmed. Check conversation history before trying again.');}
       }
       try{
-        const delivered=await deliverNavigation(reply.actionResults);
+        let delivered=await deliverNavigation(reply.actionResults);
+        // The agent may propose the photo without showing Camera in the same turn. When that proposal is the
+        // reply's only pending item and the agent bound it to this very message, Camera is opened here.
+        if(!delivered&&reply.userMessageId&&connectionController.requestedCameraNeedsOpening(reply.userMessageId))delivered=await new Promise<boolean>((resolve,reject)=>{
+          const chat=this.S().chat;
+          if(!openInternalView(this,'camera',chat==='sheet'||chat==='full'?chat:undefined)){resolve(false);return;}
+          this.setState({},()=>{try{context(this);resolve(this.live&&this.S().view==='camera');}catch(error){reject(error);}});
+        });
         cameraOpened=delivered&&alphaClient.getState().context.view==='camera';
-        if(delivered&&reply.userMessageId){
-          const results=await connectionController.continueRequestedCamera(reply.userMessageId,new AbortController().signal);
-          cameraReceipts=results.length;
-          for(const result of results)if(this.live)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
+        if(cameraOpened&&reply.userMessageId){
+          attempt.capturing=true;this.setState({});
+          try{
+            const results=await connectionController.continueRequestedCamera(reply.userMessageId,attempt.stop.signal);
+            cameraReceipts=results.length;
+            for(const result of results)if(this.live)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
+          }finally{attempt.capturing=false;}
         }
       }catch(error){if(this.live)this.toast(errorNotice(error,'Could not confirm the screen change. Check your screen.'),ERROR_TOAST);}
-      // The camera notice is dropped only when the photo was taken (a receipt) or its review card is shown on Camera.
-      const cameraReview=cameraOpened&&alphaClient.getState().context.view==='camera'&&this.S().msgs.some((m:Shell)=>m.card?.proposalId&&!m.card.done);
+      // "Open Camera" is dropped once the photo was taken (a receipt) or Camera was opened for this request:
+      // there the pending photo is recovered as its review card when this turn ends.
       for(const notice of replyNotices(reply)){
-        if((cameraReceipts>0||cameraReview)&&notice==='Take photo: '+CAMERA_CONTEXT_NOTICE)continue;
+        if((cameraReceipts>0||cameraOpened&&alphaClient.getState().context.view==='camera')&&notice==='Take photo: '+CAMERA_CONTEXT_NOTICE)continue;
         this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,done:true});
       }
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});

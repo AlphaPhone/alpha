@@ -72,7 +72,7 @@ export async function createDriver({code, subscription, DurableDraftController, 
   const connectionController = {
     getSnapshot: () => snapshot, subscribe(callback) { changed = callback; return () => {}; },
     getSelectedConversationId: () => ROOM, getCloudEnvironment: () => undefined, getCloudClient: () => undefined,
-    captureViewNavigation: () => ({}), continueRequestedCamera: async () => [],
+    captureViewNavigation: () => ({}), continueRequestedCamera: async () => [], requestedCameraNeedsOpening: () => false,
   };
   const box = {
     systemNoticeKind, systemNoticeDisplayText, collapseSystemNotices,

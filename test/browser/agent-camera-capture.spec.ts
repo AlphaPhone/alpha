@@ -4,7 +4,8 @@ import {returnToApps} from './app-navigation';
 
 // Actual shell, controller, navigation acknowledgement, action journal and camera adapter.
 // HTTP provider and camera sensor are synthetic; this is not a device acceptance test.
-for(const mode of ['capture','lost-ack','old-message','ask-first'] as const)test(`Home camera request: ${mode}`,async({page})=>{
+// proposal-only: the agent proposes the photo without showing Camera. stop: the preview never starts and the owner stops the request.
+for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only','stop'] as const)test(`Home camera request: ${mode}`,async({page})=>{
  await page.addInitScript(mode=>{
   const w=window as any,store=new Map(),agentId='12345678-1234-4234-8234-123456789abc',userMessageId='87654321-4321-4321-8321-cba987654321';
   const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,receipts:[],proposal:null as any,entry:null as any};
@@ -34,6 +35,7 @@ for(const mode of ['capture','lost-ack','old-message','ask-first'] as const)test
    if(path==='/api/conversations/camera-chat/messages'&&input.method==='POST'){
     f.posts++;
     f.proposal={id:'camera-proposal',digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+600000).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation:{type:'camera_capture_photo'},requestMessageId:mode==='old-message'?'old-message':userMessageId}};
+    if(mode==='proposal-only')return ok({text:'Taking the photo.',agentName:'Camera fixture',userMessageId});
     return ok({text:'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
    }
    if(path==='/api/views/interact-claim'){f.claims++;return ok({claimId:'camera-owned-claim'});}
@@ -59,24 +61,53 @@ for(const mode of ['capture','lost-ack','old-message','ask-first'] as const)test
  await local.getByRole('button',{name:'Connect local agent',exact:true}).click();
  await page.locator('.alpha-connection-scrim').waitFor({state:'detached'});
  await page.evaluate(async mode=>{
-  const {browserCamera}=await import('/src/prototype/browser-camera.ts');
-  browserCamera.startPreview=async()=>({width:16,height:16,deviceId:'fixture'});
+  const {browserCamera,browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');
+  browserCamera.startPreview=mode==='stop'?()=>new Promise(()=>{}):async()=>({width:16,height:16,deviceId:'fixture'});
+  // The saved photo is larger than the frame the capture receipt carries.
+  const saved=document.createElement('canvas');saved.width=saved.height=64;(window as any).cameraRequestFixture.saved=saved.toDataURL('image/jpeg');
+  browserPhotoLibrary.read=async({id}:{id:string})=>{if(id!=='1792274767123123456789012')throw Error('Unknown photo');return{id,kind:'image',image:(window as any).cameraRequestFixture.saved,width:64,height:64,date:1,revision:'r',mutationRevision:'r',favorite:false,trashed:false} as any;};
   browserCamera.stopPreview=async()=>{};
   browserCamera.capturePhoto=async()=>{const f=(window as any).cameraRequestFixture;f.captures++;const c=document.createElement('canvas');c.width=c.height=16;return{path:'browser-photo:///1792274767123123456789012',format:'jpeg',base64:c.toDataURL('image/jpeg').split(',')[1],width:16,height:16};};
   if(mode==='ask-first'){const {editDevicePreferences}=await import('/src/browser/device-preferences.ts');await editDevicePreferences(state=>{state.askBeforeAgentActions=true;});}
  },mode);
  await returnToApps(page);
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Take a photo');await input.press('Enter');
- await expect.poll(()=>page.evaluate(()=>(window as any).cameraRequestFixture.acks)).toBe(1);
+ const fixture=()=>page.evaluate(()=>(window as any).cameraRequestFixture);
+ const notice=page.getByText('Take photo: Open Camera to take the requested photo.',{exact:true}),saved=page.locator('[data-alpha-message-text]').filter({hasText:/^Saved$/});
+ if(mode==='proposal-only')await expect.poll(async()=>(await fixture()).posts).toBe(1);
+ else await expect.poll(async()=>(await fixture()).acks).toBe(1);
+ if(mode==='stop'){
+  // A photo waiting for its preview can be stopped: nothing is taken and the request ends as a failure.
+  await page.getByRole('button',{name:'Stop reply',exact:true}).click();
+  await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Cancelled\. No photo was taken\./})).toHaveCount(1);
+  const f=await fixture();expect(f.captures).toBe(0);expect(f.receipts.map((receipt:any)=>receipt.outcome)).not.toContain('applied');
+  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
+  return;
+ }
  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
- if(mode==='capture'){
-  await expect.poll(()=>page.evaluate(()=>(window as any).cameraRequestFixture.receipts.length)).toBe(1);
-  const f=await page.evaluate(()=>(window as any).cameraRequestFixture);expect(f.captures).toBe(1);expect(f.receipts[0].outcome).toBe('applied');expect(f.receipts[0].result.mediaId).toBe('1792274767123123456789012');expect(JSON.stringify(f.receipts)).not.toContain('base64');
-  await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Saved$/})).toHaveCount(1);
-  await expect(page.getByText('Take photo: Open Camera to take the requested photo.',{exact:true})).toHaveCount(0);
+ if(mode==='capture'||mode==='proposal-only'){
+  await expect.poll(async()=>(await fixture()).receipts.length).toBe(1);
+  const f=await fixture();expect(f.captures).toBe(1);expect(f.receipts[0].outcome).toBe('applied');expect(f.receipts[0].result.mediaId).toBe('1792274767123123456789012');expect(JSON.stringify(f.receipts)).not.toContain('base64');
+  await expect(saved).toHaveCount(1);
+  await expect(notice).toHaveCount(0);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
+  // Camera was opened by the agent's navigation, or on this phone when the agent only proposed the photo.
+  expect(f.claims).toBe(mode==='capture'?1:0);
+  // The saved photo, not the capture thumbnail, waits in the composer; the owner has not sent it.
+  await expect(page.getByRole('button',{name:'Preview attached photo',exact:true}).getByRole('img')).toHaveAttribute('src',f.saved);
+  expect((await fixture()).posts).toBe(1);
  }else{
   await expect(page.getByText('Opening Camera.',{exact:true}).first()).toBeVisible();
-  const f=await page.evaluate(()=>(window as any).cameraRequestFixture);expect(f.captures).toBe(0);expect(f.decisions).toBe(0);
+  const f=await fixture();expect(f.captures).toBe(0);expect(f.decisions).toBe(0);
+  if(mode==='lost-ack')return;
+  // Camera is open, so the pending photo is its review card there, never "Open Camera".
+  const approve=page.getByRole('button',{name:/^Take photo\b.*Approve$/s});
+  await expect(approve).toHaveCount(1);
+  await expect(notice).toHaveCount(0);
+  if(mode!=='ask-first')return;
+  await approve.click();
+  await expect(saved).toHaveCount(1);
+  const done=await fixture();expect(done.captures).toBe(1);expect(done.decisions).toBe(1);expect(done.receipts.map((receipt:any)=>receipt.outcome)).toEqual(['applied']);
  }
 });
 
