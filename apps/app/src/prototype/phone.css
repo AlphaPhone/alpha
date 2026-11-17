@@ -1164,3 +1164,6 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .alpha-bar-recorder-status{flex:1;min-width:0;margin:0;font-size:15px;line-height:1.35;max-height:5.4em;overflow:auto;overflow-wrap:anywhere}
 .alpha-bar-recorder-primary{width:44px;height:44px;border-radius:22px;flex-shrink:0;background:var(--acc);color:var(--alpha-white);display:flex;align-items:center;justify-content:center}
 .alpha-bar-recorder-primary:disabled{opacity:.5}
+
+/* Message actions follow the author of their selected bubble. */
+[data-alpha-message-actions][data-alpha-user-actions="true"]{align-self:flex-end!important}
