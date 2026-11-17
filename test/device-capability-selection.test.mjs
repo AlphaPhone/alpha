@@ -47,6 +47,10 @@ test('the agent must offer a capability, and platform gates still apply', () => 
   const image = selectDeviceCapabilities(everything, {...apk, aospImage: true});
   assert.ok(image.includes('sms.send.v1'));
   assert.ok(image.includes('phone.dial.v1'));
+  // Phone, Messages and Contacts become agent destinations only on the image, and only when the agent offers them.
+  assert.ok(selectDeviceCapabilities([...everything, 'views.telephony.v1'], {...apk, aospImage: true}).includes('views.telephony.v1'));
+  assert.ok(!selectDeviceCapabilities([...everything, 'views.telephony.v1'], apk).includes('views.telephony.v1'));
+  assert.ok(!image.includes('views.telephony.v1'));
 });
 
 // The Cloud agent's capabilities route lists no calls, contact changes or texts by name; its device
