@@ -3,6 +3,7 @@ import {alphaClient} from '../runtime/alpha-client';
 import {calendarReviewText,inboxChoiceText,calendarApprovalStatus,type CalendarApproval,type CalendarApprovalResolution} from '../runtime/calendar-approval';
 import {reviewCalendarApproval} from './calendar-approval-review';
 import {calendarApprovalTarget,type CalendarApprovalLabels} from './calendar-approval-fields';
+import {calendarApprovalCardText} from '../ui/calendar/calendar-approval-messages';
 import {CALENDAR_INVALIDATED_EVENT} from '../runtime/app-record-completion';
 type Shell=Record<string,any>;
 type CalendarReview=ReturnType<typeof calendarReviewText>;
@@ -74,7 +75,7 @@ export function installCalendarApprovalAdapter(Component:Shell){
    // Keep that projection and never interpret its summary as Calendar commands.
    if(typeof message.displayText==='string'&&message.displayText!==source)return {...message,messageActionsLabel:message.messageActionsLabel?'Message actions: '+message.displayText:message.messageActionsLabel};
    // Order: the Calendar projection, then inbox choices (prose only); maps-adapter.ts (installMapsChatAdapter) runs after this.
-   const parsed=cache.parse(String(message.id),source),displayText=inboxChoiceText(parsed.displayText);
+   const parsed=cache.parse(String(message.id),source),displayText=inboxChoiceText(parsed.ids.length?calendarApprovalCardText(parsed.displayText):parsed.displayText);
    return {...message,displayText,hasCalendarText:message.hasCalendarText!==false&&!!displayText,messageActionsLabel:message.messageActionsLabel?'Message actions: '+(displayText||'Calendar request'):message.messageActionsLabel,calendarReviews:parsed.ids.map(id=>({id,status:value.statuses.get(key+id)||'',canOpen:value.results.get(key+id)?.kind==='succeeded',open:()=>void review(this,id),openCalendar:()=>{if(this.live&&!document.hidden&&binding()===key)this.openView('calendar');}}))};
   });return out;
  };

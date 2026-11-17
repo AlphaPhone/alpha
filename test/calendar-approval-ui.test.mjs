@@ -249,3 +249,18 @@ test('the review read asks one calendar for one instant and answers only from a 
  const abort=new AbortController();feed=w=>{abort.abort();return complete(w);};await assert.rejects(read(abort.signal));
  feed=w=>{current=false;return complete(w);};assert.equal(await read(),null);assert.equal(await read(),null,'a retired connection is not read');assert.equal(reads.length,7);
 });
+test('the queued reason sentence above a review card reads as Alpha\'s own line; other prose is shown as written',()=>{
+ const {shell}=adapterFixture();
+ try{
+  const shown=text=>{shell.st.msgs=[{id:'message',from:'agent',text}];return shell.renderVals().msgs[0];};
+  for(const [reason,line] of [
+   ['Modify "Dentist" on 2026-11-20T23:00:00.000Z without sending attendee notifications.','Review this Calendar change: “Dentist”.'],
+   ['Create "Lunch with Sam" at 2026-11-18T20:00:00.000Z on calendar "owner@example.invalid", and notify attendees.','Review this Calendar change: “Lunch with Sam”.'],
+   ['Cancel "Offsite" on 2027-03-12T17:00:00.000Z and notify attendees.','Review this Calendar change: “Offsite”.'],
+   ['Modify "" on 2026-11-20T23:00:00.000Z without sending attendee notifications.','Review this Calendar change.'],
+  ]){const message=shown(reason+'\n'+block);assert.equal(message.displayText,line);assert.equal(message.messageActionsLabel,'Message actions: '+line);assert.equal(message.calendarReviews.length,1);assert.equal(shell.st.msgs[0].text,reason+'\n'+block,'stored source is unchanged');}
+  assert.equal(shown('Review the event.\n'+block).displayText,'Review the event.');
+  const twoLines='I can move it.\nModify "Dentist" on 2026-11-20T23:00:00.000Z without sending attendee notifications.';assert.equal(shown(twoLines+'\n'+block).displayText,twoLines);
+  const alone='Modify "Dentist" on 2026-11-20T23:00:00.000Z without sending attendee notifications.';assert.equal(shown(alone).displayText,alone,'a message with no review is not rewritten');
+ }finally{shell.componentWillUnmount();delete globalThis.calendarReviewAdapterFixture;}
+});
