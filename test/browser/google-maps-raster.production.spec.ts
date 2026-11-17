@@ -87,14 +87,20 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
  await expect.poll(()=>page.evaluate(()=>(window as any).googleRaster.tiles)).toBeGreaterThan(0);
  const keys=await page.evaluate(()=>(window as any).googleRaster.tileKeys);expect(keys.every((k:string)=>/^[a-f0-9-]{36}$/.test(k))).toBe(true);
  if(tiles==='copyright-unavailable'){
-  await expect(plane).toHaveAttribute('data-map-error','copyright');
-  await expect(plane.locator('canvas')).toHaveCSS('visibility','hidden');
-  await expect(page.getByText('Loading map…',{exact:true})).toHaveCount(0);
+  // Tiles stay on screen without the viewport text; the badge shows the provider's standing attribution.
+  await expect(plane).toHaveAttribute('data-map-ready','true');
+  await expect(plane).not.toHaveAttribute('data-map-error',/./);
+  await expect(plane.locator('canvas')).toHaveCSS('visibility','visible');
+  await expect.poll(()=>page.evaluate(()=>(window as any).googleRaster.viewport)).toBeGreaterThan(0);
+  await badge.click();
+  await expect(privacy.locator('[data-maps-google-attribution]')).toHaveText('Map data © Google');
   return;
  }
  if(tiles==='malformed'){await expect(plane).toHaveAttribute('data-map-error',/./);}
  else{
   await expect(plane).toHaveAttribute('data-map-ready','true');
+  // Tiles are never hidden behind the copyright read.
+  await expect(plane.locator('canvas')).toHaveCSS('visibility','visible');
   const checkCreditLayouts=async(stage:string)=>{for(const layout of [
    {name:'portrait',width:412,height:915,scale:1},
    {name:'portrait-large',width:412,height:915,scale:2},
