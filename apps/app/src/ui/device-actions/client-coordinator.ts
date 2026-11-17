@@ -61,11 +61,15 @@ import {
   validateCalendarResult,
 } from "@elizaos/plugin-assistant/device-calendar-contract";
 import {
-  CAMERA_CAPTURE_CAPABILITY,
   type CameraCaptureResult,
+  cameraCaptureCapabilityAvailable,
   isCameraCapture,
   validateCameraCaptureResult,
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
+import {
+  browserControlCapabilityAvailable,
+  isBrowserControl,
+} from "@elizaos/plugin-assistant/device-actions/browser-contract";
 import type {
   ClockHandoffResult,
 } from "@elizaos/plugin-assistant/device-actions/clock-contract";
@@ -145,7 +149,9 @@ import {
   selectedTelephonyView,
   type TelephonyActionOperation,
   type TelephonyActionResult,
+  smsComposeTarget,
   telephonyActionCapabilityAvailable,
+  telephonyActionFormAvailable,
   validateTelephonyActionResult,
 } from "@elizaos/plugin-assistant/device-actions/telephony-actions-contract";
 import type {
@@ -786,7 +792,10 @@ export class DeviceActionCoordinator<
         payload.operation,
         this.profile.operations,
       );
-    if (isCameraCapture(op) && !this.capability(CAMERA_CAPTURE_CAPABILITY))
+    if (
+      isCameraCapture(op) &&
+      !cameraCaptureCapabilityAvailable(op, this.credential.capabilities)
+    )
       throw Error("Camera capture was not negotiated with this agent");
     if (
       isPhoneDial(op) &&
@@ -795,7 +804,11 @@ export class DeviceActionCoordinator<
       throw Error("Dialing was not negotiated with this phone");
     if (
       isTelephonyAction(op) &&
-      !telephonyActionCapabilityAvailable(op.type, this.credential.capabilities)
+      (!telephonyActionCapabilityAvailable(
+        op.type,
+        this.credential.capabilities,
+      ) ||
+        !telephonyActionFormAvailable(op, this.credential.capabilities))
     )
       throw Error("This telephony action was not negotiated with this phone");
     if (isSmsSend(op) && !this.capability(SMS_SEND_CAPABILITY))
@@ -829,6 +842,11 @@ export class DeviceActionCoordinator<
       !photosViewCapabilityAvailable(this.credential.capabilities)
     )
       throw Error("Photos actions were not negotiated with this agent");
+    if (
+      isBrowserControl(op) &&
+      !browserControlCapabilityAvailable(op.type, this.credential.capabilities)
+    )
+      throw Error("This Browser action was not negotiated with this agent");
     if (
       isForegroundReviewOperation(op) &&
       (!foregroundReviewOperationAvailable(op, this.credential.capabilities) ||
@@ -3074,7 +3092,11 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
     isClockHandoffOperation(operation)
   );
 }
-/** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
+/**
+ * Review-card copy. The phone's own review shows the resolved name, number and before/after.
+ * A contact `add`/`remove`, an SMS `target` or `draft`, `contact_show` and `contact_read_selected`
+ * are refused as not negotiated before any card, until this phone advertises them.
+ */
 function describeTelephonyAction(operation: TelephonyActionOperation): {
   title: string;
   description: string;
@@ -3109,18 +3131,31 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
     case "contact_update":
       return {
         title: "Change contact",
-        description: `Contact: ${operation.query}\n${fields(operation.set)}\n\nReplaces these details after you confirm. Nothing else is shared with the agent.`,
+        description: `Contact: ${operation.query}\n${fields(operation.set ?? {})}\n\nReplaces these details after you confirm. Nothing else is shared with the agent.`,
       };
     case "contact_delete":
       return {
         title: "Delete contact",
         description: `Contact: ${operation.query}\n\nDeletes this contact from your phone after you confirm.`,
       };
-    case "sms_compose":
+    case "contact_show":
+      return {
+        title: "Show contact",
+        description: `Search: ${operation.query}\n\nOpens Contacts on your phone with the matches. The agent learns only whether one was found.`,
+      };
+    case "contact_read_selected":
+      return {
+        title: "Share open contact",
+        description:
+          "Share the name, numbers and email addresses of the open contact with the agent. Other contacts stay private.",
+      };
+    case "sms_compose": {
+      const target = smsComposeTarget(operation);
       return {
         title: "Review SMS",
-        description: `To contact: ${operation.query}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
+        description: `${target.kind === "number" ? `To: ${target.number}` : `To contact: ${target.query}`}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
       };
+    }
     case "sms_reply_selected":
       return {
         title: "Draft reply",

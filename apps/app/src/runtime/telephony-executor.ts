@@ -9,7 +9,7 @@
  * Everything the phone does goes through `ports`, so the decisions here are testable without one.
  */
 import {
-  smsComposeReceiptOutcome, telephonyActionReceiptOutcome,
+  smsComposeReceiptOutcome, smsComposeTarget, telephonyActionReceiptOutcome,
   type ContactWriteOperation, type ContactWriteResult, type PhoneCallOperation, type PhoneCallResult, type SmsComposeOperation,
   type SmsComposeResult, type TelephonyActionOperation, type TelephonyActionResult,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts';
@@ -89,6 +89,8 @@ export function refuseTelephonyAction(operation: TelephonyActionOperation, summa
       case 'sms_compose': return {kind: 'sms-compose', status: 'unavailable'};
       case 'sms_reply_selected': return {kind: 'sms-reply', status: 'unavailable'};
       case 'contact_create': case 'contact_update': case 'contact_delete': return {kind: 'contact-write', status: 'unavailable'};
+      case 'contact_show': return {kind: 'contact-show', status: 'unavailable'};
+      case 'contact_read_selected': return {kind: 'contact-read', status: 'unavailable'};
       case 'messages_read_selected': return {kind: 'messages-read', status: 'unavailable'};
       case 'voicemail_read_selected': return {kind: 'voicemail-read', status: 'unavailable'};
       case 'voicemail_delete_selected': return {kind: 'voicemail-delete', status: 'unavailable'};
@@ -122,8 +124,12 @@ async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal
 }
 
 async function compose(operation: SmsComposeOperation, operationId: string, ports: TelephonyPorts, signal: AbortSignal): Promise<SmsComposeResult> {
+  // Only the contact search of `sms.compose.v1` runs here: an exact number or a draft-only request
+  // (`sms.compose.v2`, which this phone does not advertise) is not carried out.
+  const target = smsComposeTarget(operation);
+  if (target.kind !== 'contact' || 'draft' in operation) return {kind: 'sms-compose', status: 'unavailable'};
   let options: ContactMatch[];
-  try { options = await numbers(operation.query, ports); } catch { return {kind: 'sms-compose', status: 'unavailable'}; }
+  try { options = await numbers(target.query, ports); } catch { return {kind: 'sms-compose', status: 'unavailable'}; }
   ports.current();
   if (!options.length) return {kind: 'sms-compose', status: 'not-found'};
   // When that person's conversation is already open, the draft goes into its text field, where the
@@ -142,7 +148,7 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
   catch { return {kind: 'sms-compose', status: 'unknown'}; }
 }
 
-type ContactSet = Extract<ContactWriteOperation, {type: 'contact_update'}>['set'];
+type ContactSet = NonNullable<Extract<ContactWriteOperation, {type: 'contact_update'}>['set']>;
 /** Numbers and addresses to put on a contact beside the ones it has. */
 export type ContactAdditions = Pick<ContactSet, 'phoneNumbers' | 'emailAddresses'>;
 /**
@@ -206,7 +212,11 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
     if (!found) return result('unavailable');
     if (!found.length) return result('not-found');
     if (operation.type === 'contact_update') {
-      const options = found.flatMap(before => contactChangeOptions(before, operation.set, ports.normalize));
+      // Only a whole-field `set` (`contacts.write.v1`) is applied: `add` and `remove` belong to
+      // `contacts.write.v2`, which this phone does not advertise, so such a change is not made.
+      const {set} = operation;
+      if (!set || operation.add || operation.remove) return result('unavailable');
+      const options = found.flatMap(before => contactChangeOptions(before, set, ports.normalize));
       const choice = await ports.ask({kind: 'contact-save', options}, signal);
       if (choice === null || !options[choice]) return result('cancelled');
       ports.current();
@@ -237,6 +247,9 @@ export async function executeTelephonyAction(operation: TelephonyActionOperation
     case 'sms_compose': return finish(await compose(operation, operationId, ports, signal));
     case 'sms_reply_selected': return finish({kind: 'sms-reply', status: ports.draftInOpenThread(operation.body)});
     case 'contact_create': case 'contact_update': case 'contact_delete': return finish(await write(operation, ports, signal));
+    // Showing a contact and sharing the open contact are not carried out on this phone yet.
+    case 'contact_show': return finish({kind: 'contact-show', status: 'unavailable'});
+    case 'contact_read_selected': return finish({kind: 'contact-read', status: 'unavailable'});
     case 'messages_read_selected': {
       const thread = ports.openThread();
       return finish(thread ? {kind: 'messages-read', status: 'read', ...thread} : {kind: 'messages-read', status: 'none-selected'});

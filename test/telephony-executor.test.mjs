@@ -267,10 +267,26 @@ test('a contact that could not be read is not reported as "no matching contact"'
 });
 test('an action refused before it ran carries the typed unavailable result of its kind', () => {
   const kinds = {phone_call: 'phone-call', sms_compose: 'sms-compose', sms_reply_selected: 'sms-reply', contact_create: 'contact-write', contact_update: 'contact-write', contact_delete: 'contact-write',
+    contact_show: 'contact-show', contact_read_selected: 'contact-read',
     messages_read_selected: 'messages-read', voicemail_read_selected: 'voicemail-read', voicemail_delete_selected: 'voicemail-delete'};
   for (const [type, kind] of Object.entries(kinds)) {
     const refused = refuseTelephonyAction({type}, 'Nothing was done. Keep Alpha open and unlocked, then ask again.');
     assert.equal(refused.status, 'failed', type); assert.equal(refused.summary, 'Nothing was done. Keep Alpha open and unlocked, then ask again.');
     assert.deepEqual(refused.telephonyResult, kind === 'phone-call' ? {kind, status: 'unavailable', contact: false} : {kind, status: 'unavailable'});
+  }
+});
+test('a form this phone does not advertise is reported unavailable and nothing on the phone is touched', async () => {
+  for (const [operation, kind] of [
+    [{type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'}, 'sms-compose'],
+    [{type: 'sms_compose', target: {kind: 'contact', query: 'Priya'}, body: 'Running late', draft: true}, 'sms-compose'],
+    [{type: 'contact_update', query: 'Priya', add: {phoneNumbers: ['+14155550100']}}, 'contact-write'],
+    [{type: 'contact_update', query: 'Priya', set: {displayName: 'Priya N'}, remove: {emailAddresses: ['p@example.com']}}, 'contact-write'],
+    [{type: 'contact_show', query: 'Priya'}, 'contact-show'],
+    [{type: 'contact_read_selected'}, 'contact-read'],
+  ]) {
+    const p = ports(), result = await run(operation, p);
+    assert.deepEqual(result.telephonyResult, {kind, status: 'unavailable'}, JSON.stringify(operation));
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(p.log.filter(([what]) => what !== 'search' && what !== 'get'), [], 'nothing was asked, sent, drafted or written');
   }
 });
