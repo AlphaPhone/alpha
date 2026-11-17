@@ -18,6 +18,11 @@ export class BrowserOpenRefused extends Error {
   name = 'BrowserOpenRefused';
 }
 
+/** Whether the tab document the agent's turn observed is still the selected tab's document. A
+ * command that carries no observation is not fenced by it. */
+export const observedTabCurrent = (observed: {id: string; revision: string} | undefined, selected: {id: string; revision?: string} | undefined): boolean =>
+  !observed || (!!selected && selected.id === observed.id && selected.revision === observed.revision);
+
 /** Off the Browser view with the native surface already hidden, there is no geometry to measure or send. */
 export const surfacePollIdle = (view: unknown, lastGeometry: string, hiddenGeometry: string): boolean =>
   surfaceIdleForView(typeof view === 'string' ? view : '', lastGeometry, hiddenGeometry);

@@ -17,7 +17,7 @@ import { BrowserReviews } from '../browser/review';
 import { createExternalBrowserHandoff } from './browser-external-handoff';
 import { browserErrorMessage, PROFILE_UNSUPPORTED_NATIVE_MESSAGE, PROFILE_UNSUPPORTED_MESSAGE } from '../browser/browser-errors';
 import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-messages';
-import { approvedOpenTab, BrowserOpenRefused, surfacePollIdle } from '../browser/browser-poll';
+import { approvedOpenTab, BrowserOpenRefused, observedTabCurrent, surfacePollIdle } from '../browser/browser-poll';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
 // The shared native tab host (BrowserTabHostPlugin) under Alpha's Capacitor name; the web build
@@ -535,6 +535,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const id=state()?.cur,info=tabInfo(id);
       const admittedNavigation=info?.navigation;
       const bound=()=>{signal.throwIfAborted();current();if(disposed||!Capacitor.isNativePlatform()||document.hidden||shell.S().view!=='browser'||state()?.menu||state()?.tabsOpen||state()?.lib||state()?.share||state()?.editing||shell.S().shade||state()?.cur!==id||!tabs.has(id)||!info||(command.subaction==='reload'?!info.url:!info.committed||info.error||info.loading)||tabInfo(id)?.navigation!==admittedNavigation)throw Error('Current native browser tab changed');
+        // The turn asked about one page; a redirect or another tab since then is not that page.
+        if(!observedTabCurrent(command.selection,tabs.selection(id)))throw Error('The Browser page changed after the request. Nothing was done.');
         if(command.subaction==='back'&&!info.canBack)throw Error('There is no previous page in this tab.');
         if(command.subaction==='forward'&&!info.canForward)throw Error('There is no next page in this tab.');
       };

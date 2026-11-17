@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {loadBrowserModule} from './fixtures/browser-source.mjs';
+import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 const {ViewNavigationClient,executeViewInteraction}=await loadBrowserModule('apps/app/src/runtime/view-navigation.ts');
 const {subscribeNativeViewEvents}=await loadBrowserModule('apps/app/src/runtime/native-view-events.ts');
 const documentBefore=globalThis.document;globalThis.document=Object.assign(new EventTarget(),{hidden:false});
@@ -36,6 +37,27 @@ test('commands for a view or capability this phone does not offer are refused by
 test('a history command reaches Browser with the tab the turn observed',async()=>{
  const f=alpha(),selection={id:'session:tab',revision:'2'};await f.client.ready();const result=await f.send({params:{command:{subaction:'back'},selection}});
  assert.deepEqual(f.commands,[[{subaction:'back'},selection]]);assert.equal(result.success,true);assert.equal(result.result.ok,true);f.client.dispose();
+});
+test('the installed Browser refuses a history command when the tab the turn observed is no longer the page shown',async()=>{
+ const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command'],results:{command:input=>({session:input.session,id:input.id})}});
+ const sent=()=>host.calls.filter(call=>call.name==='command').length,signal=new AbortController().signal;
+ const page=async(id,sequence,url)=>{host.emit('stateChanged',{id,sequence,navigation:'n'+sequence,url,title:'Page',committed:true,loading:false,canBack:true,canForward:true,error:''});await host.sync();};
+ const observe=()=>{const {id,revision}=host.component.browserSelection();return {id,revision};};
+ const back=selection=>host.component.browserCommand({subaction:'back'},selection,signal,()=>{});
+ try{
+  host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:'https://example.com/'}});await host.sync();
+  const tab=host.state().cur;await page(tab,1,'https://example.com/');
+  const observed=observe();
+  assert.equal((await back(observed)).ok,true);assert.equal(sent(),1);
+  // A turn that saw no Browser tab sends no selection; the renderer's own fences still apply.
+  assert.equal((await back(undefined)).ok,true);assert.equal(sent(),2);
+  await page(tab,2,'https://example.com/redirected');
+  const stale=await back(observed);assert.equal(stale.ok,false);assert.equal(stale.code,'UNAVAILABLE');assert.match(stale.message,/page changed/);assert.equal(sent(),2);
+  assert.equal((await back(observe())).ok,true);assert.equal(sent(),3);
+  const current=observe();host.rendered().newTab();await host.sync();host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:'https://example.org/'}});await host.sync();await page(host.state().cur,1,'https://example.org/');
+  assert.equal((await back(current)).code,'UNAVAILABLE','another tab is selected');
+  assert.equal((await back({id:current.id})).code,'UNSUPPORTED','a malformed observation is refused, not ignored');assert.equal(sent(),3);
+ }finally{await host.teardown();}
 });
 test('view change after claim refuses execution and reports failed outcome, without retry',async()=>{const f=fixture();f.receive(f.frame);f.change();await settle();assert.equal(f.executed.length,0);assert.equal(f.requests.at(-1)[1].success,false);f.client.dispose();});
 test('native event port filters subscription/client identity and retires without replay',async()=>{let callback;const commands=[],frames=[];const port={async addListener(name,fn){assert.equal(name,'alphaViewEvent');callback=fn;return {async remove(){}};},async subscribeViewEvents(input){commands.push(input);return {subscriptionId:input.subscriptionId};},async unsubscribeViewEvents(input){commands.push(input);}};const channel=subscribeNativeViewEvents(port,'owner','client',v=>frames.push(v),()=>{});await channel.ready;const id=commands[0].subscriptionId,event=clientId=>({type:'agent_event',stream:'view-interact',payload:{clientId,frame:{requestId:'one'}}});callback({type:'event',subscriptionId:'foreign',event:event('client')});callback({type:'event',subscriptionId:id,event:event('foreign')});assert.equal(frames.length,0);callback({type:'event',subscriptionId:id,event:event('client')});assert.equal(frames.length,1);channel.close();callback({type:'event',subscriptionId:id,event:event('client')});assert.equal(frames.length,1);});
