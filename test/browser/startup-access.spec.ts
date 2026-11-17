@@ -40,7 +40,8 @@ test('required native access keeps focused, reachable controls at narrow widths 
  for(const viewport of [{width:274,height:538,scale:1},{width:280,height:538,scale:1},{width:360,height:740,scale:2},{width:360,height:800,scale:2}]){
   await page.setViewportSize({width:viewport.width,height:viewport.height});await setTextScale(page,viewport.scale);await action.scrollIntoViewIfNeeded();
   const box=await action.boundingBox();expect(box!.height).toBeGreaterThanOrEqual(44);expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(viewport.width);expect(box!.y+box!.height).toBeLessThanOrEqual(viewport.height);
-  await expect(panel.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);
+  await expect(panel.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
+  await expect(panel.getByRole('button',{name:/Not now|Back/})).toHaveCount(0);
  }
  await page.setViewportSize({width:360,height:740});await setTextScale(page,1);
  await heading.focus();await page.keyboard.press('Tab');await expect(action).toBeFocused();
