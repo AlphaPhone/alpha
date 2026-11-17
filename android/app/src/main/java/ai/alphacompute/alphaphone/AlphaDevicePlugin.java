@@ -255,6 +255,11 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  static final String UPDATE_STATUS="ai.alphacompute.alphaphone.UPDATE_STATUS";
+ /** The image's INSTALL_SELF_UPDATES grant, or the owner's install-unknown-apps consent. Every install read uses this. */
+ static boolean selfUpdateAdmitted(Context context){
+  return context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==PackageManager.PERMISSION_GRANTED
+   ||context.getPackageManager().canRequestPackageInstalls();
+ }
  /**
   * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
   * An image may allow-list INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher. Android then admits
@@ -264,7 +269,7 @@ public final class AlphaDevicePlugin extends Plugin {
   */
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";
-  if(!(context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==android.content.pm.PackageManager.PERMISSION_GRANTED)&&!context.getPackageManager().canRequestPackageInstalls())return "permission-required";
+  if(!selfUpdateAdmitted(context))return "permission-required";
   // Android's default silent-update policy also throttles a first attempt during early boot.
   return android.os.SystemClock.uptimeMillis()<=30_000L?"starting":"supported";
  }
@@ -824,9 +829,9 @@ public final class AlphaDevicePlugin extends Plugin {
   throw new UpdateOfferUnavailable("offer-unavailable",null);
  }
  /**
-  * Manual Install update or an automatic idle-Home attempt. An automatic attempt requires API 31+ and existing
-  * install-unknown-apps consent; it never opens the settings page. A manual tap without that consent opens
-  * only Android's page. Otherwise the HTTPS APK is downloaded to the cache and admitted by size and
+  * Manual Install update or an automatic idle-Home attempt. An automatic attempt requires API 31+ and either the
+  * image's INSTALL_SELF_UPDATES grant or existing install-unknown-apps consent (selfUpdateAdmitted); it never opens
+  * the settings page. A manual tap with neither opens only Android's page. Otherwise the HTTPS APK is downloaded to the cache and admitted by size and
   * SHA-256 (copyVerified), then by Android's reading of the archive: this package at exactly the offered
   * versionCode, above the installed one. API 31+ automatic sessions request USER_ACTION_NOT_REQUIRED through
   * Android's nonprivileged self-update API. Android may still require confirmation; for an automatic session
@@ -847,7 +852,7 @@ public final class AlphaDevicePlugin extends Plugin {
    String status=automaticUpdateStatus(getContext());
    if(!"supported".equals(status)){call.resolve(new JSObject().put("status",status));return;}
   }
-  if(!(getContext().checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==android.content.pm.PackageManager.PERMISSION_GRANTED)&&!getContext().getPackageManager().canRequestPackageInstalls()){
+  if(!selfUpdateAdmitted(getContext())){
    // Consent can be revoked between the automatic capability read and this read.
    if(automatic){call.resolve(new JSObject().put("status","permission-required"));return;}
    openInstallSourceSettings(call,null);
@@ -951,7 +956,7 @@ public final class AlphaDevicePlugin extends Plugin {
         requireCurrentUpdateOffer(manifestSha256,apkUrl,sha256,size,versionCode,signer);
         throwIfDestroyed();
         if(!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
-        if(!(getContext().checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==android.content.pm.PackageManager.PERMISSION_GRANTED)&&!getContext().getPackageManager().canRequestPackageInstalls())throw new UpdateInstallPermissionRequired();
+        if(!selfUpdateAdmitted(getContext()))throw new UpdateInstallPermissionRequired();
        }
        UpdatePause.committing(preparation.id);
        android.content.IntentSender status=AlphaUpdateStatusReceiver.sender(getContext(),preparation.id,id);

@@ -1944,6 +1944,28 @@ public final class UpdateFlowTest {
    .put("apkUrl",offer.getString("apkUrl")).put("sha256",offer.getString("sha256"))
    .put("sizeBytes",offer.getData().optLong("sizeBytes")).put("versionCode",offer.getData().optLong("versionCode"));
  }
+ /** automaticUpdateStatus and selfUpdateAdmitted with and without the image's INSTALL_SELF_UPDATES grant. */
+ static org.json.JSONObject selfUpdateGrantStatuses(File cache)throws Exception{
+  org.json.JSONObject result=new org.json.JSONObject();
+  java.util.List<Context> contexts=new java.util.ArrayList<>();
+  try{
+  String[][] cases={{"granted30","1","0","30","35000"},{"granted","1","0","37","35000"},{"grantedEarlyBoot","1","0","37","30000"},
+   {"neither","0","0","37","35000"},{"consent","0","1","37","35000"}};
+  for(String[] c:cases){
+   Context context=installing(cache);contexts.add(context);context.selfUpdateGranted=c[1].equals("1");context.packages.installsAllowed=c[2].equals("1");
+   Build.VERSION.SDK_INT=Integer.parseInt(c[3]);android.os.SystemClock.uptime=Long.parseLong(c[4]);
+   result.put(c[0],new org.json.JSONObject().put("status",AlphaDevicePlugin.automaticUpdateStatus(context))
+    .put("admitted",AlphaDevicePlugin.selfUpdateAdmitted(context)));
+   Build.VERSION.SDK_INT=37;android.os.SystemClock.uptime=35_000L;
+  }
+  return result;
+  }finally{
+   // Each Context made its own data directory; leave none behind.
+   for(Context context:contexts)try(var files=java.nio.file.Files.walk(context.data.toPath())){
+    for(java.nio.file.Path child:files.sorted(java.util.Comparator.reverseOrder()).toArray(java.nio.file.Path[]::new))java.nio.file.Files.deleteIfExists(child);
+   }
+  }
+ }
  /** Alpha ships only the launcher: an index feed carrying any other variant is malformed as a
   * whole, so it offers nothing, not even its launcher row. Another signer's row is only skipped.
   * Returns the versionCode selectUpdateOffer offers a launcher install for each mixed index (0: none). */
