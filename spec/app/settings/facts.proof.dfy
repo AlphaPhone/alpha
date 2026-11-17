@@ -1,22 +1,20 @@
-lemma requestHome_ensures(s: Facts)
-  ensures (inv(s) ==> canRequestHome(s) ==> alwaysOnlyReportedFactsAreShown(requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> alwaysShownIsFromTheNewestSettledAsking(requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> alwaysUnreadRolesAreNotHeld(requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepResumingReadsWhatIsShowing(s, "requestHome", requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepReadsOnlyWhileShowing(s, requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepFactsNeverGoBack(s, requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepOnlyAnAnswerChangesWhatIsShown(s, "requestHome", requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepEveryAskingIsSent(s, requestHome(s).state, requestHome(s).out))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepARoleRequestIsReadBack(s, "requestHome", requestHome(s).state))
-  ensures (inv(s) ==> canRequestHome(s) ==> stepOneHomeRequestAtATime(s, "requestHome", requestHome(s).state, requestHome(s).out))
+lemma requestHome_ensures(s: Facts, at: int)
+  ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysOnlyReportedFactsAreShown(requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysShownIsFromTheNewestSettledAsking(requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysUnreadRolesAreNotHeld(requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysNoHomeRequestOverAStaleRole(requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> stepReadOnlyWhenAsked(s, "requestHome", requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> stepFactsNeverGoBack(s, requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> stepOnlyAnAnswerChangesWhatIsShown(s, "requestHome", requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> stepEveryAskingIsSent(s, requestHome(s, at).state, requestHome(s, at).out))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> stepOneHomeRequestAtATime(s, "requestHome", requestHome(s, at).state, requestHome(s, at).out))
 {
-  if inv(s) && canRequestHome(s) {
-    var after := requestHome(s);
-    var e := RequestHome(s.request.ticket + 1);
+  if inv(s) && canRequestHome(s, at) {
+    var after := requestHome(s, at);
+    var e := RequestHome(after.state.request.read.ticket);
     assert after.out == [e];
     assert e in after.out && isRequestHome(e);
-    assert !isReadPhone(e);
-    forall x | x in after.out ensures x.RequestHome? && x.request == after.state.request.ticket && !isReadPhone(x) {
+    forall x | x in after.out ensures x.RequestHome? && x.request == after.state.request.read.ticket {
       assert x == e;
     }
   }
