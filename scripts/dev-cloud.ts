@@ -23,7 +23,7 @@ const env: NodeJS.ProcessEnv ={...process.env,ELIZA_DEV_ALLOW_TEST_MOCKS:'',VITE
 for(const key of Object.keys(env))if(/^(?:CEREBRAS_|OPENAI_|ANTHROPIC_|ELIZAOS_CLOUD_|ALPHA_DEV_|VITE_ALPHA_DEV_)/.test(key))delete env[key];
 // Explicit relay preview opt-in; inherited developer flags remain stripped.
 if(process.env.ALPHA_CLOUD_REALTIME_VOICE==='1'){env.ALPHA_DEV_CLOUD_REALTIME_VOICE='1';env.VITE_ALPHA_DEV_CLOUD_REALTIME_VOICE='1';}
-const child=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port',String(uiPort),'--strictPort'],{cwd:root,env,stdio:'inherit'});
+const child=spawn(process.execPath,['node_modules/vite/bin/vite.js','--configLoader','runner','--host','127.0.0.1','--port',String(uiPort),'--strictPort'],{cwd:root,env,stdio:'inherit'});
 for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>child.kill(signal));
 child.on('error',()=>{console.error('Cloud development server failed');process.exitCode=1;});child.on('exit',code=>{process.exitCode=code??1;});
 console.log(`Cloud ${environment} resident preview: http://127.0.0.1:${uiPort}; sign in through Alpha. No direct-provider key or mock runtime is used.`);

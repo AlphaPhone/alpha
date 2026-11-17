@@ -437,7 +437,7 @@ export async function runStartupPermissionsCoordinatorRefinement() {
     assert.equal(f.snapshot().component.states.camera,'settings');
   });
   await scenario('required-flow-dismissal-is-blocked',{},async(f,record)=>{
-    assert(![...document.querySelectorAll('button')].some(button=>/Skip|Not now/.test(button.textContent)));
+    assert([...document.querySelectorAll('button')].some(button=>button.textContent==='Skip'));
     await f.dismiss();
     record('cancel-and-back',action('blockedDismiss'));
     assert.equal(f.snapshot().ui.heading,'Notifications');

@@ -434,6 +434,11 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
     await f.click('Settings');record('settings readback',[action('begin'),action('result',false)]);
     f.state.notifications=true;await f.click('Settings');record('granted readback',advance);
   });
+  await scenario('known-choice-skips-without-timer',{native:false,permissions:{notifications:false}},async(f,record)=>{
+    await f.click('Skip');record('owner defers known permission',action('skip'));
+    assert.equal(f.snapshot().component.progress.step,1);
+    assert.equal(f.snapshot().calls.filter(call=>call.kind==='request').length,0);
+  });
   await scenario('required-flow-dismissal-is-blocked',{},async(f,record)=>{
     await f.dismiss();record('cancel and back',action('blockedDismiss'));
     assert.equal(f.snapshot().ui.heading,'Notifications');

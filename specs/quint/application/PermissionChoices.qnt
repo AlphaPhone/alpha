@@ -127,7 +127,8 @@ module PermissionChoices {
   /// The recovery timer also runs behind the image's hidden initial check. When it expires,
   /// Checking is shown with Skip; an unknown read is never treated as a grant.
   action skipAvailable = all { shown, not(s.ready), s' = { ...s, canSkip: true } }
-  action skip = all { visible, s.canSkip, s.generation < MaxGeneration, {
+  val skipAllowed = s.canSkip or (s.pending == -1 and s.states.get(selected) != "checking")
+  action skip = all { visible, skipAllowed, s.generation < MaxGeneration, {
     val retired = { ...s, generation: s.generation + 1, pending: -1, canSkip: false, checkNotice: "", flowTickets: s.flowTickets.set(selected, -1) }
     s' = if (s.target >= 0) { ...retired, active: false } else advanced(retired, "skipped")
   } }
@@ -292,5 +293,8 @@ module PermissionChoices {
     .then(closeReview).expect(not(visible) and s.completed and safety)
   run imageTargetReviewNeverContinuesTest = imageAlreadyGrantedCompletesTest.then(openTarget(2))
     .expect(visible and s.review and s.target == 2 and safety).then(imageContinue.fail())
+
+  run knownChoiceSkipsWithoutTimerTest = browserInit.then(signIn).then(platformStatus(0, false)).then(begin).then(result(false))
+    .then(skip).expect(s.progress == 1 and s.choices == List("skipped") and s.requests.get(0) == 0 and safety)
 
 }
