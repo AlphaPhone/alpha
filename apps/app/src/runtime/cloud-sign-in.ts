@@ -26,7 +26,7 @@ import {
  * Alpha, or Google in the user's external browser. No Eliza Cloud web page is part of a
  * successful sign-in.
  *
- * The port's host (AlphaCloudSignInPlugin, a registration of the shared
+ * The port's host (AlphaCloudSignInPlugin over AlphaCloudSignInClient, Alpha's fork of the shared
  * `ai.eliza.auth.cloud.CloudSignInPlugin`, or the development Cloud bridge in a test-mocks browser
  * build) holds the Steward session, the PKCE verifiers and states and the authorization codes; none
  * of them crosses to the renderer. Parsing of every answer and the failure codes live upstream in

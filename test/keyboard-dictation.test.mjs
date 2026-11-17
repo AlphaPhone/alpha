@@ -49,7 +49,7 @@ test('voice IME and Cloud adapter compile against Android API and shared real re
   };
   for(const [name,body] of Object.entries(stubs))writeFileSync(join(work,name),'package ai.alphacompute.alphaphone;'+body);
   const revision=join(work,'NativeProviderSlot.java');writeFileSync(revision,'package ai.eliza.plugins.agent.runtime;public final class NativeProviderSlot{public static String managementRevision(String s,long epoch){return s;}}');
-  const passwords=join(work,'PasswordSurfaces.java');writeFileSync(passwords,'package ai.eliza.plugins.passwords;public final class PasswordSurfaces{public static boolean visible(){return false;}}');
+  const passwords=join(work,'PasswordSurfaces.java');writeFileSync(passwords,'package ai.alphacompute.alphaphone;final class PasswordSurfaces{static boolean visible(){return false;}}');
   const api=join(process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT||join(homedir(),process.platform==='darwin'?'Library/Android/sdk':'Android/Sdk'),'platforms/android-36/android.jar');
   assert.ok(existsSync(api),'Android API36 required for actual service compile');
   const shared='vendor/eliza/plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/';
@@ -66,7 +66,7 @@ test('real dictation transport preserves selected Direct/Cloud ownership and can
    'AlphaCredentialStore.java':`package ai.alphacompute.alphaphone;final class AlphaCredentialStore {static String provider,credential;AlphaCredentialStore(android.content.Context c){}String readCredentialSlot(String name){return name.equals("local-agent-provider:v1")?provider:credential;}}`,
    'LocalAgentProviderAdmission.java':`package ai.alphacompute.alphaphone;final class LocalAgentProviderAdmission {static boolean validProviderToken(String s,int max){return s.matches("[!-~]{8,"+max+"}");}static void requireCloudVoiceSelection(String s,String id)throws Exception{var p=new org.json.JSONObject(s);if(!p.getString("provider").equals("elizacloud")||!id.equals(p.getString("credentialId")))throw new SecurityException();}}`,
    'NativeProviderSlot.java':`package ai.eliza.plugins.agent.runtime;public final class NativeProviderSlot{public static String managementRevision(String s,long epoch){return s+":"+epoch;}}`,
-   'PasswordSurfaces.java':`package ai.eliza.plugins.passwords;public final class PasswordSurfaces{public static boolean visible(){return false;}}`,
+   'PasswordSurfaces.java':`package ai.alphacompute.alphaphone;final class PasswordSurfaces{static boolean visible(){return false;}}`,
    'RecordingPcm.java':`package ai.eliza.voice;public final class RecordingPcm{public static byte[] decode(java.io.File f,java.util.function.BooleanSupplier cancelled)throws Exception{if(cancelled.getAsBoolean())throw new java.io.IOException();return new byte[44];}}`,
   };
   for(const [name,body] of Object.entries(stubs))writeFileSync(join(work,name),body);

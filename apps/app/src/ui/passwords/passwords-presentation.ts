@@ -34,7 +34,7 @@ const FAILURES: Readonly<Record<PasswordsFailureCode, string>> = {
  * The vault's validation refusals (code `invalid`) and the website check's, keyed by their
  * reviewed text without its final full stop, with Alpha's wording. The keys are every fixed
  * `invalid` sentence the passwords bridge can deliver: the plugin's own refusals, the store
- * messages its `SAFE_MESSAGES` lets through (PasswordsPlugin.java in plugin-native-passwords),
+ * messages its `SAFE_MESSAGES` lets through (AlphaPasswordsPlugin.java),
  * the client's (`client.ts`) and `normalizeWebsite`'s (`bindings.ts`). Any other text falls back
  * to the generic entry sentence.
  */

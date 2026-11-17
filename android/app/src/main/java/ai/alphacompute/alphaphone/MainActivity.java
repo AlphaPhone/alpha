@@ -398,7 +398,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaGmailPlugin.class);
   registerPlugin(AlphaListenerPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
-  registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
+  registerPlugin(AlphaPasswordsPlugin.class);
   // The native image gate is checked again by every telephony operation.
   // Reconcile the role components with the verified image before registering telephony.
   AlphaTelephonyRoles.sync(this);

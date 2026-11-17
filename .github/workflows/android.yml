@@ -115,6 +115,12 @@ jobs:
         env:
           ALPHA_CALENDAR_BRIDGE_EXPECTED_HEAD: ${{ github.sha }}
         run: python scripts/ci/calendar-bridge.py
+      # Alpha's JVM unit tests for its forked native UI (android/app/src/test, Robolectric) on the
+      # Gradle host the build generated. JVM evidence only, not device evidence.
+      - name: Run Alpha's native unit tests
+        timeout-minutes: 15
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testLauncherDebugUnitTest
       # The build prepared the pinned SDK and built the workflow worker; both are reused here.
       - name: Verify digest recovery across independent runtime processes
         timeout-minutes: 10

@@ -107,11 +107,22 @@
    <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
   </service>
   <!-- Alpha's password vault as an Android Autofill provider. The user selects it in Android's own
-       confirmation; Alpha never sets secure settings. The vault lives in the no-backup directory. -->
-  <service android:name="ai.eliza.plugins.passwords.ElizaPasswordAutofillService" android:label="@string/eliza_passwords_service_label" android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+       confirmation; Alpha never sets secure settings. The vault lives in the no-backup directory.
+       The service keeps its installed component name: Android keeps the selected provider by that
+       name and a service has no alias, so renaming it would unselect Alpha on update. It draws only
+       the offer row, from Alpha's string (eliza_passwords.xml points at alpha_passwords.xml). -->
+  <service android:name="ai.eliza.plugins.passwords.ElizaPasswordAutofillService" android:label="@string/alpha_passwords_service_label" android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
    <intent-filter><action android:name="android.service.autofill.AutofillService"/></intent-filter>
-   <meta-data android:name="android.autofill" android:resource="@xml/eliza_passwords_autofill_service"/>
+   <meta-data android:name="android.autofill" android:resource="@xml/alpha_passwords_autofill_service"/>
   </service>
+  <!-- Alpha's own fill picker and save prompt replace the shared screens. The shared names stay as
+       aliases of Alpha's screens: the Autofill service's one-shot fill and save tokens name them. -->
+  <activity android:name="ai.eliza.plugins.passwords.PasswordFillActivity" tools:node="remove" />
+  <activity android:name="ai.eliza.plugins.passwords.PasswordSaveActivity" tools:node="remove" />
+  <activity android:name=".PasswordFillActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density" android:theme="@style/AlphaPasswords.Theme.Dialog" />
+  <activity android:name=".PasswordSaveActivity" android:exported="false" android:excludeFromRecents="true" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density" android:theme="@style/AlphaPasswords.Theme.Dialog" />
+  <activity-alias android:name="ai.eliza.plugins.passwords.PasswordFillActivity" android:targetActivity=".PasswordFillActivity" android:exported="false" />
+  <activity-alias android:name="ai.eliza.plugins.passwords.PasswordSaveActivity" android:targetActivity=".PasswordSaveActivity" android:exported="false" />
   <receiver android:name=".AlphaUpdateStatusReceiver" android:exported="false" />
   <receiver android:name=".ReminderReceiver" android:exported="false">
    <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/><action android:name="android.intent.action.TIME_SET"/><action android:name="android.intent.action.TIMEZONE_CHANGED"/></intent-filter>
