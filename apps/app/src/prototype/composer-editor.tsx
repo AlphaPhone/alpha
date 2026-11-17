@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 
 type Surface = 'dock' | 'chat';
 type Slots = Partial<Record<Surface, HTMLElement | null>>;
-type Props = { slots: Slots; surface: Surface | null; onDockReleased?: () => void; field?: ReactNode };
+type Props = { slots: Slots; surface: Surface | null; field?: ReactNode };
 
-/** The shell's two composer layouts share one editor. During Send, the outgoing
- * dock stays connected until the editor moves directly into the visible chat slot. */
+/** The shell's two layouts share one editor. The selected slot stays fixed
+ * during a focused send. An explicit layout change can move the unfocused editor. */
 export class ComposerEditor extends Component<Props> {
   private readonly host = document.createElement('span');
 
@@ -18,13 +18,7 @@ export class ComposerEditor extends Component<Props> {
   private place() {
     const slot = this.props.surface && this.props.slots[this.props.surface];
     if (!slot) { this.host.remove(); return; }
-    if (this.host.parentNode === slot) return;
-    if (this.props.onDockReleased && this.host.isConnected && slot.moveBefore) {
-      slot.moveBefore(this.host, null);
-      this.props.onDockReleased();
-    } else {
-      slot.append(this.host);
-    }
+    if (this.host.parentNode !== slot) slot.append(this.host);
   }
 
   componentDidMount() { this.place(); }

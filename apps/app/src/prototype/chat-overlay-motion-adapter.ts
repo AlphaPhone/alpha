@@ -546,6 +546,21 @@ export function installChatOverlayMotion(Component: Shell) {
 		}
 		revealWhileResizing(shell, scale);
 	}
+	/** Keep the editor in its connected dock while placing it at the chat slot. */
+	function positionPromotedEditor(shell: Shell, scale: number) {
+		const {dock, chat} = shell.composerSlots;
+		const layer = dock?.closest('[data-alpha-promoted-editor="true"]') as HTMLElement | null;
+		if (!chat || !layer) return;
+		const anchor = chat.getBoundingClientRect(), origin = layer.getBoundingClientRect();
+		for (const [name, value] of [
+			['--alpha-editor-x', (anchor.left - origin.left) / scale],
+			['--alpha-editor-y', (anchor.top - origin.top) / scale],
+			['--alpha-editor-width', anchor.width / scale],
+		] as const) {
+			const pixels = `${value}px`;
+			if (layer.style.getPropertyValue(name) !== pixels) layer.style.setProperty(name, pixels);
+		}
+	}
 	/**
 	 * The stage keeps its last element above the sheet as the stage resizes (a finished opening,
 	 * the keyboard), and the sheet re-fits when its bar grows. One observer per shell.
@@ -553,7 +568,8 @@ export function installChatOverlayMotion(Component: Shell) {
 	function watchStage(shell: Shell) {
 		const layer = document.querySelector<HTMLElement>('[data-alpha-layer="app"]');
 		const composers = Array.from(document.querySelectorAll<HTMLElement>(".alpha-chat-composer,[data-alpha-input-bar]"));
-		const watched = [layer, ...composers].filter((element): element is HTMLElement => !!element);
+		const screen = shell.promotedEditorInDock ? document.querySelector<HTMLElement>('[data-screen]') : null;
+		const watched = [layer, screen, ...composers].filter((element): element is HTMLElement => !!element);
 		const key = shell.chatStageWatched as HTMLElement[] | undefined;
 		if (typeof ResizeObserver === "undefined" || key && key.length === watched.length && key.every((element, index) => element === watched[index])) return;
 		shell.chatStageObserver?.disconnect();
@@ -566,7 +582,9 @@ export function installChatOverlayMotion(Component: Shell) {
 			frame = requestAnimationFrame(() => {
 				frame = 0;
 				if (shell.live === false || shell.chatStageObserver === undefined) return;
-				keepStageLast(bounds().scale);
+				const {scale} = bounds();
+				if (shell.promotedEditorInDock) positionPromotedEditor(shell, scale);
+				keepStageLast(scale);
 				const mode = shell.S().chat,
 					refit = grew;
 				grew = false;
@@ -719,10 +737,21 @@ export function installChatOverlayMotion(Component: Shell) {
 			change.pending = false;
 			resizeForTap(this, change);
 		}
+		const geometry = bounds();
+		const promoted = this.promotedEditorInDock;
+		if (promoted) positionPromotedEditor(this, geometry.scale);
 		// AC-11: every bar grows with its text up to min(168px, 28dvh), then scrolls inside.
 		sizeComposers();
+		if (promoted) {
+			const {dock, chat} = this.composerSlots;
+			const editor = dock?.querySelector('textarea[data-alpha-composer]');
+			const height = editor ? `${editor.offsetHeight}px` : '';
+			if (chat && chat.style.minHeight !== height) {
+				chat.style.minHeight = height;
+				positionPromotedEditor(this, geometry.scale);
+			}
+		} else this.composerSlots?.chat?.style.removeProperty('min-height');
 		watchStage(this);
-		const geometry = bounds();
 		// A sheet that no longer fits its chat, draft or bar (a new message, a grown bar, a draft that
 		// changed length) re-fits once what changed has been drawn.
 		if (s.chat === "sheet" && !drag && this.renderedSheetHeight !== undefined) {
@@ -1309,11 +1338,14 @@ export function installChatOverlayMotion(Component: Shell) {
 		out.composerDockRef = shell.composerDockRef;
 		out.composerChatRef = shell.composerChatRef;
 		const openEditor = out.panelComposer && (!out.showComposer || isOpen(s.chat));
-		const retainDock = openEditor && !out.showComposer && !out.dockHidden && s.typing &&
-			typeof Element.prototype.moveBefore === 'function' &&
-			composerSlots.dock?.contains(document.activeElement);
-		// Keep the old parent until the new one is visible. Parking the field at the
-		// screen root before the commit can interrupt Android's editing session.
+		// Android ends the native input session when the focused editor is reparented,
+		// even when moveBefore preserves DOM focus. Keep its original slot and position
+		// it in the chat field until this editing session ends.
+		const focusedDock = composerSlots.dock?.contains(document.activeElement);
+		const retainDock = openEditor && !out.showComposer && !out.dockHidden && focusedDock &&
+			(s.typing || shell.promotedEditorInDock);
+		shell.promotedEditorInDock = !!retainDock;
+		out.promotedEditorInDock = !!retainDock;
 		if (retainDock) out.showComposer = true;
 
 		out.editor = {
@@ -1331,13 +1363,13 @@ export function installChatOverlayMotion(Component: Shell) {
 			cancel: openEditor ? undefined : handlers.cancel,
 			lost: openEditor ? undefined : handlers.lost,
 			focus: openEditor ? undefined : out.inputComposerFocus,
-			blur: openEditor ? undefined : out.inputComposerBlur,
+			blur: retainDock ? () => { shell.promotedEditorInDock = false; shell.setState({}); } :
+				openEditor ? undefined : out.inputComposerBlur,
 			style: openEditor ? '' : `touch-action:${out.inputComposerTouchAction};padding-left:8px`,
 		};
 		out.composerEditor = createElement(ComposerEditor, {
 			slots: composerSlots,
-			surface: openEditor ? 'chat' : out.showComposer ? 'dock' : null,
-			onDockReleased: retainDock ? () => shell.setState({}) : undefined,
+			surface: openEditor && !retainDock ? 'chat' : out.showComposer ? 'dock' : null,
 		});
 		return out;
 	};
