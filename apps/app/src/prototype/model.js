@@ -6315,7 +6315,7 @@ class Component extends DCLogic {
       var text = String(barValue || "").trim(); if (!text) return;
       self.barFilter = null; self.send(text); if (closed.onText) closed.onText("");
     } : barTarget === "person" ? undefined : onKey;
-    var barDictate = isOn && (barTarget === "filter" || barTarget === "person" && !barFilled && !closed.canSubmit);
+    var barDictate = isOn && (barTarget === "filter" || barTarget === "person");
     // AC-24: one faint suggestion inside the bar, only while its field is empty and no reply runs.
     var faint = null;
     if (isOn && !voiceOn && !S.typing && !S.secure) {

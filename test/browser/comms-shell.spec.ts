@@ -386,6 +386,8 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		await page.mouse.move(grab.x + grab.width / 2, grab.y + grab.height / 2);
 		await page.mouse.down();
 		await page.mouse.move(grab.x + grab.width / 2, grab.y - 90, {steps: 8});
+		// This case is a placed height, not a flick. Hold past the product's 80 ms release window.
+		await page.waitForTimeout(100);
 		await page.mouse.up();
 		await settled(page);
 		expect(await shell(page, 'window.__shell().S().chat')).toBe('sheet');

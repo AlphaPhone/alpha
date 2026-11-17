@@ -48,7 +48,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | AC-09 | The target is always visible in three ways: place (the sheet is Alpha, the stage is the person), the left slot (AC-08) and the field. The Alpha field has a 1.5 dp `--acct` outline and reads "Ask Alpha"; the person field is plain and reads "Text <first name>". The sheet header shows the context, for example "Maya Chen · Messages". | Screenshot review of every state; TalkBack announces the target (AC-29). |
 | AC-10 | Two separate drafts per thread: the owner's text to the person and the request to Alpha (`runtime/message-draft.ts`). Swapping targets never clears or merges them. Both survive layout changes and process death (AP-05). | Type to Maya, open Alpha, type to Alpha, kill the process: both drafts return. |
 | AC-11 | The bar grows with its text up to the existing composer limit, `min(168px, 28dvh)`, then scrolls inside. The stage and sheet re-fit so the bar is never clipped. | A 1,600-character draft in the bar keeps both bar buttons visible and the text scrollable. |
-| AC-12 | The right-hand mic dictates into whichever draft the bar shows. Holding the Alpha button always starts a voice turn with Alpha (AP-06 modes). During a call the caller never hears Alpha. | Mic in "Text Maya" fills the SMS draft; holding Alpha starts voice with Alpha in every state. |
+| AC-12 | The right-hand mic dictates into whichever draft the bar shows. In Messages, stopping capture appends its transcript to the editable unsent draft, without a second review step or an agent reply; the mic remains available beside Send. Recording occupies the same dock as typing. Holding the Alpha button always starts a voice turn with Alpha (AP-06 modes). During a call the caller never hears Alpha. | Mic in "Text Maya" fills only that conversation's SMS draft; cancellation or unavailable speech preserves typed text; holding Alpha starts voice with Alpha in every state. |
 
 ### Drafts in Messages
 
@@ -105,7 +105,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | Screen | Closed: left / field / right | Open: left / field / right |
 | --- | --- | --- |
 | Messages list | Alpha / "Search or ask" / mic | Search icon / "Ask Alpha" / mic |
-| Thread | Alpha / "Text <name>" / send or dictate | Avatar / "Ask Alpha" / send or voice |
+| Thread | Alpha / attach picture / "Text <name>" / send and dictate | Avatar / "Ask Alpha" / send or voice |
 | Recents and keypad | Alpha / "Call or ask" / mic | Keypad icon / "Ask Alpha" / mic |
 | In call | Alpha / "Ask during call" / mic, with End beside the bar | Call icon / "Ask Alpha" / mic; End in the call card |
 | Contacts list | Alpha / "Search or ask" / mic | Search icon / "Ask Alpha" / mic |

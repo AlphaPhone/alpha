@@ -54,22 +54,22 @@ test('an owner edit saves with the version that was shown and closes the editor'
 });
 test('a contact that changed since it was shown keeps the editor and writes nothing more',async()=>{
  let record=detail('a1'.repeat(32));const book=mountBook({get:()=>record,save:{status:'stale'}});await settle();book.model();await settle();
- book.model().d.edit();await settle();typeInto(book.model().ed.onName,'Ada L');
+ book.model().d.edit();await settle();typeInto(book.model().ed.onGivenName,'Ada L');
  record={...detail('b2'.repeat(32)),emailAddresses:[{address:'updated@example.com',type:'home'}]};
  book.model().ed.save();await settle();
- const ed=book.model().ed;assert.equal(ed.open,true,'the editor stays open with what the owner typed');assert.equal(ed.name,'Ada L');assert.match(ed.notice,/changed/);assert.equal(ed.cannotSave,true);
+ const ed=book.model().ed;assert.equal(ed.open,true,'the editor stays open with what the owner typed');assert.equal(ed.givenName,'Ada L');assert.match(ed.notice,/changed/);assert.equal(ed.cannotSave,true);
  ed.save();await settle();assert.equal(book.calls.filter(([m])=>m==='save').length,1,'the stale draft cannot overwrite current fields');
  ed.cancel();book.model().d.edit();await settle();
  assert.equal(book.model().ed.emails[0].value,'updated@example.com','reopening shows the current provider fields');
- typeInto(book.model().ed.onName,'Ada L');book.model().ed.save();await settle();
+ typeInto(book.model().ed.onGivenName,'Ada L');book.model().ed.save();await settle();
  const latest=book.calls.filter(([m])=>m==='save').at(-1)[1];assert.equal(latest.version,'b2'.repeat(32));assert.deepEqual(latest.emailAddresses,record.emailAddresses);
 });
 test('a new contact needs something in it, and an invalid draft never reaches the phone',async()=>{
  const book=mountBook({save:{status:'saved',id:'9',version:'a1'.repeat(32)},get:()=>detail('a1'.repeat(32))});await settle();
  book.model({}).addNew();await settle();let ed=book.model({}).ed;assert.equal(ed.open,true);
  ed.addPhone();book.model({}).ed.save();await settle();assert.equal(book.calls.some(([m])=>m==='save'),false,'an empty contact is refused here');assert.match(book.model({}).ed.notice,/name, number or email/);
- typeInto(book.model({}).ed.onName,'  Grace  ');book.model({}).ed.save();await settle();
- assert.deepEqual(book.calls.find(([m])=>m==='save')[1],{displayName:'Grace',phoneNumbers:[],emailAddresses:[]},'blank rows are dropped and the name is trimmed');
+ typeInto(book.model({}).ed.onGivenName,'  Grace  ');book.model({}).ed.save();await settle();
+ assert.deepEqual(book.calls.find(([m])=>m==='save')[1],{displayName:'Grace',givenName:'  Grace  ',familyName:'',phoneNumbers:[],emailAddresses:[]},'blank rows are dropped, display name is trimmed, and entered structured components are preserved');
  assert.deepEqual(book.sets.at(-1),{open:'9'},'the saved contact opens');
 });
 test('a delete asks first, names the version, and Back cancels it',async()=>{
@@ -89,7 +89,7 @@ for(const lostReply of [false,true])test(`uncertain contact writes require an ex
  for(const kind of ['save','remove']){
   const unknown=()=>{if(lostReply)throw Error('Reply lost after commit');return {status:'unknown'};};
   const book=mountBook({get:()=>detail('a1'.repeat(32)),[kind]:unknown});await settle();book.model();await settle();
-  if(kind==='save'){book.model().d.edit();await settle();typeInto(book.model().ed.onName,'Ada changed');book.model().ed.save();}
+  if(kind==='save'){book.model().d.edit();await settle();typeInto(book.model().ed.onGivenName,'Ada changed');book.model().ed.save();}
   else{book.model().d.del();book.model().d.confirmDelete();}
   await settle();assert.equal(book.model().ed.open,false);assert.match(book.model().nativeStatus,/Outcome unknown/);
   book.model().d.edit();book.model().addNew();book.model().d.del();book.model().d.confirmDelete();await settle();
@@ -186,8 +186,8 @@ test('pending and uncertain contact writes retain authority across visits and mo
  for(const operation of ['create','edit','delete'])for(const retire of ['visit','owner'])for(const reply of ['unknown','lost']){
   const pending=Promise.withResolvers(),method=operation==='delete'?'remove':'save';
   const book=mountBook({get:()=>detail('a1'.repeat(32)),[method]:()=>pending.promise});await settle();book.model();await settle();
-  if(operation==='create'){book.model({}).addNew();await settle();typeInto(book.model({}).ed.onName,'New contact');book.model({}).ed.save();}
-  else if(operation==='edit'){book.model().d.edit();await settle();typeInto(book.model().ed.onName,'Changed contact');book.model().ed.save();}
+  if(operation==='create'){book.model({}).addNew();await settle();typeInto(book.model({}).ed.onGivenName,'New contact');book.model({}).ed.save();}
+  else if(operation==='edit'){book.model().d.edit();await settle();typeInto(book.model().ed.onGivenName,'Changed contact');book.model().ed.save();}
   else{book.model().d.del();book.model().d.confirmDelete();}
   await settle();assert.equal(book.calls.filter(([name])=>name===method).length,1);
   let owner=book.shell;
@@ -207,7 +207,7 @@ test('pending and uncertain contact writes retain authority across visits and mo
 });
 test('a held refresh begun before terminal uncertainty cannot release the contact write gate',async()=>{
  const pending=Promise.withResolvers(),read=Promise.withResolvers();let held=false;
- const book=mountBook({save:()=>pending.promise});await settle();book.model({}).addNew();await settle();typeInto(book.model({}).ed.onName,'New contact');book.model({}).ed.save();await settle();
+ const book=mountBook({save:()=>pending.promise});await settle();book.model({}).addNew();await settle();typeInto(book.model({}).ed.onGivenName,'New contact');book.model({}).ed.save();await settle();
  book.shell.view='home';book.shell.componentDidUpdate();book.shell.view='contacts';book.shell.componentDidUpdate();await settle();
  const original=globalThis.contactsPlugin;globalThis.contactsPlugin=(method,options)=>method==='list'&&held?read.promise:original(method,options);
  held=true;book.model({}).nativeRefresh();await settle();pending.resolve({status:'unknown'});await settle();
