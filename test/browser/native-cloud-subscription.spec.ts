@@ -74,20 +74,9 @@ const accountPanel=(page:Page)=>page.getByRole('dialog',{name:/^Account$/});
 const planDetails=(page:Page)=>accountPanel(page).getByRole('region',{name:'Balance and membership',exact:true});
 const signInPage=(page:Page)=>page.locator('.alpha-cloud-sign-in[role="main"]');
 async function openAccountPlan(page:Page){await page.evaluate(()=>(window as any).planController.openPlan());const panel=accountPanel(page);await expect(panel).toBeVisible();return panel;}
-/** Plans are managed in the app (cloud-plan-ui.tsx): the plan manager opens with the catalogue and
- * nothing is opened in a browser until the owner subscribes. */
-async function openPlans(page:Page){
+async function confirmBillingAccount(page:Page){
  await expect(page.getByRole('dialog',{name:'Review billing account',exact:true})).toHaveCount(0);
- const plans=page.getByRole('region',{name:'Plans',exact:true});
- await expect(plans.getByText('Plus',{exact:true})).toBeVisible({timeout:30_000});
- expect((await calls(page)).filter(c=>c.method==='openExternal')).toEqual([]);
- return plans;
-}
-/** Subscribing opens exactly Stripe's hosted checkout page Cloud answered; nothing is bought here. */
-async function subscribePlus(page:Page){
- const plans=await openPlans(page);
- await plans.getByRole('listitem').filter({hasText:'Plus'}).getByRole('button',{name:'Subscribe',exact:true}).click();
- await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://checkout.stripe.com/c/pay/cs_test_synthetic']);
+ await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').length).toBeGreaterThan(0);
 }
 
 async function confirmSignOut(page:Page){const dialog=page.getByRole('dialog',{name:'Sign out?',exact:true});await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Sign out',exact:true}).click();}
@@ -195,21 +184,20 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   await admitted(page);await openAccountPlan(page);await expect(planDetails(page).getByText('Synthetic plan',{exact:true})).toBeVisible();await expect(planDetails(page).getByText('Trial',{exact:true})).toBeVisible();await release(page);
  });
 
- test('a past-due plan is admitted with a clear warning and the in-app plans',async({page},info)=>{
-  await boot(page,{...await entitlements(),plan:'past_due',limits:'past_due'});
+ test('a past-due plan is admitted with a clear warning and the hosted plan page',async({page},info)=>{
+  await boot(page,{...await entitlements(),plan:'past_due'});
   await admitted(page);await openAccountPlan(page);
   await expect(planDetails(page).getByText('Synthetic plan',{exact:true})).toBeVisible();
   await expect(planDetails(page).getByText('Payment due',{exact:true})).toBeVisible();
   await expect(planDetails(page).getByText('Update payment',{exact:true})).toBeVisible();
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('past-due-warning.png'),animations:'disabled'});
   await release(page);
-  await page.getByRole('button',{name:'Manage plan',exact:true}).click();
-  const plans=await openPlans(page);
-  await expect(plans.getByText('Payment due',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Manage plan',exact:true}).click();await confirmBillingAccount(page);
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://cloud.eliza.app/cloud/billing']);
  });
 
  for(const status of ['canceled','none'] as const)test(`a ${status} plan shows "needs plan" beside the running agent and binds no inference`,async({page},info)=>{
-  await boot(page,{...await entitlements(),plan:status,limits:'canceled'});
+  await boot(page,{...await entitlements(),plan:status});
   await needsPlan(page);
   await expect(planDetails(page).getByText('No plan',{exact:true})).toBeVisible();
   await expect(planDetails(page).getByText('Active',{exact:true})).toHaveCount(0);
@@ -222,15 +210,16 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   expect(await configured(page)).toBe(0);
   await started(page);
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath(`needs-plan-${status}.png`),animations:'disabled'});
-  // Choose a plan opens the in-app plans; Subscribe opens exactly Stripe's checkout page in the system browser.
-  await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await subscribePlus(page);
+  // Choose a plan opens exactly the allowlisted hosted page in the system browser.
+  await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await confirmBillingAccount(page);
+  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://cloud.eliza.app/cloud/billing']);
   expect(await configured(page)).toBe(0);
  });
 
- test('returning from checkout checks the plan again and admits a plan chosen there',async({page})=>{
-  await boot(page,{...await entitlements(),plan:'none',limits:'canceled'});
+ test('returning from Eliza Cloud checks the plan again and admits a plan chosen there',async({page})=>{
+  await boot(page,{...await entitlements(),plan:'none'});
   await needsPlan(page);await idle(page);await started(page);
-  await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await subscribePlus(page);await idle(page);
+  await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await confirmBillingAccount(page);await idle(page);
   await fixture(page,{plan:'active'});
   await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
   await admitted(page);expect(await configured(page)).toBe(1);await release(page);
@@ -383,14 +372,14 @@ test.describe('entitlement route unavailable: authenticated billing mode fallbac
 
 test.describe('outages and offline use',()=>{
  test('frequent Home returns are throttled but returning from plan management rechecks',async({page})=>{
-  await boot(page,{...await entitlements(),plan:'none',limits:'canceled',holdProvider:false});await needsPlan(page);await idle(page);
+  await boot(page,{...await entitlements(),plan:'none',holdProvider:false});await needsPlan(page);await idle(page);
   const checks=async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement').length;
   const before=await checks();
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
   await expect.poll(checks).toBe(before+1);await idle(page);
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());await idle(page);
   expect(await checks()).toBe(before+1);
-  await page.evaluate(()=>(window as any).planController.residentManagePlan());await subscribePlus(page);await idle(page);
+  await page.evaluate(()=>(window as any).planController.residentManagePlan());await confirmBillingAccount(page);await idle(page);
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
   await expect.poll(checks).toBe(before+2);
  });

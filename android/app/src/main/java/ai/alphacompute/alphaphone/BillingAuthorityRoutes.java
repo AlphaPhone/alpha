@@ -95,4 +95,72 @@ final class BillingAuthorityRoutes {
   Object organization = user.opt("organization_id");
   return organizationId == null || organizationId.isEmpty() ? true : organizationId.equals(organization instanceof String ? organization : null);
  }
+
+ /**
+  * The signed-in account, from the phone's stored Cloud credential (`cloud:production`): its
+  * credential id, user and organization. Null when signed out or unreadable. The renderer never
+  * names it: a billing session is bound to this, and any change (sign-out, a new key, another
+  * account) ends the session.
+  */
+ static final class Account {
+  final String credentialId, userId, organizationId;
+  private Account(String credentialId, String userId, String organizationId) { this.credentialId = credentialId; this.userId = userId; this.organizationId = organizationId; }
+  static Account of(String savedCredential) {
+   if (savedCredential == null) return null;
+   try {
+    JSONObject credential = new JSONObject(savedCredential);
+    String credentialId = credential.optString("credentialId", ""), userId = credential.optString("userId", "");
+    if (credentialId.isEmpty() || userId.isEmpty()) return null;
+    Object organization = credential.opt("organizationId");
+    return new Account(credentialId, userId, organization instanceof String && !((String) organization).isEmpty() ? (String) organization : null);
+   } catch (Exception unreadable) { return null; }
+  }
+  boolean same(Account other) {
+   return other != null && credentialId.equals(other.credentialId) && userId.equals(other.userId) && java.util.Objects.equals(organizationId, other.organizationId);
+  }
+ }
+
+ /**
+  * The in-memory billing session and pending email code, both bound to the account they were made
+  * for. Reading either for another account (or none) clears both.
+  */
+ static final class Session {
+  private String token, pendingEmail, pendingVerifier;
+  private long expiresAt, pendingExpiresAt;
+  private Account account, pendingAccount;
+
+  synchronized void clear() { token = null; account = null; expiresAt = 0; pendingEmail = null; pendingVerifier = null; pendingAccount = null; pendingExpiresAt = 0; }
+  private void retireFor(Account current) {
+   if (token != null && (account == null || !account.same(current))) { token = null; account = null; expiresAt = 0; }
+   if (pendingEmail != null && (pendingAccount == null || !pendingAccount.same(current))) { pendingEmail = null; pendingVerifier = null; pendingAccount = null; pendingExpiresAt = 0; }
+  }
+  /** The session for this account while it is fresh, else null (and nothing kept for another account). */
+  synchronized String current(Account current, long now) {
+   retireFor(current);
+   if (token != null && now >= expiresAt) { token = null; account = null; expiresAt = 0; }
+   return token;
+  }
+  synchronized long expiresAt() { return token == null ? 0 : expiresAt; }
+  synchronized void pending(Account current, String email, String verifier, long until) {
+   if (current == null) throw new SecurityException("Sign in first");
+   retireFor(current);
+   pendingEmail = email; pendingVerifier = verifier; pendingAccount = current; pendingExpiresAt = until;
+  }
+  /** The pending code's email and verifier for this account, or null when there is none (or it expired). */
+  synchronized String[] pendingFor(Account current, long now) {
+   retireFor(current);
+   if (pendingEmail == null || now >= pendingExpiresAt) return null;
+   return new String[] {pendingEmail, pendingVerifier};
+  }
+  /** Keeps a verified session only if the account is still the one the code was sent for. */
+  synchronized boolean bind(Account current, Account verifiedFor, String session, long until) {
+   retireFor(current);
+   if (current == null || !current.same(verifiedFor)) { clear(); return false; }
+   token = session; account = current; expiresAt = until;
+   pendingEmail = null; pendingVerifier = null; pendingAccount = null; pendingExpiresAt = 0;
+   return true;
+  }
+  /** A session Cloud refused is spent. */
+  synchronized void spent(String session) { if (session != null && session.equals(token)) { token = null; account = null; expiresAt = 0; } }
+ }
 }

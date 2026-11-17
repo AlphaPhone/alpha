@@ -26,8 +26,12 @@ import org.json.JSONObject;
  * sign-in key. Like upstream's native host ("billing authority", packages/auth/README.md), this
  * repeats a one-time email code for the signed-in account and keeps the resulting Steward session
  * in memory only: it is never written to storage, never returned to the renderer and never logged.
- * It ends after its JWT expiry (at most one hour), on {@link #clear}, when the app process ends, or
- * when a verified session names a different account than the phone's.
+ * It is bound to the account in the phone's stored Cloud credential (not to anything the renderer
+ * names) and ends after its JWT expiry (at most one hour), on {@link #clear}, when the app process
+ * ends, or as soon as that credential changes: sign-out, a new key or another account.
+ *
+ * Alpha Cloud cutover only: MainActivity registers this plugin only when
+ * CloudDeployment.ALPHA_CLOUD_CUTOVER is on, and every call refuses otherwise.
  *
  * Every request goes to this build's production Cloud API (CloudDeployment) on one of the fixed
  * routes in {@link BillingAuthorityRoutes}.
@@ -36,23 +40,22 @@ import org.json.JSONObject;
 public final class AlphaBillingAuthorityPlugin extends Plugin {
  private static final int RESPONSE_LIMIT = 256 * 1024;
  private final ExecutorService worker = Executors.newSingleThreadExecutor();
- private final Object lock = new Object();
- private String pendingEmail, pendingVerifier;
- private long pendingExpiresAt;
- private String session;
- private long sessionExpiresAt;
+ private final BillingAuthorityRoutes.Session session = new BillingAuthorityRoutes.Session();
 
  private static CloudSignInEnvironment environment() { return AlphaCloudSignInPlugin.REGISTRATION.environment("production"); }
 
- private JSObject status() {
-  synchronized (lock) {
-   if (session != null && System.currentTimeMillis() < sessionExpiresAt) return new JSObject().put("status", "authorized").put("expiresAt", sessionExpiresAt);
-   session = null;
-   return new JSObject().put("status", "required");
-  }
+ /** The account the phone is signed in to now, read from native storage on every call. */
+ private BillingAuthorityRoutes.Account signedIn() throws Exception {
+  return BillingAuthorityRoutes.Account.of(new AlphaCredentialStore(getContext()).readCredentialSlot("cloud:production"));
+ }
+
+ private JSObject status(BillingAuthorityRoutes.Account account) {
+  if (session.current(account, System.currentTimeMillis()) != null) return new JSObject().put("status", "authorized").put("expiresAt", session.expiresAt());
+  return new JSObject().put("status", "required");
  }
 
  private void run(PluginCall call, Task task) {
+  if (!CloudDeployment.ALPHA_CLOUD_CUTOVER) { call.reject("Not available", "unavailable"); return; }
   try {
    worker.submit(() -> {
     try { task.run(); }
@@ -64,10 +67,10 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
  }
  private interface Task { void run() throws Exception; }
 
- @PluginMethod public void status(PluginCall call) { call.resolve(status()); }
+ @PluginMethod public void status(PluginCall call) { run(call, () -> call.resolve(status(signedIn()))); }
 
  @PluginMethod public void clear(PluginCall call) {
-  synchronized (lock) { session = null; pendingEmail = null; pendingVerifier = null; }
+  session.clear();
   call.resolve();
  }
 
@@ -76,6 +79,8 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
   String email = call.getString("email");
   if (email == null || email.length() > 254 || !email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) { call.reject("Not accepted", "invalid"); return; }
   run(call, () -> {
+   BillingAuthorityRoutes.Account account = signedIn();
+   if (account == null) throw new SecurityException("Sign in first");
    byte[] random = new byte[48];
    new SecureRandom().nextBytes(random);
    String verifier = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
@@ -83,22 +88,25 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
    if (sent.status == 429) throw new SecurityException("Try again later");
    if (sent.status < 200 || sent.status >= 300) throw new SecurityException("Code not sent");
    long expiresAt = CloudEmailCode.expiresAt(sent.body.opt("expiresAt"), System.currentTimeMillis());
-   synchronized (lock) { pendingEmail = email; pendingVerifier = verifier; pendingExpiresAt = expiresAt; }
+   session.pending(account, email, verifier, expiresAt);
    call.resolve(new JSObject().put("expiresAt", expiresAt));
   });
  }
 
- /** Redeems the code, then requires the session's account to be the phone's (userId, organizationId). */
+ /**
+  * Redeems the code, then requires the session's account to be the one in the phone's stored Cloud
+  * credential. A user id the renderer passes must name that same account; it is never trusted alone.
+  */
  @PluginMethod public void verify(PluginCall call) {
-  String code = call.getString("code"), userId = call.getString("userId"), organizationId = call.getString("organizationId");
-  if (code == null || !code.matches("[0-9A-Za-z]{4,12}") || userId == null) { call.reject("Not accepted", "invalid"); return; }
+  String code = call.getString("code"), claimedUserId = call.getString("userId");
+  if (code == null || !code.matches("[0-9A-Za-z]{4,12}")) { call.reject("Not accepted", "invalid"); return; }
   run(call, () -> {
-   String email, verifier;
-   synchronized (lock) {
-    if (pendingEmail == null || System.currentTimeMillis() >= pendingExpiresAt) throw new SecurityException("Code expired");
-    email = pendingEmail; verifier = pendingVerifier;
-   }
-   Answer verified = post(CloudEmailCode.VERIFY_PATH, CloudEmailCode.verifyBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), email, code, verifier), null);
+   BillingAuthorityRoutes.Account account = signedIn();
+   if (account == null) { session.clear(); throw new SecurityException("Sign in first"); }
+   if (claimedUserId != null && !claimedUserId.equals(account.userId)) { session.clear(); throw new SecurityException("A different account"); }
+   String[] pending = session.pendingFor(account, System.currentTimeMillis());
+   if (pending == null) throw new SecurityException("Code expired");
+   Answer verified = post(CloudEmailCode.VERIFY_PATH, CloudEmailCode.verifyBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), pending[0], code, pending[1]), null);
    if (verified.status == 400 || verified.status == 401) throw new SecurityException("Wrong code");
    if (verified.status < 200 || verified.status >= 300) throw new SecurityException("Code not accepted");
    Object token = verified.body.opt("token");
@@ -107,12 +115,13 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
    long expiresAt = BillingAuthorityRoutes.sessionExpiry((String) token, System.currentTimeMillis());
    Answer user = request("GET", "/api/v1/user", null, (String) token);
    JSONObject data = user.body.optJSONObject("data");
-   if (user.status != 200 || !BillingAuthorityRoutes.sameAccount(data, userId, organizationId)) {
-    synchronized (lock) { session = null; }
+   if (user.status != 200 || !BillingAuthorityRoutes.sameAccount(data, account.userId, account.organizationId)) {
+    session.clear();
     throw new SecurityException("A different account");
    }
-   synchronized (lock) { session = (String) token; sessionExpiresAt = expiresAt; pendingEmail = null; pendingVerifier = null; }
-   call.resolve(status());
+   // The phone may have signed out or switched accounts while the code was checked.
+   if (!session.bind(signedIn(), account, (String) token, expiresAt)) throw new SecurityException("A different account");
+   call.resolve(status(account));
   });
  }
 
@@ -122,14 +131,11 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
   try { route = BillingAuthorityRoutes.route(new JSONObject(call.getData().toString())); }
   catch (Exception invalid) { call.reject("Not accepted", "invalid"); return; }
   run(call, () -> {
-   String token;
-   synchronized (lock) {
-    if (session == null || System.currentTimeMillis() >= sessionExpiresAt) { session = null; throw new SecurityException("Confirm it's you"); }
-    token = session;
-   }
+   String token = session.current(signedIn(), System.currentTimeMillis());
+   if (token == null) throw new SecurityException("Confirm it's you");
    Answer answer = request(route.method, route.path, route.body, token);
    // A refused session is spent: the owner confirms again rather than retrying with it.
-   if (answer.status == 401) synchronized (lock) { if (token.equals(session)) session = null; }
+   if (answer.status == 401) session.spent(token);
    call.resolve(new JSObject().put("status", answer.status).put("body", answer.body));
   });
  }
@@ -165,7 +171,7 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
  }
 
  @Override protected void handleOnDestroy() {
-  synchronized (lock) { session = null; pendingEmail = null; pendingVerifier = null; }
+  session.clear();
   worker.shutdownNow();
   super.handleOnDestroy();
  }
