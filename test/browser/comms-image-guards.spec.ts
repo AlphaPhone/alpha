@@ -90,7 +90,7 @@ test.describe('Alpha image: the installed executor refuses side effects during a
       await expect(review.getByRole('button', {name: /^Message Carmen .*555.*0103/})).toHaveCount(1);
       expect(await bridgeEffects(page)).toEqual([]);
     });
-    expect(dismissed).toBe('The owner dismissed the message. Nothing was sent.');
+    expect(dismissed).toBe('Message cancelled.');
     expect(await bridgeEffects(page)).toEqual([]);
     // Chosen: the same number goes to the native review.
     await reviewed(page, textCarmen, 'Carmen');
@@ -162,7 +162,7 @@ test.describe('Alpha image: a text to a number, a draft, and Contacts from chat 
     const draft = (number: string) => ({type: 'sms_compose', target: {kind: 'number', number}, body: 'See you at 7', draft: true});
     // Carmen's conversation exists: it is the one opened.
     let outcome = await execute(page, draft('+15550100103'), 'home');
-    expect(outcome).toEqual({result: {kind: 'sms-compose', status: 'drafted'}, summary: expect.stringContaining('Nothing was sent'), presents: true});
+    expect(outcome).toEqual({result: {kind: 'sms-compose', status: 'drafted'}, summary: 'Draft added to the conversation, not sent.', presents: true});
     await expect(page.locator('[data-alpha-messages-title]')).toHaveCount(0);
     await present(page);
     await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Carmen Ruiz');
@@ -192,7 +192,7 @@ test.describe('Alpha image: a text to a number, a draft, and Contacts from chat 
   test('showing a contact opens Contacts filtered to the matches and reports only that there was one', async ({page}) => {
     await installedExecutor(page);
     await shell(page, 'goHome');
-    expect(await execute(page, {type: 'contact_show', query: 'Zed'}, 'home')).toEqual({result: {kind: 'contact-show', status: 'not-found'}, summary: 'No matching contact was found on the phone.', presents: false});
+    expect(await execute(page, {type: 'contact_show', query: 'Zed'}, 'home')).toEqual({result: {kind: 'contact-show', status: 'not-found'}, summary: 'No matching contact was found.', presents: false});
     const outcome = await execute(page, {type: 'contact_show', query: 'Carmen'}, 'home');
     expect(outcome.result).toEqual({kind: 'contact-show', status: 'shown'});
     expect(JSON.stringify(outcome)).not.toMatch(/Ruiz|0103/);

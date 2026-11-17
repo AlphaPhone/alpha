@@ -163,7 +163,7 @@ test('a requested photo uses the named camera and words each failure',async({pag
  expect(outcome.changed).toEqual(['failed','The screen changed before the photo. Ask again.']);
  expect(outcome.cancelled).toEqual(['failed','Cancelled. No photo was taken.']);
  expect(outcome.before).toEqual(['capture']);
- expect(outcome.unswitched).toEqual(['failed','Couldn’t switch camera. No photo was taken.']);expect(outcome.after).toEqual(['switch']);
+ expect(outcome.unswitched).toEqual(['failed','Couldn’t switch camera, so no photo was taken.']);expect(outcome.after).toEqual(['switch']);
 
  // Camera access is refused: the request says so instead of "Camera unavailable".
  await page.getByRole('button',{name:'Back to apps',exact:true}).click();

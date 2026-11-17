@@ -404,6 +404,8 @@ public class MainActivity extends BridgeActivity {
   AlphaTelephonyRoles.sync(this);
   telephonyAdmitted = AlphaImageCapability.verified(this);
   if (telephonyAdmitted) registerPlugin(AlphaTelephonyPlugin.class);
+  // Owner issue 4: the live calls Alpha's InCallService holds, for the WebView's ongoing-call bar.
+  if (telephonyAdmitted) registerPlugin(AlphaOngoingCallPlugin.class);
   captureNavigationOpen(getIntent());
   captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());

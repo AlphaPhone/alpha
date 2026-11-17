@@ -1,7 +1,6 @@
 import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
-import {ownerReceiptText} from '../ui/telephony/telephony-receipt-text.ts';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
 type Message = Record<string, any>;
@@ -22,14 +21,14 @@ const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new br
 export function actionResultText(text: string): string {
   return text === 'The action could not reach a confirmed result.'
     || text === 'Action did not reach a confirmed result. Check action history before requesting it again.'
-    ? 'I couldn’t confirm the result. Check the app before trying again.' : ownerReceiptText(text);
+    ? 'I couldn’t confirm the result.' : text;
 }
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
   return `Created a browser tab for ${destination.host}.`;
 }
-/** What the owner reads after a reviewed Browser control ran. It stays on this phone. */
+/** The one-sentence completion of a reviewed Browser control: the owner reads it and the agent receives it. */
 export function browserControlSummary(operation: BrowserControlOperation): string {
   switch (operation.type) {
     case 'browser_search': return `Searching the web for “${operation.query}”.`;
@@ -101,6 +100,9 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (stored.card?.proposalId && stored.card.done) {
       const rawSummary = stored.card.sub;
       if (typeof rawSummary !== 'string' || !rawSummary.trim()) return message;
+      // AC-26: a comms proposal card shows its own result ("Done · Completed · summary"); it is the
+      // one completion, so its row shows no receipt line beside it.
+      if (stored.card.type === 'proposal') return {...message, hasCalendarText:false};
       const summary = actionResultText(rawSummary);
       const displayText = destination && stored.card.title === 'Completed' ? browserReceiptDisplayText(destination, summary) : summary;
       return {...message, cGeneric:false, cDigest:false, displayText, hasCalendarText:true, deviceReceipt:true};

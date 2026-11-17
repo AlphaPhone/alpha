@@ -77,7 +77,10 @@ function installHeaderClearance(): () => void {
     frame = 0;
     const screen = document.querySelector<HTMLElement>('[data-screen]');
     if (!screen || !screen.offsetWidth) return;
-    const box = screen.getBoundingClientRect(), scale = box.width / screen.offsetWidth || 1;
+    // Measured from the phone canvas top: notices fixed to the canvas read it, and the ongoing-call
+    // bar (runtime/ongoing-call.ts) moves the screen down inside the canvas while it shows.
+    const canvas = screen.parentElement?.classList.contains('alpha-phone') ? screen.parentElement : screen;
+    const box = canvas.getBoundingClientRect(), scale = box.width / canvas.offsetWidth || 1;
     const conversation = screen.querySelector<HTMLElement>('[data-alpha-layer="conversation"]:not([inert])');
     const fullChat = conversation && screen.dataset.alphaChatHalf !== 'true';
     const headers = Array.from((fullChat ? conversation : screen).querySelectorAll<HTMLElement>(fullChat ? '[data-alpha-chat-header]' : APP_HEADERS))

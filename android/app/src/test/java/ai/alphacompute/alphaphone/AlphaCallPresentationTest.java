@@ -350,4 +350,47 @@ public class AlphaCallPresentationTest {
             org.junit.Assert.assertEquals("On hold", notification.extras.getString(Notification.EXTRA_TEXT));
         } finally { owner.onDestroy(); }
     }
+
+    @Test public void theOngoingCallBarIsToldOnlyTheStatesTheOwnerSees() {
+        assertEquals("ringing", AlphaCallPresentation.ongoingState(Call.STATE_RINGING));
+        assertEquals("ringing", AlphaCallPresentation.ongoingState(Call.STATE_SIMULATED_RINGING));
+        org.junit.Assert.assertTrue(AlphaCallPresentation.ringing(Call.STATE_RINGING));
+        org.junit.Assert.assertTrue(AlphaCallPresentation.ringing(Call.STATE_SIMULATED_RINGING));
+        for (int state : new int[] {Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_ACTIVE, Call.STATE_HOLDING, Call.STATE_DISCONNECTING}) {
+            org.junit.Assert.assertFalse(AlphaCallPresentation.ringing(state));
+        }
+        for (int state : new int[] {Call.STATE_NEW, Call.STATE_SELECT_PHONE_ACCOUNT, Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_PULLING_CALL}) {
+            assertEquals("dialing", AlphaCallPresentation.ongoingState(state));
+        }
+        assertEquals("active", AlphaCallPresentation.ongoingState(Call.STATE_ACTIVE));
+        assertEquals("held", AlphaCallPresentation.ongoingState(Call.STATE_HOLDING));
+        org.junit.Assert.assertNull(AlphaCallPresentation.ongoingState(Call.STATE_DISCONNECTING));
+        org.junit.Assert.assertNull(AlphaCallPresentation.ongoingState(Call.STATE_DISCONNECTED));
+        org.junit.Assert.assertNull(AlphaCallPresentation.ongoingState(Call.STATE_AUDIO_PROCESSING));
+    }
+
+    @Test public void theOngoingCallBarReadsEachLiveCallWithoutWhoItIsWith() throws Exception {
+        AlphaInCallService owner = owner();
+        try {
+            org.junit.Assert.assertEquals("{\"calls\":[]}", AlphaOngoingCallPlugin.snapshot().toString());
+            Call active = activeCall(), ringing = activeCall(), ended = activeCall();
+            ReflectionHelpers.setField(ringing, "mState", Call.STATE_RINGING);
+            ReflectionHelpers.setField(ended, "mState", Call.STATE_DISCONNECTING);
+            owner.onCallAdded(active); owner.onCallAdded(ringing); owner.onCallAdded(ended);
+            java.util.List<String> ids = AlphaInCallService.callIds();
+            org.json.JSONArray calls = AlphaOngoingCallPlugin.snapshot().getJSONArray("calls");
+            // The ending call is not shown; the others are, oldest first, with no number or name.
+            assertEquals(2, calls.length());
+            org.json.JSONObject first = calls.getJSONObject(0), second = calls.getJSONObject(1);
+            assertEquals(ids.get(0), first.getString("id"));
+            assertEquals("active", first.getString("state"));
+            org.junit.Assert.assertTrue(first.isNull("connectedAt"));
+            assertEquals(3, first.length());
+            assertEquals(ids.get(1), second.getString("id"));
+            assertEquals("ringing", second.getString("state"));
+            // A call Telecom no longer has cannot be ended from the bar.
+            org.junit.Assert.assertFalse(AlphaOngoingCallPlugin.end("gone"));
+            org.junit.Assert.assertFalse(AlphaOngoingCallPlugin.end(null));
+        } finally { owner.onDestroy(); }
+    }
 }

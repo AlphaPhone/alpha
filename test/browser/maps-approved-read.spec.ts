@@ -146,7 +146,7 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
       await expect(page.getByRole('button',{name:/^Review unavailable/})).toBeDisabled();
       expect(await page.evaluate(()=>(window as any).recoveryFixture.claims)).toBe(0);
     } else {
-      await expect(page.getByText('Shared the exact selected Maps snapshot with approval. Navigation was not started.',{exact:true}).last()).toBeVisible();
+      await expect(page.getByText('Shared the selected Maps place.',{exact:true}).last()).toBeVisible();
       const result=await page.evaluate(()=>(window as any).mapsUploaded);
       expect(result.target).toEqual(sent.metadata.alphaPhone.context.selectedObject);
       expect(result.fields.kind).toBe(mode==='route'?'map-route':'map-place');

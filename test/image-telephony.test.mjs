@@ -209,13 +209,13 @@ test('a contact write asks for write access when it is missing, and without it n
   book = addressBook({writable: false, grants: false});
   await assert.rejects(I.imageContactPorts(book, () => {}).saveContact(draft), {code: 'permission-required'});
   assert.deepEqual(book.calls, ['status', 'requestPermissions']);
-  // Through the executor that refusal reads "nothing was changed", for a create, an update and a delete.
+  // Through the executor that refusal reads as Contacts unavailable, for a create, an update and a delete; nothing is written.
   const b = bridge(), guard = {allowed: async () => true};
   for (const operation of [operations.create, operations.remove, {type: 'contact_update', query: 'Ana', set: {displayName: 'Ana T'}}]) {
     book = addressBook({writable: false, grants: false});
     const result = await I.imageTelephonyAction(operation, 'op', {...b.ports, ...I.imageContactPorts(book, () => {}), getContact: b.ports.getContact}, guard, signal());
     assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status: 'unavailable'}, operation.type);
-    assert.match(result.summary, /Nothing was changed/); assert.equal(book.calls.some(call => Array.isArray(call)), false);
+    assert.equal(result.summary, 'Contacts are unavailable right now.'); assert.equal(book.calls.some(call => Array.isArray(call)), false);
   }
 });
 

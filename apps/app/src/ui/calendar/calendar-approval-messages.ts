@@ -23,24 +23,24 @@ export const CALENDAR_APPROVAL_INVALIDATED: ReadonlyMap<string, string> = new Ma
   ["CALENDAR_MANAGED_TARGET_CHANGED", `${NOT_MADE}: the event changed after you reviewed it.`],
   ["CALENDAR_SYNC_PRECONDITION", `${NOT_MADE}: the event changed after you reviewed it.`],
   ["CALENDAR_MANAGED_ACCOUNT_CHANGED", `${NOT_MADE}: the Calendar account changed.`],
-  ["CALENDAR_MANAGED_EDITOR_REQUIRED", `${NOT_MADE}. Review this event in Calendar instead.`],
-  ["CALENDAR_SYNC_REVIEW_REQUIRED", `${NOT_MADE}. Review this event in Calendar instead.`],
+  ["CALENDAR_MANAGED_EDITOR_REQUIRED", `${NOT_MADE}: this event needs review in Calendar.`],
+  ["CALENDAR_SYNC_REVIEW_REQUIRED", `${NOT_MADE}: this event needs review in Calendar.`],
   ["CALENDAR_MANAGED_WRITE_UNAVAILABLE", `${NOT_MADE}: Alpha couldn’t confirm it may edit this calendar.`],
 ]);
 
 /** Alpha's sentence for each code a blocked (unconfirmed) resolution names. */
 export const CALENDAR_APPROVAL_BLOCKED: ReadonlyMap<string, string> = new Map([
-  ["CALENDAR_REVIEW_IN_PROGRESS", "This Calendar change is still being made. Check Calendar again shortly."],
-  ["CALENDAR_REVIEW_UNCONFIRMED", "Calendar change is not confirmed. Check its saved status before trying again."],
+  ["CALENDAR_REVIEW_IN_PROGRESS", "This Calendar change is still being made."],
+  ["CALENDAR_REVIEW_UNCONFIRMED", "The Calendar change is not confirmed."],
 ]);
 
 /** Alpha's sentence for each outcome kind when the reply names nothing more specific. */
 export const CALENDAR_APPROVAL_FALLBACK: Readonly<Record<CalendarApprovalOutcomeKind, string>> = {
   succeeded: "Calendar change completed.",
-  rejected: `Declined. ${NOT_MADE}.`,
-  invalidated: `${NOT_MADE}. Review the current event.`,
-  retryable: `${NOT_MADE}. You can try again.`,
-  blocked: "Calendar change is not confirmed. Check its saved status before trying again.",
+  rejected: `Declined, so nothing changed in Calendar.`,
+  invalidated: `${NOT_MADE}.`,
+  retryable: `${NOT_MADE}.`,
+  blocked: "The Calendar change is not confirmed.",
 };
 
 const quoted = (title: string) => `“${title}”`;

@@ -8,6 +8,7 @@ import {Capacitor} from '@capacitor/core';
 import {registerPlugin} from './platform-plugins';
 import {aospImage} from './runtime/aosp-image';
 import {installCallStateWatch,type CallStatePlugin} from './runtime/call-state';
+import {installOngoingCallBar,type OngoingCallPlugin} from './runtime/ongoing-call';
 import {holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates} from './ui/state/app-update-gate';
 import {ownerReminderNotifications} from './runtime/owner-reminder-notification-port';
 import {installCalendarApprovalAdapter} from './prototype/calendar-approval-adapter';
@@ -184,6 +185,9 @@ installSubviewAccessibility(VIEWS);
 installCalendarMonthFocus(Component, VIEWS);
 installChatOverlayMotion(Component);
 installCommsAlpha(Component, VIEWS);
+// Owner issue 4: a call left in the background keeps a bar over every view: Telecom's calls on the
+// image, the development phone's simulated call elsewhere.
+installOngoingCallBar(Component,VIEWS,isAndroid&&aospImage&&!fixture?registerPlugin<OngoingCallPlugin>('AlphaOngoingCall'):null);
 installReplyAnnouncer(Component);
 installSystemShade(Component,{native:isAndroid});
 installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBars>('AlphaDevice'));

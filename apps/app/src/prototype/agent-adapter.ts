@@ -26,7 +26,7 @@ import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
-import {phoneDialResultText} from '../ui/telephony/telephony-receipt-text';
+import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
 import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
 import {normalizePhoneNumber} from '../runtime/aosp-telephony';
@@ -39,7 +39,6 @@ import {activeCommsSpec} from './comms-alpha';
 import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
-import {receiptLabel} from '../runtime/image-sms';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import {BrowserReviews} from '../browser/review';
 import type {ConversationMessageTarget} from '../runtime/alpha-client';
@@ -1030,7 +1029,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // The shared read words its result in its own English; Alpha's sentence replaces it.
         return {...result,summary:namedCalendarReadSummary(result)};
       }
-      if(operation.type!=='calendar_availability')return {status:'failed',summary:'This review is not available on this phone yet. Nothing was shared or changed.'};
+      if(operation.type!=='calendar_availability')return {status:'failed',summary:'This review is not available on this phone yet.'};
       const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
       const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||expectedContext.sensitive||!['home','calendar'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Availability review context changed');};
       return executeCalendarAvailability(registerPlugin<AvailabilityProvider>('AlphaCalendar'),operation,expectedContext.timeZone,signal,current,availabilityReview);
@@ -1050,7 +1049,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       signal.throwIfAborted(); context(this);
       if(operation.type==='notes_list_filter'){
         const declined={status:'failed' as const,summary:'Open the Notes list and review the filter again.'};
-        const unconfirmed={status:'unknown' as const,summary:'Could not confirm the filter. Check the Notes list.'};
+        const unconfirmed={status:'unknown' as const,summary:'Could not confirm the Notes filter.'};
         const reviewed=JSON.stringify(expectedContext),shell=this;
         const current=(state:Shell=shell.S(),notes:Shell=shell.vget('notes'))=>{
           const source=canonicalNotesListObservation(shell,state,notes);
@@ -1089,7 +1088,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(isPhoneDial(operation)){
         // Reviewed dial handoff on the verified image only: the system dial screen opens with the
         // approved number and the owner places the call there. Contact targets are not negotiated.
-        if(!aospImage||operation.target.kind!=='number'||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was dialed. Keep Alpha open and unlocked, then ask again.'};
+        if(!aospImage||operation.target.kind!=='number'||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was dialed because Alpha was not open and unlocked.'};
         const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
         const fence=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');};
         // AC-19: Telecom is read right before the dial screen opens, and the review fence runs again after it.
@@ -1102,7 +1101,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Owner-approved telephony on the verified image only. A contact is resolved here, on the
         // phone; the owner confirms the exact number or the before and after before anything
         // calls, sends or writes, and the agent receives only the outcome.
-        if(!aospImage||expectedContext.sensitive||document.hidden)return refuseTelephonyAction(operation,'Nothing was done. Keep Alpha open and unlocked, then ask again.');
+        if(!aospImage||expectedContext.sensitive||document.hidden)return refuseTelephonyAction(operation,'Nothing was done because Alpha was not open and unlocked.');
         const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true),book=registerPlugin<any>('AlphaContacts');
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
@@ -1130,23 +1129,23 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return imageTelephonyAction(operation,operationId,ports,{allowed:imageEffectAllowed},signal);
       }
       if(isSmsSend(operation)){
-        if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent. Open Messages, choose the SIM, then ask again.'};
+        if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent because no SIM was chosen in Messages.'};
         const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true);
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('SMS review context changed');};
         const status=await client.status();current();
         const selectedSim=status.subscriptions?.find(sim=>sim.id===operation.subscriptionId);
-        if(!selectedSim||expectedContext.selectedObject.revision!==smsSubscriptionRevision(selectedSim))return {status:'failed' as const,summary:'Nothing was sent because the SIM changed. Open Messages, choose the SIM, then ask again.'};
+        if(!selectedSim||expectedContext.selectedObject.revision!==smsSubscriptionRevision(selectedSim))return {status:'failed' as const,summary:'Nothing was sent because the SIM changed.'};
         const cancel=()=>{void plugin.cancelSmsReview({operationId}).catch(()=>{});};
         signal.addEventListener('abort',cancel,{once:true});
         try{
           // AC-19: Telecom is read right before the send, and the review fence runs again after it.
           const native=await imageSmsSend(()=>client.sendSms(operation,operationId),{allowed:imageEffectAllowed,fence:current});
-          if(!native)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:receiptLabel(smsResult.status)};}
+          if(!native)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:smsSendResultText(smsResult.status)};}
         finally{signal.removeEventListener('abort',cancel);}
       }
       if(isClockOperation(operation)){
-        if(Capacitor.getPlatform()!=='android'&&!browserDevProfile)return {status:'failed',summary:'Native Clock handoff is unavailable in browser development. No alarm request was sent.'};
+        if(Capacitor.getPlatform()!=='android'&&!browserDevProfile)return {status:'failed',summary:'Clock handoff is unavailable in browser development.'};
         assertClockTimeZone(operation,expectedContext.timeZone);signal.throwIfAborted();
         if(expectedContext.sensitive||document.hidden)throw Error('Return to Alpha Phone and review again');
         const clockSession=connectionController.getSnapshot().session;const clockEnrollment=JSON.stringify(connectionController.getWorkflowDeviceTarget());
@@ -1155,18 +1154,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!browserDevProfile&&!journalIdentity)throw Error('Exact approved Clock journal unavailable');
         const clockResult=validateClockResult(operation,result?{kind:'clock-handoff',action:result.action,status:result.status}:await reviewAgentClock(operation,operationId,journalIdentity!,signal,()=>{signal.throwIfAborted();context(this);if(!clockSession||connectionController.getSnapshot().session!==clockSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==clockEnrollment||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Clock review context changed');}));
         const status=clockResult.status==='opened'?'succeeded':clockResult.status==='unknown'?'unknown':'failed';
-        return {status,clockResult,summary:browserDevProfile&&clockResult.status==='opened'?result!.message:clockResult.status==='opened'?(operation.action==='dismiss'||operation.action==='snooze'?'Clock opened for manual completion. Choose the intended alarm in Clock; no snooze or dismissal was performed by Alpha.':'Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.'):clockResult.status==='unknown'?'Clock result is unknown. Check Clock before another request.':clockResult.status==='unavailable'?'No installed Clock app handles this request.':clockResult.status==='denied'?'Android did not allow this Clock request.':'Clock request was not sent. Review its time and the current phone state.'};
+        return {status,clockResult,summary:browserDevProfile&&clockResult.status==='opened'?result!.message:clockResult.status==='opened'?(operation.action==='dismiss'||operation.action==='snooze'?'Opened Clock to choose the alarm.':'Sent the request to Clock.'):clockResult.status==='unknown'?'The Clock result is unknown.':clockResult.status==='unavailable'?'No installed Clock app handles this request.':clockResult.status==='denied'?'Android did not allow this Clock request.':'The Clock request was not sent.'};
       }
       if(isMapsOperation(operation)){
         const mapsResult=readMapsSelection(operation);signal.throwIfAborted();context(this);
         if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Maps context changed');
-        return {status:'succeeded',summary:'Shared the exact selected Maps snapshot with approval. Navigation was not started.',mapsResult};
+        return {status:'succeeded',summary:'Shared the selected Maps place.',mapsResult};
       }
       if(isFilesOperation(operation)){
         // Files tools (PLAN section 4): filter/open only change what Files shows; every other
         // tool reached here after the owner approved its proposal card.
         const files=this.filesAgent as FilesAgentRunner|undefined;
-        if(!files||!filesContextAllowed(operation,expectedContext)||document.hidden)return {status:'failed',summary:'Open Files on the unlocked phone. Nothing was changed.'};
+        if(!files||!filesContextAllowed(operation,expectedContext)||document.hidden)return {status:'failed',summary:'Nothing was changed because Files was not open on the unlocked phone.'};
         signal.throwIfAborted();
         const session=connectionController.getSnapshot().session;
         const ownerCurrent=()=>activeShell===this&&this.live&&!document.hidden&&connectionController.getSnapshot().session===session;
@@ -1196,12 +1195,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(isPhotosViewOperation(photosView)){
         // photos_filter / photos_open run on the Photos grid; photos_album_create / photos_share open a review there.
         const library=deviceLibraryAgent();
-        if(!library||expectedContext.sensitive||expectedContext.view!=='photos'||document.hidden)return {status:'failed',summary:'Open Photos on the unlocked phone. Nothing was shared or changed.'};
+        if(!library||expectedContext.sensitive||expectedContext.view!=='photos'||document.hidden)return {status:'failed',summary:'Nothing was done because Photos was not open on the unlocked phone.'};
         let photosViewResult;
         try{photosViewResult=await library.runView(photosView,signal);}
         catch(failure){if(failure instanceof LibraryAgentRefusal)return {status:'failed',summary:failure.message};throw failure;}
         signal.throwIfAborted();context(this);
-        const summary=photosViewResult.kind==='photos_filter'?`Photos shows ${photosViewResult.shown}${photosViewResult.more?'+':''} ${photosViewResult.shown===1?'item':'items'}. Nothing was changed or shared.`:photosViewResult.kind==='photos_open'?(photosViewResult.opened?'Opened the item in Photos. Nothing was changed or shared.':'That item is not in Photos. Nothing was changed or shared.'):photosViewResult.kind==='photos_album_create'?'Opened the album review in Photos. Nothing changes until you confirm there.':'Opened the share review in Photos. Nothing is shared until you confirm there and pick an app.';
+        const summary=photosViewResult.kind==='photos_filter'?`Photos shows ${photosViewResult.shown}${photosViewResult.more?'+':''} ${photosViewResult.shown===1?'item':'items'}.`:photosViewResult.kind==='photos_open'?(photosViewResult.opened?'Opened the item in Photos.':'That item is not in Photos.'):photosViewResult.kind==='photos_album_create'?'Opened the album review in Photos.':'Opened the share review in Photos.';
         if(photosViewResult.kind==='photos_open'&&!photosViewResult.opened)return {status:'failed',summary};
         // photos-view-agent.patch widens photoLibraryResult to LibraryAgentResult|PhotosViewResult; until the
         // pin carries it the shared type names only the photo_library_* results (and never reaches here).
@@ -1211,14 +1210,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Device library (issue 408): reads stay local and return identity-only rows; select and
         // review act only on the owner-visible Photos > Device library, never directly on media.
         const library=deviceLibraryAgent();
-        if(!library||expectedContext.sensitive||expectedContext.view!=='photos'||document.hidden)return {status:'failed',summary:'Open Photos on the unlocked phone. Nothing was shared or changed.'};
+        if(!library||expectedContext.sensitive||expectedContext.view!=='photos'||document.hidden)return {status:'failed',summary:'Nothing was done because Photos was not open on the unlocked phone.'};
         let photoLibraryResult;
         try{photoLibraryResult=await library.run(operation,signal);}
         catch(failure){if(failure instanceof LibraryAgentRefusal)return {status:'failed',summary:failure.message};throw failure;}
         signal.throwIfAborted();context(this);
         // Selection deliberately changes the selected object; every other operation must leave the context as approved.
         if(operation.type!=='photo_library_select'&&JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Photos context changed');
-        const summary=photoLibraryResult.kind==='photo_library_search'?`Shared ${photoLibraryResult.items.length} library ${photoLibraryResult.items.length===1?'item':'items'} by id, kind, date and size in pixels. No names, location or pixels were shared.`:photoLibraryResult.kind==='photo_library_inspect'?'Shared one library item by id, kind, date and size in pixels. No name, location or pixels were shared.':photoLibraryResult.kind==='photo_library_select'?`Selected ${photoLibraryResult.selected} ${photoLibraryResult.selected===1?'item':'items'} in Photos.${photoLibraryResult.missing?` ${photoLibraryResult.missing} requested ${photoLibraryResult.missing===1?'item was':'items were'} not found.`:''} No media was changed or shared.`:'Opened the review in Photos. Nothing changes until you confirm there and in Android.';
+        const summary=photoLibraryResult.kind==='photo_library_search'?`Shared ${photoLibraryResult.items.length} library ${photoLibraryResult.items.length===1?'item':'items'} by id, kind, date and size only.`:photoLibraryResult.kind==='photo_library_inspect'?'Shared one library item by id, kind, date and size only.':photoLibraryResult.kind==='photo_library_select'?`Selected ${photoLibraryResult.selected} ${photoLibraryResult.selected===1?'item':'items'} in Photos${photoLibraryResult.missing?`, and ${photoLibraryResult.missing} requested ${photoLibraryResult.missing===1?'item was':'items were'} not found`:''}.`:'Opened the review in Photos.';
         return {status:photoLibraryResult.kind==='photo_library_select'&&photoLibraryResult.selected===0?'failed':'succeeded',summary,photoLibraryResult};
       }
       if(isCalendarOperation(operation)){
@@ -1226,21 +1225,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const calendar=registerPlugin<{executeAgent(input:{operation:unknown;operationId:string;journalIdentity?:{scope:string;proposalId:string}}):Promise<{status:string;result?:unknown}>;cancelAgent(input:{operationId:string}):Promise<unknown>}>('AlphaCalendar');
         const cancel=()=>{void calendar.cancelAgent({operationId}).catch(()=>{});};signal.addEventListener('abort',cancel,{once:true});
         let result:{status:string;result?:unknown};try{signal.throwIfAborted();result=await calendar.executeAgent({operation,operationId,journalIdentity});}finally{signal.removeEventListener('abort',cancel);}
-        if(result.status==='queued'){refreshDeletionViews();return {status:'unknown',summary:'Deletion queued with 10 seconds to Undo. Final outcome remains pending.'};}
+        if(result.status==='queued'){refreshDeletionViews();return {status:'unknown',summary:'Deletion queued with 10 seconds to Undo.'};}
         if(result.status==='applied'){
           const calendarResult=validateCalendarResult(operation,result.result);
           // Return the receipt immediately; DeviceActions must journal it before
           // the existing committed event refreshes native or browser rows.
           return {status:'succeeded',summary:calendarResult.kind==='calendar_read_next'?(calendarResult.event?`Shared ${calendarResult.event.timing==='ongoing'?'the ongoing all-day':'the next'} Calendar event “${calendarResult.event.title}”.`:`No events found from ${formatDeviceRecordDateTime(calendarResult.window.start,calendarResult.window.timeZone)} to ${formatDeviceRecordDateTime(calendarResult.window.end,calendarResult.window.timeZone)} (${calendarResult.window.timeZone}), the reviewed 30-local-day window.`):presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary,calendarResult};
         }
-        return {status:result.status==='unknown'?'unknown':'failed',summary:result.status==='unknown'?'Calendar outcome is unconfirmed. Inspect action history before another action.':result.status==='cancelled'?'Calendar review cancelled. Nothing was changed.':'Calendar target changed, access was denied, or the operation is unsupported. Nothing was changed.'};
+        return {status:result.status==='unknown'?'unknown':'failed',summary:result.status==='unknown'?'The Calendar outcome is unconfirmed.':result.status==='cancelled'?'Calendar review cancelled.':'Nothing was changed because the event changed, access was denied, or the change is unsupported.'};
       }
       if(isNativeNotesQuery(operation)){
         if(this.notesSourceMode!=='legacy'||this.notesStorageFailed||this.notesPending||!this.notesStore)return {status:'failed',summary:await previousNotesRefusalNow(this,'shared',signal)};
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||this.notesPending||this.notesStorageFailed||document.hidden||expectedContext.sensitive||!['home','notes'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes query or connection changed');};
         try{return await executeNotesQuery(this.notesStore,operation,operationId,signal,current);
-        }catch{return {status:'failed',summary:'Notes changed or sharing became unavailable. Review the query again; nothing was shared.'};}
+        }catch{return {status:'failed',summary:'Nothing was shared because Notes changed or sharing became unavailable.'};}
       }
       // The device operation union does not name the organisation proposals of the shared Notes organisation contract.
       const organize:unknown=operation;
@@ -1248,7 +1247,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Folders, the Previous notes list filter, Recently deleted restore and recording.
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||!notesOrganizeContextAllowed(expectedContext,organize)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Notes context changed');};
         try{return await executeNotesOrganize(notesOrganizeShellHost(this,{read:readNotesFolders,edit:editNotesFolders}),organize,current);}
-        catch{return {status:'failed',summary:'Notes changed or became unavailable. Nothing was changed.'};}
+        catch{return {status:'failed',summary:'Nothing was changed because Notes changed or became unavailable.'};}
       }
       if(isNotesOperation(operation)){
         try{
@@ -1282,45 +1281,45 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
             if(this.live){originalSet.call(this,'notes',{storageStatus:this.notesStorageFull?failedNotesStatus(this,false):this.notesCommitUncertain?'Save outcome unknown. Reopen the app to inspect saved notes; do not repeat.':'Notes storage needs recovery. Reopen the app to inspect saved notes before editing.'});context(this);}
           }
           // A full Trash refuses the write-ahead copy before the note is touched.
-          if(!uncertain&&operation.type==='notes_delete'&&isNotesTrashFull(error))return {status:'failed',summary:'Trash is full. Empty Trash in Notes, then review this deletion again. Nothing was deleted.'};
-          return {status:uncertain?'unknown':'failed',summary:uncertain?'Notes outcome is uncertain. Review history; do not repeat automatically.':notesActionFailureText(error)};
+          if(!uncertain&&operation.type==='notes_delete'&&isNotesTrashFull(error))return {status:'failed',summary:'Nothing was deleted because Trash is full.'};
+          return {status:uncertain?'unknown':'failed',summary:uncertain?'The Notes outcome is uncertain.':notesActionFailureText(error)};
         }finally{this.notesAgentBusy=false;}
       }
       if(operation.type==='read_calendar_range'&&agendaSource){
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive)throw Error('Calendar read context changed');};current();
         const calendar=registerPlugin<{readAgenda(input:unknown):Promise<{status:string;events:unknown[]}>}>('AlphaCalendar');
         const result=await calendar.readAgenda({operationId,source:agendaSource,operation});current();
-        if(result.status!=='ready')return {status:'failed',summary:'The local Calendar range was not shared. Permission, source or review changed; no empty result is implied.'};
+        if(result.status!=='ready')return {status:'failed',summary:'The Calendar range was not shared.'};
         const events=await Promise.all(result.events.map(async(event:any)=>({...event,revision:await workflowSha([event.id,event.calendarId,event.title,event.start,event.end,event.allDay])})));
         const readResult=await validateWorkflowResult(operation,{kind:'calendar',events});current();return {status:'succeeded',summary:`Read ${events.length} app Calendar events within the approved range.`,readResult};
       }
       if(operation.type==='read_selected_reminders'){
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='workflows'||expectedContext.selectedObject?.kind!=='workflow-run')throw new Error('Workflow read context changed');};current();
         const {reminders}=await DailyApps.listReminders();current();
-        try{const readResult=await workflowReminderRows(operation,reminders);current();return {status:'succeeded',summary:`Read ${readResult.reminders.length} reminders for ${operation.day}. The exact result is retained for this workflow receipt.`,readResult};}
+        try{const readResult=await workflowReminderRows(operation,reminders);current();return {status:'succeeded',summary:`Read ${readResult.reminders.length} reminders for ${operation.day}.`,readResult};}
         catch(error){if(error instanceof WorkflowReminderOverflow)return {status:'failed',summary:error.message};throw error;}
       }
       if(operation.type==='read_selected_notes'||operation.type==='read_calendar_range'){
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='workflows'||expectedContext.selectedObject?.kind!=='workflow-run')throw new Error('Workflow read context changed');};current();
         if(operation.type==='read_selected_notes'&&this.notesSourceMode==='canonical'){
           // The agent's Notes: each selected record must still hold the text the owner reviewed.
-          const notes=this.canonicalNotesUi;if(!notes?.current)return {status:'failed',summary:'Notes is unavailable. Review the selected notes again.'};
+          const notes=this.canonicalNotesUi;if(!notes?.current)return {status:'failed',summary:'Notes is unavailable.'};
           const rows=(notes.notes() as StickyNote[]).slice(),snapshot=[];
           const selectedText=()=>JSON.stringify(operation.notes.map(selected=>{const matches=(notes.notes() as StickyNote[]).filter(note=>note.id===selected.id);return matches.length===1?{id:selected.id,...projectNoteForModel(matches[0])}:null;}));
           const before=selectedText();
-          for(const selected of operation.notes){const matches=rows.filter(n=>n.id===selected.id);if(matches.length!==1)throw new Error('A selected note is missing');const {title,body}=projectNoteForModel(matches[0]);if(await workflowSha([title,body])!==selected.revision)return {status:'failed',summary:'A selected note changed. Review the workflow again.'};snapshot.push({id:selected.id,revision:selected.revision,title,text:body});}
+          for(const selected of operation.notes){const matches=rows.filter(n=>n.id===selected.id);if(matches.length!==1)throw new Error('A selected note is missing');const {title,body}=projectNoteForModel(matches[0]);if(await workflowSha([title,body])!==selected.revision)return {status:'failed',summary:'A selected note changed.'};snapshot.push({id:selected.id,revision:selected.revision,title,text:body});}
           const result=await validateWorkflowResult(operation,{kind:'notes',notes:snapshot});current();if(this.canonicalNotesUi!==notes||!notes.current||selectedText()!==before)throw new Error('Notes changed while preparing the approved read');
           return {status:'succeeded',summary:`Read ${snapshot.length} selected notes.`,readResult:result};
         }
         if(operation.type==='read_selected_notes'){
-          await this.notesStore?.assertCurrent();const raw=this.notesStore?.raw;if(this.notesStorageFailed||this.notesPending||raw!==this.notesRaw)return {status:'failed',summary:'Notes changed or storage is unavailable. Review the selected notes again.'};
+          await this.notesStore?.assertCurrent();const raw=this.notesStore?.raw;if(this.notesStorageFailed||this.notesPending||raw!==this.notesRaw)return {status:'failed',summary:'Notes changed or storage is unavailable.'};
           const source=this.vget('notes').list;const snapshot=operation.notes.map(selected=>{const matches=source.filter((n:Shell)=>n.id===selected.id);if(matches.length!==1||typeof matches[0].title!=='string'||typeof matches[0].body!=='string')throw new Error('A selected note is missing');return {id:selected.id,revision:selected.revision,title:matches[0].title,text:matches[0].body};});
           const result=await validateWorkflowResult(operation,{kind:'notes',notes:snapshot});current();await this.notesStore.assertCurrent();current();if(this.notesStore.raw!==raw)throw new Error('Notes changed while preparing the approved read');
-          return {status:'succeeded',summary:`Read ${snapshot.length} selected notes. The exact result is retained for this workflow receipt.`,readResult:result};
+          return {status:'succeeded',summary:`Read ${snapshot.length} selected notes.`,readResult:result};
         }
         const calendar=registerPlugin<{readWorkflowRange(input:{calendarIds:string[];start:string;end:string;timeZone:string;maximumEvents:number}):Promise<{status:string;events:Array<{id:string;calendarId:string;title:string;start:string;end:string;allDay:boolean}>}>}>('AlphaCalendar');
         const result=await calendar.readWorkflowRange({calendarIds:operation.calendarIds,start:operation.start,end:operation.end,timeZone:operation.timeZone,maximumEvents:operation.maximumEvents});current();
-        if(result.status!=='ready')return {status:'failed',summary:'Calendar read permission is unavailable. No calendar content was uploaded.'};
+        if(result.status!=='ready')return {status:'failed',summary:'Calendar read permission is unavailable.'};
         const events=await Promise.all(result.events.map(async event=>({...event,revision:await workflowSha([event.id,event.calendarId,event.title,event.start,event.end,event.allDay])})));
         const readResult=await validateWorkflowResult(operation,{kind:'calendar',events});current();return {status:'succeeded',summary:`Read ${events.length} events within the selected calendar range.`,readResult};
       }
@@ -1333,7 +1332,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           const result=await notices.postWorkflow({operationId,bindingHash,title:operation.title,body:operation.body,route:workflowRoute});
           signal.throwIfAborted();
           const status=result.status==='succeeded'?'succeeded':result.status==='failed'?'failed':'unknown';
-          return {status,summary:status==='succeeded'?'Posted the reviewed notification on this device.':status==='failed'?'Notification delivery is unavailable on this device.':'Notification outcome is unconfirmed. It will not be repeated automatically.'};
+          return {status,summary:status==='succeeded'?'Posted the reviewed notification on this device.':status==='failed'?'Notification delivery is unavailable on this device.':'The notification outcome is unconfirmed.'};
         }
         if(operation.type==='post_notification'){await publishWorkflowNotice(operationId,operation.body,signal,operation.title,bindingHash);return {status:'succeeded',summary:'Posted the reviewed notification in the browser Inbox.'};}
         const speechAbort=new AbortController(),stop=()=>speechAbort.abort();signal.addEventListener('abort',stop,{once:true});window.addEventListener('alpha:stop-workflow-speech',stop);
@@ -1344,8 +1343,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (operation.type === 'create_note') {
         if(this.notesSourceMode==='canonical'&&expectedContext.selectedObject?.kind==='workflow-run'){
           // The agent's Notes: a workflow's reviewed note becomes a canonical record, the Notes the owner sees.
-          const notes=this.canonicalNotesUi,unconfirmed={status:'unknown' as const,summary:'The note save is unconfirmed. Inspect saved notes before repeating.'};
-          if(!notes?.current||notes.pending)return {status:'failed',summary:'Notes isn’t ready. Nothing was saved.'};
+          const notes=this.canonicalNotesUi,unconfirmed={status:'unknown' as const,summary:'The note save is unconfirmed.'};
+          if(!notes?.current||notes.pending)return {status:'failed',summary:'Nothing was saved because Notes isn’t ready.'};
           try{
             // The saved record's identity reaches the Notes view; the shared create_note receipt carries no typed result.
             const created=await notes.createFromText(operation.title?operation.title+(operation.body?'\n'+operation.body:''):operation.body);
@@ -1354,17 +1353,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
         if (this.notesSourceMode!=='legacy'||this.notesStorageFailed) return { status: 'failed', summary: await previousNotesRefusalNow(this,'saved',signal) };
         const existing = this.vget('notes').list.find((note: Shell) => note.id === operationId);
-        if (existing) return { status: 'unknown', summary: 'A note already has this action identifier; review it before resolving.' };
+        if (existing) return { status: 'unknown', summary: 'A note already has this action identifier.' };
         const note = { id: operationId, kind: 'text', title: operation.title, body: operation.body, pinned: false, when: 'Now', createdAt:Date.now(), modifiedAt:Date.now() };
         const saved = await this.vset('notes', { list: [note, ...this.vget('notes').list] }, {keepSelection:true});
-        return { status: saved ? 'succeeded' : this.notesCommitUncertain?'unknown':'failed', summary: saved ? presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary : 'The note save is unconfirmed. Inspect saved notes before repeating.' };
+        return { status: saved ? 'succeeded' : this.notesCommitUncertain?'unknown':'failed', summary: saved ? presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary : 'The note save is unconfirmed.' };
       }
       if(isReminderCreate(operation)){
         const support=await DailyApps.surfaceInfo();signal.throwIfAborted();
         context(this);if(!this.live||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');
-        if(support.reminderCreationVersion!==1)return {status:'failed',summary:'This phone does not support reviewed reminder creation. Nothing was created.'};
+        if(support.reminderCreationVersion!==1)return {status:'failed',summary:'This phone does not support reviewed reminder creation.'};
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
-        if(result.status!=='succeeded')return {status:'unknown',summary:'Reminder creation outcome is unknown. Check action history; it will not be repeated.'};
+        if(result.status!=='succeeded')return {status:'unknown',summary:'The reminder creation outcome is unknown.'};
         const reminderResult=validateReminderCreateResult(operation,result.result,operationId);
         return {status:'succeeded',reminderResult,summary:reminderDeliveryProblemText('reminder_create',reminderResult.status)??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary};
       }
@@ -1372,28 +1371,28 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         signal.throwIfAborted();context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||document.hidden)throw Error('Reminder context changed');
         const target=await DailyApps.selectedReminder({id:operation.target.reminderId});signal.throwIfAborted();
         if(JSON.stringify(target)!==JSON.stringify(operation.target)) { // property order is normalized below
-          for(const key of ['sourceId','sourceRevision','reminderId','occurrenceId','revision','timingVersion'] as const)if(target[key]!==operation.target[key])return {status:'failed',summary:'This reminder changed. Review it again before applying the action.'};
+          for(const key of ['sourceId','sourceRevision','reminderId','occurrenceId','revision','timingVersion'] as const)if(target[key]!==operation.target[key])return {status:'failed',summary:'Nothing was changed because this reminder changed.'};
         }
         context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Reminder context changed');
         signal.throwIfAborted();
         if(operation.type==='reminder_cancel'){
           const queued=await deletions.reviewAgentReminder({operationId,bindingHash,operation,journalIdentity});
           if(queued.status==='queued')refreshDeletionViews();
-          if(reminderDeletionRefusal(queued.status))return {status:'failed',summary:'Deletion was not queued. Nothing changed.'};
-          return {status:queued.status==='cancelled'?'failed':'unknown',summary:queued.status==='queued'?'Deletion queued with 10 seconds to Undo. Final outcome remains pending.':queued.status==='cancelled'?'Deletion cancelled before admission.':'Deletion outcome requires review; it will not be repeated.'};
+          if(reminderDeletionRefusal(queued.status))return {status:'failed',summary:'Deletion was not queued.'};
+          return {status:queued.status==='cancelled'?'failed':'unknown',summary:queued.status==='queued'?'Deletion queued with 10 seconds to Undo.':queued.status==='cancelled'?'Deletion cancelled before admission.':'The deletion outcome is unconfirmed.'};
         }
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
         // Publish the new revision only after the receipt attempt; refreshing here
         // cancels this context-bound action before it can acknowledge the server.
-        if(result.status!=='succeeded')return {status:'unknown',summary:'Reminder outcome requires review. It was not repeated.'};
+        if(result.status!=='succeeded')return {status:'unknown',summary:'The reminder outcome is unconfirmed.'};
         const reminderResult=validateReminderResult(operation,result.result);
-        return {status:'succeeded',summary:reminderDeliveryProblemText(operation.type,reminderResult.status,{approximate:Capacitor.isNativePlatform()})??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary,reminderResult};
+        return {status:'succeeded',summary:reminderDeliveryProblemText(operation.type,reminderResult.status)??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary,reminderResult};
       }
       if (operation.type === 'create_reminder') {
         const at = Date.parse(operation.dueAt);
-        if (!Number.isSafeInteger(at) || at <= Date.now()) return { status: 'failed', summary: 'Reminder time has passed. Nothing scheduled.' };
+        if (!Number.isSafeInteger(at) || at <= Date.now()) return { status: 'failed', summary: 'Nothing was scheduled because the reminder time has passed.' };
         const result = await DailyApps.scheduleReminder({ id: operationId, title: operation.title, body: '', at });
-        if (result.status !== 'scheduled' || result.id !== operationId) return { status: 'failed', summary: 'Scheduling was not confirmed. Check notification settings and the reminder time.' };
+        if (result.status !== 'scheduled' || result.id !== operationId) return { status: 'failed', summary: 'Scheduling was not confirmed.' };
         // Publish the new revision only after the receipt attempt; refreshing here
         // cancels this context-bound action before it can acknowledge the server.
         return { status: 'succeeded', summary: presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary };
@@ -1405,7 +1404,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const browserControl=isBrowserControl(operation);
       if (!browserControl&&operation.type !== 'browser_navigate') return {status:'failed',summary:'This device operation is unavailable.'};
-      if (!this.browserNavigateApproved||!this.browserControl) return { status: 'failed', summary: 'Browser is unavailable. Nothing was done.' };
+      if (!this.browserNavigateApproved||!this.browserControl) return { status: 'failed', summary: 'Browser is unavailable, so nothing was done.' };
       const browserSession=connectionController.getSnapshot().session;
       // The tab the request was made from, when it was made in Browser: page history acts on that page only.
       const tab=expectedContext.view==='browser'?expectedContext.selectedObject:undefined,observed=tab?.kind==='browser-tab'&&tab.revision!==undefined?{id:tab.id,revision:tab.revision}:undefined;

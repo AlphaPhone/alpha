@@ -356,12 +356,17 @@ registerView("phone", {
     if (st.vmOpen) { if (st.playing) pnStop(api); api.set({ vmOpen: null, playing: null, vpos: 0 }); return true; }
     return false;
   },
-  /* calls and ringing keep going in the background: status-bar chip returns here. Its white text sits
-     on the text-safe call green (AC-28, 4.5:1). */
+  /* ringing keeps going in the background: status-bar chip returns here. Its white text sits on the
+     text-safe call green (AC-28, 4.5:1). A placed or answered call has the ongoing-call bar instead. */
   ongoing: function (st, api) {
     if (st.incoming) { var ip = pnWho(api, st.incoming); return { label: (st.ring === "screen" ? api.name + " · " : "Incoming · ") + (ip ? pnFirst(ip) : "Unknown"), icon: "phone", color: "var(--alpha-call-green-text)" }; }
-    if (st.callWho) return { label: st.liveAt ? (st.hold ? "Hold " : "") + pnClock((Date.now() - st.liveAt) / 1000) : "Calling…", icon: "phone", color: "var(--alpha-call-green-text)" };
     return null;
+  },
+  /* Owner issue 4: the call that keeps going while another view is in front, for the ongoing-call bar
+     (runtime/ongoing-call.ts). End is the call screen's own hang-up. */
+  callBar: function (st, api) {
+    if (!st.callWho) return null;
+    return { state: !st.liveAt ? "dialing" : st.hold ? "held" : "active", connectedAt: st.liveAt || null, end: function () { pnEnd(api); } };
   },
   onLeave: function (api) {
     var st = api.st;
@@ -482,7 +487,7 @@ registerView("phone", {
       target: { kind: "recents", app: "Phone", name: null, first: null, initials: null },
       closed: { kind: "filter", placeholder: "Call or ask", value: st.qBy === "alpha" ? "" : (st.q || ""), submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null,
         onText: function (text) { if (!text && api.get("phone").qBy === "alpha") return; api.set({ q: text, qBy: "owner", qLabel: "" }); } },
-      left: { icon: "keypad", label: "Back to the keypad", initials: null, run: function () { pnStop(api); api.set({ tab: "keypad", vmOpen: null, playing: null, vpos: 0 }); } },
+      left: null,
       context: "Phone", contextKey: "phone:recents:",
       strip: { title: "Phone", subtitle: "", initials: null, live: false, actions: [] },
       briefing: callsBriefing(missed, fresh, now)
@@ -801,7 +806,7 @@ function msgBar(st, api) {
       onText: function (text) { text = String(text); api.set({ filter: text.trim() ? { query: text, label: text.trim(), by: "owner" } : null }); },
       submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null
     },
-    left: { icon: "search", label: "Back to search", initials: null, run: null },
+    left: null,
     context: "Messages", contextKey: "messages:list:",
     strip: { title: "Messages", subtitle: "", initials: null, live: false, actions: [] },
     end: null, incoming: null, emergency: false, fit: null, briefing: null
@@ -810,7 +815,7 @@ function msgBar(st, api) {
 
 registerView("messages", {
   title: "Messages", icon: "bubble", aliases: ["texts", "sms", "text"],
-  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, tray: false, typing: null, q: "", filter: null, sentDraft: null, local: false, slide: null },
+  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, tray: false, typing: null, q: "", filter: null, searching: false, sentDraft: null, local: false, slide: null },
   persist: ["threads", "unread", "extra"],
   jumps: [[null, "Messages"], ["thread", "Thread"], ["new", "New message"]],
   preset: function (sub) {
@@ -822,6 +827,8 @@ registerView("messages", {
     if (st.tray) { api.set({ tray: false }); return true; }
     // Opened from this app's list: back to the list. Deep-linked (contacts, shade, chat, share): hand back to the shell's stack.
     if (st.thread || st.compose) { var u = Object.assign({}, st.unread); var tp = st.thread || st.compose; if (typeof tp === "string") delete u[tp]; api.set({ thread: null, compose: null, text: "", attach: null, q: "", unread: u }); return !!st.local; }
+    // Back closes the header search and the filter it typed, as in Inbox.
+    if (st.searching) { api.set({ searching: false, filter: null }); return true; }
     if (st.filter) { api.set({ filter: null }); return true; }
     return false;
   },
@@ -829,7 +836,7 @@ registerView("messages", {
     var st = api.st; var tp = msgOpen(st);
     var p = latchPatch(st, ["typing"]);
     if (tp) { var u = Object.assign({}, st.unread); delete u[tp]; p = Object.assign(p || {}, { unread: u }); }
-    if (st.filter || st.sentDraft) p = Object.assign(p || {}, { filter: null, sentDraft: null });
+    if (st.filter || st.sentDraft || st.searching) p = Object.assign(p || {}, { filter: null, sentDraft: null, searching: false });
     if (p) api.set(p);
   },
   suggestions: function (st, api) {
@@ -1036,6 +1043,14 @@ registerView("messages", {
       convos: convos, listStage: listStage,
       newMsg: function () { api.set({ compose: true, q: "", local: true }); },
       filterChip: fl && fl.by === "alpha" ? { label: fl.label, clearLabel: "Clear filter " + fl.label, clear: function () { api.set({ filter: null }); } } : null,
+      // Header search (the Inbox pattern): it types the same owner list filter as the bar (AC-22).
+      searching: !!st.searching, notSearching: !st.searching,
+      searchQ: fl && fl.by === "owner" ? fl.query : "",
+      openSearch: function () { api.set({ searching: true, filter: null }); focusSearchInput("messages-search-input"); },
+      closeSearch: function () { api.set({ searching: false, filter: null }); },
+      clearSearch: function () { api.set({ filter: null }); focusSearchInput("messages-search-input"); },
+      onSearch: function (e) { var text = String(e.target.value); api.set({ filter: text.trim() ? { query: text, label: text.trim(), by: "owner" } : null }); },
+      submitSearch: function (e) { e.preventDefault(); var input = e.currentTarget.querySelector("input"); if (input) input.blur(); },
       empty: convos.length === 0,
       emptyIcon: sq ? IC.search : IC.bubble, emptyText: sq ? "No results" : "No messages",
       inThread: !!th, t: th,
@@ -3632,6 +3647,12 @@ function ctFilterHandler(api) {
     current: function () { return ctFilterNow(api.get("contacts")); }
   };
 }
+/* Header search (Inbox pattern): focus the field once it is on screen, for a few frames at most. */
+function focusSearchInput(cls) {
+  var tries = 0;
+  var step = function () { var el = typeof document !== "undefined" && document.querySelector("." + cls); if (el) { el.focus(); return; } if (++tries < 5 && typeof requestAnimationFrame === "function") requestAnimationFrame(step); };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(step);
+}
 /* AP-16 bar (runtime/comms-bar.ts): on the list the bar searches it or asks Alpha; on a contact it
    asks Alpha about that person. Contacts never addresses a person from the bar. */
 function ctBar(st, api) {
@@ -3654,7 +3675,7 @@ function ctBar(st, api) {
     closed: Object.assign({}, field, { kind: "filter", placeholder: "Search or ask", value: st.chip ? "" : st.q || "",
       // Emptying the field keeps a filter Alpha applied; its chip clears it.
       onText: function (text) { if (!text && api.get("contacts").chip) return; applyListFilter("contacts", { query: text, label: text, by: "owner" }); } }),
-    left: { icon: "search", label: "Back to search", initials: null, run: null },
+    left: null,
     context: "Contacts", contextKey: "contacts:list:",
     strip: { title: "Contacts", subtitle: "", initials: null, live: false, actions: [] },
     briefing: null
@@ -3690,7 +3711,7 @@ function ctDeleted(api, p, idx) {
 
 registerView("contacts", {
   title: "Contacts", icon: "user", aliases: ["people", "address book"],
-  state: { list: CT_SEED, q: "", chip: null, open: null, edit: null, add: null, form: null },
+  state: { list: CT_SEED, q: "", chip: null, searching: false, open: null, edit: null, add: null, form: null },
   persist: ["list"],
   jumps: [[null, "Contacts"], ["detail", "Contact"], ["edit", "Edit contact"]],
   preset: function (sub) {
@@ -3701,6 +3722,8 @@ registerView("contacts", {
   back: function (st, api) {
     if (st.edit || st.add) { api.set({ edit: null, add: null, form: null, open: st.edit || st.open }); return true; }
     if (st.open) { api.set({ open: null }); return true; }
+    // Back closes the header search and the filter it typed, as in Inbox.
+    if (st.searching) { clearListFilter("contacts"); api.set({ searching: false }); return true; }
     if (st.q || st.chip) { clearListFilter("contacts"); return true; }
     return false;
   },
@@ -3828,6 +3851,13 @@ registerView("contacts", {
       filter: filter, listMark: listMark, favsLast: favs.length ? listMark : undefined,
       chip: st.chip && q ? { label: st.chip, count: hits.length, clearLabel: "Clear filter " + st.chip, clear: function () { clearListFilter("contacts"); } } : null,
       favs: favs, hasFavs: favs.length > 0, groups: groups, noHits: hits.length === 0 && !!q,
+      // Header search (the Inbox pattern): it types the same owner list filter as the bar (AC-22).
+      searching: !!st.searching, notSearching: !st.searching,
+      openSearch: function () { if (api.get("contacts").chip) clearListFilter("contacts"); api.set({ searching: true }); focusSearchInput("contacts-search-input"); },
+      closeSearch: function () { clearListFilter("contacts"); api.set({ searching: false }); },
+      clearSearch: function () { clearListFilter("contacts"); focusSearchInput("contacts-search-input"); },
+      onSearch: function (e) { applyListFilter("contacts", { query: String(e.target.value), label: String(e.target.value), by: "owner" }); },
+      submitSearch: function (e) { e.preventDefault(); var input = e.currentTarget.querySelector("input"); if (input) input.blur(); },
       addNew: function () { var s0 = api.get("contacts"); var qq = s0.chip ? "" : (s0.q || "").trim(); api.set({ add: !qq ? true : (/\d{3}/.test(qq) ? { phone: qq } : { first: qq.charAt(0).toUpperCase() + qq.slice(1) }), form: null, q: "", chip: null }); },
       detail: !!d, d: d,
       editing: editing,
@@ -6315,7 +6345,7 @@ class Component extends DCLogic {
     } : barTarget === "person" ? undefined : onKey;
     var barDictate = isOn && (barTarget === "filter" || barTarget === "person");
     var left = commsOpen ? spec.left : null;
-    var LEFT_ICONS = { call: IC.phone, search: IC.search, keypad: IC.dial };
+    var LEFT_ICONS = { call: IC.phone };
     var stageFrom = S.stageFrom || [];
     var stripSpec = comms ? spec.strip : null;
     var STRIP_ICONS = { mute: IC.phoneMute, end: IC.phone, send: IC.send, answer: IC.phone, decline: IC.phone };

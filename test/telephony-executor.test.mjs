@@ -106,7 +106,7 @@ test('a reply for the open conversation is placed as a draft and never sent', as
     assert.deepEqual(result.telephonyResult, {kind: 'sms-reply', status});
     assert.equal(result.status, status === 'drafted' ? 'succeeded' : 'failed');
     // AP-16 D5: an Alpha draft replaces unsent owner text (kept for one Undo); occupied now means a send or pictures.
-    if (status === 'occupied') assert.equal(result.summary, 'A message is being sent or has pictures attached in that conversation. Nothing was changed.');
+    if (status === 'occupied') assert.equal(result.summary, 'That conversation has a message sending or pictures attached.');
     assert.deepEqual(did(p, 'draft'), [['draft', 'Ten minutes away']], 'no recipient is named: it is the conversation on screen');
     assert.equal(did(p, 'sms').length + did(p, 'search').length + did(p, 'ask').length, 0, 'nothing is looked up, asked or sent');
   }
@@ -164,7 +164,7 @@ test('a new contact that repeats a name or number is added only after the owner 
     p = ports({ask: async () => null});
     result = await run(create(contact), p);
     assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status: 'cancelled'}); assert.equal(did(p, 'save').length, 0, 'Not now writes nothing');
-    assert.match(result.summary, /Nothing was changed/);
+    assert.equal(result.summary, 'Contact change cancelled.');
   }
   // A lookup that fails cannot rule a duplicate out: nothing is written.
   const p = ports({searchContacts: async () => { throw Error('Contacts closed'); }});
@@ -231,22 +231,22 @@ test('uncertain create, update and delete receipts stay unknown without repeatin
 });
 
 const coded = (message, code) => Object.assign(Error(message), {code});
-test('a call the phone refused before Telecom was asked is "nothing was called", never unknown', async () => {
+test('a call the phone refused before Telecom was asked reads as unavailable, never unknown', async () => {
   for (const code of ['role-required', 'permission-required', 'unavailable', 'invalid']) {
     const p = ports({placeCall: async number => { p.log.push(['call', number]); throw coded('refused', code); }});
     const result = await run({type: 'phone_call', target: {kind: 'contact', query: 'Priya'}}, p);
     assert.deepEqual(result.telephonyResult, {kind: 'phone-call', status: 'unavailable', contact: true}, code);
-    assert.equal(result.status, 'failed'); assert.match(result.summary, /Nothing was called/); assert.equal(did(p, 'call').length, 1, 'never retried');
+    assert.equal(result.status, 'failed'); assert.equal(result.summary, 'Calls are unavailable right now.'); assert.equal(did(p, 'call').length, 1, 'never retried');
   }
 });
-test('a contact write the phone refused before it touched the address book says nothing was changed', async () => {
+test('a contact write the phone refused before it touched the address book reads as its refusal, never unknown', async () => {
   const operations = [{type: 'contact_create', contact: {displayName: 'Ada', phoneNumbers: [], emailAddresses: []}}, {type: 'contact_update', query: 'Priya', set: {displayName: 'Ada'}}, {type: 'contact_delete', query: 'Priya'}];
   for (const operation of operations) {
     for (const [code, status] of [['permission-required', 'unavailable'], ['unavailable', 'unavailable'], ['invalid', 'failed'], ['not-found', operation.type === 'contact_create' ? 'failed' : 'not-found']]) {
       let writes = 0; const refuse = async () => { writes++; throw coded('refused', code); };
       const p = ports({saveContact: refuse, removeContact: refuse}); const result = await run(operation, p);
       assert.deepEqual(result.telephonyResult, {kind: 'contact-write', status}, `${operation.type} ${code}`);
-      assert.equal(result.status, 'failed'); assert.match(result.summary, /Nothing was changed/); assert.equal(writes, 1);
+      assert.equal(result.status, 'failed'); assert.equal(result.summary, {unavailable: 'Contacts are unavailable right now.', failed: 'The contact could not be saved.', 'not-found': 'No matching contact was found.'}[status]); assert.equal(writes, 1);
     }
   }
 });
@@ -273,8 +273,8 @@ test('an action refused before it ran carries the typed unavailable result of it
     contact_show: 'contact-show', contact_read_selected: 'contact-read',
     messages_read_selected: 'messages-read', voicemail_read_selected: 'voicemail-read', voicemail_delete_selected: 'voicemail-delete'};
   for (const [type, kind] of Object.entries(kinds)) {
-    const refused = refuseTelephonyAction({type}, 'Nothing was done. Keep Alpha open and unlocked, then ask again.');
-    assert.equal(refused.status, 'failed', type); assert.equal(refused.summary, 'Nothing was done. Keep Alpha open and unlocked, then ask again.');
+    const refused = refuseTelephonyAction({type}, 'Nothing was done because Alpha was not open and unlocked.');
+    assert.equal(refused.status, 'failed', type); assert.equal(refused.summary, 'Nothing was done because Alpha was not open and unlocked.');
     assert.deepEqual(refused.telephonyResult, kind === 'phone-call' ? {kind, status: 'unavailable', contact: false} : {kind, status: 'unavailable'});
   }
 });

@@ -33,6 +33,11 @@ export function installTelephonyFixture(options: TelephonyFixture = {}) {
     w.deviceCallState = {inCall: false, emergency: false, emergencyLive: false, watching: true};
     /** A call-state change, as Telephony reports it to AlphaDevice. */
     w.setDeviceCallState = (state: unknown) => { w.deviceCallState = state; for (const listener of callStateListeners) listener(state); };
+    /* Telecom's live calls as AlphaOngoingCall reports them (TelecomCallService); none by default. */
+    const ongoingListeners: ((data: unknown) => void)[] = [];
+    w.ongoingCalls = [];
+    w.ongoingCallInputs = [];
+    w.setOngoingCalls = (calls: unknown) => { w.ongoingCalls = calls; for (const listener of ongoingListeners) listener({calls}); };
     w.smsProviderChanged = () => {
       for (const listener of messageListeners.values()) {
         if (listener.eventName === 'messagesChanged') listener.callback({});
@@ -121,15 +126,16 @@ export function installTelephonyFixture(options: TelephonyFixture = {}) {
       let binary = ''; for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
       return {mimeType: 'audio/wav', sampleRateHz: 16000, durationSeconds: seconds, data: btoa(binary)};
     };
-    const names = ['ElizaSense', 'AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaCallState', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
+    const names = ['ElizaSense', 'AlphaContacts', 'DailyApps', 'AlphaBrowser', 'AlphaConnection', 'AlphaDevice', 'AlphaCallState', 'AlphaOngoingCall', 'AlphaLocalAgent', 'AlphaHostedResults', 'AlphaVoiceCloud', 'AlphaNotifications', 'ElizaSystem', 'AlphaCalendar', 'AlphaNoteDocuments', 'AlphaNoteAudio', 'AlphaFiles', 'AlphaPhotos', 'DeviceApps', 'ElizaLocation', 'AlphaActionJournal', 'AlphaTelephony', 'Agent'];
     const methods = ['present', 'turnOff', 'addListener', 'removeListener', 'surfaceInfo', 'readPending', 'readPendingResult', 'readDelegationCallback', 'readSecret', 'secureRead', 'secureWrite', 'secureRemove', 'secureCompareExchange', 'get', 'save', 'remove', 'status', 'getStatus', 'getState', 'state', 'permissionState', 'permissions', 'list', 'listCalendars', 'listEvents', 'listReminders', 'listBookmarks', 'getBookmarks', 'bookmarks', 'settings', 'getSettings', 'buildInfo', 'platformCapabilities', 'capabilities', 'query', 'read', 'readJournal', 'getPending', 'readSelection', 'requestPermissions', 'create', 'edit',
       'imageCapability', 'requestAccess', 'requestRole', 'searchContacts', 'listRecentCalls', 'dial', 'placeCall', 'composeSms', 'listThreads', 'listMessages', 'observeMessages', 'markThreadRead', 'sendSms', 'cancelSmsReview', 'smsSendHistory', 'smsSendResult',
       'smsNoticePending', 'acknowledgeSmsNotice', 'mmsSendResult', 'deleteMessage',
-      'contactForNumber', 'voicemailStatus', 'listVoicemail', 'fetchVoicemailAudio', 'voicemailAudio', 'voicemailPcm', 'markVoicemailHeard', 'deleteVoicemail', 'observeVoicemail', 'callState', 'answerCall', 'endCall', 'setCallAudio', 'observeCalls', 'sendCallTone', 'setGoogleAgentAccess', 'phoneInfo', 'openSettings'];
+      'contactForNumber', 'voicemailStatus', 'listVoicemail', 'fetchVoicemailAudio', 'voicemailAudio', 'voicemailPcm', 'markVoicemailHeard', 'deleteVoicemail', 'observeVoicemail', 'callState', 'answerCall', 'endCall', 'setCallAudio', 'observeCalls', 'sendCallTone', 'ongoingCall', 'showCall', 'setGoogleAgentAccess', 'phoneInfo', 'openSettings'];
     w.Capacitor = {Plugins: {}, PluginHeaders: names.filter(name => !options.preview || name !== 'AlphaBrowser').map(name => ({name, methods: methods.map(name => ({name, rtype: name === 'addListener' ? 'callback' : 'promise'}))})), nativeCallback: (plugin: string, method: string, input: any, callback: (data: unknown) => void) => {
       const id = String(++listenerSequence);
       if (plugin === 'AlphaTelephony' && method === 'addListener') messageListeners.set(id, {eventName: input.eventName, callback});
       if (plugin === 'AlphaCallState' && method === 'addListener' && input.eventName === 'callState') callStateListeners.push(callback);
+      if (plugin === 'AlphaOngoingCall' && method === 'addListener' && input.eventName === 'ongoingCall') ongoingListeners.push(callback);
       return id;
     }, nativePromise: async (plugin: string, method: string, input: any) => {
       if(plugin==='ElizaSense'&&(method==='status'||method==='turnOff'))return {available:true,state:'OFF',label:'Listening off',consented:false,listening:false,microphoneOpen:false,...(method==='turnOff'?{saved:true}:{})};
@@ -137,6 +143,18 @@ export function installTelephonyFixture(options: TelephonyFixture = {}) {
       if(plugin==='AlphaBrowser'&&method==='bookmarks')return {urls:[]};
       // AC-19: Telecom's call state as the AlphaCallState plugin reports it; none by default.
       if (plugin === 'AlphaCallState' && method === 'callState') return w.deviceCallState;
+      if (plugin === 'AlphaOngoingCall') {
+        if (method !== 'removeListener') w.ongoingCallInputs.push([method, input]);
+        if (method === 'ongoingCall') return {calls: w.ongoingCalls};
+        if (method === 'showCall') return {shown: (w.ongoingCalls || []).some((call: any) => call.id === input.id)};
+        if (method === 'endCall') {
+          // Telecom removes the ended call; the plugin then reports the remaining calls.
+          const known = (w.ongoingCalls || []).some((call: any) => call.id === input.id);
+          if (known) setTimeout(() => w.setOngoingCalls(w.ongoingCalls.filter((call: any) => call.id !== input.id)), 0);
+          return {ended: known};
+        }
+        return {};
+      }
       if (plugin === 'AlphaTelephony') {
         w.telephonyCalls.push(method); w.telephonyInputs.push([method, input]);
         if (w.telephonyAnswers?.[method]) return w.telephonyAnswers[method](input);

@@ -290,30 +290,29 @@ test('every shared Notes refusal on the approved change path is worded by Alpha'
  for(const sentence of sentences){const text=notes.notesActionFailureText(new Error(sentence));assert.notEqual(text,sentence,sentence);assert.notEqual(text,notes.NOTES_ACTION_FAILED,'unmapped: '+sentence);}
  for(const key of notes.NOTES_ACTION_REFUSALS.keys())assert.ok(sentences.includes(key),'not upstream: '+key);
  const PINNED={
-  'Selected note revision changed':'That note was edited after you reviewed it. Nothing was changed.',
-  'Selected note changed':'That note changed after you reviewed it. Nothing was changed.',
-  'Notes changed before the approved operation':'Notes changed before your approved change could run. Nothing was changed.',
-  'Selected note is missing':'That note is no longer in Notes. Nothing was changed.',
-  'readback mismatch':'Notes couldn’t confirm the saved change. Reopen Notes to check it.',
-  'Deletion already recorded':'This deletion is already in Recently deleted. Nothing more was changed.',
-  'A note with this identity already exists':'A note with the same identity is already in Notes. Nothing was changed.',
+  'Selected note revision changed':'Nothing was changed because the note was edited after you reviewed it.',
+  'Selected note changed':'Nothing was changed because the note changed after you reviewed it.',
+  'Notes changed before the approved operation':'Nothing was changed because Notes changed before your approved change could run.',
+  'Selected note is missing':'That note is no longer in Notes.',
+  'readback mismatch':'Notes couldn’t confirm the saved change.',
+  'Deletion already recorded':'This deletion is already in Recently deleted.',
+  'A note with this identity already exists':'Nothing was changed because a note with the same identity is already in Notes.',
  };
  for(const [upstream,alpha] of Object.entries(PINNED))assert.equal(notes.notesActionFailureText(new Error(upstream)),alpha);
- assert.equal(notes.notesActionFailureText(new Error('Previous notes isn’t ready. Nothing was changed.')),'Previous notes isn’t ready. Nothing was changed.');
+ assert.equal(notes.notesActionFailureText(new Error('Previous notes isn’t ready, so nothing was changed.')),'Previous notes isn’t ready, so nothing was changed.');
  assert.equal(notes.notesActionFailureText(new DOMException('This operation was aborted','AbortError')),notes.NOTES_ACTION_FAILED);
  assert.equal(notes.notesActionFailureText(new Error('Invalid Notes envelope')),notes.NOTES_ACTION_FAILED);
  const adapter=source('apps/app/src/prototype/agent-adapter.ts');
  assert.match(adapter,/:notesActionFailureText\(error\)\};/);
- assert.doesNotMatch(adapter,/'Notes outcome is uncertain\. Review history; do not repeat automatically\.':\(error as Error\)\.message/);
+ assert.doesNotMatch(adapter,/'The Notes outcome is uncertain\.':\(error as Error\)\.message/);
 });
 
 // An agent request for Previous notes that cannot run: the phone says there are none only when the
 // presence read proved it. A request reviewed on Home, before Notes read it, is not told so.
 test('a refused Previous notes request claims no earlier notes only when their absence is proven',()=>{
- const choose='Open Notes options, choose On this phone, then ask again. ';
- assert.equal(notes.previousNotesRefusal('canonical','absent','shared'),'There are no earlier notes on this phone. Nothing was shared.');
- for(const availability of [null,'present','unavailable'])assert.equal(notes.previousNotesRefusal('canonical',availability,'shared'),choose+'Nothing was shared.',String(availability));
- for(const availability of [null,'present','absent','unavailable'])assert.equal(notes.previousNotesRefusal('legacy',availability,'saved'),'Previous notes isn’t ready. Nothing was saved.',String(availability));
+ assert.equal(notes.previousNotesRefusal('canonical','absent','shared'),'There are no earlier notes on this phone, so nothing was shared.');
+ for(const availability of [null,'present','unavailable'])assert.equal(notes.previousNotesRefusal('canonical',availability,'shared'),'Nothing was shared because Notes is not set to On this phone.',String(availability));
+ for(const availability of [null,'present','absent','unavailable'])assert.equal(notes.previousNotesRefusal('legacy',availability,'saved'),'Previous notes isn’t ready, so nothing was saved.',String(availability));
  // The approved-change path shows each of these as written.
  for(const [source,availability] of [['legacy',null],['canonical','absent'],['canonical',null]]){const text=notes.previousNotesRefusal(source,availability,'changed');assert.equal(notes.notesActionFailureText(new Error(text)),text);}
 });
