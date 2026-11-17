@@ -693,6 +693,15 @@ test('failed native provider binding reports unconfirmed inference and exposes t
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
 
 
+test('Code can close and reopen without closing the account or sending its text',async({page})=>{
+ await boot(page,{...await entitlements(),plan:'active',holdProvider:false});await idle(page);await openAccountPlan(page);
+ await page.getByRole('button',{name:'Use code',exact:true}).click();
+ const input=page.getByRole('textbox',{name:'Membership code'});await input.fill('SYNTHETIC');
+ await page.getByRole('button',{name:'Close code',exact:true}).click();await expect(input).toHaveCount(0);await expect(accountPanel(page)).toBeVisible();
+ await page.getByRole('button',{name:'Use code',exact:true}).click();await expect(input).toHaveValue('SYNTHETIC');
+ expect((await calls(page)).filter(c=>c.path==='/api/v1/subscription/redeem')).toHaveLength(0);
+});
+
 test.describe('explicit membership code entry',()=>{
  async function notice(page:Page){
   await boot(page,{...await entitlements(),plan:'none',holdProvider:false});await started(page);await idle(page);

@@ -39,9 +39,9 @@ const dateLabel=(at:number)=>new Date(at).toLocaleDateString(undefined,{year:'nu
  * Stripe's page, opened from here and returning here; plan changes and cancellation first confirm
  * the account with a one-time email code (native billing authority).
  */
-export function CloudPlanManager({account,authority,serviceName,onChanged,onPaymentOpened}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void;
+export function CloudPlanManager({account,authority,serviceName,onChanged,onPaymentOpened,accountRevision}:{account:PlanAccount;authority:BillingAuthorityPort;serviceName:string;onChanged:()=>void;
  /** A Stripe page opened: the app's next return checks the plan even before Cloud confirms it. */
- onPaymentOpened?:()=>void}){
+ onPaymentOpened?:()=>void;accountRevision?:string}){
  const [plans,setPlans]=useState<PlanOffer[]|null>(null);
  const [subscription,setSubscription]=useState<SubscriptionState|null|undefined>(undefined);
  const [referral,setReferral]=useState<ReferralState|null>(null);
@@ -92,6 +92,7 @@ export function CloudPlanManager({account,authority,serviceName,onChanged,onPaym
   document.addEventListener('visibilitychange',returned);
   return ()=>{document.removeEventListener('visibilitychange',returned);live.current?.abort();live.current=null;};
  },[act,confirmPending,load,credential]);
+ useEffect(()=>{if(!accountRevision||live.current)return;const controller=new AbortController();void load(controller.signal).catch(()=>{if(!controller.signal.aborted)setError('Couldn’t refresh your plan.');});return()=>controller.abort();},[accountRevision,load]);
 
  /** Plan changes and cancellation: with an account session, or after confirming one. */
  const withAuthority=useCallback(async(operation:BillingOperation,signal:AbortSignal):Promise<{status:number;body:unknown}|null>=>{
