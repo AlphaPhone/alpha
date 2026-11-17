@@ -18,6 +18,7 @@ for begins.
 
 ```quint
 import read as R from "../../kit/read"
+import extend as X from "./extend"
 
 type Search = { open: bool, words: str, hits: R::Read, asked: int, shown: int, more: bool }
 
@@ -28,13 +29,12 @@ pure val pageSize = 20
 
 ### What search needs done outside comes back as an answer naming its ticket
 
-A page of hits for the words, from a position, and a hit opened.
+A page of hits for the words, from a position, and a hit opened in its
+conversation around its message.
 
 ```quint
-type Effect = Find({ words: str, from: int, ticket: int }) | Open({ hit: int })
+type Effect = Find({ words: str, from: int, ticket: int }) | Open({ conversation: int, message: int })
 type Moved = { state: Search, out: List[Effect] }
-
-pure def dropped(r: R::Read): R::Read = { ...r, status: R::Idle }
 
 pure def finding(words: str, from: int, s: Search): Moved =
   val hits = R::ask(s.hits)
@@ -49,6 +49,8 @@ pure val ticketValues = Set(1, 2, 3, 4)
 pure val countValues = Set(0, 3, 20)
 pure val hitValues = Set(1, 4, 25)
 pure val wordsValues = Set("", "lunch", "flight")
+pure val conversationValues = Set(1, 2)
+pure val messageValues = Set(1, 3)
 pure val weight_found = 4
 ```
 
@@ -57,7 +59,7 @@ pure val weight_found = 4
 ```quint
 pure def canOpenSearch(s: Search): bool = not(s.open)
 
-pure def openSearch(s: Search): Search = { ...s, open: true, words: "", hits: dropped(s.hits), asked: 0, shown: 0, more: false }
+pure def openSearch(s: Search): Search = { ...closeSearch(s), open: true, words: "", asked: 0 }
 ```
 
 ### Words are searched from the first hit, and empty words are not searched
@@ -88,21 +90,34 @@ pure def found(s: Search, ticket: int, ok: bool, count: int, further: bool): Sea
   { ...s, hits: R::answer(s.hits, ok), shown: if (ok) s.asked + count else s.shown, more: ok and further and count == pageSize }
 ```
 
-### Opening a hit closes search and opens it in its conversation
+### Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free
+
+The hit's conversation and message come with the page that showed it. A
+hit in the conversation showing always opens; one in another conversation
+waits, with search open, until no turn is in flight and the composer holds
+nothing, as [chats](./chats.md) require.
 
 ```quint
-pure def canOpenHit(s: Search, hit: int): bool = s.open and 1 <= hit and hit <= s.shown
+pure def canOpenHit(s: Search, hit: int, conversation: int, message: int, here: bool, replying: bool, holding: bool): bool =
+  s.open and 1 <= hit and hit <= s.shown and conversation >= 1 and message >= 1
+    and (here or (not(replying) and not(holding)))
 
-pure def openHit(s: Search, hit: int): Moved =
-  { state: { ...s, open: false, hits: dropped(s.hits), shown: 0, more: false }, out: List(Open({ hit: hit })) }
+pure def openHit(s: Search, hit: int, conversation: int, message: int, here: bool, replying: bool, holding: bool): Moved =
+  { state: closeSearch(s), out: List(Open({ conversation: conversation, message: message })) }
 ```
 
-### Closing search, or another owner or session, leaves its asking behind
+### Closing search leaves its asking behind
 
 ```quint
 pure def canCloseSearch(s: Search): bool = s.open
 
-pure def closeSearch(s: Search): Search = { ...s, open: false, hits: dropped(s.hits), shown: 0, more: false }
+pure def closeSearch(s: Search): Search = { ...s, open: false, hits: X::dropped(s.hits), shown: 0, more: false }
+```
+
+### Another owner or agent session leaves search behind, words and hits
+
+```quint
+pure def switchSession(s: Search): Search = { ...closeSearch(s), words: "", asked: 0 }
 ```
 
 ### Hits are shown only while search is open, and only for an answer that came
@@ -133,7 +148,9 @@ pure def stepAPageAddsToTheHitsBeforeIt(before: Search, via: str, after: Search)
 ```quint
 pure def stepALeftAskingIsNeverAnswered(before: Search, via: str, after: Search): bool =
   after.hits.ticket >= before.hits.ticket
-    and ((via == "closeSearch" or via == "openHit" or via == "openSearch") implies after.hits.status == R::Idle)
+    and ((via == "closeSearch" or via == "openHit" or via == "openSearch" or via == "switchSession")
+      implies (after.hits.status == R::Idle and after.shown == 0))
+    and (via == "switchSession" implies (not(after.open) and after.words == ""))
 ```
 
 ### Empty words are never searched
