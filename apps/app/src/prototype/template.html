@@ -557,7 +557,7 @@
    </div>
   </sc-if>
   <sc-if value="{{messages.showNewButton}}">
-   <button data-alpha-messages-new aria-label="New message" onClick="{{messages.compose}}" style="position:absolute;right:12px;width:44px;height:44px;border-radius:22px;background:var(--fg);color:var(--bg);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="{{ic.edit}}"></path></svg></button>
+   <button data-alpha-messages-new aria-label="New message" onClick="{{messages.compose}}" style="position:absolute;right:12px;width:44px;height:44px;background:transparent;color:var(--fg);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="{{ic.edit}}"></path></svg></button>
   </sc-if>
   <sc-if value="{{messages.readFailed}}"><p role="status" style="margin:8px 16px">{{messages.nativeStatus}} <button onClick="{{messages.nativeRefresh}}" style="min-height:44px;text-decoration:underline">Retry</button></p></sc-if>
   <sc-if value="{{messages.showList}}">

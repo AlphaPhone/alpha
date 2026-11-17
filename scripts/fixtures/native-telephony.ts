@@ -171,6 +171,20 @@ export function installTelephonyFixture(options: TelephonyFixture = {}) {
         }
         if (method === 'markThreadRead') { w.readThreads = [...(w.readThreads || []), input.threadId]; return {status: 'marked'}; }
         if (method === 'composeSms') return {status: 'handed-off', target: 'sms', handler: 'com.android.messaging', message: 'Your messaging app is open with the draft.'};
+        if(options.preview&&(method==='sendSms'||method==='sendComposedSms')){
+          const {body,recipients,subscriptionId,operationId}=input;
+          if(sendResults.has(operationId))return sendResults.get(operationId);
+          const bytes=new TextEncoder().encode(JSON.stringify({body,recipients,subscriptionId,type:'sms_send'}));
+          const digest=await crypto.subtle.digest('SHA-256',bytes);
+          const bindingHash=[...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+          const createdAt=Date.now(),existing=threads().find((row:any)=>row.addresses.length===recipients.length&&row.addresses.every((address:string)=>recipients.includes(address)));
+          const threadId=existing?.id||`thread:${createdAt}`;
+          const row={...message(createdAt,threadId,false,0,body,recipients[0]),date:createdAt,subscriptionId,addresses:recipients};
+          w.messages[threadId]=[...(w.messages[threadId]||[]),row];
+          const result={kind:'sms-send',operationId,subscriptionId,bindingHash,status:'sent',parts:[{index:0,recipientIndex:0,partIndex:0,sent:'success',delivery:'unknown'}],createdAt};
+          sendResults.set(operationId,result);
+          return result;
+        }
         if ((method === 'sendSms' || method === 'sendComposedSms') && options.controlledSms) {
           const {body, recipients, subscriptionId, operationId} = input;
           const createdAt = Date.now();
