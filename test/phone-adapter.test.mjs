@@ -82,7 +82,8 @@ test('a handoff result from a showing of Phone that ended is dropped and leaves 
  releases[1]();await settle();model=views.phone.render({},{});assert.match(model.nativeNotice,/phone app is open/);assert.equal(model.nativeBusy,false);
 });
 test('an emergency number, a busy line and a refusal say what happened and place nothing more',async()=>{
- for(const [answer,text] of [[{status:'emergency-handoff',message:'Emergency numbers open in the phone app.'},/phone app/],[{status:'busy',message:'Another call is in progress.'},/in progress/],[{status:'unavailable',message:'Calls are unavailable.'},/unavailable/]]){
+ // Telephony's own sentences (TelephonyPlugin.placeCall), worded by Alpha (ui/telephony/telephony-messages.ts).
+ for(const [answer,text] of [[{status:'emergency-handoff',message:'The dial screen is open with this number. Place the call there.'},/^The dial screen is open with this number; place the call there\.$/],[{status:'busy',message:'A call is already in progress. Nothing was dialed.'},/in progress/],[{status:'unavailable',message:'This phone cannot place calls.'},/^This phone can’t place calls\.$/],[{status:'unavailable',message:'A new upstream sentence'},/^Calls aren’t available right now\. Nothing was dialed\.$/]]){
   const {views,calls}=mount({status:status('granted'),listRecentCalls:{calls:[call]},placeCall:answer});await settle();
   views.phone.render({},{}).nativeRows[0].dial();await settle();assert.match(views.phone.render({},{}).nativeNotice,text);assert.equal(calls.filter(([m])=>m==='placeCall').length,1);
  }

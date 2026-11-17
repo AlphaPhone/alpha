@@ -11,6 +11,7 @@ import {formatDateTime,formatMonthDay,formatTime} from './locale-time';
 import {displayNumber,initials,numberKey,shortWhen,threadTitle} from './telephony-presenters';
 import {createSmsRecipientPicker} from './sms-recipient-picker';
 import {askedDraftPlaced,canSuggest,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,suggestionDismissed,suggestionReplied,suggestionRequested,threadChanged,typed,type DraftState} from '../runtime/message-draft';
+import {handoffResultText,sendRefusalText} from '../ui/telephony/telephony-messages';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 /** The open thread's visible tail, handed to the reply suggester and to the agent's selected-thread read. */
 export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
@@ -452,8 +453,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(status.roles?.sms?.held===false)outgoing.delete(id);
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision){const code=(error as {code?:string})?.code,message=error instanceof Error?error.message:'';
   if(operationId)outgoing.delete(operationId);
-  if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';smsReview=null;notice=message;retainDraft();}else if(operationId&&code==='expired'&&message)notice=message;
-  else notice=operationId?'May have sent':message||'Couldn’t open';}}finally{if(token===lifecycle){busy=false;bubbleSent=null;changed();if(operationId)void reconcile(operationId);}}
+  if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';smsReview=null;notice=sendRefusalText(error,'Not sent');retainDraft();}else if(operationId&&code==='expired'&&message)notice=sendRefusalText(error,'Not sent');
+  else notice=operationId?'May have sent':sendRefusalText(error,'Couldn’t open');}}finally{if(token===lifecycle){busy=false;bubbleSent=null;changed();if(operationId)void reconcile(operationId);}}
   if(sentTo)noteSent(sentTo);}
  function confirmMms(id:string,review:MmsReview,status:'submitted'|'sent'){
   finished(status);
@@ -496,7 +497,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   else if(result.status==='submitted'||result.status==='sent'){confirmMms(id,review,result.status);if(from){bubbleSent={by:from.by,text:from.text};sentTo=from.title;}}
   else finished(result.status);
   await session.refresh();
- }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':error instanceof Error?error.message:'Couldn’t open';}
+ }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':sendRefusalText(error,'Couldn’t open');}
  finally{if(token===lifecycle){busy=false;bubbleSent=null;changed();if(mmsOperationId&&dispatched)void reconcileMms(mmsOperationId);}}
   if(sentTo)noteSent(sentTo);}
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
@@ -512,7 +513,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   /* The messaging app chooses the SIM, so a handoff never carries one. */
   const status=session.state.status;if(!status){notice='Refresh needed';return;}
   const checked=reviewSms({recipients:draftRecipients(),body},status,'handoff');if('problem' in checked){notice=smsProblemLabel(checked.problem,'handoff',false,body.length);return;}
-  const result=await client.composeSms(checked.review);if(active&&token===lifecycle&&draft===draftRevision)notice=result.message;}catch{if(active&&token===lifecycle)notice='Couldn’t open';}finally{if(token===lifecycle){busy=false;changed();}}}
+  const result=await client.composeSms(checked.review);if(active&&token===lifecycle&&draft===draftRevision)notice=handoffResultText(result);}catch{if(active&&token===lifecycle)notice='Couldn’t open';}finally{if(token===lifecycle){busy=false;changed();}}}
  const changeDraft=(mutate:()=>void)=>{
   if(!editable())return;
   mutate();draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;retainDraft();changed();

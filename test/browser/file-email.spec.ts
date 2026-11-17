@@ -62,7 +62,7 @@ for(const change of ['account','bytes','revoke'])test(`file attachment review re
   }else await files.delete({id:row.id,expectedRevision:row.revision,confirmPermanent:true});
  },change);
  await dialog(page).getByRole('button',{name:'Attach',exact:true}).click();
- await expect(dialog(page).getByRole('status')).toContainText(/changed|unavailable|Select (a valid|this file)/);
+ await expect(dialog(page).getByRole('status')).toContainText(/changed|no longer available/);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 test('the same selected bytes cannot be attached twice',async({page})=>{

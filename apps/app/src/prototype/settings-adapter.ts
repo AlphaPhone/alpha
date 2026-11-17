@@ -35,10 +35,10 @@ import { imageSenseAvailable, listenerStatus, openListenerSettings, pauseListene
 import type { DataResetPlugin } from '@elizaos/capacitor-system/reset';
 import { parseRoleStatuses } from '@elizaos/capacitor-system/settings';
 import { reviewDataReset } from '../ui/settings/data-reset.ts';
-import { androidRoleLabel } from '../ui/settings/system-settings.ts';
+import { androidRoleLabel, listenerStateText, notificationHistoryState } from '../ui/settings/system-settings.ts';
 import {createAppUpdateScheduler} from '../ui/state/app-update-gate';
 import { leavePasswordEntry, leavePasswordManager, passwordEntryPage, passwordManagerGroups, passwordManagerLifecycle, refreshPasswordManager, PASSWORD_PAGES } from '../passwords/password-manager';
-import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
+import {ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
 type PhotoAccess = {scope:'full'|'partial'|'selected'|'denied';images:string;videos:string};
@@ -82,7 +82,6 @@ async function loadLicenses(changed: () => void) {
   changed();
 }
 /** Native reset results that only echo the owner's own cancel (DataResetCopy); nothing else is hidden. */
-const RESET_CANCEL_TEXTS = new Set(['Reset review closed. Nothing reset.', 'Nothing reset.', 'Reset cancelled. Nothing reset.']);
 type RecoveryDomain = 'notifications' | 'device settings' | 'device roles' | 'alert sound history';
 const recoveryActions: Record<RecoveryDomain, { label: string; open: () => void }> = {
   notifications: { label: 'Recover notification data', open: openNotificationRecovery },
@@ -854,7 +853,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       if (!listener.available) return [...recovery, settingsRow];
       const status = listener;
       const on = status.microphoneOpen || status.listening || (!!status.consented && status.state !== 'OFF');
-      const label = status.state === 'OFF' && (status.microphoneOpen || status.listening) ? 'Microphone still open' : status.label;
+      const label = status.state === 'OFF' && (status.microphoneOpen || status.listening) ? 'Microphone still open' : listenerStateText(status.state);
       // One Listening switch: off goes through the listener; on (and resume) only in its own consent screen.
       return [
         ...recovery,
@@ -1062,9 +1061,10 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         }
         if(native)page.groups.push(group([{kNav:true,label:'Erase all data',lbl:'Reset Alpha data',labCss:'color:#d93025',lucide:'trash-2',chev:true,noAB:true,go:async()=>{
           // Native review (ui/settings/data-reset.ts): only cancelled or unavailable reach here.
-          // A plain cancel needs no toast; an expired review or missing authentication still says so.
+          // A plain cancel needs no toast; an expired review or missing authentication still says so,
+          // in Alpha's words (the native sentence is never shown).
           const result=await reviewDataReset(registerPlugin<DataResetPlugin>('AlphaReset'));
-          if(result.status!=='cancelled'||!RESET_CANCEL_TEXTS.has(result.message))api.toast(errorNotice(result.message,'Reset isn’t available right now. Nothing was erased.'),ERROR_TOAST);
+          if(result.notice)api.toast(result.notice,ERROR_TOAST);
         }}]));
         if(developerTools)page.groups.push(group([{kNav:true,label:'Try mock mode',lbl:'Try mock mode',chev:true,noAB:true,go:()=>connectionController.mock()}]));
         if(developerTools&&recovery.length)page.groups.push(group([info('Saved data needs recovery','Back up before resetting'),...recovery.map(name=>({kNav:true,label:recoveryActions[name].label,lbl:recoveryActions[name].label,chev:true,noAB:true,go:()=>recoveryActions[name].open()}))]));
@@ -1172,7 +1172,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
             if(Capacitor.isNativePlatform()&&!cross.history&&!await review('notification-history','Keep notification history?','100 events · 24 h · no text','Turn on',()=>cross.revision===policyRevision))return;
             policy({history:!cross.history});
           },{hasSub:true,sub:cross.historyUnavailable?'Unavailable':'24 h · no message text',hasBadge:history!==null&&history.length>0,badge:history?String(history.length):''}),{...custom('View',()=>{if(notificationBusy)return;notificationBusy=true;const current=owner;void notifications.notificationHistory().then(result=>{if(owner===current){history=result.items;owner?.vset('settings',{notificationChanged:Date.now()});}}).catch(()=>api.toast('Unavailable')).finally(()=>{notificationBusy=false;});}),lbl:'View local metadata history'},{...custom('Clear',async()=>{if(await review('notification-clear-history','Clear notification history?','Can’t be undone.','Clear',()=>cross.revision===policyRevision))void run(async()=>{await notifications.clearNotificationHistory();history=[];});}),lbl:'Clear local metadata history',lucide:'trash-2',chev:false});
-          if(history!==null){if(!history.length)crossRows.push(info('History','None'));for(const row of history)crossRows.push(info(row.appLabel,`${row.state} · ${new Date(row.at).toLocaleString()}`,`notice:${row.id??JSON.stringify([row.packageName,row.at,row.state])}`));}
+          if(history!==null){if(!history.length)crossRows.push(info('History','None'));for(const row of history)crossRows.push(info(row.appLabel,`${notificationHistoryState(row.state)} · ${new Date(row.at).toLocaleString()}`,`notice:${row.id??JSON.stringify([row.packageName,row.at,row.state])}`));}
         }
         const alerts=topValues.Notifications;
         page.groups = [group(Capacitor.isNativePlatform()?[{...info('Alpha notifications',alerts),hasDot:alerts!=='Unavailable',dot:alerts==='On'?'ok':alerts==='Some off'?'warn':'off'},info('Do Not Disturb',interruptionLabels[delivery.interruption]||'Not available'),nav('Notifications','notifications','Manage Alpha notifications')]:[{kTog:true,label:'Alerts',aria:'Allow alerts',on:delivery.appEnabled===true,track:delivery.appEnabled?'background:var(--acc)':'background:var(--line)',kx:delivery.appEnabled?20:0,toggle:()=>void run(async()=>{await notifications.setAlertPreferences({appEnabled:delivery.appEnabled!==true});})}]),

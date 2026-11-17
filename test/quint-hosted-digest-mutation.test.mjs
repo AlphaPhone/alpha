@@ -15,7 +15,8 @@ const notices = new Map([
   ['Source not saved. Retry to clear it.', 'clearRefused'],
   ['Schedule not saved. Couldn’t clear this request.', 'scheduleClearRefused'],
   ['Schedule changed before saving. Review it again.', 'scheduleRejected'],
-  ['Source access changed before saving. Refresh accounts and review the source again.', 'sourceRejected'],
+  // HostedSourceRejected reads as Alpha's HOSTED_SOURCE_REJECTED_TEXT, never the staged client's sentence.
+  ['Your access to this source changed before it was saved. Refresh your accounts and review the source again.', 'sourceRejected'],
   ['Discarded', 'discarded'],
   ['Couldn’t discard', 'discardRefused'],
 ]);

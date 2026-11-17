@@ -8,7 +8,7 @@ import {readScanDraft,saveScanDraft,deleteScanDraft} from '../browser/scan-draft
 import {captureScanPage,type ScanPageCamera} from './scan-page-camera';
 import {inputFiles,runFilePicker} from '../browser/file-picker';
 import {scanExportTitle,exportScanPdf,ScanPdfExportError,duringSystemPicker,systemPickerActive} from './scan-pdf';
-import {scanPdfErrorText} from '../ui/documents/scan-pdf-messages';
+import {scanDraftErrorText,scanPdfErrorText} from '../ui/documents/scan-pdf-messages';
 // The document state (page rules, order, one operation at a time, export snapshots, compare-and-set
 // autosave) is Alpha's scan compose state; this file presents it in Alpha's dialog. The image types
 // and limits are the shared camera plugin's.
@@ -51,7 +51,7 @@ export function openScanDocument(first?:Blob,pageCamera?:ScanPageCamera):()=>voi
  const doc=createScanDocument<Blob,ScanTextLine[]>({
   drafts:{save:saveScanDraft,read:readScanDraft,remove:deleteScanDraft},autosave:native,
   changed:()=>{if(!closed)render();},
-  autosaveFailed:error=>{if(!closed)status.textContent=error instanceof Error?error.message:'Draft not saved';},
+  autosaveFailed:error=>{if(!closed)status.textContent=scanDraftErrorText(error,'Draft not saved');},
  });
  const render=()=>{
   if(closed)return;release();list.replaceChildren();
@@ -67,7 +67,7 @@ export function openScanDocument(first?:Blob,pageCamera?:ScanPageCamera):()=>voi
   if(stored&&stored===draftRevision)stored=undefined;notice.hidden=!stored;
   description.textContent=pages.length?`${pages.length}/${SCAN_LIMITS.pages} pages`:'No pages';
  };
- const failed=(error:unknown,fallback:string)=>{if(!closed)status.textContent=error instanceof Error?error.message:fallback;};
+ const failed=(error:unknown,fallback:string)=>{if(!closed)status.textContent=scanDraftErrorText(error,fallback);};
  const correctPage=(index:number)=>doc.run(async signal=>{
   try{const page=doc.pages()[index];const corrected=await reviewScanCorrection(page.image,signal);signal.throwIfAborted();if(!corrected)return;
    if(doc.pages().reduce((total,p,i)=>total+(i===index?0:p.image.size),0)+corrected.size>SCAN_LIMITS.documentBytes)throw Error('Corrected document exceeds 64 MB.');

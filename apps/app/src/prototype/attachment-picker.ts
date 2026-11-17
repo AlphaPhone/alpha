@@ -8,7 +8,8 @@ import {compareFilesEntries} from './files-index';
 import {intakeAttachmentFiles} from '../ui/utils/image-attachment.ts';
 import type {FilesStoragePort} from '../ui/files/files-browser-adapter.ts';
 import {parentOf,type StorageEntry,type StorageVolume} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts';
-import {formatSize} from '../ui/files/storage-presentation.ts';
+import {formatSize,storageResultText} from '../ui/files/storage-presentation.ts';
+import {photosErrorText} from '../ui/photos/photos-messages.ts';
 import {
   CHAT_IMAGE_MIME_TYPE_SET,CHAT_UPLOAD_MIME_TYPES,MAX_CHAT_ATTACHMENT_NAME_LENGTH,
   MAX_CHAT_IMAGE_INTAKE_BYTES,MAX_CHAT_MEDIA_RAW_BYTES,
@@ -147,7 +148,7 @@ export class ChatAttachmentPicker {
           ?await this.storage.storageQuery({text:this.query,...(this.path?{folder:this.path}:{}),...(this.volume?{volume:this.volume}:{})})
           :await this.storage.storageList({path:this.path,...(this.volume?{volume:this.volume}:{})});
         if(!current())return;
-        if(result.status!=='ready'){if(result.status==='denied'){this.fileAccess=true;this.rows=[];return;}throw Error(result.message||'This folder could not open. Try again.');}
+        if(result.status!=='ready'){if(result.status==='denied'){this.fileAccess=true;this.rows=[];return;}throw Error(storageResultText(result,'This folder could not open. Try again.'));}
         this.truncated='truncated' in result&&result.truncated===true;
         const matches=(result.entries||[]).filter(entry=>!this.query||!this.volume||this.volume==='primary'||entry.name.toLocaleLowerCase().includes(this.query.toLocaleLowerCase()));
         this.rows=matches.sort(compareFilesEntries('recent')).map(entry=>({
@@ -157,7 +158,8 @@ export class ChatAttachmentPicker {
         this.next='';
       }
     } catch(error) {
-      if(current()){this.error=error instanceof Error?error.message:'Files could not load. Try again.';this.rows=[];}
+      // The Photos bridge answers in its own words; Alpha words each sentence, and an unknown one reads as the fallback.
+      if(current()){this.error=this.tab==='photos'?photosErrorText(error,'Photos could not load. Try again.'):error instanceof Error?error.message:'Files could not load. Try again.';this.rows=[];}
     } finally {if(current()){this.loading=false;this.changed();}}
   }
   private switchTab(tab:'photos'|'files'):void {
@@ -212,7 +214,7 @@ export class ChatAttachmentPicker {
     }
     if(!row.reviewed)throw Error('This file changed. Select it again.');
     const value=await this.storage.storageReadAttachment({path:row.entry.path,reviewed:row.reviewed,...(row.volume?{volume:row.volume}:{})});
-    if(!('dataBase64' in value))throw Error(value.message||'This file could not be read. Select it again.');
+    if(!('dataBase64' in value))throw Error(storageResultText(value,'This file could not be read. Select it again.'));
     const file=decodedFile(value);
     if(file.name!==row.name||file.type!==row.mimeType||file.size!==row.size)throw Error('This file changed. Select it again.');
     return file;
@@ -231,7 +233,7 @@ export class ChatAttachmentPicker {
       }
       (document.activeElement as HTMLElement|null)?.blur();this.finish(chosen);
     } catch(error) {
-      if(this.active(epoch)){this.error=error instanceof Error?error.message:'The selection could not be read. Try again.';}
+      if(this.active(epoch)){this.error=photosErrorText(error,'The selection could not be read. Try again.');}
     } finally {if(this.active(epoch)){this.reading=false;this.changed();}}
   }
   private async fromComputer():Promise<void> {

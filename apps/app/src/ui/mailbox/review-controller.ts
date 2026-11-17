@@ -36,6 +36,7 @@ import type {
   GmailMailboxAction,
 } from "@elizaos/plugin-inbox/mailbox/types";
 import { classifyGmailFailure, type GmailFailureKind } from "./failures";
+import { mailOperationText } from "./mail-operation-messages";
 import { reviewBindingRefusal } from "./review-binding-refusal";
 
 // biome-ignore lint/suspicious/noExplicitAny: proposals and reviews are validated JSON from the journal.
@@ -396,14 +397,13 @@ export function createMailReviewController(
             : classifyGmailFailure(error, "operation");
           failure = classified?.kind || null;
           // A protocol error's own message names only the transport
-          // ("Cloud http (400)"); a plain client error carries a reviewed sentence.
+          // ("Cloud http (400)"); a plain journal refusal is worded by Alpha
+          // (mail-operation-messages.ts), and any other error reads as unavailable.
           status =
             classified &&
             (classified.kind !== "unavailable" || protocolFailure(error))
               ? classified.message
-              : error instanceof Error
-                ? error.message
-                : "Mail operation unavailable";
+              : mailOperationText(error, "Mail operation unavailable");
         }
         toast(status);
       }
@@ -534,10 +534,10 @@ export function createMailReviewController(
       if (token === epoch && owned === operation && owned) await owned.load();
     } catch (error) {
       if (token === epoch)
-        status =
-          error instanceof Error
-            ? error.message
-            : "The unsent review could not be discarded.";
+        status = mailOperationText(
+          error,
+          "The unsent review could not be discarded.",
+        );
     } finally {
       if (token === epoch) {
         busy = false;

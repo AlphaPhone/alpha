@@ -7,6 +7,7 @@ import { reviewMailAttachment } from './inbox-attachment.ts';
 import type { OpaqueMailAttachment } from './inbox-operation.ts';
 import { gmailCapabilitiesFor, gmailConsentCapabilities, type GmailGrantRequest } from './gmail-grants.ts';
 import { ManagedGmailMailboxClient } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/managed-gmail-client.ts';
+import { withGmailAccountLabel } from '../ui/mailbox/grants.ts';
 import type { GmailAccount, GmailDraftContent, GmailDraftSummary, GmailInboxCapabilities, GmailInboxReceipt, GmailReadResult, GmailSearchPage, GmailThreadPage, GoogleConnection } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
 import type { CloudMapsRoute } from '../maps/cloud-provider.ts';
 import {mapsTilePath} from './managed-service-routes.ts';
@@ -583,7 +584,8 @@ export class CloudProtocol {
     });
     return this.gmailClient;
   }
-  gmailAccounts(signal: AbortSignal): Promise<GmailAccount[]> { return this.gmail.gmailAccounts(signal); }
+  /** A connection with no email or name is labelled by Alpha, never by the shared client's fallback. */
+  async gmailAccounts(signal: AbortSignal): Promise<GmailAccount[]> { return (await this.gmail.gmailAccounts(signal)).map(withGmailAccountLabel); }
   /** One search page. `mailboxHistoryId` is the Gmail mailbox revision read before the page was listed
    * (elizaOS/eliza#35908); two pages of one search with different values came from a changed mailbox.
    * Older Cloud servers omit it. */

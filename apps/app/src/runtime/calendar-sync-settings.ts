@@ -4,6 +4,7 @@ import { saveGoogleCalendarSelection } from "./google-calendar-selection";
 import { googleCalendarAccountKey } from "./google-connection-ui";
 import { holdPhoneInert } from "./modal-inert";
 import type { CalendarSyncReview } from "./calendar-sync-host";
+import { calendarSyncFailureMessage } from "../ui/calendar/sync-host";
 /** Explicit destination review. Opening Settings does not enable sync or dispatch provider writes. */
 export type CanonicalCalendarSyncSettings={calendar:AgentCalendar;current():boolean;canChange():boolean};
 /** Presentation only: a published icon, a status dot (always beside a word) and a plain switch row. */
@@ -172,7 +173,8 @@ export function openCalendarSyncSettings(canonical?:CanonicalCalendarSyncSetting
 	sync.onclick = () => void run(() => calendarSyncHost.sync());
 	const pauseSync = () =>
 		void calendarSyncHost.pause().catch((error) => {
-			if (alive) say(error instanceof Error ? error.message : "Couldn’t pause");
+			// The saved opt-in slot and device gate refuse in shared words; Alpha words each one.
+			if (alive) say(calendarSyncFailureMessage(error, "Couldn’t pause sync. Try again."));
 		});
 	toggle.input.onchange = () => {
 		const state = calendarSyncHost.snapshot();

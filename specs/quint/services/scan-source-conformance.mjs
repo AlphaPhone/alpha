@@ -40,7 +40,8 @@ const bundle = await build({
       builder.onResolve({ filter: /.*/ }, args => {
         // Alpha's scan compose state and the shared camera files it reads (image limits, draft
         // port, Keep outcome) are the source under check, not ports.
-        if (args.kind === 'entry-point' || args.path === '../ui/camera/scan-document'
+        // Alpha's scan wording (ui/documents/scan-pdf-messages.ts) is pure and part of the source too.
+        if (args.kind === 'entry-point' || args.path === '../ui/camera/scan-document' || args.path === '../ui/documents/scan-pdf-messages'
           || args.path.includes('.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts')
           || args.importer.endsWith('apps/app/src/ui/camera/scan-document.ts')
           || args.importer.includes('.eliza/client-features/plugins/plugin-native-camera/src/')) return;

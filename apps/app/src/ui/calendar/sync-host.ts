@@ -166,6 +166,8 @@ const SHARED_FAILURES: ReadonlyMap<string, string> = new Map([
   ["Calendar account changed. Review sync again.", "Calendar account changed. Review sync again."],
   // sync-host.ts calendarSyncSettingsSlot (the device opt-in record)
   ["Calendar sync settings changed. Review them again.", "Calendar sync settings changed. Review them again."],
+  // sync-host.ts readCalendarSyncSettings (a damaged opt-in record)
+  ["Calendar sync settings need recovery. Saved events are retained.", "Calendar sync settings need recovery. Saved events are kept."],
 ]);
 
 const DEVICE_REPLY_INVALID =
@@ -230,9 +232,13 @@ const LOCAL_FAILURES: ReadonlyMap<string, string> = new Map([
 /**
  * Plain status text for a failed or stopped operation. Only a `CalendarSyncNotice` is shown as
  * written; every other known refusal is shown in Alpha's words, and only an unknown error falls
- * back to the generic sentence.
+ * back to `fallback` (by default the generic stopped sentence). The Calendar sync settings dialog
+ * words a failed pause with it too.
  */
-function calendarSyncFailureMessage(error: unknown): string {
+export function calendarSyncFailureMessage(
+  error: unknown,
+  fallback = "Sync stopped. Check the selected Google calendar before retrying.",
+): string {
   const e = error as { status?: number; name?: string; message?: unknown };
   if (e?.status === 404)
     return "Calendar sync is not available on this server yet. Check linked events before retrying.";
@@ -245,7 +251,7 @@ function calendarSyncFailureMessage(error: unknown): string {
   // Intl rejects an unknown event time zone with an engine-worded RangeError.
   if (e?.name === "RangeError" && /time ?zone/i.test(message))
     return "An event's time zone is not recognized. Review the event before syncing.";
-  return "Sync stopped. Check the selected Google calendar before retrying.";
+  return fallback;
 }
 
 /** Plain status text for a finished pass. Any conflict, unconfirmed or refused change asks for review. */

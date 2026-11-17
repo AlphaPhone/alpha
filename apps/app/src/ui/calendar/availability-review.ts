@@ -32,6 +32,32 @@ import {
   SOURCE_LIST_RETRY_MS,
 } from "@elizaos/plugin-calendar/client/availability-review";
 
+/** Alpha's labels for a calendar the provider lists without a name or an account. */
+export const UNNAMED_CALENDAR = "Untitled calendar";
+export const NO_CALENDAR_ACCOUNT = "On this phone";
+const providerLabel = (value: unknown) =>
+  typeof value === "string" && value.trim() && !value.includes("\0");
+
+/**
+ * The parsed sources with Alpha's labels where the provider left a name or account blank: the
+ * shared parser fills those with its own words, which are never shown. `listed` is the provider's
+ * list the sources were parsed from, in the same order.
+ */
+export function availabilitySourceLabels<T extends { name: string; account: string }>(
+  sources: readonly T[],
+  listed: unknown,
+): T[] {
+  const rows = Array.isArray(listed) ? listed : [];
+  return sources.map((source, index) => {
+    const row = (rows[index] ?? {}) as { name?: unknown; account?: unknown };
+    return {
+      ...source,
+      name: providerLabel(row.name) ? source.name : UNNAMED_CALENDAR,
+      account: providerLabel(row.account) ? source.account : NO_CALENDAR_ACCOUNT,
+    };
+  });
+}
+
 const NOTHING = " Nothing was shared.";
 const failed = (summary: string): AvailabilityOutcome => ({
   status: "failed",
@@ -131,7 +157,10 @@ export async function executeCalendarAvailability(
       return failed("Calendars are unavailable right now.");
     if (listed.timeZone !== operation.timeZone || !sameZone())
       return failed(ZONE_CHANGED);
-    const sources = parseAvailabilitySources(listed.calendars);
+    const sources = availabilitySourceLabels(
+      parseAvailabilitySources(listed.calendars),
+      listed.calendars,
+    );
     if (!sources.length)
       return failed("No readable calendars were found on this phone.");
     const chosenIds = await review.chooseCalendars(

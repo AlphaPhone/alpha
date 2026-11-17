@@ -5,6 +5,8 @@
  * Nothing is copied or uploaded. */
 import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
+import { PHOTOS_MESSAGES } from '../ui/photos/photos-messages';
+import { refusalText } from '../ui/utils/native-refusal';
 import {
   LibraryRevisions, parsePage, parseScope, parseValidation, parseItem, prepareReview, modelItem, modelSearchResult, LIBRARY_LIMITS,
   type LibraryReview, type LibraryScopeState, type LibraryItem, type LibraryChange, type LibraryAgentOperation, type LibraryAgentResult,
@@ -111,9 +113,8 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       }
     } catch (failure) {
       const code = (failure as { code?: string })?.code;
-      if (code === 'LIBRARY_DECLINED') status = 'Nothing changed.';
-      else if (code === 'LIBRARY_STALE') status = 'Item changed';
-      else status = 'Failed';
+      // The review answers in its own words (PermittedMediaReview); Alpha words each sentence and keeps its code's line otherwise.
+      status = refusalText(failure, PHOTOS_MESSAGES, code === 'LIBRARY_DECLINED' ? 'Nothing changed.' : code === 'LIBRARY_STALE' ? 'Item changed' : 'Failed', { ownErrors: false });
     } finally { acting = false; changed(); }
   }
 

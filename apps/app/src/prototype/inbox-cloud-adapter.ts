@@ -3,6 +3,7 @@ import {aospImage} from '../runtime/aosp-image';
 import {createAddressBookClient,isIncompleteAddressBookContact,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {literalMailAddress} from '../ui/mailbox/drafts-controller';
 import {MailFolderPicker} from '../ui/mailbox/MailFolderPicker.tsx';
+import {withGmailAccountLabel} from '../ui/mailbox/grants';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
 import type {ServiceReadCache} from '../runtime/service-read-cache';
 import {mailSenderImage} from '../runtime/mail-sender-image';
@@ -210,7 +211,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       // A saved summary that lands after Home's own network summary decision is older than it.
       if(!shell||selected||api?.isActive()||generation!==token||mailCacheEpoch!==epoch||summaryEpoch!==homeSummaryEpoch||identity!==JSON.stringify(offlineOwner())||binding.client!==active?.client||binding.sessionId!==active?.sessionId)return;
       const hint=readGmailAccountChoice(connectionController.getSnapshot().cloudAccount);
-      const summary=saved.flatMap(row=>{const value=row&&readSavedInboxSummary(row.value,hint);return value&&!savedGrantRejected(value.account.connectionId!,row!.value)?[value]:[];}).sort((a,b)=>b.readAt-a.readAt)[0];
+      const summary=saved.flatMap(row=>{const value=row&&readSavedInboxSummary(row.value,hint);return value&&!savedGrantRejected(value.account.connectionId!,row!.value)?[{...value,account:withGmailAccountLabel(value.account)}]:[];}).sort((a,b)=>b.readAt-a.readAt)[0];
       if(!summary)return;
       const key=gmailReadCacheKey(binding.sessionId,summary.account);if(!key)return;
       homePreview={key,owner:homeSummaryOwner(),label:summary.account.label,sessionId:binding.sessionId,accountId:summary.account.connectionId!,messages:summary.messages,more:summary.more,readAt:summary.readAt};
@@ -310,7 +311,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       const value=values.sort((a,b)=>readAt(b)-readAt(a))[0];if(!value)return false;
       const chosen=value.chosen;
       const compatible=values.filter(row=>row.selected===value.selected&&gmailReadCacheKey(binding!.sessionId,row.chosen)===gmailReadCacheKey(binding!.sessionId,chosen));
-      accounts=value.accounts;selected=value.selected;accountsChecked=false;accountsFromDisk=true;accountsSession=binding!.sessionId;spamTrashSearch=value.spamTrashSearch;
+      accounts=value.accounts.map(withGmailAccountLabel);selected=value.selected;accountsChecked=false;accountsFromDisk=true;accountsSession=binding!.sessionId;spamTrashSearch=value.spamTrashSearch;
       for(const row of compatible.flatMap(value=>value.lists).sort((a,b)=>a.at-b.at))folderLists.put({...row,key:JSON.stringify([binding!.sessionId,binding!.credentialId,selected,row.query])});
       for(const row of compatible.flatMap(value=>value.bodies).sort((a,b)=>a.at-b.at))messageBodies.put(bodyKey(row.body.message.id),row);
       if(!restoreList())return false;

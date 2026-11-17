@@ -90,9 +90,13 @@ function fakeHost(){
   ['complete',()=>({status:'complete',outcomes:[{id:'lib:i:3:30',status:'trashed'}]}),/^$/,['lib:i:3:30']],
   ['partial',()=>({status:'partial',outcomes:[{id:'lib:i:3:30',status:'stale'}]}),/^0\/1 ✓ · 1 skipped$/,[]],
   ['unverified',()=>({status:'partial',outcomes:[{id:'lib:i:3:30',status:'unverified'}]}),/^0\/1 ✓$/,[]],
-  ['declined',rejection('Photo change cancelled. No change was dispatched.','LIBRARY_DECLINED'),/^Nothing changed\.$/,[]],
-  ['stale',rejection('Selected media changed or is unavailable. Refresh Photos.','LIBRARY_STALE'),/^Item changed$/,[]],
-  ['other',rejection('Finish the current photo review first.','LIBRARY_BUSY'),/^Failed$/,[]],
+  // The review's own sentence reads in Alpha's words (PHOTOS_MESSAGES); one Alpha has no words for keeps its code's line.
+  ['declined',rejection('Photo change cancelled. No change was dispatched.','LIBRARY_DECLINED'),/^Photo change cancelled\. Nothing changed\.$/,[]],
+  ['stale',rejection('Selected media changed or is unavailable. Refresh Photos.','LIBRARY_STALE'),/^A selected item changed or isn’t available\. Refresh Photos\. Nothing changed\.$/,[]],
+  ['busy',rejection('Finish the current photo review first.','LIBRARY_BUSY'),/^Finish the open photo review first\.$/,[]],
+  ['unknown declined',rejection('A newer review sentence','LIBRARY_DECLINED'),/^Nothing changed\.$/,[]],
+  ['unknown stale',rejection('A newer review sentence','LIBRARY_STALE'),/^Item changed$/,[]],
+  ['other',rejection('A newer review sentence','LIBRARY_BUSY'),/^Failed$/,[]],
  ]){
   const {state,port}=fakePort(),host=fakeHost(),library=createDeviceLibrary(port,()=>true);
   const signal=new AbortController().signal,search=await library.agent.run({type:'photo_library_search',limit:1},signal);

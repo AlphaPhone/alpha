@@ -46,6 +46,10 @@ export {
   digestStatusLabel,
   digestSummaryText,
   digestZoneNote,
+  digestCalendarErrorText,
+  DIGEST_CALENDAR_PERMISSION_DENIED,
+  DIGEST_CALENDARS_UNAVAILABLE,
+  HOSTED_SOURCE_REJECTED_TEXT,
   type RetainedDigestSummary,
 } from '../ui/digests/hosted-digests.ts';
 

@@ -12,10 +12,13 @@ const driver = fileURLToPath(import.meta.url);
 const source = 'apps/app/src/prototype/home-shell.ts';
 const installed = {packageName: 'org.example.clock', label: 'Fixture clock'};
 const missing = {packageName: 'org.example.retired', label: 'Retired app'};
+// Android's own launcher refusals (SystemLauncherApps); Alpha words them after the app name.
+const PAUSED = 'This profile is paused or locked. Unlock it in Android, then try again.';
+const DISABLED = 'This app is disabled. Enable it in Android settings to open it.';
 const messages = new Map([
   ['', ''],
-  ['Fixture clock could not be opened. Paused.', 'launch-paused'],
-  ['Fixture clock could not be opened. Disabled.', 'launch-disabled'],
+  ['Fixture clock could not be opened. Its profile is paused or locked. Unlock it in Android, then try again.', 'launch-paused'],
+  ['Fixture clock could not be opened. It’s turned off. Turn it on in Android Settings to open it.', 'launch-disabled'],
   ['Retired app is no longer installed.', 'stale-app'],
   ['Favorites could not be saved. Nothing changed.', 'favorites'],
   ['Couldn’t load', 'inventory'],
@@ -111,7 +114,7 @@ async function fixture(compiled, pinNative) {
       shell.launcher.toggleFavorite(shell.launcher.snapshot().apps.find(app => app.packageName === installed.packageName));
     },
     async beginHeldLaunch() {
-      launchFailure = 'Paused.';
+      launchFailure = PAUSED;
       holdLaunch = deferred();
       void shell.launcher.launch(shell.launcher.snapshot().apps.find(app => app.packageName === installed.packageName));
       await tick();
@@ -128,13 +131,13 @@ async function fixture(compiled, pinNative) {
 const cases = [
   ['repeated-inventory-failure-then-recovery', true, [['refresh', true], ['refresh', true], ['refresh', false], ['refresh', true]]],
   ['inventory-with-no-dropped-favorite', false, [['refresh', true], ['refresh', false]]],
-  ['followup-read-fails-after-launch-error', true, [['launch', 'Paused.', true], ['refresh', true], ['refresh', false]]],
-  ['drawer-keeps-launch-inline-then-home-notices', true, [['show', 'drawer'], ['launch', 'Paused.'], ['show', 'home'], ['launch', 'Paused.']]],
+  ['followup-read-fails-after-launch-error', true, [['launch', PAUSED, true], ['refresh', true], ['refresh', false]]],
+  ['drawer-keeps-launch-inline-then-home-notices', true, [['show', 'drawer'], ['launch', PAUSED], ['show', 'home'], ['launch', PAUSED]]],
   ['app-view-suppresses-inventory-failure', true, [['show', 'app'], ['refresh', true], ['show', 'home'], ['refresh', true], ['refresh', false], ['refresh', true]]],
   ['edit-surface-owns-save-failure', true, [['show', 'edit'], ['saveFailure'], ['show', 'home']]],
   ['stale-entry-repeats-same-error', true, [['stale'], ['stale'], ['clearError'], ['stale']]],
   ['held-launch-rejects-after-navigation', true, [['beginHeldLaunch'], ['show', 'app'], ['finishHeldLaunch']]],
-  ['successful-launch-clears-old-error', true, [['launch', 'Disabled.'], ['launch'], ['launch', 'Paused.']]],
+  ['successful-launch-clears-old-error', true, [['launch', DISABLED], ['launch'], ['launch', PAUSED]]],
 ];
 
 async function checkHomeFailureNotice(extraSources = []) {
