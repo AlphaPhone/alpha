@@ -41,7 +41,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await setTextScale(page,scale);
     const target=page.locator('[data-alpha-message-id="sms:4"]');
     await target.scrollIntoViewIfNeeded();
-    const text=await target.innerText();
+    const text=await target.locator('[data-alpha-message-body]').innerText();
     const box=(await target.boundingBox())!;
     await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
     await expect(page.getByRole('menu',{name:'Message actions',exact:true})).toBeVisible();
@@ -86,6 +86,20 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await target.dispatchEvent('contextmenu');await expect(page.getByRole('menuitem',{name:'Copy',exact:true})).toBeVisible();
     await expect(page.getByRole('menuitem',{name:'Delete',exact:true})).toHaveCount(0);
     expect(await inputs(page,'deleteMessage')).toHaveLength(1);
+  });
+
+  test('message times and delivery labels follow provider evidence',async({page})=>{
+    await setupTelephony(page);
+    await page.evaluate(()=>{const rows=(window as any).messages['thread:101'];rows[1].status='delivered';rows[1].deliveryReport='complete';});
+    await page.getByRole('button',{name:'Messages',exact:true}).first().click();await page.getByRole('button',{name:/^Ada Okafor/}).click();
+    const outgoing=page.locator('[data-alpha-message-id="sms:2"] [data-alpha-message-meta]');
+    await expect(outgoing).toContainText('Delivered');await expect(outgoing).toHaveAttribute('title',/\d/);
+    await expect(page.locator('[data-alpha-message-id="sms:1"] [data-alpha-message-meta]')).not.toContainText('Delivered');
+    await page.evaluate(()=>{const w=window as any;w.messages['thread:101'][1].status='sent';w.messages['thread:101'][1].deliveryReport='none';w.smsProviderChanged();});
+    await expect(outgoing).toContainText('Sent');await expect(outgoing).not.toContainText('Delivered');
+    await page.evaluate(()=>{const w=window as any;w.messages['thread:101'][1].kind='mms';w.messages['thread:101'][1].id='mms:2';w.messages['thread:101'][1].deliveryReport=null;w.smsProviderChanged();});await expect(page.locator('[data-alpha-message-id="mms:2"] [data-alpha-message-meta]')).toContainText('Sent');await expect(page.locator('[data-alpha-message-id="mms:2"] [data-alpha-message-meta]')).not.toContainText('Delivered');
+    await page.evaluate(()=>{const w=window as any;w.messages['thread:101'][1].kind='sms';w.messages['thread:101'][1].id='sms:2';w.messages['thread:101'][1].deliveryReport='none';w.messages['thread:101'][1].status='pending';w.smsProviderChanged();});await expect(outgoing).toContainText('Sending');
+    await page.evaluate(()=>{const w=window as any;w.messages['thread:101'][1].status='failed';w.smsProviderChanged();});await expect(outgoing).toContainText('Not sent');
   });
 
   test('message links are credential-free HTTP(S), stay inert until tapped, and open Alpha Browser', async ({page}) => {
