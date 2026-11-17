@@ -36,7 +36,7 @@ export class BrowserCloudConnection extends WebPlugin {
   const login=[productionCloud.web,stagingCloud.web].some(origin=>origin===url.origin)&&url.pathname==='/auth/cli-login'&&sessions.length===1&&/^[0-9a-f-]{36}$/i.test(sessions[0])&&(apps.length===0||apps.length===1&&apps[0]==='alpha')&&[...url.searchParams.keys()].every(k=>k==='session'||k==='app');
   const billing=[productionCloud.agents,stagingCloud.agents].some(host=>host===url.host)&&url.pathname==='/cloud/billing'&&!url.search;
   const payment=['checkout.stripe.com','invoice.stripe.com'].includes(url.hostname);
-  if(url.protocol!=='https:'||url.username||url.password||url.hash||url.port||!login&&!billing&&!payment&&!googleAuthorizationUrlAllowed(url.href))throw Error('Unsupported Cloud browser destination');
+  if(url.protocol!=='https:'||url.username||url.password||(!payment&&url.hash)||url.port||!login&&!billing&&!payment&&!googleAuthorizationUrlAllowed(url.href))throw Error('Unsupported Cloud browser destination');
   const opened=window.open(url.href,'_blank');if(!opened)throw Error('Allow the Cloud sign-in window, then try again.');opened.opener=null;
  }
 }

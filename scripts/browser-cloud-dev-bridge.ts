@@ -25,7 +25,7 @@ async function checkoutResponse(response:Response,funds:boolean){
  const value=object(JSON.parse(Buffer.concat(parts).toString('utf8')));
  if(!funds){const parsed=parseCheckout(value);return {success:true,data:{...parsed,...(parsed.status==='open'?{expiresAt:new Date(parsed.expiresAt).toISOString()}: {})}};}
  if(Object.keys(value).some(key=>!['url','sessionId'].includes(key))||typeof value.url!=='string'||typeof value.sessionId!=='string'||!/^cs_[A-Za-z0-9_]{1,240}$/.test(value.sessionId))throw Error('Invalid balance checkout response');
- const url=new URL(value.url);if(url.protocol!=='https:'||url.hostname!=='checkout.stripe.com'||url.username||url.password||url.port||url.hash)throw Error('Invalid checkout destination');return {url:url.href,sessionId:value.sessionId};
+ const url=new URL(value.url);if(url.protocol!=='https:'||url.hostname!=='checkout.stripe.com'||url.username||url.password||url.port)throw Error('Invalid checkout destination');return {url:url.href,sessionId:value.sessionId};
 }
 
 

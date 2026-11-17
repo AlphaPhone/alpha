@@ -23,7 +23,7 @@ test('Cloud browser login admits only one session and the optional fixed Alpha h
    await connection.openExternal({url,requestId:randomUUID()});
    assert.equal(opened.at(-1).url,url);assert.equal(opened.at(-1).target,'_blank');assert.equal(opened.at(-1).popup.opener,null);
   }
-  for(const url of ['https://checkout.stripe.com/c/pay/cs_test_fixture','https://invoice.stripe.com/i/fixture'])await connection.openExternal({url,requestId:randomUUID()});
+  for(const url of ['https://checkout.stripe.com/c/pay/cs_test_fixture#fid=provider-fragment','https://invoice.stripe.com/i/fixture'])await connection.openExternal({url,requestId:randomUUID()});
   const count=opened.length,base=`https://eliza.app/auth/cli-login?session=${session}`;
   for(const url of [
    'https://checkout.stripe.com.attacker.invalid/c/pay/x','http://checkout.stripe.com/c/pay/x',
