@@ -146,19 +146,26 @@ test('a proposal is declined from its chat card and the agent records the reject
   await expect(page.getByText('Create note', { exact: true })).toHaveCount(0);
 });
 
-test('a retained uncertain action stays untouched after Activity is removed from regular Settings', async ({ page }) => {
+test('Agent activity loads an uncertain action and waits for an explicit reconciliation', async ({ page }) => {
   test.setTimeout(90_000);
   await residentAgent(page, 'reconcile');
   await connected(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'About', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Agent activity', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Refresh actions', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Agent activity', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Agent activity', exact: true })).toBeVisible();
+  const app = page.locator('[data-alpha-layer="app"]');
+  await app.getByRole('button', { name: 'Refresh actions', exact: true }).click();
+  const resolveAction = app.getByRole('button', { name: 'I verified it did not happen', exact: true });
+  await expect(resolveAction).toBeVisible();
 
+  const before = await fixture(page);
+  expect(before.states).toEqual([['fixture-reconcile', 'reconciliation_required']]);
+  expect(before.reconciliations).toEqual([]);
+  await resolveAction.click();
+  await expect.poll(async () => (await fixture(page)).states).toEqual([['fixture-reconcile', 'not_applied']]);
   const state = await fixture(page);
-  expect(state.states).toEqual([['fixture-reconcile', 'reconciliation_required']]);
-  expect(state.reconciliations).toEqual([]);
+  expect(state.reconciliations).toEqual([{ attemptId: 'fixture-attempt', resolution: { confirmed: true, outcome: 'not_applied' } }]);
   expect(state.effects).toBe(0);
   expect(state.decisions).toEqual([]);
   expect(state.journal.filter((m: string) => ['reserve', 'markApplying', 'finish'].includes(m))).toEqual([]);
