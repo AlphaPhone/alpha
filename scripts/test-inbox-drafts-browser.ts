@@ -75,7 +75,7 @@ try{
  await message.fill(body);
  assert.equal(await button('Send email').isDisabled(),true);
  assert.equal(await button('Save draft').count(),0);
- assert.equal(await button('Discard draft').count(),1);
+ assert.equal(await button('Discard draft').count(),0);
  await closeDraft();
  assert.equal(slots.size,1);
  assert.equal(draftBySubject(subject)?.body,body);

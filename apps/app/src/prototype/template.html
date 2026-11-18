@@ -970,8 +970,8 @@
             <sc-for list="{{inbox.d.threadRows}}" as="message"><button class="mail-thread-message" onClick="{{message.pick}}"><span><strong>{{message.name}}</strong><small>{{message.date}}</small></span><span>{{message.preview}}</span></button></sc-for>
             <sc-if value="{{inbox.d.hasNextThread}}"><button class="mail-thread-page" aria-label="More messages" onClick="{{inbox.d.nextThread}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.down}}"></path></svg>More</button></sc-if>
           </div>
-        </sc-if><h1 class="serif" style="margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: -.01em">{{inbox.d.subj}}</h1>
-        <div style="display: flex; align-items: flex-start; gap: 12px; margin-top: 20px">
+        </sc-if>
+        <div style="display: flex; align-items: flex-start; gap: 12px">
           <sc-if value="{{inbox.d.hasPerson}}">
             <button aria-label="{{inbox.d.name}}" onClick="{{inbox.d.who}}" style="width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; background: var(--s2); white-space: nowrap">{{inbox.d.ini}}</button>
           </sc-if>
@@ -980,6 +980,7 @@
           </sc-if>
           <details class="mail-addresses"><summary aria-label="Show message details"><span style="font-weight:600;font-size:16px">{{inbox.d.name}}</span><span class="mail-address-chevron" aria-hidden="true"></span><span style="display:block;font-size:13px;color:var(--mut);margin-top:2px">{{inbox.d.meta}}</span></summary><dl><dt>From</dt><dd>{{inbox.d.fullFrom}}</dd><dt>To</dt><dd>{{inbox.d.fullTo}}</dd><sc-if value="{{inbox.d.hasCc}}"><dt>Cc</dt><dd>{{inbox.d.fullCc}}</dd></sc-if><sc-if value="{{inbox.d.hasReplyTo}}"><dt>Reply-to</dt><dd>{{inbox.d.fullReplyTo}}</dd></sc-if><dt>Date</dt><dd>{{inbox.d.fullDate}}</dd></dl></details>
         </div>
+        <h1 class="serif" style="margin: 20px 0 0; overflow-wrap: anywhere; font-size: 32px; line-height: 1.1; letter-spacing: -.01em">{{inbox.d.subj}}</h1>
         <sc-if value="{{inbox.d.hasRemoteImages}}"><p style="margin:16px 0 8px;font-size:13px;color:var(--mut)"><button aria-label="Show images" onClick="{{inbox.d.showImages}}" style="min-height:44px;color:var(--acct);display:inline-flex;align-items:center;gap:6px;padding:0 14px;border-radius:22px;background:var(--s2)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.photo}}"></path></svg>Show</button></p></sc-if>
         <sc-if value="{{inbox.d.hasHtml}}"><iframe ref="{{inbox.d.formattedMailRef}}" title="Formatted email" sandbox="allow-same-origin" referrerpolicy="no-referrer" srcdoc="{{inbox.d.htmlDocument}}" onLoad="{{inbox.d.htmlLoaded}}" style="width:100%;border:0;display:block;height:400px;margin-top:22px;background:var(--alpha-white)"></iframe></sc-if>
         <sc-if value="{{inbox.d.noHtml}}"><div role="status" aria-busy="{{inbox.d.loading}}" style="font-size: 16px; line-height: 1.6; margin-top: 22px; white-space: pre-wrap">{{inbox.d.body}}</div></sc-if>
@@ -1011,6 +1012,7 @@
       <div data-alpha-app-header="detail" style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 12px 0 8px; gap: 2px; flex-shrink: 0">
         <button class="ib" aria-label="Back from draft" onClick="{{back}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/chevron-left.svg');-webkit-mask-image:url('/icons/lucide/chevron-left.svg')"></span></button>
         <span style="flex-grow:1;min-width:0;font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{inbox.c.heading}}</span>
+        <sc-if value="{{inbox.c.local}}"><button class="ib" data-alpha-mail-attach aria-label="Attach file" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.attach}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/paperclip.svg');-webkit-mask-image:url('/icons/lucide/paperclip.svg')"></span></button></sc-if>
         <button disabled="{{inbox.c.sendDisabled}}" aria-label="Send email" onClick="{{inbox.c.send}}" style="width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/send.svg');-webkit-mask-image:url('/icons/lucide/send.svg')"></span></button>
       </div>
       <div class="scr inbox-compose-fields" role="region" aria-label="Email draft fields" tabindex="0" style="display: flex; flex-direction: column; flex-grow: 1; min-height: 0; padding: 0 20px">
@@ -1072,22 +1074,11 @@
         </sc-if>
         <div style="display:flex;flex-direction:column;flex:1;min-height:164px">
           <textarea aria-label="Message" placeholder="Message" value="{{inbox.c.body}}" disabled="{{inbox.c.busy}}" onChange="{{inbox.c.onBody}}" style="flex:1;min-height:120px;border:0;outline:0;resize:none;background:transparent;color:var(--fg);font:inherit;font-size:16px;line-height:1.55;padding:14px 0 0"></textarea>
-          <sc-if value="{{inbox.c.local}}"><div role="group" aria-label="Draft actions" style="display:flex;align-items:center;gap:2px;align-self:flex-start"><button class="ib" data-alpha-mail-attach aria-label="Attach file" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.attach}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/paperclip.svg');-webkit-mask-image:url('/icons/lucide/paperclip.svg')"></span></button><button class="ib" aria-label="Discard draft" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.discard}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/trash-2.svg');-webkit-mask-image:url('/icons/lucide/trash-2.svg')"></span></button></div></sc-if>
         </div>
       </div>
     </div>
   </sc-if>
 
-
-  <sc-if value="{{inbox.composing}}"><sc-if value="{{inbox.c.confirm}}">
-    <div ref="{{inbox.discardModal}}" class="inbox-review-modal" style="position:absolute;inset:0;z-index:8;display:flex;align-items:flex-end;padding:16px 16px 72px;box-sizing:border-box">
-      <button aria-hidden="true" tabindex="-1" onClick="{{inbox.c.cancelDiscard}}" style="position:absolute;inset:0;background:rgba(0,0,0,.45)"></button>
-      <section role="dialog" aria-modal="true" aria-label="Discard draft?" style="position:relative;width:100%;max-height:100%;overflow:auto;padding:20px;background:var(--bg);border-radius:22px;box-sizing:border-box">
-        <h2 style="margin:0;font-size:20px">Discard draft?</h2><p>This removes this draft from the device.</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px"><button disabled="{{inbox.c.busy}}" onClick="{{inbox.c.cancelDiscard}}" style="min-height:44px;padding:10px 16px;border-radius:18px;background:var(--s2)">Keep draft</button><button disabled="{{inbox.c.busy}}" onClick="{{inbox.c.confirmDiscard}}" style="min-height:44px;padding:10px 16px;border-radius:18px;background:var(--fg);color:var(--bg)">Discard draft</button></div>
-      </section>
-    </div>
-  </sc-if></sc-if>
   <sc-if value="{{inbox.mailReview}}">
     <div ref="{{inbox.mailSelectionModal}}" class="inbox-review-modal" style="position:absolute;inset:0;z-index:8;display:flex;align-items:flex-end;padding:16px 16px 72px;box-sizing:border-box">
       <button aria-hidden="true" tabindex="-1" onClick="{{inbox.mailReview.close}}" style="position:absolute;inset:0;background:rgba(0,0,0,.45)"></button>

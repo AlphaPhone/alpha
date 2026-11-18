@@ -16,6 +16,10 @@ test('search, archive, undo and delete preserve their local state through reload
  await page.getByRole('button',{name:'Search email',exact:true}).click();await page.getByRole('searchbox',{name:'Search mail',exact:true}).fill('Train times');
  await expect(page.getByRole('button',{name:/Sender Two, Travel details/})).toBeVisible();await expect(page.getByRole('button',{name:/Sender One, Planning notes/})).toHaveCount(0);
  await page.getByRole('button',{name:'Back to inbox',exact:true}).click();await page.getByRole('button',{name:/Sender One, Planning notes/}).click();
+ const email=page.getByRole('region',{name:'Email message'});
+ const sender=await email.getByLabel('Show message details').boundingBox();
+ const subject=await email.getByRole('heading',{name:'Planning notes',exact:true}).boundingBox();
+ expect(sender!.y+sender!.height).toBeLessThanOrEqual(subject!.y);
  await chooseMailAction(page, 'Archive');expect((await stored(page)).mails[0].arch).toBe(true);
  await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await stored(page)).mails[0].arch).not.toBe(true);
  await chooseMailAction(page, 'Move to Trash');expect((await stored(page)).mails[0].del).toBe(true);
