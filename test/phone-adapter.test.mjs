@@ -198,3 +198,27 @@ test('the agent opens the keypad, filled in at most, after its receipt; it never
   globalThis.mvpViews=[];assert.equal(openKeypadStep('4155550100'),null,'no keypad where Phone is not admitted');
  }finally{delete globalThis.mvpViews;}
 });
+test('an agent keypad open leaves Voicemail as the owner tab tap does, and waits out a busy read',async()=>{
+ const item={id:'7',number:'+15555550100',cachedName:null,date:1700000000000,durationSeconds:24,isNew:true,hasAudio:true,carrierTranscript:'Call me back.'};
+ for(const st of [{tab:'keypad'},{tab:'keypad',prefill:'4155550100'}]){
+  const {views}=mount({status:status('granted'),listRecentCalls:{calls:[]},listVoicemail:{state:'ready',voicemails:[item]},observeVoicemail:{},voicemailPcm:()=>{throw Error('No decoder');}});await settle();
+  views.phone.render({},{}).tabs[2].pick();views.phone.render({},{}).voicemails[0].toggle();await settle();
+  assert.equal(views.phone.render({},{}).vm.open,true);
+  const answer=deleteOpenVoicemail(()=>{},new AbortController().signal);
+  assert.equal(views.phone.render({},{}).vm.confirming,true);
+  const model=views.phone.render(st,{set(){}});
+  assert.equal(model.isKeypad,true);assert.equal(model.vm.open,false,'the voicemail closes with its audio');
+  assert.equal(openVoicemailRead(),null);assert.equal(await answer,'cancelled','the hidden delete confirmation is not left armed');
+ }
+ let finish;
+ const {views}=mount({status:status('granted'),listRecentCalls:()=>new Promise(resolve=>{finish=resolve;})});await settle();
+ const sets=[];const api={set:patch=>sets.push(patch)};
+ const st={tab:'keypad',prefill:'4155550100'};
+ let model=views.phone.render(st,api);await settle();
+ assert.equal(model.isKeypad,false,'a busy recents read holds the request');assert.deepEqual(sets,[],'and does not discard it');
+ finish({calls:[]});await settle();
+ model=views.phone.render(st,api);await settle();
+ assert.equal(model.isKeypad,true);assert.equal(model.nativeNumber,'4155550100','the number lands once the read clears');
+ assert.deepEqual(sets,[{prefill:null},{tab:null}]);
+});
+

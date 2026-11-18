@@ -64,6 +64,8 @@ export type TelephonyPorts = {
   /**
    * The step that brings the Phone keypad in front, with `number` filled in when given (handed
    * back like `draftFor`'s); null when Phone cannot be shown now. It never dials or calls.
+   * While Phone is busy reading recents or handing off a dial, the keypad and its number wait
+   * and land when that clears, so an 'opened' receipt is not contradicted by an empty Recents.
    */
   openKeypad(number?: string): (() => void) | null;
   /** The contact open in Contacts as the phone holds it now; 'unavailable' when it cannot be read whole; null when none is open. */

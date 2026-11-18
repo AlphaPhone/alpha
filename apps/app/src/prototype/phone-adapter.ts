@@ -280,10 +280,13 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  };
  views.phone.render=(st:Bag,viewApi:Bag)=>{
  api=viewApi;
- /* A number handed over from Contacts fills the keypad once; only the owner's Call tap calls. */
- if(typeof st?.prefill==='string'&&st.prefill){if(!busy()){number=st.prefill.slice(0,40);notice='';tab='keypad';}queueMicrotask(()=>viewApi.set?.({prefill:null}));}
+ /* A number handed over from Contacts fills the keypad once; only the owner's Call tap calls.
+    While a read or a dial handoff is busy the request stays pending and lands when it clears.
+    Leaving Voicemail closes the open one, as the owner's own tab tap does: its audio and an
+    armed delete confirmation never carry on behind the keypad. */
+ if(typeof st?.prefill==='string'&&st.prefill&&!busy()){number=st.prefill.slice(0,40);notice='';if(tab==='voicemail')closeVoicemail();tab='keypad';queueMicrotask(()=>viewApi.set?.({prefill:null}));}
  /* The agent's phone_keypad opens the keypad, with or without a number (prefill above); it never calls. */
- if(st?.tab==='keypad'){if(!busy())tab='keypad';queueMicrotask(()=>viewApi.set?.({tab:null}));}
+ if(st?.tab==='keypad'&&!busy()){if(tab==='voicemail')closeVoicemail();tab='keypad';queueMicrotask(()=>viewApi.set?.({tab:null}));}
  /* Home's Phone card names the tab it leads to. */
  if(st?.tab==='recents'||st?.tab==='voicemail'){if(st.tab==='recents'||carrier==='ready')tab=st.tab;if(carrier!==null||st.tab==='recents')queueMicrotask(()=>viewApi.set?.({tab:null}));}
  const now=Date.now(),hasVoicemail=carrier==='ready',digits=number.replace(/\D/g,'');
