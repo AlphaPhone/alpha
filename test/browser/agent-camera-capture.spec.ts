@@ -10,8 +10,10 @@ import {returnToApps} from './app-navigation';
 // no requesting message; the reply's own device receipt names it, so Camera still opens first and the card waits there.
 // Both proposal-only modes also list an earlier turn's web search review, which is reviewable on Home and must not keep Camera closed.
 // unrelated-reply: an earlier turn's photo and search reviews are pending, and this reply proposed neither; Camera stays closed.
+// proposal-only-unreadable: device settings cannot be read, so the phone asks first; Camera opens and the card waits there.
+// maps-proposal-only-ask-first: the same ask-first photo asked for from Maps; Camera opens from there and the card waits there.
 // Every shutter is checked to fire on the live Camera viewfinder, never from Home.
-for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only','proposal-only-ask-first','unrelated-reply','stop','selfie','selfie-ask-first'] as const)test(`Home camera request: ${mode}`,async({page})=>{
+for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only','proposal-only-ask-first','proposal-only-unreadable','maps-proposal-only-ask-first','unrelated-reply','stop','selfie','selfie-ask-first'] as const)test(`${mode.startsWith('maps-')?'Maps':'Home'} camera request: ${mode}`,async({page})=>{
  await page.addInitScript(mode=>{
   const w=window as any,store=new Map(),agentId='12345678-1234-4234-8234-123456789abc',userMessageId='87654321-4321-4321-8321-cba987654321';
   const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,otherRoutes:0,receipts:[],log:[] as string[],shutterViews:[] as string[],advertised:'',proposal:null as any,stale:[] as any[],entry:null as any};
@@ -44,10 +46,11 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
    if(path==='/api/conversations/camera-chat/messages'&&input.method==='POST'){
     f.posts++;
     // Reviews an earlier turn left pending: a web search this screen can review, and (unrelated-reply) a photo.
-    if(mode.startsWith('proposal-only')||mode==='unrelated-reply')f.stale=[proposalOf('earlier-search',{type:'browser_search',query:'harbour tides'})];
+    const unbound=mode==='proposal-only-ask-first'||mode==='proposal-only-unreadable'||mode==='maps-proposal-only-ask-first';
+    if(mode.includes('proposal-only')||mode==='unrelated-reply')f.stale=[proposalOf('earlier-search',{type:'browser_search',query:'harbour tides'})];
     if(mode==='unrelated-reply'){f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo'});return ok({text:'It is sunny.',agentName:'Camera fixture',userMessageId,actionResults:[]});}
-    f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},mode==='proposal-only-ask-first'?undefined:mode==='old-message'?'old-message':userMessageId);
-    if(mode==='proposal-only-ask-first')return ok({text:'Review this request on your phone before it can run.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
+    f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},unbound?undefined:mode==='old-message'?'old-message':userMessageId);
+    if(unbound)return ok({text:'Review this request on your phone before it can run.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
     if(mode==='proposal-only')return ok({text:'Opening Camera to take the photo.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
     return ok({text:mode==='selfie'?'Opening Camera to take the photo.':'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
    }
@@ -86,13 +89,29 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
    // The shutter fires only with Camera active and its viewfinder on screen.
    const finder=document.querySelector('[data-alpha-camera="viewfinder"]');f.shutterViews.push(document.documentElement.getAttribute('data-active-view')+(finder&&finder.getBoundingClientRect().height>0?':viewfinder':':no-viewfinder'));const c=document.createElement('canvas');c.width=c.height=16;return{path:'browser-photo:///1792274767123123456789012',format:'jpeg',base64:c.toDataURL('image/jpeg').split(',')[1],width:16,height:16};};
   if(mode.endsWith('ask-first')){const {editDevicePreferences}=await import('/src/browser/device-preferences.ts');await editDevicePreferences(state=>{state.askBeforeAgentActions=true;});}
+  if(mode==='proposal-only-unreadable'){
+   // Direct mode is saved, then the stored settings become unreadable: the phone must fall back to asking first.
+   const {editDevicePreferences,readDevicePreferences}=await import('/src/browser/device-preferences.ts');await editDevicePreferences(state=>{state.askBeforeAgentActions=false;});
+   const {devicePreferencesDocument}=await import('/src/browser/preference-documents.ts');
+   await devicePreferencesDocument.edit(()=>({}),(state:any)=>{state.askBeforeAgentActions='unreadable';});
+   if(await readDevicePreferences().then(()=>true,()=>false))throw Error('Device settings are still readable');
+   // Any settings failure shown while the photo waits is recorded, toasts included, however briefly they show.
+   const failures=(window as any).cameraRequestFixture.failures=[] as string[];
+   new MutationObserver(()=>{const text=document.body.innerText;for(const failure of ['Device settings need recovery.','Could not confirm the screen change.'])if(text.includes(failure)&&!failures.includes(failure))failures.push(failure);}).observe(document.body,{subtree:true,childList:true,characterData:true});
+  }
  },mode);
  await returnToApps(page);
  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+ if(mode.startsWith('maps-')){
+  // The request is sent from Maps, the screen the owner was on.
+  await page.getByRole('button',{name:'Maps',exact:true}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','maps');
+  await page.getByRole('button',{name:'Type',exact:true}).click();
+ }
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Take a photo');await input.press('Enter');
  const fixture=()=>page.evaluate(()=>(window as any).cameraRequestFixture);
  const notice=page.getByText('Take photo: Open Camera to take the requested photo.',{exact:true}),saved=page.locator('[data-alpha-message-text]').filter({hasText:/^Saved$/});
- if(mode.startsWith('proposal-only')||mode==='unrelated-reply')await expect.poll(async()=>(await fixture()).posts).toBe(1);
+ if(mode.includes('proposal-only')||mode==='unrelated-reply')await expect.poll(async()=>(await fixture()).posts).toBe(1);
  else await expect.poll(async()=>(await fixture()).acks).toBe(1);
  if(mode==='stop'){
   // A photo waiting for its preview can be stopped: nothing is taken and the request ends as a failure.
@@ -129,20 +148,24 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   await expect(page.getByRole('button',{name:'Preview attached photo',exact:true}).getByRole('img')).toHaveAttribute('src',f.saved);
   expect((await fixture()).posts).toBe(1);
  }else{
-  await expect(page.getByText(mode==='proposal-only-ask-first'?'Review this request on your phone before it can run.':'Opening Camera.',{exact:true}).first()).toBeVisible();
+  const reviewOnCamera=mode==='proposal-only-ask-first'||mode==='proposal-only-unreadable'||mode==='maps-proposal-only-ask-first';
+  await expect(page.getByText(reviewOnCamera?'Review this request on your phone before it can run.':'Opening Camera.',{exact:true}).first()).toBeVisible();
   const f=await fixture();expect(f.captures).toBe(0);expect(f.decisions).toBe(0);
-  if(mode==='proposal-only-ask-first'){await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');expect(f.claims).toBe(0);}
+  if(reviewOnCamera){await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');expect(f.claims).toBe(0);}
   if(mode==='lost-ack')return;
   // Camera is open, so the pending photo is its review card there, never "Open Camera".
   const approve=page.getByRole('button',{name:/^Take photo\b.*Approve$/s});
   await expect(approve).toHaveCount(1);
   await expect(notice).toHaveCount(0);
-  if(!mode.endsWith('ask-first'))return;
+  if(!mode.endsWith('ask-first')&&mode!=='proposal-only-unreadable')return;
   // The card names the camera the request asked for.
   await expect(approve).toContainText(mode==='selfie-ask-first'?'Use the front camera and save one photo in Photos.':'Use the current camera and save one photo in Photos.');
   await approve.click();
   await expect(saved).toHaveCount(1);
-  const done=await fixture();expect(done.otherRoutes).toBe(0);expect(done.shutterViews).toEqual(['camera:viewfinder']);expect(done.log).toEqual(mode==='selfie-ask-first'?['switch:front','capture']:['capture']);expect(done.captures).toBe(1);expect(done.decisions).toBe(1);expect(done.receipts.map((receipt:any)=>receipt.outcome)).toEqual(['applied']);
+  const done=await fixture();expect(done.otherRoutes).toBe(0);
+  // Unreadable settings never fail the reply once Camera is open: the photo just waits for review.
+  if(mode==='proposal-only-unreadable')expect(done.failures).toEqual([]);
+  expect(done.shutterViews).toEqual(['camera:viewfinder']);expect(done.log).toEqual(mode==='selfie-ask-first'?['switch:front','capture']:['capture']);expect(done.captures).toBe(1);expect(done.decisions).toBe(1);expect(done.receipts.map((receipt:any)=>receipt.outcome)).toEqual(['applied']);
  }
 });
 

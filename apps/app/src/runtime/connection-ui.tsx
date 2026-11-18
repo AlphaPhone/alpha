@@ -2335,7 +2335,9 @@ export const connectionController = {
     const context=pending.client.deliveredContext(pending.attempt)??(pending.proposalOnly&&shown?structuredClone(shown):undefined);
     if(!context||context.view!=='camera'||context.sensitive||!pending.selected.actions)return [];
     const current=()=>{signal.throwIfAborted();if(document.hidden||pending.attempt.controller.signal.aborted||Date.now()>pending.expiresAt||epoch!==pending.generation||active!==pending.selected||state.session!==pending.session||conversationMemory.get(conversationKey(pending.session))!==pending.conversationId||JSON.stringify(navigationContext?.())!==JSON.stringify(context))throw Error('The camera request changed.');};
-    const allowed=async()=>{current();const preferences=await readDevicePreferences(signal);current();return !preferences.askBeforeAgentActions;};
+    // Unreadable settings read as ask-first, as when the message was sent: Camera is already open and the
+    // photo waits there as its review card instead of failing the reply. Nothing is taken without a readable direct mode.
+    const allowed=async()=>{current();const preferences=await readDevicePreferences(signal).catch(()=>{signal.throwIfAborted();return {askBeforeAgentActions:true};});current();return !preferences.askBeforeAgentActions;};
     if(!await allowed())return [];
     await pending.selected.actions.pendingReview(context,signal);current();
     return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo');
