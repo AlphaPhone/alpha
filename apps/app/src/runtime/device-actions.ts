@@ -37,6 +37,7 @@ import {
   ContextNotice,
   DeviceActionCoordinator,
   proposalContextNotice as alphaProposalContextNotice,
+  requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
@@ -52,7 +53,7 @@ import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
-export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice};
+export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,requestedCameraNeedsCameraView};
 export type {CurrentDeviceActionRequest,DeviceCredential,DeviceJournalIdentity,DeviceOperation,DeviceRecovery,ReviewableDeviceOperation,WorkflowNoticeRoute,WorkflowPresentationOperation};
 /** Foreground reviews (free/busy, Notes search, name-targeted edits) and their validators are
  * the shared device-review contract bound to the shared Notes, Calendar and reminder contracts. */
