@@ -32,6 +32,7 @@ export const moduleInventory = {
     actions: []
   },
   reviewedHelpers: {
+    "apps/app/src/browser/workflow-app-state.ts": {"owner": "apps/app/src/browser/simulated-workflows.ts", "reason": "Reads one development workflow state from the simulator and its saved overlay.", "tests": ["test/browser/dev-workflow-execution.spec.ts", "test/browser/dev-workflow-messages.spec.ts"]},
     "apps/app/src/prototype/attachment-picker.ts": {"owner": "apps/app/src/prototype/agent-adapter.ts", "reason": "Reviews current Files and Photos selections before attaching their exact bytes to the assistant draft.", "tests": ["test/browser/chat-attachment-picker.spec.ts"]},
     "apps/app/src/prototype/chat-attachment-files.ts": {"owner": "apps/app/src/prototype/agent-adapter.ts", "reason": "Validates attachment records when restoring the assistant draft and conversation history.", "tests": ["test/quint-chat-attachments.test.mjs"]},
     "apps/app/src/prototype/composer-editor.tsx": {"owner": "apps/app/src/prototype/chat-overlay-motion-adapter.ts", "reason": "Keeps the same editor and its focus when Home Send opens chat.", "tests": ["test/browser/composer-send-focus.spec.ts"]},
@@ -353,6 +354,7 @@ export const moduleInventory = {
     "apps/app/src/browser/video-edit.ts",
     "apps/app/src/browser/video-transcode.ts",
     "apps/app/src/browser/voice.ts",
+    "apps/app/src/browser/workflow-app-state.ts",
     "apps/app/src/browser/workflow-calendar.ts",
     "apps/app/src/browser/workflow-dated-sources.ts",
     "apps/app/src/browser/workflow-drafts.ts",
