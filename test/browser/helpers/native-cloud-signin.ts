@@ -1,5 +1,6 @@
 import {expect,type Page} from '@playwright/test';
 import {createServer,type Plugin,type ViteDevServer} from 'vite';
+import {scopedViteCacheDir} from './vite-cache';
 import {resolve} from 'node:path';
 import {webcrypto} from 'node:crypto';
 
@@ -7,7 +8,8 @@ import {webcrypto} from 'node:crypto';
 // controller composition. Only native ports are synthetic: AlphaCloudSignIn stands in for the native
 // Steward + mobile App Auth client and "stores" a synthetic key the way the plugin does. No device,
 // account, browser, Google consent, App Link verification, Cloud request or real code is involved.
-export async function startNativeCloudSignInFixture(cacheDir=resolve('test-results/native-cloud-signin/vite-cache'), plugins:Plugin[]=[]){
+export async function startNativeCloudSignInFixture(cacheDirectory='test-results/native-cloud-signin/vite-cache', plugins:Plugin[]=[]){
+ const cacheDir=scopedViteCacheDir(cacheDirectory);
  let server:ViteDevServer;
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
  try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir,server:{host:'127.0.0.1',port:0,hmr:false,watch:null},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...plugins,{name:'native-signin-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `

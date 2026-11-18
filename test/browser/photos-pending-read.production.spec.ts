@@ -19,7 +19,7 @@ for(const slow of [false,true])test(`native Photos grid opens and stays open ${s
  expect(errors).toEqual([]);
 });
 test('a store change during a pending read keeps the viewer and publishes the read',async({page})=>{
- await fenceNetwork(page);await photosBridge(page,'full',false,true);const skip=page.getByRole('button',{name:'Not now',exact:true});if(await skip.isVisible())await skip.click();await page.getByRole('button',{name:'Photos',exact:true}).click();
+ await fenceNetwork(page);await photosBridge(page,'full',false,true);await dismissPrompt(page);await page.getByRole('button',{name:'Photos',exact:true}).click();
  await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(1);
  await page.evaluate(()=>{const w=window as any,c=w.Capacitor,original=c.nativePromise;w.heldReads=0;c.nativePromise=async(p:string,m:string,i:any)=>{if(p==='AlphaPhotos'&&m==='read'&&++w.heldReads===1)await new Promise(r=>{w.releaseHeldRead=r;});return original(p,m,i);};});
  await page.getByRole('button',{name:/^Photo, /}).click();await expect(page.locator('[data-alpha-subview="photos-viewer"]')).toBeVisible();
@@ -31,8 +31,9 @@ test('a store change during a pending read keeps the viewer and publishes the re
 });
 
 test('native Photos keeps the deep window after a catalog event and reloads evicted thumbnails',async({page})=>{
- await fenceNetwork(page);await photosBridge(page,'full',false,true);
- await page.addInitScript(()=>{
+ await fenceNetwork(page);
+ // The catalog extension is installed with the bridge, before the first start.
+ await photosBridge(page,'full',false,true,false,()=>{
   const w=window as any,c=w.Capacitor,original=c.nativePromise;
   const photos=c.PluginHeaders.find((plugin:any)=>plugin.name==='AlphaPhotos');photos.methods.push({name:'thumbnails',rtype:'promise'});
   // Keep the synthetic six-minute gallery in one browser-local day, including midnight runs.
@@ -50,8 +51,7 @@ test('native Photos keeps the deep window after a catalog event and reloads evic
    return original(plugin,method,input);
   };
  });
- await page.reload();
- const skip=page.getByRole('button',{name:'Not now',exact:true});if(await skip.isVisible())await skip.click();
+ await dismissPrompt(page);
  await page.getByRole('button',{name:'Photos',exact:true}).click();
  const grid=page.locator('[data-alpha-app-scroll="photos"]'),count=page.locator('.photo-day-header span');
  // The current grid opens one native page; each deeper page is requested by scrolling.

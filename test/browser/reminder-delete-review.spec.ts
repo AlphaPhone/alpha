@@ -1,11 +1,13 @@
 import {chooseCalendarEventAction} from './helpers/browser-calendar';
 import {test,expect,type Page} from '@playwright/test';
 test.use({timezoneId:'UTC'});
+// A local reminder edit announces itself only to other tabs; the fixture sends the same
+// reminders-document change signal so this tab re-reads the seeded reminder without a reload.
 async function setup(page:Page){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.clock.install({time:new Date('2027-03-13T00:00Z')});await page.goto('/');await page.getByRole('button',{name:'Calendar',exact:true}).waitFor();
- await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'delete-boundary',title:'Delete boundary reminder',at:Date.parse('2027-03-13T14:00Z')});});
- await page.reload();await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Delete boundary reminder,/}).click();
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'delete-boundary',title:'Delete boundary reminder',at:Date.parse('2027-03-13T14:00Z')});window.dispatchEvent(new Event('alpha:reminders-document-changed'));});
+ await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Delete boundary reminder,/}).click();
 }
 const read=(page:Page)=>page.evaluate(async()=>JSON.parse((await(await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!));
 for(const mode of ['fresh','stale','response-loss','staging-loss','navigate','legacy','late-stale','reload-loss'])test(`reviewed reminder deletion ${mode}`,async({page})=>{

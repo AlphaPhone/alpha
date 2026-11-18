@@ -142,6 +142,14 @@ for (const frame of ['done', 'error'] as const) test(`a provider-less turn witho
   await expect(page.getByText(/PRIVATE_PROVIDER_ERROR_CANARY/)).toHaveCount(0);
   const plan = page.getByRole('button', { name: /^Choose plan/ });
   await expect(plan).toHaveCount(1);
+  // The reply opens the conversation sheet, and its opening motion can start after the card is
+  // already laid out and still. Tap the card once the open sheet shows it whole: pressed during
+  // the opening, the press blurs the composer, and the re-render's follow-to-newest scroll moves
+  // the card out from under the pointer before release, so the tap lands on the transcript.
+  await expect.poll(() => plan.evaluate(card => {
+    const list = card.closest('[data-alpha-transcript]')!.getBoundingClientRect(), box = card.getBoundingClientRect();
+    return box.top >= list.top && box.bottom <= list.bottom;
+  })).toBe(true);
   await plan.click();
   // On the phone's own agent the plan action opens the resident account & plan panel (plan headline,
   // Recheck, Renew); it carries the Subscription controls.
@@ -199,9 +207,18 @@ for (const mode of ['reject', 'busy'] as const) {
     test.setTimeout(120_000);
     await connected(page);
     await setStub(page, { stream: mode });
+    // The refusal notice is a short toast (about 2 s) that can be gone by the time the draft has
+    // settled on a loaded host, so every toast shown from the send on is recorded.
+    await page.evaluate(() => {
+      const w = window as any; w.shownToasts = [];
+      new MutationObserver(() => {
+        const toast = document.querySelector('[data-alpha-toast] .drop > span'), text = toast?.textContent?.trim();
+        if (text && toast!.checkVisibility() && w.shownToasts.at(-1) !== text) w.shownToasts.push(text);
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
     await sendRefused(page, `Refused by ${mode}`);
     // A 429 refusal names its own reason; a refusal with none says nothing, the text simply comes back.
-    if (mode === 'busy') await expect(page.getByText('Not sent. Busy · not sent', { exact: true })).toBeVisible();
+    if (mode === 'busy') await expect.poll(() => page.evaluate(() => (window as any).shownToasts)).toContain('Not sent. Busy · not sent');
     await expect(page.getByText(NOT_SENT)).toHaveCount(0);
     await expect(bubble(page, `Refused by ${mode}`)).toHaveCount(0);
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);

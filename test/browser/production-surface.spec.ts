@@ -199,16 +199,23 @@ test('Settings keeps the unavailable fallback when the license notices cannot be
   await expect(settings.getByText('Flagged', { exact: true })).toHaveCount(0);
 });
 
-test('deferred apps are absent and root views show honest unconnected states', async ({ page }) => {
-  await page.route('https://tiles.openfreemap.org/**',route=>route.fulfill({json:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#e7ebed'}}]}}));
+test('deferred apps are absent', async ({ page }) => {
   await page.addInitScript(offline);
   await page.goto('/?tools=1');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   for (const deferred of ['Phone', 'Messages', 'Contacts', 'Wallet']) await expect(page.getByRole('button', { name: deferred, exact: true })).toHaveCount(0);
-  const states: Record<string, RegExp> = {
-    Inbox: /Connect Eliza Cloud/, Workflows: /Use on phone/, Notes: /Notes unavailable/,
-    Photos: /No photos/, Maps: /© OpenStreetMap/, Calendar: /\d/, Files: /Internal storage|Storage Unavailable/, Settings: /General|Privacy|Apps|About/,
-  };
-  for (const [view, expected] of Object.entries(states)) {
+});
+
+// One fresh start per root view, each its own test: eight serial starts in one test do not fit
+// its budget when the host is loaded, and the views are independent.
+const rootViewStates: Record<string, RegExp> = {
+  Inbox: /Connect Eliza Cloud/, Workflows: /Use on phone/, Notes: /Notes unavailable/,
+  Photos: /No photos/, Maps: /© OpenStreetMap/, Calendar: /\d/, Files: /Internal storage|Storage Unavailable/, Settings: /General|Privacy|Apps|About/,
+};
+for (const [view, expected] of Object.entries(rootViewStates)) {
+  test(`root view ${view} shows an honest unconnected state`, async ({ page }) => {
+    await page.route('https://tiles.openfreemap.org/**',route=>route.fulfill({json:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#e7ebed'}}]}}));
+    await page.addInitScript(offline);
     await page.goto('/?tools=1');
     await page.getByRole('button', { name: view, exact: true }).and(page.locator('[data-mobile-shell-tile]')).click();
     await expect(page.locator('html')).toHaveAttribute('data-active-view', view.toLowerCase());
@@ -224,8 +231,8 @@ test('deferred apps are absent and root views show honest unconnected states', a
     }
     const text = await page.locator('body').innerText();
     for (const name of fixtureNames) expect(text, `${view} shows fixture ${name}`).not.toContain(name);
-  }
-});
+  });
+}
 
 test('sending chat without a connection opens the chooser', async ({ page }) => {
   await page.goto('/?tools=1');

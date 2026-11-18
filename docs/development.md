@@ -73,6 +73,41 @@ deadlines for refinement, host JVM fixtures and LemmaScript, and Playwright serv
 startup. CI uses 1. Dafny's per-proof limits and the update deadlines measured by
 fixtures stay the same.
 
+### Browser test runs
+
+Each browser test boots the app in a fresh context from the development server, so the
+suite's wall time is its total test time divided by the worker count. Locally Playwright
+uses 4 workers; CI (`CI` set) uses 2 per shard. `ALPHA_BROWSER_WORKERS=<n>` or
+`-- --workers=<n>` overrides both. Projected from per-test timings (not yet measured as full
+runs): roughly 75 minutes for `bun run test:browser` and about 10 minutes for
+`bun run test:browser:production` on a quiet 24-CPU host;
+other sessions' builds, emulators and test runs on the same machine lengthen both and push
+timing-sensitive tests over their timeouts. At 6 workers a quiet host
+runs about a quarter faster again (`ALPHA_BROWSER_WORKERS=6`), but with other sessions loading it
+6 and 8 workers time out timing-sensitive tests that pass at 4.
+
+On a shared workstation run the lanes in their own memory-capped unit, so that the out-of-memory
+daemon stops the test run rather than the session that started it (about 0.85 GB per worker
+plus 0.5 GB for the development server):
+
+```sh
+systemd-run --user --wait --pipe -q -p MemoryMax=10G --working-directory="$PWD" \
+  --setenv=PATH="$PATH" --setenv=HOME="$HOME" bun run test:browser
+```
+
+A failing test keeps a trace with its actions, their timings and errors, the screencast and
+the console. DOM snapshots and the network log are off: Playwright records both together,
+including every module body the development server sends, and that cost every test about
+a second even though passing tests discard the trace. `ALPHA_TRACE=1` records them
+again; so does rerunning with `-- --last-failed --trace=on`.
+
+Concurrent runs in one worktree need different `ALPHA_BROWSER_TEST_PORT` values (the
+production lane uses the port after it). A run on a port other than 5317 writes
+`test-results/browser-<port>/` and `test-results/browser-report-<port>/`, and every Vite
+server it starts keeps its dependency cache under `test-results/vite-cache/` scoped by port
+(and, for servers a spec starts itself, by worker), so concurrent runs and workers never
+replace each other's optimized modules.
+
 ## Development
 
 ```sh

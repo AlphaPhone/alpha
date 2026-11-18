@@ -1,8 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import {createServer,type ViteDevServer} from 'vite';
-import {mkdtemp,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
-import path from 'node:path';
+import {scopedViteCacheDir} from './helpers/vite-cache';
 
 const locationPhase = (page: Page) => page.locator('[data-map-diagnostics]').evaluate(node =>
   (JSON.parse(node.getAttribute('data-map-diagnostics') || '{}') as {lifecycle?: {position?: string}}).lifecycle?.position);
@@ -51,9 +49,9 @@ for(const mode of ['granted','denied','late-fix'] as const)test(`Maps location r
 // A separate server configures this group with the synthetic Maps provider.
 // Every request to that synthetic endpoint is fulfilled here, never sent out.
 test.describe('configured synthetic Maps provider',()=>{
- let server:ViteDevServer,origin:string,cache:string;
- test.beforeAll(async()=>{cache=await mkdtemp(path.join(tmpdir(),'alpha-maps-vite-'));server=await createServer({configLoader:'native',cacheDir:cache,define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('1'),'import.meta.env.VITE_MAPS_BASE_URL':JSON.stringify('https://maps-fixture.invalid')},server:{host:'127.0.0.1',port:0,hmr:false,watch:null}});await server.listen();origin=`http://127.0.0.1:${(server.httpServer!.address() as any).port}`;});
- test.afterAll(async()=>{await server?.close();if(cache)await rm(cache,{recursive:true,force:true});});
+ let server:ViteDevServer,origin:string;
+ test.beforeAll(async()=>{server=await createServer({configLoader:'native',cacheDir:scopedViteCacheDir('test-results/map-plane/vite-cache'),define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('1'),'import.meta.env.VITE_MAPS_BASE_URL':JSON.stringify('https://maps-fixture.invalid')},server:{host:'127.0.0.1',port:0,hmr:false,watch:null}});await server.listen();origin=`http://127.0.0.1:${(server.httpServer!.address() as any).port}`;});
+ test.afterAll(async()=>{await server?.close();});
 for(const mode of ['granted','outside-coverage','webgl','tiles'] as const)test(`Maps configured renderer recovery: ${mode}`,async({page,context})=>{
  let badTiles=mode==='tiles';await page.route('https://maps-fixture.invalid/**',route=>{if(new URL(route.request().url()).pathname==='/capabilities')return route.fulfill({json:{providerId:'alpha-osm-monaco',region:'Synthetic Monaco fixture',bounds:[7.40,43.72,7.45,43.76],attribution:'Synthetic browser test',connectionId:'conn_maps_fixture_connection_123456',revision:'fixture1',capabilities:{map:true,search:true,placeDetails:true,modes:['walk'],traffic:'none',transit:'none',offline:{map:false,search:false,routing:false}}},headers:{'access-control-allow-origin':'*'}});return route.fulfill({status:badTiles?503:204,headers:{'access-control-allow-origin':'*'}});});
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await context.grantPermissions(['geolocation']);await context.setGeolocation(mode==='outside-coverage'?{latitude:10,longitude:10,accuracy:5}:{latitude:43.739,longitude:7.425,accuracy:5});
