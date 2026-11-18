@@ -41,7 +41,7 @@ async function askAboutDocument(page: Page) {
   // Documents lists the file from storage; opening it selected that one path, and nothing was sent.
   expect(await harness(page, f => f.documents.picks)).toEqual([{ action: 'files', path: 'Documents/garden-report.txt' }]);
   await button(page, 'File actions').click();
-  await button(page, 'Add to chat').click();
+  await button(page, 'Ask Alpha').click();
   await page.getByRole('button', { name: /^Edit excerpt from / }).click();
   const question = page.getByRole('dialog', { name: 'Ask about selected content' });
   await expect(question.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue(contents);

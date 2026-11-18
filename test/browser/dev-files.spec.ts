@@ -13,7 +13,7 @@ test(pdfTest,async({page})=>{
  const result=await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const files=registerPlugin<any>('AlphaFiles');const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>','<< /Length 43 >>\nstream\nBT /F1 16 Tf 20 100 Td (Browser PDF) Tj ET\nendstream'];let pdf='%PDF-1.4\n',offsets=[0];for(let i=0;i<objects.length;i++){offsets.push(pdf.length);pdf+=`${i+1} 0 obj\n${objects[i]}\nendobj\n`;}const xref=pdf.length;pdf+='xref\n0 7\n0000000000 65535 f \n'+offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;const selected=await files.importFile(new File([pdf],'pages.pdf',{type:'application/pdf'}));const first=await files.pdfSelected({...selected,page:0});const blob=await (await fetch(first.imageUri)).blob(),bitmap=await createImageBitmap(blob);const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;const context=canvas.getContext('2d')!;context.drawImage(bitmap,0,0);const ink=Array.from(context.getImageData(0,0,canvas.width,canvas.height).data).filter((value,index)=>index%4!==3&&value<128).length>100;const second=await files.pdfSelected({...selected,page:1});let released=false;try{await fetch(first.imageUri);}catch{released=true;}await files.forgetSelected(selected);let forgotten=false;try{await files.pdfSelected({...selected,page:0});}catch{forgotten=true;}return {text:first.text,status:first.status,count:first.pageCount,width:bitmap.width,height:bitmap.height,page:second.page,ink,released,forgotten};});
  expect(result).toEqual({text:'Browser PDF',status:'rendered',count:2,width:400,height:600,page:1,ink:true,released:true,forgotten:true});
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open pages.pdf',exact:true}).click();await expect(page.getByRole('img',{name:'Page 1 of 2',exact:true})).toBeVisible();await page.getByRole('button',{name:'Next PDF page',exact:true}).click();await expect(page.getByRole('img',{name:'Page 2 of 2',exact:true})).toBeVisible();await page.getByRole('button',{name:'File actions',exact:true}).click();
-  await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
   await page.getByRole('button',{name:/^Edit excerpt from /}).click();const question=page.getByRole('dialog',{name:'Ask about selected content'});await expect(question.getByRole('heading')).toHaveText('Ask Alpha');await expect(question.getByLabel('Selected source',{exact:true})).toHaveText('pages.pdf · page 2');await expect(question.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Browser PDF');await expect(question.getByRole('img',{name:'Image for question review'})).toBeVisible();await expect(question.getByRole('button',{name:'Extract text locally',exact:true})).toBeEnabled();await question.getByRole('button',{name:'Cancel',exact:true}).click();await page.screenshot({path:'test-results/dev-parity-ui/pdf.png'});
 });
 test('Files renderer confirms folder creation and closes its mutation dialog',async({page})=>{
@@ -69,7 +69,7 @@ const recentNames=(page:import('@playwright/test').Page)=>page.evaluate(()=>(JSO
 for(const [label,name,content,excerpt] of [['a UTF-8 BOM text file','bom.txt','\uFEFFByte order mark',undefined],['a long text file within the preview bound','long-preview.txt','x'.repeat(1_500_000),'The long log']] as const)
  test(`Ask Alpha links the source of ${label}`,async({page})=>{
   await observeFileQuestionEffects(page);await importAndOpen(page,name,content);await page.getByRole('button',{name:'File actions',exact:true}).click();
-  await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
   await page.getByRole('button',{name:/^Edit excerpt from /}).click();
   const question=page.getByRole('dialog',{name:'Ask about selected content'});if(excerpt)await question.getByRole('textbox',{name:'Content excerpt'}).fill(excerpt);
   await expect(question.getByRole('checkbox')).toBeChecked();await question.getByRole('button',{name:'Use in conversation'}).click();
@@ -102,7 +102,7 @@ for(const [name,bytes] of [['long.txt',2_500_000],['huge.txt',6*1024*1024]] as c
   await observeFileQuestionEffects(page);await importAndOpen(page,name,'x'.repeat(bytes));
   await expect(page.getByRole('status').filter({hasText:'Open or download this file to read it.'})).toBeVisible();
   await page.getByRole('button',{name:'File actions',exact:true}).click();
-  await expect(page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Add to chat',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true})).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
   await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveCount(0);
@@ -123,7 +123,7 @@ test('a file above the link limit can contribute a deliberate text excerpt',asyn
  expect(bytes).toBeGreaterThan(5*1024*1024);
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open oversized.png',exact:true}).click();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
  await expect(page.getByText('File too large. Choose Use excerpt in File actions.',{exact:true})).toBeVisible();
  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
  await page.getByRole('button',{name:'File actions',exact:true}).click();

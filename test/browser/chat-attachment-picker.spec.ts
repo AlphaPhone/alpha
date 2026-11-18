@@ -215,7 +215,7 @@ test('a Files preview attaches the exact file to an editable prompt and waits fo
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
  const prompt=page.getByRole('textbox',{name:'Message Alpha',exact:true});
  await expect(prompt).toHaveValue('Explain this file');
  await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toBeVisible();
@@ -240,7 +240,7 @@ test('adding and removing a file preserves an existing unsent question',async({p
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
  const prompt=page.getByRole('textbox',{name:'Message Alpha',exact:true});
  await expect(prompt).toHaveValue('My own question');
  const remove=page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true});
@@ -267,7 +267,7 @@ test('leaving Files during attachment validation discards the late read and allo
  const attach=async()=>{
   await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
   await page.getByRole('button',{name:'File actions',exact:true}).click();
-  await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
  };
  await page.getByRole('button',{name:'Files',exact:true}).click();
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();

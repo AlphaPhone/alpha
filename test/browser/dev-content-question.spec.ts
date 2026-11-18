@@ -6,7 +6,7 @@ test('selected file question reviews exact text and composes without sending',as
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Public excerpt\nPRIVATE OMIT'],'review.txt',{type:'text/plain'}));});
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open review.txt',exact:true}).click();
  await expect(page.getByText('PRIVATE OMIT',{exact:true})).toBeVisible();await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
  await page.getByRole('button',{name:/^Edit excerpt from /}).click();
  const review=page.getByRole('dialog',{name:'Ask about selected content'});await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Public excerpt\nPRIVATE OMIT');
  await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect(review).toHaveCount(0);
