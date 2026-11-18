@@ -340,10 +340,22 @@ export function createMailReviewController(
     });
     operation = bound;
     try {
-      await bound.load();
+      const restored = await bound.load();
       if (token !== epoch) return;
-      const restored = bound.snapshot();
-      if (restored) {
+      if (
+        restored?.phase === "preparing" &&
+        restored.proposal.kind === "send" &&
+        restored.review === null &&
+        restored.receipt === null &&
+        restored.source?.draftId === `agent-email:${restored.requestId}` &&
+        restored.composer?.draftId === restored.source.draftId &&
+        /^[a-f0-9]{8}-[a-f0-9]{4}-0[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(restored.requestId)
+      ) {
+        // Older chat drafts used a version-zero message ID. Cloud rejects
+        // that ID before review, so this local prepare never reached dispatch.
+        await bound.clear();
+        if (token !== epoch) return;
+      } else if (restored) {
         status =
           "Saved mail operation. Check its exact review and receipt before continuing.";
         const sent = sentSource(restored);

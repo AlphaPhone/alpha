@@ -116,6 +116,35 @@ const controls = () => controlsModule ??= bundle('apps/app/src/prototype/inbox-p
   'inbox-attachment': attachmentPort,
 });
 
+test('restore clears a rejected legacy chat prepare and retains a valid prepare', async () => {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const owner = JSON.stringify(['production', account.userId, '']);
+  const d = device(owner);
+  const key = 'inbox-operation:v1:' + await sha(JSON.stringify([owner, 'grant-a']));
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    for (const version of ['0', '5']) {
+      const requestId = `00000000-0000-${version}000-8000-000000000001`;
+      const draftId = `agent-email:${requestId}`;
+      const record = {
+        version: 1, owner, grantId: 'grant-a',
+        requestId, proposal: {kind: 'send'}, phase: 'preparing', review: null, receipt: null,
+        source: {draftId}, composer: {draftId},
+      };
+      d.slots.set(key, record);
+      await inboxProviderControls(() => {}, () => {}).bind('grant-a');
+      assert.deepEqual(d.slot(), version === '0' ? null : record);
+    }
+    assert.equal(d.remote.receipts.size, 0);
+    assert.equal(d.remote.dispatches, 0);
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+});
+
 test('a manual Send never dispatches a composer that changed during preparation', async () => {
   const account = {environment: 'production', userId: 'owner-1'};
   const d = device(JSON.stringify(['production', 'owner-1', '']));
