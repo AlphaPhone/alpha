@@ -584,6 +584,7 @@ function describeForegroundReview(
 
 type ExecutionResult = DeviceExecutionResult & {
   foregroundResult?: ForegroundReviewResult;
+  cancelledBeforeCapture?: true;
   /**
    * The view change that shows a successful telephony outcome (the drafted
    * conversation, the filtered Contacts list). Like `presentBrowser`, it ends
@@ -1980,7 +1981,7 @@ export class DeviceActionCoordinator<
           proposalId,
           status: result.status,
           summary:
-            signal.aborted && result.status === "failed"
+            isCameraCapture(p.operation) && result.status === "failed" && result.cancelledBeforeCapture
               ? result.summary
               : unsyncedSummary(result.summary),
           committedChanges,
