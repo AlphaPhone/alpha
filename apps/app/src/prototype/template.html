@@ -4502,6 +4502,19 @@
             <sc-if value="{{m.hasMapsChoice}}"><div class="maps-chat-choice" role="group" aria-label="Share location"><sc-for list="{{m.mapsChoices}}" as="option"><button class="tap" onClick="{{option.choose}}">{{option.label}}</button></sc-for></div></sc-if>
 
 
+            <sc-if value="{{m.emailDraft}}">
+              <section aria-label="Email draft" class="chat-email-draft">
+                <sc-if value="{{m.emailDraft.editing}}">
+                  <sc-if value="{{m.emailDraft.from}}"><small>From {{m.emailDraft.from}}</small></sc-if>
+                  <label>To<input type="text" aria-label="Email recipients" value="{{m.emailDraft.to}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeTo}}"></label>
+                  <label>Subject<input type="text" aria-label="Email subject" maxlength="998" value="{{m.emailDraft.subject}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeSubject}}"></label>
+                  <textarea aria-label="Email body" rows="4" maxlength="64000" value="{{m.emailDraft.body}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeBody}}"></textarea>
+                  <sc-if value="{{m.emailDraft.missingAccount}}"><button onClick="{{m.emailDraft.openInbox}}">Open Inbox</button></sc-if>
+                  <div><button disabled="{{m.emailDraft.busy}}" onClick="{{m.emailDraft.discard}}">Don’t send</button><button aria-label="Send email" disabled="{{m.emailDraft.sendDisabled}}" onClick="{{m.emailDraft.send}}">Send</button></div>
+                </sc-if>
+                <sc-if value="{{m.emailDraft.status}}"><span role="status">{{m.emailDraft.status}}</span></sc-if>
+              </section>
+            </sc-if>
             <sc-if value="{{m.cAgenda}}">
               <button onClick="{{m.act}}" style="border-radius: 22px; background: var(--s2); overflow: hidden; text-align: left">
                 <sc-for list="{{m.rows}}" as="r">

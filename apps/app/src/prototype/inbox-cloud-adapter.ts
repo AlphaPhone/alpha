@@ -463,7 +463,35 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     await drafts.flushForAppUpdate(exact);
   };
   provider.setEditor((proposal,reference,review)=>drafts.editProvider(proposal,reference,review));
-  provider.setComposer(()=>api?.isActive() && drafts.render().composing ? drafts.email() : null);
+  let chatSend:{draftId:string;proposal:Bag;current:()=>boolean}|undefined;
+  provider.setComposer(()=>chatSend ? (chatSend.current()?chatSend:null) : api?.isActive() && drafts.render().composing ? drafts.email() : null);
+  view.readyAgentEmailAccount=async()=>{
+    const identity=homeOwnerKey();
+    if(!identity||document.hidden)return;
+    if(!api?.isActive()) await warmHomeMailbox();
+    if(identity!==homeOwnerKey()||document.hidden||accountsFromDisk||!accountsChecked)return;
+    const grant=selected||homePreview?.accountId;
+    const chosen=accounts.find(row=>row.connectionId===grant&&gmailReadable(row)&&gmailActionGrant(row,'send')==='granted');
+    if(!chosen?.connectionId)return;
+    if(!selected)selected=chosen.connectionId;
+    await provider.bind(selected);
+  };
+  view.agentEmailAccount=()=>{
+    const binding=connectionController.getCloudClient(),caps=provider.capabilities();
+    if(!binding||accountsFromDisk||!selected||!caps?.send||!literalMailAddress(caps.from||'')||
+       !gmailInboxAllows(caps,'send')||!accounts.some(a=>a.connectionId===selected&&gmailActionGrant(a,'send')==='granted'))return null;
+    return {from:caps.from,token:JSON.stringify([homeOwnerKey(),binding.sessionId,binding.credentialId,selected,caps.from])};
+  };
+  view.sendAgentEmail=async(id:string,mail:{to:string[];subject:string;body:string},accountToken:string,reviewCurrent:()=>boolean)=>{
+    const current=()=>reviewCurrent()&&view.agentEmailAccount()?.token===accountToken&&!document.hidden;
+    if (chatSend || !current()) return {state: 'unsent'};
+    const proposal={mode:'compose',to:[...mail.to],cc:[],bcc:[],subject:mail.subject,bodyText:mail.body,attachments:[]};
+    const draftId='agent-email:'+id;
+    chatSend={draftId,proposal,current};
+    try{
+      return await provider.prepare({kind:'send',...proposal},{draftId,requestId:id},'send-from-composer');
+    }finally{chatSend=undefined;}
+  };
   const readable = () => accounts.filter(gmailReadable);
   const currentQuery = () => String(api?.get('inbox')?.q || '').trim() || folderQuery[folder];
   /** Read-cache identity of the selected account now; null while nothing it read may be shown. */
@@ -560,11 +588,20 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   } });
   provider.setObservers({
     // A provider-confirmed send removes the local copies of exactly the draft it was sent from.
-    sent: (source, proposal, grant) => void drafts.settleSent(source.draftId, proposal, grant, (source as { savedRevision?: string }).savedRevision), sentNote: source => drafts.sentNote(source.draftId),
+    sent: (source, proposal, grant) => {
+      if (!source.draftId.startsWith('agent-email:'))
+        void drafts.settleSent(source.draftId, proposal, grant, (source as { savedRevision?: string }).savedRevision);
+    },
+    sentNote: source => drafts.sentNote(source.draftId),
     // A stale review was discarded without dispatch; reload the open message so the user sees its current state.
     stale: () => { if (!body) { void load(); return; } const key = bodyKey(body.message.id); messageBodies.delete(key); pendingBodies.get(key)?.controller.abort(); pendingBodies.delete(key); void open(body.message); },
     receipt: receipt => {
       const id = typeof receipt.providerResult?.messageId === 'string' ? receipt.providerResult.messageId : '';
+      if(id&&receipt.kind==='send'){
+        invalidateList();homePreview=null;inboxPreview=null;
+        if(api?.isActive()&&(currentQuery()==='in:sent'||currentQuery()==='in:inbox'))void load();
+        return;
+      }
       if (!id || !['archive', 'trash'].includes(receipt.kind) || !messages.some(m => m.id === id)) return;
       folderLists.clear();readAhead.invalidate();messageBodies.delete(bodyKey(id));
       messages = messages.filter(m => m.id !== id);

@@ -1216,3 +1216,13 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .alpha-call-bar[data-alpha-call-bar-ended="true"]{background:var(--alpha-gray-55)}
 .alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-end-button{visibility:hidden}
 .alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-call-bar-return{cursor:default}
+
+.chat-email-draft { display:grid; gap:8px; width:100%; box-sizing:border-box; padding:14px; border:1px solid var(--line); border-radius:18px; background:var(--bg); }
+.chat-email-draft small,.chat-email-draft label { color:var(--mut); }
+.chat-email-draft label { display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line); }
+.chat-email-draft input,.chat-email-draft textarea { min-width:0; width:100%; border:0; background:transparent; color:var(--fg); font:inherit; }
+.chat-email-draft input { min-height:44px; }
+.chat-email-draft > div { display:flex; justify-content:flex-end; gap:8px; }
+.chat-email-draft button { padding:0 14px; min-height:44px; border-radius:22px; background:var(--s2); }
+.chat-email-draft button:last-child { background:var(--fg); color:var(--bg); }
+.chat-email-draft button:disabled { opacity:.45; }
