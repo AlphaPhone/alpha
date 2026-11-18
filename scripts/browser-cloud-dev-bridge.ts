@@ -536,10 +536,12 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
   const read=async(input:Parameters<typeof agentRead>[0])=>{await current();const result=await agentRead(input);await current();return result;};
   const calendar=async(input:Parameters<typeof agentCalendarOperation>[0])=>{if(!new URL(input.url).pathname.startsWith('/api/v1/eliza/google/calendar/sync-v1/'))return read(input);await current();if(!googleAllowed('calendarEdits',binding,generation))throw refusal(403,'calendar-owner-access-disabled');const result=await agentCalendarOperation(input);await current();if(!googleAllowed('calendarEdits',binding,generation))throw refusal(409,'calendar-owner-access-changed');return result;};
   const assertSendAccess=()=>{if(!googleAllowed('gmailChanges',binding,generation))throw refusal(403,'gmail-owner-access-disabled');};
+  // Off refuses agent writes only. Reads and send receipts stay available, as in the shared host.
   const gmail=async(input:Parameters<typeof agentGmailOperation>[0])=>{
+   const write=input.method!=='GET';
    await current();
-   assertSendAccess();
-   const result=await agentGmailOperation(input,assertSendAccess);
+   if(write)assertSendAccess();
+   const result=await agentGmailOperation(input,write?assertSendAccess:undefined);
    await current();
    return result;
   };

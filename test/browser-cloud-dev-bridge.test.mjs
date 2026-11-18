@@ -845,6 +845,9 @@ test('resident Gmail requires the current owner switch and a matching review bef
   assert.equal((await intent(false)).status,200);
   assert.notEqual((await call(send)).status,200);
   assert.equal(dispatches,0);
+  const receipt=await call({operation:'receipt',id});
+  assert.equal(receipt.status,200,'Off keeps send receipts readable: '+JSON.stringify(receipt.data));
+  assert.equal(receipt.data.send.state,'prepared');
   assert.equal((await intent(true)).status,200);
   assert.equal((await call(send)).data.send.providerResult.messageId,'fixture-message');
   assert.equal((await call(send)).data.send.state,'succeeded');

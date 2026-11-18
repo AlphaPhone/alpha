@@ -2,7 +2,7 @@ import type {DomainRecovery} from '../browser/domain-document';
 import {captureDevicePreferences,cachedDevicePreferences,editDevicePreferences,initializeDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import {Capacitor} from '@capacitor/core';
 import {browserLocalAgentEnabled,saveNativeGoogleAgentAccess} from './local-agent';
-import {browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall} from './browser-cloud-resident';
+import {BROWSER_RESIDENT_LAUNCHED,browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall} from './browser-cloud-resident';
 import {cloudCredentialStore} from './native-connection';
 
 /** Owner switches for agent writes through Google. Off never disconnects or revokes Google; reads keep working. */
@@ -44,6 +44,8 @@ async function publishSavedGoogleAgentAccess(){
 export function publishGoogleAgentAccess(){
  return withGoogleAccessLock(publishSavedGoogleAgentAccess);
 }
+// A relaunched development resident forgets the owner's Gmail switch; hand it the saved one again.
+if(browserCloudResidentEnabled&&typeof window!=='undefined')window.addEventListener(BROWSER_RESIDENT_LAUNCHED,()=>{void publishGoogleAgentAccess().catch(()=>{});});
 export async function setGoogleAgentAccess(change:Partial<GoogleAgentAccess>,guard?:{current():boolean;expectedCalendarEdits:boolean;receipt:DomainRecovery}){
  return withGoogleAccessLock(async()=>{
   let before:GoogleAgentAccess|undefined;
