@@ -27,12 +27,28 @@ test('switches are independent',async()=>{
  await assert.rejects(gmailOnly.host.calendarWrite({operation:'write-capabilities'}),/Calendar edits are turned off/);
  assert.deepEqual(gmailOnly.calls,['/api/v1/user'],'Only the allowed Gmail change reached Cloud');
 });
-async function renderer({native=false,browserLocalAgentEnabled=!native}={}){
+async function renderer({native=false,browserLocalAgentEnabled=!native,browserCloudResidentEnabled=false}={}){
  const {transformSync}=await import('esbuild');const {readFileSync}=await import('node:fs');const vm=await import('node:vm');
- const state={cached:undefined,initialized:0,posts:[],saves:[],saveFails:false,saveHook:undefined};
+ const state={cached:undefined,initialized:0,posts:[],saves:[],saveFails:false,saveHook:undefined,cloudCalls:[],cloudCredential:null};
  let queue=Promise.resolve();
  const navigator={locks:{request:(_name,_options,operation)=>{const result=queue.then(operation);queue=result.catch(()=>{});return result;}}};
- const modules={'../browser/device-preferences':{cachedDevicePreferences:()=>state.cached,initializeDevicePreferences:()=>{state.initialized++;},readDevicePreferences:async()=>({...state.cached}),editDevicePreferences:async edit=>{edit(state.cached);}},'@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./local-agent':{browserLocalAgentEnabled,saveNativeGoogleAgentAccess:async access=>{await state.saveHook?.(access);if(state.saveFails)throw Error('Google access could not be saved.');state.saves.push(JSON.parse(JSON.stringify(access)));}}};
+ const modules={
+  '../browser/device-preferences':{cachedDevicePreferences:()=>state.cached,initializeDevicePreferences:()=>{state.initialized++;},readDevicePreferences:async()=>({...state.cached}),editDevicePreferences:async edit=>{edit(state.cached);}},
+  '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},
+  './local-agent':{browserLocalAgentEnabled,saveNativeGoogleAgentAccess:async access=>{await state.saveHook?.(access);if(state.saveFails)throw Error('Google access could not be saved.');state.saves.push(JSON.parse(JSON.stringify(access)));}},
+  './browser-cloud-resident':{
+   browserCloudResidentEnabled,
+   browserCloudResidentEnvironment:'production',
+   browserResidentCall:async(operation,credentialId,gmailChanges)=>{
+    state.cloudCalls.push([operation,credentialId,gmailChanges]);
+    return {gmailChanges};
+   }
+  },
+  './native-connection':{cloudCredentialStore:{read:async environment=>{
+   assert.equal(environment,'production');
+   return state.cloudCredential;
+  }}}
+ };
  const module={exports:{}};
  vm.runInContext(transformSync(readFileSync('apps/app/src/runtime/google-agent-access.ts','utf8'),{loader:'ts',format:'cjs',target:'es2022'}).code,vm.createContext({module,exports:module.exports,navigator,require:name=>modules[name]??(()=>{throw Error('Unexpected import '+name);})(),fetch:async(path,init)=>{state.posts.push([path,JSON.parse(init.body)]);return {};}}));
  return {access:module.exports,state};
@@ -47,6 +63,20 @@ test('the renderer never publishes the default over a saved off before settings 
  assert.deepEqual(posts,[['/__alpha-agent-google-access',{gmailChanges:false,calendarEdits:true}]],'The saved off reaches the host once loaded');
  await access.setGoogleAgentAccess({gmailChanges:true});
  assert.deepEqual(posts.at(-1)[1],{gmailChanges:true,calendarEdits:true});
+});
+test('the Cloud preview publishes saved Gmail access only for the signed-in credential',async()=>{
+ const {access,state}=await renderer({browserCloudResidentEnabled:true});
+ state.cached={agentGmailChanges:false,agentCalendarEdits:true};
+ await access.publishGoogleAgentAccess();
+ assert.deepEqual(state.cloudCalls,[]);
+ state.cloudCredential=credential;
+ await access.publishGoogleAgentAccess();
+ await access.setGoogleAgentAccess({gmailChanges:true});
+ assert.deepEqual(state.cloudCalls,[
+  ['residentGoogleGmailAccess',credential.credentialId,false],
+  ['residentGoogleGmailAccess',credential.credentialId,true],
+ ]);
+ assert.deepEqual(state.posts,[],'Cloud access uses the credential-bound resident channel');
 });
 test('on the phone the saved switches reach the native Google host, and a failed save fails the toggle',async()=>{
  const {access,state}=await renderer({native:true});
