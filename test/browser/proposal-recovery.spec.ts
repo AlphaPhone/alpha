@@ -7,6 +7,9 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
   test(`interrupted reply recovers only reviewable proposals: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
       const w = window as any, store = new Map();
+      // notes_query reads only notes saved before canonical Notes, so the phone negotiates
+      // notes.query.v1 only when it has some (selectDeviceCapabilities, #1330).
+      if (mode === 'notes-from-calendar') localStorage.setItem('alphaphone:daily:v1', JSON.stringify({ notes: [{ id: 'previous-note', title: 'Owned synthetic title', body: 'Saved before canonical Notes', updatedAt: '2026-01-01T00:00:00.000Z' }] }));
       const agentId = '12345678-1234-4234-8234-123456789abc';
       const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, unknown:mode==='unknown-receipt', journal: [] as string[], proposal: null as any };
       const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
