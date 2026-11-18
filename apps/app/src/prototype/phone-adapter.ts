@@ -8,7 +8,7 @@ import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {formatDateTime} from './locale-time';
 import {callKind,callRow,callsBriefing,clockLength,displayNumber,initials,matchesCallQuery,numberKey,shortWhen} from './telephony-presenters';
-import {placeOwnerCall} from '../ui/telephony/place-owner-call';
+import {placeOwnerCall} from './place-owner-call';
 import {clearListFilter,setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 type Bag=Record<string,any>;
 type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
