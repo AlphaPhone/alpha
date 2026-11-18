@@ -228,8 +228,11 @@ export function contactChangeOptions(before: ContactRecord, operation: Pick<Cont
   const fields = (draft: ContactDraft) => draft.phoneNumbers.length + draft.emailAddresses.length;
   return fields(kept) === fields(change) ? [{before, after: change}] : [{before, after: kept, keeps: 'add'}, {before, after: change, keeps: 'replace'}];
 }
-/** The matching contacts the editor can read completely; null when some matched but none can be offered. */
-async function records(query: string, ports: TelephonyPorts): Promise<ContactRecord[] | null> {
+/**
+ * The matching contacts the editor can read completely; null when some matched but none can be offered.
+ * A change or deletion is offered (and its approval card names them) only for these.
+ */
+export async function contactWriteTargets(query: string, ports: Pick<TelephonyPorts, 'searchContacts' | 'getContact'>): Promise<ContactRecord[] | null> {
   const rows = await ports.searchContacts(query, LOOKUP_LIMIT), found: ContactRecord[] = [];
   for (const row of rows) {
     try { found.push(await ports.getContact(row.id)); }
@@ -259,7 +262,7 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
         phoneNumbers: contact.phoneNumbers.map(number => ({number, type: 'mobile'})), emailAddresses: contact.emailAddresses.map(address => ({address, type: 'home'}))});
       return result(saved.status === 'saved' ? 'saved' : saved.status === 'unknown' ? 'unknown' : 'failed');
     }
-    const found = await records(operation.query, ports);
+    const found = await contactWriteTargets(operation.query, ports);
     ports.current();
     if (!found) return result('unavailable');
     if (!found.length) return result('not-found');

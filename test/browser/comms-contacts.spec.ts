@@ -78,6 +78,36 @@ test.describe('dev Contacts (?mode=dev&fixture=1 dev build with ELIZA_DEV_ALLOW_
 });
 
 test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-views.spec.ts)', () => {
+  // v610: a change or deletion for a name nobody in Contacts has was carded anyway. The installed
+  // review lookup reads the stubbed address book; the proposals are a stubbed agent list.
+  test('a contact change or deletion is carded only for contacts in the address book, and only approval runs it', async ({page}) => {
+    await setupTelephony(page);
+    const review = (operation: Record<string, unknown>) => page.evaluate(async operation => {
+      const {DeviceActions} = await import('/src/runtime/device-actions.ts' as string);
+      const posts: string[] = [];
+      const proposal = {id: '5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20', digest: 'd'.repeat(64), state: 'pending', subjectUserId: 'owner', requestedBy: 'agent', action: 'device_action',
+        expiresAt: new Date(Date.now() + 600000).toISOString(), execution: null,
+        payload: {action: 'device_action', version: 1, installationId: 'device', enrollmentId: 'enrollment', operation}};
+      const request = async (path: string, body: unknown) => { if (body !== undefined) posts.push(path); return {proposals: [proposal]}; };
+      const journal = {reserve: async () => { throw Error('no journal'); }, markApplying: async () => {}, finish: async () => {}, get: async () => ({}), list: async () => ({entries: []})};
+      let effects = 0;
+      const client = new DeviceActions({ownerId: 'owner', agentId: 'agent', origin: 'https://agent.example', sessionId: 'session'},
+        {installationId: 'device', enrollmentId: 'enrollment', key: 'a'.repeat(64), capabilities: ['contacts.write.v1', 'contacts.write.v2']}, 'c'.repeat(64), request, journal, async () => { effects++; return {status: 'succeeded', summary: 'done'}; });
+      const items = await client.pendingReview({view: 'home', revision: 1, sensitive: false}, new AbortController().signal);
+      return {items: items.map((item: any) => item.proposal ? `${item.proposal.title}\n${item.proposal.description}` : `notice ${item.notice}`), posts, effects};
+    }, operation);
+    const missing = await review({type: 'contact_delete', query: 'Test Alpha'});
+    expect(missing).toEqual({items: ['notice Delete contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.'], posts: [], effects: 0});
+    expect((await review({type: 'contact_update', query: 'Test Alpha', set: {phoneNumbers: ['+14155550101']}})).items).toEqual(['notice Change contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.']);
+    const one = await review({type: 'contact_update', query: 'Ada', add: {phoneNumbers: ['+14155550101']}});
+    expect(one.items).toHaveLength(1);
+    expect(one.items[0]).toMatch(/^Change contact\nContact: Ada Okafor\nAdd: \+14155550101\n/);
+    expect(one).toMatchObject({posts: [], effects: 0});
+    // "ra" matches two people: the card names both and the owner picks one on the phone.
+    const several = await review({type: 'contact_delete', query: 'Ra'});
+    expect(several.items).toEqual(['Delete contact\n2 contacts match “Ra”: Bao Tran, Grace Lindqvist\n\nAfter you confirm, you choose which one to delete on your phone.']);
+    expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).map(([method]) => method).filter(method => ['contacts.save', 'contacts.remove'].includes(method)))).toEqual([]);
+  });
   test('immediate fields save structured names and Notes while unrelated provider rows stay unchanged', async ({page}) => {
     await setupTelephony(page);
     await page.evaluate(()=>{
