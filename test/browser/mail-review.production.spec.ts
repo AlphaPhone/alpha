@@ -177,7 +177,8 @@ test('Android: one composer tap sends the exact addresses and content once', asy
   await button(page, 'Inbox').click();
   await expect(button(page, 'Synthetic sender, Harbour schedule')).toBeVisible({ timeout: 30_000 });
   await button(page, 'Compose').click();
-  const attachment = page.getByRole('region', {name: 'Email draft fields'}).getByRole('button', {name: 'Attach file', exact: true});
+  const header = page.locator('[data-alpha-subview="inbox-composing"] [data-alpha-app-header]');
+  const attachment = header.getByRole('button', {name: 'Attach file', exact: true});
   await attachment.click();
   const picker = page.getByRole('dialog', {name: 'Attach files', exact: true});
   await expect(picker.getByRole('button', {name: 'Files', exact: true})).toBeVisible();
