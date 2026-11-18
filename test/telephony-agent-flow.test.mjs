@@ -97,7 +97,7 @@ test('a latest SMS sender read from Home requires the negotiated capability and 
   const capability = 'sms.latest-sender.v1';
   const operation = {type: 'sms_latest_sender'};
   const result = {kind: 'sms-latest-sender', status: 'found', numberEnding: '0123'};
-  const profile = {android: true, native: true, aospImage: true, foregroundReview: true};
+  const profile = {android: true, native: true, aospImage: true, foregroundReview: false};
   assert.ok(P.selectDeviceCapabilities([capability], profile).includes(capability));
   assert.ok(!P.selectDeviceCapabilities([capability], {...profile, aospImage: false}).includes(capability));
   await assert.rejects(fixture({operation, result, capabilities: []}).client.pending(context, signal()), /not negotiated/);
