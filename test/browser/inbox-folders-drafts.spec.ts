@@ -7,11 +7,12 @@ import {preloadPageModules} from './helpers/page-modules';
 async function install(page:Page,caps:Record<string,unknown>){
  await seedCompletedAccessSetup(page);
  await page.goto('/');
- await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
+ await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/runtime/inbox-local-store.ts']);
  await page.waitForFunction(()=>{const state=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.getSnapshot();return state.startupResolved&&!state.busy;});
- await page.evaluate(async caps=>{
-  const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
-  const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');
+ await page.evaluate(caps=>{
+  const loaded=(window as any).__alphaModules;
+  const {connectionController:c}=loaded['/src/runtime/connection-ui.tsx'];
+  const {inboxLocalStore:s}=loaded['/src/runtime/inbox-local-store.ts'];
   const f=(window as any).folderFixture={slots:{} as Record<string,unknown>,searches:[] as string[],drafts:0,draftReads:[] as string[],prepared:[] as any[],dispatches:0};
   s.read=async(key:string)=>structuredClone(f.slots[key]??null);
   s.compareExchange=async(key:string,prior:unknown,next:unknown)=>{if(JSON.stringify(f.slots[key]??null)!==JSON.stringify(prior))return {status:'conflict'};f.slots[key]=structuredClone(next);return {status:'saved'};};

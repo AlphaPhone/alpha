@@ -3,8 +3,9 @@ import {mkdtempSync,mkdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {app,root} from './java.mjs';
+import {reminderPlatform} from './reminder-delivery-platform.mjs';
 
-export const gmailProduct=['GmailBackground','GmailDeliveryWorker','AlphaGmailPlugin','CloudDeployment','LocalAgentProviderAdmission','PluginWorkers'].map(name=>app+name+'.java');
+export const gmailProduct=['GmailBackground','GmailDeliveryWorker','GmailNoticePoster','AlphaGmailPlugin','CloudDeployment','LocalAgentProviderAdmission','PluginWorkers'].map(name=>app+name+'.java');
 const notificationSource='plugins/plugin-native-notifications/android/src/main/java/ai/eliza/plugins/notifications/';
 export const gmailShared=['MailBackgroundDelivery','MailHistoryReconciliation'].map(name=>notificationSource+name+'.java');
 export const providerAdmission='plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/runtime/NativeProviderAdmission.java';
@@ -17,22 +18,49 @@ export function gmailBackgroundPlatform() {
     const start=provider.indexOf(' private static String cloudId(Object value)');
     const end=provider.indexOf(' private static JSONObject cloudIdentity(JSONObject selected)',start);
     assert.ok(start>=0&&end>start&&provider.slice(start,end).includes('verifiedCloudIdentity'));
+    const androidNotifications=['android/Manifest.java','android/os/Build.java','android/content/pm/PackageManager.java',
+      'android/net/Uri.java','android/app/NotificationChannel.java','android/service/notification/StatusBarNotification.java'];
     const files={
+      ...Object.fromEntries(androidNotifications.map(name=>[name,reminderPlatform[name]])),
       'android/content/Context.java':`package android.content;
 public class Context {
+ private static final android.app.NotificationManager notices=new android.app.NotificationManager();
  public final android.app.KeyguardManager keyguard=new android.app.KeyguardManager();
  public Context getApplicationContext(){return this;}
  public String getPackageName(){return "fixture.alpha";}
- public <T>T getSystemService(Class<T> type){return type.cast(keyguard);}
+ public int checkSelfPermission(String name){return android.content.pm.PackageManager.PERMISSION_GRANTED;}
+ public <T>T getSystemService(Class<T> type){return type.cast(type==android.app.NotificationManager.class?notices:keyguard);}
 }`,
-      'android/content/Intent.java':`package android.content;
-public final class Intent {
- public Object data;
- public Intent(){}
- public Intent(String action){}
- public Intent putExtra(String key,String value){return this;}
- public Intent setData(Object value){data=value;return this;}
+      'android/content/Intent.java':reminderPlatform['android/content/Intent.java'].replace(
+        ' public Intent(String action)', ' public Intent(){this((String)null);}\n public Intent(String action)'),
+      'android/app/PendingIntent.java':reminderPlatform['android/app/PendingIntent.java'].replace(
+        ' public static void reboot()', ' public void cancel(){registry.remove(identity);}\n public static void reboot()'),
+      'android/app/Notification.java':reminderPlatform['android/app/Notification.java']
+        .replace(' public final String channel;',' public static final String CATEGORY_EMAIL="email";\n public final String channel;')
+        .replace(' public String title,text,category;',' public String title,text,category,group;\n public long timeout;')
+        .replace('  public Notification build()', '  public Builder setTimeoutAfter(long ms){notice.timeout=ms;return this;}\n  public Builder setGroup(String group){notice.group=group;return this;}\n  public Notification build()'),
+      'android/app/NotificationManager.java':`package android.app;
+import ai.alphacompute.alphaphone.GmailBackgroundTraces;
+import android.service.notification.StatusBarNotification;
+public final class NotificationManager {
+ public static final int IMPORTANCE_NONE=0,IMPORTANCE_DEFAULT=3;
+ private NotificationChannel channel;
+ public void createNotificationChannel(NotificationChannel candidate){
+  if(!candidate.id.equals("alpha-gmail")||candidate.getLockscreenVisibility()!=Notification.VISIBILITY_PRIVATE)
+   throw new AssertionError("Unexpected installed notice channel");
+  channel=candidate;
+ }
+ public NotificationChannel getNotificationChannel(String id){return channel!=null&&channel.id.equals(id)?channel:null;}
+ public boolean areNotificationsEnabled(){return GmailBackgroundTraces.allowed;}
+ public StatusBarNotification[] getActiveNotifications(){
+  return GmailBackgroundTraces.activeKeys().stream()
+   .map(key->new StatusBarNotification("alpha-gmail-"+key,0,null)).toArray(StatusBarNotification[]::new);
+ }
+ public void notify(String tag,int id,Notification notice){GmailBackgroundTraces.post(tag,id,notice);}
+ public void cancel(String tag,int id){GmailBackgroundTraces.cancel(tag,id);}
 }`,
+      'android/os/SystemClock.java':`package android.os;
+public final class SystemClock {private static long now; public static long elapsedRealtime(){return now+=500;}}`,
       'android/app/Activity.java':`package android.app;
 public class Activity extends android.content.Context {
  public boolean focused=true,finishing,destroyed;
@@ -172,31 +200,6 @@ import java.util.UUID;
 import org.json.JSONObject;
 public class NativeProviderAdmission {
 ${provider.slice(start,end)}
-}`,
-      'ai/eliza/plugins/notifications/MailNoticePoster.java':`package ai.eliza.plugins.notifications;
-import android.content.Context;
-import android.content.Intent;
-import ai.alphacompute.alphaphone.GmailBackgroundTraces;
-public final class MailNoticePoster implements MailBackgroundDelivery.Notices {
- public static final class Config {
-  public final String channel,name,description,action,open,ask,tag,title,text,publicTitle,publicText,askLabel;
-  public final int icon;
-  public final Class<?> activity;
-  public Config(String channel,String name,String description,String action,String open,String ask,String tag,
-    int icon,String title,String text,String publicTitle,String publicText,String askLabel,Class<?> activity) {
-   this.channel=channel;this.name=name;this.description=description;this.action=action;this.open=open;
-   this.ask=ask;this.tag=tag;this.icon=icon;this.title=title;this.text=text;this.publicTitle=publicTitle;
-   this.publicText=publicText;this.askLabel=askLabel;this.activity=activity;
-  }
- }
- public static final class Tap {public String key;public boolean question;}
- public MailNoticePoster(Context context,Config config){GmailBackgroundTraces.configurePoster(config);}
- public boolean allowed(){return GmailBackgroundTraces.allowed;}
- public boolean active(String key){return GmailBackgroundTraces.active(key);}
- public void post(String key){GmailBackgroundTraces.post(key);}
- public void cancel(String key){GmailBackgroundTraces.cancel(key);}
- public void cancelAll(){GmailBackgroundTraces.cancelAll();}
- public Tap tap(Intent intent){if(intent==null||intent.data==null)return null;throw new AssertionError("Intent delivery outside this replay");}
 }`,
       'ai/alphacompute/alphaphone/GmailPorts.java':`package ai.alphacompute.alphaphone;
 import android.content.Context;
