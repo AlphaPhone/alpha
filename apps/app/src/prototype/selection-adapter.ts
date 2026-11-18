@@ -260,7 +260,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           photoBg: image ? `url(${JSON.stringify(image)}) center / contain no-repeat` : '', photoSun: 'none',
           isReceipt: false, isAudio: false, isArchive: false, receipt: null, contents: [],
           renaming: !!st.renaming, notRenaming: !st.renaming, rn: typeof st.rn === 'string' ? st.rn : name, onRn: (event: Event) => api.set({rn:(event.target as HTMLInputElement).value}), saveRn: () => rename(api), rnKey: (event: KeyboardEvent) => {if(event.key === 'Enter'){event.preventDefault();void rename(api);}if(event.key === 'Escape')api.set({renaming:false});}, asking: false, asked: false, canAsk,
-          askLabel: linkable && !selected.excerptOnly ? 'Add to chat' : 'Use excerpt', ask, close,
+          askLabel: linkable && !selected.excerptOnly ? 'Ask Alpha' : 'Use excerpt', ask, close,
           startRename: () => selected.result.status === 'renamed-reselect' ? api.toast('Reselect file') : api.set({renaming:true,rn:name}),
           share: () => share(api), move: () => api.toast('Can’t move here'), del: () => api.toast('Delete in Android'),
         };
