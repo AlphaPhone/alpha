@@ -173,3 +173,30 @@ test('recovery cannot attach a selected telephony proposal to another item or se
     assert.deepEqual(await fixture({operation, requestMessageId: messageId}).client.pending(original, signal()), [], 'a replacement coordinator needs a fresh request');
   }
 });
+test('the dialer keypad is advertised only on the image, opens without a review only for a number the owner typed, and never calls', async () => {
+  const profile = {android: true, native: true, aospImage: true};
+  assert.ok(P.selectDeviceCapabilities(['phone.keypad.v1'], profile).includes('phone.keypad.v1'));
+  assert.ok(!P.selectDeviceCapabilities(['phone.keypad.v1'], {...profile, aospImage: false}).includes('phone.keypad.v1'), 'a standalone install draws no keypad for the agent');
+  assert.ok(!P.selectDeviceCapabilities([], profile).includes('phone.keypad.v1'), 'only what the agent offers');
+  const keypad = {type: 'phone_keypad', number: '+14155550100'};
+  await assert.rejects(fixture({operation: keypad}).client.pending(context, signal()), /not negotiated/);
+  const [card] = await fixture({operation: keypad, capabilities: ['phone.keypad.v1']}).client.pending(context, signal());
+  assert.match(`${card.title}\n${card.description}`, /^Open keypad\nNumber: \+14155550100\n\nOpens the Phone keypad with this number filled in\. Nothing is dialed until you tap Call\.$/);
+  const shown = [], f = fixture({operation: keypad, capabilities: ['phone.keypad.v1'], result: {kind: 'phone-keypad', status: 'opened'}, requestMessageId: messageId, present: posted => shown.push(posted)});
+  await f.client.pending(context, signal());
+  assert.deepEqual(await f.client.performRequested('other', context, signal(), async () => true), []);
+  assert.equal(f.effects, 0);
+  // A number the owner did not type in this message (read from an email or a page) keeps its card.
+  const proof = text => ({messageId, text, current() {}});
+  for (const current of [undefined, proof('open the keypad with the number from that email'), proof('open the keypad with 415 555 0199')])
+    assert.deepEqual(await f.client.performRequested(messageId, context, signal(), async () => true, undefined, current), []);
+  assert.equal(f.effects, 0);
+  assert.deepEqual((await f.client.performRequested(messageId, context, signal(), async () => true, undefined, proof('open the dialer with +1 415-555-0100'))).map(result => result.status), ['succeeded']);
+  assert.equal(f.effects, 1); assert.deepEqual(shown, [['decision', 'claim', 'receipt']], 'the keypad comes in front after the receipt');
+  assert.deepEqual(receiptOf(f).result, {kind: 'phone-keypad', status: 'opened'});
+  // A call bound to the same message keeps its review.
+  const call = fixture({operation: {type: 'phone_call', target: {kind: 'number', number: '+14155550100'}}, requestMessageId: messageId});
+  await call.client.pending(context, signal());
+  assert.deepEqual(await call.client.performRequested(messageId, context, signal(), async () => true), []);
+  assert.equal(call.effects, 0);
+});

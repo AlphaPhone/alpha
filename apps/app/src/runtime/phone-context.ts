@@ -4,7 +4,7 @@ import {parseClientTurnObservation,parseClientCalendarDayObservation} from '../.
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
 import {CAMERA_CAPTURE_CAPABILITY,CAMERA_LENS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
-import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
+import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_OPEN_NEW_TAB_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
 import {CONTACT_UPDATE_VALUES_CAPABILITY,CONTACT_WRITE_CAPABILITY,SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY,telephonyActionCapabilities} from './telephony-actions-contract.ts';
@@ -161,7 +161,7 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
   // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.
-  for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[])])if(agent.includes(capability))capabilities.push(capability);
+  for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[]),BROWSER_OPEN_NEW_TAB_CAPABILITY])if(agent.includes(capability))capabilities.push(capability);
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
   // The device photo library is offered only where the native Photos plugin exists and the agent offers it.
@@ -180,7 +180,8 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // or single values), Contacts filtered to a search, and reads of the open thread, voicemail or
   // contact: the verified image only, and only what the agent offers. Each is confirmed on the phone
   // (telephony-executor.ts); the agent never receives the address book or a message list.
-  const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability));
+  // The keypad, filled in at most, is the Phone view's own; it never calls.
+  const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true,keypad:true}).filter(capability=>agent.includes(capability));
   // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
   for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
   capabilities.push(...telephony);

@@ -20,7 +20,9 @@ const nativeViews = declarations([
 ], id => `@elizaos/plugin-${id}`);
 // Alpha draws Phone, Messages and Contacts only on its verified AOSP image.
 const imageViews = declarations([
-  ['phone', 'Phone', ['dialer']],
+  // "Open the dialer" or "the keypad" is the phone_keypad device action (phone.keypad.v1), which
+  // shows the Keypad tab; as an alias of Phone it landed on Recents.
+  ['phone', 'Phone'],
   ['messages', 'Messages', ['sms', 'texts', 'text messages']],
   ['contacts', 'Contacts', ['address book']],
 ], id => `@elizaos/plugin-native-${id}`);

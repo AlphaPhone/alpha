@@ -38,7 +38,7 @@ import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type C
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
-import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
+import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import {BrowserReviews} from '../browser/review';
 import type {ConversationMessageTarget} from '../runtime/alpha-client';
@@ -1131,6 +1131,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
             const listed=await book.list({query,limit:1});current();
             return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
           },
+          // The keypad opens after the receipt, like a filtered Contacts list; nothing is dialed.
+          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>{current();step();});},
           openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
@@ -1417,7 +1419,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // The tab the request was made from, when it was made in Browser: page history acts on that page only.
       const tab=expectedContext.view==='browser'?expectedContext.selectedObject:undefined,observed=tab?.kind==='browser-tab'&&tab.revision!==undefined?{id:tab.id,revision:tab.revision}:undefined;
       // Several tabs matching the request's words are listed in this action's own card; the agent never sees them.
-      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true));
+      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
       return { status: 'succeeded', summary: browserControl?browserControlSummary(operation):browserNavigationSummary(operation.url),presentBrowser:()=>{
         const show=()=>{
           if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
