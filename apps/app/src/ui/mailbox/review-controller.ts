@@ -42,6 +42,12 @@ import { reviewBindingRefusal } from "./review-binding-refusal";
 // biome-ignore lint/suspicious/noExplicitAny: proposals and reviews are validated JSON from the journal.
 type Bag = Record<string, any>;
 
+export type MailSelectionAction = Extract<
+  GmailMailboxAction,
+  "archive" | "unarchive" | "trash" | "untrash" | "star" | "unstar" |
+  "mark-read" | "mark-unread"
+>;
+
 export interface MailReviewClient extends InboxOperationClient {
   gmailInboxCapabilities(
     grant: string,
@@ -113,6 +119,10 @@ const TITLES: Record<string, string> = {
   unarchive: "Restore to Inbox",
   trash: "Move message to Trash",
   untrash: "Restore from Trash",
+  star: "Star message",
+  unstar: "Remove star",
+  "mark-read": "Mark message read",
+  "mark-unread": "Mark message unread",
 };
 
 /** Taps on a control that replaced another within this window are ignored. */
@@ -125,6 +135,8 @@ export function createMailReviewController(
   const disabled = () => options.disabled?.() === true;
   const allowed = (proposal: Bag) =>
     gmailInboxAllows(caps, proposal.kind as GmailMailboxAction) &&
+    (!["star", "unstar"].includes(proposal.kind) || caps?.stars === true) &&
+    (!["mark-read", "mark-unread"].includes(proposal.kind) || caps?.readState === true) &&
     (!proposal.forwardAttachments || caps?.forwardAttachments === true);
   const now = options.now ?? (() => performance.now());
   const defer = options.defer ?? ((task: () => void) => queueMicrotask(task));
@@ -582,6 +594,69 @@ export function createMailReviewController(
     await run((owned) => owned.prepare(proposal, source));
   }
 
+  /** One reviewed selection, serialized through the same journal as individual changes. */
+  async function applySelection(
+    action: MailSelectionAction,
+    selectedIds: readonly string[],
+    historyId: (id: string) => Promise<string | null>,
+    current: () => boolean,
+  ): Promise<number> {
+    if (!operation || busy || visible || !allowed({kind: action})) return 0;
+    const ids = [...new Set(selectedIds)];
+    let applied = 0;
+    await run(async (owned, check) => {
+      const requireSelection = () => {
+        check();
+        if (!current()) throw new DOMException("Selection changed", "AbortError");
+        if (!allowed({kind: action})) throw new MailReviewNotice("Gmail change access changed.");
+      };
+      requireSelection();
+      for (const id of ids) {
+        const prior = owned.snapshot();
+        if (prior) {
+          const receipt = prior.receipt;
+          const sent = sentSource(prior);
+          const settledChange = prior.phase === "observed" &&
+            (receipt?.state === "succeeded" || receipt?.state === "rejected") &&
+            !composerKind(prior.proposal.kind);
+          if (!(sent && !sent.providerDraft) && !settledChange) {
+            visible = true;
+            throw new MailReviewNotice("Finish the saved mail review first.");
+          }
+        }
+        const version = await historyId(id);
+        requireSelection();
+        if (!version) throw new MailReviewNotice("An email in this selection could not be refreshed.");
+        if (prior) {
+          await owned.clear();
+          requireSelection();
+        }
+        try {
+          await owned.prepare({kind: action, messageId: id, expectedHistoryId: version});
+          requireSelection();
+          const confirmed = await owned.confirm();
+          check();
+          const receipt = confirmed?.receipt;
+          if (receipt?.state !== "succeeded") {
+            visible = true;
+            return;
+          }
+          if (receipt.providerResult?.messageId !== id) {
+            throw new MailReviewNotice("Gmail answered for a different email. Check the saved receipt.");
+          }
+          applied++;
+          reported = receipt.requestId;
+          onReceipt?.(receipt);
+          requireSelection();
+        } catch (error) {
+          if (operation === owned && current() && owned.snapshot()) visible = true;
+          throw error;
+        }
+      }
+    });
+    return applied;
+  }
+
   /**
    * The account no longer grants a change capability: the saved undispatched
    * review for this grant is discarded, so it can never be confirmed against
@@ -889,6 +964,7 @@ export function createMailReviewController(
     bind,
     reset,
     prepare,
+    applySelection,
     withdrawn,
     setEditor(value: typeof editor) {
       editor = value;
