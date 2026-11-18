@@ -77,24 +77,26 @@ test('Back saves the retained email locally without sending or opening a confirm
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
  expect(await page.evaluate(()=>(window as any).emailRecoveryFixture.mutations)).toBe(0);
 });
-test('a saved local draft is discarded only after the confirmation, and stays gone',async({page})=>{
+test('a saved local draft is deleted from Drafts only after confirmation',async({page})=>{
  await begin(page);await page.getByRole('button',{name:'Back from draft',exact:true}).click();
- await setup(page);await (await localDraftRow(page,'Local draft, Retained subject')).click();
- await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
- const draftActions=page.getByRole('region',{name:'Email draft fields'});
- // Keep draft leaves it untouched.
- await draftActions.getByRole('button',{name:'Discard draft',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Discard draft?'});
- await dialog.getByRole('button',{name:'Keep draft',exact:true}).click();
+ await setup(page);
+ const row=await localDraftRow(page,'Local draft, Retained subject');
+ const action=async(name:string)=>{
+  await page.getByLabel('Mail options',{exact:true}).click();
+  await page.getByRole('menuitem',{name,exact:true}).click();
+ };
+ await expect(row).toBeVisible();
+ await action('Select drafts');
+ await page.getByRole('checkbox',{name:/Retained subject/}).click();
+ await action('Delete drafts');
+ const dialog=page.getByRole('dialog',{name:'Delete 1 draft?',exact:true});
+ await dialog.getByRole('button',{name:'No',exact:true}).click();
  await expect(dialog).toHaveCount(0);
- await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
- await draftActions.getByRole('button',{name:'Discard draft',exact:true}).click();
- await dialog.getByRole('button',{name:'Discard draft',exact:true}).click();
- await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
- await expect.poll(()=>page.evaluate(()=>(localStorage.getItem('test-inbox-saved')||'').includes('Unsent local body'))).toBe(false);
- // After a reload the draft is neither in Drafts nor offered for recovery.
- await setup(page);await localDraftRow(page);
- await expect(page.getByRole('button',{name:'Local draft, Retained subject',exact:true})).toHaveCount(0);
+ await action('Delete drafts');
+ await dialog.getByRole('button',{name:'Yes',exact:true}).click();
+ await expect(page.getByRole('checkbox',{name:/Retained subject/})).toHaveCount(0);
+ await setup(page);
+ await expect(await localDraftRow(page,'Local draft, Retained subject')).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Resume unsaved email',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).emailRecoveryFixture.mutations)).toBe(0);
 });

@@ -29,7 +29,6 @@ export function installSubviewAccessibility(views:Bag){
   let output:Bag={};
   const attachmentModal=reviewFocus(()=>output.attachment?.close());
   const providerModal=reviewFocus(()=>output.provider?.close());
-  const discardModal=reviewFocus(()=>output.c?.cancelDiscard?.());
   const mailSelectionModal=reviewFocus(()=>output.mailReview?.close());
   const focus=focusHistory();
   const detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read),runFocus=subviewFocus(focus.read),builderFocus=subviewFocus(focus.read);
@@ -38,10 +37,9 @@ export function installSubviewAccessibility(views:Bag){
    const out=output=render(state,api);
    if(name==='inbox'){
     attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
-    discardModal.render(!!(out.composing&&out.c?.confirm));
     mailSelectionModal.render(!!out.mailReview);
-    const review=!!(out.attachmentOpen||out.providerReview||out.mailReview||out.composing&&out.c?.confirm);
-    return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,discardModal:discardModal.ref,mailSelectionModal:mailSelectionModal.ref,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
+    const review=!!(out.attachmentOpen||out.providerReview||out.mailReview);
+    return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,mailSelectionModal:mailSelectionModal.ref,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
    }
    return {...out,...popups(out),captureSubviewFocus:focus.capture,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!(out.detail||out.automation?.detail||out.runOpen||out.builder),detailCovered:!!(out.runOpen||out.builder),runCovered:!!out.builder};
   };

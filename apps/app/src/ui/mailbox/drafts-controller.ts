@@ -493,7 +493,6 @@ export function createMailDraftsController(
     ready = false,
     busy = false,
     open = false,
-    confirm = false,
     toQ = "",
     label = "",
     status = "",
@@ -662,7 +661,6 @@ export function createMailDraftsController(
     baseRevision = value.baseRevision;
     staleBase = baseRevision !== (saved?.revision || null);
     open = true;
-    confirm = false;
     status = staleBase
       ? "The saved local draft changed. Review the latest saved copy before saving these edits."
       : draft?.mode === "forward"
@@ -711,7 +709,6 @@ export function createMailDraftsController(
         pendingEdits.delete(owner);
         draft = null;
         open = false;
-        confirm = false;
         toQ = "";
         baseRevision = saved?.revision || null;
         staleBase = false;
@@ -817,7 +814,7 @@ export function createMailDraftsController(
     owner = "";
     session = "";
     saved = draft = null;
-    loading = ready = busy = open = confirm = recipientDetails = false;
+    loading = ready = busy = open = recipientDetails = false;
     toQ = "";
     status = "";
   }
@@ -842,7 +839,7 @@ export function createMailDraftsController(
     staleBase = false;
     epoch++;
     saved = draft = null;
-    loading = ready = busy = open = confirm = recipientDetails = false;
+    loading = ready = busy = open = recipientDetails = false;
     toQ = "";
     status = "";
     owner = next;
@@ -970,7 +967,6 @@ export function createMailDraftsController(
       pendingEdits.delete(owner);
       draft = null;
       open = false;
-      confirm = false;
       baseRevision = null;
       staleBase = false;
       toQ = "";
@@ -1013,7 +1009,6 @@ export function createMailDraftsController(
           "Finish, save or discard the open email draft first. The shared content was not added.",
         );
       open = true;
-      confirm = false;
       publish();
       return true;
     }
@@ -1070,7 +1065,6 @@ export function createMailDraftsController(
       baseRevision = null;
       staleBase = false;
       open = true;
-      confirm = false;
       toQ = "";
       persist();
       status =
@@ -1162,7 +1156,6 @@ export function createMailDraftsController(
     baseRevision = null;
     staleBase = false;
     open = true;
-    confirm = false;
     toQ = "";
     persist();
     status =
@@ -1289,7 +1282,6 @@ export function createMailDraftsController(
     if (!(await setAside()) || !rowCurrent() || draft || saved) return;
     adoptShelved(row);
     open = true;
-    confirm = false;
     status = "Draft on this device";
     persist();
     publish();
@@ -1321,7 +1313,6 @@ export function createMailDraftsController(
     baseRevision = expected.revision;
     staleBase = false;
     open = true;
-    confirm = false;
     toQ = "";
     if (reuse)
       status =
@@ -1462,7 +1453,6 @@ export function createMailDraftsController(
     pendingEdits.delete(owner);
     draft = null;
     open = false;
-    confirm = false;
     baseRevision = null;
     staleBase = false;
     toQ = "";
@@ -1484,7 +1474,7 @@ export function createMailDraftsController(
     publish();
   }
 
-  async function update(remove = false) {
+  async function update() {
     if (!draft || !ready || busy) return;
     if (staleBase) {
       toast(
@@ -1492,17 +1482,14 @@ export function createMailDraftsController(
       );
       return;
     }
-    if (!remove && toQ.trim()) {
+    if (toQ.trim()) {
       add();
       if (toQ.trim()) return;
     }
-    const value = remove
-      ? null
-      : { ...draft, revision: crypto.randomUUID(), to: [...draft.to] };
+    const value = { ...draft, revision: crypto.randomUUID(), to: [...draft.to] };
     if (
-      value &&
-      (!validLocalMailDraft(value, owner) ||
-        new TextEncoder().encode(JSON.stringify(value)).length > DRAFT_BYTES)
+      !validLocalMailDraft(value, owner) ||
+      new TextEncoder().encode(JSON.stringify(value)).length > DRAFT_BYTES
     ) {
       toast(
         [value.cc || [], value.bcc || []].some(
@@ -1551,18 +1538,12 @@ export function createMailDraftsController(
         cleared = false;
       }
       if (token !== epoch) return;
-      baseRevision = value?.revision || null;
+      baseRevision = value.revision;
       staleBase = false;
-      draft = value ? structuredClone(value) : cleared ? null : draft;
+      draft = structuredClone(value);
       status = cleared
-        ? remove
-          ? "Local draft discarded"
-          : "Saved locally on this device"
-        : remove
-          ? "Saved local draft removed; retained edits could not be cleared. Review recovery before closing."
-          : "Saved locally; retained edits could not be cleared. Review recovery before closing.";
-      confirm = false;
-      if (remove && cleared) open = false;
+        ? "Saved locally on this device"
+        : "Saved locally; retained edits could not be cleared. Review recovery before closing.";
       toast(status);
     } catch {
       if (token === epoch) {
@@ -1831,7 +1812,6 @@ export function createMailDraftsController(
       if (!draft && !begin()) return false;
       (draft as LocalMailDraft).attachments = next;
       open = true;
-      confirm = false;
       status =
         "Selected file added to this local draft. Review recipients, text and attachments before sending; nothing has been sent.";
       persist();
@@ -1894,7 +1874,6 @@ export function createMailDraftsController(
           }
           draft.body = joined;
           open = true;
-          confirm = false;
           status =
             "Agent suggestion added below your text. Review and edit before sending; nothing has been sent.";
           persist();
@@ -1903,7 +1882,6 @@ export function createMailDraftsController(
         }
         draft.body = body;
         open = true;
-        confirm = false;
         status =
           "Agent suggestion placed in the open draft. Review and edit before sending; nothing has been sent.";
         persist();
@@ -2004,7 +1982,6 @@ export function createMailDraftsController(
         baseRevision = saved.revision;
         staleBase = false;
         open = true;
-        confirm = false;
         toQ = "";
         status = earlierVersion()
           ? "Earlier version of a sent email. Sending it creates another message; nothing has been sent."
@@ -2046,7 +2023,6 @@ export function createMailDraftsController(
       baseRevision = saved?.revision || null;
       staleBase = false;
       open = true;
-      confirm = false;
       status =
         "Editing a Gmail draft. Save locally to keep your edits. This draft may have changed in Gmail, and saving replaces it.";
       publish();
@@ -2062,7 +2038,6 @@ export function createMailDraftsController(
         return true;
       }
       open = false;
-      confirm = false;
       publish();
       return true;
     },
@@ -2232,7 +2207,6 @@ export function createMailDraftsController(
               status,
               showDraftStatus: staleBase || !ROUTINE_DRAFT_STATUS.has(status),
               busy,
-              confirm,
               recoveryVisible: !!retained?.error || !!retained?.conflict,
               sendDisabled: busy || !caps?.send,
               showSendHint: !!caps && !caps.send,
@@ -2262,17 +2236,6 @@ export function createMailDraftsController(
               staleBase,
               useLatest: () => useLatest(current),
               save: () => void update(),
-              discard: () => {
-                if (!busy) {
-                  confirm = true;
-                  publish();
-                }
-              },
-              cancelDiscard: () => {
-                confirm = false;
-                publish();
-              },
-              confirmDiscard: () => void update(true),
               send: () => {
                 if (!provider?.capabilities()?.send) {
                   toast(
