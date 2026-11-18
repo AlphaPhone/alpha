@@ -633,17 +633,6 @@
       </sc-if>
      </div>
     </sc-for>
-    <sc-if value="{{messages.draftBubble}}">
-     <div class="alpha-draft-bubble" data-alpha-draft-bubble="{{messages.draftBubble.by}}" data-alpha-draft-sent="{{messages.draftBubble.sent}}" role="group" aria-label="{{messages.draftBubble.aria}}" style="flex-shrink:0;margin-top:8px">
-      <span class="alpha-draft-label" aria-hidden="true"><sc-if value="{{messages.draftBubble.alpha}}"><span class="alpha-mark-18 alpha-mark-fill"><span class="alpha-compute-mark" aria-hidden="true"></span></span></sc-if>{{messages.draftBubble.label}}</span>
-      <span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.draftBubble.text}}</span>
-      <sc-if value="{{messages.draftBubble.canAct}}"><span class="alpha-draft-actions">
-       <sc-if value="{{messages.draftBubble.canUndo}}"><button data-alpha-draft-undo onClick="{{messages.draftBubble.undo}}" style="min-height:44px;padding:0 14px;border-radius:22px;color:var(--fg);font-size:15px">Undo</button></sc-if>
-       <button data-alpha-draft-edit onClick="{{messages.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button>
-       <button data-alpha-draft-send onClick="{{messages.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
-      </span></sc-if>
-     </div>
-    </sc-if>
    </div>
   </sc-if>
   <sc-if value="{{messages.messageDelete}}">
@@ -687,6 +676,19 @@
       <span style="font-size:14px;color:var(--mut);font-variant-numeric:tabular-nums;flex-shrink:0">{{c.number}}</span>
      </button>
     </sc-for>
+   </div>
+  </sc-if>
+  <sc-if value="{{messages.draftBubble}}">
+   <div class="alpha-draft-bubble" data-alpha-draft-bubble="{{messages.draftBubble.by}}" data-alpha-draft-sent="{{messages.draftBubble.sent}}" role="group" aria-label="{{messages.draftBubble.aria}}" style="flex-shrink:1;min-height:0;overflow:auto;margin:8px 12px">
+    <span class="alpha-draft-label" aria-hidden="true"><sc-if value="{{messages.draftBubble.alpha}}"><span class="alpha-mark-18 alpha-mark-fill"><span class="alpha-compute-mark" aria-hidden="true"></span></span></sc-if>{{messages.draftBubble.label}}</span>
+    <sc-if value="{{messages.draftBubble.showText}}"><span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.draftBubble.text}}</span></sc-if>
+    <sc-if value="{{messages.draftBubble.alpha}}"><sc-if value="{{messages.draftBubble.canAct}}"><textarea class="alpha-sms-inline-body" aria-label="Message draft" maxLength="1600" value="{{messages.draftBubble.text}}" disabled="{{messages.draftBubble.blocked}}" onChange="{{messages.draftBubble.onText}}"></textarea></sc-if></sc-if>
+    <sc-if value="{{messages.draftBubble.canAct}}"><span class="alpha-draft-actions">
+     <sc-if value="{{messages.draftBubble.canUndo}}"><button data-alpha-draft-undo onClick="{{messages.draftBubble.undo}}" style="min-height:44px;padding:0 14px;border-radius:22px;color:var(--fg);font-size:15px">Undo</button></sc-if>
+     <sc-if value="{{messages.draftBubble.ownerEdit}}"><button data-alpha-draft-edit onClick="{{messages.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button></sc-if>
+     <sc-if value="{{messages.draftBubble.alpha}}"><button data-alpha-draft-discard disabled="{{messages.draftBubble.blocked}}" onClick="{{messages.draftBubble.discard}}">Don’t send</button></sc-if>
+     <button data-alpha-draft-send disabled="{{messages.draftBubble.sendDisabled}}" onClick="{{messages.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
+    </span></sc-if>
    </div>
   </sc-if>
   <sc-if value="{{messages.showComposer}}">
@@ -820,11 +822,13 @@
           <sc-if value="{{messages.t.draftBubble}}">
            <div class="alpha-draft-bubble" data-alpha-draft-bubble="{{messages.t.draftBubble.by}}" data-alpha-draft-sent="{{messages.t.draftBubble.sent}}" role="group" aria-label="{{messages.t.draftBubble.aria}}" style="flex-shrink:0;margin-top:8px">
             <span class="alpha-draft-label" aria-hidden="true"><sc-if value="{{messages.t.draftBubble.alpha}}"><span class="alpha-mark-18 alpha-mark-fill"><span class="alpha-compute-mark" aria-hidden="true"></span></span></sc-if>{{messages.t.draftBubble.label}}</span>
-            <span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.t.draftBubble.text}}</span>
+            <sc-if value="{{messages.t.draftBubble.showText}}"><span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.t.draftBubble.text}}</span></sc-if>
+            <sc-if value="{{messages.t.draftBubble.alpha}}"><sc-if value="{{messages.t.draftBubble.canAct}}"><textarea class="alpha-sms-inline-body" aria-label="Message draft" maxLength="1600" value="{{messages.t.draftBubble.text}}" disabled="{{messages.t.draftBubble.blocked}}" onChange="{{messages.t.draftBubble.onText}}"></textarea></sc-if></sc-if>
             <sc-if value="{{messages.t.draftBubble.canAct}}"><span class="alpha-draft-actions">
              <sc-if value="{{messages.t.draftBubble.canUndo}}"><button data-alpha-draft-undo onClick="{{messages.t.draftBubble.undo}}" style="min-height:44px;padding:0 14px;border-radius:22px;color:var(--fg);font-size:15px">Undo</button></sc-if>
-             <button data-alpha-draft-edit onClick="{{messages.t.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button>
-             <button data-alpha-draft-send onClick="{{messages.t.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
+             <sc-if value="{{messages.t.draftBubble.ownerEdit}}"><button data-alpha-draft-edit onClick="{{messages.t.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button></sc-if>
+             <sc-if value="{{messages.t.draftBubble.alpha}}"><button data-alpha-draft-discard disabled="{{messages.t.draftBubble.blocked}}" onClick="{{messages.t.draftBubble.discard}}">Don’t send</button></sc-if>
+             <button data-alpha-draft-send disabled="{{messages.t.draftBubble.sendDisabled}}" onClick="{{messages.t.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
             </span></sc-if>
            </div>
           </sc-if>
