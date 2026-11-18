@@ -262,12 +262,13 @@ function Phone() {
   // The chooser can be requested before its DOM commits. Keep Home inert even
   // behind sign-in; only its layout-commit acknowledgement releases the logo.
   const [chooserCommitted,setChooserCommitted]=useState(false);
-  // Once the chooser has been on screen and closes (sign-in done, or the owner closed it), Home is shown
-  // even while the resident restarts behind it, as before; it is never revealed while the chooser is up.
+  // Allow an explicit dismissal into local use. A confirmed sign-in waits for
+  // its resident session after the chooser closes.
   const [chooserSeen,setChooserSeen]=useState(false);
   useEffect(()=>{if(chooserCommitted)setChooserSeen(true);},[chooserCommitted]);
-  const chooserClosedAfterShown=chooserSeen&&!chooserCommitted&&!connectionChooserVisible(connection);
-  const startupPending = !homeShown && !(connection.session && connection.startupResolved && !connectionChooserVisible(connection)) && !chooserClosedAfterShown && !connection.error && connection.residentPlanNotice !== 'offline' && !connection.residentRecoveryReason;
+  const chooserVisible=connectionChooserVisible(connection);
+  const chooserDismissedForLocalUse=chooserSeen&&!chooserCommitted&&!chooserVisible&&!connection.cloudAccount&&!connection.residentStarting;
+  const startupPending = !homeShown && !(connection.session && connection.startupResolved && !chooserVisible) && !chooserDismissedForLocalUse && !connection.error && connection.residentPlanNotice !== 'offline' && !connection.residentRecoveryReason;
   useEffect(() => {
     if (!startupPending) setHomeShown(true);
   }, [startupPending]);
