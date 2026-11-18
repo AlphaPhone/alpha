@@ -607,7 +607,7 @@ retain the original fabricated-`opened` acceptance. The JVM executes the
 product bridge methods and pinned journal and handoff classes over
 controlled ports.
 
-### Native reviewed SMS dispatch and receipts
+### Native SMS dispatch and receipts
 
 `NativeSmsDispatch` models the Alpha plugin's reviewed tuple, SIM checks,
 journaled radio handoff and immutable callback boundary. The two bridge
@@ -630,7 +630,7 @@ rejected. After capacity pruning, a late exact review reports `expired`,
 while a conflicting review reports `invalid`. The source replay drives
 both outcomes through the retained dialog, then reloads the tombstone.
 
-### Native reviewed MMS dispatch
+### Native MMS dispatch
 
 `NativeMmsDispatch` follows the inherited Alpha wrapper through MMS review,
 PDU encoding, durable dispatch admission, outbox storage, and callback
@@ -651,6 +651,18 @@ tuple. The source replay rejects changed body, recipients, SIM or attachment
 bytes, including an ID retained by SMS. It also checks that a pruned exact
 review reports `expired` and a conflicting review reports `invalid`, with
 the newly staged PDU cleaned in both cases.
+
+**Out of date since the card-confirmed send.** Alpha's `AlphaTelephonyBase` no
+longer shows a native dialog. An agent's text dispatches once its approved
+card's action-journal entry admits it (`AlphaApprovedSms`: exact recipients,
+text and SIM, one claim per approval), and an MMS is sent only from the
+Messages composer, whose Send is the confirmation. The journal, SIM, part
+count, idempotency and callback boundaries above are unchanged, but the
+source drivers of `NativeSmsDispatch` and `NativeMmsDispatch` still extract
+and press the retired dialog. `test/quint-native-sms-dispatch.test.mjs` and
+`test/quint-native-mms-dispatch.test.mjs` fail until each model's review and
+approve steps become the card's claim. `AlphaTelephonySendTest` covers the
+new admission on the JVM meanwhile.
 
 ### Android text scale and accessibility readback
 

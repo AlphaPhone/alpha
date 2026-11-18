@@ -40,7 +40,7 @@ export type TelephonyPorts = {
   getContact(id: string): Promise<ContactRecord>;
   saveContact(draft: ContactDraft, target?: {id: string; version: string}): Promise<{status: 'saved' | 'stale' | 'not-found' | 'failed' | 'unknown'}>;
   removeContact(id: string, version: string): Promise<{status: 'deleted' | 'stale' | 'not-found' | 'failed' | 'unknown'}>;
-  /** The native reviewed send of one SMS under `operationId`; a repeated id never sends twice. */
+  /** The native send of one SMS the owner approved on its card, under `operationId`; a repeated id never sends twice. */
   sendSms(number: string, body: string, operationId: string, signal: AbortSignal): Promise<SmsComposeResult['status']>;
   /**
    * Puts a draft in the draft slot of the conversation the owner has open (only the one with exactly
@@ -169,8 +169,8 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
     if (!options.length) return result('not-found');
     const only = options.length === 1 ? inOpenThread(options[0].number) : null;
     if (only === 'drafted') return result('drafted');
-    // A name is never texted unseen: the lookup is a fuzzy filter and the native review shows only the
-    // number, so the owner confirms or chooses the matched name and number here, even for one match.
+    // A name is never texted unseen: the lookup is a fuzzy filter and the card showed only the name,
+    // so the owner confirms or chooses the matched name and number here, even for one match.
     const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
     if (choice === null || !options[choice]) return result('cancelled');
     ports.current();
@@ -189,8 +189,8 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
     return result('drafted');
   }
   // The port answers every outcome it observed, including a refusal before anything was sent. It
-  // throws only when the native review's answer was lost: the radio may have taken the message.
-  // Outside Messages it sends from Android's default SMS SIM, which the native review names.
+  // throws only when the native send's answer was lost: the radio may have taken the message. No
+  // dialog follows the card. Outside Messages it sends from Android's default SMS SIM, as the card says.
   try { return result(await ports.sendSms(number, operation.body, operationId, signal)); }
   catch { return result('unknown'); }
 }

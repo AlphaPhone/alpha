@@ -23,7 +23,8 @@ import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state
 import {EMERGENCY_REFUSAL,imageContactPorts,imageDialHandoff,imageSmsPort,imageSmsSend,imageTelephonyAction} from './image-telephony';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
-import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
+import {approvedCardTelephony,createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
+import {DeviceActionNotStarted} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
@@ -1135,7 +1136,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // phone; the owner confirms the exact number or the before and after before anything
         // calls, sends or writes, and the agent receives only the outcome.
         if(!aospImage||expectedContext.sensitive||document.hidden)return refuseTelephonyAction(operation,'Nothing was done because Alpha was not open and unlocked.');
-        const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true),book=registerPlugin<any>('AlphaContacts');
+        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true),book=registerPlugin<any>('AlphaContacts');
+        // A text is sent under the approved card's journal entry, which Android checks instead of asking again.
+        const texts=journalIdentity?approvedCardTelephony(plugin,journalIdentity):client;
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
         const ports:TelephonyPorts={
@@ -1143,7 +1146,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
           placeCall:number=>client.placeCall(number),
           ...imageContactPorts(book,current),
-          sendSms:imageSmsPort(client,expectedContext,current),
+          sendSms:imageSmsPort(texts,expectedContext,current),
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
           latestIncomingSender:()=>client.latestIncomingSender(),
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
@@ -1166,9 +1169,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(isSmsSend(operation)){
         if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent because no SIM was chosen in Messages.'};
-        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true);
+        // Approve on the card is the owner's confirmation: Android sends exactly what that card's journal entry approved, with no dialog.
+        if(!journalIdentity)return {status:'failed' as const,summary:'Nothing was sent because the approved card could not be found.'};
+        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=approvedCardTelephony(plugin,journalIdentity);
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
-        const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('SMS review context changed');};
+        const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('SMS send context changed');};
         const status=await client.status();current();
         const selectedSim=status.subscriptions?.find(sim=>sim.id===operation.subscriptionId);
         if(!selectedSim||expectedContext.selectedObject.revision!==smsSubscriptionRevision(selectedSim))return {status:'failed' as const,summary:'Nothing was sent because the SIM changed.'};
@@ -1176,7 +1181,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         signal.addEventListener('abort',cancel,{once:true});
         try{
           // AC-19: Telecom is read right before the send, and the review fence runs again after it.
-          const native=await imageSmsSend(()=>client.sendSms(operation,operationId),{allowed:imageEffectAllowed,fence:current});
+          // Android refuses a text its approved card does not name before journaling or sending anything.
+          const native=await imageSmsSend(()=>client.sendSms(operation,operationId).catch(error=>{if((error as {code?:unknown}|null)?.code==='not-approved')throw new DeviceActionNotStarted('This text is not the one approved on its card');throw error;}),{allowed:imageEffectAllowed,fence:current});
           if(!native)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:smsSendResultText(smsResult.status)};}
         finally{signal.removeEventListener('abort',cancel);}
       }
