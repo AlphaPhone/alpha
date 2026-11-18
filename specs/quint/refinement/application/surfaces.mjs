@@ -20,7 +20,7 @@ export async function shellNavigation() {
     vm.runInContext(`class Shell {
       constructor(){this.state={view:null,chat:'input',shade:false,drawer:false,voice:'off'};this.props={};}
       S(){return this.state;} setState(patch){Object.assign(this.state,patch);} clear(){} leave(){}
-      mod(){return {};} vget(){return {};} vset(){} vreset(){} homeHint(){} toast(){}
+      mod(){return {};} api(){return {};} vget(){return {};} vset(){} vreset(){} homeHint(){} toast(){}
       defaultChat(){return 'hidden';} rest(){return this.state.view?'hidden':'input';}
       ${commsMember}
       ${methods}
