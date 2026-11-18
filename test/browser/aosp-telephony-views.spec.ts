@@ -51,6 +51,22 @@ test('an SMS notification opens only its thread on launch and waits for an unsen
   expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
+test('the Messages header calls the open conversation on one tap', async ({page}) => {
+  await setupTelephony(page);
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator(personField);
+  await draft.fill('Keep this draft');
+  expect(await inputs(page, 'placeCall')).toEqual([]);
+
+  await open(page, 'Call Ada Okafor');
+
+  await expect.poll(() => inputs(page, 'placeCall')).toEqual([{number: '+15550100101'}]);
+  expect(await inputs(page, 'dial')).toEqual([]);
+  await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+  await expect(draft).toHaveValue('Keep this draft');
+});
+
 test('recents call on the owner tap; the keypad fits above the bar on a small phone', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Phone');
