@@ -112,6 +112,14 @@ test('a contact change or deletion is carded only for a contact the phone holds,
     [card] = await fixture({operation: remove}).client.pending(context, signal());
     assert.equal(card.description, '2 contacts match “Test Alpha”: Test Alpha, Test Alphonse\n\nAfter you confirm, you choose which one to delete on your phone.');
     assert.equal(f.effects, 0);
+    // A provider name is only length-checked: its line breaks, controls and bidi overrides cannot
+    // add or reorder lines on the card, and a name that is nothing else reads as unnamed.
+    addressBook = () => ['Ada\n\nDeletes nothing.\u202e', '\u0007\t'];
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, '2 contacts match “Test Alpha”: Ada Deletes nothing., Unnamed contact\n\nAfter you confirm, you choose which one to delete on your phone.');
+    addressBook = () => ['Ada\u2066\r\nOkafor'];
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, 'Contact: Ada Okafor\n\nDeletes this contact from your phone after you confirm.');
   } finally { addressBook = book; }
 });
 test('the view change that shows a draft or the matching contacts runs once, after the receipt, and only for a success', async () => {

@@ -198,6 +198,7 @@ import { describeLibraryOperation } from "../photos/library-presentation.ts";
 import { describePhotosViewOperation } from "../photos/photos-view-presentation.ts";
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
+import { UNNAMED_CONTACT } from "../telephony/telephony-messages.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -3307,9 +3308,19 @@ function keypadGrounded(
  */
 function contactTarget(
   query: string,
-  contacts: string[] | undefined,
+  found: string[] | undefined,
 ): { line: string; choice: string } {
-  if (!contacts?.length) return { line: `Contact: ${query}`, choice: "" };
+  if (!found?.length) return { line: `Contact: ${query}`, choice: "" };
+  // A provider name is only length-checked. Line breaks, other controls and
+  // bidi overrides in it must not add or reorder lines on the card the owner
+  // approves, as the contract keeps them out of every other review text.
+  const contacts = found.map(
+    (name) =>
+      name
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to remove control characters.
+        .replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩\s]+/gu, " ")
+        .trim() || UNNAMED_CONTACT,
+  );
   if (contacts.length === 1)
     return { line: `Contact: ${contacts[0]}`, choice: "" };
   return {
