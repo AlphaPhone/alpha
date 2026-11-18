@@ -26,7 +26,7 @@ try {
   const make = () => inboxDrafts(() => {}, text => context.toasts.push(text), {
     prepare: async () => { context.providerCalls++; },
     capabilities: () => ({send: true, providerDrafts: false, from: 'owner@example.invalid'}),
-  });
+  }, () => true, async () => undefined);
   type Drafts = ReturnType<typeof make>;
   const tick = () => new Promise<void>(resolve => setImmediate(resolve));
   const chip = (label: string, pick: () => void) => ({label, pick});
@@ -48,6 +48,16 @@ try {
     assert.ok(current, 'Expected a local draft identifier');
     return current.draftId;
   }
+  const backDraft=make();await backDraft.bind('grant-back','owner@example.invalid');assert.equal(await backDraft.newEmail(),true);
+  field(backDraft,'onSubj','Back saves email');field(backDraft,'onBody','Retained without a toolbar save');field(backDraft,'onTo','unfinished address');
+  assert.equal(backDraft.back(),true);
+  await tick();
+  assert.equal(backDraft.render().composing,false);
+  const reopen=make();await reopen.bind('grant-back','owner@example.invalid');
+  const backRow=reopen.chips(chip).find(row=>row.subject==='Back saves email');assert.ok(backRow);
+  backRow.pick();await tick();
+  assert.equal(composer(reopen).body,'Retained without a toolbar save');
+  assert.equal(composer(reopen).toQ,'unfinished address');
   let d=make();await d.bind('grant-A','owner@example.invalid');assert.equal(await d.newEmail(),true);field(d,'onSubj','First email');field(d,'onBody','Preserve these unfinished edits');field(d,'onTo','partial-address');d.close();
   assert.equal(await d.newEmail(),true);assert.equal(composer(d).body,'');assert.equal(composer(d).subject,'');
   const first=d.chips(chip).find(row=>row.subject==='First email');assert.ok(first,'unfinished email becomes a Drafts entry');

@@ -29,6 +29,7 @@ import { sha256Hex } from "@elizaos/plugin-inbox/mailbox/digest";
 import { attachmentRefused } from "@elizaos/plugin-inbox/mailbox/failures";
 import type { InboxUnsaved } from "@elizaos/plugin-inbox/mailbox/retained-draft";
 import type { GmailMessage } from "@elizaos/plugin-inbox/mailbox/types";
+import { readFileAsBase64 } from "../utils/image-attachment";
 
 // biome-ignore lint/suspicious/noExplicitAny: proposals and composer events are host data validated here.
 type Bag = Record<string, any>;
@@ -272,6 +273,7 @@ export interface MailDraftsProvider {
       savedRevision?: string;
       providerDraft?: { draftId: string; providerDigest: string };
     },
+    mode?: "send-from-composer",
   ): Promise<void>;
   capabilities(): {
     send: boolean;
@@ -315,7 +317,8 @@ interface MailDraftsControllerOptions {
   ): boolean | Promise<boolean>;
   /** Whether the host is still showing the mailbox that can admit the review. */
   reviewActive?(): boolean;
-  attachments: MailAttachmentPicker;
+  attachments?: MailAttachmentPicker;
+  chooseAttachment?(current: () => boolean): Promise<File | undefined>;
   reviewAttachment: MailAttachmentReviewer;
 }
 
@@ -389,6 +392,16 @@ function validLocalMailDraft(
 }
 
 /** Local encrypted drafts remain separate from explicitly reviewed provider operations. */
+/** Autosave progress the composer does not show; any other status is news to the owner. */
+const ROUTINE_DRAFT_STATUS = new Set([
+  "",
+  "Unsaved local draft",
+  "Saved locally on this device",
+  "Draft saved",
+  "Draft on this device",
+  "Checking local draft…",
+]);
+
 export function createMailDraftsController(
   options: MailDraftsControllerOptions,
 ) {
@@ -454,13 +467,14 @@ export function createMailDraftsController(
   async function saveShelf(next: Shelf) {
     const token = epoch,
       expected = shelf;
-    const receipt = await store.compareExchange(shelfSlot(), expected, next);
+    const value = next.items.length ? next : null;
+    const receipt = await store.compareExchange(shelfSlot(), expected, value);
     if (token !== epoch) throw Error("Draft account changed");
     if (receipt.status !== "saved")
       throw Error(
         "Drafts changed in another window. Reload before continuing.",
       );
-    shelf = next;
+    shelf = value;
   }
 
   const pendingEdits = new Map<
@@ -916,6 +930,7 @@ export function createMailDraftsController(
     const copies = new Map<string, Shelved>();
     for (const row of shelf?.items || []) copies.set(row.draft.id, row);
     if (saved) copies.set(saved.id, { draft: structuredClone(saved), toQ: "" });
+    const savedIds = new Set(copies.keys());
     if (kept)
       copies.set(kept.draft.id, {
         draft: structuredClone(kept.draft) as LocalMailDraft,
@@ -926,7 +941,9 @@ export function createMailDraftsController(
     const next: Shelf = {
       version: 1,
       owner,
-      items: [...copies.values()].filter(meaningful),
+      items: [...copies.values()].filter(
+        (row) => savedIds.has(row.draft.id) || meaningful(row),
+      ),
     };
     if (
       !shelfValid(next) ||
@@ -1546,28 +1563,41 @@ export function createMailDraftsController(
       );
       return;
     }
-    const token = epoch;
+    const token = epoch, draftId = draft.id;
+    const current = () =>
+      token === epoch && open && draft?.id === draftId &&
+      options.reviewActive?.() !== false;
+    const picker = options.attachments;
     let selectionId: string | undefined;
     busy = true;
     publish();
     try {
-      const selected = await options.attachments.select();
-      selectionId = selected.selectionId;
-      if (token !== epoch) return;
-      if (selected.status === "cancelled") return;
-      if (
-        selected.status !== "selected" ||
-        !selected.selectionId ||
-        !selected.name
-      )
-        throw new AttachmentNotice("Select one supported document or image.");
-      const file = await options.attachments.read(selected.selectionId);
+      let file: OutgoingMailAttachment & { size: number; sha256?: string };
+      if (options.chooseAttachment) {
+        const selected = await options.chooseAttachment(current);
+        if (!selected || !current()) return;
+        if (selected.size > 5 * MIB) throw new AttachmentNotice(ATTACHMENT_TOO_LARGE);
+        file = {
+          name: selected.name,
+          mimeType: selected.type,
+          size: selected.size,
+          dataBase64: await readFileAsBase64(selected),
+        };
+      } else {
+        if (!picker) return;
+        const selected = await picker.select();
+        selectionId = selected.selectionId;
+        if (!current() || selected.status === "cancelled") return;
+        if (selected.status !== "selected" || !selectionId || !selected.name)
+          throw new AttachmentNotice("Select one supported document or image.");
+        file = await picker.read(selectionId);
+      }
       const checked = await options.reviewAttachment(file);
-      if (checked.sha256 !== file.sha256 || checked.size !== file.size)
+      if ((file.sha256 && checked.sha256 !== file.sha256) || checked.size !== file.size)
         throw new AttachmentNotice(
           "The selected file changed while it was checked. Select it again.",
         );
-      if (token !== epoch || !draft) return;
+      if (!current() || !draft) return;
       const next = [
         ...(draft.attachments || []),
         {
@@ -1578,13 +1608,13 @@ export function createMailDraftsController(
       ];
       admitOutgoingAttachments(next, policy(), draft.forward?.parts);
       draft.attachments = next;
-      status = `${next.length} attachment${next.length === 1 ? "" : "s"} selected locally. Nothing is uploaded until you review it.`;
+      status = `${next.length} attachment${next.length === 1 ? "" : "s"} selected locally. Nothing is uploaded until you tap Send.`;
       persist();
     } catch (error) {
       if (token === epoch) toast(attachmentRefusalText(error));
     } finally {
-      if (selectionId)
-        await options.attachments.forget(selectionId).catch(() => {});
+      if (selectionId && picker)
+        await picker.forget(selectionId).catch(() => {});
       if (token === epoch) {
         busy = false;
         publish();
@@ -1989,9 +2019,18 @@ export function createMailDraftsController(
       }
       open = false;
       confirm = false;
-      if (status === "Unsaved local draft")
-        toast(retained?.status || "Edits remain in this session.");
       publish();
+      return true;
+    },
+    back() {
+      if (!open) return false;
+      reviewVisit++;
+      retireReview();
+      if (busy) {
+        toast("Wait for the local draft update.");
+        return true;
+      }
+      void setAside();
       return true;
     },
     /** The email now in the composer, in the shape Send reviews. A review of anything else is stale. */
@@ -2035,7 +2074,12 @@ export function createMailDraftsController(
             ...(shelf?.items
               .filter((row) => row.draft.id !== local?.id)
               .map((row) => ({
-                ...chip("Open local draft", () => void openShelved(row)),
+                ...chip(
+                  row.draft.earlierThanSent
+                    ? "Earlier version of a sent email"
+                    : "Open local draft",
+                  () => void openShelved(row),
+                ),
                 subject: row.draft.subject || "(No subject)",
                 snippet: row.draft.body.slice(0, 160) || "Draft on this device",
               })) || []),
@@ -2108,6 +2152,7 @@ export function createMailDraftsController(
           ? {
               local: true,
               status,
+              showDraftStatus: staleBase || !ROUTINE_DRAFT_STATUS.has(status),
               busy,
               confirm,
               recoveryVisible: !!retained?.error || !!retained?.conflict,
@@ -2120,7 +2165,7 @@ export function createMailDraftsController(
                     ? "Reply"
                     : current.mode === "forward"
                       ? "Forward"
-                      : "New message",
+                      : "New email",
               showRecipientDetails:
                 recipientDetails ||
                 !!current.cc?.length ||
@@ -2182,6 +2227,7 @@ export function createMailDraftsController(
                       ? { providerDraft: { ...sending.provider } }
                       : {}),
                   },
+                  "send-from-composer",
                 );
               },
               canSaveProvider: !!caps?.providerDrafts,
