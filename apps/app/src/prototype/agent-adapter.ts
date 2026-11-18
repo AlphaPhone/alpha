@@ -636,13 +636,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       return {msgs:at<0?[...msgs,bubble]:msgs.map((message:Shell,index:number)=>index===at?bubble:message)};
     });
   }
-  function openInternalView(shell:Shell,target:string,chat?:string):boolean {
+  function openInternalView(shell:Shell,target:string,chat?:string,{voice=false}:{voice?:boolean}={}):boolean {
     const view=alphaViewKey(target);
     if(!view||view!=='home'&&!views[view])return false;
     // Camera is handed the whole screen: an open conversation closes to Camera's own resting bar (the pill
     // below the shutter row), so the viewfinder and shutter are never under the sheet or the typing dock's
     // tap-away layer. A photo waiting for review is shown just above that bar (barReviews).
-    if(view==='camera'&&(chat==='sheet'||chat==='full')){chat=undefined;shell.cameraHandoff=true;}
+    // A voice conversation is held by its sheet (voice-adapter chatCurrent): closing it would end the
+    // conversation and refuse the agent's screen change, so voice keeps its detent.
+    if(view==='camera'&&!voice&&(chat==='sheet'||chat==='full')){chat=undefined;shell.cameraHandoff=true;}
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
   }
@@ -659,7 +661,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
     const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
       const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
+        try{check();if(!openInternalView(shell,view,chat,{voice:!!continuation})){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
       });
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
@@ -1851,7 +1853,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // the bar: the same Approve and Decline rows as its card in the chat, below the shutter. Being part of
     // the dock, it moves Camera's viewfinder and shutter up (--alpha-dock-clearance) instead of covering them.
     const barState=this.S();
-    out.barReviews=barState.view==='camera'&&(barState.chat==='hidden'||barState.chat==='input')?(out.msgs||[]).filter((m:Shell)=>m.cameraReview).flatMap((m:Shell)=>m.rows.map((row:Shell,index:number)=>({...row,key:`${m.id}:${index}`}))):[];
+    // Only the newest photo waits there (an earlier turn's photo can still be pending, as on v610); every
+    // pending photo stays reviewable in the conversation, and the dock never grows over the shutter row.
+    const barReview=barState.view==='camera'&&(barState.chat==='hidden'||barState.chat==='input')?(out.msgs||[]).filter((m:Shell)=>m.cameraReview).reduce((newest:Shell|null,m:Shell)=>!newest||!(Number(m.c?.expiresAt)<Number(newest.c?.expiresAt))?m:newest,null):null;
+    out.barReviews=barReview?barReview.rows.map((row:Shell,index:number)=>({...row,key:`${barReview.id}:${index}`})):[];
     out.hasBarReviews=out.barReviews.length>0;
     out.msgs=projectActionMessages(out.msgs||[],live);
     out.canStopReply=!!this.S().typing&&(alphaClient.getState().pending||this.sendAttempt?.capturing===true);
@@ -1945,7 +1950,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!delivered)throw Error('The voice screen change could not be confirmed.');
         return true;
       }
-      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
+      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat,{voice:true})){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
   };
   p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
@@ -1998,7 +2003,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!delivered&&reply.userMessageId&&input.navigation&&connectionController.requestedCameraNeedsOpening(reply.userMessageId)){
         const live=()=>{signal.throwIfAborted();input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');};
         try{
-          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat)){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
+          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat,{voice:true})){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
         }catch{delivered=false;}finally{nextContext=input.navigation.finish(delivered);}
         if(!nextContext)delivered=false;else acceptedContext=nextContext;
         current();
@@ -2053,6 +2058,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     let s = this.S(); const text = String(argument ?? s.draft);
     const hasBinaryAttachment=argument===undefined&&!edit&&!!(this.cameraAttachment||filesAtStart?.length);
     if ((!text.trim()&&!hasBinaryAttachment) || s.typing || this.chatAttachmentAbort || this.draftSendPending || this.composerDraft?.holding || !filesCurrent()) return;
+    // A new turn is answered in the conversation: only the turn that handed Camera the screen keeps its replies behind the bar.
+    this.cameraHandoff=false;
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;

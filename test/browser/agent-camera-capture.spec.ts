@@ -6,7 +6,7 @@ import {returnToApps} from './app-navigation';
 // HTTP provider and camera sensor are synthetic; this is not a device acceptance test.
 // proposal-only: the agent proposes the photo without showing Camera. stop: the preview never starts and the owner stops the request.
 // selfie: the proposal names the front camera, taken at once or (selfie-ask-first) after the owner approves its card.
-// proposal-only-ask-first: the agent only proposes the photo on an ask-first phone. As the agent does there, the proposal names
+// proposal-only-ask-first: the agent only proposes the photo on an ask-first phone, with an earlier turn's photo still pending. As the agent does there, the proposal names
 // no requesting message; the reply's own device receipt names it, so Camera still opens first and the card waits there.
 // Both proposal-only modes also list an earlier turn's web search review, which is reviewable on Home and must not keep Camera closed.
 // open-only: "open camera". The agent shows Camera and proposes nothing; the chat closes to its bar over a clear viewfinder.
@@ -29,7 +29,7 @@ for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','p
    return shutter.contains(document.elementFromPoint(s.left+s.width/2,s.top+s.height/2));
   };
   const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,otherRoutes:0,receipts:[],log:[] as string[],shutterViews:[] as string[],advertised:'',proposal:null as any,stale:[] as any[],entry:null as any};
-  const proposalOf=(id:string,operation:any,requestMessageId?:string)=>({id,digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+600000).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation,...(requestMessageId?{requestMessageId}:{})}});
+  const proposalOf=(id:string,operation:any,requestMessageId?:string,ttl=600000)=>({id,digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+ttl).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation,...(requestMessageId?{requestMessageId}:{})}});
   // The agent's preview receipt for the device proposal it created in this reply.
   const proposed=(id:string)=>({actionName:'PROPOSE_DEVICE_ACTION',success:true,effectReceipts:[{receiptId:id,operation:'device.camera_capture_photo',resource:{kind:'device.approval',id},artifacts:[],idempotency:{key:'device:'+id,replayed:false},observedAt:new Date().toISOString(),outcome:'preview'}]});
   const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
@@ -60,6 +60,9 @@ for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','p
     // Reviews an earlier turn left pending: a web search this screen can review, and (unrelated-reply) a photo.
     const unbound=mode==='proposal-only-ask-first'||mode==='proposal-only-unreadable'||mode==='maps-proposal-only-ask-first';
     if(mode.includes('proposal-only')||mode==='unrelated-reply')f.stale=[proposalOf('earlier-search',{type:'browser_search',query:'harbour tides'})];
+    // As on the v610 phone, an earlier turn's photo, proposed a minute before, is still pending with no requesting message.
+    // Camera's bar offers only the newest photo; approving it must decide this reply's photo, never the earlier one.
+    if(mode==='proposal-only-ask-first')f.stale.push(proposalOf('earlier-photo',{type:'camera_capture_photo'},undefined,540000));
     if(mode==='unrelated-reply'){f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo'});return ok({text:'It is sunny.',agentName:'Camera fixture',userMessageId,actionResults:[]});}
     if(mode!=='open-only')f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},unbound?undefined:mode==='old-message'?'old-message':userMessageId);
     if(unbound)return ok({text:'Review this request on your phone before it can run.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
