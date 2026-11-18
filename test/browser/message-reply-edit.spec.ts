@@ -15,6 +15,10 @@ async function ready(page:Page){
   P.prototype.forkConversation=async(room,id,requestId)=>{fixture.truncated.push({room,id});if(fixture.failTruncate)throw Error('Unsupported endpoint');if(fixture.holdTruncate)await new Promise<void>(resolve=>fixture.releaseTruncate=resolve);fixture.originalRows=structuredClone(fixture.rows);fixture.originalRoom=room;fixture.rows=fixture.rows.slice(0,fixture.rows.findIndex((row:any)=>row.id===id));fixture.room=crypto.randomUUID();return {id:fixture.room,title:"Edited conversation",metadata:{sourceConversationId:room}};};
  },{userId,agentId});
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Original request');await input.press('Enter');await expect(agent(page)).toBeVisible();
+ // The reply paints before its turn settles (typing off, the held draft released), and the composer
+ // ignores a send until then. Wait for it to accept the next send, so an edit or reply below is never
+ // dropped on a host that settles the first turn late.
+ await expect.poll(()=>page.evaluate(()=>{const shell=(window as any).messageShell;return !!shell&&!shell.S().typing&&!shell.draftSendPending&&!shell.composerDraft?.holding;})).toBe(true);
 }
 async function edit(page:Page){await user(page).click();await menu(page).getByRole('menuitem',{name:'Edit and resend',exact:true}).click();await expect(composer(page)).toHaveValue('Original request');await composer(page).fill('Edited request');}
 test('new live stable IDs enable Reply and send canonical metadata without rewriting prose',async({page},info)=>{

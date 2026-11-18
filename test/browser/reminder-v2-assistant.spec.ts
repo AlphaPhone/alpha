@@ -144,9 +144,12 @@ for (const { target: version, mode } of cases) {
       await expect(page.getByRole('complementary',{name:'Pending deletions'}).getByRole('button',{name:'Undo',exact:true})).toBeVisible();
       const queued=await page.evaluate(async()=>JSON.parse((await(await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders[0]);
       expect(queued.pendingDeletion).toBeTruthy();expect(queued.status).not.toBe('cancelled');
+      // Let the 10 s Undo window lapse on the page clock (setFixedTime keeps timers and
+      // performance.now on it), as reminder-delete-review does, rather than waiting it out in real time.
+      await page.clock.fastForward(11_000);
     }
-    await expect.poll(()=>page.evaluate(()=>(window as any).recoveryFixture.receipts),{timeout:mode==='cancel'?20_000:5_000}).toBe(1);
-    if(mode==='cancel')await expect.poll(()=>page.evaluate(async()=>JSON.parse((await(await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders[0].status),{timeout:20_000}).toBe('cancelled');
+    await expect.poll(()=>page.evaluate(()=>(window as any).recoveryFixture.receipts)).toBe(1);
+    if(mode==='cancel')await expect.poll(()=>page.evaluate(async()=>JSON.parse((await(await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders[0].status)).toBe('cancelled');
     // A no-alert reminder cannot be snoozed: the approved v2 snooze is refused and changes nothing.
     // The refusal follows the claimed boundary: retain conservative uncertainty,
     // prove the exact browser record stayed unchanged, and never report success.
