@@ -11,7 +11,7 @@
 import {
   smsComposeReceiptOutcome, smsComposeTarget, telephonyActionReceiptOutcome, validateContactReadResult,
   type ContactReadResult, type ContactShowOperation, type ContactShowResult, type ContactWriteOperation, type ContactWriteResult, type PhoneCallOperation, type PhoneCallResult,
-  type SmsComposeOperation, type SmsComposeResult, type TelephonyActionOperation, type TelephonyActionResult,
+  type SmsComposeOperation, type SmsComposeResult, type SmsLatestSenderMetadata, type TelephonyActionOperation, type TelephonyActionResult,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts';
 import {contactLookupMatches} from '../../../../.eliza/client-features/packages/contracts/src/phone-dial.ts';
 import {telephonyActionResultText} from '../ui/telephony/telephony-receipt-text';
@@ -66,6 +66,7 @@ export type TelephonyPorts = {
   /** The agent negotiated `contacts.write.v2`: it names each value to add or remove, so a `set` it sends replaces the field. */
   contactValues: boolean;
   openThread(): {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean} | null;
+  latestIncomingSender?(): Promise<SmsLatestSenderMetadata>;
   openVoicemail(): {caller: string | null; date: number; durationSeconds: number; transcriptState: 'ready' | 'pending' | 'unavailable' | 'failed'; engine: 'device' | 'cloud' | 'carrier' | null; transcript: string | null} | null;
   deleteOpenVoicemail(current: () => void, signal: AbortSignal): Promise<'deleted' | 'none-selected' | 'cancelled' | 'failed'>;
 };
@@ -111,6 +112,7 @@ export function refuseTelephonyAction(operation: TelephonyActionOperation, summa
       case 'contact_show': return {kind: 'contact-show', status: 'unavailable'};
       case 'contact_read_selected': return {kind: 'contact-read', status: 'unavailable'};
       case 'messages_read_selected': return {kind: 'messages-read', status: 'unavailable'};
+      case 'sms_latest_sender': return {kind: 'sms-latest-sender', status: 'unavailable'};
       case 'voicemail_read_selected': return {kind: 'voicemail-read', status: 'unavailable'};
       case 'voicemail_delete_selected': return {kind: 'voicemail-delete', status: 'unavailable'};
     }
@@ -319,6 +321,12 @@ async function observed(operation: TelephonyActionOperation, operationId: string
     case 'messages_read_selected': {
       const thread = ports.openThread();
       return thread ? {kind: 'messages-read', status: 'read', ...thread} : {kind: 'messages-read', status: 'none-selected'};
+    }
+    case 'sms_latest_sender': {
+      const sender = await ports.latestIncomingSender?.().catch(() => null);
+      signal.throwIfAborted();
+      ports.current();
+      return {kind: 'sms-latest-sender', ...(sender ?? {status:'unavailable'})};
     }
     case 'voicemail_read_selected': {
       const voicemail = ports.openVoicemail();

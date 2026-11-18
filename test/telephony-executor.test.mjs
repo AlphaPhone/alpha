@@ -374,3 +374,15 @@ test('the agent reads the open contact whole and within the contract bounds, or 
     assert.deepEqual(result.telephonyResult, {kind: 'contact-read', status: 'unavailable'}, 'nothing is truncated or shared in part'); assert.equal(result.status, 'failed');
   }
 });
+
+test('SMS sender uses the narrow device read and drops results after the foreground fence closes', async () => {
+  const operation = {type: 'sms_latest_sender'};
+  const read = async () => ({status: 'found', numberEnding: '0123'});
+  const result = await run(operation, ports({latestIncomingSender:read}));
+  assert.equal(result.status, 'succeeded');
+  assert.deepEqual(result.telephonyResult, {kind:'sms-latest-sender',status:'found',numberEnding:'0123'});
+  const cancelled = new AbortController();
+  await assert.rejects(executeTelephonyAction(operation, 'cancelled',
+    ports({latestIncomingSender:async () => { cancelled.abort(); return read(); }}).ports,
+    cancelled.signal), /aborted/i);
+});

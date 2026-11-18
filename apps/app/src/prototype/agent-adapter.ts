@@ -1120,6 +1120,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           ...imageContactPorts(book,current),
           sendSms:imageSmsPort(client,expectedContext,current),
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
+          latestIncomingSender:()=>client.latestIncomingSender(),
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
