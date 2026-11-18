@@ -1,6 +1,13 @@
 import { v5 as uuidv5 } from 'uuid';
 import { literalMailAddress } from './drafts-controller';
 
+const gmailComposeActions = new Set([
+  'MESSAGE',
+  'MESSAGE_DRAFT_FOLLOWUP',
+  'MESSAGE_SEND_DRAFT',
+  'MESSAGE_SEND',
+]);
+
 /** Gmail receipts use RFC UUIDs. Eliza may persist a version-zero message ID.
  * Derive one durable, mail-specific key while preserving existing valid keys. */
 export function agentEmailOperationId(messageId: string): string {
@@ -27,7 +34,8 @@ export function agentEmailDraft(
       values = row.values as Record<string, unknown> | null;
     if (
       row.success !== true ||
-      row.actionName !== 'MESSAGE' ||
+      typeof row.actionName !== 'string' ||
+      !gmailComposeActions.has(row.actionName) ||
       values?.mode !== 'local-compose' ||
       values.targetId !== 'inbox'
     )

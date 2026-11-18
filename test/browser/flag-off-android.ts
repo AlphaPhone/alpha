@@ -410,7 +410,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
                 const prepared=navigation().request('POST','/api/views/inbox/navigate',{clientId:body.metadata.viewClientId,delivery:'completed-action',prepareOnly:true,viewType:'gui',completedActionHandoffId:handoff},{},id);
                 if(prepared.status!==200)throw Error('Invalid fixture navigation preparation');
                 emailActions=[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'inbox',viewPath:'/inbox',viewType:'gui',label:'Inbox',navigationPrepared:true,completedActionHandoffId:handoff,navigationBinding:prepared.data.navigationBinding}}];
-              }else emailActions=[{actionName:'MESSAGE',success:true,values:{mode:'local-compose',targetId:'inbox',emailDraft:{version:1,requestMessageId:userMessageId,...options.emailDraft}}}];
+              }else emailActions=[{actionName:'MESSAGE_DRAFT_FOLLOWUP',success:true,values:{mode:'local-compose',targetId:'inbox',emailDraft:{version:1,requestMessageId:userMessageId,...options.emailDraft}}}];
             }
             setTimeout(() => {
               emitStream(streamId, { type: 'response', status: 200, headers: { 'content-type': 'text/event-stream' } });

@@ -13,9 +13,9 @@ const draft = {
   subject: 'Shoot plan',
   body: 'Pack the tripod.',
 };
-const handoff = (offer) => ({
+const handoff = (offer, actionName = 'MESSAGE') => ({
   success: true,
-  actionName: 'MESSAGE',
+  actionName,
   values: { mode: 'local-compose', targetId: 'inbox', emailDraft: offer },
 });
 
@@ -29,12 +29,15 @@ test('a version-zero conversation ID gets a stable, valid Gmail operation ID', (
 });
 
 test('only one successful, exact-turn local handoff creates an editable email', () => {
-  assert.deepEqual(agentEmailDraft([handoff(draft)], id), {
+  const expected = {
     id,
     to: ['self'],
     subject: 'Shoot plan',
     body: 'Pack the tripod.',
-  });
+  };
+  for (const actionName of ['MESSAGE', 'MESSAGE_DRAFT_FOLLOWUP', 'MESSAGE_SEND_DRAFT', 'MESSAGE_SEND']) {
+    assert.deepEqual(agentEmailDraft([handoff(draft, actionName)], id), expected);
+  }
   for (const results of [
     [
       {
@@ -44,6 +47,7 @@ test('only one successful, exact-turn local handoff creates an editable email', 
       },
     ],
     [handoff({ ...draft, requestMessageId: crypto.randomUUID() })],
+    [handoff(draft, 'MESSAGE_DRAFT_REPLY')],
     [{ ...handoff(draft), success: false }],
     [handoff(draft), handoff(draft)],
     [handoff({ ...draft, subject: 'one\ntwo' })],
