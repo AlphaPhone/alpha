@@ -4512,6 +4512,12 @@
                   <sc-if value="{{m.emailDraft.missingAccount}}"><button onClick="{{m.emailDraft.openInbox}}">Open Inbox</button></sc-if>
                   <div><button disabled="{{m.emailDraft.busy}}" onClick="{{m.emailDraft.discard}}">Don’t send</button><button aria-label="Send email" disabled="{{m.emailDraft.sendDisabled}}" onClick="{{m.emailDraft.send}}">Send</button></div>
                 </sc-if>
+                <sc-if value="{{m.emailDraft.settled}}">
+                  <sc-if value="{{m.emailDraft.from}}"><small>From {{m.emailDraft.from}}</small></sc-if>
+                  <sc-if value="{{m.emailDraft.to}}"><small>To {{m.emailDraft.to}}</small></sc-if>
+                  <strong>{{m.emailDraft.subject}}</strong>
+                  <p class="chat-email-draft-body">{{m.emailDraft.body}}</p>
+                </sc-if>
                 <sc-if value="{{m.emailDraft.status}}"><span role="status">{{m.emailDraft.status}}</span></sc-if>
               </section>
             </sc-if>

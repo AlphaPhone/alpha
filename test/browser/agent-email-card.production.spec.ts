@@ -12,6 +12,7 @@ import { openRetainedNativeNotes } from './helpers/native-notes';
 for (const decision of [
   'send',
   'discard',
+  'restore',
   'rejected',
   'uncertain',
   'revoked',
@@ -82,13 +83,33 @@ for (const decision of [
       ).toEqual([0, 0]);
       if (decision === 'discard') {
         await draft.getByRole('button', { name: 'Don’t send' }).click();
-        await expect(draft).toHaveCount(0);
+        await expect(draft.getByRole('status')).toHaveText('Not sent.');
+        await expect(draft).toContainText('Please bring the blue notebook.');
+        await expect(draft.getByRole('button', { name: 'Send email' })).toHaveCount(0);
         expect(
           await harness(page, (f) => [
             f.mail.prepares.length,
             f.mail.dispatches.length,
           ]),
         ).toEqual([0, 0]);
+        await page.reload();
+        await residentHome(page);
+        await button(page, 'Open conversation').click();
+        await expect(draft.getByRole('status')).toHaveText('Not sent.');
+        await expect(draft).toContainText('Please bring the blue notebook.');
+        await expect(draft.getByRole('button', { name: 'Send email' })).toHaveCount(0);
+        expect(await harness(page, (f) => f.mail.dispatches.length)).toBe(0);
+      } else if (decision === 'restore') {
+        await composer.fill('Draft a second email about the shoot plan.');
+        await composer.press('Enter');
+        await expect(draft).toHaveCount(2);
+        await page.reload();
+        await residentHome(page);
+        await button(page, 'Open conversation').click();
+        await expect(draft).toHaveCount(2);
+        await expect(draft.first().getByRole('textbox', { name: 'Email body' })).toHaveValue('Please bring the blue notebook.');
+        await expect(draft.last().getByRole('textbox', { name: 'Email body' })).toHaveValue('Bring the tripod.');
+        expect(await harness(page, (f) => [f.mail.prepares.length, f.mail.dispatches.length])).toEqual([0, 0]);
       } else if (decision === 'revoked') {
         await harness(page, (f) => {
           f.mail.accounts[0].connected = false;

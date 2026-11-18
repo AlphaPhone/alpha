@@ -1219,6 +1219,8 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 
 .chat-email-draft { display:grid; gap:8px; width:100%; box-sizing:border-box; padding:14px; border:1px solid var(--line); border-radius:18px; background:var(--bg); }
 .chat-email-draft small,.chat-email-draft label { color:var(--mut); }
+.chat-email-draft strong,.chat-email-draft small,.chat-email-draft-body { overflow-wrap:anywhere; }
+.chat-email-draft-body { margin:0; white-space:pre-wrap; }
 .chat-email-draft label { display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line); }
 .chat-email-draft input,.chat-email-draft textarea { min-width:0; width:100%; border:0; background:transparent; color:var(--fg); font:inherit; }
 .chat-email-draft input { min-height:44px; }
