@@ -108,8 +108,8 @@ test('idle capture expiry and stale stop callbacks neither upload silence nor en
  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await noPhysicalOrLocalVoice(page);
 });
-// A spoken "open camera" from the voice sheet: the voice conversation is held by its sheet, so Camera keeps
-// that detent (typed navigation closes the chat to Camera's bar instead) and the screen change is acknowledged.
+// A spoken "open camera" from the voice sheet: the conversation keeps its detent on Camera, as typed navigation
+// does, so the voice conversation held by its sheet continues and the screen change is acknowledged.
 test('spoken Camera navigation keeps the voice sheet and acknowledges the switch',async({page})=>{
  await setup(page,'sheet');
  await utterance(page,'camera');

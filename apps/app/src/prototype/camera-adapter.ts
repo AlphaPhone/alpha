@@ -760,7 +760,11 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let requestedCaptureHolds=0;
   let pendingShot:number|undefined;
   const cameraViewVisible = () => !disposed && !document.hidden && !!api?.isActive() && !!document.querySelector(finder);
-  const chatCovers = () => ['sheet', 'full'].includes(api?.S.chat);
+  /** Portrait Camera with the sheet open is laid out above the sheet (phone.css, Camera's chat-open layout),
+   * so only a full conversation, or a sheet without that layout (landscape), covers the viewfinder. */
+  const chatOpenLayout = () => api?.S.chat === 'sheet' && !document.documentElement.classList.contains('alpha-landscape') &&
+    document.querySelector('[data-screen]')?.getAttribute('data-alpha-chat-half') === 'true';
+  const chatCovers = () => api?.S.chat === 'full' || (api?.S.chat === 'sheet' && !chatOpenLayout());
   const conversationPanel = () => document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]');
   function conversationOverViewfinder(panel: HTMLElement | null): boolean {
     const viewfinder = document.querySelector(finder);
@@ -770,6 +774,27 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     return chat.height > 0 && chat.width > 0 &&
       chat.top < preview.bottom && chat.bottom > preview.top &&
       chat.left < preview.right && chat.right > preview.left;
+  }
+  /** Waits, a bounded number of times, for the conversation panel and Camera's layer to finish moving while
+   * the panel still overlaps the viewfinder. It never changes the conversation's detent. */
+  async function viewfinderSettled(signal: AbortSignal): Promise<void> {
+    for (let pass = 0; pass < 4; pass++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      signal.throwIfAborted();
+      const panel = conversationPanel();
+      if (!conversationOverViewfinder(panel)) return;
+      const layer = document.querySelector(finder)?.closest('[data-alpha-layer="app"]');
+      // Only finite motion is waited for, and never longer than a sheet transition.
+      const moving = [...(panel?.getAnimations?.() || []), ...(layer?.getAnimations?.() || [])]
+        .filter(animation => animation.effect?.getTiming().iterations !== Infinity);
+      if (!moving.length) return;
+      await new Promise<void>(resolve => {
+        const timer = window.setTimeout(() => done(), 1000);
+        const done = () => { window.clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+        signal.addEventListener('abort', done, { once: true });
+        void Promise.allSettled(moving.map(animation => animation.finished)).then(done);
+      });
+    }
   }
   /** When the chat sheet started covering Camera; the session stays bound for CHAT_GRACE_MS after that. */
   let chatCoveredAt: number | undefined, chatTimer: number | undefined;
@@ -1074,8 +1099,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(agentRequest||session.busy)return busy;
       const capture: AgentCaptureRequest = { queued: true, refused: false };
       request=agentRequest=capture;requestedCaptureHolds++;
-      const closeChat=owner.S.chat!=='hidden';
-      // The committed chat state can be hidden while its closing panel still covers Camera.
+      // The conversation keeps its detent where Camera is laid out above it (the open sheet in portrait).
+      // Only a conversation over the viewfinder (full, or a landscape sheet) closes so the owner sees what is
+      // taken. The committed state can also be settled while its moving panel still covers Camera.
+      const closeChat=chatCovers();
       if(closeChat||conversationOverViewfinder(conversationPanel())){
         const revealed=await new Promise<boolean>(resolve=>{
           const finish=(committed:boolean)=>{
@@ -1118,6 +1145,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         signal.throwIfAborted();current();
         if(direction!==wantedLens||!active()||session.phase!=='ready')return {status:'failed',summary:'Couldn’t switch camera, so no photo was taken.'};
       }
+      // An open sheet keeps its detent, and Camera's layout above it moves with it (the reply opening the sheet,
+      // the sheet's own motion): a viewfinder that is still settling is waited for, never shot through.
+      if(!chatCovers())await viewfinderSettled(signal);
+      signal.throwIfAborted();current();
       const attempt=await session.exclusive(async():Promise<CameraCaptureAttempt>=>{
         if(chatCovers()||conversationOverViewfinder(conversationPanel())){
           return {status:'failed',summary:'Camera viewfinder is covered'};
@@ -1218,8 +1249,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   scanRequest=()=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    // Close the chat so the viewfinder and scan review are visible.
-    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
+    // The conversation stays where it is: scan review is a modal dialog above it.
     void scanFrame(owner);return true;
   };
   /** Android: the system picker returns one image straight into scan review
@@ -1252,10 +1282,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   frameQuestion=question=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    if(!askCameraFrame(owner,question))return false;
-    // Close the chat so the frame review is visible.
-    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
-    return true;
+    // The conversation stays where it is: the frame review is a modal dialog above it.
+    return askCameraFrame(owner,question);
   };
   /** The reviewed item is still the listed one at the revision the review started with:
    * an edited, replaced or removed capture ends its review instead of continuing under the same id. */
