@@ -288,7 +288,7 @@ async function reencodeImageToChatCap(file: File): Promise<{
   );
 }
 /** Read a file's bytes as raw base64 (the `data:<mime>;base64,` prefix stripped). */
-function readFileAsBase64(file: File): Promise<string> {
+export function readFileAsBase64(file: File): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

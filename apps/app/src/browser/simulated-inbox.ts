@@ -180,7 +180,7 @@ export function installSimulatedInbox(view:Bag){
  const otherDrafts=(draft:Bag)=>(api.get('inbox').localDrafts||[]).filter((saved:Bag)=>!draft.localDraftId||saved.localDraftId!==draft.localDraftId);
  const compose=out.compose;out.compose=()=>{if(api.get('inbox').compose&&!keepDraft(api))return;status='Unsaved local draft';confirm=false;compose();};
  const validRecipient=(value:unknown)=>!!recipientAddress(api,value);
- if(out.c){const base=out.c;out.c={...base,toPh:'Email address',local:true,busy,status,confirm,sendDisabled:busy,heading:'New message',showRecipientDetails:!!state.compose.recipientsExpanded||!!state.compose.cc||!!state.compose.bcc,toggleRecipientDetails:()=>setDraft({recipientsExpanded:!state.compose.recipientsExpanded}),attachmentHint:'PDF, images or text · one file up to 5 MiB',cc:state.compose.cc||'',bcc:state.compose.bcc||'',onCc:(e:Bag)=>setDraft({cc:e.target.value}),onBcc:(e:Bag)=>setDraft({bcc:e.target.value}),
+ if(out.c){const base=out.c;out.c={...base,toPh:'Email address',local:true,busy,status,confirm,sendDisabled:busy,heading:'New email',showRecipientDetails:!!state.compose.recipientsExpanded||!!state.compose.cc||!!state.compose.bcc,toggleRecipientDetails:()=>setDraft({recipientsExpanded:!state.compose.recipientsExpanded}),attachmentHint:'PDF, images or text · one file up to 5 MiB',cc:state.compose.cc||'',bcc:state.compose.bcc||'',onCc:(e:Bag)=>setDraft({cc:e.target.value}),onBcc:(e:Bag)=>setDraft({bcc:e.target.value}),
  save:()=>{
   try{
    const current=api.get('inbox'),draft=structuredClone(current.compose),raw=String(current.toQ||'').trim();

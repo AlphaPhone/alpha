@@ -234,7 +234,6 @@ test('Share by email from Notes opens a prefilled local draft without sending',a
  await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Shared plan');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Shared plan\n\nFirst line\nSecond line');
- await expect(page.getByRole('status').filter({hasText:'nothing has been sent'})).toBeVisible();
  expect((await gm(page)).prepares).toEqual([]);
 });
 
@@ -252,7 +251,6 @@ test('compose From picker moves a new email directly to a chosen connected accou
  await expect(from).toHaveValue('grant-2');
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Moving subject');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Moving body');
- await expect(page.getByRole('status').filter({hasText:'Draft in third@example.test'})).toBeVisible();
  expect((await gm(page)).prepares).toEqual([]);
 });
 
@@ -330,14 +328,26 @@ test('From switcher returns the email to its account when the other account alre
  expect((await page.evaluate(()=>(window as any).gmSlots['inbox-drafts:v1:'+JSON.stringify(['production','fixture-owner','fixture-org','grant-1'])])).subject).toBe('Second saved');
 });
 
-for(const saved of [false,true])test(`Share to email opens a new populated draft and preserves ${saved?'saved':'unsaved'} earlier email`,async({page})=>{
- await setup(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();
+async function seedLegacyOwnerDraft(page: Page, subject: string, body: string) {
+ await page.evaluate(({subject,body})=>{
+  const owner=JSON.stringify(['production','fixture-owner','fixture-org','grant-0']);
+  (window as any).gmSlots['inbox-drafts:v1:'+owner]={version:1,id:'earlier-email',revision:'earlier-revision',owner,to:[],subject,body};
+ },{subject,body});
+}
+
+for(const legacy of [false,true])test(`Share to email opens a new populated draft and preserves ${legacy?'a legacy saved copy':'an earlier draft saved on Back'}`,async({page})=>{
+ await setup(page);
+ if(legacy)await seedLegacyOwnerDraft(page,'Earlier email','Earlier exact body');
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Compose',exact:true}).click();
- await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Earlier email');
- await page.getByRole('textbox',{name:'Message',exact:true}).fill('Earlier exact body');
- if(saved){await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByText('Saved locally on this device',{exact:true}).first()).toBeVisible();}
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);
+ if(!legacy){
+  await page.getByRole('button',{name:'Compose',exact:true}).click();
+  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Earlier email');
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Earlier exact body');
+  await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
+ }
+ await returnToApps(page);
  await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Shared selected note');
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('First line\nSecond line');
@@ -354,10 +364,9 @@ for(const saved of [false,true])test(`Share to email opens a new populated draft
 });
 
 for(const destination of ['another account','Home'] as const)test(`Shared email is retired when leaving for ${destination} during local preservation`,async({page})=>{
- await setup(page,{accounts:['owner@example.test','second@example.test']});await page.getByRole('button',{name:'Inbox',exact:true}).click();
- await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Compose',exact:true}).click();
- await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Keep earlier email');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Keep earlier body');
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);
+ await setup(page,{accounts:['owner@example.test','second@example.test']});
+ // Back now shelves new drafts. A legacy saved draft still moves during Share.
+ await seedLegacyOwnerDraft(page,'Keep earlier email','Keep earlier body');
  await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Retired share');await page.getByRole('textbox',{name:'Note',exact:true}).fill('Must not insert later');
  await page.evaluate(async()=>{
@@ -384,9 +393,9 @@ for(const destination of ['another account','Home'] as const)test(`Shared email 
 });
 
 test('Share to email preserves earlier edits when local preservation conflicts',async({page})=>{
- await setup(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Conflict protected email');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Protected exact body');
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
+ await setup(page);
+ await seedLegacyOwnerDraft(page,'Conflict protected email','Protected exact body');
+ await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Refused share');await page.getByRole('textbox',{name:'Note',exact:true}).fill('Never replaces earlier email');
  await page.evaluate(async()=>{const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');const cas=s.compareExchange.bind(s);s.compareExchange=async(key,prior,next)=>key.startsWith('inbox-drafts:v1:shelf:')?{status:'conflict'}:cas(key,prior,next);});
  await page.getByRole('button',{name:'More',exact:true}).click();

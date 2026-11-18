@@ -73,15 +73,17 @@ export class ChatAttachmentPicker {
   private removeAbort?:()=>void;
   private resolve?:((files:File[])=>void);
   private current:()=>boolean=()=>false;
+  private returnFocus='button[aria-label="Chat actions"]';
   private readonly modal;
 
   constructor(private readonly changed:()=>void,private readonly storage:PickerFiles=files) {
-    this.modal=createInlineModal(()=>this.finish([]),()=>document.querySelector('button[aria-label="Chat actions"]'),{coverAssistant:true});
+    this.modal=createInlineModal(()=>this.finish([]),()=>document.querySelector(this.returnFocus),{coverAssistant:true});
   }
-  choose(signal:AbortSignal,maximum:number,current:()=>boolean):Promise<File[]> {
+  choose(signal:AbortSignal,maximum:number,current:()=>boolean,returnFocus='button[aria-label="Chat actions"]'):Promise<File[]> {
     this.finish([],false);
     if(signal.aborted||document.hidden||!current())return Promise.resolve([]);
     this.opened=true;this.signal=signal;this.current=current;this.maximum=maximum;
+    this.returnFocus=returnFocus;
     this.tab='photos';this.volume=undefined;this.query='';this.path='';this.rows=[];this.next='';this.selected.clear();this.error='';
     const abort=()=>this.finish([]);
     const hide=()=>{if(document.hidden)abort();};
