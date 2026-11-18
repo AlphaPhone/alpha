@@ -128,7 +128,10 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     if(mode!=='transcribed')await expect(page.getByText(/Review the action below\./)).toBeVisible();
     await expect(page.getByText('clock handoff',{exact:true})).toBeVisible();
     expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);
-    if(mode==='zone')await page.evaluate(()=>{const original=Intl.DateTimeFormat.prototype.resolvedOptions;Intl.DateTimeFormat.prototype.resolvedOptions=function(){return {...original.call(this),timeZone:'Pacific/Honolulu'};};});
+    // The zone moves at the tap itself, so only the approval-time recheck can see it. Changed any
+    // earlier, the next render (the composer blurring as focus moves to the review) republishes the
+    // phone context and recovery retires the card first; that path ends disabled, asserted below.
+    if(mode==='zone')await page.evaluate(()=>document.addEventListener('keydown',event=>{if(event.key!=='Enter')return;const original=Intl.DateTimeFormat.prototype.resolvedOptions;Intl.DateTimeFormat.prototype.resolvedOptions=function(){return {...original.call(this),timeZone:'Pacific/Honolulu'};};},{capture:true,once:true}));
     if(mode==='modal'){
       await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
       await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByRole('button',{name:'New automation',exact:true}).click();await page.getByRole('button',{name:'Clock alarms',exact:true}).click();
@@ -145,7 +148,7 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     // Activate the actual review button through its keyboard path. The chat sheet
     // can still be settling after voice closes; nested text is not a stable click target.
     await page.getByRole('button',{name:/^clock handoff /}).press('Enter');
-    if(mode==='zone'){await expect(page.getByText('No longer pending',{exact:true}).first()).toBeVisible();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;}
+    if(mode==='zone'){await expect(page.getByText('No longer pending',{exact:true}).first()).toBeVisible();await expect(page.getByRole('button',{name:/^Review unavailable /})).toBeDisabled();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;}
 
     if(mode==='review-cancel'){
       await expect.poll(()=>page.evaluate(()=>(window as any).recoveryFixture.receipts)).toBe(1);
