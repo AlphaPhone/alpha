@@ -48,9 +48,14 @@ the device. This branch rebuilds it on the stack below.
   application, its tests, every build, release and device script. What
   `legacy/` runs with Bun is rebuilt for Node when its area is rebuilt; no
   Bun command, lock file or runtime comes across.
-- **Upstream is pinned.** The agent runtime is elizaOS at the commit
-  `legacy/upstream.lock.json` records, in the submodule `legacy/vendor/eliza`.
-  Never edit its checkout: make shared changes upstream and advance the pin.
+- **Alpha is built on Eliza's own Vibestack branch.** The on-device agent,
+  the Android device package and the hosted services are
+  [elizaOS/eliza](https://github.com/elizaOS/eliza) on its `vibestack`
+  branch: `@elizaos/agent`, `@elizaos/os`, `@elizaos/cloud` and the plugins,
+  at a pinned commit. Use what they export, and never restate their state or
+  wire shapes here. Never edit their checkout: make shared changes upstream
+  and advance the pin. `legacy/` still records the older `develop` pin it
+  was built on, for reading only.
 - **Do not import another product's interface or identity.**
 - **Say what was shown.** An APK build, an emulator HOME-role test, a full
   AOSP image boot, a real integration and device or user acceptance are
