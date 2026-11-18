@@ -1,5 +1,4 @@
-import {decodedFile} from './attachment-picker';
-import type {SelectedChatFile} from './chat-attachment-files';
+import {decodedFile,type SelectedChatFile} from './chat-attachment-files';
 import {reviewFileEmail} from './file-email-review';
 import {AttachmentNotice} from '../ui/mailbox/drafts-controller';
 import {registerPlugin} from '../platform-plugins';
