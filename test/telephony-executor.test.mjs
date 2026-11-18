@@ -407,3 +407,11 @@ test('SMS sender uses the narrow device read and drops results after the foregro
     ports({latestIncomingSender:async () => { cancelled.abort(); return read(); }}).ports,
     cancelled.signal), /aborted/i);
 });
+
+test('an addressed read uses the negotiated full address and thread',async()=>{
+  const operation={type:'sms_latest_sender',includeAddress:true};
+  const sender={status:'found',address:'+14155550123',threadId:'thread:42'};
+  const result=await run(operation,ports({latestIncomingSender:async include=>{assert.equal(include,true);return sender;}}));
+  assert.deepEqual(result.telephonyResult,{kind:'sms-latest-sender',...sender});
+  assert.equal(result.summary,sender.address);
+});

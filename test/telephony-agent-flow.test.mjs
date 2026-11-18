@@ -162,6 +162,27 @@ test('a latest SMS sender read from Home requires the negotiated capability and 
   assert.equal(f.effects, 1);
 });
 
+test('an addressed sender read and a bound reply draft follow the owner’s approval preference', async()=>{
+  const capabilities=['sms.latest-sender.v1','sms.latest-sender.v2','sms.compose.v1','sms.compose.v2'];
+  const read={type:'sms_latest_sender',includeAddress:true};
+  const sender={kind:'sms-latest-sender',status:'found',address:'+14155550123',threadId:'thread:42'};
+  const reply={type:'sms_compose',target:{kind:'number',number:sender.address},body:'Bring the tripod.',draft:true,replyThreadId:'thread:42'};
+  assert.ok(P.selectDeviceCapabilities(capabilities,{android:true,native:true,aospImage:true,foregroundReview:false}).includes('sms.latest-sender.v2'));
+  for(const [operation,result,text] of [[read,sender,'Who texted me?'],[reply,{kind:'sms-compose',status:'drafted'},'Draft a quick text asking them to bring a tripod.']]){
+    for(const mode of ['off','on','explicit']){
+      const origin={...proof,text:mode==='explicit'?'Show me an approval card first. '+text:text};
+      const f=fixture({operation,result,capabilities,requestMessageId:messageId});
+      await f.client.pendingReview(context, signal(),origin);
+      const receipts=await f.client.performRequested(messageId,context,signal(),async()=>mode!=='on',undefined,origin);
+      assert.equal(receipts.length,mode==='off'?1:0);
+      assert.equal(f.effects,mode==='off'?1:0);
+      if(mode!=='off')await f.client.approve(id,context,signal());
+      assert.deepEqual(receiptOf(f).result,result);
+      await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,origin);
+      assert.equal(f.effects,1);
+    }
+  }
+});
 test('each action needs its own negotiated capability', async () => {
   await assert.rejects(fixture({capabilities: []}).client.pending(context, signal()), /not negotiated/);
   await assert.rejects(fixture({capabilities: ['contacts.write.v1']}).client.pending(context, signal()), /not negotiated/);

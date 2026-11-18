@@ -1145,12 +1145,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           ...imageContactPorts(book,current),
           sendSms:imageSmsPort(client,expectedContext,current),
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
-          latestIncomingSender:()=>client.latestIncomingSender(),
+          latestIncomingSender:includeAddress=>client.latestIncomingSender(includeAddress),
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
-          draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
+          draftInOpenThread:(body,number,threadId)=>placeAskedSmsDraft(body,number,threadId),
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
           // changes the view, so it runs after the receipt and only while this review is still current.
-          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>{current();step();});},
+          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&(()=>{current();step();});},
           showContacts:async query=>{
             const step=showContactsStep(query),access=step?await book.status():null;
             if(!step||access?.available!==true||access.readable!==true)return null;
