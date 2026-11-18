@@ -108,3 +108,15 @@ test('idle capture expiry and stale stop callbacks neither upload silence nor en
  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await noPhysicalOrLocalVoice(page);
 });
+// A spoken "open camera" from the voice sheet: the voice conversation is held by its sheet, so Camera keeps
+// that detent (typed navigation closes the chat to Camera's bar instead) and the screen change is acknowledged.
+test('spoken Camera navigation keeps the voice sheet and acknowledges the switch',async({page})=>{
+ await setup(page,'sheet');
+ await utterance(page,'camera');
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ const observed=await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {chat:f.shell.S().chat,toast:f.shell.S().toast,acks:f.acks,ack:f.requests.find((request:any)=>request.path.endsWith('interact-result'))?.body};});
+ expect(observed).toMatchObject({chat:'sheet',toast:'',acks:1,ack:{success:true,result:{switched:true}}});
+ // Camera's own preview asks for media here, so only the voice conversation's end is checked.
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect(voice(page)).toHaveCount(0);
+});
