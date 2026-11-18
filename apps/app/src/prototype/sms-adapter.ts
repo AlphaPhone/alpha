@@ -13,6 +13,7 @@ import {createSmsRecipientPicker} from './sms-recipient-picker';
 import {askedDraftPlaced,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 import {handoffResultText,sendRefusalText} from '../ui/telephony/telephony-messages';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
+import {placeOwnerCall} from './phone-adapter';
 /** The open thread's visible tail, available to the agent's explicitly selected-thread read. */
 export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
@@ -84,6 +85,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const native=registerPlugin<MessagesBridge>('AlphaTelephony');
  const client=createAospTelephony(native,true),p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,recipients='',body='',sim='',operationId='',busy=false,notice='',active=false,lifecycle=0,draftRevision=0,picking=false;
+ let calling=false;
  let messageMenu: {
   target:MessageDeleteReference;text:string;trigger:HTMLElement;confirm:boolean;copied:boolean;notice:string;
  }|null=null;
@@ -249,6 +251,19 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const resetMms=(pictures:boolean)=>{mmsOperationId='';mmsReview=null;if(pictures){attachments=[];pictureSeq=0;}};
  const inputRecipients=()=>recipients.split(',').map(v=>v.trim()).filter(Boolean);
  const inFront=()=>active&&owner?.S().view==='messages'&&!document.hidden;
+ async function callThread(threadId:string,number:string,toast:(message:string)=>void){
+  const visit=lifecycle;
+  const current=()=>{
+   const row=openRow();
+   return visit===lifecycle&&inFront()&&row?.id===threadId&&row.addresses.length===1&&normalizePhoneNumber(row.addresses[0])===number;
+  };
+  if(calling||!current())return;
+  calling=true;paint();
+  try{
+   const result=await placeOwnerCall(client,number,current);
+   if(current()&&result.notice)toast(result.notice);
+  }finally{calling=false;paint();}
+ }
  /* Keep the shared profile on reviewed sends. Only this click's local client substitutes
   * the origin-checked composer port, retaining the shared digest and receipt validation. */
  function composerClient(visit:number){
@@ -820,7 +835,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    openSearch:openListSearch,closeSearch:closeListSearch,clearSearch:()=>{listFilter=null;paint();focusListSearch();},
    onSearch:(event:Event)=>{const text=(event.target as HTMLInputElement).value;listFilter=text.trim()?{query:text,label:text.trim(),by:'owner'}:null;paint();},
    submitSearch:(event:Event)=>{event.preventDefault();(event.currentTarget as HTMLFormElement).querySelector('input')?.blur();},
-   title,ini:initials(title),canCall:!!sole,call:()=>{if(sole)api?.open?.('phone',{prefill:sole});},callLabel:`Call ${title}`,
+   title,ini:initials(title),canCall:!!sole,calling,call:()=>{if(thread&&sole)void callThread(thread.id,sole,message=>viewApi.toast?.(message));},callLabel:`Call ${title}`,
    messageDelete:messageMenu?.confirm&&menuRow()?{
     busy:deleting,
     close:()=>closeMessageMenu(true),

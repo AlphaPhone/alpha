@@ -18,6 +18,20 @@ export function phoneRows(calls:readonly TelephonyCallLogEntry[],dial:(number:st
  return calls.map(call=>{const who=call.cachedName||call.number||'Unknown caller',minutes=Math.floor(call.durationSeconds/60),seconds=call.durationSeconds%60;
   return {id:call.id,label:`${who}${call.isNew?' · new':''}`,detail:`${CALL_TYPE[call.type]} · ${formatDateTime(new Date(call.date))}${call.durationSeconds?` · ${minutes}:${String(seconds).padStart(2,'0')}`:''}`,noDial:!call.number,dialLabel:call.number?`Call ${who}`:`Can’t dial ${who}`,dial:()=>{if(call.number)dial(call.number);}};});
 }
+/** A direct user tap uses Telecom. Only a known permission or role refusal can open the system dialer. */
+export async function placeOwnerCall(client:AospTelephony,number:string,current:()=>boolean){
+ try{
+  const result=await client.placeCall(number);
+  return {placed:result.status==='placed',notice:result.status==='placed'?'':callResultText(result)};
+ }catch(error){
+  const code=(error as {code?:string})?.code;
+  if(current()&&(code==='role-required'||code==='permission-required')){
+   try{return {placed:false,notice:handoffResultText(await client.dial(number))};}
+   catch{return {placed:false,notice:'Couldn’t open'};}
+  }
+  return {placed:false,notice:'Call unconfirmed'};
+ }
+}
 /**
  * Transcribes one window of a voicemail (a complete mono 16 kHz PCM16 WAV, base64) under the owner's
  * speech setting. `available` answers whether the on-device recognizer can run now. Installed by the
@@ -154,10 +168,12 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   if(busy()||!available())return;const target=normalizePhoneNumber(raw);
   if(!target){notice='Invalid number';changed();return;}
   const token=session;dialing=true;notice='';changed();
-  try{const result=await client!.placeCall(target);if(token!==session)return;if(result.status==='placed'){number='';inCall=true;vm=callStarted(vm);audio?.pause();}else notice=callResultText(result);}
-  catch(error){if(token!==session)return;const code=(error as {code?:string})?.code;
-   if(code==='role-required'||code==='permission-required'){try{const handoff=await client!.dial(target);if(token===session)notice=handoffResultText(handoff);}catch{if(token===session)notice='Couldn’t open';}}
-   else notice='Call unconfirmed';}
+  try{
+   const result=await placeOwnerCall(client!,target,()=>token===session&&available());
+   if(token!==session)return;
+   if(result.placed){number='';inCall=true;vm=callStarted(vm);audio?.pause();}
+   else notice=result.notice;
+  }
   finally{if(token===session){dialing=false;changed();}}
  }
  const ready=()=>active&&available();
@@ -265,7 +281,7 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  };
  views.phone.render=(st:Bag,viewApi:Bag)=>{
  api=viewApi;
- /* A number handed over from Contacts or Messages fills the keypad once; only the owner's Call tap calls. */
+ /* A number handed over from Contacts fills the keypad once; only the owner's Call tap calls. */
  if(typeof st?.prefill==='string'&&st.prefill){if(!busy()){number=st.prefill.slice(0,40);notice='';tab='keypad';}queueMicrotask(()=>viewApi.set?.({prefill:null}));}
  /* Home's Phone card names the tab it leads to. */
  if(st?.tab==='recents'||st?.tab==='voicemail'){if(st.tab==='recents'||carrier==='ready')tab=st.tab;if(carrier!==null||st.tab==='recents')queueMicrotask(()=>viewApi.set?.({tab:null}));}
