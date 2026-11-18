@@ -13,7 +13,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -28,7 +28,8 @@ import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runti
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {contactChoiceName} from '../ui/telephony/telephony-messages';
 import {normalizePhoneNumber} from '../runtime/aosp-telephony';
 import {askTelephonyReview} from './telephony-review';
 import type {BrowserTabChoice} from './browser-adapter';
@@ -196,6 +197,8 @@ function createdFromSlot(slot:string,key:string){
 }
 /** What releasing a composer send did with a send's text that had no durable copy. */
 type ComposerRelease='kept'|'restored'|'lost';
+/** The review title the device action coordinator gives a requested photo (ui/device-actions/client-coordinator.ts). */
+const CAMERA_REVIEW_TITLE='Take photo';
 const UNSENT_NOT_RESTORED='Not sent. The conversation changed, so the message could not be put back.';
 function releaseComposerSend(shell:Shell,heldKey:string|undefined,heldText:string,undurableText?:string,{cleared=true,sameChat,stayed}:{cleared?:boolean;sameChat?:()=>boolean;stayed?:()=>boolean}={}):ComposerRelease{
   const draft=shell.composerDraft;draft.release();
@@ -334,6 +337,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // The same options the in-card review offers before the dial (telephony-executor).
     const options=contactCallOptions(await client.searchContacts(target.contact,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber),names=new Set(options.map(option=>option.id));
     return {name:names.size===1?options[0].name:null,numbers:options.map(option=>option.number)};
+  });
+  // A contact change or deletion is carded only for contacts the phone holds, found the way the
+  // executor finds them after approval. Only their names reach the card; the agent learns nothing.
+  setContactReviewMatches(async (query,signal)=>{
+    if(!aospImage)return null;
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    const found=await contactWriteTargets(query,{searchContacts:(text,limit)=>client.searchContacts(text,limit),...imageContactPorts(registerPlugin<any>('AlphaContacts'),()=>signal.throwIfAborted())});
+    signal.throwIfAborted();
+    return found&&found.map(contact=>contactChoiceName(contact.displayName));
   });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
@@ -634,9 +646,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       return {msgs:at<0?[...msgs,bubble]:msgs.map((message:Shell,index:number)=>index===at?bubble:message)};
     });
   }
-  function openInternalView(shell:Shell,target:string,chat?:string):boolean {
+  function openInternalView(shell:Shell,target:string,chat?:string,{voice=false}:{voice?:boolean}={}):boolean {
     const view=alphaViewKey(target);
     if(!view||view!=='home'&&!views[view])return false;
+    // Camera is handed the whole screen: an open conversation closes to Camera's own resting bar (the pill
+    // below the shutter row), so the viewfinder and shutter are never under the sheet or the typing dock's
+    // tap-away layer. A photo waiting for review is shown just above that bar (barReviews).
+    // A voice conversation is held by its sheet (voice-adapter chatCurrent): closing it would end the
+    // conversation and refuse the agent's screen change, so voice keeps its detent.
+    if(view==='camera'&&!voice&&(chat==='sheet'||chat==='full')){chat=undefined;shell.cameraHandoff=true;}
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
   }
@@ -653,7 +671,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
     const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
       const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
+        try{check();if(!openInternalView(shell,view,chat,{voice:!!continuation})){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
       });
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
@@ -1020,7 +1038,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const result=await DailyApps.reminderOperationReceipt({operation,operationId,bindingHash});signal.throwIfAborted();
       return result.status==='succeeded'?{status:'succeeded',reminderResult:isReminderCreate(operation)?validateReminderCreateResult(operation,result.result,operationId):validateReminderResult(operation,result.result)}:{status:'unknown'};
     });
-    connectionController.setViewInteractionExecutor((view,capability,params,signal,current)=>executeViewInteraction(view,capability,params,{active:!!this.live&&alphaClient.getState().context?.view==='browser',command:this.browserCommand},signal,current));
+    // A history command the agent sends during its reply moves the page that reply is answering on.
+    // The reply's own command must not read as the owner leaving the page, which stops the reply.
+    const browserCommand=async(command:unknown,selection:unknown,signal:AbortSignal,current:()=>void)=>{
+      const release=alphaClient.admitOwnPageChange(this.browserSelection?.());
+      // A typed refusal dispatched nothing. A thrown failure may follow a dispatch, so its page change stays admitted.
+      const result=await this.browserCommand(command,selection,signal,current);if(!(result as {ok?:unknown}|undefined)?.ok)release();return result;
+    };
+    connectionController.setViewInteractionExecutor((view,capability,params,signal,current)=>executeViewInteraction(view,capability,params,{active:!!this.live&&alphaClient.getState().context?.view==='browser',command:this.browserCommand&&browserCommand},signal,current));
     connectionController.setNavigationContext(()=>this.live?alphaClient.getState().context:null);
     connectionController.setDeviceReadReview(async(proposal,expectedContext,signal)=>{
       if(typeof this.prepareDeviceReadReview!=='function')throw Error('Notes review is unavailable. Nothing was shared.');
@@ -1459,7 +1484,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if (this.notesSourceMode === 'legacy' && store) await store.assertCurrent();
     if (!exact()) throw Error('Notes changed');
   };
-  p.componentDidUpdate = function (prev: Shell) { originalUpdate.call(this, prev); const notesView=this.S().view==='notes';if(notesView&&!this.wasCanonicalNotesView&&this.notesSourceMode==='canonical')void this.canonicalNotesUi?.refresh().catch(()=>{});this.wasCanonicalNotesView=notesView; context(this); void connectionController.observeCommittedView();this.composerDraft?.edit(String(this.S().draft||''));const shade=!!this.S().shade;if(shade&&!this.shadeWasOpen)this.refreshTileFacts();this.shadeWasOpen=shade;const chatOpen=this.S().chat==='sheet'||this.S().chat==='full',drafting=!!String(this.S().draft||'').trim();if((chatOpen&&!this.chatWasOpen)||(drafting&&!this.wasDrafting))connectionController.warmInference();this.chatWasOpen=chatOpen;this.wasDrafting=drafting;const selected=this.messageReplyTarget||this.messageEditTarget;if(selected&&(JSON.stringify(selected.session)!==JSON.stringify(connectionController.getSnapshot().session)||!this.S().msgs.some((m:Shell)=>m.id===selected.messageId&&m.text===selected.text))){cancelMessageContext(this);this.setState({});} };
+  p.componentDidUpdate = function (prev: Shell) { originalUpdate.call(this, prev); const notesView=this.S().view==='notes';if(notesView&&!this.wasCanonicalNotesView&&this.notesSourceMode==='canonical')void this.canonicalNotesUi?.refresh().catch(()=>{});this.wasCanonicalNotesView=notesView; context(this); void connectionController.observeCommittedView();this.composerDraft?.edit(String(this.S().draft||''));const shade=!!this.S().shade;if(shade&&!this.shadeWasOpen)this.refreshTileFacts();this.shadeWasOpen=shade;const chatOpen=this.S().chat==='sheet'||this.S().chat==='full',drafting=!!String(this.S().draft||'').trim();if((chatOpen&&!this.chatWasOpen)||(drafting&&!this.wasDrafting))connectionController.warmInference();this.chatWasOpen=chatOpen;this.wasDrafting=drafting;const cameraBar=this.S().view==='camera'&&(this.S().chat==='hidden'||this.S().chat==='input');if(this.cameraBarShown&&!cameraBar)this.cameraHandoff=false;this.cameraBarShown=cameraBar;const selected=this.messageReplyTarget||this.messageEditTarget;if(selected&&(JSON.stringify(selected.session)!==JSON.stringify(connectionController.getSnapshot().session)||!this.S().msgs.some((m:Shell)=>m.id===selected.messageId&&m.text===selected.text))){cancelMessageContext(this);this.setState({});} };
   p.componentWillUnmount = function () {
     this.chatImageModal?.ref(null);
     this.chatAttachmentAbort?.abort();this.chatAttachmentPicker?.dispose();
@@ -1820,7 +1845,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // AC-19: during an emergency call the card can still be declined but not approved.
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
-      return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',rows:[
+      return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
         {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,keepComposerFocus,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,keepComposerFocus,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
@@ -1841,6 +1866,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         ...(refused?[{workflowId:'',runId:'',title:'Workflows',done:false,status:'Make this change in Workflows',label:'Open Workflows',open:()=>this.openView('workflows')}]:[]),
       ]};
     });
+    // On Camera with the conversation closed to its bar, a photo waiting for review is shown just above
+    // the bar: the same Approve and Decline rows as its card in the chat, below the shutter. Being part of
+    // the dock, it moves Camera's viewfinder and shutter up (--alpha-dock-clearance) instead of covering them.
+    const barState=this.S();
+    // Only the newest photo waits there (an earlier turn's photo can still be pending, as on v610); every
+    // pending photo stays reviewable in the conversation, and the dock never grows over the shutter row.
+    const barReview=barState.view==='camera'&&(barState.chat==='hidden'||barState.chat==='input')?(out.msgs||[]).filter((m:Shell)=>m.cameraReview).reduce((newest:Shell|null,m:Shell)=>!newest||!(Number(m.c?.expiresAt)<Number(newest.c?.expiresAt))?m:newest,null):null;
+    out.barReviews=barReview?barReview.rows.map((row:Shell,index:number)=>({...row,key:`${barReview.id}:${index}`})):[];
+    out.hasBarReviews=out.barReviews.length>0;
     out.msgs=projectActionMessages(out.msgs||[],live);
     out.canStopReply=!!this.S().typing&&(alphaClient.getState().pending||this.sendAttempt?.capturing===true);
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
@@ -1906,7 +1940,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     catch { this.toast('Unavailable'); }
     finally { this.brightnessGate.end(); }
   };
-  p.voiceConversationCurrent = function(prepared:{binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope}){return !alphaClient.getState().context.sensitive&&connectionController.voiceConversationCurrent(prepared.binding)&&JSON.stringify(alphaClient.getState().context)===JSON.stringify(prepared.context);};
+  p.voiceConversationCurrent = function(prepared:{binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope}){return !alphaClient.getState().context.sensitive&&connectionController.voiceConversationCurrent(prepared.binding)&&alphaClient.continuesContext(prepared.context);};
   p.voiceConversationContext = function(binding:import('../runtime/alpha-client').VoiceConversationBinding){const value=alphaClient.getState().context;if(!this.live||document.hidden||value.sensitive||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');return value;};
   p.prepareVoiceConversation = async function(signal:AbortSignal,mark?:(stage:VoiceStartupStage)=>void){
     if(!connectionController.getSnapshot().session)throw Error(residentAlwaysPresent?(connectionController.getSnapshot().kind==='recovering'?RESIDENT_RECOVERING_NOTICE:RESIDENT_STARTING_NOTICE):NO_AGENT_VOICE);
@@ -1933,11 +1967,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!delivered)throw Error('The voice screen change could not be confirmed.');
         return true;
       }
-      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
+      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat,{voice:true})){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
   };
   p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
-    const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&JSON.stringify(alphaClient.getState().context)===JSON.stringify(acceptedContext);}catch{return false;}};
+    const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
     this.voiceSendTurnId=turnId;
@@ -1986,7 +2020,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!delivered&&reply.userMessageId&&input.navigation&&connectionController.requestedCameraNeedsOpening(reply.userMessageId)){
         const live=()=>{signal.throwIfAborted();input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');};
         try{
-          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat)){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
+          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat,{voice:true})){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
         }catch{delivered=false;}finally{nextContext=input.navigation.finish(delivered);}
         if(!nextContext)delivered=false;else acceptedContext=nextContext;
         current();
@@ -2041,6 +2075,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     let s = this.S(); const text = String(argument ?? s.draft);
     const hasBinaryAttachment=argument===undefined&&!edit&&!!(this.cameraAttachment||filesAtStart?.length);
     if ((!text.trim()&&!hasBinaryAttachment) || s.typing || this.chatAttachmentAbort || this.draftSendPending || this.composerDraft?.holding || !filesCurrent()) return;
+    // A new turn is answered in the conversation: only the turn that handed Camera the screen keeps its replies behind the bar.
+    this.cameraHandoff=false;
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
@@ -2214,8 +2250,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       try{
         let delivered=await deliverNavigation(reply.actionResults);
-        // The agent may propose the photo without showing Camera in the same turn. When that proposal is the
-        // reply's only pending item and the agent bound it to this very message, Camera is opened here.
+        // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's
+        // (bound to this message, or named by the reply's own receipt on an ask-first phone) and no other review of
+        // this reply needs the current screen, Camera is opened here.
         if(!delivered&&reply.userMessageId&&connectionController.requestedCameraNeedsOpening(reply.userMessageId))delivered=await openRequestedCamera(this);
         cameraOpened=delivered&&alphaClient.getState().context.view==='camera';
         if(cameraOpened&&reply.userMessageId){
@@ -2223,6 +2260,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           try{
             const results=await connectionController.continueRequestedCamera(reply.userMessageId,attempt.stop.signal);
             cameraReceipts=results.length;
+            // The photo was taken on the open viewfinder; its receipt shows in the conversation as any other.
+            if(results.length)this.cameraHandoff=false;
             for(const result of results)if(this.live)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
           }finally{attempt.capturing=false;}
         }
@@ -2319,7 +2358,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const delivered=(previous.msgs||[]).find((message:Shell)=>message.id===identity.id);
         if(delivered){const enriched=enrichSettledAssistant(delivered,card,identity.messageBinding);return enriched===delivered?null:{msgs:previous.msgs.map((message:Shell)=>message===delivered?enriched:message)};}
       }
-      const chat = previous.chat === 'full' ? 'full' : 'sheet';
+      // While Camera holds the closed bar for a requested photo, replies are added without reopening the sheet over it.
+      const chat = previous.chat === 'full' ? 'full' : this.cameraHandoff&&previous.view==='camera'&&(previous.chat==='hidden'||previous.chat==='input') ? previous.chat : 'sheet';
       // Recovery and a chat reply can publish the same pending action. Decide
       // inside the state update so either arrival order retains one approval.
       if (card?.proposalId && (previous.msgs || []).some((message: Shell) => message.card?.proposalId === card.proposalId)) return { chat };
@@ -2455,6 +2495,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           catch{if(this.live&&readLease?.phase==='unconfirmed')this.setState((previous:Shell)=>this.live&&readLease.phase==='unconfirmed'&&connectionController.readReplyCurrent(readLease.binding)?{msgs:previous.msgs.map((m:Shell)=>m.id===message.id?{...m,card:{...m.card,sub:receipt.summary.replace(/[.!]\s*$/,'')+', but its answer is unconfirmed.'}}:m)}:null);}
         }else {
           if(receipt.status!=='succeeded'){this.cancelReadReplyCompletions?.(receipt.proposalId);this.retireReadReplyVoice?.(receipt.proposalId);}
+          if(card.title===CAMERA_REVIEW_TITLE)this.cameraHandoff=false;
           if (this.S().view !== beforeView) this.toast(displaySummary);
           else this.agentSay(displaySummary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
         }
@@ -2464,7 +2505,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!alphaClient.getState().pending)this.notesCommittedHandler?.();
           publishCommittedDeviceChanges(receipt,alphaClient,session);
         }});
-      } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
+      } catch (e) { if(card.title===CAMERA_REVIEW_TITLE)this.cameraHandoff=false;const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
       finally {this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
     } else if (card.go) this.openView(card.go.view, card.go.patch);
   };

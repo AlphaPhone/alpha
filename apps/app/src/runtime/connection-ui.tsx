@@ -62,7 +62,7 @@ import { AlphaClientError } from './alpha-client';
 import { WorkflowProtocol, WorkflowHttpError } from './workflow-protocol';
 import { registerPlugin } from '../platform-plugins';
 import { DailyApps } from '../daily';
-import { DeviceActions, actionScope, requestedCameraNeedsCameraView, type DeviceCredential, type DeviceExecutor, type ForegroundReviewExecutor, type ActionJournal } from './device-actions';
+import { DeviceActions, actionScope, replyDeviceProposalIds, requestedCameraNeedsCameraView, type DeviceCredential, type DeviceExecutor, type ForegroundReviewExecutor, type ActionJournal } from './device-actions';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isAndroid, System } from '../native';
 import { readNativeNetwork } from './native-network';
@@ -2335,7 +2335,9 @@ export const connectionController = {
     const context=pending.client.deliveredContext(pending.attempt)??(pending.proposalOnly&&shown?structuredClone(shown):undefined);
     if(!context||context.view!=='camera'||context.sensitive||!pending.selected.actions)return [];
     const current=()=>{signal.throwIfAborted();if(document.hidden||pending.attempt.controller.signal.aborted||Date.now()>pending.expiresAt||epoch!==pending.generation||active!==pending.selected||state.session!==pending.session||conversationMemory.get(conversationKey(pending.session))!==pending.conversationId||JSON.stringify(navigationContext?.())!==JSON.stringify(context))throw Error('The camera request changed.');};
-    const allowed=async()=>{current();const preferences=await readDevicePreferences(signal);current();return !preferences.askBeforeAgentActions;};
+    // Unreadable settings read as ask-first, as when the message was sent: Camera is already open and the
+    // photo waits there as its review card instead of failing the reply. Nothing is taken without a readable direct mode.
+    const allowed=async()=>{current();const preferences=await readDevicePreferences(signal).catch(()=>{signal.throwIfAborted();return {askBeforeAgentActions:true};});current();return !preferences.askBeforeAgentActions;};
     if(!await allowed())return [];
     await pending.selected.actions.pendingReview(context,signal);current();
     return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo');
@@ -3635,7 +3637,10 @@ export const connectionController = {
           const shown=announcedProposals.get(selected.actions)??new Set<string>();announcedProposals.set(selected.actions,shown);
           const turnItems=items.filter(item=>!item.proposalId||!shown.has(item.proposalId));for(const item of items)if(item.proposalId)shown.add(item.proposalId);
           // A photo this message asked for is taken only on the visible Camera: when the agent did not show Camera, this phone opens it first.
-          cameraProposalOnly=requestedCameraNeedsCameraView(turnItems,typeof reply.userMessageId==='string'?reply.userMessageId:undefined,!!findViewActionHandoff(reply.actionResults));
+          // The reply's own device receipts name the proposals of this turn, bound to the message or not (ask-first);
+          // pending reviews of other turns, announced or not, never keep the current screen.
+          const replyProposals=Array.isArray(reply.actionResults)?replyDeviceProposalIds(reply.actionResults):undefined;
+          cameraProposalOnly=requestedCameraNeedsCameraView(replyProposals?items:turnItems,typeof reply.userMessageId==='string'?reply.userMessageId:undefined,!!findViewActionHandoff(reply.actionResults),replyProposals);
           proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []); notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
         catch { update({ message: 'Actions not checked' }); }
       }

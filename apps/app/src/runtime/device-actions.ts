@@ -37,6 +37,7 @@ import {
   ContextNotice,
   DeviceActionCoordinator,
   proposalContextNotice as alphaProposalContextNotice,
+  replyDeviceProposalIds,
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
@@ -53,7 +54,7 @@ import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
-export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,requestedCameraNeedsCameraView};
+export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,replyDeviceProposalIds,requestedCameraNeedsCameraView};
 export type {CurrentDeviceActionRequest,DeviceCredential,DeviceJournalIdentity,DeviceOperation,DeviceRecovery,ReviewableDeviceOperation,WorkflowNoticeRoute,WorkflowPresentationOperation};
 /** Foreground reviews (free/busy, Notes search, name-targeted edits) and their validators are
  * the shared device-review contract bound to the shared Notes, Calendar and reminder contracts. */
@@ -109,10 +110,16 @@ let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
 export function setBrowserTabNeedsChoice(read: (target:string)=>boolean) {
   browserTabNeedsChoice=read;
 }
+/** The names of the phone contacts a contact change or deletion would be offered for, looked up
+ * as its executor will; null when Contacts cannot be read. Unset, no such card is offered. */
+let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<string[]|null>)|undefined;
+export function setContactReviewMatches(read: (query:string,signal:AbortSignal)=>Promise<string[]|null>) {
+  contactReviewMatches=read;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target)});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
   }
 }

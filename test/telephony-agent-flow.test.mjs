@@ -13,7 +13,11 @@ const dir = mkdtempSync(join(tmpdir(), 'telephony-flow-'));
 process.on('exit', () => rmSync(dir, {recursive: true, force: true}));
 const output = await build({entryPoints: [resolve('apps/app/src/runtime/device-actions.ts')], bundle: true, format: 'esm', platform: 'node', write: false});
 writeFileSync(join(dir, 'sdk.mjs'), output.outputFiles[0].text);
-const {DeviceActions} = await import(pathToFileURL(join(dir, 'sdk.mjs')));
+const {DeviceActions, setContactReviewMatches} = await import(pathToFileURL(join(dir, 'sdk.mjs')));
+// The phone's address book as the review lookup reads it: the names matching each query.
+let addressBook = query => ['Priya Nair'].filter(name => name.toLowerCase().includes(query.toLowerCase()));
+const lookups = [];
+setContactReviewMatches(async query => { lookups.push(query); return addressBook(query); });
 const P = await import('../apps/app/src/runtime/phone-context.ts');
 
 const context = {view: 'home', revision: 1, sensitive: false};
@@ -67,9 +71,56 @@ test('a text to a number, a draft, a single contact value, a contact search and 
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
   assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
   const change = await card(add);
-  assert.match(change, /^Change contact\nContact: Priya\nAdd: \+14155550100\nRemove: p@example\.com\n/); assert.match(change, /other details stay/); assert.doesNotMatch(change, /Replaces/);
+  assert.match(change, /^Change contact\nContact: Priya Nair\nAdd: \+14155550100\nRemove: p@example\.com\n/); assert.match(change, /other details stay/); assert.doesNotMatch(change, /Replaces/);
   assert.match(await card({type: 'contact_update', query: 'Priya', set: {displayName: 'Priya N'}}), /Name: Priya N\n\nReplaces these details/);
   assert.match(await card({type: 'contact_show', query: 'Priya'}), /^Show contact\nSearch: Priya/);
+});
+test('a contact change or deletion is carded only for a contact the phone holds, and still needs approval', async () => {
+  const change = {type: 'contact_update', query: 'Test Alpha', set: {phoneNumbers: ['+14155550101']}}, remove = {type: 'contact_delete', query: 'Test Alpha'};
+  const book = addressBook;
+  try {
+    // No such contact: a notice says so, no card is offered, and nothing can be approved or run.
+    addressBook = () => [];
+    for (const [operation, title] of [[change, 'Change contact'], [remove, 'Delete contact']]) {
+      const f = fixture({operation});
+      lookups.length = 0;
+      const items = await f.client.pendingReview(context, signal());
+      assert.deepEqual(lookups, ['Test Alpha'], 'the phone looks the name up before any card');
+      assert.deepEqual(items.map(item => [item.proposal, item.notice]), [[null, `${title}: No contact matching “Test Alpha” is on this phone. Nothing was changed.`]]);
+      assert.deepEqual(await f.client.pending(context, signal()), []);
+      await assert.rejects(f.client.approve(id, context, signal()), /Review this action again/);
+      assert.equal(f.effects, 0); assert.deepEqual(f.posts, [], 'nothing is decided for the owner');
+    }
+    // Contacts unreadable: the same, with the reason.
+    addressBook = () => null;
+    assert.deepEqual((await fixture({operation: remove}).client.pendingReview(context, signal())).map(item => item.notice), ["Delete contact: Contacts can't be read on this phone right now. Nothing was changed."]);
+    addressBook = () => { throw Object.assign(Error('denied'), {code: 'permission-required'}); };
+    assert.deepEqual((await fixture({operation: change}).client.pendingReview(context, signal())).map(item => item.notice), ["Change contact: Contacts can't be read on this phone right now. Nothing was changed."]);
+    // One match: the card names that contact, and nothing runs until the owner approves.
+    addressBook = () => ['Test Alpha'];
+    let f = fixture({operation: remove, result: {kind: 'contact-write', status: 'deleted'}});
+    let [card] = await f.client.pending(context, signal());
+    assert.equal(`${card.title}\n${card.description}`, 'Delete contact\nContact: Test Alpha\n\nDeletes this contact from your phone after you confirm.');
+    assert.equal(f.effects, 0); assert.deepEqual(f.posts, []);
+    assert.equal((await f.client.approve(id, context, signal())).status, 'succeeded');
+    assert.equal(f.effects, 1); assert.equal(f.posts[0].path.split('/').pop(), 'decision');
+    // Several matches: the card lists them and the owner chooses one on the phone after approving.
+    addressBook = () => ['Test Alpha', 'Test Alphonse'];
+    f = fixture({operation: change});
+    [card] = await f.client.pending(context, signal());
+    assert.match(card.description, /^2 contacts match “Test Alpha”: Test Alpha, Test Alphonse\nNumbers: \+14155550101\n\nReplaces these details after you confirm\. You choose which one on your phone after you confirm\./);
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, '2 contacts match “Test Alpha”: Test Alpha, Test Alphonse\n\nAfter you confirm, you choose which one to delete on your phone.');
+    assert.equal(f.effects, 0);
+    // A provider name is only length-checked: its line breaks, controls and bidi overrides cannot
+    // add or reorder lines on the card, and a name that is nothing else reads as unnamed.
+    addressBook = () => ['Ada\n\nDeletes nothing.\u202e', '\u0007\t'];
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, '2 contacts match “Test Alpha”: Ada Deletes nothing., Unnamed contact\n\nAfter you confirm, you choose which one to delete on your phone.');
+    addressBook = () => ['Ada\u2066\r\nOkafor'];
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, 'Contact: Ada Okafor\n\nDeletes this contact from your phone after you confirm.');
+  } finally { addressBook = book; }
 });
 test('the view change that shows a draft or the matching contacts runs once, after the receipt, and only for a success', async () => {
   const draft = {type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late', draft: true};

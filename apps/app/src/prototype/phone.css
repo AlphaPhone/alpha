@@ -914,6 +914,21 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-row-label { flex-shrink:0; min-height:36px; padding:0 16px; border-radius:18px; background:var(--acc); color:var(--alpha-white); font-size:14px; font-weight:600; display:inline-flex; align-items:center; }
 .alpha-row-label:not(:empty) + svg { display:none; }
 .alpha-action-review button { min-height:56px; }
+/* A photo waiting for review on Camera's closed bar: compact, above the composer, never over the viewfinder or shutter. */
+/* Above Camera's pill: part of the dock, so the dock clearance lifts the shutter row above it. */
+.alpha-pill-review { position:absolute; left:16px; right:16px; bottom:calc(100% + 8px); pointer-events:auto; }
+/* In landscape it stops at Camera's capture rail (--alpha-camera-rail, 132px) instead of lying across the shutter. */
+.alpha-landscape .alpha-pill-review { right:calc(132px + 16px); }
+.alpha-bar-review { margin-bottom:8px; border-radius:22px; background:var(--s2); color:var(--fg); overflow:hidden; box-shadow:0 14px 40px var(--shc); }
+.alpha-bar-review button { width:100%; display:flex; align-items:center; gap:12px; padding:8px 8px 8px 16px; text-align:left; font:inherit; color:inherit; }
+.alpha-action-review.alpha-bar-review button { min-height:48px; }
+.alpha-bar-review button + button { border-top:1px solid var(--line); }
+.alpha-bar-review button > div { min-width:0; flex-grow:1; }
+.alpha-bar-review-title { font-size:14px; font-weight:600; }
+.alpha-bar-review-text { font-size:13px; color:var(--mut); }
+/* Decline is one short row: its explanation stays in the chat card. */
+.alpha-bar-review button + button .alpha-bar-review-text { display:none; }
+.alpha-bar-review svg { width:14px; height:14px; color:var(--mut); flex-shrink:0; }
 /* What the phone itself reports (done, declined, not completed) is set apart from the assistant's own words. */
 [data-alpha-device-receipt="true"] { align-self:flex-start; max-width:100%; box-sizing:border-box; padding:10px 14px; border-radius:6px 16px 16px 6px; border-left:3px solid var(--acct); background:var(--s2); font-size:14px!important; line-height:1.45!important; overflow-wrap:anywhere; }
 /* Narrow phones keep New chat and History reachable by dropping the assistant's name beside its mark. */
