@@ -21,10 +21,12 @@ const UPSTREAM_DECLARATION='public abstract class CloudSignInPlugin extends Plug
 const FORK_DECLARATION='public abstract class AlphaCloudSignInClient extends Plugin {';
 // Upstream #39859 put encrypted password backup inside its sign-in client. Alpha's PRD keeps
 // the vault on-device, so its client keeps the ordinary email, phone and Google sign-in paths.
+// The upstream picker also supplies the account for its combined sign-in and Gmail grant. Alpha
+// uses the ID token for sign-in and keeps Google service access behind its separate settings flow.
 // Both full bodies are bound here to make any later upstream or Alpha change require review.
 const SIGN_IN_BODY = {
- upstream: '497ec7d5e469d2386e8befc9f967132c7234e1434dbdc300082bbe077454554c',
- alpha: '352075de818084eab5d5443d314c4f33b7408c5e5c1a73669f177d5f78bbf5fb',
+ upstream: 'd3d15cec52d7a4cd888c46073cd5db462883abed33373375befef0daff254254',
+ alpha: 'eda78b5ba91bd7a147545fad2c3a7c3db8c7a7650ac84f1271d2456ec31fdb53',
 };
 const sha256=body=>createHash('sha256').update(body).digest('hex');
 /** The shared non-UI policy the fork keeps using from the pinned upstream package. */
