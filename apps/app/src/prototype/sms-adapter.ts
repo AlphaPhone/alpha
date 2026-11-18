@@ -23,22 +23,22 @@ export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
 export const openSmsThread=()=>openThreadReader?.()??null;
 /** What became of a draft Alpha was asked to put in the open conversation's draft slot. */
 export type AskedDraft='drafted'|'none-selected'|'occupied'|'unavailable';
-let askedDraftWriter:((text:string,number?:string)=>AskedDraft)|null=null;
+let askedDraftWriter:((text:string,number?:string,threadId?:string)=>AskedDraft)|null=null;
 /**
  * Puts a draft the owner asked Alpha for into the open conversation's draft slot (AC-14); with
  * `number`, only when that conversation is with exactly that number. It replaces the slot, the owner's
  * text included, and keeps the previous text for one Undo. 'occupied' means a message is being sent
  * or has pictures attached. It never sends: Send stays the owner's tap.
  */
-export const placeAskedSmsDraft=(text:string,number?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number):'none-selected';
-let draftOpener:((text:string,number:string)=>(()=>void)|null)|null=null;
+export const placeAskedSmsDraft=(text:string,number?:string,threadId?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number,threadId):'none-selected';
+let draftOpener:((text:string,number:string,threadId:string|undefined,current:()=>void)=>Promise<(()=>void)|null>)|null=null;
 /**
  * The step that opens the conversation with exactly `number` (a new message to it when there is
  * none) and puts a draft the owner asked Alpha for in its text field, as `placeAskedSmsDraft` does
  * for the open one; null when Messages cannot be opened here. The step never sends, and when the
  * draft cannot be placed it says so on the phone.
  */
-export const openSmsDraftStep=(text:string,number:string)=>draftOpener?draftOpener(text,number):null;
+export const openSmsDraftStep=(text:string,number:string,threadId:string|undefined,current:()=>void)=>draftOpener?draftOpener(text,number,threadId,current):null;
 let draftUndoer:(()=>boolean)|null=null,draftReader:(()=>SmsDraftView|null)|null=null;
 /** Puts back the text Alpha's last draft replaced. False when there is nothing to undo or a send is in flight. */
 export const undoSmsDraft=():boolean=>draftUndoer?draftUndoer():false;
@@ -515,9 +515,9 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
   draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();if(owner?.S().chat==='full')owner.setState({chat:'sheet'});return 'drafted';
  };
- askedDraftWriter=(text,number)=>{
+ askedDraftWriter=(text,number,threadId)=>{
   const thread=active?openRow():null;
-  if(!thread)return 'none-selected';
+  if(!thread||threadId!==undefined&&thread.id!==threadId)return 'none-selected';
   if(number!==undefined){
    const key=numberKey(number);
    if(!key||thread.addresses.length!==1||numberKey(thread.addresses[0])!==key)return 'none-selected';
@@ -525,25 +525,33 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   return placeAsked(text);
  };
  /* Opens one conversation for a draft (`sms_compose` with `draft: true`): only the thread with exactly this number, never another as a fallback. */
- draftOpener=(text,number)=>{
+ draftOpener=async(text,number,threadId,current)=>{
   const shell=owner,key=numberKey(number),wanted=normalizePhoneNumber(number);
   if(!shell||!key||!wanted||shell.props?.assistantSurface)return null;
   const here=()=>owner===shell&&inFront()&&!shell.props?.assistantSurface;
   const idle=()=>!here()||editable()&&session.state.status?.permissions.sms==='granted';
-  const place=async()=>{
-   let target:{id:string;addresses:readonly string[]}|null=null,cursor:string|undefined;
-   for(let page=0;page<3&&!target;page++){
-    const result=await client.threadPage(cursor);
-    for(const row of result.rows)if(!isIncompleteSmsRow(row)&&row.addresses.length===1&&numberKey(row.addresses[0])===key){target={id:row.id,addresses:row.addresses};break;}
-    if(!result.next)break;
-    cursor=result.next;
+  let target:{id:string;addresses:readonly string[]}|null=null,cursor:string|undefined;
+  const seen=new Set<string>();
+  do {
+   current();
+   const result=await client.threadPage(cursor);
+   current();
+   if(owner!==shell||document.hidden)return null;
+   for(const row of result.rows){
+    if(!isIncompleteSmsRow(row)&&(!threadId||row.id===threadId)&&row.addresses.length===1&&numberKey(row.addresses[0])===key){target=row;break;}
    }
+   if(target||!result.next)break;
+   if(seen.has(result.next))return null;
+   seen.add(result.next);cursor=result.next;
+  } while(cursor);
+  if(threadId&&!target)return null;
+  const place=async()=>{
    if(owner!==shell||document.hidden)return false;
    if(!inFront()){shell.openView('messages',undefined,'sheet');await new Promise<void>(resolve=>shell.setState({},()=>resolve()));}
    if(!await until(idle)||!here())return false;
    if(target)chooseThread(target.id,target.addresses);else compose(wanted);
    if(!await until(idle)||!here())return false;
-   if(target)return openRow()?.id===target.id&&placeAsked(text)==='drafted';
+   if(target){const row=openRow();return row?.id===target.id&&row.addresses.length===1&&numberKey(row.addresses[0])===key&&placeAsked(text)==='drafted';}
    if(!composing||session.state.thread||draftThread!==null)return false;
    // A new message the owner left unsent to someone else is theirs: it is not readdressed.
    if(!sameRecipients(normalizeRecipients(inputRecipients()),[wanted])){if(body||attachments.length||operationId||mmsOperationId)return false;changeDraft(()=>{recipients=wanted;});}

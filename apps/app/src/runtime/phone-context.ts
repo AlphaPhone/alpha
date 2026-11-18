@@ -185,7 +185,10 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
   for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
   // Sender lookup uses the approved telephony executor, independent of Calendar's foreground review.
-  if (profile.aospImage && agent.includes('sms.latest-sender.v1')) capabilities.push('sms.latest-sender.v1');
+  if (profile.aospImage && agent.includes('sms.latest-sender.v1')) {
+    capabilities.push('sms.latest-sender.v1');
+    if(agent.includes('sms.latest-sender.v2')) capabilities.push('sms.latest-sender.v2');
+  }
   capabilities.push(...telephony);
   return capabilities;
 }

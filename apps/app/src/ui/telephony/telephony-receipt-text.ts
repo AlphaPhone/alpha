@@ -179,7 +179,7 @@ export function telephonyActionResultText(
       return voicemailDeleteResultText(result);
     case "sms-latest-sender":
       return result.status === "found"
-        ? `Latest incoming SMS sender ends in ${result.numberEnding}.`
+        ? ("address" in result ? result.address : `Latest incoming SMS sender ends in ${result.numberEnding}.`)
         : result.status === "empty"
           ? "No incoming SMS messages."
           : result.status === "sender-unavailable"
