@@ -6,6 +6,8 @@ export const browserCloudResidentEnabled=import.meta.env!==undefined&&import.met
 export const browserCloudResidentEnvironment=browserCloudResidentEnabled&&import.meta.env.VITE_ALPHA_CLOUD_ENVIRONMENT==='staging'?'staging':'production';
 /** Why an own-key setup failed, without provider text: the host sends none, and a key never reaches the screen. */
 export const OWN_KEYS_NOT_SET_UP='Keys rejected';
+/** Fired after a bind or start reaches the development resident host. */
+export const BROWSER_RESIDENT_LAUNCHED='alpha:browser-resident-launched';
 export async function browserResidentCall(operation:'residentOwn'|'residentCloud'|'residentBind'|'residentClear'|'residentStatus'|'residentStart'|'residentGoogleCalendarAccess'|'residentGoogleGmailAccess',credentialId?:string,googleAccess?:boolean,keys?:{apiKey:string;cartesiaKey?:string},signal?:AbortSignal){
  signal?.throwIfAborted();
  if(!browserCloudResidentEnabled)throw Error('Cloud resident host unavailable');
@@ -13,7 +15,10 @@ export async function browserResidentCall(operation:'residentOwn'|'residentCloud
  const response=await fetch('/__alpha-browser-cloud',{method:'POST',headers:{'Content-Type':'application/json','X-Alpha-Browser-Cloud':'1'},body:JSON.stringify({...keys,operation,environment:browserCloudResidentEnvironment,credentialId,...access}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(120000),redirect:'error'});
  signal?.throwIfAborted();
  if(!response.ok)throw Error(operation==='residentOwn'?OWN_KEYS_NOT_SET_UP:'Cloud resident binding unavailable');
- return response.json();
+ const result=await response.json();
+ // Each bind or start can launch a new resident generation, which starts with Google writes off.
+ if(operation==='residentBind'||operation==='residentStart')window.dispatchEvent(new Event(BROWSER_RESIDENT_LAUNCHED));
+ return result;
 }
 
 export interface BrowserProviderStatus {
