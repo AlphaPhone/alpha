@@ -2,6 +2,8 @@ import type {DomainRecovery} from '../browser/domain-document';
 import {captureDevicePreferences,cachedDevicePreferences,editDevicePreferences,initializeDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import {Capacitor} from '@capacitor/core';
 import {browserLocalAgentEnabled,saveNativeGoogleAgentAccess} from './local-agent';
+import {browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall} from './browser-cloud-resident';
+import {cloudCredentialStore} from './native-connection';
 
 /** Owner switches for agent writes through Google. Off never disconnects or revokes Google; reads keep working. */
 export type GoogleAgentAccess={gmailChanges:boolean;calendarEdits:boolean};
@@ -30,6 +32,13 @@ async function publishSavedGoogleAgentAccess(){
  const saved=await readDevicePreferences();
  const access={gmailChanges:saved.agentGmailChanges,calendarEdits:saved.agentCalendarEdits};
  if(native){await saveNativeGoogleAgentAccess(access);return;}
+ if(browserCloudResidentEnabled){
+  const credential=await cloudCredentialStore.read(browserCloudResidentEnvironment);
+  if(!credential?.credentialId)return;
+  const applied=await browserResidentCall('residentGoogleGmailAccess',credential.credentialId,access.gmailChanges);
+  if(applied?.gmailChanges!==access.gmailChanges)throw Error('Gmail access was not confirmed.');
+  return;
+ }
  await fetch(GOOGLE_AGENT_ACCESS_PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(access)}).catch(()=>{});
 }
 export function publishGoogleAgentAccess(){

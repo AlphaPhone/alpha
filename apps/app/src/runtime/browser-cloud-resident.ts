@@ -6,10 +6,11 @@ export const browserCloudResidentEnabled=import.meta.env!==undefined&&import.met
 export const browserCloudResidentEnvironment=browserCloudResidentEnabled&&import.meta.env.VITE_ALPHA_CLOUD_ENVIRONMENT==='staging'?'staging':'production';
 /** Why an own-key setup failed, without provider text: the host sends none, and a key never reaches the screen. */
 export const OWN_KEYS_NOT_SET_UP='Keys rejected';
-export async function browserResidentCall(operation:'residentOwn'|'residentCloud'|'residentBind'|'residentClear'|'residentStatus'|'residentStart'|'residentGoogleCalendarAccess',credentialId?:string,calendarEdits?:boolean,keys?:{apiKey:string;cartesiaKey?:string},signal?:AbortSignal){
+export async function browserResidentCall(operation:'residentOwn'|'residentCloud'|'residentBind'|'residentClear'|'residentStatus'|'residentStart'|'residentGoogleCalendarAccess'|'residentGoogleGmailAccess',credentialId?:string,googleAccess?:boolean,keys?:{apiKey:string;cartesiaKey?:string},signal?:AbortSignal){
  signal?.throwIfAborted();
  if(!browserCloudResidentEnabled)throw Error('Cloud resident host unavailable');
- const response=await fetch('/__alpha-browser-cloud',{method:'POST',headers:{'Content-Type':'application/json','X-Alpha-Browser-Cloud':'1'},body:JSON.stringify({...keys,operation,environment:browserCloudResidentEnvironment,credentialId,...(operation==='residentGoogleCalendarAccess'?{calendarEdits}:{})}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(120000),redirect:'error'});
+ const access=operation==='residentGoogleCalendarAccess'?{calendarEdits:googleAccess}:operation==='residentGoogleGmailAccess'?{gmailChanges:googleAccess}:undefined;
+ const response=await fetch('/__alpha-browser-cloud',{method:'POST',headers:{'Content-Type':'application/json','X-Alpha-Browser-Cloud':'1'},body:JSON.stringify({...keys,operation,environment:browserCloudResidentEnvironment,credentialId,...access}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(120000),redirect:'error'});
  signal?.throwIfAborted();
  if(!response.ok)throw Error(operation==='residentOwn'?OWN_KEYS_NOT_SET_UP:'Cloud resident binding unavailable');
  return response.json();

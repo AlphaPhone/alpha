@@ -67,8 +67,6 @@ export function GoogleConnectionsPanel(){
  const [access,setAccess]=useState(googleAgentAccess);
  // The Calendar intent waiting on the owner's Allow Calendar changes tap; rows are the readback to link, if any.
  const [choice,setChoice]=useState<GoogleCalendarAccessChoice|null>(null);
- // The agent host reads the owner's Google switches; republish whenever device settings load or change.
- useEffect(()=>{const sync=()=>{setAccess(googleAgentAccess());void publishGoogleAgentAccess();};sync();window.addEventListener('alpha:device-settings',sync);return()=>window.removeEventListener('alpha:device-settings',sync);},[]);
  const browserReturned=useRef(false),browserReturnPending=useRef(false);
  const returnedWorkspaceOwner=useRef<GoogleWorkspaceBinding|null>(null);
  const returnedWorkspace=useRef<{result:'connected'|'denied'|'failed';connectionId?:string}|null>(null);
@@ -77,6 +75,10 @@ export function GoogleConnectionsPanel(){
  const returnWatch=useRef<ReturnType<typeof watchGoogleConnectionReturn>|null>(null);
  const active=useRef<AbortController|null>(null),panel=useRef<HTMLDivElement>(null);
  const cloud=connectionController.getCloudClient(),key=googleCalendarAccountKey();
+ // Republish on preference changes and after the browser owner or provider is rebound.
+ const gmailHostBinding=browserCloudResidentEnabled?cloud?.credentialId:undefined;
+ const gmailHostProvider=browserCloudResidentEnabled?connection.providerStatus?.revision:undefined;
+ useEffect(()=>{const sync=()=>{setAccess(googleAgentAccess());void publishGoogleAgentAccess().catch(()=>{});};sync();window.addEventListener('alpha:device-settings',sync);return()=>window.removeEventListener('alpha:device-settings',sync);},[gmailHostBinding,gmailHostProvider]);
  const serviceName=cloudServiceName(cloud?.client.environment ?? connection.cloudAccount?.environment ?? 'production');
  const identity=JSON.stringify([connection.cloudAccount,cloud?.sessionId,cloud?.credentialId]);
  const binding:GoogleConnectionReturnBinding|null=cloud&&key?{client:cloud.client,...key,sessionId:cloud.sessionId,credentialId:cloud.credentialId}:null;
