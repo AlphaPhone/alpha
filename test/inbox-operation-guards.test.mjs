@@ -150,6 +150,56 @@ test('a manual Send never dispatches a composer that changed during preparation'
   }
 });
 
+async function directSendAfter(earlier) {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const d = device(JSON.stringify(['production', 'owner-1', '']));
+  const toasts = [];
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    const provider = inboxProviderControls(() => {}, text => toasts.push(text));
+    const proposal = {kind: 'send', mode: 'compose', to: ['reader@example.invalid'], cc: [], bcc: [], subject: 'Hello', bodyText: 'Body', attachments: []};
+    provider.setComposer(() => ({draftId: 'draft-1', proposal}));
+    await provider.bind('grant-a');
+    await earlier(provider, d);
+    const before = d.remote.dispatches;
+    await provider.prepare(proposal, {draftId: 'draft-1'}, 'send-from-composer');
+    await until(() => !provider.render().provider.busy, 'the send');
+    return {d, toasts, provider, sent: d.remote.dispatches - before};
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+}
+
+for (const kind of ['archive', 'trash']) {
+  test(`one-tap Send after a settled ${kind} receipt clears the receipt and dispatches once`, async () => {
+    const {d, toasts, provider, sent} = await directSendAfter(async (provider, d) => {
+      await provider.prepare({...archive, kind});
+      provider.render().provider.confirm();
+      await until(() => d.slot()?.phase === 'observed' && !provider.render().provider.busy, 'the confirmed ' + kind);
+    });
+    assert.equal(sent, 1, 'the email is dispatched exactly once');
+    assert.equal(d.slot().proposal.kind, 'send');
+    assert.equal(d.slot().receipt.state, 'succeeded');
+    assert.equal(toasts.at(-1), 'Sent.');
+    assert.equal(provider.render().providerReview, false);
+  });
+}
+
+test('one-tap Send behind an unsent review of another change opens the review sheet and sends nothing', async () => {
+  const {d, toasts, provider, sent} = await directSendAfter(async provider => {
+    await provider.prepare(archive);
+  });
+  assert.equal(sent, 0, 'nothing is dispatched');
+  assert.equal(d.slot().proposal.kind, 'archive', 'the saved review is kept for the owner');
+  assert.equal(d.slot().phase, 'review');
+  assert.equal(provider.render().providerReview, true, 'the review sheet is shown so the owner can resolve it');
+  assert.equal(toasts.at(-1), 'Review the saved email action before starting another.');
+  assert.equal(provider.render().provider.status, 'Review the saved email action before starting another.');
+});
+
 test('the review sheet keeps a confirmed receipt when Check gets a regressed answer, and never dispatches again', async () => {
   const account = {environment: 'production', userId: 'owner-1'}, owner = JSON.stringify(['production', 'owner-1', '']);
   const d = device(owner), toasts = [];

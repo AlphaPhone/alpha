@@ -482,13 +482,25 @@ export function createMailReviewController(
     }
     if (mode === "send-from-composer" && kind === "send" && source && composer) {
       const owned = operation;
-      let dispatchId: string | undefined;
+      let dispatchId: string | undefined,
+        blocked = false;
       visible = false;
       await run(async (operation, check) => {
-        const previous = sentSource(operation.snapshot());
+        const earlier = operation.snapshot();
+        const previous = sentSource(earlier);
         if (previous && !previous.providerDraft) {
           if (previous.draftId === source.draftId)
             throw new MailReviewNotice("This email was already sent.");
+          await operation.clear();
+          check();
+        } else if (
+          earlier?.phase === "observed" &&
+          earlier.proposal.kind !== "send" &&
+          (earlier.receipt?.state === "succeeded" ||
+            earlier.receipt?.state === "rejected")
+        ) {
+          // A settled archive, trash or label change has its receipt already
+          // reported; it never blocks the next email.
           await operation.clear();
           check();
         }
@@ -502,6 +514,15 @@ export function createMailReviewController(
         ) {
           if (pending) await operation.clear();
           check();
+          // Any other saved operation (an unsent review of another change, or
+          // an unresolved outcome) is left for the owner to resolve in the
+          // review sheet, which is opened below; nothing is prepared over it.
+          if (operation.snapshot()) {
+            blocked = true;
+            throw new MailReviewNotice(
+              "Review the saved email action before starting another.",
+            );
+          }
           await operation.prepare(proposal, source);
         }
         check();
@@ -525,9 +546,12 @@ export function createMailReviewController(
         settle();
         toast("Sent.");
       } else if (
+        (blocked && record && record.requestId !== dispatchId) ||
         record?.phase === "dispatching" ||
         (record?.phase === "observed" && record.receipt?.state !== "succeeded")
       ) {
+        // An earlier saved operation blocks this send, or this send's outcome
+        // is not confirmed: the owner resolves it in the review sheet.
         visible = true;
         publish();
       }

@@ -1072,7 +1072,7 @@
         </sc-if>
         <div style="display:flex;flex-direction:column;flex:1;min-height:164px">
           <textarea aria-label="Message" placeholder="Message" value="{{inbox.c.body}}" disabled="{{inbox.c.busy}}" onChange="{{inbox.c.onBody}}" style="flex:1;min-height:120px;border:0;outline:0;resize:none;background:transparent;color:var(--fg);font:inherit;font-size:16px;line-height:1.55;padding:14px 0 0"></textarea>
-          <sc-if value="{{inbox.c.local}}"><button class="ib" data-alpha-mail-attach aria-label="Attach file" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.attach}}" style="align-self:flex-start"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/paperclip.svg');-webkit-mask-image:url('/icons/lucide/paperclip.svg')"></span></button></sc-if>
+          <sc-if value="{{inbox.c.local}}"><div role="group" aria-label="Draft actions" style="display:flex;align-items:center;gap:2px;align-self:flex-start"><button class="ib" data-alpha-mail-attach aria-label="Attach file" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.attach}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/paperclip.svg');-webkit-mask-image:url('/icons/lucide/paperclip.svg')"></span></button><button class="ib" aria-label="Discard draft" disabled="{{inbox.c.busy}}" onClick="{{inbox.c.discard}}"><span aria-hidden="true" class="mail-toolbar-icon" style="mask-image:url('/icons/lucide/trash-2.svg');-webkit-mask-image:url('/icons/lucide/trash-2.svg')"></span></button></div></sc-if>
         </div>
       </div>
     </div>

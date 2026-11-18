@@ -19,7 +19,7 @@ for(const theme of ['light','dark'])for(const viewport of [{width:360,height:640
  await body.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('editable-draft.png')});
  for(const name of ['Back from draft','Send email']){const box=(await page.getByRole('button',{name,exact:true}).boundingBox())!;expect(box.y).toBeGreaterThanOrEqual(0);expect(box.y+box.height).toBeLessThanOrEqual(viewport.height);}
  await expect(page.getByRole('button',{name:'Save draft',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Discard draft',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'Email draft fields'}).getByRole('button',{name:'Discard draft',exact:true})).toHaveCount(1);
  await expect(page.getByRole('region',{name:'Email draft fields'}).getByRole('button',{name:'Attach file',exact:true})).toHaveCount(1);
  await expect(page.getByText('Unsaved local draft',{exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Back from draft',exact:true}).click();

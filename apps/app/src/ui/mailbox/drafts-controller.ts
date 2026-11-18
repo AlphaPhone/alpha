@@ -392,6 +392,16 @@ function validLocalMailDraft(
 }
 
 /** Local encrypted drafts remain separate from explicitly reviewed provider operations. */
+/** Autosave progress the composer does not show; any other status is news to the owner. */
+const ROUTINE_DRAFT_STATUS = new Set([
+  "",
+  "Unsaved local draft",
+  "Saved locally on this device",
+  "Draft saved",
+  "Draft on this device",
+  "Checking local draft…",
+]);
+
 export function createMailDraftsController(
   options: MailDraftsControllerOptions,
 ) {
@@ -1598,7 +1608,7 @@ export function createMailDraftsController(
       ];
       admitOutgoingAttachments(next, policy(), draft.forward?.parts);
       draft.attachments = next;
-      status = `${next.length} attachment${next.length === 1 ? "" : "s"} selected locally. Nothing is uploaded until you review it.`;
+      status = `${next.length} attachment${next.length === 1 ? "" : "s"} selected locally. Nothing is uploaded until you tap Send.`;
       persist();
     } catch (error) {
       if (token === epoch) toast(attachmentRefusalText(error));
@@ -2016,7 +2026,11 @@ export function createMailDraftsController(
       if (!open) return false;
       reviewVisit++;
       retireReview();
-      if (!busy) void setAside();
+      if (busy) {
+        toast("Wait for the local draft update.");
+        return true;
+      }
+      void setAside();
       return true;
     },
     /** The email now in the composer, in the shape Send reviews. A review of anything else is stale. */
@@ -2138,7 +2152,7 @@ export function createMailDraftsController(
           ? {
               local: true,
               status,
-              showDraftStatus: staleBase,
+              showDraftStatus: staleBase || !ROUTINE_DRAFT_STATUS.has(status),
               busy,
               confirm,
               recoveryVisible: !!retained?.error || !!retained?.conflict,
