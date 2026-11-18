@@ -34,6 +34,7 @@ async function deleteNote(page:Page,title:string){
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText(`Deleted`,{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:`Open ${title}`,exact:true})).toHaveCount(0);
+ await expect.poll(async()=>(await savedRecords(page)).some(note=>note.title===title)).toBe(false);
 }
 /**
  * The product limit is 10,000 entries. The served policy module is the product module with only

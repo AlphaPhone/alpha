@@ -1,6 +1,11 @@
 import {localDraftRow} from './inbox-draft-navigation';
 import {test,expect} from '@playwright/test';
-test.beforeEach(async({context})=>{await context.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));});
+test.beforeEach(async({context})=>{
+ await context.addInitScript(()=>{
+  localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
+  localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4,choices:['skipped','skipped','skipped','skipped']}));
+ });
+});
 async function retained(page:any,expected:{body:string;toQ?:string;cc?:string[]},owner='owner-a'){
  await expect.poll(()=>page.evaluate(async owner=>{
   const binding=JSON.stringify(['inbox-unsaved','app',JSON.stringify(['production',owner,'','grant'])]);

@@ -914,6 +914,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-row-label { flex-shrink:0; min-height:36px; padding:0 16px; border-radius:18px; background:var(--acc); color:var(--alpha-white); font-size:14px; font-weight:600; display:inline-flex; align-items:center; }
 .alpha-row-label:not(:empty) + svg { display:none; }
 .alpha-action-review button { min-height:56px; }
+.alpha-action-review button:disabled,[data-alpha-proposal-act]:disabled { opacity:.5; cursor:default; }
 /* A photo waiting for review on Camera's closed bar: compact, above the composer, never over the viewfinder or shutter. */
 /* Above Camera's pill: part of the dock, so the dock clearance lifts the shutter row above it. */
 .alpha-pill-review { position:absolute; left:16px; right:16px; bottom:calc(100% + 8px); pointer-events:auto; }
