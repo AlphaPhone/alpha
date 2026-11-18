@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "e9a98b741266d17b7f4d383cfab0853597700077",
-  "head": "e322b01c2d98de828e3738053f1a1b7c04f4912f",
+  "head": "8ae047d4e1b2059a3c0e2d9f636045f08b90bd16",
   "recordedAt": "2026-11-18",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...e322b01c2d98de828e3738053f1a1b7c04f4912f",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...8ae047d4e1b2059a3c0e2d9f636045f08b90bd16",
   "status": "diverged",
-  "aheadBy": 8,
+  "aheadBy": 11,
   "behindBy": 27,
   "mergeBase": "396f7a5d2df28f33a498cbc4f4baa9ba46263994",
   "pinOnlyCommits": [
@@ -42,6 +42,18 @@
     {
       "sha": "e322b01c2d98de828e3738053f1a1b7c04f4912f",
       "subject": "Expose reviewed SMS sender lookup in Messages planning"
+    },
+    {
+      "sha": "9e2a54c575581e14c4121a85b7a9e264290b7971",
+      "subject": "Keep the Notes classifier rule generic instead of naming one device transcript"
+    },
+    {
+      "sha": "0395c7b4950f53876e268bdddbbd7e95fb7c8514",
+      "subject": "Clarify which Notes operation a follow-up can continue"
+    },
+    {
+      "sha": "8ae047d4e1b2059a3c0e2d9f636045f08b90bd16",
+      "subject": "Require an explicit direct-save decision for local Calendar events"
     }
   ],
   "pullRequests": [
