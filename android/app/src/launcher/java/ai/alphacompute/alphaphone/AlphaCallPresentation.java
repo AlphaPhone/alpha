@@ -152,6 +152,17 @@ final class AlphaCallPresentation {
     }
 
     /**
+     * The connect time the ongoing-call bar counts its clock from: Telecom's
+     * {@code Call.Details.getConnectTimeMillis()}, only once the call is ACTIVE or held. A dialing,
+     * connecting or ringing call has none, whatever time the network has already attached to it, so
+     * the bar says "Calling…" or "Incoming call" as the call screen does, never "On call · 0:00".
+     */
+    static Long ongoingConnectedAt(int state, long connectMillis) {
+        boolean connected = state == Call.STATE_ACTIVE || state == Call.STATE_HOLDING;
+        return connected && connectMillis > 0 ? connectMillis : null;
+    }
+
+    /**
      * A call still waiting for the owner's answer: Telecom's ringing, or a call it presents as ringing
      * after screening ({@code STATE_SIMULATED_RINGING}). The bar names both "ringing" and offers
      * Decline for them, so its end action rejects both rather than disconnecting one.
