@@ -2,6 +2,7 @@ import React from 'react';
 import {aospImage} from '../runtime/aosp-image';
 import {createAddressBookClient,isIncompleteAddressBookContact,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {literalMailAddress} from '../ui/mailbox/drafts-controller';
+import {agentEmailOperationId} from '../ui/mailbox/agent-email-draft';
 import {MailFolderPicker} from '../ui/mailbox/MailFolderPicker.tsx';
 import {withGmailAccountLabel} from '../ui/mailbox/grants';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
@@ -489,7 +490,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     const draftId='agent-email:'+id;
     chatSend={draftId,proposal,current};
     try{
-      return await provider.prepare({kind:'send',...proposal},{draftId,requestId:id},'send-from-composer');
+      return await provider.prepare({kind:'send',...proposal},{draftId,requestId:agentEmailOperationId(id)},'send-from-composer');
     }finally{chatSend=undefined;}
   };
   const readable = () => accounts.filter(gmailReadable);

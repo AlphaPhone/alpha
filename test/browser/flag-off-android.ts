@@ -236,6 +236,8 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
       }
       const reply = (receipt: unknown, extra: Record<string, unknown> = {}) => ({ status: 200, data: { version: 1, providerExactlyOnce: false, receipt, ...extra } });
       if (path === google + '/gmail/inbox-v1/operations' && input.method === 'POST') {
+        if (options.emailDraft && !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestId))
+          return { status: 400, data: { error: 'A UUID identity is required' } };
         // The server's review echoes the proposal (including the message a reply answers) and names the From account.
         const p = body.proposal, review = { ...p, from: account.email, attachments: [] };
         const receipt = { requestId: body.requestId, kind: p.kind, state: 'prepared', reviewDigest: await sha(JSON.stringify(review)), providerResult: null, rejectionCode: null };
@@ -396,7 +398,9 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
             // The resident agent records the user turn, then streams its reply over native IPC.
             const conversation = /^\/api\/conversations\/([^/]+)\/messages\/stream$/.exec(input.path)![1], body = JSON.parse(input.body), streamId = input.streamId as string;
             f.streams++; f.posts.push(String(body.text));
-            const userMessageId=crypto.randomUUID(),messageId=crypto.randomUUID();
+            const messageUuid=crypto.randomUUID();
+            // The actual resident derives a version-zero ID for the owner's turn.
+            const userMessageId=options.emailDraft?messageUuid.slice(0,14)+'0'+messageUuid.slice(15):messageUuid,messageId=crypto.randomUUID();
             agent.history[conversation].push({ id: userMessageId, role: 'user', text: body.text, timestamp: Date.now() }); persist();
             const reply = f.replies.shift() ?? 'Resident reply ' + f.streams;
             let emailActions:unknown[]=[];

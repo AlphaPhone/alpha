@@ -1,4 +1,13 @@
+import { v5 as uuidv5 } from 'uuid';
 import { literalMailAddress } from './drafts-controller';
+
+/** Gmail receipts use RFC UUIDs. Eliza may persist a version-zero message ID.
+ * Derive one durable, mail-specific key while preserving existing valid keys. */
+export function agentEmailOperationId(messageId: string): string {
+  return /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(messageId)
+    ? messageId
+    : uuidv5(`https://alphacompute.ai/id/gmail-send/${messageId.toLowerCase()}`, uuidv5.URL);
+}
 
 /** The resident offers only an unsent, phone-owned email. Provider send requests and arbitrary
  * reply text are never interpreted as drafts. Bind its offer to the turn that produced it. */
