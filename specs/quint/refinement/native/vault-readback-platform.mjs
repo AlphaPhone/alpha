@@ -10,7 +10,7 @@ const storageSource = 'vendor/eliza/plugins/plugin-native-secure-store/android-n
 export const vaultSources = [
   ...['PasswordsPlugin', 'PasswordsConfig', 'PasswordVaultAccess', 'PasswordUnlock', 'PasswordRequests',
     'PasswordGenerator', 'PasswordEditorPolicy', 'PasswordFormPolicy', 'PasswordSurfaces'].map(name => passwordSource + name + '.java'),
-  ...['PasswordVaultStore', 'PasswordVaultFrame', 'CredentialAccessSession', 'PasswordFacets'].map(name => storageSource + name + '.java'),
+  ...['PasswordVaultStore', 'PasswordVaultFrame', 'PasswordBackupEnvelope', 'CredentialAccessSession', 'PasswordFacets'].map(name => storageSource + name + '.java'),
 ];
 export const vaultResources = [
   'android/app/src/main/res/values/eliza_passwords.xml', plugin + 'src/main/res/values/eliza_passwords.xml',
@@ -86,6 +86,15 @@ public class PackageManager {
       'android/content/Intent.java': 'package android.content; public class Intent { public Intent(String action){} public Intent(String action,android.net.Uri uri){} }',
       'android/net/Uri.java': 'package android.net; public class Uri { public static Uri parse(String value){throw new AssertionError();} }',
       'android/provider/Settings.java': 'package android.provider; public class Settings { public static final String ACTION_REQUEST_SET_AUTOFILL_SERVICE="autofill",ACTION_SETTINGS="settings"; }',
+      'android/view/ViewTreeObserver.java': `package android.view;
+public class ViewTreeObserver {
+ public interface OnWindowFocusChangeListener {void onWindowFocusChanged(boolean focused);}
+ public boolean isAlive(){throw new AssertionError("Window observation is outside this replay");}
+ public void addOnWindowFocusChangeListener(OnWindowFocusChangeListener listener){throw new AssertionError("Window observation is outside this replay");}
+ public void removeOnWindowFocusChangeListener(OnWindowFocusChangeListener listener){throw new AssertionError("Window observation is outside this replay");}
+}`,
+      'android/view/View.java': 'package android.view; public class View { public ViewTreeObserver getViewTreeObserver(){throw new AssertionError("Window observation is outside this replay");} }',
+      'android/view/Window.java': 'package android.view; public class Window { public View getDecorView(){throw new AssertionError("Window presentation is outside this replay");} }',
       'android/view/autofill/AutofillManager.java': 'package android.view.autofill; public class AutofillManager { public boolean isAutofillSupported(){throw new AssertionError();} public android.content.ComponentName getAutofillServiceComponentName(){throw new AssertionError();} }',
       'android/app/Activity.java': `package android.app;
 public class Activity extends android.content.Context {
@@ -95,6 +104,8 @@ public class Activity extends android.content.Context {
  public java.util.concurrent.Executor getMainExecutor(){return Runnable::run;}
  public boolean isFinishing(){return false;}
  public boolean isDestroyed(){return false;}
+ public boolean hasWindowFocus(){throw new AssertionError("Window focus is outside this replay");}
+ public android.view.Window getWindow(){throw new AssertionError("Window presentation is outside this replay");}
  public String getString(int id){return getResources().getString(id);}
  public void startActivity(android.content.Intent intent){throw new AssertionError("External dispatch");}
 }`,
@@ -239,7 +250,9 @@ public class PasswordEditor {
       'ai/eliza/plugins/passwords/SecretSurfaces.java': `package ai.eliza.plugins.passwords;
 public class SecretSurfaces {
  public static final int REVEAL_MILLIS=1,CLIPBOARD_MILLIS=1;
- public static void reveal(android.app.Activity a,String label,String value){throw new AssertionError();}
+ public static void revealOwned(android.app.Activity a,String label,String value,java.util.function.BooleanSupplier owned){throw new AssertionError("Secret reveal is outside this replay");}
+ public static void focused(){throw new AssertionError("Window focus is outside this replay");}
+ public static void retireClipboard(){}
  public static void copy(android.app.Activity a,String value){throw new AssertionError();}
  public static void dismiss(){}
  public static void resume(android.app.Activity a){}
