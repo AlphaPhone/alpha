@@ -34,10 +34,7 @@ function device(owner = 'owner') {
     },
     gmailDispatchOperation: async (_grant, requestId, reviewDigest, proposal) => {
       remote.dispatches++; if (remote.dispatchFails) throw new TypeError('Failed to fetch');
-      const providerResult = proposal.kind === 'send'
-        ? {messageId: 'sent-' + requestId, threadId: 'thread-1'}
-        : {messageId: proposal.messageId, historyId: 'history-2'};
-      const receipt = {requestId, kind: proposal.kind, state: remote.dispatchState, reviewDigest, providerResult: remote.dispatchState === 'succeeded' ? providerResult : null, rejectionCode: null};
+      const receipt = {requestId, kind: proposal.kind, state: remote.dispatchState, reviewDigest, providerResult: remote.dispatchState === 'succeeded' ? {messageId: proposal.messageId, historyId: 'history-2'} : null, rejectionCode: null};
       remote.receipts.set(requestId, receipt); return receipt;
     },
     gmailOperation: async (_grant, requestId) => ({...remote.receipts.get(requestId), ...(remote.answer ? {state: remote.answer, providerResult: null} : {})}),
@@ -186,7 +183,7 @@ for (const kind of ['archive', 'trash']) {
     assert.equal(sent, 1, 'the email is dispatched exactly once');
     assert.equal(d.slot().proposal.kind, 'send');
     assert.equal(d.slot().receipt.state, 'succeeded');
-    assert.deepEqual(toasts, ['Sent.']);
+    assert.equal(toasts.at(-1), 'Sent.');
     assert.equal(provider.render().providerReview, false);
   });
 }
@@ -199,7 +196,7 @@ test('one-tap Send behind an unsent review of another change opens the review sh
   assert.equal(d.slot().proposal.kind, 'archive', 'the saved review is kept for the owner');
   assert.equal(d.slot().phase, 'review');
   assert.equal(provider.render().providerReview, true, 'the review sheet is shown so the owner can resolve it');
-  assert.deepEqual(toasts, [], 'the open review is the only notice');
+  assert.equal(toasts.at(-1), 'Review the saved email action before starting another.');
   assert.equal(provider.render().provider.status, 'Review the saved email action before starting another.');
 });
 
@@ -220,13 +217,10 @@ test('the review sheet keeps a confirmed receipt when Check gets a regressed ans
     // The provider regresses; the owner taps Check, then Confirm, twice.
     d.remote.answer = 'prepared';
     provider.render().provider.check();
-    await until(() => {
-      const review = provider.render().provider;
-      return review.status === regressedReceiptRefusal && !review.busy;
-    }, 'the refused check');
+    await until(() => toasts.length > 0 && !provider.render().provider.busy, 'the refused check');
     const shown = provider.render().provider;
     // The owner is told, in Alpha's words, that nothing changed and not to repeat it.
-    assert.deepEqual(toasts, [], 'the open review is the only notice');
+    assert.equal(toasts.at(-1), regressedReceiptRefusal, 'the toast keeps the guard’s guidance');
     assert.equal(shown.status, regressedReceiptRefusal, 'the review status keeps the guard’s guidance');
     assert.equal(shown.canConfirm, false, 'Confirm is not offered again');
     assert.equal(d.slot().phase, 'observed'); assert.equal(d.slot().receipt.state, 'succeeded');

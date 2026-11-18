@@ -2,60 +2,15 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "e9a98b741266d17b7f4d383cfab0853597700077",
-  "head": "8ae047d4e1b2059a3c0e2d9f636045f08b90bd16",
+  "baseCommit": "a521335235e7dc60ed268c55f7502813a78ac925",
+  "head": "e9a98b741266d17b7f4d383cfab0853597700077",
   "recordedAt": "2026-11-18",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...8ae047d4e1b2059a3c0e2d9f636045f08b90bd16",
-  "status": "diverged",
-  "aheadBy": 11,
-  "behindBy": 27,
-  "mergeBase": "396f7a5d2df28f33a498cbc4f4baa9ba46263994",
-  "pinOnlyCommits": [
-    {
-      "sha": "2401f043bbfdb3566cfcefc45635ba27c475d82a",
-      "subject": "Recover once when Calendar creation extraction returns no fields"
-    },
-    {
-      "sha": "19ddb9f2a013447de451e8b6b5e3455b6d95feef",
-      "subject": "Keep ambiguous Notes transcripts from implying a write"
-    },
-    {
-      "sha": "9f122bedf8dcfc4e7740e89a33d959117dca8767",
-      "subject": "Send requested Calendar previews through owner approval"
-    },
-    {
-      "sha": "bb938760dcb9dd4614d3b9b872bf07fd9b54b9c3",
-      "subject": "Verify requested Calendar review against the real approval queue"
-    },
-    {
-      "sha": "8df98e581758c4ad4e614b972c3de14877150a4e",
-      "subject": "Keep Calendar clock conformance and check persisted review dates"
-    },
-    {
-      "sha": "02822e1a09abc1ae4280e2155117b95361856271",
-      "subject": "Read the latest SMS sender through the reviewed device action"
-    },
-    {
-      "sha": "621fd76936868b8dddfc1d73c2cf3ce3034918d7",
-      "subject": "Route reviewed latest SMS sender lookups into the planner"
-    },
-    {
-      "sha": "e322b01c2d98de828e3738053f1a1b7c04f4912f",
-      "subject": "Expose reviewed SMS sender lookup in Messages planning"
-    },
-    {
-      "sha": "9e2a54c575581e14c4121a85b7a9e264290b7971",
-      "subject": "Keep the Notes classifier rule generic instead of naming one device transcript"
-    },
-    {
-      "sha": "0395c7b4950f53876e268bdddbbd7e95fb7c8514",
-      "subject": "Clarify which Notes operation a follow-up can continue"
-    },
-    {
-      "sha": "8ae047d4e1b2059a3c0e2d9f636045f08b90bd16",
-      "subject": "Require an explicit direct-save decision for local Calendar events"
-    }
-  ],
+  "command": "gh api repos/elizaOS/eliza/compare/develop...e9a98b741266d17b7f4d383cfab0853597700077",
+  "status": "behind",
+  "aheadBy": 0,
+  "behindBy": 6,
+  "mergeBase": "e9a98b741266d17b7f4d383cfab0853597700077",
+  "pinOnlyCommits": [],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",

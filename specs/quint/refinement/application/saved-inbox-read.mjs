@@ -47,11 +47,12 @@ async function fixture(withBody) {
   const settle = () => source.settle();
   function observe() {
     const value = render(), notice = value.cachedListNotice || '';
-    const canMutate = inbox.emailTarget().ready;
-    const savedReadOnly = value.cachedListShown && !canMutate;
+    const target = inbox.emailTarget();
+    const saved = value.cachedListShown && target.reason === 'Check Gmail access first';
     if (value.rows.length) assert.deepEqual(Array.from(value.rows, row => row.subj), [message.subject]);
     if (value.d) assert.equal(value.d.body, withBody ? savedText : 'Message not saved on this device.');
-    if (savedReadOnly) {
+    assert.doesNotMatch(notice, /checking/i, 'Revalidating saved mail quietly never adds a banner');
+    if (saved) {
       assert.equal(shell.st.nativeMailSelection ?? null, null, 'Saved detail has no live selection');
       assert.equal(bodyReads, 0, 'Saved mail cannot trigger a body read');
       assert.ok(!source.events.some(([operation]) => operation === 'search' || operation === 'capabilities'),
@@ -59,10 +60,10 @@ async function fixture(withBody) {
     }
     assert.equal(source.state.prepares, 0, 'The source schedule prepares no provider effect');
     assert.equal(source.state.dispatches, 0, 'The source schedule dispatches no provider effect');
-    return {'s.shown': value.rows.length ? savedReadOnly ? 'saved' : 'fresh' : 'none',
+    return {'s.shown': value.rows.length ? saved ? 'saved' : 'fresh' : 'none',
       's.reading': value.refreshDisabled, 's.checkFailed': notice === 'Saved mail · Could not check Gmail access',
       's.detail': value.d ? withBody ? 'cached' : 'missing' : 'closed',
-      canMutate, canUseDetail: value.d?.actionsAvailable === true};
+      canMutate: target.ready, canUseDetail: value.d?.actionsAvailable === true};
   }
   const pending = () => {
     assert.ok(checks.at(-1)?.signal && !checks.at(-1).signal.aborted, 'One current account check');

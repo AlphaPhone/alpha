@@ -43,10 +43,12 @@ for (const mime of ['video/webm;codecs=vp8', 'video/mp4;codecs=avc1.42001f']) {
    const Recorder = window.MediaRecorder;
    const encoder = new Recorder(source.srcObject as MediaStream, {mimeType: type});
    const chunks: Blob[] = [];
-   encoder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+   // Stop once the encoder has delivered two nonempty slices. A fixed wait was not enough when a
+   // loaded host starved the encoder: it delivered fewer than two slices before stop.
+   const sliced = new Promise<void>(resolve => { encoder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); if (chunks.length >= 2) resolve(); }; });
    const encoded = new Promise<void>(resolve => { encoder.onstop = () => resolve(); });
    encoder.start(150);
-   await new Promise(resolve => setTimeout(resolve, 1250));
+   await sliced;
    encoder.stop();
    await encoded;
    const [prefix, overflow] = chunks;

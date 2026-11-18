@@ -235,7 +235,6 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
   await expect(review.getByRole('status')).toContainText('Gmail may not have received this change');
   await expect(review.getByRole('status')).toContainText('check the saved receipt before trying again');
-  await expect(page.locator('[data-alpha-toast]').getByText('Gmail may not have received this change')).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Cancel unsent review', exact: true})).toHaveCount(0);

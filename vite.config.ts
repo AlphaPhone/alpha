@@ -16,6 +16,7 @@ import { localAgentDevBridge } from './scripts/local-agent-dev-bridge.ts';
 // Only this single key is exposed; envPrefix stays VITE_ so ELIZA_* secrets never reach the bundle.
 checkCloudDeployment(fileURLToPath(new URL('.', import.meta.url)));
 const flagOn = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === '1';
+const viteCacheScope = (process.env.ALPHA_VITE_CACHE_SCOPE ?? '').replace(/[^\w.-]/g, '');
 const appConfig = JSON.parse(readFileSync(fileURLToPath(new URL('./app.config.json', import.meta.url)), 'utf8')) as { version?: unknown };
 const appVersion = process.env.ELIZAOS_VERSION_NAME?.trim() || (typeof appConfig.version === 'string' ? appConfig.version : '0.0.0');
 const prototypeDirectory = fileURLToPath(new URL('./apps/app/src/prototype/', import.meta.url));
@@ -105,7 +106,9 @@ function productionSurface(): Plugin[] {
 export default defineConfig({
   root: "apps/app",
   // Worktrees may share node_modules; one preview must not replace another preview's optimized modules.
-  cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}/`, import.meta.url)),
+  // Concurrent browser-test runs in one worktree must not share one either: playwright.config.ts
+  // scopes its servers' caches by port. Plain dev:ui and builds keep the unscoped directory.
+  cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}${viteCacheScope ? `-${viteCacheScope}` : ""}/`, import.meta.url)),
   plugins: [productionSurface(), localOcrAssets(), browserPdfAssets(), browserFullReload(), react(), localAgentDevBridge(), browserCloudDevBridge()],
   define: {
     'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify(flagOn ? '1' : ''),

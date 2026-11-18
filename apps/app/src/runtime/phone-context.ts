@@ -7,7 +7,7 @@ import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugi
 import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
-import {CONTACT_UPDATE_VALUES_CAPABILITY,CONTACT_WRITE_CAPABILITY,SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY,SMS_LATEST_SENDER_CAPABILITY,telephonyActionCapabilities} from './telephony-actions-contract.ts';
+import {CONTACT_UPDATE_VALUES_CAPABILITY,CONTACT_WRITE_CAPABILITY,SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY,telephonyActionCapabilities} from './telephony-actions-contract.ts';
 import {reminderTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
 import {notesTarget} from './notes-contract.ts';
 import { calendarSource, calendarTarget } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
@@ -183,8 +183,6 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability));
   // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
   for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
-  // Sender lookup uses the approved telephony executor, independent of Calendar's foreground review.
-  if (profile.aospImage && agent.includes(SMS_LATEST_SENDER_CAPABILITY)) capabilities.push(SMS_LATEST_SENDER_CAPABILITY);
   capabilities.push(...telephony);
   return capabilities;
 }

@@ -19,21 +19,13 @@ async function compile() {
   const replacements = {
     './documents': 'export const browserDocuments = ports.documents;',
     './local-agent': 'export const browserLocalAgentEnabled = false; export const saveNativeGoogleAgentAccess = ports.save;',
-    './browser-cloud-resident': `
-      export const browserCloudResidentEnabled = false;
-      export const browserCloudResidentEnvironment = 'production';
-      export function browserResidentCall() { throw Error('Unexpected browser resident call in native fixture'); }
-    `,
-    './native-connection': `
-      export const cloudCredentialStore = {
-        read() { throw Error('Unexpected browser credential read in native fixture'); }
-      };
-    `,
     '@capacitor/core': 'export const Capacitor = {isNativePlatform: () => true};',
+    './browser-cloud-resident': 'export const BROWSER_RESIDENT_LAUNCHED = "unused"; export const browserCloudResidentEnabled = false; export const browserCloudResidentEnvironment = "production"; export const browserResidentCall = () => { throw Error("Cloud preview port unused"); };',
+    './native-connection': 'export const cloudCredentialStore = {read: async () => { throw Error("Cloud preview port unused"); }};',
   };
   const compiled = await build({entryPoints: [source], bundle: true, platform: 'node', format: 'cjs', write: false,
     metafile: true, plugins: [{name: 'controlled-google-access-ports', setup(builder) {
-      builder.onResolve({filter: /^(\.\/(?:documents|local-agent|browser-cloud-resident|native-connection)|@capacitor\/core)$/},
+      builder.onResolve({filter: /^(\.\/documents|\.\/local-agent|\.\/browser-cloud-resident|\.\/native-connection|@capacitor\/core)$/},
         args => ({path: args.path, namespace: 'port'}));
       builder.onLoad({filter: /.*/, namespace: 'port'}, args => ({contents: replacements[args.path], loader: 'js'}));
     }}]});

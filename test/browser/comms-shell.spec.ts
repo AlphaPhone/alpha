@@ -206,6 +206,8 @@ test.describe('comms shell (fixture dev build, test-only bar)', () => {
 		expect((await calls(page)).filter(call => call[1] === 'end')).toHaveLength(1);
 		// The closed bar for a call addresses Alpha, outlined.
 		await expect(page.locator('[data-alpha-input-bar].alpha-bar-field-alpha')).toBeVisible();
+		// The bar is still moving after End: a grab point read now can be below the bar when the press lands.
+		await settled(page);
 		const grab = await page.locator('[data-alpha-input-drag-background]').evaluate(background => {
 			const box = background.getBoundingClientRect();
 			const point = {x: box.x + box.width / 2, y: box.bottom - 4};

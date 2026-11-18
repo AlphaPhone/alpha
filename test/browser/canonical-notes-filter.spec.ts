@@ -103,8 +103,9 @@ test('the approved canonical Notes filter receives success after the active list
  await holdFilterCommit(page);
  await (await requestFilter(page)).click();
  // The admitted list has committed; only its completion callback is held. A receipt written
- // before that callback runs is a failure, not a wait condition.
- await expect.poll(async()=>await filterCommitted(page)||(await actionState(page)).journal.length>0).toBe(true);
+ // before that callback runs is a failure, not a wait condition. The journal reserves the action
+ // before it applies, so only a terminal entry ends the wait early.
+ await expect.poll(async()=>await filterCommitted(page)||(await actionState(page)).journal.some(([phase])=>phase==='terminal')).toBe(true);
  expect((await actionState(page)).journal).not.toContainEqual(['terminal','succeeded']);
  expect(await filterCommitted(page)).toBe(true);
  await expect(rows(page)).toHaveCount(1);
