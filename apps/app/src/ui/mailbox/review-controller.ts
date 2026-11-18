@@ -347,7 +347,8 @@ export function createMailReviewController(
         status =
           "Saved mail operation. Check its exact review and receipt before continuing.";
         const sent = sentSource(restored);
-        visible = !sent || !!sent.providerDraft;
+        // Confirmed sends from Gmail drafts keep an explicit receipt action.
+        visible = !sent;
         settleSent(bound);
       }
       if (capabilityRead !== read) {
@@ -414,7 +415,7 @@ export function createMailReviewController(
           record?.phase === "dispatching" && receipt?.state === "prepared";
         if (receipt?.state === "succeeded" && receipt.requestId !== reported) {
           reported = receipt.requestId;
-          if (visible && confirmedSend && !confirmedSend.providerDraft) {
+          if (confirmedSend) {
             visible = false;
             toast("Sent.");
           }
@@ -426,6 +427,9 @@ export function createMailReviewController(
     } catch (error) {
       if (token === epoch) {
         notStarted = false;
+        const pending = owned.snapshot();
+        if (pending?.proposal.kind === "send" && pending.phase === "dispatching")
+          visible = true;
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
         if (!aborted && options.onSessionError?.(ownerSession, error)) {
@@ -447,7 +451,7 @@ export function createMailReviewController(
               ? classified.message
               : mailOperationText(error, "Mail operation unavailable");
         }
-        toast(status);
+        if (!visible) toast(status);
       }
     } finally {
       if (token === epoch) {
@@ -522,8 +526,7 @@ export function createMailReviewController(
     }
     if (mode === "send-from-composer" && kind === "send" && source && composer) {
       const owned = operation;
-      let dispatchId: string | undefined,
-        blocked = false;
+      let dispatchId: string | undefined;
       visible = false;
       await run(async (operation, check) => {
         const earlier = operation.snapshot();
@@ -558,7 +561,7 @@ export function createMailReviewController(
           // an unresolved outcome) is left for the owner to resolve in the
           // review sheet, which is opened below; nothing is prepared over it.
           if (operation.snapshot()) {
-            blocked = true;
+            visible = true;
             throw new MailReviewNotice(
               "Review the saved email action before starting another.",
             );
@@ -584,11 +587,10 @@ export function createMailReviewController(
       const record = owned.snapshot();
       if (dispatchId && record?.requestId === dispatchId && record.phase === "observed" && record.receipt?.state === "succeeded") {
         settle();
-        toast("Sent.");
       } else if (
-        (blocked && record && record.requestId !== dispatchId) ||
-        record?.phase === "dispatching" ||
-        (record?.phase === "observed" && record.receipt?.state !== "succeeded")
+        !visible &&
+        (record?.phase === "dispatching" ||
+          (record?.phase === "observed" && record.receipt?.state !== "succeeded"))
       ) {
         // An earlier saved operation blocks this send, or this send's outcome
         // is not confirmed: the owner resolves it in the review sheet.
