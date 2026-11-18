@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
 const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const {spokenActionReply,projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -231,4 +231,35 @@ test('a completed comms proposal card is the one completion: no receipt quote be
  assert.equal(shown[1].hasCalendarText,false,'no quote line beside the card');
  assert.notEqual(shown[1].deviceReceipt,true);
  assert.deepEqual(rows,frozen);
+});
+
+
+test('voice distinguishes in-chat email wording from confirmed preparation and preserves the actual reply',()=>{
+ const request='Draft an email to my own address. Subject: shoot prep. Body: bring a tripod.';
+ const reply={text:"Got it. Here's the draft:\n\nTo: (your own address)\nSubject: Tomorrow’s shoot\n\nI’ll charge the Pixel. Can you bring the tripod?\n\nReady to send whenever you are."};
+ const before=structuredClone(reply);
+ assert.equal(spokenActionReply(request,reply),'The suggested email is in the chat.');
+ assert.deepEqual(reply,before);
+ assert.equal(spokenActionReply(request,{text:reply.text.replace('I’ll charge the Pixel.', 'I can’t make it.')}),'The suggested email is in the chat.');
+ const prepared='Drafted gmail message to owner@example.com.\n[gmail] To: owner@example.com\nSubject: Tomorrow’s shoot\nCan you bring the tripod?\nConfirm before I send it.';
+ const actionReply={text:prepared,actionResults:[{actionName:'MESSAGE_SEND_DRAFT',success:true,text:prepared}]};
+ assert.equal(spokenActionReply(request,actionReply),'The suggested email is in the chat.');
+ assert.equal(spokenActionReply(request,actionReply,true),'Your email draft is ready to review.');
+ assert.equal(spokenActionReply(request,{text:'Review the email in chat.'},true),'Your email draft is ready to review.');
+ const compound={...reply,text:reply.text+'\n\nYou have 2 appointments tomorrow.'};
+ assert.match(spokenActionReply('Draft an email and tell me about tomorrow.',compound),/2 appointments tomorrow/);
+ assert.equal(spokenActionReply(request,{...reply,actionResults:[{actionName:'MESSAGE_SEND_DRAFT',success:false,error:'unavailable'}]}),'The email action failed. The suggested wording is in the chat.');
+ assert.equal(spokenActionReply('Read the whole email aloud.',reply),reply.text);
+ assert.equal(spokenActionReply(request,{text:"I couldn't save it.\nTo: owner@example.com\nSubject: Shoot\nBring the tripod."}),"I couldn't save it.\n\nBring the tripod.");
+});
+
+test('spoken action responses omit isolated receipt identifiers and keep meaningful numbers, punctuation, and requested values',()=>{
+ const reply={text:'Meeting moved to 9:30 for 25 minutes.\nEvent ID: e-12abf\nRequest ID: 453786.',actionResults:[{actionName:'CALENDAR',success:true}]};
+ assert.equal(spokenActionReply('Move my meeting.',reply),'Meeting moved to 9:30 for 25 minutes.');
+ assert.equal(spokenActionReply('Tell me the exact ID.',reply),reply.text);
+ assert.equal(spokenActionReply('What’s the event ID?',reply),reply.text);
+ assert.equal(spokenActionReply('What is on my screen?',{text:reply.text}),reply.text);
+ for(const text of ['Bus #7 costs $2.75.','The result is 3/4, or 75%.','The message said: “Use #42 at 8:15.”']){
+  assert.equal(spokenActionReply('Check that for me.',{text,completedActions:[{status:'succeeded'}]}),text);
+ }
 });
