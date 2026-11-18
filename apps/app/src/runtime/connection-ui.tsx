@@ -1263,8 +1263,10 @@ async function connectRemote(kind: 'remote' | 'local', origin: string, code: str
     const registered = admitted.registered as { installationId: string; enrollmentId: string; capabilities?: string[]; viewProfileVersion?: unknown; userTextFormatVersion?:unknown };
     if (registered.installationId !== credential.installationId || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId)) throw new Error('Device registration was not verified');
     if(registered.userTextFormatVersion===1)userTextFormatVersion=1;
-    reason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
+    // The agent answers the views a phone may enrol from the capabilities this request carries,
+    // so the full set (views.telephony.v1 on the image) is in the header before negotiation.
     headers["X-Eliza-Device-Capabilities"]=await deviceCapabilities(registered.capabilities);
+    reason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
     credential.enrollmentId = registered.enrollmentId;
     await secureConnectionStore.write(slot, credential); signal.throwIfAborted();
     deviceHeaders = headers;
@@ -1598,8 +1600,10 @@ async function connectResident(signal: AbortSignal, admitted?: ResidentAdmission
     workflowProtocol=admitted.workflowProtocol;const registered=admitted.registered;
     if(registered.installationId!==credential.installationId||typeof registered.enrollmentId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId))throw Error('Device registration was not verified');
     if(registered.userTextFormatVersion===1)userTextFormatVersion=1;
-    reason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
+    // Negotiate views with the full capability header: the agent offers Phone, Messages and
+    // Contacts only to a request that carries views.telephony.v1.
     headers['X-Eliza-Device-Capabilities']=await deviceCapabilities(registered.capabilities,true);
+    reason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
     credential.enrollmentId=registered.enrollmentId;await store.write(slot,credential);signal.throwIfAborted();
     // Cost: one authenticated read after durable enrollment, not per message.
     // Its existing native enrollment entry wakes notifications only after the complete slot exists.
@@ -1674,11 +1678,12 @@ async function connectCloud(agentId: string, signal: AbortSignal, expectedOwner?
     next.workflowProtocol=admitted.workflowProtocol;const registered=admitted.registered;
     if (registered.installationId!==credential.installationId || typeof registered.enrollmentId!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(registered.enrollmentId)) throw new Error('Cloud device registration was not verified');
     if(registered.userTextFormatVersion===1)next.userTextFormatVersion=1;
-    const profileReason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
     // The registration answers the agent's full device capability list, as it does for the remote
     // and resident connections. An agent from before the shared list answers only part of it on the
     // capabilities route above (no calls, no text by name), and Cloud agents are deployed apart from this app.
+    // The header is complete before views are negotiated: the agent offers the image's views only for it.
     target.headers["X-Eliza-Device-Capabilities"]=await deviceCapabilities(offeredByEither(device?.capabilities,registered.capabilities));
+    const profileReason = await negotiateEnabledViews(registered.viewProfileVersion, request, signal);
 
     credential.enrollmentId=registered.enrollmentId; await secureConnectionStore.write(slot,credential); signal.throwIfAborted();
     credential.capabilities=target.headers["X-Eliza-Device-Capabilities"].split(",");
