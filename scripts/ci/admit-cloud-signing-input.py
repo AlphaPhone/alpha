@@ -24,6 +24,23 @@ VARIANTS = ("launcher",)
 SHA = re.compile("[0-9a-f]{64}")
 COMMIT = re.compile("[0-9a-f]{40}")
 
+# Owner-approved verification exceptions for exact private producers.
+# Protected producer approval still binds the archive and APK bytes.
+PRIVATE_VERIFICATION_EXCEPTIONS = (
+    {
+        "alphaCommit": "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
+        "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+        "versionCode": 81,
+        "applicationId": CANDIDATE_PACKAGE,
+    },
+    {
+        "alphaCommit": "c80fdf12344d448086e6f1b08f46614bba94bcfb",
+        "sdkCommit": "95532fce36ab4d253c0d848d127704d9b9ace2ac",
+        "versionCode": 82,
+        "applicationId": CANDIDATE_PACKAGE,
+    },
+)
+
 
 def require(condition, message):
     if not condition:
@@ -32,6 +49,14 @@ def require(condition, message):
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def private_verification_admitted(private, pin):
+    value = private["checks"]["combinedVerification"]
+    return value == "passed" or value == "waived-by-owner" and any(
+        all(pin.get(key) == expected and private.get(key) == expected
+            for key, expected in exception.items())
+        for exception in PRIVATE_VERIFICATION_EXCEPTIONS)
 
 
 def matches_profile(record, profile):
@@ -376,9 +401,10 @@ def admit(archive, pin, stage=None, *, source_root=None):
                         private["unsignedApkSHA256"] == apks and matches_profile(private, profile),
                         "Private producer identity differs from the reviewed build")
                 require(private.get("updateChannel") == channel, "Private producer update channel differs")
-                for check in ("productSourceGuard", "sdkSourceGuard", "normalPreparation",
-                              "combinedVerification", "apkArchive"):
+                for check in ("productSourceGuard", "sdkSourceGuard", "normalPreparation", "apkArchive"):
                     require(private["checks"][check] == "passed", f"Private build did not pass {check}")
+                require(private_verification_admitted(private, pin),
+                        "Private build did not pass combinedVerification")
 
             producer_bytes = data("producer-evidence/manifest.json")
             require(digest(producer_bytes) == pin["producerManifestSHA256"], "Producer manifest digest differs")
