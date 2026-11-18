@@ -787,6 +787,76 @@ test('full browser resident Calendar writes require exact owner intent and prese
  }finally{await google?.close();await second?.close();await third?.close();await f.close();}
 });
 
+test('resident Gmail requires the current owner switch and a matching review before one dispatch',async()=>{
+ const f=await fixture({clear:async()=>({})},'production');
+ const token='6'.repeat(64),saved=new Map(),gmailGrant=randomUUID();
+ let host,hasSendGrant=true;
+ let dispatches=0;
+ f.setResponse(async(url,input)=>{
+  const pathname=new URL(url).pathname;
+  if(pathname.endsWith('/accounts'))return Response.json([{
+   configured:true,connected:true,reason:'connected',connectionId:gmailGrant,identity:{email:'owned@example.invalid'},
+   grantedCapabilities:['google.gmail.triage',...(hasSendGrant?['google.gmail.send']:[])],
+  }]);
+  if(pathname.endsWith('/operations')&&input.method==='POST'){
+   const {requestId,proposal}=JSON.parse(input.body);
+   const review={from:'owned@example.invalid',...proposal};
+   const reviewDigest=createHash('sha256').update(JSON.stringify(review)).digest('hex');
+   const receipt={requestId,kind:'send',state:'prepared',reviewDigest,providerResult:null,rejectionCode:null};
+   saved.set(requestId,{receipt,proposal});
+   return Response.json({version:1,providerExactlyOnce:false,receipt,review});
+  }
+  if(pathname.includes('/inbox-v1/operations/')){
+   const entry=saved.get(pathname.split('/').at(input.method==='POST'?-2:-1));
+   if(!entry)return Response.json({error:'Unknown operation'},{status:404});
+   if(input.method==='POST'){
+    const {proposal,reviewDigest}=JSON.parse(input.body);
+    assert.deepEqual(proposal,entry.proposal);
+    assert.equal(reviewDigest,entry.receipt.reviewDigest);
+    dispatches++;
+    entry.receipt={...entry.receipt,state:'succeeded',providerResult:{messageId:'fixture-message'}};
+   }
+   return Response.json({version:1,providerExactlyOnce:false,receipt:entry.receipt});
+  }
+  throw Error('Unexpected synthetic Cloud operation '+pathname);
+ });
+ const call=async send=>{
+  const r=await fetch('http://127.0.0.1:'+host.port+'/__alpha-owner-gmail',{
+   method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({send}),
+  });
+  return {status:r.status,data:await r.json()};
+ };
+ const intent=(gmailChanges,id=credentialId)=>f.rpc({operation:'residentGoogleGmailAccess',environment:'production',credentialId:id,gmailChanges});
+ try{
+  host=await f.host().startGoogleHost(token,{credentialId,reference});
+  const content={to:['self@example.invalid'],subject:'Synthetic review',bodyText:'Fixture only'};
+  const prepare={...content,operation:'prepare',requestId:randomUUID()};
+  assert.notEqual((await call(prepare)).status,200);
+  assert.notEqual((await intent(true,gmailGrant)).status,200);
+  assert.deepEqual((await intent(true)).data,{gmailChanges:true});
+  hasSendGrant=false;assert.notEqual((await call(prepare)).status,200);assert.equal(saved.size,0);
+  hasSendGrant=true;
+  const prepared=await call(prepare);assert.equal(prepared.status,200,JSON.stringify(prepared.data));
+  const {id,reviewDigest}=prepared.data.send;
+  assert.equal(dispatches,0,'prepare is review only');
+  const send={...content,operation:'dispatch',id,reviewDigest};
+  assert.notEqual((await call({...send,bodyText:'Changed'})).status,200);
+  assert.equal(dispatches,0);
+  assert.equal((await intent(false)).status,200);
+  assert.notEqual((await call(send)).status,200);
+  assert.equal(dispatches,0);
+  const receipt=await call({operation:'receipt',id});
+  assert.equal(receipt.status,200,'Off keeps send receipts readable: '+JSON.stringify(receipt.data));
+  assert.equal(receipt.data.send.state,'prepared');
+  assert.equal((await intent(true)).status,200);
+  assert.equal((await call(send)).data.send.providerResult.messageId,'fixture-message');
+  assert.equal((await call(send)).data.send.state,'succeeded');
+  assert.equal(dispatches,1);
+  assert.equal((await f.rpc({operation:'residentClear',environment:'production'})).status,200);
+  assert.notEqual((await call({...prepare,requestId:randomUUID()})).status,200);
+ }finally{await host?.close();await f.close();}
+});
+
 const googleProof = {state:'a'.repeat(43),challenge:'b'.repeat(43)};
 const alphaBrowserStart = 'https://eliza.app/alphaphone/auth/browser-start';
 function googleSessionRoutes(onExchange) {
