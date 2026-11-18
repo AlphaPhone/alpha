@@ -2,15 +2,52 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "1a61700e4181757a8c926b0065d82ca084753708",
-  "head": "1a61700e4181757a8c926b0065d82ca084753708",
+  "baseCommit": "bf27d43a7841870392d3246a5fd049765ef561fc",
+  "head": "947098d4765944951d3b8516f5fd8c08632232de",
   "recordedAt": "2026-11-18",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...1a61700e4181757a8c926b0065d82ca084753708",
-  "status": "identical",
-  "aheadBy": 0,
+  "command": "gh api repos/elizaOS/eliza/compare/develop...947098d4765944951d3b8516f5fd8c08632232de",
+  "status": "ahead",
+  "aheadBy": 15,
   "behindBy": 0,
-  "mergeBase": "1a61700e4181757a8c926b0065d82ca084753708",
-  "pinOnlyCommits": [],
+  "mergeBase": "bf27d43a7841870392d3246a5fd049765ef561fc",
+  "pinOnlyCommits": [
+    {
+      "sha": "cb4bda9e85f0987a84777523c4af169742e210db",
+      "subject": "Ground Browser opens in spoken hostnames"
+    },
+    {
+      "sha": "6895508ec0d4dee95a70eba52d175c09c8b565a6",
+      "subject": "Keep mixed hostnames and spoken corrections intact"
+    },
+    {
+      "sha": "9e453f11a0d54b793507b9dac206f9d81d702a73",
+      "subject": "Bind SMS reply drafts to the actual latest sender read"
+    },
+    {
+      "sha": "cd10f18e6ac775ab163778d040fd6ada9da072e2",
+      "subject": "Require a persisted sender reply before resolving its address"
+    },
+    {
+      "sha": "dae4495e860c3d5bd68fdea3cf99b2c6aa0fae5a",
+      "subject": "Read spoken hostname spans after the request words"
+    },
+    {
+      "sha": "3b644d2680e5f64e408dcdc15134aff61bd80621",
+      "subject": "Use the existing native Messages thread identity throughout"
+    },
+    {
+      "sha": "93c5035131033ec792be522e8ee252bd00be6c5a",
+      "subject": "Offer owner-bound Gmail composition to a negotiated device editor"
+    },
+    {
+      "sha": "94c7e31bc7d74eb801fd76ecf13918a1b0bb0d8f",
+      "subject": "Ground SMS draft recipients and sender disclosure in the owner request"
+    },
+    {
+      "sha": "72b0ccdd837ffccc45ac03f5c017b7f3d026570f",
+      "subject": "Ask before reading when the requested sender scope is unsupported"
+    }
+  ],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
@@ -64,6 +101,9 @@
     "https://github.com/elizaOS/eliza/pull/39898",
     "https://github.com/elizaOS/eliza/pull/39901",
     "https://github.com/elizaOS/eliza/pull/39906",
-    "https://github.com/elizaOS/eliza/pull/39903"
+    "https://github.com/elizaOS/eliza/pull/39903",
+    "https://github.com/elizaOS/eliza/pull/39919",
+    "https://github.com/elizaOS/eliza/pull/39920",
+    "https://github.com/elizaOS/eliza/pull/39921"
   ]
 }
