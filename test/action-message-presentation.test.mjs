@@ -77,6 +77,19 @@ test('cold history refuses uncertain, foreign, changed or contradictory browser 
  for(const change of [(p,e)=>e.status='unknown',(p,e)=>e.phase='applying',(p,e)=>e.record.ownerId='foreign',(p,e)=>e.record.enrollmentId='foreign',(p,e)=>e.record.operation={type:'browser_navigate',url:'https://other.example/'},(p,e)=>e.operationHash='wrong',(p,e)=>e.attemptId='stale',(p,e)=>p.providerReceipt.operationId='other',(p,e)=>p.providerReceipt.outcome='unconfirmed',(p,e)=>p.providerReceipt.result={},(p,e)=>p.requestMessageId='other'])assert.equal((await restoredReceipt(change)).length,0);
 });
 
+test('the generic review instruction yields to a visible phone result or an unavailable-action notice',()=>{
+ const review={id:'review',from:'agent',text:'Review this request on your phone before it can run.'};
+ const notice={id:'blocked',from:'agent',text:'Share open messages: Ask again from the open conversation.',card:{systemNotice:true,deviceActionNotice:true,done:true}};
+ const receipt={id:'device-receipt:sms',from:'agent',text:'The newest text sender ends in 1234.',deviceReceipt:true};
+ for(const replacement of [notice,receipt]){
+  const rows=[user,review,replacement],before=structuredClone(rows);
+  assert.deepEqual(projectActionMessages(render(rows),rows).map(row=>row.id),['user',replacement.id]);
+  assert.deepEqual(rows,before);
+  assert.deepEqual(projectActionMessages(render(rows.slice(0,2)),rows).map(row=>row.id),['user','review']);
+ }
+ const rows=[user,review,{...notice,card:{systemNotice:true,done:true}}];
+ assert.deepEqual(projectActionMessages(render(rows),rows).map(row=>row.id),['user','review','blocked']);
+});
 test('automatic live receipt replaces the exact protocol pause without needing an approval card',()=>{
  const rows=[user,{id:'protocol',from:'agent',text:notice},{id:'result',from:'agent',text:tabCreated,deviceReceipt:true}];const shown=projectActionMessages(render(rows),rows);assert.deepEqual(shown.map(m=>m.id),['user','result']);assert.equal(shown[1].displayText,tabCreated);
 });

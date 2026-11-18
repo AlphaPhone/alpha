@@ -912,6 +912,8 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 /* The approval row says what a tap does; rows without a label keep their icon. */
 .alpha-row-label:empty { display:none; }
 .alpha-row-label { flex-shrink:0; min-height:36px; padding:0 16px; border-radius:18px; background:var(--acc); color:var(--alpha-white); font-size:14px; font-weight:600; display:inline-flex; align-items:center; }
+/* Decline is an action with the same target size and quieter emphasis. */
+.alpha-action-review .alpha-row-label[data-alpha-secondary-action="true"] { background:var(--s3); color:var(--fg); }
 .alpha-row-label:not(:empty) + svg { display:none; }
 .alpha-action-review button { min-height:56px; }
 /* A photo waiting for review on Camera's closed bar: compact, above the composer, never over the viewfinder or shutter. */
