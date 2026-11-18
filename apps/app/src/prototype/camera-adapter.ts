@@ -24,7 +24,7 @@ import {DEFAULT_HOLD_MS} from '../ui/gestures/constants';
 import {photosErrorText,photosResultText} from '../ui/photos/photos-messages';
 import {cameraCaptureErrorText} from '../ui/camera/camera-capture-messages';
 import {openScanReview,ScanKeepError} from './scan-review';
-import {openScanDocument,pickNativeScanImage} from './scan-document';
+import {pickNativeScanImage} from './scan-document';
 import type {ScanPageCamera} from './scan-page-camera';
 import {systemPickerActive} from './scan-pdf';
 import {DailyApps} from '../daily';
@@ -1058,14 +1058,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const owner = api;
     await session.exclusive(async token=>{
       shutterFlash(owner);
-      const alpha=owner.get('camera').mode==='alpha';
-      try {
-        const photo=await writePhoto(owner,!alpha);
-        if(alpha&&photo.id&&session.current(token)&&owner.isActive()&&owner.get('camera').mode==='alpha'){
-          owner.open('photos',{tab:'lib',album:null,open:photo.id,nativePhotoSelection:captureSelection(photo),chrome:true});
-          owner.attachCameraPhoto(photo.id,photo.image);
-        }
-      }
+      try { await writePhoto(owner,true); }
       catch { if (session.current(token)) message('Not saved'); }
     });
   }
@@ -1317,11 +1310,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.bg = 'transparent'; data.vfBg = ready ? 'transparent' : '#000000'; data.vfOp = 1;
     data.zoomCss = ''; data.rec = session.recording; data.recTime = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`;
     data.shutter = () => { void capture(); };
-    data.ask = () => {
-      if (!askCameraFrame(currentApi)) message(ready ? 'Capture in progress' : 'Camera off');
-    };
-    data.scanDocumentAvailable=!recordingBusy;
-    data.scanDocument=()=>{if(!currentApi.isActive()||recordingBusy)return;cancelScan();if(currentApi.S.chat!=='hidden')currentApi.shell({chat:'hidden'});closeScan=openScanDocument(undefined,documentCamera(currentApi));};
     data.flip = () => { void flipLens(currentApi); };
     data.flashAvailable = ready && !recordingBusy && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
     if (browserMode) data.flashLabel = browserCamera.lightingLabel(flash);
@@ -1348,12 +1336,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     };
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
-    data.modes = [...(data.modes || []),{label:'Ask',mode:'alpha',css:st.mode==='alpha'?'color:var(--alpha-white)':'color:rgba(255,255,255,.55)',dot:st.mode==='alpha'?1:0}].map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.mode || m.label.toLowerCase(); if (mode === 'photo' || mode === 'video' || mode === 'alpha') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
-    if(st.mode==='alpha'){
-      data.shutterLabel='Ask about this';
-      data.shutter=data.ask;
-      data.innerCss="width:62px;height:62px;border-radius:50%;background:var(--alpha-white) url('/logo-mark.svg') center/80% no-repeat";
-    }
+    // Camera has two modes, Video and Photo; asking about the frame goes through chat.
+    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {
@@ -1559,7 +1543,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.importAvailable=browserMode||Capacitor.isPluginAvailable('DailyApps');
     data.importLabel=browserMode?'Choose image':'Scan image text';
     data.importImage=(event?:Event)=>{(event?.currentTarget as HTMLElement|undefined)?.closest('details')?.removeAttribute('open');chooseImage(currentApi);};
-    data.scanDocument=()=>{if(currentApi.isActive()){cancelScan();closeScan=openScanDocument();}};
     data.libraryAccessControl=!browserMode&&!!libraryAccess&&libraryAccess.scope!=='full'&&!st.open&&!st.album&&!selection&&!onAlbums;
     data.libraryAccessBusy=requestingLibraryAccess;
     data.libraryAccessChoose=async()=>{if(requestingLibraryAccess)return;requestingLibraryAccess=true;currentApi.set({nativeLibraryAccessRevision:Date.now()});const before=libraryAccess?.scope;try{libraryAccess=await nativeLibrary.requestLibraryAccess();if(libraryAccess.scope===before&&before==='denied')await nativeLibrary.openLibrarySettings();retirePhotoRead();captures=[];preview=undefined;next='';loaded=false;cancelEdit();closeVideo();currentApi.set({open:null,nativePhotoSelection:null});await refresh();}catch{currentApi.toast('Couldn’t open settings');}finally{requestingLibraryAccess=false;currentApi.set({nativeLibraryAccessRevision:Date.now()});}};

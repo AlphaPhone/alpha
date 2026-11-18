@@ -613,6 +613,10 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > 
 }
 
 /* Keep portrait capture controls above the assistant on short windows. */
+/* The Video/Photo switch shows its choice by colour and dot, never a focus box: no ring after a
+ * tap or click; a keyboard user still gets a thin underline under the focused mode's label. */
+[data-alpha-camera-mode]:focus{outline:none}
+[data-alpha-camera-mode]:focus-visible{outline:none;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px}
 html:not(.alpha-landscape) [data-alpha-camera="capture"]{top:min(712px,calc(100% - var(--alpha-dock-clearance,102px) - 106px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="modes"]{top:min(656px,calc(100% - var(--alpha-dock-clearance,102px) - 162px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="zoom"]{top:min(585px,calc(100% - var(--alpha-dock-clearance,102px) - 217px))!important}
