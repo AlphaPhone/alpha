@@ -90,7 +90,7 @@ export async function createInboxFixture() {
     attachmentPolicy: { maximumOutgoing: 2, maximumBytes: 5242880, maximumTotalBytes: 5242880 }
   }]));
   const receipts = new Map();
-  const state = { prepares: 0, dispatches: 0, receiptReads: 0, outcome: "succeeded", failReceipt: false, failStore: false, attachments: [], released: [], messages: [] };
+  const state = { prepares: 0, dispatches: 0, receiptReads: 0, outcome: "succeeded", failReceipt: false, failStore: false, attachments: [], choices: [], released: [], messages: [] };
   function track(task) {
     const result = Promise.resolve().then(task);
     pending.add(result);
@@ -190,6 +190,22 @@ export async function createInboxFixture() {
   const documentEvents = new EventTarget(), windowEvents = new EventTarget(), local = new Map();
   const document = { hidden: false, documentElement: { dataset: { connectionMode: "live" } }, addEventListener: documentEvents.addEventListener.bind(documentEvents), removeEventListener: documentEvents.removeEventListener.bind(documentEvents) };
   const window = { addEventListener: windowEvents.addEventListener.bind(windowEvents), removeEventListener: windowEvents.removeEventListener.bind(windowEvents), dispatchEvent: windowEvents.dispatchEvent.bind(windowEvents), confirm: () => true };
+  // The shared attachment picker returns a platform File; its bytes are read through FileReader.
+  class FileReader {
+    readAsDataURL(file) {
+      void track(async () => {
+        this.result = `data:${file.type};base64,${file.dataBase64}`;
+        this.onload?.();
+      });
+    }
+  }
+  async function chooseAttachment(current) {
+    if (attachmentGate) await attachmentGate();
+    const file = state.attachments.shift();
+    // The product's own fence decides whether this late selection may still attach.
+    state.choices.push(current());
+    return file ? { name: file.name, type: file.mimeType, size: file.size, dataBase64: file.dataBase64 } : undefined;
+  }
   const sandbox = vm.createContext({
     ports: {
       store,
@@ -211,6 +227,7 @@ export async function createInboxFixture() {
     TextEncoder,
     TextDecoder,
     structuredClone,
+    FileReader,
     AbortController,
     DOMException,
     Event,
@@ -308,7 +325,7 @@ export async function createInboxFixture() {
       const provider = modules.inboxProviderControls(() => {
       }, (text) => toasts.push(text));
       const drafts = modules.inboxDrafts(() => {
-      }, (text) => toasts.push(text), provider);
+      }, (text) => toasts.push(text), provider, () => true, chooseAttachment);
       provider.setComposer(() => drafts.email());
       provider.setEditor((proposal, reference, review) => drafts.editProvider(proposal, reference, review));
       provider.setObservers({ sent: (source, proposal, grant) => void drafts.settleSent(source.draftId, proposal, grant, source.savedRevision), sentNote: (source) => drafts.sentNote(source.draftId) });

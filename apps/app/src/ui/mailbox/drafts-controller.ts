@@ -1228,6 +1228,39 @@ export function createMailDraftsController(
     return begin(undefined, undefined, "", target);
   }
 
+  /** A Drafts row becomes the composer's draft; its row is replaced when the draft is set aside again. */
+  function adoptShelved(row: Shelved) {
+    // The earlier-version mark stays on the shelved row, as with fromSaved().
+    const { earlierThanSent: _earlier, ...copy } = structuredClone(row.draft);
+    draft = copy as LocalMailDraft;
+    toQ = row.toQ;
+    baseRevision = null;
+    staleBase = false;
+  }
+
+  /**
+   * The reply to this exact message that Back saved to Drafts, the latest when
+   * there are several. It is the thread's unfinished reply, so a suggestion for
+   * the message goes there instead of into a second reply. Earlier versions of
+   * a sent email are never reused without their own confirmation.
+   */
+  function shelvedReply(reply?: GmailMessage): Shelved | undefined {
+    if (!reply || draft || saved || retained?.available) return undefined;
+    const rows = shelf?.items || [];
+    for (let index = rows.length - 1; index >= 0; index--) {
+      const row = rows[index];
+      const mode = row.draft.mode || "reply";
+      if (
+        !row.draft.earlierThanSent &&
+        (mode === "reply" || mode === "reply-all") &&
+        row.draft.reply?.messageId === reply.id &&
+        row.draft.reply.threadId === reply.threadId
+      )
+        return row;
+    }
+    return undefined;
+  }
+
   async function openShelved(row: Shelved) {
     const visit = captureVisit();
     const rowCurrent = () =>
@@ -1254,12 +1287,7 @@ export function createMailDraftsController(
         return;
     }
     if (!(await setAside()) || !rowCurrent() || draft || saved) return;
-    // The earlier-version mark stays on the shelved row, as with fromSaved().
-    const { earlierThanSent: _earlier, ...copy } = structuredClone(row.draft);
-    draft = copy as LocalMailDraft;
-    toQ = row.toQ;
-    baseRevision = null;
-    staleBase = false;
+    adoptShelved(row);
     open = true;
     confirm = false;
     status = "Draft on this device";
@@ -1657,18 +1685,22 @@ export function createMailDraftsController(
           ? "The local email draft is still loading. Try again in a moment."
           : status || "Connect a Gmail account first.",
       );
-    if (draft) {
+    // A reply to this message that Back saved to Drafts is the thread's
+    // unfinished reply: the suggestion goes there, named as not on screen.
+    const shelved = shelvedReply(reply);
+    const target = draft || shelved?.draft;
+    if (target) {
       const recipients = [
-        ...draft.to,
-        ...(draft.cc || []),
-        ...(draft.bcc || []),
+        ...target.to,
+        ...(target.cc || []),
+        ...(target.bcc || []),
       ];
-      const append = !!draft.body.trim();
-      // One draft exists per account. When its composer is closed the user may
-      // be looking at another message, so the review says that this draft is
-      // not on screen and is not a reply to that message.
-      const aside = !open,
-        elsewhere = aside && !!reply && draft.reply?.messageId !== reply.id;
+      const append = !!target.body.trim();
+      // When the composer is closed the user may be looking at another
+      // message, so the review says that this draft is not on screen and, for
+      // a set-aside draft, whether it is a reply to that message.
+      const aside = !draft || !open,
+        elsewhere = aside && !!reply && target.reply?.messageId !== reply.id;
       return {
         ready: true,
         kind: "draft",
@@ -1676,28 +1708,30 @@ export function createMailDraftsController(
         aside,
         elsewhere,
         reply:
-          !!draft.reply || draft.mode === "reply" || draft.mode === "reply-all",
-        subject: draft.subject,
+          !!target.reply ||
+          target.mode === "reply" ||
+          target.mode === "reply-all",
+        subject: target.subject,
         to: recipients,
         room: append
-          ? Math.max(0, BODY_LIMIT - draft.body.replace(/\s+$/, "").length - 2)
+          ? Math.max(0, BODY_LIMIT - target.body.replace(/\s+$/, "").length - 2)
           : BODY_LIMIT,
         token: JSON.stringify([
           owner,
-          "draft",
-          draft.id,
-          draft.mode || "",
-          draft.reply?.messageId || "",
-          draft.provider?.draftId || "",
-          draft.subject,
-          draft.to,
-          draft.cc || [],
-          draft.bcc || [],
-          draft.body,
-          draft.revision,
+          shelved ? "drafts" : "draft",
+          target.id,
+          target.mode || "",
+          target.reply?.messageId || "",
+          target.provider?.draftId || "",
+          target.subject,
+          target.to,
+          target.cc || [],
+          target.bcc || [],
+          target.body,
+          target.revision,
           reviewRevision,
-          draft.forward || null,
-          toQ,
+          target.forward || null,
+          shelved ? shelved.toQ : toQ,
           aside,
           elsewhere,
         ]),
@@ -1833,9 +1867,18 @@ export function createMailDraftsController(
           suggestionTarget(reply).token !== expected.token)
       )
         return false;
+      // The reviewed destination is the reply Back saved to Drafts: reopen it.
+      const shelved = expected ? shelvedReply(reply) : undefined;
+      if (shelved) adoptShelved(shelved);
+      const release = () => {
+        if (!shelved) return;
+        draft = null;
+        toQ = "";
+      };
       if (draft) {
         if (draft.body.trim()) {
           if (!expected?.append) {
+            release();
             toast(
               "Finish, save or discard the open email draft first. The suggestion was not added.",
             );
@@ -1843,6 +1886,7 @@ export function createMailDraftsController(
           }
           const joined = `${draft.body.replace(/\s+$/, "")}\n\n${body}`;
           if (joined.length > BODY_LIMIT) {
+            release();
             toast(
               "The draft would be too long with this suggestion. Nothing was added.",
             );
