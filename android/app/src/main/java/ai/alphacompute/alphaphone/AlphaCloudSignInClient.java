@@ -59,10 +59,11 @@ import org.json.JSONTokener;
  * cancel or teardown) and the Custom Tabs launch of the browser Google page. The account picker is
  * Android's Credential Manager sheet (shared NativeGoogleCredential), which is system UI.
  *
- * Everything below the class declaration is the pinned shared client, changed only where
- * test/cloud-sign-in-client-fork.test.mjs lists an Alpha change, so the sign-in, acknowledgement,
- * renewal and revocation semantics stay the ones upstream tests (packages/auth/android/test). The
- * non-UI policy stays shared: CloudSignInFlow, CloudSignInReadiness, CloudSignInRoutes,
+ * The client keeps the pinned shared sign-in, acknowledgement, renewal and revocation paths tested
+ * upstream (packages/auth/android/test). Alpha keeps its password vault on-device and omits the
+ * upstream password-backup flow. The full reviewed bodies are recorded by
+ * test/cloud-sign-in-client-fork.test.mjs. The non-UI policy stays shared: CloudSignInFlow,
+ * CloudSignInReadiness, CloudSignInRoutes,
  * CloudKeyRenewal, CloudKeyRevocation, CloudEmailCode, CloudSmsCode and the registration types.
  *
  * Native screens collect an email or phone code or use the host-selected Google account picker or

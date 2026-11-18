@@ -20,6 +20,7 @@ final class PasswordVaultGate {
 
   /** The vault is locked or the screen asking for it is gone. Reported to the renderer as {@code locked}. */
   static final class Locked extends Exception { Locked() { super("Saved passwords are locked", null, false, false); } }
+  static final class NotAdmitted extends Exception { NotAdmitted() { super("Saved passwords are not available here", null, false, false); } }
 
   /**
    * Registers Alpha's rule for whether the vault may be reached now, once, from
@@ -32,6 +33,14 @@ final class PasswordVaultGate {
    */
   static void setAdmission(PasswordVaultAccess.Admission rule) { PasswordVaultAccess.setAdmission(rule); }
   static boolean admitted(Context context) { return AlphaPasswordAdmission.admitted(context); }
+
+  static <T> T useForOwner(Context context, PasswordVaultAccess access, long ticket,
+      PasswordVaultAccess.Operation<T> operation) throws Exception {
+    return access.use(ticket, store -> {
+      if (!admitted(context)) throw new NotAdmitted();
+      return operation.run(store);
+    });
+  }
 
   /** Closes the editor and a revealed secret, on the main thread. */
   static void closeSurfaces() {
