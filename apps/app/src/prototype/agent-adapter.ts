@@ -1930,7 +1930,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     catch { this.toast('Unavailable'); }
     finally { this.brightnessGate.end(); }
   };
-  p.voiceConversationCurrent = function(prepared:{binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope}){return !alphaClient.getState().context.sensitive&&connectionController.voiceConversationCurrent(prepared.binding)&&JSON.stringify(alphaClient.getState().context)===JSON.stringify(prepared.context);};
+  p.voiceConversationCurrent = function(prepared:{binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope}){return !alphaClient.getState().context.sensitive&&connectionController.voiceConversationCurrent(prepared.binding)&&alphaClient.continuesContext(prepared.context);};
   p.voiceConversationContext = function(binding:import('../runtime/alpha-client').VoiceConversationBinding){const value=alphaClient.getState().context;if(!this.live||document.hidden||value.sensitive||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');return value;};
   p.prepareVoiceConversation = async function(signal:AbortSignal,mark?:(stage:VoiceStartupStage)=>void){
     if(!connectionController.getSnapshot().session)throw Error(residentAlwaysPresent?(connectionController.getSnapshot().kind==='recovering'?RESIDENT_RECOVERING_NOTICE:RESIDENT_STARTING_NOTICE):NO_AGENT_VOICE);
@@ -1961,7 +1961,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   };
   p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
-    const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&JSON.stringify(alphaClient.getState().context)===JSON.stringify(acceptedContext);}catch{return false;}};
+    const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
     this.voiceSendTurnId=turnId;
