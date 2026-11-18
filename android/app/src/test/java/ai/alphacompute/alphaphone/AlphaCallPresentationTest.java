@@ -369,6 +369,42 @@ public class AlphaCallPresentationTest {
         org.junit.Assert.assertNull(AlphaCallPresentation.ongoingState(Call.STATE_AUDIO_PROCESSING));
     }
 
+    @Test public void theOngoingCallBarCountsFromTheConnectTimeOnlyOnceTheCallIsActive() {
+        long connect = 1_763_400_000_000L;
+        // A call still dialing, connecting or ringing has no clock, even if Telecom already carries a time.
+        for (int state : new int[] {Call.STATE_NEW, Call.STATE_SELECT_PHONE_ACCOUNT, Call.STATE_CONNECTING, Call.STATE_DIALING,
+                Call.STATE_PULLING_CALL, Call.STATE_RINGING, Call.STATE_SIMULATED_RINGING, Call.STATE_DISCONNECTING, Call.STATE_DISCONNECTED}) {
+            org.junit.Assert.assertNull(AlphaCallPresentation.ongoingConnectedAt(state, connect));
+        }
+        assertEquals(Long.valueOf(connect), AlphaCallPresentation.ongoingConnectedAt(Call.STATE_ACTIVE, connect));
+        assertEquals(Long.valueOf(connect), AlphaCallPresentation.ongoingConnectedAt(Call.STATE_HOLDING, connect));
+        // ACTIVE before Telecom has set the connect time: no clock rather than one from now.
+        org.junit.Assert.assertNull(AlphaCallPresentation.ongoingConnectedAt(Call.STATE_ACTIVE, 0));
+    }
+
+    private static Call callWithConnectTime(int state, long connect) throws Exception {
+        Call call = contactCall();
+        ReflectionHelpers.setField(call, "mState", state);
+        ReflectionHelpers.setField(call.getDetails(), "mConnectTimeMillis", connect);
+        return call;
+    }
+
+    @Test public void theOngoingCallBarIsToldTheDialingStateAndThenTheConnectTime() throws Exception {
+        AlphaInCallService owner = owner();
+        try {
+            long connect = System.currentTimeMillis() - 42_000;
+            Call call = callWithConnectTime(Call.STATE_DIALING, connect);
+            owner.onCallAdded(call);
+            org.json.JSONObject row = AlphaOngoingCallPlugin.snapshot().getJSONArray("calls").getJSONObject(0);
+            assertEquals("dialing", row.getString("state"));
+            org.junit.Assert.assertTrue(row.isNull("connectedAt"));
+            ReflectionHelpers.setField(call, "mState", Call.STATE_ACTIVE);
+            row = AlphaOngoingCallPlugin.snapshot().getJSONArray("calls").getJSONObject(0);
+            assertEquals("active", row.getString("state"));
+            assertEquals(connect, row.getLong("connectedAt"));
+        } finally { owner.onDestroy(); }
+    }
+
     @Test public void theOngoingCallBarReadsEachLiveCallWithoutWhoItIsWith() throws Exception {
         AlphaInCallService owner = owner();
         try {
