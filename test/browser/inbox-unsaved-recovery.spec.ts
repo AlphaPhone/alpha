@@ -1,6 +1,7 @@
 import {localDraftRow} from './inbox-draft-navigation';
 import {test,expect} from '@playwright/test';
-test.beforeEach(async({context})=>{await context.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));});
+import {restoreOfflineProfileAfterSetup} from './app-navigation';
+test.beforeEach(async({context})=>{await context.addInitScript(restoreOfflineProfileAfterSetup);});
 async function retained(page:any,expected:{body:string;toQ?:string;cc?:string[]},owner='owner-a'){
  await expect.poll(()=>page.evaluate(async owner=>{
   const binding=JSON.stringify(['inbox-unsaved','app',JSON.stringify(['production',owner,'','grant'])]);

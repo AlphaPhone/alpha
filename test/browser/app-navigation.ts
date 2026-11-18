@@ -1,5 +1,10 @@
 import { expect, type Page } from '@playwright/test';
 
+export function restoreOfflineProfileAfterSetup() {
+  localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
+  localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4,choices:['skipped','skipped','skipped','skipped']}));
+}
+
 /** Return through the standalone app's visible controls, including nested app pages. */
 export async function returnToApps(page: Page) {
   const settings = page.getByRole('button', {name: 'Settings', exact: true});
