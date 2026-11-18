@@ -1,3 +1,4 @@
+import {readWorkflowAppState} from './workflow-app-state';
 import {isFocusWorkflow} from './workflow-focus';
 import {detectWorkflowTriggers,triggerDefinition,triggerTickPlan,EventRangeCache,ParsedDocuments,type TriggerCursor,type TriggerOccurrence,type TriggerSnapshot} from './workflow-triggers';
 import {registerPlugin} from '../platform-plugins';
@@ -11,7 +12,6 @@ export type TriggerJob=TriggerOccurrence&{id:string;sourceHash:string};
 export type TriggerState={cursors:TriggerCursor[];queue:TriggerJob[]};
 export const emptyTriggerState=():TriggerState=>({cursors:[],queue:[]});
 const foreground=()=>!document.hidden&&document.documentElement.dataset.devBackground!=='true'&&!Array.from(document.querySelectorAll('[aria-label="Unlock with fingerprint"], [aria-label="Wake"]')).some(element=>element.getClientRects().length);
-const app=(api:Bag,name:string)=>({...api.get(name),...JSON.parse(localStorage.getItem('alpha.dev.app.'+name)||'{}')});
 const sha=async(value:unknown)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)))),b=>b.toString(16).padStart(2,'0')).join('');
 function sourceRecord(occurrence:TriggerOccurrence,snapshot:TriggerSnapshot):Bag{
  const source=occurrence.source;let rows:Bag[]=[];
@@ -24,7 +24,7 @@ function sourceRecord(occurrence:TriggerOccurrence,snapshot:TriggerSnapshot):Bag
 /** Hydrate only the exact triggering record, checking its captured content hash. */
 export async function hydrateTriggerJob(job:TriggerJob,api:Bag,signal:AbortSignal){
  signal.throwIfAborted();const calendar=registerPlugin<any>('AlphaCalendar'),source=job.source;
- const snapshot:TriggerSnapshot={messages:app(api,'messages').threads||{},mails:app(api,'inbox').mails||[],events:[],places:{}};
+ const snapshot:TriggerSnapshot={messages:readWorkflowAppState(api,'messages').threads||{},mails:readWorkflowAppState(api,'inbox').mails||[],events:[],places:{}};
  if(source.kind==='event'){const result=await calendar.list({begin:source.begin,end:source.end});if(result.truncated)throw Error('Calendar trigger input is incomplete.');snapshot.events=result.events;}
  const row=sourceRecord(job,snapshot);if(await sha(row)!==job.sourceHash)throw Error('The trigger source changed. Inspect it before running again.');signal.throwIfAborted();
  const messages=source.kind==='message'?{[source.person]:[structuredClone(row)]}:undefined;
@@ -85,8 +85,8 @@ export class WorkflowTriggerRuntime {
   }catch(error){this.blocked=true;const message=error instanceof Error?error.message:'Couldn’t check triggers';if(message!==this.report){this.report=message;api.setView('workflows',{localTriggerError:message});}}
   finally{this.scanning=false;}}
   if(!this.stopped&&triggerTickPlan({foreground:foreground(),scanBlocked:this.blocked,dispatchHeld:this.held}).dispatch&&this.stored(api,'workflows').triggerState?.queue?.length){
-   const state=app(api,'workflows'),job=(state.triggerState?.queue||[]).find((job:TriggerJob)=>{const flow=state.flows.find((flow:Bag)=>flow.on&&String(flow.id)===job.flowId&&triggerDefinition(flow)===job.definition);return flow&&!this.busy(job.flowId)&&!(workflowUsesAgent(flow)&&api.localWorkflowBusy?.())&&(!workflowNeedsReview(flow,api.localWorkflowReady?.())||api.isActive()&&String(state.open)===job.flowId&&!document.querySelector('dialog[open]'));});
-   if(job){const flow=state.flows.find((flow:Bag)=>String(flow.id)===job.flowId);void this.dispatch(flow,api,job).finally(()=>{this.held=!!app(api,'workflows').triggerState?.queue.some((pending:TriggerJob)=>pending.id===job.id);if(!this.held){this.blocked=false;void this.tick();}}).catch(()=>{this.held=true;});}
+   const state=readWorkflowAppState(api,'workflows'),job=(state.triggerState?.queue||[]).find((job:TriggerJob)=>{const flow=state.flows.find((flow:Bag)=>flow.on&&String(flow.id)===job.flowId&&triggerDefinition(flow)===job.definition);return flow&&!this.busy(job.flowId)&&!(workflowUsesAgent(flow)&&api.localWorkflowBusy?.())&&(!workflowNeedsReview(flow,api.localWorkflowReady?.())||api.isActive()&&String(state.open)===job.flowId&&!document.querySelector('dialog[open]'));});
+   if(job){const flow=state.flows.find((flow:Bag)=>String(flow.id)===job.flowId);void this.dispatch(flow,api,job).finally(()=>{this.held=!!readWorkflowAppState(api,'workflows').triggerState?.queue.some((pending:TriggerJob)=>pending.id===job.id);if(!this.held){this.blocked=false;void this.tick();}}).catch(()=>{this.held=true;});}
   }
  }
  dispose(){this.stopped=true;clearInterval(this.timer);for(const event of this.events)window.removeEventListener(event,this.wake);document.removeEventListener('visibilitychange',this.wake);void this.location.stop();}
