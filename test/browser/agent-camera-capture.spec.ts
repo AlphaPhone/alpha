@@ -9,13 +9,25 @@ import {returnToApps} from './app-navigation';
 // proposal-only-ask-first: the agent only proposes the photo on an ask-first phone. As the agent does there, the proposal names
 // no requesting message; the reply's own device receipt names it, so Camera still opens first and the card waits there.
 // Both proposal-only modes also list an earlier turn's web search review, which is reviewable on Home and must not keep Camera closed.
+// open-only: "open camera". The agent shows Camera and proposes nothing; the chat closes to its bar over a clear viewfinder.
 // unrelated-reply: an earlier turn's photo and search reviews are pending, and this reply proposed neither; Camera stays closed.
 // proposal-only-unreadable: device settings cannot be read, so the phone asks first; Camera opens and the card waits there.
 // maps-proposal-only-ask-first: the same ask-first photo asked for from Maps; Camera opens from there and the card waits there.
-// Every shutter is checked to fire on the live Camera viewfinder, never from Home.
-for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only','proposal-only-ask-first','proposal-only-unreadable','maps-proposal-only-ask-first','unrelated-reply','stop','selfie','selfie-ask-first'] as const)test(`${mode.startsWith('maps-')?'Maps':'Home'} camera request: ${mode}`,async({page})=>{
+// Every shutter is checked to fire on the live Camera viewfinder, never from Home, with nothing of the chat over it:
+// chat opening Camera closes the conversation to its bar, and a photo waiting for review is approved on that bar.
+for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','proposal-only','proposal-only-ask-first','proposal-only-unreadable','maps-proposal-only-ask-first','unrelated-reply','stop','selfie','selfie-ask-first'] as const)test(`${mode.startsWith('maps-')?'Maps':'Home'} camera request: ${mode}`,async({page})=>{
  await page.addInitScript(mode=>{
   const w=window as any,store=new Map(),agentId='12345678-1234-4234-8234-123456789abc',userMessageId='87654321-4321-4321-8321-cba987654321';
+  // The viewfinder (above its zoom row, when the lens has one) and the shutter are what is on top at each of their points, and the chat is closed.
+  w.cameraViewClear=()=>{
+   const finder=document.querySelector('[data-alpha-camera="viewfinder"]'),zoom=document.querySelector('[data-alpha-camera="zoom"]'),conversation=document.querySelector('[data-alpha-layer="conversation"]');
+   const shutter=[...document.querySelectorAll('[data-alpha-camera="capture"] button')].find(button=>button.getBoundingClientRect().width>=70);
+   if(!finder||!shutter||conversation?.getAttribute('aria-hidden')!=='true')return false;
+   const r=finder.getBoundingClientRect(),bottom=Math.min(r.bottom,zoom?zoom.getBoundingClientRect().top:r.bottom)-2,s=shutter.getBoundingClientRect();
+   if(r.height<=0||bottom<=r.top)return false;
+   for(const fx of [.05,.25,.5,.75,.95])for(const fy of [.02,.25,.5,.75,.98])if(!finder.contains(document.elementFromPoint(r.left+r.width*fx,r.top+(bottom-r.top)*fy)))return false;
+   return shutter.contains(document.elementFromPoint(s.left+s.width/2,s.top+s.height/2));
+  };
   const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,otherRoutes:0,receipts:[],log:[] as string[],shutterViews:[] as string[],advertised:'',proposal:null as any,stale:[] as any[],entry:null as any};
   const proposalOf=(id:string,operation:any,requestMessageId?:string)=>({id,digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+600000).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation,...(requestMessageId?{requestMessageId}:{})}});
   // The agent's preview receipt for the device proposal it created in this reply.
@@ -49,9 +61,10 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
     const unbound=mode==='proposal-only-ask-first'||mode==='proposal-only-unreadable'||mode==='maps-proposal-only-ask-first';
     if(mode.includes('proposal-only')||mode==='unrelated-reply')f.stale=[proposalOf('earlier-search',{type:'browser_search',query:'harbour tides'})];
     if(mode==='unrelated-reply'){f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo'});return ok({text:'It is sunny.',agentName:'Camera fixture',userMessageId,actionResults:[]});}
-    f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},unbound?undefined:mode==='old-message'?'old-message':userMessageId);
+    if(mode!=='open-only')f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},unbound?undefined:mode==='old-message'?'old-message':userMessageId);
     if(unbound)return ok({text:'Review this request on your phone before it can run.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
     if(mode==='proposal-only')return ok({text:'Opening Camera to take the photo.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
+    if(mode==='open-only')return ok({text:'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
     return ok({text:mode==='selfie'?'Opening Camera to take the photo.':'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
    }
    if(path==='/api/views/interact-claim'){f.claims++;return ok({claimId:'camera-owned-claim'});}
@@ -87,7 +100,7 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   browserCamera.switchCamera=async({direction})=>{(window as any).cameraRequestFixture.log.push('switch:'+direction);return{width:16,height:16,deviceId:'fixture'} as any;};
   browserCamera.capturePhoto=async()=>{const f=(window as any).cameraRequestFixture;f.captures++;f.log.push('capture');
    // The shutter fires only with Camera active and its viewfinder on screen.
-   const finder=document.querySelector('[data-alpha-camera="viewfinder"]');f.shutterViews.push(document.documentElement.getAttribute('data-active-view')+(finder&&finder.getBoundingClientRect().height>0?':viewfinder':':no-viewfinder'));const c=document.createElement('canvas');c.width=c.height=16;return{path:'browser-photo:///1792274767123123456789012',format:'jpeg',base64:c.toDataURL('image/jpeg').split(',')[1],width:16,height:16};};
+   const finder=document.querySelector('[data-alpha-camera="viewfinder"]');f.shutterViews.push(document.documentElement.getAttribute('data-active-view')+(finder&&finder.getBoundingClientRect().height>0&&(window as any).cameraViewClear()?':viewfinder':':no-viewfinder'));const c=document.createElement('canvas');c.width=c.height=16;return{path:'browser-photo:///1792274767123123456789012',format:'jpeg',base64:c.toDataURL('image/jpeg').split(',')[1],width:16,height:16};};
   if(mode.endsWith('ask-first')){const {editDevicePreferences}=await import('/src/browser/device-preferences.ts');await editDevicePreferences(state=>{state.askBeforeAgentActions=true;});}
   if(mode==='proposal-only-unreadable'){
    // Direct mode is saved, then the stored settings become unreadable: the phone must fall back to asking first.
@@ -119,6 +132,16 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Cancelled\. No photo was taken\.$/})).toHaveCount(1);
   const f=await fixture();expect(f.captures).toBe(0);expect(f.receipts.map((receipt:any)=>receipt.outcome)).not.toContain('applied');
   await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
+  return;
+ }
+ if(mode==='open-only'){
+  // Camera has the screen: the reply is behind Camera's resting bar, which reopens it, and nothing is taken.
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
+  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
+  await expect.poll(()=>page.evaluate(()=>(window as any).cameraViewClear())).toBe(true);
+  await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();
+  await expect(page.locator('[data-alpha-bar-review]')).toHaveCount(0);
+  const f=await fixture();expect(f.captures).toBe(0);expect(f.claims).toBe(1);
   return;
  }
  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
@@ -157,6 +180,15 @@ for(const mode of ['capture','lost-ack','old-message','ask-first','proposal-only
   const approve=page.getByRole('button',{name:/^Take photo\b.*Approve$/s});
   await expect(approve).toHaveCount(1);
   await expect(notice).toHaveCount(0);
+  // The card waits on the closed bar, below the shutter: the viewfinder and shutter stay clear and the card stays tappable.
+  const review=page.locator('[data-alpha-bar-review]');
+  await expect(review.getByRole('button',{name:/^Take photo\b.*Approve$/s})).toBeVisible();
+  await expect(review.getByRole('button',{name:'Decline',exact:true})).toBeVisible();
+  // Once the dock clearance has settled, the card lies wholly below the shutter row and on screen.
+  await expect.poll(()=>page.evaluate(()=>{
+   const card=document.querySelector('[data-alpha-bar-review]')!.getBoundingClientRect(),row=document.querySelector('[data-alpha-camera="capture"]')!.getBoundingClientRect(),screen=document.querySelector('[data-screen]')!.getBoundingClientRect();
+   return (window as any).cameraViewClear()&&card.top>=row.bottom&&card.bottom<=screen.bottom;
+  })).toBe(true);
   if(!mode.endsWith('ask-first')&&mode!=='proposal-only-unreadable')return;
   // The card names the camera the request asked for.
   await expect(approve).toContainText(mode==='selfie-ask-first'?'Use the front camera and save one photo in Photos.':'Use the current camera and save one photo in Photos.');

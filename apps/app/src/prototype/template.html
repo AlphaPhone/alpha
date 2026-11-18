@@ -4688,6 +4688,18 @@
       <button class="alpha-bar-recorder-primary" aria-label="{{barRecorder.primaryLabel}}" disabled="{{barRecorder.primaryDisabled}}" onClick="{{barRecorder.stop}}"><svg class="i" viewBox="0 0 24 24"><path d="{{barRecorder.primaryIcon}}"></path></svg></button>
     </section>
   </sc-if>
+  <sc-if value="{{hasBarReviews}}">
+    <!-- Camera keeps its viewfinder and shutter clear: a photo waiting for review is approved or declined here, on its closed bar. -->
+    <div data-alpha-bar-review class="alpha-action-review alpha-bar-review" role="group" aria-label="Photo waiting for review">
+      <sc-for list="{{barReviews}}" key="{{r.key}}" as="r">
+        <button onPointerDown="{{r.keepComposerFocus}}" onClick="{{r.open}}">
+          <span aria-hidden="true">{{r.ini}}</span>
+          <div><div class="alpha-bar-review-title">{{r.who}}</div><div class="alpha-bar-review-text">{{r.text}}</div></div>
+          <strong class="alpha-row-label">{{r.label}}</strong><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
   <sc-if value="{{barAskHint}}"><p data-alpha-bar-hint class="alpha-bar-hint" role="status">{{barAskHint}}</p></sc-if>
   <div data-alpha-input-bar class="enter {{barFieldClass}}" onPointerDown="{{inputSw.down}}" onPointerMove="{{inputSw.move}}" onPointerUp="{{inputSw.up}}" onPointerCancel="{{inputSw.cancel}}" onLostPointerCapture="{{inputSw.lost}}" style="{{inputDragStyle}}; position:relative; display: flex; align-items: center; gap: 4px; min-height: 62px; padding: 6px 8px 6px 9px; border-radius: 31px; background: var(--s2); box-shadow: 0 14px 40px var(--shc); touch-action: pan-y">
     <span data-alpha-input-drag-background aria-hidden="true" style="position:absolute;inset:0;z-index:0;border-radius:inherit;touch-action:none"></span>
@@ -4717,6 +4729,17 @@
 
 <sc-if value="{{showPill}}">
 <div data-alpha-layer="pill" role="group" aria-label="Assistant controls" aria-hidden="{{dockHidden}}" inert="{{dockHidden}}" style="position: absolute; left: 0; right: 0; bottom: 26px; z-index: 40; display: flex; justify-content: center; pointer-events: none">
+  <sc-if value="{{hasBarReviews}}">
+    <div data-alpha-bar-review class="alpha-action-review alpha-bar-review alpha-pill-review" role="group" aria-label="Photo waiting for review">
+      <sc-for list="{{barReviews}}" key="{{r.key}}" as="r">
+        <button onPointerDown="{{r.keepComposerFocus}}" onClick="{{r.open}}">
+          <span aria-hidden="true">{{r.ini}}</span>
+          <div><div class="alpha-bar-review-title">{{r.who}}</div><div class="alpha-bar-review-text">{{r.text}}</div></div>
+          <strong class="alpha-row-label">{{r.label}}</strong><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
   <div class="enter" onPointerDown="{{pillSw.down}}" onPointerMove="{{pillSw.move}}" onPointerUp="{{pillSw.up}}" onPointerCancel="{{pillSw.cancel}}" onLostPointerCapture="{{pillSw.lost}}" style="{{pillDragStyle}}; pointer-events: auto; display: flex; align-items: center; gap: 2px; padding: 5px; border-radius: 30px; background: var(--s2); box-shadow: 0 12px 34px var(--shc); touch-action: none">
     <sc-if value="{{pillVoiceInactive}}">    <button data-alpha-pill-alpha class="alpha-mark-fill" aria-label="Open conversation" onClick="{{openSheet}}" style="width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; font-family: Denton, Fraunces, Georgia, serif; font-style: italic; font-size: 24px"><span class="alpha-compute-mark" aria-hidden="true"></span></button>
     <button class="ib" aria-label="Type" onClick="{{toInput}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.kbd}}"></path></svg></button>
