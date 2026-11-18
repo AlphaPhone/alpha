@@ -3,11 +3,9 @@ import {Capacitor} from '@capacitor/core';
 import {runFilePicker,inputFiles} from '../browser/file-picker';
 import {DailyApps} from '../daily';
 import {registerPlugin} from '../platform-plugins';
-import {reviewMailAttachment as reviewSharedAttachment,type MailAttachment} from '../runtime/inbox-attachment';
-import {attachmentRefusalText} from '../ui/mailbox/drafts-controller';
+import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
+import {rethrowAttachmentRefusal} from '../ui/mailbox/drafts-controller';
 import {documentSourceOf,retainedSourceReferences,type DocumentSourceLink} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
-/** The shared attachment review, refusing in Alpha's words (never the shared module's). */
-const reviewMailAttachment=(file:MailAttachment)=>reviewSharedAttachment(file).catch((error:unknown)=>{throw new Error(attachmentRefusalText(error));});
 type Bag=Record<string,any>;
 /** A note's linked source document (shared plugin-files source-link rules, J03). */
 export type Source=DocumentSourceLink;
@@ -91,11 +89,11 @@ export function installNoteSourceAdapter(views:Bag){
        const owned=anyAbortSignal([signal,pickerAbort.signal]),files=await inputFiles(owned);owned.throwIfAborted();
        if(!files.length)return null;const chosen=files[0];if(chosen.size>5*1024*1024)throw Error('Choose a file up to 5 MB.');
        const bytes=new Uint8Array(await chosen.arrayBuffer());owned.throwIfAborted();let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-       const value={name:chosen.name,mimeType:chosen.type,dataBase64:btoa(binary)};return {...value,...await reviewMailAttachment(value)};
+       const value={name:chosen.name,mimeType:chosen.type,dataBase64:btoa(binary)};return {...value,...await reviewMailAttachment(value).catch(rethrowAttachmentRefusal)};
       },null);
       if(!current())return;if(!selected){status.textContent='';return;}file=selected;
      }
-     const checked=await reviewMailAttachment(file);
+     const checked=await reviewMailAttachment(file).catch(rethrowAttachmentRefusal);
      if(!current())return;
      if(checked.sha256!==file.sha256||checked.size!==file.size)throw Error('Selected file changed. Choose it again.');
      if(mode==='link'){

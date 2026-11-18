@@ -111,18 +111,27 @@ test('every refusal Cloud’s Inbox routes send with HTTP 400 or 413 keeps its r
  assert.equal(cloudInboxRefusal(null),undefined);
 });
 
-const {attachmentRefusalText}=await import('../apps/app/src/ui/mailbox/drafts-controller.ts');
-test('the shared attachment review’s refusals reach Use in email and the note source review in Alpha’s words',()=>{
+const {attachmentRefusalText,rethrowAttachmentRefusal}=await import('../apps/app/src/ui/mailbox/drafts-controller.ts');
+test('shared attachment review rejections carry the composer-safe refusal',async()=>{
  const sentences=thrown(staged('plugins/plugin-files/src/browser/attachment.ts'));
  assert.equal(sentences.length,3);
  for(const sentence of sentences){
-  const text=attachmentRefusalText(Object.assign(new Error(sentence),{name:'AttachmentRefusedError'}));
+  const reason=Object.assign(new Error(sentence),{name:'AttachmentRefusedError'});
+  const text=attachmentRefusalText(reason);
   assert.notEqual(text,sentence);assert.ok(text.length>10,sentence);
+  await assert.rejects(Promise.reject(reason).catch(rethrowAttachmentRefusal),{message:text});
  }
+ // Use in email and the note source review reach the shared review (and Use in email its selection
+ // read) only through that refusal, so no staged sentence reaches either dialog.
  for(const file of ['apps/app/src/prototype/file-email-review.ts','apps/app/src/prototype/note-source-adapter.ts']){
   const text=readFileSync(new URL('../'+file,import.meta.url),'utf8');
-  assert.match(text,/reviewSharedAttachment\(file\)\.catch\(\(error:unknown\)=>\{throw new Error\(attachmentRefusalText\(error\)\);\}\)/,file);
+  const reviews=text.match(/reviewMailAttachment\([^)]*\)(\.catch\(rethrowAttachmentRefusal\))?/g)||[];
+  assert.ok(reviews.length>0,file);
+  for(const call of reviews)assert.match(call,/\.catch\(rethrowAttachmentRefusal\)$/,file);
  }
+ const review=readFileSync(new URL('../apps/app/src/prototype/file-email-review.ts',import.meta.url),'utf8');
+ assert.equal((review.match(/options\.read\(\)/g)||[]).length,1);
+ assert.match(review,/options\.read\(\)\.catch\(rethrowAttachmentRefusal\)/);
 });
 
 const {SCAN_DRAFT_REFUSALS,scanDraftErrorText}=await import('../apps/app/src/ui/documents/scan-pdf-messages.ts');
@@ -165,7 +174,7 @@ test('every entitlement verifier code has Alpha’s status and its own text is n
 });
 
 const {AttachmentNotice}=await import('../apps/app/src/ui/mailbox/drafts-controller.ts');
-test('the Files selection a web Attach to email reads is refused in Alpha’s words, never the staged Files sentence',()=>{
+test('selected-file read failures carry the composer-safe refusal',async()=>{
  // BrowserFiles.selected()/attachment(), reached through BrowserMailAttachments.readSelected.
  const files=staged('plugins/plugin-files/src/browser/files.ts');
  const attachment=files.slice(files.indexOf('async attachment('),files.indexOf('async forgetSelected('));
@@ -176,16 +185,14 @@ test('the Files selection a web Attach to email reads is refused in Alpha’s wo
   'Choose a file up to 5 MiB.':'This file is larger than 5 MiB. Choose a file up to 5 MiB.',
  };
  assert.deepEqual(sentences.sort(),Object.keys(PINNED).sort());
- for(const [upstream,alpha] of Object.entries(PINNED))assert.equal(attachmentRefusalText(new Error(upstream)),alpha,upstream);
+ for(const [upstream,alpha] of Object.entries(PINNED))
+  await assert.rejects(Promise.reject(new Error(upstream)).catch(rethrowAttachmentRefusal),{message:alpha});
  // The review readSelected runs (plugin-files reviewMailAttachment) reaches the dialog the same way.
  for(const sentence of thrown(staged('plugins/plugin-files/src/browser/attachment.ts')))assert.notEqual(attachmentRefusalText(new Error(sentence)),sentence);
- assert.equal(attachmentRefusalText(new Error('Something new from Files')),'Attachment unavailable');
+ await assert.rejects(Promise.reject(new Error('Something new from Files')).catch(rethrowAttachmentRefusal),{message:'Attachment unavailable'});
  // Alpha's own selection check reads as written.
- assert.equal(attachmentRefusalText(new AttachmentNotice('Selected file changed. Select it again.')),'Selected file changed. Select it again.');
- const review=readFileSync(new URL('../apps/app/src/prototype/file-email-review.ts',import.meta.url),'utf8');
- assert.match(review,/const readSelected=\(read:\(\)=>Promise<SelectedFile>\)=>read\(\)\.catch\(\(error:unknown\)=>\{throw new Error\(attachmentRefusalText\(error\)\);\}\);/);
- assert.match(review,/const checked=async\(\)=>\{const value=await readSelected\(options\.read\),/);
- assert.doesNotMatch(review,/options\.read\(\)/,'every read of the selection goes through readSelected');
+ const message='Selected file changed. Select it again.';
+ await assert.rejects(Promise.reject(new AttachmentNotice(message)).catch(rethrowAttachmentRefusal),{message});
  const adapter=readFileSync(new URL('../apps/app/src/prototype/selection-adapter.ts',import.meta.url),'utf8');
  assert.match(adapter,/throw new AttachmentNotice\('Selected file changed\. Select it again\.'\)/);
 });

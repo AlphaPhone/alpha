@@ -169,6 +169,11 @@ export function attachmentRefusalText(error: unknown): string {
   return ATTACHMENT_UNAVAILABLE;
 }
 
+/** Carry the composer-safe refusal text across a file reader or reviewer rejection. */
+export function rethrowAttachmentRefusal(error: unknown): never {
+  throw new Error(attachmentRefusalText(error));
+}
+
 /**
  * Alpha's sentence when an outgoing list breaks the shared limits (`checkOutgoingAttachments`):
  * the file count, two names that match (forwarded originals included), the combined size, or
