@@ -102,7 +102,7 @@ test('a full-height conversation keeps the review below the status bar, and a se
  expect(measured.cancel).toBeGreaterThanOrEqual(measured.header);
  expect(await dialog.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
  await dialog.getByRole('button',{name:'Insert into draft',exact:true}).click();await expect(body(page)).toHaveValue(first);
- // System Back closes the composer; the one draft for this account stays, off screen.
+ // System Back saves the reply to Drafts; it stays the thread's unfinished reply, off screen.
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
  await expect(body(page)).toHaveCount(0);await expect(page.getByText('Can you do Tuesday at 10?',{exact:true})).toBeVisible();
  await say(page,second);await expect(reply(page,second)).toBeVisible();await openReview(page,second);
