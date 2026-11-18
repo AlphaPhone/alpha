@@ -671,9 +671,9 @@ registerView("phone", {
 /* Messages: SMS / RCS. Holes are {{messages.*}}. The one bottom bar is the composer (bar(), AP-16). */
 IC.msgUnread = IC.msgUnread || "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z";
 
-function msgPeople(api) { var c = api.get("contacts") || {}; return (c.list && c.list.length) ? c.list : api.people; }
+function messagePeople(api) { var c = api.get("contacts") || {}; return (c.list && c.list.length) ? c.list : api.people; }
 function msgWho(api, pid, st) {
-  var l = msgPeople(api);
+  var l = messagePeople(api);
   for (var i = 0; i < l.length; i++) if (l[i].id === pid) return l[i];
   var p = api.person(pid); if (p) return p;
   var ex = ((st || api.get("messages")).extra || []).filter(function (x) { return x.id === pid; })[0];
@@ -682,7 +682,7 @@ function msgWho(api, pid, st) {
 }
 function msgFind(api, word) {
   if (!word) return null; word = word.toLowerCase().replace(/[^a-z]/g, "");
-  return msgPeople(api).filter(function (p) { return p.id === word || p.name.toLowerCase().split(" ")[0] === word; })[0] || null;
+  return messagePeople(api).filter(function (p) { return p.id === word || p.name.toLowerCase().split(" ")[0] === word; })[0] || null;
 }
 function msgFirst(p) { return String(p.name).split(" ")[0]; }
 function msgFmt(k) {
@@ -994,7 +994,7 @@ registerView("messages", {
       var by = d.draft === "asked" ? "alpha" : d.draft === "owner" ? "owner" : null;
       th = {
         name: w.name, ini: w.ini, bubbles: bubbles, typing: st.typing === tp,
-        who: function () { if (api.person(tp) || msgPeople(api).some(function (p) { return p.id === tp; })) api.open("contacts", { open: tp }); else api.open("contacts", { add: true }); },
+        who: function () { if (api.person(tp) || messagePeople(api).some(function (p) { return p.id === tp; })) api.open("contacts", { open: tp }); else api.open("contacts", { add: true }); },
         call: function () { api.open("phone", { call: tp }); },
         draftBubble: open && by && d.text.trim() ? {
           by: by, alpha: by === "alpha", sent: undefined, text: d.text, canUndo: !!d.undo, canAct: true,
@@ -1017,7 +1017,7 @@ registerView("messages", {
       var q = (st.q || "").trim().toLowerCase();
       var digits = q.replace(/[^0-9]/g, "");
       var numOnly = /^[0-9()+\-\s.]+$/.test(q) && digits.length >= 3;
-      var ppl = msgPeople(api).filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || (digits && String(p.phone || "").replace(/[^0-9]/g, "").indexOf(digits) >= 0); });
+      var ppl = messagePeople(api).filter(function (p) { return !q || p.name.toLowerCase().indexOf(q) >= 0 || (digits && String(p.phone || "").replace(/[^0-9]/g, "").indexOf(digits) >= 0); });
       var goNum = function () {
         if (!numOnly) return;
         var id = "n:" + digits; var s2 = api.get("messages");
@@ -1081,8 +1081,7 @@ function inboxAcctOf(accts, id) {
   for (var j = 0; j < accts.length; j++) if (String(accts[j].label || "").toLowerCase() === id) return accts[j];
   return (id === "work" && accts[1] ? accts[1] : accts[0]) || { id: id || "none", label: "No account", address: "No account connected", mail: false };
 }
-function inboxPeople(api) { var c = api.get("contacts") || {}; return (c.list && c.list.length) ? c.list : api.people; }
-function inboxPerson(api, id) { var l = inboxPeople(api); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return api.person(id); }
+function inboxPerson(api, id) { var l = messagePeople(api); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return api.person(id); }
 function inboxWho(api, m) {
   var p = m.pid ? inboxPerson(api, m.pid) : null;
   if (p) return { name: p.name, ini: p.ini, email: p.email };
@@ -1091,7 +1090,7 @@ function inboxWho(api, m) {
 }
 function inboxFind(api, word) {
   if (!word) return null; word = word.toLowerCase();
-  return inboxPeople(api).filter(function (p) { return p.id === word || p.name.toLowerCase().split(" ")[0] === word || p.name.toLowerCase() === word; })[0] || null;
+  return messagePeople(api).filter(function (p) { return p.id === word || p.name.toLowerCase().split(" ")[0] === word || p.name.toLowerCase() === word; })[0] || null;
 }
 function inboxClock(d) { return formatTime(d); }
 function inboxLive(st) { return (st.mails || []).filter(function (m) { return !m.arch && !m.del; }); }
@@ -1368,7 +1367,7 @@ registerView("inbox", {
       var fa = inboxAcctOf(accts, acctId);
       var upd = function (p) { var cc = api.get("inbox").compose; cc = cc === true ? {} : (cc || {}); api.set({ compose: Object.assign({}, cc, { to: inboxRecips(cc.to) }, p) }); };
       var q = (st.toQ || "").trim().toLowerCase();
-      var sugg = inboxPeople(api).filter(function (p) {
+      var sugg = messagePeople(api).filter(function (p) {
         if (!p.email || to.indexOf(p.id) >= 0) return false;
         if (!q) return to.length === 0;
         return p.name.toLowerCase().indexOf(q) >= 0 || p.email.toLowerCase().indexOf(q) >= 0;
@@ -1458,7 +1457,7 @@ function calOccurs(e, off, api) {
   return false;
 }
 function calEvents(api) { var st = api.get("calendar"); return st.events || CAL_SEED; }
-function calFind(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+function recordById(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 function calPeople(api) { var c = api.get("contacts"); return (c && c.list && c.list.length) ? c.list : PEOPLE; }
 function calPerson(api, id) { var l = calPeople(api); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; var email=calendarGuestEmail(id);return email?{id:id,name:email,email:email,ini:email.slice(0,2).toUpperCase()}:api.person(id) || { id: id, name: id, ini: id.slice(0, 2).toUpperCase() }; }
 function calCals(st, api) {
@@ -1532,14 +1531,14 @@ registerView("calendar", {
   suggestions: function (st) {
     var sg = copy("calendar").suggestions || {};
     if (st.form) return sg.form || ["Find me an hour to focus"];
-    if (st.open) { var e = calFind(st.events || CAL_SEED, st.open); if (e) return ["Prep me for " + e.title, "Move " + e.title + " to tomorrow", "Cancel " + e.title]; }
+    if (st.open) { var e = recordById(st.events || CAL_SEED, st.open); if (e) return ["Prep me for " + e.title, "Move " + e.title + " to tomorrow", "Cancel " + e.title]; }
     return sg.day || ["What does my afternoon look like?", "Find me an hour to focus"];
   },
   voicePhrase: "Find me an hour to focus",
   back: function (st, api) {
     if (st.form && st.form.pq != null) { api.set({ form: Object.assign({}, st.form, { pq: null }) }); return true; }
     if (st.form) { api.set({ form: null }); return true; }
-    if (st.open) { var oe = calFind(st.events || CAL_SEED, st.open); api.set({ open: null, openDay: null, day: calendarReturnDay(st.day || 0, st.openDay != null ? st.openDay : (oe ? oe.off : st.day || 0)) }); return true; }
+    if (st.open) { var oe = recordById(st.events || CAL_SEED, st.open); api.set({ open: null, openDay: null, day: calendarReturnDay(st.day || 0, st.openDay != null ? st.openDay : (oe ? oe.off : st.day || 0)) }); return true; }
     if (st.month != null) { api.set({ month: null }); return true; }
     return false;
   },
@@ -1547,13 +1546,13 @@ registerView("calendar", {
     add: function (card, api) {
       var ev = Object.assign({ id: "e" + Date.now() }, card.ev);
       var list = calEvents(api);
-      if (!calFind(list, ev.id)) api.set({ events: list.concat([ev]) });
+      if (!recordById(list, ev.id)) api.set({ events: list.concat([ev]) });
       api.toast("Added to calendar");
       api.open("calendar", { day: ev.off, open: null, month: null, form: null });
     },
     restore: function (card, api) {
       var list = calEvents(api);
-      if (!calFind(list, card.ev.id)) api.set({ events: list.concat([card.ev]) });
+      if (!recordById(list, card.ev.id)) api.set({ events: list.concat([card.ev]) });
       api.toast("Restored " + card.ev.title);
     },
     savePrep: function (card, api) { api.toast("Pinned to " + (card.evTitle || "the event")); }
@@ -1561,7 +1560,7 @@ registerView("calendar", {
   reply: function (t, raw, api) {
     if (calIsFlowTalk(t)) return null;
     var st = api.get("calendar"); var list = calEvents(api);
-    var cur = st.open ? calFind(list, st.open) : null;
+    var cur = st.open ? recordById(list, st.open) : null;
     var setList = function (l) { api.setView("calendar", { events: l }); };
 
     // invites
@@ -1662,7 +1661,7 @@ registerView("calendar", {
         var l = calEvents(api); var id = a.id || "e" + Date.now();
         var ne = { id: id, off: a.off || 0, t: a.t == null ? 9 : a.t, d: a.d || 1, title: a.title || "New event", where: a.where || "", who: a.who || [], cal: a.cal || "personal", notes: a.notes || "", alert: a.alert == null ? 10 : a.alert };
         if (a.video) ne.video = a.video;
-        api.setView("calendar", { add: null, events: calFind(l, id) ? l : l.concat([ne]), day: ne.off, open: id, openDay: ne.off, form: null, month: null });
+        api.setView("calendar", { add: null, events: recordById(l, id) ? l : l.concat([ne]), day: ne.off, open: id, openDay: ne.off, form: null, month: null });
         api.toast("Added to calendar");
       }, 0);
     }
@@ -1750,11 +1749,11 @@ registerView("calendar", {
     });
 
     // detail
-    var ev = st.open ? calFind(list, st.open) : null;
+    var ev = st.open ? recordById(list, st.open) : null;
     if (ev && !calOf(ev.cal)) ev = null;
     var evDay = ev ? (st.openDay != null && calOccurs(ev, st.openDay, api) ? st.openDay : ev.off) : 0;
     var undo = function (label, ev) {
-      api.toast(label, { undo: function () { var l = calEvents(api); if (!calFind(l, ev.id)) api.setView("calendar", { events: l.concat([ev]) }); } });
+      api.toast(label, { undo: function () { var l = calEvents(api); if (!recordById(l, ev.id)) api.setView("calendar", { events: l.concat([ev]) }); } });
     };
     var formFrom = function (e, off) { return { id: e ? e.id : null, title: e ? e.title : "", off: e ? (e.repeat && e.repeat !== "none" ? e.off : off) : off, t: e ? e.t : 17, d: e ? e.d : 1, where: e ? (e.where === "Phone" ? "Phone" : e.where || "") : "", video: e ? !!e.video : false, who: e ? (e.who || []).slice() : [], cal: e ? e.cal : "work", repeat: e ? e.repeat || "none" : "none", alert: e ? (e.alert == null ? null : e.alert) : 10, notes: e ? e.notes || "" : "" }; };
     var D = null;
@@ -1836,7 +1835,7 @@ registerView("calendar", {
         save: function () {
           var title = (f.title || "").trim();
           if (!title) return;
-          var old = f.id ? calFind(list, f.id) : null;
+          var old = f.id ? recordById(list, f.id) : null;
           var ne = Object.assign({}, old || {}, { id: f.id || "e" + Date.now(), off: f.off, t: f.t, d: f.d, title: title, where: (f.where || "").trim(), who: f.who, cal: f.cal, repeat: f.repeat, alert: f.alert, notes: (f.notes || "").trim() });
           if (f.video && !ne.video) ne.video = "meet.lumen.example/" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
           if (!f.video) delete ne.video;
@@ -3227,7 +3226,6 @@ var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null };
 
 function notesFmt(sec) { if (!Number.isFinite(sec)) return ""; sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + pad2(sec % 60); }
 function notesNowLabel(d) { return formatTime(d); }
-function notesFind(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 /* Live agent Notes (canonical-notes-ui.ts) bind api.canonicalNotes: the same view, saved through the canonical Notes client. */
 function notesUpd(api, id, patch) {
   if (api.canonicalNotes) return api.canonicalNotes.update(id, patch);
@@ -3240,7 +3238,7 @@ function notesUpd(api, id, patch) {
     return next;
   });
   var change = { list: list };
-  if (s.blankCreationId === id && !notesEmpty(notesFind(list, id), s.blankCreationTitle)) { change.blankCreationId = null; change.blankCreationTitle = null; }
+  if (s.blankCreationId === id && !notesEmpty(recordById(list, id), s.blankCreationTitle)) { change.blankCreationId = null; change.blankCreationTitle = null; }
   return api.set(change);
 }
 function notesEmpty(n, defaultTitle) {
@@ -3259,7 +3257,7 @@ function notesClose(api) {
 function notesLeave(api, next) {
   if (api.canonicalNotes) { void api.canonicalNotes.leave(next); return {}; }
   var s = api.get("notes"); notesStopTimers();
-  var n = s.open !== next && s.open === s.blankCreationId ? notesFind(s.list, s.open) : null;
+  var n = s.open !== next && s.open === s.blankCreationId ? recordById(s.list, s.open) : null;
   var patch = { open: next, sheet: null, playing: false, newItem: "", blankCreationId: next === s.open ? s.blankCreationId : null, blankCreationTitle: next === s.open ? s.blankCreationTitle : null };
   if (n && notesEmpty(n, s.blankCreationTitle)) patch.list = s.list.filter(function (x) { return x.id !== n.id; });
   return patch;
@@ -3274,7 +3272,7 @@ function notesAway(api) {
   return p;
 }
 function notesUndoable(api, note, idx, label) {
-  api.toast(label, { undo: function () { var s = api.get("notes"); if (notesFind(s.list, note.id)) return; var l = s.list.slice(); l.splice(Math.min(idx, l.length), 0, note); api.set({ list: l }); } });
+  api.toast(label, { undo: function () { var s = api.get("notes"); if (recordById(s.list, note.id)) return; var l = s.list.slice(); l.splice(Math.min(idx, l.length), 0, note); api.set({ list: l }); } });
 }
 async function notesDelete(api, id) {
   if (api.canonicalNotes) return api.canonicalNotes.remove(id, api);
@@ -3325,7 +3323,7 @@ registerView("notes", {
   },
   onLeave: function (api) { var p = notesAway(api); if (p) api.set(p); },
   suggestions: function (st, api) {
-    var n = st.open ? notesFind(st.list, st.open) : null;
+    var n = st.open ? recordById(st.list, st.open) : null;
     if (n && n.kind === "voice") {
       var pid = null; (n.lines || []).forEach(function (l) { if (!pid && l.s !== "me") pid = l.s; });
       var p = pid ? api.person(pid) : null;
@@ -3372,16 +3370,16 @@ registerView("notes", {
     }
     var digest = copy("notes").digest;
     if (digest && digest.re.test(t) && /decide|decision|agree|summar|what/.test(t)) {
-      var d = notesFind(st.list, digest.id);
+      var d = recordById(st.list, digest.id);
       if (d) return { text: digest.text, card: { type: "summary", bullets: d.summary.concat(d.actions.map(function (a) { return "Next: " + a.t; })), go: { view: "notes", patch: { open: digest.id } } } };
     }
     if (/summar|recap|what did we (decide|say)/.test(t) && /(last|latest|recent)?\s*(recording|meeting|voice note|memo|standup)/.test(t) || (api.active && /what did we decide/.test(t))) {
-      var cur = api.active && st.open ? notesFind(st.list, st.open) : null;
+      var cur = api.active && st.open ? recordById(st.list, st.open) : null;
       var r = cur && cur.kind === "voice" ? cur : notesLast(st.list);
       if (r) return { text: r.title + ", " + notesFmt(r.dur) + ".", card: { type: "summary", bullets: r.summary.concat(r.actions.map(function (a) { return "Next: " + a.t; })), go: { view: "notes", patch: { open: r.id } } } };
     }
     if (api.active && st.open) {
-      var n = notesFind(st.list, st.open);
+      var n = recordById(st.list, st.open);
       if (n && n.kind === "text" && /checklist|to-?do list|make .*list/.test(t)) {
         return { text: "Done. Each line is now a checkbox.", then: function () { notesUpd(api, n.id, function (x) { return { kind: "list", items: String(x.body || "").split("\n").filter(function (l) { return l.trim(); }).map(function (l) { return { t: l.trim(), done: false }; }), body: "" }; }); } };
       }
@@ -3425,7 +3423,7 @@ registerView("notes", {
     var pinnedRows = rows.filter(function (r) { return r.pinned; }), otherRows = rows.filter(function (r) { return !r.pinned; });
 
     /* open note */
-    var n = st.open ? notesFind(list, st.open) : null;
+    var n = st.open ? recordById(list, st.open) : null;
     var isEdit = !!n && (n.kind === "text" || n.kind === "list");
     var ed = null, vo = null, lk = null;
     var common = n ? {
@@ -3549,7 +3547,6 @@ function ctMake(p) { var name = ((p.first || "") + " " + (p.last || "")).trim();
 
 var CT_FIELDS = ["first", "last", "phone", "email", "address", "birthday", "note"];
 function ctList(api) { return api.get("contacts").list || CT_SEED; }
-function ctGet(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 function ctFind(t, list) {
   var best = null, len = 0;
   list.forEach(function (p) {
@@ -3564,7 +3561,7 @@ function ctFind(t, list) {
 function ctForm(s, list) {
   if (s.form) return s.form;
   var f = {}; CT_FIELDS.forEach(function (k) { f[k] = ""; });
-  var p = s.edit ? ctGet(list, s.edit) : null;
+  var p = s.edit ? recordById(list, s.edit) : null;
   if (p) CT_FIELDS.forEach(function (k) { f[k] = p[k] || ""; });
   if (s.add && typeof s.add === "object") CT_FIELDS.forEach(function (k) { if (s.add[k]) f[k] = s.add[k]; });
   return f;
@@ -3656,7 +3653,7 @@ function focusSearchInput(cls) {
 /* AP-16 bar (runtime/comms-bar.ts): on the list the bar searches it or asks Alpha; on a contact it
    asks Alpha about that person. Contacts never addresses a person from the bar. */
 function ctBar(st, api) {
-  var p = st.open ? ctGet(st.list || CT_SEED, st.open) : null;
+  var p = st.open ? recordById(st.list || CT_SEED, st.open) : null;
   var field = { value: "", onText: null, submit: null, canSubmit: false, maxLength: null, suggestion: null, acceptSuggestion: null };
   var rest = { end: null, incoming: null, emergency: false, fit: null };
   if (p) {
@@ -3684,7 +3681,7 @@ function ctBar(st, api) {
 function ctSave(api) {
   var s = api.get("contacts"); var l = s.list || CT_SEED;
   /* the contact being edited was deleted meanwhile: nothing is saved and the editor closes */
-  if (s.edit && !ctGet(l, s.edit)) { api.set({ edit: null, add: null, form: null, open: null }); api.toast("This contact was deleted"); return false; }
+  if (s.edit && !recordById(l, s.edit)) { api.set({ edit: null, add: null, form: null, open: null }); api.toast("This contact was deleted"); return false; }
   var f = ctForm(s, l);
   var clean = {}; CT_FIELDS.forEach(function (k) { clean[k] = String(f[k] || "").trim(); });
   if (!clean.first && !clean.last && !clean.phone) { api.toast("Add a name or number"); return false; }
@@ -3701,7 +3698,7 @@ function ctSave(api) {
 function ctDeleted(api, p, idx) {
   var restore = function () {
     var l = ctList(api).slice();
-    if (!ctGet(l, p.id)) l.splice(idx < 0 ? l.length : Math.min(idx, l.length), 0, p);
+    if (!recordById(l, p.id)) l.splice(idx < 0 ? l.length : Math.min(idx, l.length), 0, p);
     try { api.setView("contacts", { list: l }); }
     catch (error) { api.toast("Contact could not be restored. Try Undo again.", { undo: restore }); return; }
     if (api.isActive()) api.setView("contacts", { open: p.id });
@@ -3729,7 +3726,7 @@ registerView("contacts", {
   },
   bar: ctBar,
   suggestions: function (st, api) {
-    var p = st.open ? ctGet(st.list || CT_SEED, st.open) : null;
+    var p = st.open ? recordById(st.list || CT_SEED, st.open) : null;
     if (st.edit || st.add) return ["Save it", "Discard changes"];
     if (p) return ["Catch me up on " + p.first, "Text " + p.first, "Edit " + p.first + "'s email"];
     return copy("contacts").suggestions || [];
@@ -3777,7 +3774,7 @@ registerView("contacts", {
     }
     if (/\b(delete|remove)\b.*\bcontact|\b(delete|remove)\b.*\bfrom (my )?contacts/.test(t)) {
       return { text: "Removed " + p.name + ". Undo from Contacts.", then: function () {
-        var l = ctList(api); var idx = l.indexOf(ctGet(l, p.id));
+        var l = ctList(api); var idx = l.indexOf(recordById(l, p.id));
         api.setView("contacts", { list: l.filter(function (x) { return x.id !== p.id; }), open: null });
         ctDeleted(api, p, idx);
       } };
@@ -3800,7 +3797,7 @@ registerView("contacts", {
     setListFilterHandler("contacts", filter);
     var q = (st.q || "").trim();
     var hits = ctHits(list, q);
-    var p = st.open ? ctGet(list, st.open) : null;
+    var p = st.open ? recordById(list, st.open) : null;
     /* The first row on screen stays above the Alpha sheet (data-alpha-stage-last), while no contact covers the list. */
     var listMark = p ? undefined : "true";
     var favs = q ? [] : list.filter(function (p) { return p.fav; }).map(function (p) { return { ini: p.ini, first: p.first || p.name, label: p.name, open: function () { api.set({ open: p.id }); } }; });
@@ -3831,7 +3828,7 @@ registerView("contacts", {
         toggleFav: function () { api.set({ list: api.get("contacts").list.map(function (x) { return x.id === p.id ? Object.assign({}, x, { fav: !x.fav }) : x; }) }); },
         edit: function () { api.set({ edit: p.id, form: null }); },
         del: function () {
-          var l = api.get("contacts").list; var idx = l.indexOf(ctGet(l, p.id));
+          var l = api.get("contacts").list; var idx = l.indexOf(recordById(l, p.id));
           api.set({ list: l.filter(function (x) { return x.id !== p.id; }), open: null });
           ctDeleted(api, p, idx);
         },
@@ -3898,12 +3895,11 @@ var FILES_TYPES = {
 };
 var FL = { undoT: null, playI: null };
 
-function filesFind(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 function filesSplit(name) { var i = name.lastIndexOf("."); return i > 0 ? [name.slice(0, i), name.slice(i)] : [name, ""]; }
 function filesUndoable(api, entries, label) {
   api.toast(label, { undo: function () {
     var l = api.get("files").files.slice();
-    entries.slice().sort(function (a, b) { return a.idx - b.idx; }).forEach(function (e) { if (!filesFind(l, e.f.id)) l.splice(Math.min(e.idx, l.length), 0, e.f); });
+    entries.slice().sort(function (a, b) { return a.idx - b.idx; }).forEach(function (e) { if (!recordById(l, e.f.id)) l.splice(Math.min(e.idx, l.length), 0, e.f); });
     api.set({ files: l });
   } });
 }
@@ -4009,7 +4005,7 @@ registerView("files", {
     var selCount = isSel ? sel.length : 0;
 
     /* preview */
-    var f = st.open ? filesFind(files, st.open) : null;
+    var f = st.open ? recordById(files, st.open) : null;
     var pv = null;
     if (f) {
       var ty = FILES_TYPES[f.type] || FILES_TYPES.pdf;
@@ -4044,7 +4040,7 @@ registerView("files", {
         transcribe: function () {
           if (!VIEWS.notes) return api.toast("Transcribing");
           var id = "memo-" + f.id;
-          if (notesFind((api.get("notes").list || []), id)) return api.open("notes", { open: id });
+          if (recordById((api.get("notes").list || []), id)) return api.open("notes", { open: id });
           var note = { id: id, kind: "voice", title: "Landlord", when: "Yesterday · 6:20 PM", dur: f.dur, pinned: false,
             lines: [{ s: "me", t: "Note to self: call the landlord Friday.", at: 0 }, { s: "me", t: "The bedroom radiator clanks all night, and ask when the lease renewal is due.", at: 6 }],
             summary: f.sum.slice(0, 2), actions: [{ t: "Call the landlord Friday", done: false }, { t: "Ask about the lease renewal date", done: false }] };

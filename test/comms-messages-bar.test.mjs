@@ -17,7 +17,7 @@ function top(name) {
   const rest = model.slice(start + 1), end = rest.search(/\n(?=[^\s}])/);
   return rest.slice(0, end < 0 ? rest.length : end);
 }
-const MESSAGES = ['msgPeople', 'msgWho', 'msgFind', 'msgFirst', 'msgFmt', 'msgMaxK', 'msgNowK', 'msgLastIn', 'msgOpen', 'msgPush', 'msgFiles', 'msgSend',
+const MESSAGES = ['messagePeople', 'msgWho', 'msgFind', 'msgFirst', 'msgFmt', 'msgMaxK', 'msgNowK', 'msgLastIn', 'msgOpen', 'msgPush', 'msgFiles', 'msgSend',
   'msgDraft', 'msgDraftsPatch', 'msgSetDraft', 'msgSubmit', 'msgBubbleSend', 'msgMatches', 'msgBar'];
 function devMessages() {
   const filters = [];
