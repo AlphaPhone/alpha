@@ -1245,8 +1245,8 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       return d.toDateString() === now.toDateString() ? formatTime(d) : formatMonthDay(d); };
     const fullDate = (value: string) => { const d = new Date(value); return Number.isNaN(d.valueOf()) ? '' : `${weekdayName(d)}, ${formatMonthDay(d, true)}, ${formatTime(d)}`; };
     const activeBody = st.open && body?.message.id === st.open ? body : null;
-    const cachedListNotice = accountsFromDisk && (cachedListShown || activeBody)
-      ? failure || homeFailure ? 'Saved mail · Could not check Gmail access' : 'Saved mail · Checking Gmail access…'
+    const cachedListNotice = accountsFromDisk && (cachedListShown || activeBody) && (failure || homeFailure)
+      ? 'Saved mail · Could not check Gmail access'
       : '';
     const rows:Bag[] = messages.map(m => {
       // The shell's swipe recognizer keeps edge gestures for system navigation; a left swipe on a row
