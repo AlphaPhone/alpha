@@ -45,7 +45,7 @@ export function publishGoogleAgentAccess(){
  return withGoogleAccessLock(publishSavedGoogleAgentAccess);
 }
 // A relaunched development resident forgets the owner's Gmail switch; hand it the saved one again.
-if(browserCloudResidentEnabled)window.addEventListener(BROWSER_RESIDENT_LAUNCHED,()=>{void publishGoogleAgentAccess().catch(()=>{});});
+if(browserCloudResidentEnabled&&typeof window!=='undefined')window.addEventListener(BROWSER_RESIDENT_LAUNCHED,()=>{void publishGoogleAgentAccess().catch(()=>{});});
 export async function setGoogleAgentAccess(change:Partial<GoogleAgentAccess>,guard?:{current():boolean;expectedCalendarEdits:boolean;receipt:DomainRecovery}){
  return withGoogleAccessLock(async()=>{
   let before:GoogleAgentAccess|undefined;
