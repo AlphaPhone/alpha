@@ -1218,3 +1218,9 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .alpha-call-bar[data-alpha-call-bar-ended="true"]{background:var(--alpha-gray-55)}
 .alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-end-button{visibility:hidden}
 .alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-call-bar-return{cursor:default}
+
+.files-actions-menu .file-preview-action {
+  display:flex; align-items:center; gap:12px; width:100%; min-height:44px;
+  padding:8px 14px; border-radius:16px; font-size:15px; text-align:start;
+}
+.file-preview-action :is(.i,.alpha-compute-mark) { width:20px; height:20px; flex:none; }

@@ -20,7 +20,14 @@ const POPUPS:Record<string,Popup[]>={
 };
 function popupFocus(name:string,current:()=>Bag){
  const popups=(POPUPS[name]||[]).map(([key,open,close])=>({key,open,modal:reviewFocus(()=>close(current()))}));
- return (out:Bag)=>{const refs:Bag={};for(const popup of popups){popup.modal.render(popup.open(out));refs[popup.key]=popup.modal.ref;}return refs;};
+ return (out:Bag)=>{
+  const refs:Bag={};
+  // A menu row disappears when it opens a sibling sheet. Carry its surviving opener forward.
+  const replaced=popups.find(popup=>!popup.open(out)&&popup.modal.openedFrom());
+  const opener=replaced?.modal.openedFrom();
+  for(const popup of popups){popup.modal.render(popup.open(out),opener);refs[popup.key]=popup.modal.ref;}
+  return refs;
+ };
 }
 /** Full-screen subviews replace their covered content in accessibility navigation. */
 export function installSubviewAccessibility(views:Bag){
@@ -115,8 +122,8 @@ function subviewFocus(read:()=>FocusTarget){
 function reviewFocus(close:()=>void){
  let open=false,opener:HTMLElement|null=null;
  const modal=createInlineModal(close,()=>opener);
- return {...modal,render(next:boolean){
-  if(next&&!open)opener=document.activeElement instanceof HTMLElement?document.activeElement:null;
+ return {...modal,openedFrom:()=>open?opener:null,render(next:boolean,inheritedOpener?:HTMLElement|null){
+  if(next&&!open)opener=inheritedOpener??(document.activeElement instanceof HTMLElement?document.activeElement:null);
   open=next;
  }};
 }
