@@ -16,6 +16,7 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   return prose.trimEnd();
 }
 const REVIEW_TEXT = 'Review on phone';
+const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 // Presentation only: preserve the journal while explaining uncertainty safely.
 export function actionResultText(text: string): string {
@@ -84,12 +85,19 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
   }
   let turn: Message[] = [];
   const finish = () => {
-    const actions = turn.filter(message => message.from === 'agent' && (message.card?.proposalId || message.deviceReceipt));
-    if (!actions.length) return;
-    for (const message of turn) if (message.from === 'agent' && message.text === REVIEW_TEXT) hidden.add(message.id);
+    const visibleActions = turn.filter(message => renderedIds.has(message.id) && message.from === 'agent'
+      && (message.card?.proposalId || message.deviceReceipt || message.card?.deviceActionNotice === true));
+    if (!visibleActions.length) return;
+    // A pending proposal still needs its review instruction. A visible outcome supersedes it.
+    const outcomeShown = visibleActions.some(message => message.deviceReceipt
+      || message.card?.deviceActionNotice === true || message.card?.done === true);
+    for (const message of turn) {
+      if (message.from === 'agent' && (message.text === REVIEW_TEXT
+        || (outcomeShown && message.text === REVIEW_INSTRUCTION))) hidden.add(message.id);
+    }
     // A shown agent reply already answers a requested Browser open. Only a succeeded browser receipt
     // carries browserDestination; failures and other device receipts stay visible.
-    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && typeof message.text === 'string' && message.text.trim())) return;
+    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && message.text !== REVIEW_INSTRUCTION && typeof message.text === 'string' && message.text.trim())) return;
     for (const message of turn) if (message.from === 'agent' && message.deviceReceipt === true && !message.card && message.browserDestination) hidden.add(message.id);
   };
   for (const message of source) { if (message.from === 'user') { finish(); turn = []; } turn.push(message); } finish();
