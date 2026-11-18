@@ -61,6 +61,11 @@ export type TelephonyPorts = {
    * Contacts cannot be read or opened.
    */
   showContacts(query: string): Promise<(() => void) | 'not-found' | null>;
+  /**
+   * The step that brings the Phone keypad in front, with `number` filled in when given (handed
+   * back like `draftFor`'s); null when Phone cannot be shown now. It never dials or calls.
+   */
+  openKeypad(number?: string): (() => void) | null;
   /** The contact open in Contacts as the phone holds it now; 'unavailable' when it cannot be read whole; null when none is open. */
   openContact(): Pick<ContactDraft, 'displayName' | 'phoneNumbers' | 'emailAddresses'> | 'unavailable' | null;
   /** The agent negotiated `contacts.write.v2`: it names each value to add or remove, so a `set` it sends replaces the field. */
@@ -107,6 +112,7 @@ export function refuseTelephonyAction(operation: TelephonyActionOperation, summa
       case 'phone_call': return {kind: 'phone-call', status: 'unavailable', contact: false};
       case 'sms_compose': return {kind: 'sms-compose', status: 'unavailable'};
       case 'sms_reply_selected': return {kind: 'sms-reply', status: 'unavailable'};
+      case 'phone_keypad': return {kind: 'phone-keypad', status: 'unavailable'};
       case 'contact_create': case 'contact_update': case 'contact_delete': return {kind: 'contact-write', status: 'unavailable'};
       case 'contact_show': return {kind: 'contact-show', status: 'unavailable'};
       case 'contact_read_selected': return {kind: 'contact-read', status: 'unavailable'};
@@ -313,6 +319,13 @@ async function observed(operation: TelephonyActionOperation, operationId: string
     case 'phone_call': return call(operation, ports, signal);
     case 'sms_compose': return compose(operation, operationId, ports, signal, present);
     case 'sms_reply_selected': return {kind: 'sms-reply', status: ports.draftInOpenThread(operation.body)};
+    case 'phone_keypad': {
+      // The keypad in front, filled in at most: only the owner's Call tap there places a call.
+      const step = ports.openKeypad(operation.number);
+      if (!step) return {kind: 'phone-keypad', status: 'unavailable'};
+      present(step);
+      return {kind: 'phone-keypad', status: 'opened'};
+    }
     case 'contact_create': case 'contact_update': case 'contact_delete': return write(operation, ports, signal);
     case 'contact_show': return show(operation, ports, present);
     case 'contact_read_selected': return readOpenContact(ports);

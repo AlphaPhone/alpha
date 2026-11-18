@@ -4,7 +4,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {bui
 const dir=mkdtempSync(join(tmpdir(),'phone-adapter-'));
 const output=await build({entryPoints:[resolve('apps/app/src/prototype/phone-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,external:['@capacitor/core'],plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\.\/runtime\/aosp-image|\.\.\/runtime\/comms-bar|\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('aosp-image')?'export const aospImage=false;':a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':a.path.includes('comms-bar')?'export function setListFilterHandler(view,handler){(globalThis.listFilters||={})[view]=handler;}export function clearListFilter(view){globalThis.listFilters?.[view]?.clear();}':'export function registerPlugin(){return {};}',loader:'js'}));}}]});
 writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
-const {installPhoneAdapter,phoneRows,openVoicemailRead,deleteOpenVoicemail}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const {installPhoneAdapter,phoneRows,openVoicemailRead,deleteOpenVoicemail,openKeypadStep}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 const {createAospTelephony}=await import('../apps/app/src/runtime/aosp-telephony.ts');
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const status=callLog=>({version:2,voiceCapable:true,smsCapable:true,permissions:{contacts:'granted',phoneState:'denied',sms:'denied',sendSms:'denied',...(callLog?{callLog}:{})},sendMode:'handoff',roles:{dialer:{available:true,held:false,eligible:true},sms:{available:true,held:false,eligible:true}},defaultDialer:'com.android.dialer',defaultSms:null,subscriptions:null,defaultSmsSubscriptionId:null});
@@ -179,4 +179,22 @@ test('an unconfirmed voicemail observer retirement refuses a replacement enable'
  await settle();shell.view='home';shell.componentDidUpdate();shell.view='phone';shell.componentDidUpdate();await settle();await settle();
  assert.deepEqual(calls.filter(([m])=>m==='observeVoicemail').map(([,o])=>o.enabled),[true],'unconfirmed cleanup never enables a second listener');
  shell.componentWillUnmount();
+});
+test('the agent opens the keypad, filled in at most, after its receipt; it never calls',async()=>{
+ const {views,shell,calls}=mount({status:status('granted'),listRecentCalls:{calls:[]},placeCall:placed});await settle();
+ const opened=[];shell.openView=(view,patch,chat)=>opened.push([view,patch,chat]);
+ globalThis.mvpViews=['phone'];
+ try{
+  for(const [number,patch] of [[undefined,{tab:'keypad'}],['4155550100',{tab:'keypad',prefill:'4155550100'}]]){
+   opened.length=0;const step=openKeypadStep(number);assert.equal(typeof step,'function');assert.deepEqual(opened,[],'nothing opens before the receipt');
+   step();assert.deepEqual(opened,[['phone',patch,undefined]]);
+  }
+  const sets=[];const api={set:patch=>sets.push(patch)};
+  let model=views.phone.render({tab:'keypad'},api);await settle();
+  assert.equal(model.isKeypad,true);assert.equal(model.nativeNumber,'');assert.deepEqual(sets,[{tab:null}]);
+  model=views.phone.render({tab:'keypad',prefill:'4155550100'},api);await settle();
+  assert.equal(model.isKeypad,true);assert.equal(model.nativeNumber,'4155550100');
+  assert.ok(!calls.some(([m])=>m==='placeCall'||m==='dial'),'opening the keypad never calls or dials');
+  globalThis.mvpViews=[];assert.equal(openKeypadStep('4155550100'),null,'no keypad where Phone is not admitted');
+ }finally{delete globalThis.mvpViews;}
 });
