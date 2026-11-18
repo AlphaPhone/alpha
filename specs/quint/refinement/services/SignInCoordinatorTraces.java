@@ -15,12 +15,12 @@ public final class SignInCoordinatorTraces {
   }
   // Alpha adds no lifecycle override; the shared client's handlers are protected in its package.
   static void newIntent(AlphaCloudSignInPlugin plugin, Intent intent) throws Exception {
-    java.lang.reflect.Method method = ai.eliza.auth.cloud.CloudSignInPlugin.class.getDeclaredMethod("handleOnNewIntent", Intent.class);
+    java.lang.reflect.Method method = AlphaCloudSignInClient.class.getDeclaredMethod("handleOnNewIntent", Intent.class);
     method.setAccessible(true);
     method.invoke(plugin, intent);
   }
   static void destroy(AlphaCloudSignInPlugin plugin) throws Exception {
-    java.lang.reflect.Method method = ai.eliza.auth.cloud.CloudSignInPlugin.class.getDeclaredMethod("handleOnDestroy");
+    java.lang.reflect.Method method = AlphaCloudSignInClient.class.getDeclaredMethod("handleOnDestroy");
     method.setAccessible(true);
     method.invoke(plugin);
   }
