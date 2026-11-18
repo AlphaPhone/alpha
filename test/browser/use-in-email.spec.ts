@@ -91,8 +91,20 @@ test('system Back cancels the review, and a message from the account itself name
  expect(await page.evaluate(()=>(window as any).useInEmail.writes)).toBe(0);
 });
 
-test('a full-height conversation keeps the review below the status bar, and a set-aside draft is named as off screen',async({page})=>{
+test('a full-height conversation keeps the review below the status bar and preserves a reply saved on Back',async({page})=>{
  await setup(page,'light',false,true);await say(page,first);await expect(reply(page,first)).toBeVisible();
+ await page.evaluate(async()=>{
+  const {inboxLocalStore}=await import('/src/runtime/inbox-local-store.ts');
+  const save=inboxLocalStore.compareExchange.bind(inboxLocalStore);
+  inboxLocalStore.compareExchange=async(key,prior,value)=>{
+   const result=await save(key,prior,value);
+   if(result.status==='saved'&&key.startsWith('inbox-drafts:v1:shelf:')){
+    const shelf=value as {items:Array<{draft:{body:string}}> }|null;
+    (window as any).useInEmail.savedBodies=shelf?.items.map(row=>row.draft.body)??[];
+   }
+   return result;
+  };
+ });
  await page.getByRole('button',{name:'Expand chat',exact:true}).click();await expect(page.getByRole('button',{name:'Shrink chat',exact:true})).toBeVisible();
  const tops=()=>page.evaluate(()=>{const top=(selector:string)=>Math.round(document.querySelector(selector)!.getBoundingClientRect().top);return {panel:top('[data-alpha-layer="conversation"]'),header:top('[data-alpha-chat-header]'),cancel:document.querySelector('[aria-label="Review email suggestion"] button')?Math.round(document.querySelector('[aria-label="Review email suggestion"] button')!.getBoundingClientRect().top):-1};});
  // The full-height conversation reserves the status bar above its header.
@@ -102,13 +114,15 @@ test('a full-height conversation keeps the review below the status bar, and a se
  expect(measured.cancel).toBeGreaterThanOrEqual(measured.header);
  expect(await dialog.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
  await dialog.getByRole('button',{name:'Insert into draft',exact:true}).click();await expect(body(page)).toHaveValue(first);
- // System Back closes the composer; the one draft for this account stays, off screen.
+ // Back saves this reply. A later suggestion starts a separate reply with its own contents.
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
  await expect(body(page)).toHaveCount(0);await expect(page.getByText('Can you do Tuesday at 10?',{exact:true})).toBeVisible();
+ const savedBodies=()=>page.evaluate(()=>(window as any).useInEmail.savedBodies as string[]|undefined);
+ await expect.poll(savedBodies).toEqual([first]);
  await say(page,second);await expect(reply(page,second)).toBeVisible();await openReview(page,second);
- await expect(dialog.locator('[data-alpha-email-use-destination]')).toHaveText('Your unfinished reply draft (not on screen) · Re: Planning session · to sender@example.invalid');
- await expect(dialog.locator('[data-alpha-email-use-effect]')).toHaveText('This draft already has text. The suggestion is added below it; nothing is replaced.');
- await dialog.getByRole('button',{name:'Add below existing text',exact:true}).click();await expect(dialog).toHaveCount(0);
- await expect(body(page)).toHaveValue(first+'\n\n'+second);
+ await expect(dialog.locator('[data-alpha-email-use-destination]')).toHaveText('New reply to sender@example.invalid (Fixture sender) · Re: Planning session');
+ await dialog.getByRole('button',{name:'Insert into draft',exact:true}).click();await expect(dialog).toHaveCount(0);
+ await expect(body(page)).toHaveValue(second);
+ expect(await savedBodies()).toEqual([first]);
  expect(await page.evaluate(()=>(window as any).useInEmail.writes)).toBe(0);
 });
