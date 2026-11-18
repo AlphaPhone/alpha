@@ -13,7 +13,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -28,7 +28,8 @@ import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runti
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {contactChoiceName} from '../ui/telephony/telephony-messages';
 import {normalizePhoneNumber} from '../runtime/aosp-telephony';
 import {askTelephonyReview} from './telephony-review';
 import type {BrowserTabChoice} from './browser-adapter';
@@ -334,6 +335,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // The same options the in-card review offers before the dial (telephony-executor).
     const options=contactCallOptions(await client.searchContacts(target.contact,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber),names=new Set(options.map(option=>option.id));
     return {name:names.size===1?options[0].name:null,numbers:options.map(option=>option.number)};
+  });
+  // A contact change or deletion is carded only for contacts the phone holds, found the way the
+  // executor finds them after approval. Only their names reach the card; the agent learns nothing.
+  setContactReviewMatches(async (query,signal)=>{
+    if(!aospImage)return null;
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    const found=await contactWriteTargets(query,{searchContacts:(text,limit)=>client.searchContacts(text,limit),...imageContactPorts(registerPlugin<any>('AlphaContacts'),()=>signal.throwIfAborted())});
+    signal.throwIfAborted();
+    return found&&found.map(contact=>contactChoiceName(contact.displayName));
   });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */

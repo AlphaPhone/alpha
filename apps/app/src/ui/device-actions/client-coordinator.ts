@@ -649,6 +649,15 @@ export class DeviceActionCoordinator<
       currentRequestTelephonyPolicy?: boolean;
       /** Whether a tab switch's words match several open tabs on this phone. */
       browserTabNeedsChoice?: (target: string) => boolean;
+      /**
+       * The names of the phone contacts a contact change or deletion would be
+       * offered for, looked up exactly as its executor will; null or a throw
+       * when Contacts cannot be read. Without it no such card is offered.
+       */
+      contactMatches?: (
+        query: string,
+        signal: AbortSignal,
+      ) => Promise<string[] | null>;
     } = {},
   ) {
     this.ports = ports;
@@ -1011,7 +1020,11 @@ export class DeviceActionCoordinator<
   private notice(operation: ReviewableDeviceOperation, context: C) {
     return proposalContextNotice(operation, context, this.profile);
   }
-  private card(proposal: DeviceProposal, context: C): DeviceActionProposalCard {
+  private card(
+    proposal: DeviceProposal,
+    context: C,
+    contacts?: string[],
+  ): DeviceActionProposalCard {
     const op = proposal.operation;
     const readReply = proposal.readReplyOrigin
       ? {
@@ -1054,7 +1067,11 @@ export class DeviceActionCoordinator<
         description: `${op.target.kind === "number" ? `Number: ${op.target.number}` : `Contact: ${op.target.query}`}\n\nOpens your phone app with this number. You place the call there.`,
       };
     if (isTelephonyAction(op))
-      return { ...base, ...describeTelephonyAction(op), ...readReply };
+      return {
+        ...base,
+        ...describeTelephonyAction(op, contacts),
+        ...readReply,
+      };
     if (isSmsSend(op)) {
       const sim = this.profile.simLabel?.(op.subscriptionId);
       return {
@@ -1196,8 +1213,8 @@ export class DeviceActionCoordinator<
         });
         continue;
       }
-      const card = this.card(proposal, context),
-        notice =
+      let card = this.card(proposal, context);
+      const notice =
           (isNativeNotesQuery(proposal.operation) && !context.sensitive) ||
           card.reviewDestination === "notes" ||
           card.reviewDestination === "calendar"
@@ -1244,6 +1261,38 @@ export class DeviceActionCoordinator<
           context: selectionContext,
           expiresAt: Math.max(binding?.expiresAt ?? 0, proposal.expiresAt),
         });
+      }
+      // A contact change or deletion is offered only for contacts the phone
+      // holds: the card names them, and a name nothing matches gets a notice
+      // instead of a card that could not apply. The executor looks the name up
+      // again after approval and shows the owner the exact contact.
+      const contactOp = proposal.operation;
+      if (
+        contactOp.type === "contact_update" ||
+        contactOp.type === "contact_delete"
+      ) {
+        let names: string[] | null = null;
+        try {
+          names =
+            (await this.options.contactMatches?.(contactOp.query, signal)) ??
+            null;
+        } catch {
+          names = null;
+        }
+        assertCurrentReview();
+        if (!names?.length) {
+          items.push({
+            proposalId: proposal.id,
+            proposal: null,
+            notice: `${card.title}: ${
+              names
+                ? `No contact matching “${contactOp.query}” is on this phone. Nothing was changed.`
+                : "Contacts can't be read on this phone right now. Nothing was changed."
+            }`,
+          });
+          continue;
+        }
+        card = this.card(proposal, context, names);
       }
       // A Files move or trash binds the identity of each file as the card shows
       // it; whatever identity the agent sent is replaced.
@@ -3183,7 +3232,26 @@ function keypadGrounded(
   }
   return false;
 }
-function describeTelephonyAction(operation: TelephonyActionOperation): {
+/**
+ * The contact a change or deletion applies to, as the phone's lookup named it.
+ * Several matches: the owner picks one in the phone's own review after approval.
+ */
+function contactTarget(
+  query: string,
+  contacts: string[] | undefined,
+): { line: string; choice: string } {
+  if (!contacts?.length) return { line: `Contact: ${query}`, choice: "" };
+  if (contacts.length === 1)
+    return { line: `Contact: ${contacts[0]}`, choice: "" };
+  return {
+    line: `${contacts.length} contacts match “${query}”: ${contacts.join(", ")}`,
+    choice: " You choose which one on your phone after you confirm.",
+  };
+}
+function describeTelephonyAction(
+  operation: TelephonyActionOperation,
+  contacts?: string[],
+): {
   title: string;
   description: string;
 } {
@@ -3227,22 +3295,25 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
         ...values("Add", operation.add),
         ...values("Remove", operation.remove),
       ].join("\n");
+      const target = contactTarget(operation.query, contacts);
       return {
         title: "Change contact",
-        description: `Contact: ${operation.query}\n${lines}\n\n${
+        description: `${target.line}\n${lines}\n\n${
           operation.add || operation.remove
             ? operation.set
               ? "Replaces the details listed whole and adds or removes only the values marked, after you confirm."
               : "Adds or removes only these values after you confirm. The contact's other details stay."
             : "Replaces these details after you confirm."
-        } Nothing else is shared with the agent.`,
+        }${target.choice} Nothing else is shared with the agent.`,
       };
     }
-    case "contact_delete":
+    case "contact_delete": {
+      const target = contactTarget(operation.query, contacts);
       return {
         title: "Delete contact",
-        description: `Contact: ${operation.query}\n\nDeletes this contact from your phone after you confirm.`,
+        description: `${target.line}\n\n${target.choice ? "After you confirm, you choose which one to delete on your phone." : "Deletes this contact from your phone after you confirm."}`,
       };
+    }
     case "contact_show":
       return {
         title: "Show contact",
