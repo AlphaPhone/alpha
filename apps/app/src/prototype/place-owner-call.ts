@@ -1,5 +1,5 @@
-import type {AospTelephony} from '../../runtime/aosp-telephony';
-import {callResultText,handoffResultText} from './telephony-messages';
+import type {AospTelephony} from '../runtime/aosp-telephony';
+import {callResultText,handoffResultText} from '../ui/telephony/telephony-messages';
 
 /** A direct user tap uses Telecom. A known role or permission refusal can open the system dialer. */
 export async function placeOwnerCall(client:AospTelephony,number:string,current:()=>boolean){
