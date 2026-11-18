@@ -11,7 +11,7 @@ test('Inbox source coordination refines grant, confirmation, attachment and reco
     assert.equal(receipts.length, 1);
     const receipt = receipts[0];
     assert.equal(receipt.model, 'InboxCoordinator');
-    assert.equal(receipt.traces, 18);
+    assert.equal(receipt.traces, 20);
     assert.equal(receipt.passed, true);
     assert.equal(receipt.driverInputsBound, true);
     assert.equal(receipt.inputsUnchanged, true);
@@ -29,5 +29,5 @@ test('Inbox source coordination refines grant, confirmation, attachment and reco
   });
   assert.ifError(result.error);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /"traces":18/);
+  assert.match(result.stdout, /"traces":20/);
 });

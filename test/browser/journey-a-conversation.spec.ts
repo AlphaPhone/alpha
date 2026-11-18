@@ -258,6 +258,8 @@ test('journey A: a proposed phone action is declined from the conversation and n
  expect(state.proposals.map((p:any)=>[p.payload.operation.type,p.state,p.receipt??null])).toEqual([['create_note','rejected',null]]);
  expect(state.journal).toEqual([]);
  // The conversation continues: one reply per accepted request, and the declined action stays declined.
+ // The follow-up goes through the shared composer in the Assistant controls group: since #1298 the
+ // chat's field is no longer a descendant of the conversation layer.
  const message=page.getByRole('group',{name:'Assistant controls'}).getByRole('textbox',{name:'Message Alpha',exact:true});
  await message.fill('Journey A request after declining');
  await message.press('Enter');
