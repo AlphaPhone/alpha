@@ -224,26 +224,86 @@ function id(value: unknown): string {
 // ── Screen binding ──────────────────────────────────────────────────────────
 
 export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
-/** A camera capture that only needs Camera open also names the message that asked for it. */
+/**
+ * A review item with the request binding the agent recorded. A camera capture that only needs
+ * Camera open is marked, and names the message that asked for it when the agent bound one
+ * (direct mode). A reviewable card names its bound message the same way.
+ */
 export type ReviewItem = PendingReviewItem & {
+  cameraCapture?: true;
   cameraRequestMessageId?: string;
+  requestMessageId?: string;
 };
+const DEVICE_APPROVAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/**
+ * The device proposals one agent reply created or reused, read from its action results'
+ * `device.approval` effect receipts. It names which pending items belong to that reply; it is
+ * never approval or execution authority.
+ */
+export function replyDeviceProposalIds(
+  actionResults: readonly unknown[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const result of actionResults) {
+    const receipts =
+      result && typeof result === "object" && !Array.isArray(result)
+        ? (result as { effectReceipts?: unknown }).effectReceipts
+        : undefined;
+    if (!Array.isArray(receipts)) continue;
+    for (const receipt of receipts) {
+      if (!receipt || typeof receipt !== "object") continue;
+      const { operation, resource } = receipt as {
+        operation?: unknown;
+        resource?: { kind?: unknown; id?: unknown } | null;
+      };
+      if (
+        typeof operation === "string" &&
+        operation.startsWith("device.") &&
+        resource &&
+        typeof resource === "object" &&
+        resource.kind === "device.approval" &&
+        typeof resource.id === "string" &&
+        DEVICE_APPROVAL_ID.test(resource.id)
+      )
+        ids.add(resource.id);
+    }
+  }
+  return ids;
+}
 /**
  * Whether a reply must open Camera on this phone for the photo its own message asked for.
  * A photo is only ever taken on the visible Camera viewfinder, so a photo waiting only on
- * Camera is shown there first. Camera is not opened when the agent already navigates
- * (`viewHandoff`), when the request was not this message's, or when another action of
- * this turn is reviewable on the current screen and leaving it would drop that review.
+ * Camera is shown there first: taken at once in direct mode, or waiting as its review card
+ * on an ask-first phone. Camera is not opened when the agent already navigates
+ * (`viewHandoff`), when the photo is not this reply's, or when another action of this reply
+ * is reviewable on the current screen and leaving it would drop that review.
+ *
+ * `replyProposals` are the proposal ids this reply created or reused
+ * (`replyDeviceProposalIds`). With them, a photo the agent proposed in this reply qualifies
+ * even when it carries no message binding (review mode), and pending reviews from other
+ * turns never keep the current screen. Without them, only a photo bound to `messageId`
+ * qualifies and every reviewable item keeps the current screen.
  */
 export function requestedCameraNeedsCameraView(
   items: readonly ReviewItem[],
   messageId: string | undefined,
   viewHandoff: boolean,
+  replyProposals?: ReadonlySet<string>,
 ): boolean {
   if (!messageId || viewHandoff) return false;
+  const ofReply = (item: ReviewItem) =>
+    item.requestMessageId === messageId ||
+    (!!item.proposalId && !!replyProposals?.has(item.proposalId));
+  const photo = items.some(
+    (item) =>
+      item.cameraCapture &&
+      (item.cameraRequestMessageId
+        ? item.cameraRequestMessageId === messageId
+        : !!item.proposalId && !!replyProposals?.has(item.proposalId)),
+  );
   return (
-    items.some((item) => item.cameraRequestMessageId === messageId) &&
-    !items.some((item) => item.proposal)
+    photo &&
+    !items.some((item) => item.proposal && (!replyProposals || ofReply(item)))
   );
 }
 /** A pending proposal that does not fit the current screen. Its message is shown to the owner. */
@@ -1208,10 +1268,13 @@ export class DeviceActionCoordinator<
           proposalId: proposal.id,
           proposal: null,
           notice: `${card.title}: ${notice}`,
-          ...(notice === CAMERA_CONTEXT_NOTICE &&
-          !context.sensitive &&
-          proposal.requestMessageId
-            ? { cameraRequestMessageId: proposal.requestMessageId }
+          ...(notice === CAMERA_CONTEXT_NOTICE && !context.sensitive
+            ? {
+                cameraCapture: true as const,
+                ...(proposal.requestMessageId
+                  ? { cameraRequestMessageId: proposal.requestMessageId }
+                  : {}),
+              }
             : {}),
         });
         continue;
@@ -1305,7 +1368,13 @@ export class DeviceActionCoordinator<
           digest: proposal.digest,
           origin: proposal.readReplyOrigin,
         });
-      items.push({ proposalId: proposal.id, proposal: card });
+      items.push({
+        proposalId: proposal.id,
+        proposal: card,
+        ...(proposal.requestMessageId
+          ? { requestMessageId: proposal.requestMessageId }
+          : {}),
+      });
     }
     const failures = invalid
       .filter((item) => item.pending)

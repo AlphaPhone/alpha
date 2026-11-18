@@ -2214,8 +2214,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       try{
         let delivered=await deliverNavigation(reply.actionResults);
-        // The agent may propose the photo without showing Camera in the same turn. When that proposal is the
-        // reply's only pending item and the agent bound it to this very message, Camera is opened here.
+        // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's
+        // (bound to this message, or named by the reply's own receipt on an ask-first phone) and no other review of
+        // this reply needs the current screen, Camera is opened here.
         if(!delivered&&reply.userMessageId&&connectionController.requestedCameraNeedsOpening(reply.userMessageId))delivered=await openRequestedCamera(this);
         cameraOpened=delivered&&alphaClient.getState().context.view==='camera';
         if(cameraOpened&&reply.userMessageId){
