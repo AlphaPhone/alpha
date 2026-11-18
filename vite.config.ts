@@ -207,6 +207,8 @@ export default defineConfig({
     fileURLToPath(new URL('./apps/app', import.meta.url)),
     // Prepared upstream modules, by real path when a worktree shares this prepared tree.
     realpathSync(fileURLToPath(new URL('./.eliza/client-features', import.meta.url))),
-    fileURLToPath(new URL('./node_modules', import.meta.url)),
+    // Vite resolves shared dependencies and the pinned password client to their real paths.
+    realpathSync(fileURLToPath(new URL('./node_modules', import.meta.url))),
+    realpathSync(fileURLToPath(new URL('./vendor/eliza/plugins/plugin-native-passwords/src', import.meta.url))),
   ] } },
 });
