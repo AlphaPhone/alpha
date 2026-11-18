@@ -11,6 +11,10 @@ async function setup(page:Page,options:Options={}){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/runtime/inbox-local-store.ts','/src/runtime/cloud-protocol.ts']);
+ await page.waitForFunction(()=>{
+  const state=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.getSnapshot();
+  return state.startupResolved&&!state.busy;
+ });
  await page.evaluate(options=>{
   const w=window as any,loaded=w.__alphaModules,slots:Record<string,unknown>={};w.gmSlots=slots;
   const {connectionController:c}=loaded['/src/runtime/connection-ui.tsx'];
