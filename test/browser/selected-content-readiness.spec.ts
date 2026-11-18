@@ -23,7 +23,9 @@ test('a selected text file offers Ask only after its readable excerpt arrives',a
    return new Promise(resolve=>{fixture.finish=()=>resolve({status:'read',text:'Actual file text'});});
   };
  });
- const preview=await openStoredFile(page,'pending-excerpt.txt'),ask=preview.getByRole('button').filter({hasText:/^Ask Alpha$/});
+ const preview=await openStoredFile(page,'pending-excerpt.txt');
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ const ask=page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true});
  await expect.poll(()=>page.evaluate(()=>(window as any).excerptRead.started)).toBe(true);
  await expect(ask).toHaveCount(0);
  await page.evaluate(()=>(window as any).excerptRead.finish());
@@ -39,7 +41,8 @@ test('a selected unsupported file has no empty Ask review',async({page})=>{
  });
  const preview=await openStoredFile(page,'unsupported.bin');
  await expect(preview.getByText('Open or download this file.',{exact:true})).toBeVisible();
- await expect(preview.getByRole('button').filter({hasText:/^Ask Alpha$/})).toHaveCount(0);
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true})).toHaveCount(0);
  await expect(page.getByRole('dialog',{name:'Ask about selected content',exact:true})).toHaveCount(0);
 });
 
@@ -50,7 +53,8 @@ test('a selected image keeps the local text and description review',async({page}
   await registerPlugin<any>('AlphaFiles').importFile(new File([bytes],'review-image.png',{type:'image/png'}));
  });
  const preview=await openStoredFile(page,'review-image.png');
- await preview.getByRole('button').filter({hasText:/^Ask Alpha$/}).click();
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ await page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true}).click();
  const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
  await expect(review.getByRole('button',{name:'Extract text locally',exact:true})).toBeEnabled();
  await expect(review.getByRole('img',{name:'Image for question review',exact:true})).toBeVisible();
