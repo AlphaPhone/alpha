@@ -301,6 +301,8 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .alpha-draft-bubble[data-alpha-draft-bubble="owner"]{border-color:var(--mut);background:var(--s2)}
 .alpha-draft-bubble[data-alpha-draft-sent="true"]{border-style:solid;background:var(--fg);color:var(--bg)}
 .alpha-draft-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.alpha-sms-inline-body{width:100%;min-height:66px;max-height:34dvh;field-sizing:content;box-sizing:border-box;resize:vertical;color:inherit;background:transparent;border:0;font:inherit;font-size:16px;line-height:1.35}
+[data-alpha-draft-discard]{min-height:44px;padding:0 12px;border-radius:22px;color:var(--fg)}
 .alpha-draft-actions{position:sticky;bottom:0;display:flex;gap:8px;justify-content:flex-end;background:inherit}
 .alpha-filter-chip{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 0 0 12px;border-radius:16px;background:var(--s2);color:var(--fg);font-size:13px}
 .alpha-filter-chip>button{min-width:44px;min-height:44px;margin:-6px 0;display:inline-flex;align-items:center;justify-content:center}
