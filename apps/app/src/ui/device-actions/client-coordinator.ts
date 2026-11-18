@@ -1979,7 +1979,10 @@ export class DeviceActionCoordinator<
         return {
           proposalId,
           status: result.status,
-          summary: unsyncedSummary(result.summary),
+          summary:
+            signal.aborted && result.status === "failed"
+              ? result.summary
+              : unsyncedSummary(result.summary),
           committedChanges,
         };
       }
