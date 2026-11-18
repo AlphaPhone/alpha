@@ -481,7 +481,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     const binding=connectionController.getCloudClient(),caps=provider.capabilities();
     if(!binding||accountsFromDisk||!selected||!caps?.send||!literalMailAddress(caps.from||'')||
        !gmailInboxAllows(caps,'send')||!accounts.some(a=>a.connectionId===selected&&gmailActionGrant(a,'send')==='granted'))return null;
-    return {from:caps.from,token:JSON.stringify([homeOwnerKey(),binding.sessionId,binding.credentialId,selected,caps.from])};
+    return {from:caps.from,grant:selected,token:JSON.stringify([homeOwnerKey(),binding.sessionId,binding.credentialId,selected,caps.from])};
   };
   view.sendAgentEmail=async(id:string,mail:{to:string[];subject:string;body:string},accountToken:string,reviewCurrent:()=>boolean)=>{
     const current=()=>reviewCurrent()&&view.agentEmailAccount()?.token===accountToken&&!document.hidden;
