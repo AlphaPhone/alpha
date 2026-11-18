@@ -674,7 +674,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
      synchronized (lock) { if (attempt != next || next.cancelled) return; }
      NativeGoogleCredential.request(getActivity(), clientId, nonce, next.googleCancellation, new NativeGoogleCredential.Callback() {
       @Override public void failure(String code) { end(next, code, false); }
-      @Override public void token(String idToken) {
+      @Override public void token(String idToken, String account) {
        run(() -> {
         try {
          synchronized (lock) { if (attempt != next || next.cancelled) throw new SignInFailure("cancelled"); }
