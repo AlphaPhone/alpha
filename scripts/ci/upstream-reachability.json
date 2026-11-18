@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "bf27d43a7841870392d3246a5fd049765ef561fc",
-  "head": "947098d4765944951d3b8516f5fd8c08632232de",
+  "head": "e83eea56ed100c2d361567b484a6516eaf0a1770",
   "recordedAt": "2026-11-18",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...947098d4765944951d3b8516f5fd8c08632232de",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...e83eea56ed100c2d361567b484a6516eaf0a1770",
   "status": "ahead",
-  "aheadBy": 15,
+  "aheadBy": 16,
   "behindBy": 0,
   "mergeBase": "bf27d43a7841870392d3246a5fd049765ef561fc",
   "pinOnlyCommits": [
@@ -46,6 +46,10 @@
     {
       "sha": "72b0ccdd837ffccc45ac03f5c017b7f3d026570f",
       "subject": "Ask before reading when the requested sender scope is unsupported"
+    },
+    {
+      "sha": "e83eea56ed100c2d361567b484a6516eaf0a1770",
+      "subject": "Route retries of phone Gmail drafts back to the composer"
     }
   ],
   "pullRequests": [
