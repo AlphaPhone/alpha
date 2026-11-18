@@ -398,6 +398,11 @@ export function createMailReviewController(
       )
         throw new DOMException("Inbox account changed", "AbortError");
     };
+    // A send already confirmed before this run (a restored receipt being
+    // checked again) was reported when it settled; only a send this run
+    // confirms closes the review with a Sent notice.
+    const earlier = owned.snapshot(),
+      alreadySent = sentSource(earlier) ? earlier?.requestId : undefined;
     busy = true;
     failure = null;
     publish();
@@ -415,7 +420,7 @@ export function createMailReviewController(
           record?.phase === "dispatching" && receipt?.state === "prepared";
         if (receipt?.state === "succeeded" && receipt.requestId !== reported) {
           reported = receipt.requestId;
-          if (confirmedSend) {
+          if (confirmedSend && receipt.requestId !== alreadySent) {
             visible = false;
             toast("Sent.");
           }

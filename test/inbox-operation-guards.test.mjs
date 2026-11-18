@@ -191,6 +191,42 @@ for (const kind of ['archive', 'trash']) {
   });
 }
 
+test('checking a restored Gmail draft send receipt keeps the review open and reports Sent once', async () => {
+  const account = {environment: 'production', userId: 'owner-1'}, owner = JSON.stringify(['production', 'owner-1', '']);
+  const d = device(owner), toasts = [];
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    const provider = inboxProviderControls(() => {}, text => toasts.push(text));
+    const proposal = {kind: 'send', mode: 'compose', to: ['reader@example.invalid'], cc: [], bcc: [], subject: 'Hello', bodyText: 'Body', attachments: []};
+    const source = {draftId: 'draft-1', providerDraft: {draftId: 'gmail-draft-1', providerDigest: 'a'.repeat(64)}};
+    provider.setComposer(() => ({draftId: 'draft-1', proposal}));
+    await provider.bind('grant-a');
+    await provider.prepare(proposal, source, 'send-from-composer');
+    await until(() => !provider.render().provider.busy, 'the send');
+    assert.equal(d.remote.dispatches, 1);
+    assert.deepEqual(toasts, ['Sent.']);
+    assert.equal(provider.render().providerReview, false);
+    // After a restart the receipt is reopened from its chip and checked again.
+    const restarted = inboxProviderControls(() => {}, text => toasts.push(text));
+    await restarted.bind('grant-a');
+    assert.equal(restarted.render().providerReview, false);
+    const chips = restarted.chips((label, action) => ({label, action}));
+    assert.deepEqual(chips.map(chip => chip.label), ['Mail review / receipt']);
+    chips[0].action();
+    assert.equal(restarted.render().providerReview, true);
+    restarted.render().provider.check();
+    await until(() => !restarted.render().provider.busy, 'the check');
+    assert.deepEqual(toasts, ['Sent.'], 'the earlier send is not reported again');
+    assert.equal(restarted.render().providerReview, true, 'the checked receipt stays on view');
+    assert.equal(d.remote.dispatches, 1);
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+});
+
 test('one-tap Send behind an unsent review of another change opens the review sheet and sends nothing', async () => {
   const {d, toasts, provider, sent} = await directSendAfter(async provider => {
     await provider.prepare(archive);
