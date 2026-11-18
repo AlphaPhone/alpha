@@ -37,7 +37,8 @@ ANDROID_DOUBLES = {
      public class AtomicFile {
       public static boolean denyWrites, denyReads; private final File file, pending;
       public AtomicFile(File path){file=path;pending=new File(path+".new");}
-      public byte[] readFully()throws IOException{if(denyReads)throw new IOException("read denied");try(FileInputStream in=new FileInputStream(file)){return in.readAllBytes();}}
+      public File getBaseFile(){return file;}
+      public byte[] readFully()throws IOException{if(denyReads)throw new FileNotFoundException("read denied");try(FileInputStream in=new FileInputStream(file)){return in.readAllBytes();}}
       public FileOutputStream startWrite()throws IOException{if(denyWrites)throw new IOException("write denied");return new FileOutputStream(pending);}
       public void finishWrite(FileOutputStream out){try{out.close();Files.move(pending.toPath(),file.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}catch(IOException e){throw new UncheckedIOException(e);}}
       public void failWrite(FileOutputStream out){try{out.close();Files.deleteIfExists(pending.toPath());}catch(IOException e){throw new UncheckedIOException(e);}}

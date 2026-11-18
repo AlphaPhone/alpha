@@ -20,6 +20,8 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.util.List;
 
 /** Runs only on RoleControllerService's serialized worker. */
@@ -81,11 +83,20 @@ final class AlphaRoleUpgradeAndroid implements AlphaRoleUpgrade.Port {
     }
 
     @Override public String state(String role) {
+        AtomicFile file = stateFile(role);
         try {
-            return new String(stateFile(role).readFully(), StandardCharsets.UTF_8);
-        } catch (FileNotFoundException missing) {
-            return "";
+            String value = new String(file.readFully(), StandardCharsets.UTF_8);
+            if (AlphaRoleUpgrade.PENDING.equals(value) || AlphaRoleUpgrade.DONE.equals(value)) {
+                return value;
+            }
+            throw new IllegalStateException("Invalid Alpha role transition state for " + role);
         } catch (IOException error) {
+            // FileInputStream also throws FileNotFoundException for access errors. Only a
+            // confirmed missing marker allows the default pass to start a fresh migration.
+            if (error instanceof FileNotFoundException
+                    && Files.notExists(file.getBaseFile().toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                return "";
+            }
             throw new IllegalStateException("Cannot read Alpha role transition state", error);
         }
     }
