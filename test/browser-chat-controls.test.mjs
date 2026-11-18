@@ -62,6 +62,33 @@ test('an address opened in a new tab keeps the earlier page, so switching back a
   const reused=await approved('https://example.org/',false);assert.equal(reused,wiki);assert.equal(host.state().tabs.length,2);
  });
 });
+// The owner's v610 turns (Pixel): the same opens, then the controls the owner asked for next. The server
+// stores "open wikipedia.org in a new tab" as browser_navigate {url, newTab: true} even when the model
+// proposed an empty browser_tab_new (eliza service grounding), so the phone opens the address.
+test('after an address opened in a new tab, switch, back, forward, reload and close act on the right tab',async()=>{
+ await browser(async({host,sent,page,control})=>{
+  const approved=async(address,newTab)=>{const present=await host.component.browserNavigateApproved(address,signal(),true,newTab);await host.sync();const id=sent('navigate').at(-1).id;present?.();await host.sync();return id;};
+  const example=await approved('https://example.com/',false);await page(example,'https://example.com/','Example Domain');
+  const wiki=await approved('https://wikipedia.org/',true);await page(wiki,'https://wikipedia.org/','Wikipedia');
+  assert.deepEqual(host.state().tabs.map(tab=>tab.id),[example,wiki]);assert.equal(host.state().cur,wiki);
+  assert.deepEqual(sent('navigate').map(input=>[input.id,input.url]),[[example,'https://example.com/'],[wiki,'https://wikipedia.org/']],'the new tab loads the address, it is not left empty');
+  // "switch to the example tab"
+  await (await control({type:'browser_tab_switch',target:'example'}))();assert.equal(host.state().cur,example);
+  // The owner follows a link in that tab, so it has a page to go back to.
+  await page(example,'https://example.com/more','More examples',{canBack:true});
+  // "go back", "go forward", "reload": each on the showing example tab, never the Wikipedia one.
+  await (await control({type:'browser_history',action:'back'}))();
+  await page(example,'https://example.com/','Example Domain',{canForward:true});
+  await (await control({type:'browser_history',action:'forward'}))();
+  await page(example,'https://example.com/more','More examples',{canBack:true});
+  await (await control({type:'browser_history',action:'reload'}))();
+  assert.deepEqual(sent('command').map(input=>[input.id,input.command]),[[example,'back'],[example,'forward'],[example,'reload']]);
+  // "close this tab": the showing example tab closes and Wikipedia stays open.
+  await (await control({type:'browser_tab_close'}))();
+  assert.deepEqual(sent('close').map(input=>input.id),[example]);
+  assert.deepEqual(host.state().tabs.map(tab=>tab.id),[wiki]);assert.equal(host.state().cur,wiki);
+ });
+});
 test('switching finds one tab by a word of its title or its site and shows it after the receipt',async()=>{
  await browser(async({host,open,control,asked})=>{
   const news=await open('https://news.example/today','Morning news',{fresh:false}),docs=await open('https://docs.example.org/guide','Field guide');
@@ -184,6 +211,21 @@ for(const [operation,text] of direct)test(`a ${operation.type} bound to the owne
  const on=bound(operation);assert.deepEqual(await on.run(text,async()=>false),[]);assert.deepEqual(on.actions.calls,[],'with "Ask before Alpha acts" on, the card is the only way to run it');
  const unbound=bound(operation,null);assert.deepEqual(await unbound.run(text),[]);assert.deepEqual(unbound.actions.calls,[]);
  const older=bound(operation,'an-earlier-message');assert.deepEqual(await older.run(text),[]);assert.deepEqual(older.actions.calls,[]);
+});
+test('the v610 sentences run their bound operations without a card, and the new-tab open only for its own address',async()=>{
+ const sentences=[
+  [{type:'browser_navigate',url:'https://wikipedia.org/',newTab:true},'open wikipedia.org in a new tab',true],
+  [{type:'browser_navigate',url:'https://example.com/'},'open example.com in the browser',true],
+  [{type:'browser_tab_switch',target:'example'},'switch to the example tab',true],
+  [{type:'browser_history',action:'back'},'go back',true],
+  [{type:'browser_history',action:'forward'},'go forward',true],
+  [{type:'browser_history',action:'reload'},'reload',true],
+  [{type:'browser_tab_close'},'close this tab',false],
+  [{type:'browser_navigate',url:'https://example.com/',newTab:true},'open wikipedia.org in a new tab',false],
+ ];
+ for(const [operation,text,runs] of sentences){
+  const f=bound(operation);await f.run(text);assert.deepEqual(f.actions.calls,runs?['control']:[],text+' '+JSON.stringify(operation));
+ }
 });
 test('a bound switch whose words match several tabs is left for its card, where the owner picks',async()=>{
  const f=bound({type:'browser_tab_switch',target:'shop'});f.actions.options.browserTabNeedsChoice=target=>target==='shop';
