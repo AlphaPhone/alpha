@@ -2,15 +2,24 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "031d59436d3b9972438a28344e7e0aec1c74c53f",
-  "head": "031d59436d3b9972438a28344e7e0aec1c74c53f",
+  "baseCommit": "d1ec6ba3b84bd053dc79c30c531d6214130103c5",
+  "head": "3e57cde5a72a8ec13f7662e8827fd810795e9181",
   "recordedAt": "2026-11-18",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...031d59436d3b9972438a28344e7e0aec1c74c53f",
-  "status": "identical",
-  "aheadBy": 0,
+  "command": "gh api repos/elizaOS/eliza/compare/develop...3e57cde5a72a8ec13f7662e8827fd810795e9181",
+  "status": "ahead",
+  "aheadBy": 2,
   "behindBy": 0,
-  "mergeBase": "031d59436d3b9972438a28344e7e0aec1c74c53f",
-  "pinOnlyCommits": [],
+  "mergeBase": "d1ec6ba3b84bd053dc79c30c531d6214130103c5",
+  "pinOnlyCommits": [
+    {
+      "sha": "b320f1941cf3b00c4bd1b257d72e617c83fa5306",
+      "subject": "Recover once when Calendar creation extraction returns no fields"
+    },
+    {
+      "sha": "3e57cde5a72a8ec13f7662e8827fd810795e9181",
+      "subject": "Keep ambiguous Notes transcripts from implying a write"
+    }
+  ],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
