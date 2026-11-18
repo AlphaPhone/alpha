@@ -163,7 +163,9 @@ for (const decision of [
           'inbox',
         );
         await expect(
-          page.getByText('Tomorrow’s shoot', { exact: true }),
+          page.getByRole('button').filter({
+            has: page.getByText('Tomorrow’s shoot', { exact: true }),
+          }),
         ).toBeVisible();
       }
       expect(foreign).toEqual([]);
