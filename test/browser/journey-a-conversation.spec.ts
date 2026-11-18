@@ -263,6 +263,7 @@ test('journey A: a proposed phone action is declined from the conversation and n
  const message=page.getByRole('group',{name:'Assistant controls'}).getByRole('textbox',{name:'Message Alpha',exact:true});
  await message.fill('Journey A request after declining');
  await message.press('Enter');
+ await expect(bubble(page,'Journey A request after declining')).toHaveCount(1);
  await expect(bubble(page,REPLY)).toHaveCount(2);
  await expect(approve).toHaveCount(0);
 
