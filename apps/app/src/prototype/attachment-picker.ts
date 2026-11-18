@@ -40,7 +40,7 @@ type PickerRow=
 
 const accepts=(name:string,mime:string)=>name.length>0&&name.length<=MAX_CHAT_ATTACHMENT_NAME_LENGTH&&uploadTypes.has(mime);
 const revision=(photo:SavedPhoto)=>photo.mutationRevision||photo.revision;
-function decodedFile(value:AttachmentBytes):File {
+export function decodedFile(value:AttachmentBytes):File {
   if(!accepts(value.name,value.mimeType)||value.dataBase64.length>Math.ceil(fileLimit(value.mimeType)/3)*4)
     throw Error('Choose a supported photo or document.');
   const raw=atob(value.dataBase64),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));

@@ -1,7 +1,7 @@
 import {expect,test,type Page} from '@playwright/test';
 import {createHash} from 'node:crypto';
 
-async function setup(page:Page,documentBytes=0) {
+async function ready(page:Page,documentBytes=0) {
  const outbound:string[]=[];
  await page.route('https://**/*',route=>{outbound.push(route.request().url());return route.abort();});
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
@@ -44,6 +44,11 @@ async function setup(page:Page,documentBytes=0) {
   LocalAgentProtocol.prototype.messages=async()=>({messages:structuredClone(fixture.rows)}) as never;
   (window as any).attachmentFixture=fixture;
  },documentBytes);
+ return outbound;
+}
+
+async function setup(page:Page,documentBytes=0) {
+ const outbound=await ready(page,documentBytes);
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await page.getByRole('button',{name:'Chat actions',exact:true}).click();
  await page.getByRole('dialog',{name:'Chat actions',exact:true}).getByRole('button',{name:'Attach media',exact:true}).click();
@@ -201,4 +206,80 @@ test('a large reviewed photo reaches shared compression before explicit Send',as
   try{return {mime:image.mimeType,length:image.data.length,width:bitmap.width,height:bitmap.height,reads:f.reads,sends:f.sends.length};}finally{bitmap.close();}
  });
  expect(result.mime).toBe('image/jpeg');expect(result.length).toBeLessThanOrEqual(5*1024*1024);expect(result.width).toBeGreaterThan(0);expect(result.width).toBeLessThanOrEqual(2048);expect(result.width/result.height).toBe(2);expect(result.reads).toBe(1);expect(result.sends).toBe(1);expect(outbound).toEqual([]);
+});
+
+
+test('a Files preview attaches the exact file to an editable prompt and waits for Send',async({page},testInfo)=>{
+ const outbound=await ready(page);
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
+ await page.getByRole('button',{name:'File actions',exact:true}).click();
+ await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ const prompt=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await expect(prompt).toHaveValue('Explain this file');
+ await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toBeVisible();
+ await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
+ await page.screenshot({path:testInfo.outputPath('file-in-chat.png'),animations:'disabled'});
+ await prompt.fill('What does this say?');
+ await page.getByRole('button',{name:'Send',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).attachmentFixture.sends.map(({text,images}:any)=>({text:text.split('[USER MESSAGE]\n').at(-1),images})))).toEqual([{
+  text: 'What does this say?',
+  images:[{name:'Reviewed notes.txt',mimeType:'text/plain',data:Buffer.from('first bytes').toString('base64')}],
+ }]);
+ await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(0);
+ expect(outbound).toEqual([]);
+});
+
+test('adding and removing a file preserves an existing unsent question',async({page})=>{
+ await ready(page);
+ await page.getByRole('textbox',{name:'Ask Alpha',exact:true}).fill('My own question');
+ await page.locator('[data-alpha-dock-scrim="true"]').click({position:{x:12,y:12}});
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
+ await page.getByRole('button',{name:'File actions',exact:true}).click();
+ await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ const prompt=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await expect(prompt).toHaveValue('My own question');
+ const remove=page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true});
+ await remove.click();
+ await expect(remove).toHaveCount(0);
+ await expect(prompt).toHaveValue('My own question');
+ expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
+});
+
+
+test('leaving Files during attachment validation discards the late read and allows a fresh retry',async({page})=>{
+ await ready(page);
+ await page.evaluate(async()=>{
+  const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
+  const read=BrowserMailAttachments.prototype.readSelected;
+  const fixture=(window as any).attachmentFixture;
+  BrowserMailAttachments.prototype.readSelected=async function(input){
+   if(!fixture.readReleased){
+    await new Promise<void>(resolve=>{fixture.resumeRead=()=>{fixture.readReleased=true;resolve();};});
+   }
+   return read.call(this,input);
+  };
+ });
+ const attach=async()=>{
+  await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
+  await page.getByRole('button',{name:'File actions',exact:true}).click();
+  await page.getByRole('button',{name:'Add to chat',exact:true}).click();
+ };
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await attach();
+ await expect.poll(()=>page.evaluate(()=>typeof (window as any).attachmentFixture.resumeRead)).toBe('function');
+ await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
+ await expect(page.getByRole('button',{name:'Files',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).attachmentFixture.resumeRead());
+ await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await attach();
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Explain this file');
+ await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(1);
+ expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
 });
