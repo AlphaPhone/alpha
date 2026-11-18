@@ -189,6 +189,7 @@ test('F-5: manual Send binds all fields and the shared-picker attachment byte fo
   const chooser = page.waitForEvent('filechooser');
   await picker.getByRole('button', {name: 'From computer', exact: true}).click();
   await (await chooser).setFiles({name: 'timetable.txt', mimeType: 'text/plain', buffer: bytes});
+  await expect(page.locator('input[type=file]')).toHaveCount(0);
   await picker.getByRole('button', {name: 'Attach selected files', exact: true}).click();
   await expect(button(page, 'Remove timetable.txt')).toBeVisible();
   expect(await provider(page)).toMatchObject({prepared: [], dispatched: [], sent: []});
@@ -211,6 +212,26 @@ test('F-5: manual Send binds all fields and the shared-picker attachment byte fo
     subject: 'Timetable for Friday', bodyText: 'Line one of the reviewed body.\nLine two.',
     attachments: [{name: 'timetable.txt', mimeType: 'text/plain', dataBase64: bytes.toString('base64')}],
   });
+});
+
+test('F-5: Inbox rejects an unsupported attachment and retires the chooser', async ({page}) => {
+  await openInbox(page);
+  await compose(page, 'Attachment check', 'Keep this message.');
+  await button(page, 'Attach file').click();
+  const picker = page.getByRole('dialog', {name: 'Attach files', exact: true});
+  const chooser = page.waitForEvent('filechooser');
+  await picker.getByRole('button', {name: 'From computer', exact: true}).click();
+  await (await chooser).setFiles({
+    name: 'unsupported.exe',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('Fixture bytes'),
+  });
+  await expect(picker.getByText('Choose a supported photo or document.', {exact: true})).toBeVisible();
+  await expect(picker.getByRole('button', {name: 'Attach selected files', exact: true})).toBeDisabled();
+  await expect(page.locator('input[type=file]')).toHaveCount(0);
+  await picker.getByRole('button', {name: 'Close attachments', exact: true}).click();
+  await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Keep this message.');
+  expect(await provider(page)).toMatchObject({prepared: [], dispatched: [], sent: []});
 });
 
 test('F-5: an email without Cc, Bcc or attachments sends empty fields', async ({page}) => {

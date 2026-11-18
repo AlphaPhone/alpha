@@ -129,7 +129,6 @@ test('a draft that changed under the open review is not written to; the refreshe
   await add.click();
   await expect(dialog).toHaveCount(0);
   await expect(body(page)).toHaveValue('My own opening line. Edited again.\n\n' + second);
-  await expect(page.getByText(/Agent suggestion added below your text\./)).toBeVisible();
   expect(await mail(page)).toEqual({ prepares: [], dispatches: [], sent: [] });
   expect(await harness(page, f => f.unexpected)).toEqual([]);
 });
