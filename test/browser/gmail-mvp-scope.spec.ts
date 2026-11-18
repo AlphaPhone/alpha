@@ -5,7 +5,7 @@ import {guardCalendarFixture as guardNoMedia} from './calendar-draft-readiness';
 import {test,expect,type Page} from '@playwright/test';
 test.beforeEach(async({context,page})=>{await guardNoMedia(context);await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());});
 // Gmail MVP flows against a controlled provider-boundary fixture: no real account, OAuth or mail.
-type Options={accounts?:string[];readState?:boolean;pages?:Record<string,number>;deferPaging?:boolean};
+type Options={accounts?:string[];readState?:boolean;pages?:Record<string,number>;deferPaging?:boolean;shiftedInboxPage?:boolean};
 async function setup(page:Page,options:Options={}){
  // Provider fixtures use local apps; they do not perform resident/Cloud onboarding.
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
@@ -28,7 +28,7 @@ async function setup(page:Page,options:Options={}){
    return {status:'saved'};
   };
   const f=w.gm={searches:[] as any[],prepares:[] as any[],dispatches:[] as any[],disconnects:[] as string[],fail:null as any,failCursor:false,stale:false,gate:null as Promise<void>|null,dispatchState:'succeeded',accountReads:0,accountGate:null as Promise<void>|null,accountFailure:false,
-   dispatchSaveGate:null as Promise<void>|null,dispatchSaveHeld:false,hiddenIds:[] as string[],
+   dispatchSaveGate:null as Promise<void>|null,dispatchSaveHeld:false,hiddenIds:[] as string[],receiptReads:[] as string[],
    accounts:(options.accounts||['owner@example.test']).map((label,i)=>({connectionId:'grant-'+i,label,configured:true,connected:true,reason:'connected',grantedCapabilities:['google.gmail.triage','google.gmail.send','google.gmail.mailbox']}))};
   const mail=(id:string,extra:Record<string,unknown>={})=>({id,threadId:'thread-'+id,subject:'Subject '+id,from:'Sender '+id,fromEmail:'sender@example.test',to:['owner@example.test'],cc:[],replyTo:null,snippet:'Preview '+id,receivedAt:'2026-10-06T12:00:00Z',unread:false,...extra});
   const inbox=Array.from({length:options.pages?.inbox??1},(_,page)=>[mail('in-'+page+'-a',{unread:page===0}),mail('in-'+page+'-b')]);
@@ -46,7 +46,8 @@ async function setup(page:Page,options:Options={}){
     if(f.fail){const kind=f.fail;f.fail=null;if(kind==='offline')throw new TypeError('Failed to fetch');throw new CloudProtocolError('http',kind);}
     if(pageToken&&f.failCursor){f.failCursor=false;throw new CloudProtocolError('http',400,{error:'Invalid Gmail page token.'});}
     const pages=store[query]||[[]],index=pageToken?Number(pageToken.split(':')[1]):0;
-    return {messages:(pages[index]||[]).filter(message=>!f.hiddenIds.includes(message.id)),syncedAt:'sync',nextPageToken:index+1<pages.length?'cursor:'+(index+1):null};
+    const mailboxHistoryId=options.shiftedInboxPage&&query==='in:inbox'?String(index+1):undefined;
+    return {messages:(pages[index]||[]).filter(message=>!f.hiddenIds.includes(message.id)),syncedAt:'sync',mailboxHistoryId,nextPageToken:index+1<pages.length?'cursor:'+(index+1):null};
    },
    gmailRead:async(_grant:string,id:string)=>({message:all().find(m=>m.id===id),bodyText:'Body of '+id,historyId:'h-'+id,attachments:[]}),
    gmailThread:async(_grant:string,threadId:string)=>{const message=all().find(m=>m.threadId===threadId);return {messages:[{message,bodyText:'Body of '+message.id,historyId:'h-'+message.id,attachments:[]}],total:1,offset:0,historyId:'thread-history',nextOffset:null};},
@@ -64,7 +65,7 @@ async function setup(page:Page,options:Options={}){
     const receipt={...receipts[requestId],state:'succeeded',providerResult:{messageId:proposal.messageId,labelIds:[],historyId:'h2-'+proposal.messageId,...(proposal.kind.startsWith('mark-')?{unread:proposal.kind==='mark-unread'}:{})},reviewDigest};
     receipts[requestId]=receipt;return receipt;
    },
-   gmailOperation:async(_grant:string,requestId:string)=>receipts[requestId],
+   gmailOperation:async(_grant:string,requestId:string)=>{f.receiptReads.push(requestId);return receipts[requestId];},
    disconnectGmail:async(id:string)=>{f.disconnects.push(id);f.accounts=f.accounts.map((a:any)=>a.connectionId===id?{...a,connected:false,reason:'disconnected',grantedCapabilities:[]}:a);},
    initiateGmail:async()=>{throw Error('No live OAuth in fixture');},
   };
@@ -443,17 +444,19 @@ test('Inbox selection changes only the confirmed visible emails once',async({pag
 });
 
 test('Inbox does not retain a selection across a refreshed first page',async({page})=>{
- await setup(page);
+ await setup(page,{pages:{inbox:2},shiftedInboxPage:true});
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
- await expect(page.getByText('Subject in-0-b',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Load more',exact:true}).click();
+ const reload=page.getByRole('button',{name:'Load newer mail',exact:true});
+ await expect(reload).toBeVisible();
  await mailOption(page,'Select emails');
  await mailOption(page,'Select all shown');
+ await expect(page.getByRole('heading',{name:'4 selected',exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeDisabled();
 
- await page.evaluate(()=>{
-  (window as any).gm.hiddenIds=['in-0-b'];
-  window.dispatchEvent(new Event('alpha:google-accounts-changed'));
- });
+ await page.evaluate(()=>{(window as any).gm.hiddenIds=['in-0-b'];});
+ await reload.click();
+ await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
  await expect(page.getByText('Subject in-0-b',{exact:true})).toHaveCount(0);
  await expect(page.getByRole('heading',{name:'Inbox',exact:true})).toBeVisible();
  await mailOption(page,'Select emails');
@@ -464,8 +467,8 @@ test('Inbox does not retain a selection across a refreshed first page',async({pa
  expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
 });
 
-for(const retirement of ['leave Inbox','withdraw Gmail changes'] as const)test(
- `Inbox stops an Archive held at the journal write when the owner can ${retirement}`,async({page})=>{
+for(const retirement of ['leaves Inbox','withdraws Gmail changes'] as const)test(
+ `Inbox recovers a held Archive without dispatch when the owner ${retirement}`,async({page})=>{
  await setup(page);
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
@@ -478,10 +481,17 @@ for(const retirement of ['leave Inbox','withdraw Gmail changes'] as const)test(
  await mailOption(page,'Archive');
  await page.getByRole('dialog',{name:'Archive 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
  await expect.poll(async()=>(await gm(page)).dispatchSaveHeld).toBe(true);
+ const journal=await page.evaluate(()=>{
+  const slots=(window as any).gmSlots;
+  const key=Object.keys(slots).find(k=>k.startsWith('inbox-operation:v1:'))!;
+  return {key,requestId:slots[key].requestId,phase:slots[key].phase};
+ });
+ expect(journal.phase).toBe('review');
 
- if(retirement==='leave Inbox'){
+ const homeInbox=page.getByRole('region',{name:'Home',exact:true}).getByRole('button',{name:'Inbox',exact:true});
+ if(retirement==='leaves Inbox'){
   await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
-  await expect(page.getByRole('button',{name:'Inbox',exact:true})).toBeVisible();
+  await expect(homeInbox).toBeVisible();
  }else{
   const reads=(await gm(page)).accountReads;
   await page.evaluate(()=>{
@@ -492,9 +502,18 @@ for(const retirement of ['leave Inbox','withdraw Gmail changes'] as const)test(
   await expect.poll(async()=>(await gm(page)).accountReads).toBeGreaterThan(reads);
  }
  await page.evaluate(()=>(window as any).gm.releaseDispatchSave());
- await expect.poll(async()=>(await gm(page)).dispatchSaveHeld).toBe(false);
- if(retirement==='leave Inbox')await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ const saved=()=>page.evaluate(key=>(window as any).gmSlots[key]??null,journal.key);
+ await expect.poll(saved).toMatchObject({phase:'dispatching',requestId:journal.requestId,receipt:{state:'prepared'}});
+ if(retirement==='leaves Inbox')await homeInbox.click();
  await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeEnabled();
+ const review=page.getByRole('dialog',{name:'Review mail operation',exact:true});
+ if(!await review.isVisible())await page.getByRole('button',{name:'Mail review / receipt',exact:true}).click();
+ await expect(review).toContainText(journal.requestId);
+ await review.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ await expect(review.getByRole('status')).toContainText('Gmail reports that this change was not made.');
+ await review.getByRole('button',{name:'Discard this operation',exact:true}).click();
+ await expect.poll(saved).toBeNull();
+ expect((await gm(page)).receiptReads).toEqual([journal.requestId,journal.requestId]);
  expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
  expect((await gm(page)).dispatches).toEqual([]);
 });
