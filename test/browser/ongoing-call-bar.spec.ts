@@ -29,6 +29,80 @@ test.describe('Alpha image: ongoing call bar', () => {
     expect(await inputs(page)).toEqual([['showCall', {id: 'call-1'}]]);
   });
 
+  // Owner report (v609): while Telecom still said DIALING the bar said "On call · 0:00". The bar says
+  // what the call screen says, and its clock counts from the connect time the call reports.
+  test('a dialing call says Calling… until it is active, then counts from its connect time', async ({page}) => {
+    await setupTelephony(page);
+    await setCalls(page, [{id: 'call-1', state: 'dialing', connectedAt: null}]);
+    await expect(bar(page)).toContainText('Calling…');
+    await page.waitForTimeout(1_500);
+    await expect(bar(page)).toContainText('Calling…');
+    await expect(bar(page)).not.toContainText('On call');
+    // Connected 42 seconds ago by Telecom's clock, long after the bar first appeared: not 0:00.
+    await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 42_000}]);
+    await expect(bar(page)).toContainText(/On call · 0:4[2-4]/);
+    await expect(page.getByRole('button', {name: /^Return to call, On call · 0:4\d$/})).toBeVisible();
+    // A ringing call is an incoming call, with no clock.
+    await setCalls(page, [{id: 'call-2', state: 'ringing', connectedAt: null}]);
+    await expect(bar(page)).toContainText('Incoming call');
+  });
+
+  // Owner report (v609): the remote side hung up just as the owner tapped the bar; the bar vanished,
+  // the screen moved up, and the tap opened the Inbox card underneath. The ended call's bar keeps its
+  // place as "Call ended" for a moment and takes the tap.
+  test('when the call ends the bar holds its place as Call ended and swallows a tap aimed at it', async ({page}) => {
+    await setupTelephony(page);
+    await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 20_000}]);
+    await expect(bar(page)).toContainText(/On call/);
+    const live = await bar(page).boundingBox();
+    const screenTop = await page.locator('[data-screen]').evaluate(node => node.getBoundingClientRect().top);
+    // Count every click that reaches the screen (the views under the bar).
+    await page.evaluate(() => {
+      (window as any).screenClicks = 0;
+      document.querySelector('[data-screen]')!.addEventListener('click', () => { (window as any).screenClicks++; }, true);
+    });
+    await setCalls(page, []);
+    await expect(bar(page)).toContainText('Call ended');
+    await expect(page.getByRole('status').filter({hasText: 'Call ended'})).toHaveCount(1);
+    // Same place and size, and the screen has not moved up.
+    expect(await bar(page).boundingBox()).toEqual(live);
+    expect(await page.locator('[data-screen]').evaluate(node => node.getBoundingClientRect().top)).toBe(screenTop);
+    // Nothing to return to or end: the return control is disabled and End is gone from view.
+    await expect(bar(page).getByRole('button', {name: 'Call ended'})).toHaveAttribute('aria-disabled', 'true');
+    await expect(bar(page).getByRole('button', {name: 'End call', exact: true})).toHaveCount(0);
+    // Taps where Return and End were land on the bar and do nothing.
+    await page.mouse.click(live!.x + 60, live!.y + live!.height / 2);
+    await page.mouse.click(live!.x + live!.width - 26, live!.y + live!.height / 2);
+    expect(await inputs(page)).toEqual([]);
+    expect(await page.evaluate(() => (window as any).screenClicks)).toBe(0);
+    // Then it goes, and the screen gets its full height back.
+    await expect(bar(page)).toHaveCount(0, {timeout: 4_000});
+    await expect.poll(() => page.locator('[data-screen]').evaluate(node => node.getBoundingClientRect().top)).toBeLessThan(screenTop);
+  });
+
+  test('ending the call from the bar shows Call ended, and a second tap does nothing', async ({page}) => {
+    await setupTelephony(page);
+    await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 5_000}]);
+    const end = page.getByRole('button', {name: 'End call', exact: true});
+    const box = (await end.boundingBox())!;
+    await end.click();
+    await expect(bar(page)).toContainText('Call ended');
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    expect(await inputs(page)).toEqual([['endCall', {id: 'call-1'}]]);
+    await expect(bar(page)).toHaveCount(0, {timeout: 4_000});
+  });
+
+  test('a new call during the Call ended moment shows at once', async ({page}) => {
+    await setupTelephony(page);
+    await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 5_000}]);
+    await expect(bar(page)).toContainText(/On call/);
+    await setCalls(page, []);
+    await expect(bar(page)).toContainText('Call ended');
+    await setCalls(page, [{id: 'call-2', state: 'ringing', connectedAt: null}]);
+    await expect(bar(page)).toContainText('Incoming call');
+    await expect(page.getByRole('button', {name: 'Decline', exact: true})).toBeVisible();
+  });
+
   test('End call disconnects the shown call and the bar goes when Telecom removes it', async ({page}) => {
     await setupTelephony(page);
     await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 65_000}]);
@@ -71,6 +145,14 @@ test.describe('Alpha image: ongoing call bar', () => {
     await setCalls(page, [{id: 'call-1', state: 'dialing', connectedAt: null, number: '+15550100103'}]);
     await setCalls(page, [{id: 'call-1', state: 'ringing-loudly', connectedAt: null}]);
     await expect(bar(page)).toHaveCount(0);
+  });
+
+  test('a malformed reading during a call removes the bar at once rather than claiming the call ended', async ({page}) => {
+    await setupTelephony(page);
+    await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 5_000}]);
+    await expect(bar(page)).toContainText(/On call/);
+    await setCalls(page, [{id: 'call-1', state: 'ringing-loudly', connectedAt: null}]);
+    await expect(bar(page)).toHaveCount(0, {timeout: 1_000});
   });
 });
 

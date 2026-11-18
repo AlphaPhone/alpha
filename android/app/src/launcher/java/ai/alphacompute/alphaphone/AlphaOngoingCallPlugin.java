@@ -40,15 +40,16 @@ public final class AlphaOngoingCallPlugin extends Plugin {
         for (String id : AlphaInCallService.callIds()) {
             Call call = AlphaInCallService.call(id);
             if (call == null) continue;
-            String state = AlphaCallPresentation.ongoingState(call.getState());
+            // One reading of the state for both fields, so a call never reports a clock it has not earned.
+            int telecom = call.getState();
+            String state = AlphaCallPresentation.ongoingState(telecom);
             if (state == null) continue;
             Call.Details details = call.getDetails();
-            long connected = details == null ? 0 : details.getConnectTimeMillis();
+            Long connected = AlphaCallPresentation.ongoingConnectedAt(telecom, details == null ? 0 : details.getConnectTimeMillis());
             JSObject row = new JSObject();
             row.put("id", id);
             row.put("state", state);
-            boolean live = "active".equals(state) || "held".equals(state);
-            row.put("connectedAt", live && connected > 0 ? (Object) connected : JSObject.NULL);
+            row.put("connectedAt", connected != null ? (Object) connected : JSObject.NULL);
             calls.put(row);
         }
         JSObject out = new JSObject();

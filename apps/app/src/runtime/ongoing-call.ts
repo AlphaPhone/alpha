@@ -10,6 +10,13 @@
  *   its showCall and endCall are the call notice's open and the call screen's Decline and End.
  * - The development phone (prototype model.js, Phone's `callBar`): its simulated call screen is the
  *   Phone view, so the bar shows on every other view and returns there. It never reaches a radio.
+ *
+ * The bar says what the call screen says: "Calling…" until Telecom reports the call ACTIVE (dialing
+ * and connecting both report `dialing`), "Incoming call" while it rings, and "On call · m:ss" counted
+ * from the connect time Android reports (Call.Details.getConnectTimeMillis), never from when the bar
+ * appeared. When the call goes, the bar keeps its place for CALL_ENDED_HOLD_MS saying "Call ended",
+ * and its controls do nothing, so a tap aimed at it as the call ends does not reach the view the
+ * collapsing bar would otherwise uncover underneath (owner report, v609).
  */
 type Bag = Record<string, any>;
 
@@ -62,7 +69,10 @@ export function callClock(millis: number): string {
 	return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
 
-/** What the bar says about the call. */
+/**
+ * What the bar says about the call. Only an active call has a clock, and it counts from the connect
+ * time the call reports; a dialing or ringing call never shows one, whatever time it carries.
+ */
 export function callBarStatus(state: OngoingCallState, connectedAt: number | null, now: number): string {
 	if (state === 'ringing') return 'Incoming call';
 	if (state === 'dialing') return 'Calling…';
@@ -70,10 +80,37 @@ export function callBarStatus(state: OngoingCallState, connectedAt: number | nul
 	return connectedAt ? `On call · ${callClock(now - connectedAt)}` : 'On call';
 }
 
-export type CallBar = {status: string; returnLabel: string; endLabel: string; open(): void; end(): void};
+export type CallBar = {status: string; returnLabel: string; endLabel: string; ended: boolean; announcement: string; open(): void; end(): void};
 export function presentCallBar(call: {state: OngoingCallState; connectedAt: number | null}, now: number, open: () => void, end: () => void): CallBar {
 	const status = callBarStatus(call.state, call.connectedAt, now);
-	return {status, returnLabel: `Return to call, ${status}`, endLabel: call.state === 'ringing' ? 'Decline' : 'End call', open, end};
+	return {status, returnLabel: `Return to call, ${status}`, endLabel: call.state === 'ringing' ? 'Decline' : 'End call', ended: false, announcement: '', open, end};
+}
+
+/** How long an ended call's bar keeps its place, swallowing taps, before the screen moves back up. */
+export const CALL_ENDED_HOLD_MS = 1500;
+const ignore = () => {};
+/** The ended call's bar: same place and size, nothing to press, and a status a screen reader hears. */
+export function presentEndedCallBar(): CallBar {
+	return {status: 'Call ended', returnLabel: 'Call ended', endLabel: 'Call ended', ended: true, announcement: 'Call ended', open: ignore, end: ignore};
+}
+
+/** Which call the last frame showed, and until when an ended call keeps its bar. */
+export type CallBarMemory = {shown: string | null; endedUntil: number};
+export type CallBarPhase = 'live' | 'ended' | 'none';
+/**
+ * The bar's phase for this frame.
+ * @param live the key of the call the bar would show now, or null.
+ * @param eligible the bar may show at all here (screen on, not the assistant, not the call screen).
+ *   Leaving those places is not a call ending: the bar just goes.
+ * @param trusted the last reading was well formed. A reading the bar cannot trust removes the bar at
+ *   once rather than claiming the call ended.
+ */
+export function nextCallBarPhase(memory: CallBarMemory, live: string | null, eligible: boolean, trusted: boolean, now: number): {phase: CallBarPhase; memory: CallBarMemory} {
+	if (!eligible) return {phase: 'none', memory: {shown: null, endedUntil: 0}};
+	if (live) return {phase: 'live', memory: {shown: live, endedUntil: 0}};
+	if (memory.shown && trusted) return {phase: 'ended', memory: {shown: null, endedUntil: now + CALL_ENDED_HOLD_MS}};
+	if (!memory.shown && trusted && memory.endedUntil > now) return {phase: 'ended', memory};
+	return {phase: 'none', memory: {shown: null, endedUntil: 0}};
 }
 
 /**
@@ -83,12 +120,14 @@ export function presentCallBar(call: {state: OngoingCallState; connectedAt: numb
  */
 export function installOngoingCallBar(Component: any, views: Bag, plugin: OngoingCallPlugin | null): void {
 	const p = Component.prototype, render = p.renderVals, mount = p.componentDidMount, unmount = p.componentWillUnmount;
-	let calls: OngoingCall[] = [], generation = 0, ending: string | null = null;
+	let calls: OngoingCall[] = [], generation = 0, ending: string | null = null, trusted = true;
+	let memory: CallBarMemory = {shown: null, endedUntil: 0}, collapse: ReturnType<typeof setTimeout> | undefined;
 	const owners = new Set<any>();
 	const redraw = () => { for (const owner of owners) if (owner.live !== false) owner.setState({ongoingCallRevision: Date.now()}); };
-	const apply = (next: OngoingCall[]) => {
-		if (JSON.stringify(next) === JSON.stringify(calls)) return;
+	const apply = (next: OngoingCall[], wellFormed = true) => {
+		if (wellFormed === trusted && JSON.stringify(next) === JSON.stringify(calls)) return;
 		calls = next;
+		trusted = wellFormed;
 		if (ending && !calls.some(call => call.id === ending)) ending = null;
 		redraw();
 	};
@@ -107,12 +146,16 @@ export function installOngoingCallBar(Component: any, views: Bag, plugin: Ongoin
 			// A reading the bar cannot trust removes the bar rather than showing a stale call.
 			if (!live) return;
 			generation++;
-			apply(parsed ?? []);
+			apply(parsed ?? [], !!parsed);
 		}).then(registered => { if (live) handle = registered; else void registered.remove(); }, () => {});
 		const visible = () => { if (!document.hidden) void refresh(); };
 		document.addEventListener('visibilitychange', visible);
 		void refresh();
-		stop = () => { live = false; document.removeEventListener('visibilitychange', visible); void handle?.remove(); calls = []; ending = null; };
+		stop = () => {
+			live = false; document.removeEventListener('visibilitychange', visible); void handle?.remove();
+			calls = []; ending = null; trusted = true; memory = {shown: null, endedUntil: 0};
+			if (collapse) { clearTimeout(collapse); collapse = undefined; }
+		};
 	};
 	// The connected clock advances once a second while the bar shows it.
 	let ticker: ReturnType<typeof setInterval> | undefined;
@@ -123,11 +166,13 @@ export function installOngoingCallBar(Component: any, views: Bag, plugin: Ongoin
 
 	p.renderVals = function () {
 		const out = render.call(this), self = this, now = Date.now();
-		let bar: CallBar | null = null, clock = false;
+		let bar: CallBar | null = null, clock = false, live: string | null = null, eligible = false;
 		if (out.isOn && !out.assistantSurface) {
 			if (plugin) {
+				eligible = true;
 				const call = shownCall(calls);
 				if (call) {
+					live = `call:${call.id}`;
 					clock = call.state === 'active' && !!call.connectedAt;
 					bar = presentCallBar(call, now,
 						() => { void plugin.showCall({id: call.id}).catch(() => {}); },
@@ -138,11 +183,22 @@ export function installOngoingCallBar(Component: any, views: Bag, plugin: Ongoin
 						});
 				}
 			} else if (self.S().view !== 'phone' && typeof views.phone?.callBar === 'function') {
+				eligible = true;
 				const call: PrototypeCall | null = views.phone.callBar(self.vget('phone'), self.api('phone'));
 				// The development phone ticks its own clock once a second while a call is live.
-				if (call) bar = presentCallBar(call, now, () => self.openView('phone', null, null, {restore: true}), () => call.end());
+				if (call) {
+					live = 'prototype';
+					bar = presentCallBar(call, now, () => self.openView('phone', null, null, {restore: true}), () => call.end());
+				}
 			}
 		}
+		const next = nextCallBarPhase(memory, live, eligible, plugin ? trusted : true, now);
+		if (next.memory.endedUntil !== memory.endedUntil) {
+			if (collapse) clearTimeout(collapse);
+			collapse = next.memory.endedUntil ? setTimeout(() => { collapse = undefined; redraw(); }, next.memory.endedUntil - now + 20) : undefined;
+		}
+		memory = next.memory;
+		if (next.phase === 'ended') { bar = presentEndedCallBar(); clock = false; }
 		tick(clock);
 		return {...out, hasCallBar: !!bar, callBar: bar || {}};
 	};

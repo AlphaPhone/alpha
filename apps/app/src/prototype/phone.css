@@ -1196,3 +1196,7 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .alpha-call-bar-return{flex:1 1 auto;min-width:0;min-height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;color:inherit;text-align:left;font-size:15px;font-weight:600}
 .alpha-call-bar-status{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .alpha-call-bar .alpha-end-button{width:48px;height:48px;min-width:48px;border-radius:24px}
+/* The ended call's moment: the bar keeps its place and takes the tap; End is hidden but keeps its space. */
+.alpha-call-bar[data-alpha-call-bar-ended="true"]{background:var(--alpha-gray-55)}
+.alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-end-button{visibility:hidden}
+.alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-call-bar-return{cursor:default}

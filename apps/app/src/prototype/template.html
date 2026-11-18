@@ -4843,13 +4843,16 @@
 </div>
 <!-- Owner issue 4: the ongoing-call bar (runtime/ongoing-call.ts) above every view but the call screen.
      It sits outside the screen, in the phone canvas (dc-lite.js moves data-alpha-screen-chrome there),
-     and data-alpha-call-bar-on moves the whole screen down below it (phone.css): it never covers a view. -->
+     and data-alpha-call-bar-on moves the whole screen down below it (phone.css): it never covers a view.
+     When the call ends it stays a moment as "Call ended" (data-alpha-call-bar-ended): same place, its
+     controls do nothing and End is hidden, so a tap aimed at it lands on the bar, not the view below. -->
 <sc-if value="{{hasCallBar}}" data-alpha-screen-chrome>
-<div data-alpha-call-bar role="region" aria-label="Ongoing call" class="alpha-call-bar">
-  <button data-alpha-call-bar-return aria-label="{{callBar.returnLabel}}" onClick="{{callBar.open}}" class="alpha-call-bar-return">
+<div data-alpha-call-bar data-alpha-call-bar-ended="{{callBar.ended}}" role="region" aria-label="Ongoing call" class="alpha-call-bar">
+  <button data-alpha-call-bar-return aria-label="{{callBar.returnLabel}}" aria-disabled="{{callBar.ended}}" onClick="{{callBar.open}}" class="alpha-call-bar-return">
     <svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.phone}}"></path></svg>
     <span class="alpha-call-bar-status">{{callBar.status}}</span>
   </button>
+  <span role="status" class="sr-only">{{callBar.announcement}}</span>
   <button data-alpha-call-bar-end aria-label="{{callBar.endLabel}}" onClick="{{callBar.end}}" class="alpha-end-button"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 20px; height: 20px; transform: rotate(135deg)"><path d="{{ic.phone}}"></path></svg></button>
 </div>
 </sc-if>
