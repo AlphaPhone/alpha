@@ -395,3 +395,15 @@ test('the dialer opens the Phone keypad, filled in at most, and never dials or c
   assert.equal(result.status, 'failed'); assert.equal(result.present, undefined);
   assert.deepEqual(refuseTelephonyAction({type: 'phone_keypad'}, 'Alpha was not open.').telephonyResult, {kind: 'phone-keypad', status: 'unavailable'});
 });
+
+test('SMS sender uses the narrow device read and drops results after the foreground fence closes', async () => {
+  const operation = {type: 'sms_latest_sender'};
+  const read = async () => ({status: 'found', numberEnding: '0123'});
+  const result = await run(operation, ports({latestIncomingSender:read}));
+  assert.equal(result.status, 'succeeded');
+  assert.deepEqual(result.telephonyResult, {kind:'sms-latest-sender',status:'found',numberEnding:'0123'});
+  const cancelled = new AbortController();
+  await assert.rejects(executeTelephonyAction(operation, 'cancelled',
+    ports({latestIncomingSender:async () => { cancelled.abort(); return read(); }}).ports,
+    cancelled.signal), /aborted/i);
+});

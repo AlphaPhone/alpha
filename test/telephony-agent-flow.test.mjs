@@ -93,6 +93,24 @@ test('the open contact is returned to the agent as a read result, and a request 
   assert.equal((await f.client.approve(id, contacts, signal())).status, 'succeeded');
   assert.equal(receiptOf(f).outcome, 'applied'); assert.deepEqual(receiptOf(f).result, result);
 });
+test('a latest SMS sender read from Home requires the negotiated capability and an approved exact receipt', async () => {
+  const capability = 'sms.latest-sender.v1';
+  const operation = {type: 'sms_latest_sender'};
+  const result = {kind: 'sms-latest-sender', status: 'found', numberEnding: '0123'};
+  const profile = {android: true, native: true, aospImage: true, foregroundReview: false};
+  assert.ok(P.selectDeviceCapabilities([capability], profile).includes(capability));
+  assert.ok(!P.selectDeviceCapabilities([capability], {...profile, aospImage: false}).includes(capability));
+  await assert.rejects(fixture({operation, result, capabilities: []}).client.pending(context, signal()), /not negotiated/);
+  const f = fixture({operation, result, capabilities: [capability], requestMessageId: messageId});
+  const [card] = await f.client.pendingReview(context, signal(), proof);
+  assert.ok(card.proposal);
+  assert.equal(f.effects, 0);
+  assert.equal((await f.client.approve(id, context, signal())).status, 'succeeded');
+  assert.deepEqual(receiptOf(f).result, result);
+  await f.client.approve(id, context, signal()).catch(() => {});
+  assert.equal(f.effects, 1);
+});
+
 test('each action needs its own negotiated capability', async () => {
   await assert.rejects(fixture({capabilities: []}).client.pending(context, signal()), /not negotiated/);
   await assert.rejects(fixture({capabilities: ['contacts.write.v1']}).client.pending(context, signal()), /not negotiated/);

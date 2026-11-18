@@ -177,6 +177,14 @@ export function telephonyActionResultText(
         : "Phone is unavailable right now. Nothing was dialed.";
     case "voicemail-delete":
       return voicemailDeleteResultText(result);
+    case "sms-latest-sender":
+      return result.status === "found"
+        ? `Latest incoming SMS sender ends in ${result.numberEnding}.`
+        : result.status === "empty"
+          ? "No incoming SMS messages."
+          : result.status === "sender-unavailable"
+            ? "The latest incoming SMS has no readable phone number."
+            : "Messages are unavailable right now.";
     case "messages-read":
       return result.status === "read"
         ? "Shared the open thread."

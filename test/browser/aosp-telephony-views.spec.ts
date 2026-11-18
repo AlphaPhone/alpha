@@ -26,6 +26,20 @@ test('Home shows one Messages card and one Phone card and keeps no telephony con
   expect(await page.evaluate(() => /Ada Okafor|Running ten minutes/.test(JSON.stringify({...localStorage})))).toBe(false);
 });
 
+test('the latest SMS sender read on Home calls the narrow bridge and never loads a thread', async ({page}) => {
+  await setupTelephony(page);
+  await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
+  const sender = await page.evaluate(async () => {
+    const {registerPlugin} = await import('/src/platform-plugins.ts');
+    const {createAospTelephony} = await import('/src/runtime/aosp-telephony.ts');
+    const plugin = registerPlugin('AlphaTelephony') as Parameters<typeof createAospTelephony>[0];
+    return createAospTelephony(plugin, true).latestIncomingSender();
+  });
+  expect(sender).toEqual({status: 'found', numberEnding: '0101'});
+  expect(await inputs(page, 'latestIncomingSender')).toHaveLength(1);
+  expect(await inputs(page, 'listMessages')).toEqual([]);
+});
+
 test('an SMS notification opens only its thread on launch and waits for an unsent draft', async ({page}) => {
   await setupTelephony(page, {smsNoticeThread: 'thread:102'});
   const title = page.locator('[data-alpha-messages-title]');
