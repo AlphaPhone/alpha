@@ -86,7 +86,7 @@ export function chatAttachmentComposerFixture() {
   shell.refreshDraftBinding = () => {shell.composerDraft.binding = key();};
   const ports = {
     storedChatFiles,
-    Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
+    AbortController, Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
     crypto: {randomUUID: () => `request-${++request}`},
     browserDocuments: {
       async edit(name, update) {

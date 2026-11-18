@@ -110,7 +110,7 @@ async function replayMountedLibrary(traces, {rewrite, required, reached}) {
               assert.ok(refusal instanceof product.LibraryAgentRefusal, String(refusal));
               if (refusal.message === 'Open Photos, then ask again.') refusedLeft = bump(refusedLeft);
               else if (refusal.message === 'Finish the open review first.') refusedBusy = bump(refusedBusy);
-              else assert.match(refusal.message, /^An item changed or left the library/);
+              else assert.equal(refusal.message, 'Nothing changed because an item changed or left the library.');
             });
             await settle();
             assert.ok(validating.has(from), 'the request did not reach the provider');

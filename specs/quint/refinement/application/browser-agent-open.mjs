@@ -10,7 +10,7 @@ const self = fileURLToPath(import.meta.url);
 const turn = 'browser-agent-request';
 const url = 'https://example.com/article';
 const tabCreated = 'Created a browser tab for example.com.';
-const syncNotice = ' Not synced yet; open action history to retry.';
+const tabCreatedUnsynced = "Created a browser tab for example.com, but it isn't synced yet.";
 const prefs = ['off', 'on', 'unreadable'];
 const browserCalls = ['bookmarks', 'browsingState', 'saveBrowsingState', 'present', 'close', 'cancelReading', 'readingSupport', 'create', 'navigate'];
 
@@ -240,7 +240,7 @@ async function replayOpen(DeviceActions, browserNavigationSummary, options) {
     // The summary the real coordinator journaled at its terminal phase and, once the approval
     // settles, the receipt it returned. Both must name tab creation in the exact product wording.
     's.tabReceipt':journalEntry?.phase === 'terminal' && journalEntry.summary === tabCreated &&
-      (returnedSummary === undefined || returnedSummary === tabCreated + (synced ? '' : syncNotice)),
+      (returnedSummary === undefined || returnedSummary === (synced ? tabCreated : tabCreatedUnsynced)),
   });
   const r = recorder(name, observe);
   try {
@@ -276,7 +276,7 @@ async function replayOpen(DeviceActions, browserNavigationSummary, options) {
       assert.equal(host.state().cur, navigate()[0].input.id);
       assert.deepEqual(host.viewOpens[0], ['browser', null, null, {restore:true}]);
     }
-    assert.equal(receipt.summary, receiptSucceeds ? tabCreated : tabCreated + syncNotice);
+    assert.equal(receipt.summary, receiptSucceeds ? tabCreated : tabCreatedUnsynced);
     r.step(r.action('receipt', receiptSucceeds), r.action(hidden ? 'presentSkipped' : 'present'));
     return r.trace;
   } finally {

@@ -349,6 +349,7 @@ export async function runInboxCoordinatorRefinement(extraSources = []) {
     let composer = app.render().c;
     composer.onTo({ target: { value: "recipient@example.test" } });
     app.render().c.addRaw();
+    app.render().c.onSubj({ target: { value: "Grant reconnected draft" } });
     app.render().c.onBody({ target: { value: "original" } });
     await fixture.settle();
     step(trace, "normal Inbox compose entrypoint retains the email", action("newDraft"), observe(fixture, projected));
@@ -375,7 +376,7 @@ export async function runInboxCoordinatorRefinement(extraSources = []) {
     assert.ok(draftsFolder);
     draftsFolder.pick();
     await fixture.settle();
-    const resume = app.render().rows.find((row) => row.name === "On this device");
+    const resume = app.render().rows.find((row) => row.label === "Local draft, Grant reconnected draft");
     assert.ok(resume);
     resume.open();
     await fixture.settle();
