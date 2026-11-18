@@ -1665,7 +1665,6 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           repaint();
         },
         hasMenu: at.kind !== "trash",
-        openMenu: () => currentApi.set({ menu: true }),
         moreD: ICONS.more,
         menuRows: [
           ...(["name", "date", "size"] as SortMode[]).map((mode) => ({
@@ -1761,7 +1760,6 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       out.canRename = selection?.size === 1;
       out.icons = ICONS;
       out.menuOpen = !!state.menu;
-      out.closeMenu = () => currentApi.set({ menu: false });
     } else {
       out.fd = null;
       out.menuOpen = false;
@@ -1807,6 +1805,12 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         .filter(Boolean)
         .join(" · ");
     } else if (!out.isPreview) opened = undefined;
+
+    if (out.isPreview) {
+      out.menuOpen = !!state.menu;
+      out.menuLabel = "File actions";
+      out.folderMenu = false;
+    }
 
     const d = dialog;
     out.nativeTreeDialog = null;

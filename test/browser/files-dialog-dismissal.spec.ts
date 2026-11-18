@@ -10,7 +10,14 @@ for(const theme of ['light','dark'])test(`${theme} file rename and delete dialog
  await page.locator('[data-alpha-dock-scrim="true"]').click({position:{x:12,y:12}});
  await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toHaveValue('Retained unsent file question');
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open keep.txt',exact:true}).click();
- const remove=page.getByRole('button',{name:'Delete file',exact:true});await expect(remove).toBeVisible();const selection=await page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context.selectedObject);
+ const remove=page.getByRole('button',{name:'Delete file',exact:true});await expect(remove).toHaveCount(0);
+ await page.getByRole('button',{name:'File actions',exact:true}).click();
+ const actions=page.getByRole('dialog',{name:'File actions',exact:true});
+ await expect(actions.getByRole('button')).toHaveText(['Share','Add to folder','Ask Alpha','Download file','Delete']);
+ await page.screenshot({path:test.info().outputPath('file-actions.png'),animations:'disabled'});
+ await page.keyboard.press('Escape');await expect(remove).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'File actions',exact:true})).toBeFocused();
+ const selection=await page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context.selectedObject);
  const rename=page.getByRole('button',{name:'Rename',exact:true});await rename.click();
  const dialog=page.getByRole('dialog',{name:'Rename',exact:true}),name=dialog.getByRole('textbox',{name:'Name',exact:true});await expect(name).toBeFocused();await name.fill('Unapproved.txt');
  const dock=await page.locator('[data-alpha-layer="pill"]').boundingBox(),confirm=await dialog.getByRole('button',{name:'Rename',exact:true}).boundingBox();
