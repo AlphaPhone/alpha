@@ -2110,11 +2110,12 @@ export function createMailDraftsController(
         try {
           await saveShelf(next);
         } catch {
-          if (token !== epoch || !current()) return false;
+          if (token !== epoch) return false;
           const readback = await store.read<Shelf>(shelfSlot());
-          if (token !== epoch || !current() || (readback !== null && !shelfValid(readback))) return false;
+          if (token !== epoch || (readback !== null && !shelfValid(readback))) return false;
           shelf = readback;
-          if (JSON.stringify(readback) !== JSON.stringify(next.items.length ? next : null)) return false;
+          // A peer can edit another draft after our write. Only the selected IDs need to be absent.
+          if (readback?.items.some(row => selected.has(row.draft.id))) return false;
         }
         return current();
       } finally {

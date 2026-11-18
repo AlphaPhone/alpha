@@ -24,7 +24,7 @@ import { homeReadIsStale, presentHomeInboxCard } from './home-cards';
 import { inboxDrafts, type ComposePrefill } from './inbox-drafts';
 import { attachmentReadFailure, classifyGmailFailure, gmailReadable, MailReadStateGuard, mailReadStateMessage, newestMailBodies, GMAIL_ACCOUNTS_CHANGED, type GmailFailureKind } from '../runtime/gmail-mailbox';
 import { connectionController, agentPendingText } from '../runtime/connection-ui';
-import { gmailGrantChange, gmailInboxAllows, gmailModifyIncomplete, gmailReadCacheKey } from '../runtime/gmail-grants';
+import { gmailActionGrant, gmailGrantChange, gmailInboxAllows, gmailModifyIncomplete, gmailReadCacheKey } from '../runtime/gmail-grants';
 import { cloudServiceName, type GmailAccount, type GmailDraftContent, type GmailDraftSummary, type GmailLink, type GmailMessage } from '../runtime/cloud-protocol';
 import { linkifyMailText, linkTextMismatch } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/links.ts';
 import { MAILBOX_FOLDER_QUERY, MailBodyCache, MailboxListCache, mergeMailboxPage, nextMailboxCursor, readSavedInboxSummary, readSavedMailbox, type MailboxFolder, type SavedMailbox } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts';
@@ -458,7 +458,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   }
   p.flushInboxForAppUpdate=async function(current:()=>boolean){
     const exact=()=>current()&&(!shell||shell===this)&&!pendingCompose&&!api?.get('inbox')?.compose&&
-      !provider.render().providerReview&&!attachmentView&&!this.mailAttachment;
+      !provider.render().providerReview&&!selectionAbort&&!preparingSelection&&!attachmentView&&!this.mailAttachment;
     if(!exact())throw Error('Inbox changes are still pending');
     await drafts.flushForAppUpdate(exact);
   };
@@ -518,11 +518,13 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       if (review.action === localDraftDelete) {
         changed = await drafts.removeSelection(review.ids, active) ? review.ids.size : 0;
       } else {
-        changed = await provider.applySelection(review.action, [...review.ids.keys()], async id => {
-          if (!active()) return null;
+        const action = review.action;
+        const canChange = () => active() && gmailActionGrant(accounts.find(a => a.connectionId === grant), action) === 'granted';
+        changed = await provider.applySelection(action, [...review.ids.keys()], async id => {
+          if (!canChange()) return null;
           const result = await binding.client.gmailRead(grant, id, abort.signal);
           return result.message.id === id ? result.historyId : null;
-        }, active);
+        }, canChange);
       }
       if (!active()) return;
       selection = null;
@@ -624,6 +626,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     } finally { if (token === generation) { operation = null; if (phase === 'busy') phase = 'ready'; publish(); } }
   }
   async function refreshAccounts(preserveSelection=false) {
+    if (selection || preparingSelection) finishSelection();
     readAhead.pause();stopBodyReads();
     let loadAfter = false;
     await work('Checking…', async (binding, signal, valid) => {
@@ -663,8 +666,8 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     if (loadAfter && api?.isActive()) await load();
   }
   function selectAccount(a: GmailAccount, force = false) {
-    if (a.connectionId !== selected || force) finishSelection();
     if (accountsFromDisk || operation && !force) return;
+    finishSelection();
     invalidateList();
     if (operation) cancelOperation();
     void attachmentNative.cancel().catch(()=>{});attachmentView=null;inboxPreview=null;homeFailure=null;hasUnread=false;selected = gmailReadable(a) ? a.connectionId! : '';saveGmailAccountChoice(connectionController.getSnapshot().cloudAccount,selected||null);watchSelectedMail(); void provider.bind(selected); void drafts.bind(selected, a.label); messages = []; body = null; thread = null; nextPageToken = null; loadedQuery = ''; failure = null;
@@ -752,6 +755,8 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   /** Abort only the in-flight read, preserving the list cursor and open message. */
   function cancelOperation() { linkReviews?.cancelAll(); generation++; operation?.abort(); operation = null; if (phase === 'busy') phase = 'ready'; loadingMore = false; }
   async function load(more = false) {
+    // A new first page can remove selected rows even when the folder and account stay the same.
+    if (!more && (selection || preparingSelection)) finishSelection();
     if (!selected || accountsFromDisk) { await refreshAccounts(accountsFromDisk); return; }
     if (draftsView()) { await loadDrafts(more); return; }
     const accountId = selected, query = currentQuery();
@@ -1115,6 +1120,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     const chip = (label: string, action: () => void, on = false) => ({ label, on,icon:folderIcons[label]?'/icons/lucide/'+folderIcons[label]+'.svg':null,
       css: on ? 'background:var(--fg);color:var(--bg)' : 'background:var(--s2);color:var(--fg)', pick: action });
     if (st.compose && typeof st.compose === 'object' && st.compose !== lastCompose) {
+      finishSelection();
       const incoming = lastCompose = st.compose;
       returnPending(); pendingCompose = shared(incoming);
       queueMicrotask(() => { if (api?.get('inbox')?.compose === incoming) publish({ compose: null }); });
@@ -1208,7 +1214,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
           ...(folder !== 'trash' ? [option('Move to Trash', 'trash-2',
             blocked || !hasSelected || !provider.capabilities()?.mailboxMutations,
             () => reviewSelection(activeSelection, 'trash', 'Move to Trash'))] : []),
-          ...(provider.capabilities()?.stars ? [option(folder === 'starred' ? 'Remove stars' : 'Star', 'star', blocked || !hasSelected,
+          ...(provider.capabilities()?.mailboxMutations && provider.capabilities()?.stars ? [option(folder === 'starred' ? 'Remove stars' : 'Star', 'star', blocked || !hasSelected,
             () => reviewSelection(activeSelection, folder === 'starred' ? 'unstar' : 'star', folder === 'starred' ? 'Remove stars from' : 'Star'))] : []),
           ...(provider.capabilities()?.mailboxMutations && provider.capabilities()?.readState ? [
             option('Mark as read', 'mail-open', blocked || !hasSelected,
@@ -1340,13 +1346,14 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
       restoreAndWarmHome();
     });
     this.gmailNoticeListener=onGmailNotice(()=>void openNotice());void openNotice();
-    this.inboxVisibility=()=>{if(document.hidden){retireRecipients();readAhead.pause();stopBodyReads();if(homeLoad)retireHomeLoad();}else{void openNotice();restoreAndWarmHome(true);}};
+    this.inboxVisibility=()=>{if(document.hidden){finishSelection();retireRecipients();readAhead.pause();stopBodyReads();if(homeLoad)retireHomeLoad();}else{publish();void openNotice();restoreAndWarmHome(true);}};
     document.addEventListener('visibilitychange',this.inboxVisibility);
     this.inboxResume = DailyApps.addListener('appResumed', () => { void openNotice(); if (api?.isActive()) { if (!operation) void refreshAccounts(true); }else restoreAndWarmHome(true); }).catch(() => null);
     // Settings can disconnect an account; re-check instead of showing a revoked mailbox.
     // Only a change to the selected account withdraws its notices and drops its saved mail; disconnecting
     // another account keeps both and the saved choice. An account list that cannot be read fails closed.
     this.inboxAccountsChanged = async () => {
+      finishSelection();
       retireRecipients();
       const binding = connectionController.getCloudClient(), cloudAccount = connectionController.getSnapshot().cloudAccount;
       const grant = selected || homePreview?.accountId || readGmailAccountChoice(cloudAccount) || '';

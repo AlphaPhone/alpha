@@ -161,6 +161,7 @@ export function createMailReviewController(
   let notStarted = false;
   // An explicit refresh can overlap an older read without changing the account epoch.
   let capabilityRead: AbortController | null = null;
+  let checkSelectionAtDispatch: (() => void) | null = null;
   let draftRead: AbortController | null = null,
     failure: GmailFailureKind | null = null;
   // A change grant withdrawn while a provider run is active is applied when that
@@ -256,6 +257,7 @@ export function createMailReviewController(
     draftRead = null;
     operation?.stop();
     operation = null;
+    checkSelectionAtDispatch = null;
     selected = session = owner = "";
     running = null;
     caps = null;
@@ -305,11 +307,32 @@ export function createMailReviewController(
     const token = epoch,
       read = new AbortController();
     capabilityRead = read;
-    const bound = new InboxOperation({
+    const checkMessageResult = (receipt: GmailInboxReceipt, proposal?: Bag) => {
+      if (receipt.state === "succeeded" && proposal?.expectedHistoryId &&
+          receipt.providerResult?.messageId !== proposal.messageId) {
+        throw new MailReviewNotice("Gmail answered for a different email. Check the saved receipt.");
+      }
+      return receipt;
+    };
+    const bound: InboxOperation = new InboxOperation({
       owner,
       grantId: grant,
       store: options.store,
-      client: current.client,
+      client: {
+        gmailPrepareOperation: (...args) => current.client.gmailPrepareOperation(...args),
+        gmailDispatchOperation: async (grant, request, digest, proposal, signal) => {
+          // confirm() awaits a durable write before dispatch. A selection can retire during it.
+          checkSelectionAtDispatch?.();
+          const receipt = await current.client.gmailDispatchOperation(grant, request, digest, proposal, signal);
+          return checkMessageResult(receipt, proposal);
+        },
+        gmailOperation: async (...args) => {
+          const receipt = await current.client.gmailOperation(...args);
+          return receipt.state === "succeeded" && !composerKind(receipt.kind)
+            ? checkMessageResult(receipt, bound.snapshot()?.proposal)
+            : receipt;
+        },
+      },
       reviewAttachment: options.reviewAttachment,
       active: () =>
         epoch === token && session === currentSession() && !disabled(),
@@ -608,7 +631,7 @@ export function createMailReviewController(
       const requireSelection = () => {
         check();
         if (!current()) throw new DOMException("Selection changed", "AbortError");
-        if (!allowed({kind: action})) throw new MailReviewNotice("Gmail change access changed.");
+        if (withdrawal || !allowed({kind: action})) throw new MailReviewNotice("Gmail change access changed.");
       };
       requireSelection();
       for (const id of ids) {
@@ -634,15 +657,15 @@ export function createMailReviewController(
         try {
           await owned.prepare({kind: action, messageId: id, expectedHistoryId: version});
           requireSelection();
-          const confirmed = await owned.confirm();
+          checkSelectionAtDispatch = requireSelection;
+          const confirmed = await owned.confirm().finally(() => {
+            if (checkSelectionAtDispatch === requireSelection) checkSelectionAtDispatch = null;
+          });
           check();
           const receipt = confirmed?.receipt;
           if (receipt?.state !== "succeeded") {
             visible = true;
             return;
-          }
-          if (receipt.providerResult?.messageId !== id) {
-            throw new MailReviewNotice("Gmail answered for a different email. Check the saved receipt.");
           }
           applied++;
           reported = receipt.requestId;
