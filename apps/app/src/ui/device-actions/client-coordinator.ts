@@ -70,6 +70,7 @@ import {
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
 import {
   BROWSER_CONTROL_DIRECT_TYPES,
+  BROWSER_OPEN_NEW_TAB_CAPABILITY,
   browserControlCapabilityAvailable,
   describeBrowserControl,
   isBrowserControl,
@@ -881,13 +882,12 @@ export class DeviceActionCoordinator<
       !browserControlCapabilityAvailable(op.type, this.credential.capabilities)
     )
       throw Error("This Browser action was not negotiated with this agent");
-    // An address opened in a tab of its own (browser.open-new-tab.v1, the
-    // shared browser contract's BROWSER_OPEN_NEW_TAB_CAPABILITY) only when
-    // this phone negotiated it, as the shared coordinator checks.
+    // An address opened in a tab of its own only when this phone negotiated
+    // it, as the shared coordinator checks.
     if (
       op.type === "browser_navigate" &&
       (op as { newTab?: unknown }).newTab === true &&
-      !this.capability("browser.open-new-tab.v1")
+      !this.capability(BROWSER_OPEN_NEW_TAB_CAPABILITY)
     )
       throw Error(
         "Opening an address in a new tab was not negotiated with this agent",
