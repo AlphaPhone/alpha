@@ -371,7 +371,7 @@ public class SenseListenerClient {
   boolean authorize(String account,java.util.function.BooleanSupplier consume);
  }
 }`,
-    'ai/eliza/plugins/passwords/SecretSurfaces.java': `package ai.eliza.plugins.passwords;
+    'ai/alphacompute/alphaphone/SecretSurfaces.java': `package ai.alphacompute.alphaphone;
 public class SecretSurfaces {
  public static AutoCloseable revealOwned(android.app.Activity activity,String title,String secret,java.util.function.BooleanSupplier owner) {
   throw new AssertionError("Unused protected secret presentation");
