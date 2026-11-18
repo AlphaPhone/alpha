@@ -213,6 +213,7 @@ export function createMailReviewController(
     const record = owned.snapshot(),
       source = sentSource(record);
     if (record && source) onSent?.(source, record.proposal, record.grantId);
+    return source;
   };
 
   function reset() {
@@ -371,13 +372,17 @@ export function createMailReviewController(
       await pending;
       if (token === epoch) {
         status = "";
-        settleSent(owned);
+        const confirmedSend = settleSent(owned);
         const record = owned.snapshot(),
           receipt = record?.receipt;
         notStarted =
           record?.phase === "dispatching" && receipt?.state === "prepared";
         if (receipt?.state === "succeeded" && receipt.requestId !== reported) {
           reported = receipt.requestId;
+          if (visible && confirmedSend && !confirmedSend.providerDraft) {
+            visible = false;
+            toast("Sent.");
+          }
           onReceipt?.(receipt);
           if (receipt.kind === "unarchive" || receipt.kind === "untrash")
             onRestored?.();
