@@ -8,15 +8,15 @@
     "recordedAt": null
   },
   "privateProducerApproval": {
-    "alphaCommit": "00d88aa2fc8474d332324d2410b7f1a01c5f315f",
-    "sdkCommit": "c6db724d13f25ed39fb26c687788c03a6847e29e",
-    "versionCode": 89,
-    "archiveSHA256": "9d93c9701f027999c2df750ffcf902052edbbe31d5937cc4dc8cc3a6f72efcae",
-    "archiveBytes": 1257734474,
-    "producerManifestSHA256": "f9fb0cbb4de81f29f003dba4d45e399d3a6637ee391629f24cdea175c894ccc9",
-    "privateProducerReceiptSHA256": "f5cf347f9179920ae40555a65bcfeea1ad0fef561e59e1a75b0c9af7593b7277",
+    "alphaCommit": "74cf71c19b412252e2301af455020c80187eae83",
+    "sdkCommit": "031d59436d3b9972438a28344e7e0aec1c74c53f",
+    "versionCode": 91,
+    "archiveSHA256": "1c2a59318ad19720acf17d0dfae34b6048a0a23d5772837f9364e302147bd34d",
+    "archiveBytes": 1257743835,
+    "producerManifestSHA256": "7acecddf16325224a13cf45c5276aa01c9f6a85d311905f24fe1cddac0638c53",
+    "privateProducerReceiptSHA256": "9537d030c0e24cd6ce1dd3632bcbd8458aa1b833a76c2ed678eddbd57e65e0b9",
     "unsignedApkSHA256": {
-      "launcher": "c4d6ac5df05d6911cc263c6d574aebeea34bd1588321fef9e4219973bc4d32ca"
+      "launcher": "1927104808974d8cd91b63cf332a14866a944180ac71b89e04f35e271793afb8"
     },
     "updateChannel": {
       "kind": "public",
