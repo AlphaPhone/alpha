@@ -38,7 +38,7 @@ import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type C
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
-import {deleteOpenVoicemail,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
+import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import {BrowserReviews} from '../browser/review';
 import type {ConversationMessageTarget} from '../runtime/alpha-client';
@@ -1131,6 +1131,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
             const listed=await book.list({query,limit:1});current();
             return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
           },
+          // The keypad opens after the receipt, like a filtered Contacts list; nothing is dialed.
+          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>{current();step();});},
           openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.

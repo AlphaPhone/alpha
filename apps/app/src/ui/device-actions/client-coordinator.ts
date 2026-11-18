@@ -1350,6 +1350,8 @@ export class DeviceActionCoordinator<
       "camera_capture_photo",
       "photo_library_select",
       "sms_reply_selected",
+      // The keypad in front, filled in at most: only the owner's Call tap there calls.
+      "phone_keypad",
       ...NOTES_ORGANIZE_DIRECT_TYPES,
       ...FILES_DIRECT_TYPES,
       ...PHOTOS_VIEW_DIRECT_TYPES,
@@ -3224,6 +3226,11 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
             description: `${to}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
           };
     }
+    case "phone_keypad":
+      return {
+        title: "Open keypad",
+        description: `${operation.number ? `Number: ${operation.number}\n\n` : ""}Opens the Phone keypad${operation.number ? " with this number filled in" : ""}. Nothing is dialed until you tap Call.`,
+      };
     case "sms_reply_selected":
       return {
         title: "Draft reply",

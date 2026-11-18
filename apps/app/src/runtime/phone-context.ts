@@ -180,7 +180,8 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // or single values), Contacts filtered to a search, and reads of the open thread, voicemail or
   // contact: the verified image only, and only what the agent offers. Each is confirmed on the phone
   // (telephony-executor.ts); the agent never receives the address book or a message list.
-  const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true}).filter(capability=>agent.includes(capability));
+  // The keypad, filled in at most, is the Phone view's own; it never calls.
+  const telephony=telephonyActionCapabilities({present:profile.aospImage,call:true,contactsWrite:true,contactsShow:true,contactsRead:true,sms:true,voicemail:true,keypad:true}).filter(capability=>agent.includes(capability));
   // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
   for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
   capabilities.push(...telephony);

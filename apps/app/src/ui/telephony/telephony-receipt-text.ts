@@ -171,6 +171,10 @@ export function telephonyActionResultText(
       return smsComposeResultText(result);
     case "sms-reply":
       return smsReplyResultText(result);
+    case "phone-keypad":
+      return result.status === "opened"
+        ? "The keypad is open. Nothing was dialed."
+        : "Phone is unavailable right now. Nothing was dialed.";
     case "voicemail-delete":
       return voicemailDeleteResultText(result);
     case "messages-read":

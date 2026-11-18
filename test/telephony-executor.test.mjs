@@ -36,6 +36,7 @@ function ports(overrides = {}) {
     draftFor: async (number, body) => { log.push(['draft-for', number, body]); return () => { log.push(['opened-draft', number, body]); }; },
     showContacts: async query => { log.push(['list', query]); return () => { log.push(['shown', query]); }; },
     openContact: () => null, contactValues: false,
+    openKeypad: number => { log.push(['keypad', number]); return () => { log.push(['keypad-shown', number]); }; },
   };
   return {log, ports: {...base, ...overrides}};
 }
@@ -373,4 +374,24 @@ test('the agent reads the open contact whole and within the contract bounds, or 
     result = await run({type: 'contact_read_selected'}, ports({openContact: () => contact}));
     assert.deepEqual(result.telephonyResult, {kind: 'contact-read', status: 'unavailable'}, 'nothing is truncated or shared in part'); assert.equal(result.status, 'failed');
   }
+});
+
+test('the dialer opens the Phone keypad, filled in at most, and never dials or calls', async () => {
+  for (const [operation, number] of [[{type: 'phone_keypad'}, undefined], [{type: 'phone_keypad', number: '4155550100'}, '4155550100']]) {
+    const p = ports();
+    const result = await run(operation, p);
+    assert.deepEqual(result.telephonyResult, {kind: 'phone-keypad', status: 'opened'});
+    assert.equal(result.status, 'succeeded');
+    assert.deepEqual(did(p, 'keypad'), [['keypad', number]]);
+    // The keypad comes in front after the receipt, like a filtered Contacts list.
+    assert.deepEqual(did(p, 'keypad-shown'), []);
+    result.present();
+    assert.deepEqual(did(p, 'keypad-shown'), [['keypad-shown', number]]);
+    for (const effect of ['call', 'ask', 'sms', 'save', 'remove']) assert.deepEqual(did(p, effect), [], effect);
+  }
+  const p = ports({openKeypad: () => null});
+  const result = await run({type: 'phone_keypad', number: '4155550100'}, p);
+  assert.deepEqual(result.telephonyResult, {kind: 'phone-keypad', status: 'unavailable'});
+  assert.equal(result.status, 'failed'); assert.equal(result.present, undefined);
+  assert.deepEqual(refuseTelephonyAction({type: 'phone_keypad'}, 'Alpha was not open.').telephonyResult, {kind: 'phone-keypad', status: 'unavailable'});
 });

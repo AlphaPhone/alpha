@@ -76,6 +76,10 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
   chunk.set(wav.subarray(data+start,data+start+length),44);out.push(chunk);}
  return out;
 }
+let keypadOpener:((number?:string)=>(()=>void)|null)|null=null;
+/** The step that brings the Phone keypad in front, `number` filled in when given; null when Phone
+ * is not mounted or not admitted. It never dials: only the owner's Call tap there calls. */
+export const openKeypadStep=(number?:string)=>keypadOpener?.(number)??null;
 /**
  * Phone on the verified Alpha image only (P-36, AP-08), through the shared telephony profile.
  * Recents and voicemail are its bounded, unlocked, foreground-only reads, kept in memory for the
@@ -98,6 +102,15 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  let pendingDelete:{current:()=>void;answer:(result:DeleteResult)=>void;detach:()=>void}|null=null,deleting=false;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
  const busy=()=>reading||dialing;
+ keypadOpener=keypadNumber=>{
+  const shell=owner;
+  if(!shell||!isMvpView('phone'))return null;
+  return ()=>{
+   if(owner!==shell||document.hidden)return;
+   const chat=shell.S().chat;
+   shell.openView('phone',{tab:'keypad',...(keypadNumber?{prefill:keypadNumber}:{})},chat==='sheet'||chat==='full'?chat:undefined);
+  };
+ };
  const changed=()=>owner?.setState({phoneNativeRevision:Date.now()});
  const available=()=>!!owner&&owner.S().view==='phone'&&!document.hidden;
  // The native observer is one switch. Its replacement waits until the prior lease retires.
@@ -267,6 +280,8 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  api=viewApi;
  /* A number handed over from Contacts or Messages fills the keypad once; only the owner's Call tap calls. */
  if(typeof st?.prefill==='string'&&st.prefill){if(!busy()){number=st.prefill.slice(0,40);notice='';tab='keypad';}queueMicrotask(()=>viewApi.set?.({prefill:null}));}
+ /* The agent's phone_keypad opens the keypad, with or without a number (prefill above); it never calls. */
+ if(st?.tab==='keypad'){if(!busy())tab='keypad';queueMicrotask(()=>viewApi.set?.({tab:null}));}
  /* Home's Phone card names the tab it leads to. */
  if(st?.tab==='recents'||st?.tab==='voicemail'){if(st.tab==='recents'||carrier==='ready')tab=st.tab;if(carrier!==null||st.tab==='recents')queueMicrotask(()=>viewApi.set?.({tab:null}));}
  const now=Date.now(),hasVoicemail=carrier==='ready',digits=number.replace(/\D/g,'');
