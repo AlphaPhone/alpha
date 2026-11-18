@@ -87,3 +87,39 @@ test('a command refused before dispatch releases its admission, and a foreign ta
  const idle=new AlphaClient();idle.setViewContext(tab('1'));idle.admitOwnPageChange({kind:'browser-tab',id:'session:tab-1'});
  assert.equal(idle.getState().pending,false);
 });
+
+test('a turn holding its sent context still matches after the reply\'s own page moves, and only then',async()=>{
+ const {client,agent,reply}=await turn(tab('1'));
+ const sent=client.getState().context;
+ assert.equal(client.continuesContext(sent),true);
+ client.admitOwnPageChange({kind:'browser-tab',id:'session:tab-1'});
+ client.setViewContext({view:'browser',timeZone:'UTC'});
+ client.setViewContext(tab('2'));
+ assert.equal(client.continuesContext(sent),true,'the voice turn keeps its sent context across the reply\'s own back');
+ agent.finish('Went back.');await reply;
+ assert.equal(client.continuesContext(sent),true,'the lineage holds after the reply until something else changes');
+ // Any other change ends the lineage, as an exact comparison would.
+ client.setViewContext(tab('3','session:tab-2'));
+ assert.equal(client.continuesContext(sent),false);
+ assert.equal(client.continuesContext(client.getState().context),true);
+});
+
+test('without an admitted own change, a page move breaks the sent context',async()=>{
+ const {client,reply}=await turn(tab('1'));
+ const sent=client.getState().context;
+ client.setViewContext(tab('2'));
+ await assert.rejects(reply,cancelled);
+ assert.equal(client.continuesContext(sent),false);
+});
+
+test('a second command refused before dispatch keeps the first command\'s page move admitted',async()=>{
+ const {client,agent,reply}=await turn(tab('1'));
+ client.admitOwnPageChange({kind:'browser-tab',id:'session:tab-1'});
+ // "Go back twice": the first back is dispatched; the second is refused while that page loads.
+ const second=client.admitOwnPageChange({kind:'browser-tab',id:'session:tab-1'});
+ second();
+ client.setViewContext(tab('2'));
+ assert.equal(client.getState().pending,true,'the first back\'s load still belongs to the reply');
+ agent.finish('Went back once.');
+ assert.equal((await reply).text,'Went back once.');
+});

@@ -200,6 +200,8 @@ export class AlphaClient {
   private activeRevision = 0;
   /** A page the request in flight changes itself (the agent's own Browser back, forward or reload). */
   private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
+  /** Each context an own page change published, keyed by its revision, with the context it replaced. */
+  private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
   private consumed = new Set<string>();
   /** The session whose approvals `consumed` records. */
@@ -258,6 +260,8 @@ export class AlphaClient {
     this.active?.abort();
     this.active = null;
     this.activeWorkflow = false;
+    this.ownPageChange = null;
+    this.ownMoves.clear();
     const old = this.transport;
     this.transport = null;
     this.proposals.clear();
@@ -276,14 +280,20 @@ export class AlphaClient {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
-    const ownChange = this.isOwnPageChange(next, selection);
+    const ownChange = this.isOwnPageChange(next, selection), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
     // The request's own page command moved the page it acts on: the reply continues and answers
     // for the new document. Approvals bound to the earlier document are still retired above.
-    if (ownChange) this.activeRevision = this.context.revision;
-    else if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;}
+    if (ownChange) {
+      this.activeRevision = this.context.revision;
+      if (this.ownMoves.size >= 32) this.ownMoves.clear();
+      this.ownMoves.set(this.context.revision, previous);
+    } else {
+      this.ownMoves.clear();
+      if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;}
+    }
     this.emit();
   }
   /**
@@ -297,8 +307,25 @@ export class AlphaClient {
     const active = this.active;
     if (!active || this.activeWorkflow || !page || this.context.sensitive || this.context.selectedObject?.kind !== page.kind || this.context.selectedObject.id !== page.id)
       return () => {};
+    // A later command refused before dispatch must not retire an earlier one whose page may still be loading.
+    const prior = this.ownPageChange?.active === active ? this.ownPageChange : null;
     const admitted = this.ownPageChange = { active, kind: page.kind, id: page.id };
-    return () => { if (this.ownPageChange === admitted) this.ownPageChange = null; };
+    return () => { if (this.ownPageChange === admitted) this.ownPageChange = prior; };
+  }
+  /**
+   * True when the published context is `expected`, or was reached from it only by own page
+   * changes (see `admitOwnPageChange`) with no other change since. A caller that holds the context
+   * it sent a turn with uses this in place of an exact comparison, so the reply's own Browser
+   * back or reload does not read as the owner leaving the page. Approvals stay revision-bound.
+   */
+  continuesContext(expected: ContextEnvelope): boolean {
+    const want = JSON.stringify(expected);
+    let at: ContextEnvelope | undefined = this.context;
+    for (let steps = 0; at && steps <= this.ownMoves.size; steps++) {
+      if (JSON.stringify(at) === want) return true;
+      at = this.ownMoves.get(at.revision);
+    }
+    return false;
   }
   private isOwnPageChange(next: ContextEnvelope, selection: string | null): boolean {
     const own = this.ownPageChange;
