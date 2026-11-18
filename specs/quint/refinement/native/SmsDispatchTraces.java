@@ -185,9 +185,10 @@ public final class SmsDispatchTraces {
    context.radio.parts=parts;
    if(plugins[bridge].activity.dialogs.size()>before){
     reviewCalls[bridge]=call;reviewedBinding[bridge]=binding;reviewedSim[bridge]=context.subscriptions.revision;
-    check(dialog(bridge).message.contains(BODY[binding])&&dialog(bridge).message.contains(TO[0])&&
-     dialog(bridge).message.contains("Synthetic SIM")&&dialog(bridge).getButton(-1).filtered&&
-     (dialog(bridge).getWindow().flags&android.view.WindowManager.LayoutParams.FLAG_SECURE)!=0,"Exact private review and obscured-tap filter");
+    AlertDialog review=dialog(bridge);
+    check(review.message.contains(BODY[binding])&&review.message.contains("To: "+String.join(", ",numbers())+"\n")&&
+     review.message.contains("Synthetic SIM")&&review.getButton(-1).filtered&&
+     (review.getWindow().flags&android.view.WindowManager.LayoutParams.FLAG_SECURE)!=0,"Exact private review and obscured-tap filter");
    }
    classify(call);point("request",bridge,binding,mode);
   }

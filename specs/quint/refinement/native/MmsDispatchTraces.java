@@ -188,7 +188,7 @@ public final class MmsDispatchTraces {
    if(plugins[actor].activity.dialogs.size()>count){
     reviewCalls[actor]=call;reviews[actor]=binding;reviewSims[actor]=context.subscriptions.revision==1;
     AlertDialog dialog=dialog(actor);
-    check(dialog.message.contains(BODY)&&dialog.message.contains(to[0])&&dialog.message.contains("Synthetic SIM")&&
+    check(dialog.message.contains(BODY)&&dialog.message.contains("To: "+String.join(", ",to)+"\n")&&dialog.message.contains("Synthetic SIM")&&
      (dialog.getWindow().flags&android.view.WindowManager.LayoutParams.FLAG_SECURE)!=0&&dialog.getButton(-1).filtered,
      "Reviewed message is private and obscured tap is filtered");
     if(group(binding))check(dialog.message.contains(historicalListeners?"Attachment: synthetic.png":"Picture: synthetic.png")&&dialog.preview.images.size()==1&&

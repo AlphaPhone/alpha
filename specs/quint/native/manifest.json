@@ -2566,17 +2566,22 @@
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephony.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyReview.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/SmsNoticeOpenRequest.java",
+      "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
       "android/app/src/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephonyConfiguration.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsSendJournal.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java"
     ],
     "stateMapping": {
       "reviews/foreground/closed/listeners/events": "Exact review calls, saved SIM/tuple, Activity lifecycle, registered bridge identities and each bridge's actual opaque notification count",
@@ -2634,18 +2639,22 @@
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephony.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyReview.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/SmsNoticeOpenRequest.java",
+      "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
       "android/app/src/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephonyConfiguration.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsSendJournal.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java"
     ],
     "stateMapping": {
       "reviewA/reviewB/groupRecipients": "Two exact native review calls, captured SIM class and reviewed recipient count",

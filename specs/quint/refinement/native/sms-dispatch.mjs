@@ -17,14 +17,15 @@ import {materializeHistoricalSources} from '../../legacy/core/formal-source-inve
 const model='NativeSmsDispatch';
 const modulePath='plugins/plugin-native-messages/android';
 const shared=modulePath+'/src/main/java/ai/eliza/plugins/messages/';
-const members=['TelephonyPlugin','MmsStore','SmsProviderReader'];
-const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal'];
+const members=['MmsStore','SmsProviderReader'];
+const historicalCompiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal'];
+const currentCompiled=[...historicalCompiled,'MmsPdu','SmsRoleConfiguration'];
 const historicalProduct=['AlphaTelephony','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
 const appBase=app+'AlphaTelephonyBase.java';
 const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaTelephonyReview.java',
   app+'SmsNoticeOpenRequest.java','android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java'];
-const paths=[...members,...compiled].map(name=>shared+name+'.java');
-const currentPaths=[...paths,shared+'MmsPdu.java',shared+'SmsRoleConfiguration.java'];
+const historicalPaths=['TelephonyPlugin',...members,...historicalCompiled].map(name=>shared+name+'.java');
+const currentPaths=[...members,...currentCompiled].map(name=>shared+name+'.java');
 const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const patchManifest='android/upstream-native-sources.json';
 const harness='SmsDispatchTraces.java';
@@ -32,7 +33,7 @@ const historicalInventory='specs/quint/refinement/native/mms-historical-sources.
 
 function driverInputs(temporary, sourceRoot, resolveSource=path=>join(sourceRoot,path), historical=false) {
   const read=name=>readFileSync(resolveSource(shared+name+'.java'),'utf8');
-  const plugin=historical?read(members[0]):readFileSync(join(root,appBase),'utf8');
+  const plugin=historical?read('TelephonyPlugin'):readFileSync(join(root,appBase),'utf8');
   const generated={...smsPlatform,...smsMembers(plugin,read('MmsStore'),read('SmsProviderReader'),{appOwned:!historical}),
     ...(historical?historicalTelephonyHost:appOwnedTelephonyReadPorts)};
   if(!historical) {
@@ -47,7 +48,7 @@ final class System {static long currentTimeMillis(){return ai.eliza.plugins.mess
     writeFileSync(file,contents);
     return file;
   });
-  return {files,complete:(historical?compiled:[...compiled,'MmsPdu','SmsRoleConfiguration']).map(name=>resolveSource(shared+name+'.java')),productSources:historical?historicalProduct:product};
+  return {files,complete:(historical?historicalCompiled:currentCompiled).map(name=>resolveSource(shared+name+'.java')),productSources:historical?historicalProduct:product};
 }
 
 function runScenarios(scenarios, {files,complete,productSources}, historical=false) {
@@ -58,7 +59,7 @@ function runScenarios(scenarios, {files,complete,productSources}, historical=fal
 export function historicalSmsSourceTraces(scenarios) {
   const temporary=mkdtempSync(join(tmpdir(),'quint-sms-dispatch-'));
   try {
-    const history=materializeHistoricalSources(root,paths.map(path=>'vendor/eliza/'+path),historicalInventory);
+    const history=materializeHistoricalSources(root,historicalPaths.map(path=>'vendor/eliza/'+path),historicalInventory);
     const inputs=driverInputs(temporary,null,path=>history.resolveSource('vendor/eliza/'+path),true);
     const sources=[...history.sources,...inputs.productSources,...inputs.files];
     const hashes=captureInputs(sources);
@@ -79,7 +80,7 @@ export async function checkNativeSmsDispatch(extraSources = []) {
       patchManifest,app+'AlphaImageCapability.java',join(directory,harness),join(directory,'Trace.java'),
       join(directory,'java.mjs'),join(directory,'sms-dispatch-platform.mjs'),fileURLToPath(import.meta.url),
       'test/fixtures/jvm-tools.mjs','test/fixtures/native-source.mjs','upstream.lock.json','scripts/upstream-native-source.ts',
-      'scripts/prepare-patched-native.ts',historicalInventory,'specs/quint/legacy/core/formal-source-inventory.mjs',
+      'scripts/prepare-patched-native.ts',
       ...(jsonJar?[jsonJar]:[]),...generatedSources,...extraSources];
     const driverHashes=captureInputs(sources);
     assert.match(readFileSync(join(root,launcherManifest),'utf8'),/<receiver\s+android:name="\.AlphaSmsSendReceiver"\s+android:exported="false"/);
