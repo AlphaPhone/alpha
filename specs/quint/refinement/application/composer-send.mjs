@@ -18,6 +18,7 @@ import {tsImport} from '../../../../test/support/ts-import.mjs';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {systemNoticeKind, systemNoticeDisplayText, collapseSystemNotices} from '../../../../apps/app/src/runtime/action-message-presentation.ts';
 import {residentDraftOwner,residentRestartDraftScope} from '../../../../apps/app/src/prototype/assistant-draft-controller.ts';
+import {workflowChanges, workflowViewRefusal} from '../../../../apps/app/src/runtime/automation-completion.ts';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 
 export const model = {path: 'specs/quint/application/ComposerSend.qnt', module: 'ComposerSend'};
@@ -85,6 +86,7 @@ export async function createDriver({code, subscription, DurableDraftController, 
     sourceOf: () => undefined, NotDispatched, AlphaClientError, cloudServiceName: () => 'Eliza Cloud',
     privateLocalPreviewEnabled: false, residentAlwaysPresent: false, pageLeaving: false,
     NO_AGENT_SEND: 'No agent', RESIDENT_STARTING_NOTICE: 'Starting', RESIDENT_RECOVERING_NOTICE: 'Recovering', CAMERA_CONTEXT_NOTICE: 'camera',
+    workflowChanges, workflowViewRefusal,
     deliverChatNavigation: async () => false, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
     retainReadReply() {}, completeReadReply: async () => {}, proposalCard: () => undefined, publishCommittedDeviceChanges() {},
     cameraScanRequested: () => false, cameraFrameQuestionRequested: () => false,

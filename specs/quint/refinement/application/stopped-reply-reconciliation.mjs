@@ -31,7 +31,7 @@ function compile() {
   const stop = between('const STOPPED_REPLY_CHECK_MS =', 'async function conversationList(').replace(/^export /gm, '');
   const send = between('  async send(text:', '\n  },\n};');
   return new vm.Script(stripTypeScriptTypes(
-    key + '\n' + stop + '\nconst connectionController = {' + send + '\n}};\n' +
+    key + '\n' + stop + '\nconst connectionController = {getAppRecordClient: () => null,' + send + '\n}};\n' +
     'Object.assign(globalThis, {connectionController, conversationKey, scheduleStoppedReply, cancelStoppedReply,' +
     'hasCheck: () => stoppedReply !== null});',
     {mode: 'strip'},
