@@ -7,14 +7,13 @@ export const meta: ComponentMeta<CardProps> = {
   args: {
     children: (
       <>
-        <CardTitle>Order 1042</CardTitle>
-        <Progress value={2} max={3} aria-label="Shipped" />
+        <CardTitle>Lisbon trip</CardTitle>
+        <Progress value={2} max={3} aria-label="Booked" />
         <CardFooter>
-          <Button>Track</Button>
+          <Button>Open</Button>
         </CardFooter>
       </>
     ),
   },
-  // `asChild` needs an element to become, which no type can supply.
-  examples: { AsChild: { asChild: true, children: <a href="#order-1042"><CardTitle>Order 1042</CardTitle></a> } },
+  examples: { AsChild: { asChild: true, children: <a href="#lisbon-trip"><CardTitle>Lisbon trip</CardTitle></a> } },
 };
