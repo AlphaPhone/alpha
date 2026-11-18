@@ -8,7 +8,8 @@ test('a document excerpt with a verification code is refused until it is edited'
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open errands.txt',exact:true}).click();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Add to chat',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Use excerpt',exact:true}).click();
  const review=page.getByRole('dialog',{name:'Ask about selected content'}),excerpt=review.getByRole('textbox',{name:'Content excerpt'});
  await expect(excerpt).toHaveValue('Pick up the bikes on Friday.\nYour verification code is 482913');
  const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true});

@@ -597,7 +597,8 @@ test('loop J03 in the web build: a chosen document can be reviewed for a questio
   await button(page, 'Documents').click();
   await button(page, 'Open garden-report.txt').click();
   await button(page, 'File actions').click();
-  await button(page, 'Ask Alpha').click();
+  await button(page, 'Add to chat').click();
+  await page.getByRole('button', { name: /^Edit excerpt from / }).click();
   const question = page.getByRole('dialog', { name: 'Ask about selected content' });
   await expect(question.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue('Public fact: twelve raised beds.');
   await question.getByRole('button', { name: 'Use in conversation', exact: true }).click();
