@@ -258,6 +258,9 @@ test('spoken action responses omit isolated receipt identifiers and keep meaning
  assert.equal(spokenActionReply('Move my meeting.',reply),'Meeting moved to 9:30 for 25 minutes.');
  assert.equal(spokenActionReply('Tell me the exact ID.',reply),reply.text);
  assert.equal(spokenActionReply('What’s the event ID?',reply),reply.text);
+ const asides={...reply,text:'Saved the 2 appointments (event ID: cal_43). Request ID: 93c4d. Next appointment at 9:30.'};
+ assert.equal(spokenActionReply('Save my appointments.',asides),'Saved the 2 appointments. Next appointment at 9:30.');
+ assert.equal(spokenActionReply('Read it back verbatim.',asides),asides.text);
  assert.equal(spokenActionReply('What is on my screen?',{text:reply.text}),reply.text);
  for(const text of ['Bus #7 costs $2.75.','The result is 3/4, or 75%.','The message said: “Use #42 at 8:15.”']){
   assert.equal(spokenActionReply('Check that for me.',{text,completedActions:[{status:'succeeded'}]}),text);

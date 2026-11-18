@@ -323,7 +323,10 @@ const asksForField = /\b(?:read(?: back)?|spell(?: out)?|quote|repeat|recite|giv
 // email copy typically has just the To and Subject lines, sometimes with bold labels.
 const mailHeaders = /^(?:[ \t]*(?:\*\*)?From:(?:\*\*)?[^\n]*\r?\n)?[ \t]*(?:\[gmail(?: account [^\]\n]+)?\][ \t]*)?(?:\*\*)?To:(?:\*\*)?[^\n]*\r?\n(?:[ \t]*(?:Cc|Bcc):[^\n]*\r?\n)*[ \t]*(?:\*\*)?Subject:(?:\*\*)?[^\n]*/im;
 const introToDraft = /^(?:(?:Got it|Sure|Okay)[.!,:]?\s*)?(?:(?:Here(?:’s|'s| is) (?:the|your|a) (?:email|draft|suggested wording)(?: draft)?|Drafted gmail message to [^\n]+)[.:!]?\s*)?$/i;
-const receiptField = /(^|\n|[.!?][ \t]+)[ \t]*(?:(?:request|proposal|receipt|operation|message|event|draft|run|workflow|record|conversation|thread|external|resource)\s+(?:id|identifier)|uuid)\s*[:=#]\s*[`"']?[a-z\d][\w.:-]*[`"']?[.;]?[ \t]*(?=\r?$)/gim;
+const receiptKey = String.raw`(?:(?:request|proposal|receipt|operation|message|event|draft|run|workflow|record|conversation|thread|external|resource)\s+(?:id|identifier)|uuid|id)`;
+const opaqueValue = "[`\"']?[a-z0-9_-](?:[a-z0-9_.:-]*[a-z0-9_-])?[`\"']?";
+const receiptField = new RegExp(String.raw`(^|\n|[.!?][ \t]+)[ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}(?:[.;](?=\s|$)|(?=[ \t]*\r?$))[ \t]*`, 'gim');
+const receiptAside = new RegExp(String.raw`[ \t]*\([ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}[ \t]*\)`, 'gi');
 
 /** Presentation for conversation speech. Never mutate the written reply or the action results. */
 export function spokenActionReply(request: string, reply: {
@@ -355,8 +358,8 @@ export function spokenActionReply(request: string, reply: {
     if (envelope) return (lead+'\n\n'+rest).trim();
   }
   if (!results.length && !reply.completedActions?.length) return text;
-  // Only standalone ID fields from action turns. Dates, times, counts, amounts and
+  // Only delimited ID fields from action turns. Dates, times, counts, amounts and
   // numbers in the actual answer remain available to the synthesizer.
-  const spoken = text.replace(receiptField, '$1');
+  const spoken = text.replace(receiptAside,'').replace(receiptField,'$1');
   return spoken === text ? text : spoken.replace(/\n{3,}/g,'\n\n').trim() || 'The details are in the chat.';
 }
