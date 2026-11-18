@@ -611,7 +611,9 @@ export function createMailReviewController(
           if (reviewBinding(record, composer?.() ?? null) !== "bound" || !allowed(proposal))
             throw new MailReviewNotice("Email changed before sending. Check it and tap Send again.");
         };
-        checkSelectionAtDispatch = requireExactComposer;
+        // Inline drafts stay bound to the active conversation through dispatch.
+        // The regular composer already handed off its confirmed snapshot.
+        if (inlineSend) checkSelectionAtDispatch = requireExactComposer;
         try {
           await operation.confirm(email);
         } finally {
