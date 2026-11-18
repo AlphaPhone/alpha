@@ -102,7 +102,13 @@ final class AlphaRoleUpgradeAndroid implements AlphaRoleUpgrade.Port {
             return false;
         }
         file.finishWrite(output);
-        return value.equals(state(role));
+        // Owner requests reach save() outside the default pass's catch, on the system
+        // server's role worker: an unreadable marker refuses the write instead of throwing.
+        try {
+            return value.equals(state(role));
+        } catch (IllegalStateException unreadable) {
+            return false;
+        }
     }
     @Override public boolean adopt(String role) {
         return controller.onAddRoleHolder(role, AlphaRoleUpgrade.ALPHA, 0);

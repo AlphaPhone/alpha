@@ -35,9 +35,9 @@ ANDROID_DOUBLES = {
     ''',
     'android/util/AtomicFile.java': '''package android.util; import java.io.*; import java.nio.file.*;
      public class AtomicFile {
-      public static boolean denyWrites; private final File file, pending;
+      public static boolean denyWrites, denyReads; private final File file, pending;
       public AtomicFile(File path){file=path;pending=new File(path+".new");}
-      public byte[] readFully()throws IOException{try(FileInputStream in=new FileInputStream(file)){return in.readAllBytes();}}
+      public byte[] readFully()throws IOException{if(denyReads)throw new IOException("read denied");try(FileInputStream in=new FileInputStream(file)){return in.readAllBytes();}}
       public FileOutputStream startWrite()throws IOException{if(denyWrites)throw new IOException("write denied");return new FileOutputStream(pending);}
       public void finishWrite(FileOutputStream out){try{out.close();Files.move(pending.toPath(),file.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}catch(IOException e){throw new UncheckedIOException(e);}}
       public void failWrite(FileOutputStream out){try{out.close();Files.deleteIfExists(pending.toPath());}catch(IOException e){throw new UncheckedIOException(e);}}
@@ -170,7 +170,7 @@ import android.content.ApexEnvironment;import android.content.Context;import and
 public class OwnerChoiceTest {
  static final String HOME=AlphaRoleUpgrade.ROLES.get(0),DIALER=AlphaRoleUpgrade.ROLES.get(1),SMS=AlphaRoleUpgrade.ROLES.get(2),A=AlphaRoleUpgrade.ALPHA,L=AlphaRoleUpgrade.PREVIOUS;
  static void check(boolean b,String what){if(!b)throw new AssertionError(what);}
- static Context context()throws IOException{AtomicFile.denyWrites=false;ApexEnvironment.directory=Files.createTempDirectory(Path.of("."),"permission-data").toFile();Context c=new Context();for(String r:AlphaRoleUpgrade.ROLES)c.roles.holders.put(r,new ArrayList<>(List.of(L)));return c;}
+ static Context context()throws IOException{AtomicFile.denyWrites=false;AtomicFile.denyReads=false;ApexEnvironment.directory=Files.createTempDirectory(Path.of("."),"permission-data").toFile();Context c=new Context();for(String r:AlphaRoleUpgrade.ROLES)c.roles.holders.put(r,new ArrayList<>(List.of(L)));return c;}
  static RoleControllerServiceImpl failedDialer(Context c){
   c.roles.failAdd=DIALER;RoleControllerServiceImpl p=new RoleControllerServiceImpl(UserHandle.SYSTEM,c);
   check(p.onGrantDefaultRoles(),"default pass continues after a failed grant");
@@ -203,6 +203,10 @@ public class OwnerChoiceTest {
   // An eligible device refuses the request when it cannot record the choice, and changes nothing.
   Context unwritable=failedContextAfterFailure();p=new RoleControllerServiceImpl(UserHandle.SYSTEM,unwritable);AtomicFile.denyWrites=true;
   check(!p.onAddRoleHolder(DIALER,"owner.dialer",0),"unrecorded owner choice refused");check(unwritable.roles.getRoleHolders(DIALER).equals(List.of(L)),"refused request changes nothing");
+  // An unreadable marker refuses the eligible owner request instead of throwing on the role worker.
+  Context unreadable=failedContextAfterFailure();p=new RoleControllerServiceImpl(UserHandle.SYSTEM,unreadable);AtomicFile.denyReads=true;
+  check(!p.onAddRoleHolder(DIALER,"owner.dialer",0),"unreadable owner choice refused");check(unreadable.roles.getRoleHolders(DIALER).equals(List.of(L)),"unreadable refusal changes nothing");
+  AtomicFile.denyReads=false;
   // An ineligible device never refuses an owner request over the marker.
   Context ineligibleUnwritable=context();ineligibleUnwritable.complete=0;AtomicFile.denyWrites=true;p=new RoleControllerServiceImpl(UserHandle.SYSTEM,ineligibleUnwritable);
   check(p.onAddRoleHolder(SMS,"owner.sms",0)&&ineligibleUnwritable.roles.getRoleHolders(SMS).equals(List.of("owner.sms")),"ineligible owner request proceeds");
@@ -254,7 +258,7 @@ class RoleUpgrade(unittest.TestCase):
              import android.content.ApexEnvironment;import android.content.Context;import android.os.UserHandle;import android.util.AtomicFile;import java.io.*;import java.nio.file.*;import java.util.*;
              public class ControllerTest {
               static void check(boolean b){if(!b)throw new AssertionError();}
-              static Context context()throws IOException{AtomicFile.denyWrites=false;ApexEnvironment.directory=Files.createTempDirectory(Path.of("."),"permission-data").toFile();Context c=new Context();for(String r:AlphaRoleUpgrade.ROLES)c.roles.holders.put(r,new ArrayList<>(List.of(AlphaRoleUpgrade.PREVIOUS)));return c;}
+              static Context context()throws IOException{AtomicFile.denyWrites=false;AtomicFile.denyReads=false;ApexEnvironment.directory=Files.createTempDirectory(Path.of("."),"permission-data").toFile();Context c=new Context();for(String r:AlphaRoleUpgrade.ROLES)c.roles.holders.put(r,new ArrayList<>(List.of(AlphaRoleUpgrade.PREVIOUS)));return c;}
               public static void main(String[]args)throws IOException{
                Context c=context();RoleControllerServiceImpl p=new RoleControllerServiceImpl(UserHandle.SYSTEM,c);
                check(p.onGrantDefaultRoles());for(String r:AlphaRoleUpgrade.ROLES)check(c.roles.getRoleHolders(r).equals(List.of(AlphaRoleUpgrade.ALPHA)));
