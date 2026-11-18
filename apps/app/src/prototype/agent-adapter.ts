@@ -1020,7 +1020,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const result=await DailyApps.reminderOperationReceipt({operation,operationId,bindingHash});signal.throwIfAborted();
       return result.status==='succeeded'?{status:'succeeded',reminderResult:isReminderCreate(operation)?validateReminderCreateResult(operation,result.result,operationId):validateReminderResult(operation,result.result)}:{status:'unknown'};
     });
-    connectionController.setViewInteractionExecutor((view,capability,params,signal,current)=>executeViewInteraction(view,capability,params,{active:!!this.live&&alphaClient.getState().context?.view==='browser',command:this.browserCommand},signal,current));
+    // A history command the agent sends during its reply moves the page that reply is answering on.
+    // The reply's own command must not read as the owner leaving the page, which stops the reply.
+    const browserCommand=async(command:unknown,selection:unknown,signal:AbortSignal,current:()=>void)=>{
+      const release=alphaClient.admitOwnPageChange(this.browserSelection?.());
+      // A typed refusal dispatched nothing. A thrown failure may follow a dispatch, so its page change stays admitted.
+      const result=await this.browserCommand(command,selection,signal,current);if(!(result as {ok?:unknown}|undefined)?.ok)release();return result;
+    };
+    connectionController.setViewInteractionExecutor((view,capability,params,signal,current)=>executeViewInteraction(view,capability,params,{active:!!this.live&&alphaClient.getState().context?.view==='browser',command:this.browserCommand&&browserCommand},signal,current));
     connectionController.setNavigationContext(()=>this.live?alphaClient.getState().context:null);
     connectionController.setDeviceReadReview(async(proposal,expectedContext,signal)=>{
       if(typeof this.prepareDeviceReadReview!=='function')throw Error('Notes review is unavailable. Nothing was shared.');
