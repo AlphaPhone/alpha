@@ -13,7 +13,7 @@ import {createSmsRecipientPicker} from './sms-recipient-picker';
 import {askedDraftPlaced,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 import {handoffResultText,sendRefusalText} from '../ui/telephony/telephony-messages';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
-import {placeOwnerCall} from './phone-adapter';
+import {placeOwnerCall} from '../ui/telephony/place-owner-call';
 /** The open thread's visible tail, available to the agent's explicitly selected-thread read. */
 export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
