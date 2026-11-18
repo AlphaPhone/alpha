@@ -2,19 +2,15 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "41236472b4e39c79d6130ab948c493f0e8b48d6f",
-  "head": "02822e1a09abc1ae4280e2155117b95361856271",
+  "baseCommit": "e9a98b741266d17b7f4d383cfab0853597700077",
+  "head": "621fd76936868b8dddfc1d73c2cf3ce3034918d7",
   "recordedAt": "2026-11-18",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...02822e1a09abc1ae4280e2155117b95361856271",
-  "status": "ahead",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...621fd76936868b8dddfc1d73c2cf3ce3034918d7",
+  "status": "diverged",
   "aheadBy": 7,
-  "behindBy": 0,
-  "mergeBase": "41236472b4e39c79d6130ab948c493f0e8b48d6f",
+  "behindBy": 27,
+  "mergeBase": "396f7a5d2df28f33a498cbc4f4baa9ba46263994",
   "pinOnlyCommits": [
-    {
-      "sha": "396f7a5d2df28f33a498cbc4f4baa9ba46263994",
-      "subject": "Accept verified Calendar windows when the planner omits bounds"
-    },
     {
       "sha": "2401f043bbfdb3566cfcefc45635ba27c475d82a",
       "subject": "Recover once when Calendar creation extraction returns no fields"
@@ -38,6 +34,10 @@
     {
       "sha": "02822e1a09abc1ae4280e2155117b95361856271",
       "subject": "Read the latest SMS sender through the reviewed device action"
+    },
+    {
+      "sha": "621fd76936868b8dddfc1d73c2cf3ce3034918d7",
+      "subject": "Route reviewed latest SMS sender lookups into the planner"
     }
   ],
   "pullRequests": [
