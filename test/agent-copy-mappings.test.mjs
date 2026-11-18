@@ -253,11 +253,13 @@ test('every WORKFLOW action sentence the agent delivers unparaphrased reads in A
  // A removal and its undo share one result, so their two sentences are the arms of one conditional.
  const bound=[...vendor('plugins/plugin-workflow/src/actions/workflow.ts').matchAll(/text:\s*(?:op === 'remove'\s*\?\s*)?`([^`]+)`(?:\s*:\s*`([^`]+)`)?,\s*effectReceipts: (?!\[\])/g)].flatMap(m=>m.slice(1).filter(Boolean));
  const paused=' It was on, so it is now off. Review the change, then turn it on again.',schedulePaused=' Its schedule is now paused. Turn it on again in Workflows.';
- const values={'workflow.name':'Morning digest',label:'“Daily notes”',[`current.active ? '${paused}' : ''`]:paused,[`current.active && !workflow.active ? '${schedulePaused}' : ''`]:schedulePaused,"workflow.active ? 'active' : 'inactive'":'inactive',marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
+ // A chat-created workflow cannot notify; upstream says so when the owner asked to be reminded.
+ const noNotification=' It can’t send you a notification: when it is on, each run’s reminder text appears only in its run history. For a reminder that notifies you, use a phone reminder instead.';
+ const values={'workflow.name':'Morning digest',label:'“Daily notes”',[`current.active ? '${paused}' : ''`]:paused,[`current.active && !workflow.active ? '${schedulePaused}' : ''`]:schedulePaused,"workflow.active ? 'active' : 'inactive'":'inactive',[`asksToNotify(instruction, message.content.text) ? '${noNotification}' : ''`]:noNotification,marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
  const sentence=template=>template.replaceAll('\\n','\n').replace(/\$\{([^}]+)\}/g,(_whole,name)=>{assert.ok(name in values,'template value: '+name);return values[name];});
  // Upstream words these for the owner, so Alpha shows each as written; only the run marker block becomes a card.
  const PINNED=[
-  ['Created “${workflow.name}”. It is off until you turn it on.','Created “Morning digest”. It is off until you turn it on.'],
+  ["Created “${workflow.name}”. It is off until you turn it on.${asksToNotify(instruction, message.content.text) ? '"+noNotification+"' : ''}",'Created “Morning digest”. It is off until you turn it on.'+noNotification],
   ["Updated “${workflow.name}”.${current.active ? '"+paused+"' : ''}",'Updated “Morning digest”.'+paused],
   ["Renamed ${label} to “${workflow.name}”.${current.active && !workflow.active ? '"+schedulePaused+"' : ''}",'Renamed “Daily notes” to “Morning digest”.'+schedulePaused],
   ["${workflow.name} is now ${workflow.active ? 'active' : 'inactive'}.",'Morning digest is now inactive.'],
