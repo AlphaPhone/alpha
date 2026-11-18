@@ -173,7 +173,7 @@ test('recovery cannot attach a selected telephony proposal to another item or se
     assert.deepEqual(await fixture({operation, requestMessageId: messageId}).client.pending(original, signal()), [], 'a replacement coordinator needs a fresh request');
   }
 });
-test('the dialer keypad is advertised only on the image, opens without a review for the requesting message and never calls', async () => {
+test('the dialer keypad is advertised only on the image, opens without a review only for a number the owner typed, and never calls', async () => {
   const profile = {android: true, native: true, aospImage: true};
   assert.ok(P.selectDeviceCapabilities(['phone.keypad.v1'], profile).includes('phone.keypad.v1'));
   assert.ok(!P.selectDeviceCapabilities(['phone.keypad.v1'], {...profile, aospImage: false}).includes('phone.keypad.v1'), 'a standalone install draws no keypad for the agent');
@@ -186,7 +186,12 @@ test('the dialer keypad is advertised only on the image, opens without a review 
   await f.client.pending(context, signal());
   assert.deepEqual(await f.client.performRequested('other', context, signal(), async () => true), []);
   assert.equal(f.effects, 0);
-  assert.deepEqual((await f.client.performRequested(messageId, context, signal(), async () => true)).map(result => result.status), ['succeeded']);
+  // A number the owner did not type in this message (read from an email or a page) keeps its card.
+  const proof = text => ({messageId, text, current() {}});
+  for (const current of [undefined, proof('open the keypad with the number from that email'), proof('open the keypad with 415 555 0199')])
+    assert.deepEqual(await f.client.performRequested(messageId, context, signal(), async () => true, undefined, current), []);
+  assert.equal(f.effects, 0);
+  assert.deepEqual((await f.client.performRequested(messageId, context, signal(), async () => true, undefined, proof('open the dialer with +1 415-555-0100'))).map(result => result.status), ['succeeded']);
   assert.equal(f.effects, 1); assert.deepEqual(shown, [['decision', 'claim', 'receipt']], 'the keypad comes in front after the receipt');
   assert.deepEqual(receiptOf(f).result, {kind: 'phone-keypad', status: 'opened'});
   // A call bound to the same message keeps its review.

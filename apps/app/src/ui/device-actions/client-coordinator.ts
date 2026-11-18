@@ -45,6 +45,7 @@ import {
   isPhoneDial,
   type PhoneDialResult,
   phoneDialCapabilityAvailable,
+  phoneDialNumber,
   validatePhoneDialResult,
 } from "@elizaos/contracts/phone-dial";
 import {
@@ -1405,6 +1406,14 @@ export class DeviceActionCoordinator<
           entry.requestKey !== requestKey ||
           proof.messageId !== messageId ||
           !this.browserAllowed(entry.proposal, proof))
+      )
+        continue;
+      // A filled-in keypad runs without review only for a number the owner
+      // typed in this very message; one the model took from an email, a page
+      // or an earlier read stays on its "Open keypad" card.
+      if (
+        entry.proposal.operation.type === "phone_keypad" &&
+        !keypadGrounded(entry.proposal.operation, messageId, proof)
       )
         continue;
       if (!(await allowed())) break;
@@ -3150,6 +3159,30 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
   );
 }
 /** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
+/** An empty keypad, or a number written in the owner's own current message. */
+function keypadGrounded(
+  operation: { number?: string },
+  messageId: string,
+  proof?: CurrentDeviceActionRequest,
+): boolean {
+  if (!operation.number) return true;
+  if (!proof || proof.messageId !== messageId) return false;
+  proof.current();
+  let wanted: string;
+  try {
+    wanted = phoneDialNumber(operation.number);
+  } catch {
+    return false;
+  }
+  for (const [written] of proof.text.matchAll(/\+?[\d(][\d ().-]*\d/g)) {
+    try {
+      if (phoneDialNumber(written) === wanted) return true;
+    } catch {
+      // Not a dial number as written; keep looking.
+    }
+  }
+  return false;
+}
 function describeTelephonyAction(operation: TelephonyActionOperation): {
   title: string;
   description: string;
