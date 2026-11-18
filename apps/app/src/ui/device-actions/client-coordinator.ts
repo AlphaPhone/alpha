@@ -881,6 +881,17 @@ export class DeviceActionCoordinator<
       !browserControlCapabilityAvailable(op.type, this.credential.capabilities)
     )
       throw Error("This Browser action was not negotiated with this agent");
+    // An address opened in a tab of its own (browser.open-new-tab.v1, the
+    // shared browser contract's BROWSER_OPEN_NEW_TAB_CAPABILITY) only when
+    // this phone negotiated it, as the shared coordinator checks.
+    if (
+      op.type === "browser_navigate" &&
+      (op as { newTab?: unknown }).newTab === true &&
+      !this.capability("browser.open-new-tab.v1")
+    )
+      throw Error(
+        "Opening an address in a new tab was not negotiated with this agent",
+      );
     if (
       isForegroundReviewOperation(op) &&
       (!foregroundReviewOperationAvailable(op, this.credential.capabilities) ||
@@ -1100,7 +1111,7 @@ export class DeviceActionCoordinator<
               : op.type === "open_view"
                 ? `Open ${op.view} on this phone`
                 : op.type === "browser_navigate"
-                  ? `Open browser destination ${op.url}`
+                  ? `Open browser destination ${op.url}${(op as { newTab?: unknown }).newTab === true ? " in a new tab" : ""}`
                   : "Workflow phone read"));
     return {
       ...base,
