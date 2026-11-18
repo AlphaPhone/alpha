@@ -8,7 +8,7 @@ import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {formatDateTime} from './locale-time';
 import {callKind,callRow,callsBriefing,clockLength,displayNumber,initials,matchesCallQuery,numberKey,shortWhen} from './telephony-presenters';
-import {callResultText,handoffResultText} from '../ui/telephony/telephony-messages';
+import {placeOwnerCall} from '../ui/telephony/place-owner-call';
 import {clearListFilter,setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 type Bag=Record<string,any>;
 type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
@@ -17,20 +17,6 @@ const CALL_TYPE:Record<TelephonyCallLogEntry['type'],string>={incoming:'Incoming
 export function phoneRows(calls:readonly TelephonyCallLogEntry[],dial:(number:string)=>void){
  return calls.map(call=>{const who=call.cachedName||call.number||'Unknown caller',minutes=Math.floor(call.durationSeconds/60),seconds=call.durationSeconds%60;
   return {id:call.id,label:`${who}${call.isNew?' · new':''}`,detail:`${CALL_TYPE[call.type]} · ${formatDateTime(new Date(call.date))}${call.durationSeconds?` · ${minutes}:${String(seconds).padStart(2,'0')}`:''}`,noDial:!call.number,dialLabel:call.number?`Call ${who}`:`Can’t dial ${who}`,dial:()=>{if(call.number)dial(call.number);}};});
-}
-/** A direct user tap uses Telecom. Only a known permission or role refusal can open the system dialer. */
-export async function placeOwnerCall(client:AospTelephony,number:string,current:()=>boolean){
- try{
-  const result=await client.placeCall(number);
-  return {placed:result.status==='placed',notice:result.status==='placed'?'':callResultText(result)};
- }catch(error){
-  const code=(error as {code?:string})?.code;
-  if(current()&&(code==='role-required'||code==='permission-required')){
-   try{return {placed:false,notice:handoffResultText(await client.dial(number))};}
-   catch{return {placed:false,notice:'Couldn’t open'};}
-  }
-  return {placed:false,notice:'Call unconfirmed'};
- }
 }
 /**
  * Transcribes one window of a voicemail (a complete mono 16 kHz PCM16 WAV, base64) under the owner's
