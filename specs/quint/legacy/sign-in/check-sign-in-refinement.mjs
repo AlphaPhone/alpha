@@ -8,6 +8,7 @@ import {filesWithin, repositoryRoot as root} from '../../../../scripts/quint-lib
 import {sha256} from '../../../../scripts/sha256.ts';
 import {fenceNetwork} from '../../../../test/browser/flag-off-android.ts';
 import {entitlements, startNativeCloudSignInFixture, USER} from '../../../../test/browser/helpers/native-cloud-signin.ts';
+import {scopedViteCacheDir} from '../../../../test/browser/helpers/vite-cache.ts';
 import {captureInputs, checkTraces, qset} from '../../refinement/check-traces.mjs';
 
 const expect = baseExpect.configure({timeout: 30000});
@@ -108,6 +109,7 @@ async function googleBack(page, record) {
 async function mounted(extraSources) {
   checkClientFeatures();
   const cacheDir = resolve(root, 'test-results/quint-refinement/legacy-sign-in-vite-cache');
+  const optimizedDependencies = scopedViteCacheDir(cacheDir);
   const watched = new Set(['apps/app/src/runtime/connection-ui.tsx', 'apps/app/src/runtime/cloud-sign-in.ts',
     'apps/app/src/runtime/cloud-sign-in-ui.tsx', 'apps/app/src/ui/auth/native-cloud-sign-in-copy.ts',
     '.eliza/client-features/packages/auth/src/auth/native-cloud-sign-in.ts']
@@ -119,12 +121,12 @@ async function mounted(extraSources) {
     'vendor/eliza/packages/core/src/utils/uuid.ts', 'vite.config.ts', 'package.json', 'bun.lock', 'upstream.lock.json',
     'scripts/prepare-client-features.ts', 'scripts/quint-lib.ts', fileURLToPath(import.meta.url),
     'test/browser/flag-off-android.ts', 'test/browser/helpers/native-navigation-protocol.ts',
-    'test/browser/helpers/native-cloud-signin.ts', ...extraSources,
+    'test/browser/helpers/native-cloud-signin.ts', 'test/browser/helpers/vite-cache.ts', ...extraSources,
   ])];
   const driverHashes = captureInputs(sources), loaded = new Set();
   const fixture = await startNativeCloudSignInFixture(cacheDir, [{name: 'quint-sign-in-inputs', enforce: 'pre', transform(code, id) {
     const path = id.split('?')[0];
-    if (path.startsWith(root+'/') && !path.startsWith(cacheDir+'/') && !path.includes('/node_modules/') && existsSync(path)) {
+    if (path.startsWith(root+'/') && !path.startsWith(optimizedDependencies+'/') && !path.includes('/node_modules/') && existsSync(path)) {
       assert.ok(driverHashes[path], 'Mounted source captured before execution: '+path);
       if (watched.has(path)) {
         assert.equal(sha256(Buffer.from(code)), driverHashes[path]);
